@@ -29,22 +29,14 @@ func Startup(q *Quotation, ctx context.Context) {
 	q.ctx = ctx
 }
 
-func (q *Quotation) Generate() {
-	imgByte, err := backAssets.ReadFile("assets/cats.png")
-
-	if err != nil {
-		fmt.Println(err)
-	}
-
+func (q *Quotation) Export() {
 	filePath, err := runtime.SaveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
 		DefaultFilename: "quotation.pdf",
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
 	})
 
-	m := q.createQuotation(imgByte)
-
-	document, err := m.Generate()
+	document, err := q.build()
 
 	if err != nil {
 		fmt.Println(err)
@@ -55,6 +47,20 @@ func (q *Quotation) Generate() {
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	runtime.BrowserOpenURL(q.ctx, filePath)
+}
+
+func (q *Quotation) build() (core.Document, error) {
+	imgByte, err := backAssets.ReadFile("assets/cats.png")
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	m := q.createQuotation(imgByte)
+
+	return m.Generate()
 }
 
 func (q *Quotation) createQuotation(img []byte) core.Maroto {

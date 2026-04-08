@@ -54,3 +54,5 @@ yarn-error.log*
 # --- OS Specific ---
 .DS_Store
 Thumbs.db
+
+backend/bin/
