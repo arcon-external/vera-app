@@ -16,7 +16,7 @@ var assets embed.FS
 var icon []byte
 
 func main() {
-	quotationHandler := &backend.Quotation{}
+	quotationApp := &backend.Quotation{}
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -26,10 +26,13 @@ func main() {
 		Assets:           assets,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
-			backend.Startup(quotationHandler, ctx)
+			err := backend.Startup(quotationApp, ctx)
+			if err != nil {
+				panic(err)
+			}
 		},
 		Bind: []interface{}{
-			quotationHandler,
+			quotationApp,
 		},
 	})
 

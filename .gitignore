@@ -56,3 +56,5 @@ yarn-error.log*
 Thumbs.db
 
 backend/bin/
+proto/
+AGENTS.md

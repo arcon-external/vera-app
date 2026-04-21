@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<style>
+		{{.CustomCSS}}
+	</style>
+	<title>Quotation</title>
+</head>
+
+<body>
+	<div class="page">
+		<div class="top-ribbon"></div>
+
+		<div class="top-lead">
+			<div class="top-brand">
+				<h1>PT Arcon Penta Persada</h1>
+				<p>Perkantoran Graha Kadin Blk C no. 6 Jl. Engku Putri, Kel. Belian, Kec. Batam, Kota
+					Batam 29433, Indonesia</p>
+			</div>
+			<img src="data:image/png;base64,{{.LogoBase64}}" alt="logo">
+		</div>
+
+		<main class="content">
+			<section class="recipient-row">
+				<article class="card">
+					<h3>Quotation to</h3>
+					<p class="name">{{.RecipientName}}</p>
+					<p class="company">{{.RecipientCompany}}</p>
+					<p><strong>Address:</strong></p>
+					<p>{{.RecipientAddress}}</p>
+				</article>
+
+				<div class="meta-stack">
+					<dl class="quote-meta">
+						<dt>Quotation No.</dt>
+						<dd>{{.QuoteNumber}}</dd>
+						<dt>Issue Date</dt>
+						<dd>{{.Date}}</dd>
+						<dt>Valid Until</dt>
+						<dd>{{.ValidUntil}}</dd>
+					</dl>
+					<div class="meta-decor" aria-hidden="true"></div>
+				</div>
+			</section>
+
+			<section class="subject">
+				<div class="label">Subject</div>
+				<div class="value">{{.Subject}}</div>
+			</section>
+
+			<section class="items-wrap">
+				<table class="items-head-table">
+					<colgroup>
+						<col style="width: 7%;">
+						<col style="width: 43%;">
+						<col style="width: 8%;">
+						<col style="width: 8%;">
+						<col style="width: 17%;">
+						<col style="width: 17%;">
+					</colgroup>
+					<thead>
+						<tr>
+							<th>No.</th>
+							<th>Description</th>
+							<th>Qty.</th>
+							<th>UoM</th>
+							<th>Unit Price IDR</th>
+							<th>Total IDR</th>
+						</tr>
+					</thead>
+				</table>
+
+				<table class="items-body-table">
+					<colgroup>
+						<col style="width: 7%;">
+						<col style="width: 43%;">
+						<col style="width: 8%;">
+						<col style="width: 8%;">
+						<col style="width: 17%;">
+						<col style="width: 17%;">
+					</colgroup>
+					<tbody>
+						{{range .Items}}
+						<tr>
+							<td>{{.No}}</td>
+							<td>
+								<div class="item-desc">{{.DisplayDesc}}</div>
+							</td>
+							<td>{{.Qty}}</td>
+							<td>{{.UoM}}</td>
+							<td>{{.DisplayUnitPrice}}</td>
+							<td>{{.DisplayTotal}}</td>
+						</tr>
+						{{end}}
+					</tbody>
+				</table>
+			</section>
+
+			<section class="footer">
+				<div class="tnc">
+					<h3>Terms and Conditions</h3>
+					<p>1. Payment terms agreed for this quotation is {{.PaymentTerms}} days.</p>
+					<p>2. This quotation is valid for {{.Validity}} days.</p>
+					<p>3. Lead time is {{.LeadTime}} days.</p>
+				</div>
+
+				<div class="totals">
+					<div class="line">
+						<span>Sub Total</span>
+						<span>Rp{{.DisplaySubTotal}}</span>
+					</div>
+					<div class="line discount">
+						<span>Discount ({{.DiscountPercent}}%)</span>
+						<span>Rp{{.DisplayDiscountAmount}}</span>
+					</div>
+					<div class="line grand">
+						<span>Grand Total</span>
+						<span>Rp{{.DisplayGrandTotal}}</span>
+					</div>
+				</div>
+			</section>
+
+			<p class="closing">
+				We will be happy to supply information that you may need and trust that you call on us
+				to fill your order,
+				which will receive our prompt and careful attention.
+			</p>
+
+			<div class="signature">
+				<img src="data:image/png;base64,{{.SignatureBase64}}" alt="signature">
+			</div>
+		</main>
+	</div>
+</body>
+
+</html>
