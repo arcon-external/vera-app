@@ -7,6 +7,7 @@ import (
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
+	_ "golang.org/x/image/bmp"
 )
 
 //go:embed all:frontend/dist
