@@ -3,33 +3,34 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
+	"os"
+
 	"vera-app/backend"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
+
+	// Register BMP decoder required for Windows application icon
 	_ "golang.org/x/image/bmp"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed build/appicon.png
-var icon []byte
-
 func main() {
 	quotationApp := &backend.Quotation{}
 
-	// Create application with options
 	err := wails.Run(&options.App{
-		Title:            "wails-events",
+		Title:            "Vera",
 		Width:            1024,
 		Height:           768,
 		Assets:           assets,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
-			err := backend.Startup(quotationApp, ctx)
-			if err != nil {
-				panic(err)
+			if err := backend.Startup(quotationApp, ctx); err != nil {
+				fmt.Fprintf(os.Stderr, "startup failed: %v\n", err)
+				os.Exit(1)
 			}
 		},
 		Bind: []interface{}{
@@ -38,6 +39,7 @@ func main() {
 	})
 
 	if err != nil {
-		println("Error:", err.Error())
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
 }

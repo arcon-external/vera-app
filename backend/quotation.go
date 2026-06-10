@@ -3,8 +3,6 @@ package backend
 import (
 	"bytes"
 	"context"
-	"embed"
-	"encoding/base64"
 	"fmt"
 	"html"
 	"html/template"
@@ -20,17 +18,7 @@ import (
 	"golang.org/x/text/message"
 )
 
-//go:embed assets/*
-var backAssets embed.FS
-
-//go:embed template/html/*
-var htmlTemplate embed.FS
-
-//go:embed template/css/*
-var cssTemplate embed.FS
-
 type QuotationItem struct {
-	No               uint32
 	Description      string
 	DisplayDesc      template.HTML
 	UoM              string
@@ -38,6 +26,7 @@ type QuotationItem struct {
 	DisplayTotal     string
 	UnitPrice        uint64
 	Total            uint64
+	No               uint32
 	Qty              uint32
 }
 
@@ -51,11 +40,11 @@ type QuotationData struct {
 	FontBoldBase64        string
 	Date                  string
 	ValidUntil            string
-	QuoteNumber           string
 	SenderName            string
 	RecipientName         string
 	RecipientCompany      string
 	RecipientAddress      string
+	QuoteNumber           string
 	Subject               string
 	DisplaySubTotal       string
 	DisplayDiscountAmount string
@@ -70,146 +59,22 @@ type QuotationData struct {
 }
 
 type Quotation struct {
-	Data QuotationData
 	ctx  context.Context
+	Data QuotationData
 }
 
 func Startup(quotation *Quotation, ctx context.Context) error {
 	quotation.ctx = ctx
 
-	cssContent, err := cssTemplate.ReadFile("template/css/template-fixed.css")
+	err := ReadTemplate(quotation)
 	if err != nil {
-		return fmt.Errorf("load css template: %w", err)
+		return fmt.Errorf("read template: %w", err)
 	}
 
-	htmlContent, err := htmlTemplate.ReadFile("template/html/template-fixed.html")
-	if err != nil {
-		return fmt.Errorf("load html template: %w", err)
-	}
-
-	logoBytes, err := backAssets.ReadFile("assets/arcon-logo.png")
-	if err != nil {
-		return fmt.Errorf("load logo asset: %w", err)
-	}
-
-	sigBytes, err := backAssets.ReadFile("assets/signature.png")
-	if err != nil {
-		return fmt.Errorf("load signature asset: %w", err)
-	}
-
-	fontRegularBytes, err := backAssets.ReadFile("assets/inter-medium.ttf")
-	if err != nil {
-		return fmt.Errorf("load regular font asset: %w", err)
-	}
-
-	fontBoldBytes, err := backAssets.ReadFile("assets/inter-bold.ttf")
-	if err != nil {
-		return fmt.Errorf("load bold font asset: %w", err)
-	}
-
-	protoItemList := []QuotationItem{
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) at AHU block3 ,2A 2, Mezzanine Front & Rear with following scopes:\n- 6 sensors at Front AHU and 6 sensors at Rear AHU\n- 6-units of batten fixtures set with guard (fixtures 2x 1200mm LED tubes/lamps) for additional lightings\n- Rewiring with Auto-Manual selector and lighting switch.",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   115725000,
-			Total:       115725000,
-		},
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) 14 sensor at CDA blok 4.3",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   59970000,
-			Total:       59970000,
-		},
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) 5 sensor office blok9",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   22170000,
-			Total:       22170000,
-		},
-		{
-			Description: "Supply and install aircond automation system at mesjid of Batam1, consisted of:\n- Metal enclosure panel Timers\n- Zelio Schneider.",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   34050000,
-			Total:       34050000,
-		},
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) at AHU block3 ,2A 2, Mezzanine Front & Rear with following scopes:\n- 6 sensors at Front AHU and 6 sensors at Rear AHU\n- 6-units of batten fixtures set with guard (fixtures 2x 1200mm LED tubes/lamps) for additional lightings\n- Rewiring with Auto-Manual selector and lighting switch.",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   115725000,
-			Total:       115725000,
-		},
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) 14 sensor at CDA blok 4.3",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   59970000,
-			Total:       59970000,
-		},
-		{
-			Description: "Supply & Install lighting sensor system (PIR Schneider) 5 sensor office blok9",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   22170000,
-			Total:       22170000,
-		},
-		{
-			Description: "Supply and install aircond automation system at mesjid of Batam1, consisted of:\n- Metal enclosure panel Timers\n- Zelio Schneider.",
-			Qty:         1,
-			UoM:         "Lot",
-			UnitPrice:   34050000,
-			Total:       34050000,
-		},
-	}
-
-	for i := range protoItemList {
-		protoItemList[i].DisplayDesc = formatDescription(protoItemList[i].Description)
-		protoItemList[i].DisplayUnitPrice = formatRupiah(protoItemList[i].UnitPrice)
-		protoItemList[i].DisplayTotal = formatRupiah(protoItemList[i].Total)
-	}
-
-	quotation.Data.CustomCSS = template.CSS(string(cssContent))
-	quotation.Data.HtmlTemplate = string(htmlContent)
-	quotation.Data.LogoBase64 = base64.StdEncoding.EncodeToString(logoBytes)
-	quotation.Data.SignatureBase64 = base64.StdEncoding.EncodeToString(sigBytes)
-	quotation.Data.FontRegularBase64 = base64.StdEncoding.EncodeToString(fontRegularBytes)
-	quotation.Data.FontBoldBase64 = base64.StdEncoding.EncodeToString(fontBoldBytes)
-
-	// configured variables, filled temporarily for prototyping
-	quotation.Data.QuoteNumber = "APP-2026-01-001-R0"
-	quotation.Data.SenderName = "Quotation Team"
-	quotation.Data.RecipientName = "Recipient Name"
-	quotation.Data.RecipientCompany = "Recipient Company"
-	quotation.Data.RecipientAddress = "Recipient Address"
-	quotation.Data.Subject = "Supply & Install lighting sensor system (PIR Schneider) at AHU Bat1"
-	quotation.Data.Validity = 30
-	quotation.Data.PaymentTerms = 90
-	quotation.Data.LeadTime = 60
-	quotation.Data.DiscountPercent = 5
-
-	// dates
-	now := time.Now()
-
-	quotation.Data.Date = now.Format("January 02, 2006")
-	quotation.Data.ValidUntil = now.AddDate(0, 0, int(quotation.Data.Validity)).Format("January 02, 2006")
-
-	// must filled/calculated variables
-	quotation.Data.Items = protoItemList
-
-	for _, item := range protoItemList {
-		quotation.Data.SubTotal += item.Total
-	}
-
-	quotation.Data.DiscountAmount = (quotation.Data.SubTotal * uint64(quotation.Data.DiscountPercent)) / 100
-	quotation.Data.GrandTotal = quotation.Data.SubTotal - quotation.Data.DiscountAmount
-
-	quotation.Data.DisplaySubTotal = formatRupiah(quotation.Data.SubTotal)
-	quotation.Data.DisplayDiscountAmount = formatRupiah(quotation.Data.DiscountAmount)
-	quotation.Data.DisplayGrandTotal = formatRupiah(quotation.Data.GrandTotal)
+	InsertDate(quotation)
+	InsertSenderRecipient(quotation)
+	InsertQuotationInfo(quotation)
+	InsertItemPrices(quotation)
 
 	return nil
 }
@@ -280,7 +145,6 @@ func (q *Quotation) Export() error {
 		DefaultFilename: "quotation.pdf",
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
 	})
-
 	if err != nil {
 		return fmt.Errorf("open save dialog: %w", err)
 	}
@@ -308,7 +172,7 @@ func (q *Quotation) save(path string) error {
 		return err
 	}
 
-	err = os.WriteFile(validatedPath, pdfBuf, 0644)
+	err = os.WriteFile(validatedPath, pdfBuf, 0o644)
 	if err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
@@ -354,9 +218,10 @@ func validateSavePath(path string) (string, error) {
 	return absPath, nil
 }
 
+var rupiahPrinter = message.NewPrinter(language.Indonesian)
+
 func formatRupiah(amount uint64) string {
-	p := message.NewPrinter(language.Indonesian)
-	return p.Sprintf("%d", amount)
+	return rupiahPrinter.Sprintf("%d", amount)
 }
 
 func formatDescription(raw string) template.HTML {
