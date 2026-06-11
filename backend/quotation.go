@@ -4,19 +4,34 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"html"
 	"html/template"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 )
+
+type QuotationInput struct {
+	Items            []QuotationItemInput
+	Subject          string
+	RecipientName    string
+	RecipientCompany string
+	RecipientAddress string
+	DiscountPercent  uint8
+	Validity         uint8
+	PaymentTerm      uint8
+	LeadTime         uint8
+}
+
+type QuotationItemInput struct {
+	Description string
+	Qty         uint32
+	UoM         string
+	UnitPrice   uint64
+}
 
 type QuotationItem struct {
 	Description      string
@@ -33,14 +48,13 @@ type QuotationItem struct {
 type QuotationData struct {
 	Items                 []QuotationItem
 	CustomCSS             template.CSS
-	HtmlTemplate          string
+	HtmlTemplate          *template.Template
 	LogoBase64            string
 	SignatureBase64       string
 	FontRegularBase64     string
 	FontBoldBase64        string
 	Date                  string
 	ValidUntil            string
-	SenderName            string
 	RecipientName         string
 	RecipientCompany      string
 	RecipientAddress      string
@@ -53,7 +67,7 @@ type QuotationData struct {
 	DiscountAmount        uint64
 	GrandTotal            uint64
 	Validity              uint8
-	PaymentTerms          uint8
+	PaymentTerm           uint8
 	LeadTime              uint8
 	DiscountPercent       uint8
 }
@@ -68,75 +82,94 @@ func Startup(quotation *Quotation, ctx context.Context) error {
 
 	err := ReadTemplate(quotation)
 	if err != nil {
-		return fmt.Errorf("read template: %w", err)
+		return err
 	}
-
-	InsertDate(quotation)
-	InsertSenderRecipient(quotation)
-	InsertQuotationInfo(quotation)
-	InsertItemPrices(quotation)
 
 	return nil
 }
 
-func (q *Quotation) build() ([]byte, error) {
-	for i := range q.Data.Items {
-		q.Data.Items[i].No = uint32(i + 1)
+func (q *Quotation) Prepare(input QuotationInput) error {
+	if len(input.Items) < 1 {
+		return fmt.Errorf("at least one item is required")
 	}
 
-	tmpl, err := template.New("quotation").Parse(q.Data.HtmlTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("parse quotation template: %w", err)
+	for _, item := range input.Items {
+		if strings.TrimSpace(item.Description) == "" {
+			return fmt.Errorf("item description is required")
+		}
+
+		if item.Qty == 0 {
+			return fmt.Errorf("item quantity must be greater than zero")
+		}
+
+		if strings.TrimSpace(item.UoM) == "" {
+			return fmt.Errorf("item unit of measure is required")
+		}
 	}
 
-	var body bytes.Buffer
-	if err := tmpl.Execute(&body, q.Data); err != nil {
-		return nil, fmt.Errorf("execute quotation template: %w", err)
+	if input.Subject == "" {
+		return fmt.Errorf("subject is required")
 	}
 
-	if body.Len() == 0 {
-		return nil, fmt.Errorf("template executed but produced empty output")
+	if strings.TrimSpace(input.RecipientName) == "" {
+		return fmt.Errorf("recipient name are required")
 	}
 
-	baseCtx := q.ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
+	if strings.TrimSpace(input.RecipientCompany) == "" {
+		return fmt.Errorf("recipient company name are required")
 	}
 
-	ctx, cancel := chromedp.NewContext(baseCtx)
-	defer cancel()
-
-	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelTimeout()
-
-	var buf []byte
-	err = chromedp.Run(
-		ctx,
-		chromedp.Navigate("about:blank"),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			tree, err := page.GetFrameTree().Do(ctx)
-			if err != nil {
-				return err
-			}
-
-			return page.SetDocumentContent(tree.Frame.ID, body.String()).Do(ctx)
-		}),
-		chromedp.WaitVisible(`table`, chromedp.ByQuery),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			printData, _, err := page.PrintToPDF().WithPrintBackground(true).WithDisplayHeaderFooter(false).WithPaperWidth(8.27).WithPaperHeight(11.69).Do(ctx)
-			buf = printData
-			return err
-		}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("render quotation pdf: %w", err)
+	if strings.TrimSpace(input.RecipientAddress) == "" {
+		return fmt.Errorf("recipient address are required")
 	}
 
-	if len(buf) == 0 {
-		return nil, fmt.Errorf("render quotation pdf: empty output")
+	if input.Validity < 1 {
+		return fmt.Errorf("validity must be greater than zero")
 	}
 
-	return buf, nil
+	if input.PaymentTerm < 1 {
+		return fmt.Errorf("payment term must be greater than zero")
+	}
+
+	if input.LeadTime < 1 {
+		return fmt.Errorf("lead time must be greater than zero")
+	}
+
+	if input.DiscountPercent > 100 {
+		return fmt.Errorf("discount percent cannot be greater than 100")
+	}
+
+	q.Data.RecipientName = input.RecipientName
+	q.Data.RecipientCompany = input.RecipientCompany
+	q.Data.RecipientAddress = input.RecipientAddress
+
+	// TODO: generate quote number with proper logic
+	q.Data.QuoteNumber = fmt.Sprintf("Q-%d", time.Now().Unix())
+
+	q.Data.Subject = input.Subject
+	q.Data.Validity = input.Validity
+	q.Data.PaymentTerm = input.PaymentTerm
+	q.Data.LeadTime = input.LeadTime
+	q.Data.DiscountPercent = input.DiscountPercent
+
+	items := buildItems(input.Items)
+	q.Data.Items = items
+
+	date, validUntil := buildDates(input.Validity)
+	q.Data.Date = date
+	q.Data.ValidUntil = validUntil
+
+	subTotal, discountAmount, grandTotal := buildPrices(items, input.DiscountPercent)
+	q.Data.SubTotal = subTotal
+	q.Data.DiscountAmount = discountAmount
+	q.Data.GrandTotal = grandTotal
+
+	displaySubTotal, displayDiscountAmount, displayGrandTotal := buildViews(subTotal, discountAmount, grandTotal)
+	q.Data.DisplaySubTotal = displaySubTotal
+	q.Data.DisplayDiscountAmount = displayDiscountAmount
+	q.Data.DisplayGrandTotal = displayGrandTotal
+
+	return nil
 }
 
 func (q *Quotation) Export() error {
@@ -180,95 +213,53 @@ func (q *Quotation) save(path string) error {
 	return nil
 }
 
-func validateSavePath(path string) (string, error) {
-	if strings.TrimSpace(path) == "" {
-		return "", fmt.Errorf("path is required")
+func (q *Quotation) build() ([]byte, error) {
+	var body bytes.Buffer
+	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+		return nil, fmt.Errorf("execute quotation template: %w", err)
 	}
 
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve absolute path: %w", err)
+	if body.Len() == 0 {
+		return nil, fmt.Errorf("template executed but produced empty output")
 	}
 
-	if !strings.EqualFold(filepath.Ext(absPath), ".pdf") {
-		return "", fmt.Errorf("file must use .pdf extension")
+	baseCtx := q.ctx
+	if baseCtx == nil {
+		baseCtx = context.Background()
 	}
 
-	parentDir := filepath.Dir(absPath)
-	parentInfo, err := os.Stat(parentDir)
-	if err != nil {
-		return "", fmt.Errorf("invalid destination directory: %w", err)
-	}
-	if !parentInfo.IsDir() {
-		return "", fmt.Errorf("destination parent is not a directory")
-	}
+	ctx, cancel := chromedp.NewContext(baseCtx)
+	defer cancel()
 
-	fileInfo, err := os.Lstat(absPath)
-	if err == nil {
-		if fileInfo.IsDir() {
-			return "", fmt.Errorf("destination is a directory")
-		}
-		if fileInfo.Mode()&os.ModeSymlink != 0 {
-			return "", fmt.Errorf("destination cannot be a symlink")
-		}
-	} else if !os.IsNotExist(err) {
-		return "", fmt.Errorf("check destination: %w", err)
-	}
+	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
 
-	return absPath, nil
-}
-
-var rupiahPrinter = message.NewPrinter(language.Indonesian)
-
-func formatRupiah(amount uint64) string {
-	return rupiahPrinter.Sprintf("%d", amount)
-}
-
-func formatDescription(raw string) template.HTML {
-	clean := strings.ReplaceAll(raw, "\r\n", "\n")
-	lines := strings.Split(clean, "\n")
-
-	mainParts := make([]string, 0, len(lines))
-	bullets := make([]string, 0, len(lines))
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "- ") {
-			item := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
-			if item != "" {
-				bullets = append(bullets, item)
+	var buf []byte
+	err := chromedp.Run(
+		ctx,
+		chromedp.Navigate("about:blank"),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			tree, err := page.GetFrameTree().Do(ctx)
+			if err != nil {
+				return err
 			}
-			continue
-		}
 
-		mainParts = append(mainParts, trimmed)
+			return page.SetDocumentContent(tree.Frame.ID, body.String()).Do(ctx)
+		}),
+		chromedp.WaitVisible(`table`, chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			printData, _, err := page.PrintToPDF().WithPrintBackground(true).WithDisplayHeaderFooter(false).WithPaperWidth(8.27).WithPaperHeight(11.69).Do(ctx)
+			buf = printData
+			return err
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("render quotation pdf: %w", err)
 	}
 
-	var b strings.Builder
-
-	if len(mainParts) > 0 {
-		b.WriteString(`<div class="desc-main">`)
-		b.WriteString(html.EscapeString(strings.Join(mainParts, " ")))
-		b.WriteString(`</div>`)
+	if len(buf) == 0 {
+		return nil, fmt.Errorf("render quotation pdf: empty output")
 	}
 
-	if len(bullets) > 0 {
-		b.WriteString(`<ul class="desc-subitems">`)
-		for _, item := range bullets {
-			b.WriteString(`<li>`)
-			b.WriteString(html.EscapeString(item))
-			b.WriteString(`</li>`)
-		}
-		b.WriteString(`</ul>`)
-	}
-
-	if b.Len() == 0 {
-		return template.HTML(html.EscapeString(raw))
-	}
-
-	return template.HTML(b.String())
+	return buf, nil
 }
