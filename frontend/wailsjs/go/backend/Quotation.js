@@ -5,3 +5,7 @@
 export function Export() {
   return window['go']['backend']['Quotation']['Export']();
 }
+
+export function Prepare(arg1) {
+  return window['go']['backend']['Quotation']['Prepare'](arg1);
+}

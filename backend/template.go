@@ -17,7 +17,7 @@ var htmlTemplate embed.FS
 //go:embed template/css/*
 var cssTemplate embed.FS
 
-func ReadTemplate(q *Quotation) error {
+func readTemplate(q *Quotation) error {
 	cssContent, err := cssTemplate.ReadFile("template/css/template-fixed.css")
 	if err != nil {
 		return fmt.Errorf("load css template: %w", err)

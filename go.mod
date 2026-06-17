@@ -45,4 +45,4 @@ require (
 	golang.org/x/sys v0.43.0 // indirect
 )
 
-// replace github.com/wailsapp/wails/v2 v2.11.0 => /Users/tristan/dev/projects/go/vera-app
+

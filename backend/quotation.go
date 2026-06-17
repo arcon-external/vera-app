@@ -14,18 +14,21 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// QuotationInput is the data contract between the frontend and the backend.
+// The frontend sends this struct via Wails bindings when calling Prepare.
 type QuotationInput struct {
-	Items            []QuotationItemInput
-	Subject          string
-	RecipientName    string
-	RecipientCompany string
-	RecipientAddress string
-	DiscountPercent  uint8
-	Validity         uint8
-	PaymentTerm      uint8
-	LeadTime         uint8
+	Items           []QuotationItemInput
+	Subject         string
+	RecipientName   string
+	DiscountPercent uint8
+	Validity        uint8
+	PaymentTerm     uint8
+	LeadTime        uint8
+	CustomerID      uint8
 }
 
+// QuotationItemInput is a single line item from the frontend.
+// No is assigned by the backend. UnitPrice is in raw IDR.
 type QuotationItemInput struct {
 	Description string
 	Qty         uint32
@@ -33,6 +36,8 @@ type QuotationItemInput struct {
 	UnitPrice   uint64
 }
 
+// QuotationItem is a prepared line item with computed display fields
+// ready for template rendering.
 type QuotationItem struct {
 	Description      string
 	DisplayDesc      template.HTML
@@ -45,6 +50,9 @@ type QuotationItem struct {
 	Qty              uint32
 }
 
+// QuotationData is the full template data bag.
+// It combines static template assets (set once at startup by readTemplate)
+// with business data (set per-export by Prepare).
 type QuotationData struct {
 	Items                 []QuotationItem
 	CustomCSS             template.CSS
@@ -70,17 +78,39 @@ type QuotationData struct {
 	PaymentTerm           uint8
 	LeadTime              uint8
 	DiscountPercent       uint8
+	CustomerID            uint8
 }
 
+// Quotation is the Wails-bound application struct.
+// It owns the Wails context and the full data bag for rendering.
 type Quotation struct {
 	ctx  context.Context
 	Data QuotationData
 }
 
+var customerMap = map[uint8]string{
+	2: "PT. Infineon Technologies Batam",
+	3: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+	4: "PT. Datalec Global Solution",
+	5: "PT. Panasonic Industrial Devices Batam",
+	6: "PT. Surya Teknologi Batam",
+}
+
+var addressMap = map[uint8]string{
+	2: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+	3: "Kecamatan Nongsa, Kota Batam, Kepulauan Riau, Indonesia",
+	4: "Ruko Pollux Habibie No.E16, Kota Batam, Kepulauan Riau, Indonesia",
+	5: "Puri Industrial Park, Baloi Permai, Batam Kota, Kepulauan Riau, Indonesia",
+	6: "Batam Industrial Park, Jalan Beringin Lot 312-313, Muka Kuning Batam, Kepulauan Riau, Indonesia",
+}
+
+// Startup initialises the Quotation struct at app launch.
+// It stores the Wails context (required for runtime.SaveFileDialog)
+// and loads all static template assets (CSS, HTML, fonts, logo, signature).
 func Startup(quotation *Quotation, ctx context.Context) error {
 	quotation.ctx = ctx
 
-	err := ReadTemplate(quotation)
+	err := readTemplate(quotation)
 	if err != nil {
 		return err
 	}
@@ -88,7 +118,33 @@ func Startup(quotation *Quotation, ctx context.Context) error {
 	return nil
 }
 
+func checkCustomerID(id uint8) bool {
+	_, exists := customerMap[id]
+	return exists
+}
+
+func generateQuoteNumber(cusID uint8) (string, error) {
+	seqID, err := getNextSequence()
+	if err != nil {
+		return "", fmt.Errorf("get next sequence: %w", err)
+	}
+	return formatQuoteNumber(cusID, seqID), nil
+}
+
+func formatQuoteNumber(cusID uint8, seqID uint16) string {
+	return fmt.Sprintf("15%02d%04d", cusID, seqID)
+}
+
+// Prepare validates user input and populates the QuotationData business fields.
+// It does not generate the quote number — that is deferred to Export to avoid
+// consuming a sequence number if the user never saves. Returns an error
+// describing the first validation failure, or nil on success.
 func (q *Quotation) Prepare(input QuotationInput) error {
+	customerExists := checkCustomerID(input.CustomerID)
+	if !customerExists {
+		return fmt.Errorf("invalid customer ID: %d", input.CustomerID)
+	}
+
 	if len(input.Items) < 1 {
 		return fmt.Errorf("at least one item is required")
 	}
@@ -115,14 +171,6 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("recipient name are required")
 	}
 
-	if strings.TrimSpace(input.RecipientCompany) == "" {
-		return fmt.Errorf("recipient company name are required")
-	}
-
-	if strings.TrimSpace(input.RecipientAddress) == "" {
-		return fmt.Errorf("recipient address are required")
-	}
-
 	if input.Validity < 1 {
 		return fmt.Errorf("validity must be greater than zero")
 	}
@@ -139,12 +187,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("discount percent cannot be greater than 100")
 	}
 
-	q.Data.RecipientName = input.RecipientName
-	q.Data.RecipientCompany = input.RecipientCompany
-	q.Data.RecipientAddress = input.RecipientAddress
+	q.Data.CustomerID = input.CustomerID
 
-	// TODO: generate quote number with proper logic
-	q.Data.QuoteNumber = fmt.Sprintf("Q-%d", time.Now().Unix())
+	q.Data.RecipientName = input.RecipientName
+	q.Data.RecipientCompany = customerMap[input.CustomerID]
+	q.Data.RecipientAddress = addressMap[input.CustomerID]
 
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
@@ -172,6 +219,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	return nil
 }
 
+// Export opens a native save file dialog, generates the quote number,
+// builds the PDF, and writes it to the chosen path. The quote number
+// is only consumed after the user confirms the save dialog, preventing
+// wasted sequence increments on cancellation.
 func (q *Quotation) Export() error {
 	filePath, err := runtime.SaveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
@@ -185,6 +236,12 @@ func (q *Quotation) Export() error {
 	if filePath == "" {
 		return fmt.Errorf("user cancelled")
 	}
+
+	quoteID, err := generateQuoteNumber(q.Data.CustomerID)
+	if err != nil {
+		return fmt.Errorf("generate quote number: %w", err)
+	}
+	q.Data.QuoteNumber = quoteID
 
 	err = q.save(filePath)
 	if err != nil {

@@ -5,7 +5,7 @@ import "time"
 func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 	items := make([]QuotationItem, 0, len(inputItems))
 	for key, itemInput := range inputItems {
-		items = append(items, NewQuotationItem(
+		items = append(items, newQuotationItem(
 			itemInput.Description,
 			itemInput.Qty,
 			itemInput.UoM,
@@ -43,7 +43,7 @@ func buildViews(subTotal, discountAmount, grandTotal uint64) (string, string, st
 	return formatRupiah(subTotal), formatRupiah(discountAmount), formatRupiah(grandTotal)
 }
 
-func NewQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) QuotationItem {
+func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) QuotationItem {
 	total := uint64(qty) * unitPrice
 	return QuotationItem{
 		Description:      desc,

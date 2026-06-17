@@ -2,9 +2,11 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestGeneratePDF(t *testing.T) {
@@ -81,13 +83,18 @@ func TestGeneratePDF(t *testing.T) {
 		},
 		Subject:          "Supply & Installation of Electrical and Mechanical Systems at PT Example Plant",
 		RecipientName:    "Budi Santoso",
-		RecipientCompany: "PT Example Industrial",
-		RecipientAddress: "Kawasan Industri Batamindo, Jl. Gaharu Lot 42, Kel. Muka Kuning, Kota Batam 29433",
 		DiscountPercent:  5,
 		Validity:         30,
 		PaymentTerm:      90,
 		LeadTime:         60,
+		CustomerID:       2,
 	})
+
+	quoteID, err := generateQuoteNumber(q.Data.CustomerID)
+	if err != nil {
+		t.Fatalf("generate quote number: %v", err)
+	}
+	q.Data.QuoteNumber = quoteID
 
 	pdfBuf, err := q.build()
 	if err != nil {
@@ -144,7 +151,7 @@ func TestValidateSavePathAcceptsPDF(t *testing.T) {
 func TestFormatRupiah(t *testing.T) {
 	cases := []struct {
 		amount uint64
-		want  string
+		want   string
 	}{
 		{0, "0"},
 		{1, "1"},
@@ -162,6 +169,321 @@ func TestFormatRupiah(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("formatRupiah(%d) = %q; want %q", tc.amount, got, tc.want)
 		}
+	}
+}
+
+func TestCheckCustomerID(t *testing.T) {
+	cases := []struct {
+		id   uint8
+		want bool
+	}{
+		{0, false},
+		{1, false},
+		{2, true},
+		{3, true},
+		{4, true},
+		{5, true},
+		{6, true},
+		{7, false},
+		{255, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("ID_%d", tc.id), func(t *testing.T) {
+			if got := checkCustomerID(tc.id); got != tc.want {
+				t.Errorf("checkCustomerID(%d) = %v; want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildItems(t *testing.T) {
+	inputs := []QuotationItemInput{
+		{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 10000},
+		{Description: "Item B", Qty: 3, UoM: "Unit", UnitPrice: 5000},
+	}
+
+	items := buildItems(inputs)
+	if len(items) != 2 {
+		t.Fatalf("buildItems returned %d items; want 2", len(items))
+	}
+
+	if items[0].No != 1 {
+		t.Errorf("items[0].No = %d; want 1", items[0].No)
+	}
+	if items[1].No != 2 {
+		t.Errorf("items[1].No = %d; want 2", items[1].No)
+	}
+	if items[0].Total != 20000 {
+		t.Errorf("items[0].Total = %d; want 20000", items[0].Total)
+	}
+	if items[1].Total != 15000 {
+		t.Errorf("items[1].Total = %d; want 15000", items[1].Total)
+	}
+	if items[0].DisplayUnitPrice != "10.000" {
+		t.Errorf("items[0].DisplayUnitPrice = %q; want %q", items[0].DisplayUnitPrice, "10.000")
+	}
+}
+
+func TestBuildItemsEmpty(t *testing.T) {
+	items := buildItems(nil)
+	if items == nil {
+		t.Fatal("buildItems(nil) returned nil; want empty slice")
+	}
+	if len(items) != 0 {
+		t.Errorf("buildItems(nil) returned %d items; want 0", len(items))
+	}
+}
+
+func TestBuildDates(t *testing.T) {
+	date, validUntil := buildDates(30)
+
+	expectedDate := time.Now().Format("January 02, 2006")
+	expectedValid := time.Now().AddDate(0, 0, 30).Format("January 02, 2006")
+
+	if date != expectedDate {
+		t.Errorf("date = %q; want %q", date, expectedDate)
+	}
+	if validUntil != expectedValid {
+		t.Errorf("validUntil = %q; want %q", validUntil, expectedValid)
+	}
+}
+
+func TestBuildPrices(t *testing.T) {
+	items := []QuotationItem{
+		{Total: 100000},
+		{Total: 200000},
+	}
+
+	subTotal, discount, grandTotal := buildPrices(items, 10)
+	if subTotal != 300000 {
+		t.Errorf("subTotal = %d; want 300000", subTotal)
+	}
+	if discount != 30000 {
+		t.Errorf("discount = %d; want 30000", discount)
+	}
+	if grandTotal != 270000 {
+		t.Errorf("grandTotal = %d; want 270000", grandTotal)
+	}
+}
+
+func TestBuildPricesNoDiscount(t *testing.T) {
+	items := []QuotationItem{
+		{Total: 50000},
+		{Total: 50000},
+	}
+
+	subTotal, discount, grandTotal := buildPrices(items, 0)
+	if subTotal != 100000 {
+		t.Errorf("subTotal = %d; want 100000", subTotal)
+	}
+	if discount != 0 {
+		t.Errorf("discount = %d; want 0", discount)
+	}
+	if grandTotal != 100000 {
+		t.Errorf("grandTotal = %d; want 100000", grandTotal)
+	}
+}
+
+func TestBuildPricesEmptyItems(t *testing.T) {
+	subTotal, discount, grandTotal := buildPrices(nil, 10)
+	if subTotal != 0 || discount != 0 || grandTotal != 0 {
+		t.Errorf("nil items: got %d, %d, %d; want 0, 0, 0", subTotal, discount, grandTotal)
+	}
+}
+
+func TestBuildViews(t *testing.T) {
+	dSub, dDisc, dGrand := buildViews(100000, 10000, 90000)
+	if dSub != "100.000" {
+		t.Errorf("display sub total = %q; want %q", dSub, "100.000")
+	}
+	if dDisc != "10.000" {
+		t.Errorf("display discount = %q; want %q", dDisc, "10.000")
+	}
+	if dGrand != "90.000" {
+		t.Errorf("display grand total = %q; want %q", dGrand, "90.000")
+	}
+}
+
+func TestNewQuotationItem(t *testing.T) {
+	item := newQuotationItem("Service installation", 5, "Unit", 10000)
+
+	if item.Description != "Service installation" {
+		t.Errorf("Description = %q; want %q", item.Description, "Service installation")
+	}
+	if item.Qty != 5 {
+		t.Errorf("Qty = %d; want 5", item.Qty)
+	}
+	if item.UoM != "Unit" {
+		t.Errorf("UoM = %q; want %q", item.UoM, "Unit")
+	}
+	if item.UnitPrice != 10000 {
+		t.Errorf("UnitPrice = %d; want 10000", item.UnitPrice)
+	}
+	if item.Total != 50000 {
+		t.Errorf("Total = %d; want 50000", item.Total)
+	}
+	if item.DisplayTotal != "50.000" {
+		t.Errorf("DisplayTotal = %q; want %q", item.DisplayTotal, "50.000")
+	}
+	if item.DisplayDesc == "" {
+		t.Error("DisplayDesc is empty")
+	}
+	if item.No != 0 {
+		t.Errorf("No = %d; want 0 (constructor should not set No)", item.No)
+	}
+}
+
+func TestFormatQuoteNumber(t *testing.T) {
+	cases := []struct {
+		cusID uint8
+		seqID uint16
+		want  string
+	}{
+		{2, 1, "15020001"},
+		{3, 5, "15030005"},
+		{6, 42, "15060042"},
+		{2, 0, "15020000"},
+		{6, 1, "15060001"},
+		{2, 9999, "15029999"},
+		{6, 9999, "15069999"},
+		{5, 100, "15050100"},
+	}
+
+	for _, tc := range cases {
+		got := formatQuoteNumber(tc.cusID, tc.seqID)
+		if got != tc.want {
+			t.Errorf("formatQuoteNumber(%d, %d) = %q; want %q", tc.cusID, tc.seqID, got, tc.want)
+		}
+	}
+}
+
+func TestPrepareValidation(t *testing.T) {
+	validItem := QuotationItemInput{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000}
+
+	cases := []struct {
+		name  string
+		input QuotationInput
+	}{
+		{
+			name:  "missing customer ID",
+			input: QuotationInput{},
+		},
+		{
+			name:  "invalid customer ID",
+			input: QuotationInput{CustomerID: 255},
+		},
+		{
+			name:  "empty items",
+			input: QuotationInput{CustomerID: 2},
+		},
+		{
+			name: "empty item description",
+			input: QuotationInput{
+				CustomerID: 2,
+				Items:      []QuotationItemInput{{Description: "", Qty: 1, UoM: "Lot", UnitPrice: 1000}},
+			},
+		},
+		{
+			name: "zero item quantity",
+			input: QuotationInput{
+				CustomerID: 2,
+				Items:      []QuotationItemInput{{Description: "Item", Qty: 0, UoM: "Lot", UnitPrice: 1000}},
+			},
+		},
+		{
+			name: "missing item UoM",
+			input: QuotationInput{
+				CustomerID: 2,
+				Items:      []QuotationItemInput{{Description: "Item", Qty: 1, UoM: "", UnitPrice: 1000}},
+			},
+		},
+		{
+			name: "empty subject",
+			input: QuotationInput{
+				CustomerID:     2,
+				Items:          []QuotationItemInput{validItem},
+				Subject:        "",
+				RecipientName:  "Test",
+				Validity:       30,
+				PaymentTerm:    30,
+				LeadTime:       30,
+			},
+		},
+		{
+			name: "empty recipient name",
+			input: QuotationInput{
+				CustomerID:     2,
+				Items:          []QuotationItemInput{validItem},
+				Subject:        "Test",
+				RecipientName:  "",
+				Validity:       30,
+				PaymentTerm:    30,
+				LeadTime:       30,
+			},
+		},
+		{
+			name: "zero validity",
+			input: QuotationInput{
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      0,
+				PaymentTerm:   30,
+				LeadTime:      30,
+			},
+		},
+		{
+			name: "zero payment term",
+			input: QuotationInput{
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   0,
+				LeadTime:      30,
+			},
+		},
+		{
+			name: "zero lead time",
+			input: QuotationInput{
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      0,
+			},
+		},
+		{
+			name: "discount exceeds 100",
+			input: QuotationInput{
+				CustomerID:      2,
+				Items:           []QuotationItemInput{validItem},
+				Subject:         "Test",
+				RecipientName:   "Test",
+				Validity:        30,
+				PaymentTerm:     30,
+				LeadTime:        30,
+				DiscountPercent: 101,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &Quotation{}
+			err := q.Prepare(tc.input)
+			if err == nil {
+				t.Error("expected error but got nil")
+			}
+			if q.Data.CustomerID != 0 {
+				t.Errorf("q.Data.CustomerID = %d; want 0 (should not be set after failure)", q.Data.CustomerID)
+			}
+		})
 	}
 }
 
