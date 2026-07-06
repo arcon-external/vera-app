@@ -27,6 +27,7 @@ export namespace backend {
 	    PaymentTerm: number;
 	    LeadTime: number;
 	    CustomerID: number;
+	    Incoterm: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new QuotationInput(source);
@@ -42,6 +43,7 @@ export namespace backend {
 	        this.PaymentTerm = source["PaymentTerm"];
 	        this.LeadTime = source["LeadTime"];
 	        this.CustomerID = source["CustomerID"];
+	        this.Incoterm = source["Incoterm"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

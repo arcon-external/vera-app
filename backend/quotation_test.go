@@ -88,6 +88,7 @@ func TestGeneratePDF(t *testing.T) {
 		PaymentTerm:      90,
 		LeadTime:         60,
 		CustomerID:       2,
+		Incoterm:          "FOB",
 	})
 
 	quoteID, err := generateQuoteNumber(q.Data.CustomerID)

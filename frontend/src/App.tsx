@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { Prepare, Export } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
+import { Select } from "./components/Select";
 
 interface ItemRow {
   key: number;
@@ -23,6 +24,39 @@ const CUSTOMERS: Record<number, string> = {
   5: "Panasonic Industrial",
   6: "Surya Teknologi",
 };
+
+const CUSTOMER_OPTIONS = Object.entries(CUSTOMERS).map(([id, name]) => ({
+  value: Number(id),
+  label: name,
+}));
+
+const UOM_OPTIONS = [
+  { value: "Lot", label: "Lot" },
+  { value: "PC", label: "PC" },
+  { value: "EA", label: "EA" },
+  { value: "Set", label: "Set" },
+  { value: "Meter", label: "Meter" },
+] as const;
+
+const VALIDITY_OPTIONS = [
+  { value: 30, label: "30 Days" },
+  { value: 60, label: "60 Days" },
+  { value: 90, label: "90 Days" },
+] as const;
+
+const INCOTERM_OPTIONS = [
+  { value: "EXW", label: "EXW" },
+  { value: "FCA", label: "FCA" },
+  { value: "FAS", label: "FAS" },
+  { value: "FOB", label: "FOB" },
+  { value: "CFR", label: "CFR" },
+  { value: "CIF", label: "CIF" },
+  { value: "CPT", label: "CPT" },
+  { value: "CIP", label: "CIP" },
+  { value: "DPU", label: "DPU" },
+  { value: "DAP", label: "DAP" },
+  { value: "DDP", label: "DDP" },
+] as const;
 
 const DEFAULT_ITEM: ItemRow = {
   key: 0,
@@ -115,6 +149,7 @@ function App() {
   const [paymentTerm, setPaymentTerm] = useState(90);
   const [leadTime, setLeadTime] = useState(60);
   const [discountPercent, setDiscountPercent] = useState(5);
+  const [incoterm, setIncoterm] = useState("EXW");
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
 
   const handleAddItem = useCallback(() => {
@@ -241,6 +276,7 @@ function App() {
       PaymentTerm: paymentTerm,
       LeadTime: leadTime,
       CustomerID: customerId,
+      Incoterm: incoterm,
     });
 
     try {
@@ -250,7 +286,7 @@ function App() {
       const msg = typeof err === "string" ? err : "Validation failed";
       setStatus({ type: "error", message: msg });
     }
-  }, [items, subject, recipientName, discountPercent, validity, paymentTerm, leadTime, customerId]);
+  }, [items, subject, recipientName, discountPercent, validity, paymentTerm, leadTime, customerId, incoterm]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -267,6 +303,7 @@ function App() {
       setLeadTime(Number.parseInt(cols[4]) || 60);
       setDiscountPercent(Math.min(Number.parseInt(cols[5]) || 5, 100));
       setCustomerId(Number.parseInt(cols[6]) || 2);
+      setIncoterm((cols[7] || "").trim() || "EXW");
     },
     []
   );
@@ -330,17 +367,11 @@ function App() {
               <div className={divider} />
             </div>
             <div className={`${card} p-5`}>
-              <select
+              <Select
                 value={customerId}
-                onChange={(e) => setCustomerId(Number(e.target.value))}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-800 outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10 cursor-pointer"
-              >
-                {Object.entries(CUSTOMERS).map(([id, name]) => (
-                  <option key={id} value={id} className="text-slate-800">
-                    {name}
-                  </option>
-                ))}
-              </select>
+                options={CUSTOMER_OPTIONS}
+                onChange={(v) => setCustomerId(Number(v))}
+              />
             </div>
           </section>
 
@@ -354,7 +385,7 @@ function App() {
             </div>
 
             <div className={`${card} overflow-hidden`}>
-              <div className="grid grid-cols-[1fr_0.6fr_0.8fr_1fr_0.2fr] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
+              <div className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
                 <span>Description</span>
                 <span>UoM</span>
                 <span>Qty</span>
@@ -372,7 +403,7 @@ function App() {
                       opacity: 0,
                     }}
                   >
-                    <div className="grid grid-cols-[1fr_0.6fr_0.8fr_1fr_0.2fr] gap-3 px-6 pt-3 items-start group">
+                    <div className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 px-6 pt-3 items-start group">
                       <input
                         type="text"
                         placeholder="Service or product description. Paste from Excel"
@@ -383,14 +414,13 @@ function App() {
                         onPaste={(e) => handlePaste(item.key, e)}
                         className="w-full bg-transparent py-2 text-[14px] text-slate-800 placeholder-slate-400 outline-none transition-colors duration-200"
                       />
-                      <input
-                        type="text"
-                        placeholder="e.g. Lot"
+                      <Select
                         value={item.uom}
-                        onChange={(e) =>
-                          handleItemChange(item.key, "uom", e.target.value)
+                        options={UOM_OPTIONS}
+                        className="!py-2 !px-3 !rounded-lg"
+                        onChange={(v) =>
+                          handleItemChange(item.key, "uom", String(v))
                         }
-                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[14px] text-slate-800 placeholder-slate-400 outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
                       />
                       <input
                         type="text"
@@ -428,24 +458,29 @@ function App() {
                     </div>
 
                     {item.subItems.length > 0 && (
-                      <div className="ml-12 mr-6 mb-2 border-l-2 border-slate-100 pl-4">
+                      <div className="mb-2 ml-12 border-l-2 border-slate-100 pl-4">
                         {item.subItems.map((sub, si) => (
-                          <div key={si} className="flex items-center gap-2 py-1">
-                            <span className="flex-shrink-0 text-[11px] text-slate-400 select-none">
-                              &mdash;
-                            </span>
-                            <input
-                              type="text"
-                              placeholder={`Sub-item ${si + 1}`}
-                              value={sub}
-                              onChange={(e) =>
-                                handleSubItemChange(item.key, si, e.target.value)
-                              }
-                              className="flex-1 bg-transparent py-1 text-[13px] text-slate-600 placeholder-slate-300 outline-none transition-colors duration-200"
-                            />
+                          <div
+                            key={si}
+                            className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 pr-6 py-1 items-center"
+                          >
+                            <div className="col-span-4 flex items-center gap-2">
+                              <span className="flex-shrink-0 text-[11px] text-slate-400 select-none">
+                                &mdash;
+                              </span>
+                              <input
+                                type="text"
+                                placeholder={`Sub-item ${si + 1}`}
+                                value={sub}
+                                onChange={(e) =>
+                                  handleSubItemChange(item.key, si, e.target.value)
+                                }
+                                className="flex-1 bg-transparent py-1 text-[13px] text-slate-600 placeholder-slate-300 outline-none transition-colors duration-200"
+                              />
+                            </div>
                             <button
                               onClick={() => handleRemoveSubItem(item.key, si)}
-                              className="flex-shrink-0 flex h-5 w-5 items-center justify-center rounded text-slate-300 transition-all duration-200 hover:bg-red-50 hover:text-red-400"
+                              className="mx-auto flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition-all duration-200 hover:bg-red-50 hover:text-red-500 active:scale-[0.94]"
                             >
                               <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M4 4l8 8M12 4l-8 8" />
@@ -529,23 +564,16 @@ function App() {
                   />
                 </div>
 
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-5 gap-4">
                   <div>
                     <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
                       Validity
                     </label>
-                    <div className={inputGroup}>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={validity}
-                        onChange={(e) =>
-                          setValidity(Number(e.target.value.replace(/\D/g, "")) || 0)
-                        }
-                        className={inputFieldCenter}
-                      />
-                      <span className={inputSuffix}>days</span>
-                    </div>
+                    <Select
+                      value={validity}
+                      options={VALIDITY_OPTIONS}
+                      onChange={(v) => setValidity(Number(v))}
+                    />
                   </div>
 
                   <div>
@@ -602,6 +630,17 @@ function App() {
                       />
                       <span className={inputSuffix}>%</span>
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
+                      Incoterm
+                    </label>
+                    <Select
+                      value={incoterm}
+                      options={INCOTERM_OPTIONS}
+                      onChange={(v) => setIncoterm(String(v))}
+                    />
                   </div>
                 </div>
               </div>

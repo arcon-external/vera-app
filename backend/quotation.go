@@ -25,6 +25,7 @@ type QuotationInput struct {
 	PaymentTerm     uint8
 	LeadTime        uint8
 	CustomerID      uint8
+	Incoterm        string
 }
 
 // QuotationItemInput is a single line item from the frontend.
@@ -79,6 +80,7 @@ type QuotationData struct {
 	LeadTime              uint8
 	DiscountPercent       uint8
 	CustomerID            uint8
+	Incoterm              string
 }
 
 // Quotation is the Wails-bound application struct.
@@ -187,6 +189,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("discount percent cannot be greater than 100")
 	}
 
+	validIncoterms := map[string]bool{"EXW": true, "FCA": true, "FAS": true, "FOB": true, "CFR": true, "CIF": true, "CPT": true, "CIP": true, "DPU": true, "DAP": true, "DDP": true}
+	if !validIncoterms[strings.ToUpper(input.Incoterm)] {
+		return fmt.Errorf("invalid incoterm: %s", input.Incoterm)
+	}
+
 	q.Data.CustomerID = input.CustomerID
 
 	q.Data.RecipientName = input.RecipientName
@@ -198,6 +205,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTime = input.LeadTime
 	q.Data.DiscountPercent = input.DiscountPercent
+	q.Data.Incoterm = input.Incoterm
 
 	items := buildItems(input.Items)
 	q.Data.Items = items
