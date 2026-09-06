@@ -453,7 +453,7 @@ function App() {
             </div>
 
             <div className={`${card} overflow-hidden`}>
-              <div className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
+              <div className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
                 <span>Description</span>
                 <span>UoM</span>
                 <span>Qty</span>
@@ -471,7 +471,7 @@ function App() {
                       opacity: 0,
                     }}
                   >
-                    <div className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 px-6 pt-3 items-start group">
+                    <div className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 px-6 pt-3 items-start group">
                       <input
                         type="text"
                         placeholder="Service or product description. Paste from Excel"
@@ -480,7 +480,7 @@ function App() {
                           handleItemChange(item.key, "description", e.target.value)
                         }
                         onPaste={(e) => handlePaste(item.key, e)}
-                        className="w-full bg-transparent py-2 text-[14px] text-slate-800 placeholder-slate-400 outline-none transition-colors duration-200"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[14px] text-slate-800 placeholder-slate-400 outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
                       />
                       <Select
                         value={item.uom}
@@ -530,7 +530,7 @@ function App() {
                         {item.subItems.map((sub, si) => (
                           <div
                             key={si}
-                            className="grid grid-cols-[1fr_0.8fr_0.8fr_1fr_0.2fr] gap-3 pr-6 py-1 items-center"
+                            className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 pr-6 py-1 items-center"
                           >
                             <div className="col-span-4 flex items-center gap-2">
                               <span className="flex-shrink-0 text-[11px] text-slate-400 select-none">
@@ -632,7 +632,7 @@ function App() {
                   />
                 </div>
 
-                <div className="grid grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                   <div>
                     <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
                       Validity
