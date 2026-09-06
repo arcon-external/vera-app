@@ -58,6 +58,20 @@ const INCOTERM_OPTIONS = [
   { value: "DDP", label: "DDP" },
 ] as const;
 
+const TAX_ZONE_OPTIONS = [
+  { value: "FTZ", label: "FTZ — 0% tax" },
+  { value: "NonFTZ", label: "Non-FTZ" },
+] as const;
+
+const TAX_CATEGORY_OPTIONS = [
+  { value: "SupplyOnly", label: "Supply Only — 11%" },
+  { value: "SupplyInstall", label: "Supply and Install Services — 2%" },
+  {
+    value: "SupplyInstallConstruction",
+    label: "Supply and Install Services (Construction) — 1.75%",
+  },
+] as const;
+
 const DEFAULT_ITEM: ItemRow = {
   key: 0,
   description: "",
@@ -150,6 +164,8 @@ function App() {
   const [leadTime, setLeadTime] = useState(60);
   const [discountPercent, setDiscountPercent] = useState(5);
   const [profitMargin, setProfitMargin] = useState(0);
+  const [taxZone, setTaxZone] = useState("FTZ");
+  const [taxCategory, setTaxCategory] = useState("");
   const [incoterm, setIncoterm] = useState("EXW");
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
 
@@ -274,6 +290,8 @@ function App() {
       RecipientName: recipientName,
       DiscountPercent: discountPercent,
       ProfitMargin: profitMargin,
+      TaxZone: taxZone,
+      TaxCategory: taxZone === "NonFTZ" ? taxCategory : "",
       Validity: validity,
       PaymentTerm: paymentTerm,
       LeadTime: leadTime,
@@ -288,7 +306,7 @@ function App() {
       const msg = typeof err === "string" ? err : "Validation failed";
       setStatus({ type: "error", message: msg });
     }
-  }, [items, subject, recipientName, discountPercent, profitMargin, validity, paymentTerm, leadTime, customerId, incoterm]);
+  }, [items, subject, recipientName, discountPercent, profitMargin, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -307,6 +325,9 @@ function App() {
       setCustomerId(Number.parseInt(cols[6]) || 2);
       setIncoterm((cols[7] || "").trim() || "EXW");
       setProfitMargin(Math.min(Number.parseInt(cols[8]) || 0, 100));
+      const pastedZone = (cols[9] || "").trim();
+      setTaxZone(pastedZone === "NonFTZ" ? "NonFTZ" : "FTZ");
+      setTaxCategory((cols[10] || "").trim());
     },
     []
   );
@@ -665,6 +686,49 @@ function App() {
                       onChange={(v) => setIncoterm(String(v))}
                     />
                   </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
+                      Tax zone
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {TAX_ZONE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setTaxZone(opt.value);
+                            if (opt.value === "FTZ") setTaxCategory("");
+                          }}
+                          className={`rounded-xl border px-4 py-3 text-[14px] transition duration-200 active:scale-[0.98] ${
+                            taxZone === opt.value
+                              ? "border-emerald-500/60 bg-emerald-50 font-medium text-emerald-700 ring-2 ring-emerald-500/10"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {taxZone === "NonFTZ" && (
+                    <div>
+                      <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
+                        Tax category
+                      </label>
+                      <Select
+                        value={taxCategory}
+                        options={[
+                          { value: "", label: "Select category…" },
+                          ...TAX_CATEGORY_OPTIONS,
+                        ]}
+                        onChange={(v) => setTaxCategory(String(v))}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
