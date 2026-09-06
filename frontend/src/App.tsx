@@ -1,7 +1,14 @@
-import { useState, useCallback, useRef } from "react";
-import { Prepare, Export } from "@backend/backend/Quotation";
+import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  Prepare,
+  Export,
+  GetCustomerPreview,
+  GetInternalBreakdown,
+} from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { Select } from "./components/Select";
+import { ReviewPanel } from "./components/ReviewPanel";
+import type { CustomerPreview, InternalBreakdown } from "./preview";
 
 interface ItemRow {
   key: number;
@@ -168,6 +175,34 @@ function App() {
   const [taxCategory, setTaxCategory] = useState("");
   const [incoterm, setIncoterm] = useState("EXW");
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
+  const [customerPreview, setCustomerPreview] =
+    useState<CustomerPreview | null>(null);
+  const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
+
+  const clearPreview = useCallback(() => {
+    setCustomerPreview(null);
+    setBreakdown(null);
+  }, []);
+
+  // Any input edit invalidates the review: the user must re-Prepare.
+  useEffect(() => {
+    clearPreview();
+    setStatus((s) => (s.type === "ready" ? { type: "idle", message: "" } : s));
+  }, [
+    items,
+    subject,
+    recipientName,
+    discountPercent,
+    profitMargin,
+    taxZone,
+    taxCategory,
+    validity,
+    paymentTerm,
+    leadTime,
+    customerId,
+    incoterm,
+    clearPreview,
+  ]);
 
   const handleAddItem = useCallback(() => {
     setItems((prev) => [...prev, newItem(nextKey.current++)]);
@@ -301,12 +336,19 @@ function App() {
 
     try {
       await Prepare(input);
+      const [customer, internal] = await Promise.all([
+        GetCustomerPreview(),
+        GetInternalBreakdown(),
+      ]);
+      setCustomerPreview(customer as CustomerPreview);
+      setBreakdown(internal as InternalBreakdown);
       setStatus({ type: "ready", message: "Quotation prepared — review and export" });
     } catch (err: unknown) {
+      clearPreview();
       const msg = typeof err === "string" ? err : "Validation failed";
       setStatus({ type: "error", message: msg });
     }
-  }, [items, subject, recipientName, discountPercent, profitMargin, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm]);
+  }, [items, subject, recipientName, discountPercent, profitMargin, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm, clearPreview]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -336,6 +378,7 @@ function App() {
     setStatus({ type: "loading", message: "Generating PDF..." });
     try {
       await Export();
+      clearPreview();
       setStatus({ type: "idle", message: "" });
     } catch (err: unknown) {
       const msg = typeof err === "string" ? err : "Export failed";
@@ -343,9 +386,10 @@ function App() {
         setStatus({ type: "ready", message: "Quotation prepared — review and export" });
         return;
       }
+      clearPreview();
       setStatus({ type: "error", message: msg });
     }
-  }, []);
+  }, [clearPreview]);
 
   const statusStyles: Record<StatusState["type"], string> = {
     idle: "hidden",
@@ -734,6 +778,10 @@ function App() {
             </div>
           </section>
 
+          {customerPreview !== null && breakdown !== null && (
+            <ReviewPanel customer={customerPreview} internal={breakdown} />
+          )}
+
           <section className="flex flex-col items-center gap-3">
             {status.type !== "idle" && (
               <div
@@ -774,7 +822,11 @@ function App() {
 
               <button
                 onClick={handleExport}
-                disabled={status.type !== "ready"}
+                disabled={
+                  status.type !== "ready" ||
+                  customerPreview === null ||
+                  breakdown === null
+                }
                 className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(5,150,105,0.2)] transition-all duration-200 hover:bg-emerald-500 hover:shadow-[0_2px_6px_rgba(5,150,105,0.25)] active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none"
               >
                 <svg

@@ -5,3 +5,7 @@ import {backend} from '../models';
 export function Export():Promise<void>;
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
+
+export function GetCustomerPreview():Promise<any>;
+
+export function GetInternalBreakdown():Promise<any>;
