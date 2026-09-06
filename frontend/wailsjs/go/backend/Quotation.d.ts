@@ -4,8 +4,8 @@ import {backend} from '../models';
 
 export function Export():Promise<void>;
 
+export function GetCustomerPreview():Promise<backend.CustomerPreview>;
+
+export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
+
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
-
-export function GetCustomerPreview():Promise<any>;
-
-export function GetInternalBreakdown():Promise<any>;
