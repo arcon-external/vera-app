@@ -21,6 +21,7 @@ type QuotationInput struct {
 	Subject         string
 	RecipientName   string
 	DiscountPercent uint8
+	ProfitMargin    uint8
 	Validity        uint8
 	PaymentTerm     uint8
 	LeadTime        uint8
@@ -79,6 +80,7 @@ type QuotationData struct {
 	PaymentTerm           uint8
 	LeadTime              uint8
 	DiscountPercent       uint8
+	ProfitMargin          uint8
 	CustomerID            uint8
 	Incoterm              string
 }
@@ -189,6 +191,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("discount percent cannot be greater than 100")
 	}
 
+	if input.ProfitMargin > 100 {
+		return fmt.Errorf("profit margin cannot be greater than 100")
+	}
+
 	validIncoterms := map[string]bool{"EXW": true, "FCA": true, "FAS": true, "FOB": true, "CFR": true, "CIF": true, "CPT": true, "CIP": true, "DPU": true, "DAP": true, "DDP": true}
 	if !validIncoterms[strings.ToUpper(input.Incoterm)] {
 		return fmt.Errorf("invalid incoterm: %s", input.Incoterm)
@@ -205,9 +211,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTime = input.LeadTime
 	q.Data.DiscountPercent = input.DiscountPercent
+	q.Data.ProfitMargin = input.ProfitMargin
 	q.Data.Incoterm = input.Incoterm
 
-	items := buildItems(input.Items)
+	items := buildItems(input.Items, input.ProfitMargin)
 	q.Data.Items = items
 
 	date, validUntil := buildDates(input.Validity)

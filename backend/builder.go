@@ -2,14 +2,19 @@ package backend
 
 import "time"
 
-func buildItems(inputItems []QuotationItemInput) []QuotationItem {
+func applyMarkup(cost uint64, margin uint8) uint64 {
+	return cost + cost*uint64(margin)/100
+}
+
+func buildItems(inputItems []QuotationItemInput, margin uint8) []QuotationItem {
 	items := make([]QuotationItem, 0, len(inputItems))
 	for key, itemInput := range inputItems {
+		sellPrice := applyMarkup(itemInput.UnitPrice, margin)
 		items = append(items, newQuotationItem(
 			itemInput.Description,
 			itemInput.Qty,
 			itemInput.UoM,
-			itemInput.UnitPrice,
+			sellPrice,
 		))
 
 		items[key].No = uint32(key + 1)

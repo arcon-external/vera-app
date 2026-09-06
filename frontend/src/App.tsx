@@ -149,6 +149,7 @@ function App() {
   const [paymentTerm, setPaymentTerm] = useState(90);
   const [leadTime, setLeadTime] = useState(60);
   const [discountPercent, setDiscountPercent] = useState(5);
+  const [profitMargin, setProfitMargin] = useState(0);
   const [incoterm, setIncoterm] = useState("EXW");
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
 
@@ -272,6 +273,7 @@ function App() {
       Subject: subject,
       RecipientName: recipientName,
       DiscountPercent: discountPercent,
+      ProfitMargin: profitMargin,
       Validity: validity,
       PaymentTerm: paymentTerm,
       LeadTime: leadTime,
@@ -286,7 +288,7 @@ function App() {
       const msg = typeof err === "string" ? err : "Validation failed";
       setStatus({ type: "error", message: msg });
     }
-  }, [items, subject, recipientName, discountPercent, validity, paymentTerm, leadTime, customerId, incoterm]);
+  }, [items, subject, recipientName, discountPercent, profitMargin, validity, paymentTerm, leadTime, customerId, incoterm]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -304,6 +306,7 @@ function App() {
       setDiscountPercent(Math.min(Number.parseInt(cols[5]) || 5, 100));
       setCustomerId(Number.parseInt(cols[6]) || 2);
       setIncoterm((cols[7] || "").trim() || "EXW");
+      setProfitMargin(Math.min(Number.parseInt(cols[8]) || 0, 100));
     },
     []
   );
@@ -389,7 +392,7 @@ function App() {
                 <span>Description</span>
                 <span>UoM</span>
                 <span>Qty</span>
-                <span>Unit Price (IDR)</span>
+                <span>Cost Price (IDR)</span>
                 <span />
               </div>
 
@@ -564,7 +567,7 @@ function App() {
                   />
                 </div>
 
-                <div className="grid grid-cols-5 gap-4">
+                <div className="grid grid-cols-6 gap-4">
                   <div>
                     <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
                       Validity
@@ -623,6 +626,26 @@ function App() {
                         value={discountPercent}
                         onChange={(e) =>
                           setDiscountPercent(
+                            Math.min(Number(e.target.value.replace(/\D/g, "")) || 0, 100)
+                          )
+                        }
+                        className={inputFieldCenter}
+                      />
+                      <span className={inputSuffix}>%</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
+                      Margin
+                    </label>
+                    <div className={inputGroup} title="Customer price = cost × (1 + margin)">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={profitMargin}
+                        onChange={(e) =>
+                          setProfitMargin(
                             Math.min(Number(e.target.value.replace(/\D/g, "")) || 0, 100)
                           )
                         }
