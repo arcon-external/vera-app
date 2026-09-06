@@ -22,6 +22,8 @@ type QuotationInput struct {
 	RecipientName   string
 	DiscountPercent uint8
 	ProfitMargin    uint8
+	TaxZone         string
+	TaxCategory     string
 	Validity        uint8
 	PaymentTerm     uint8
 	LeadTime        uint8
@@ -76,11 +78,19 @@ type QuotationData struct {
 	SubTotal              uint64
 	DiscountAmount        uint64
 	GrandTotal            uint64
+	TaxRateBps            uint16
+	TaxAmount             uint64
+	NettProfit            uint64
+	TaxLabel              string
+	DisplayTaxAmount      string
+	DisplayNettProfit     string
 	Validity              uint8
 	PaymentTerm           uint8
 	LeadTime              uint8
 	DiscountPercent       uint8
 	ProfitMargin          uint8
+	TaxZone               string
+	TaxCategory           string
 	CustomerID            uint8
 	Incoterm              string
 }
@@ -195,6 +205,14 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("profit margin cannot be greater than 100")
 	}
 
+	if input.TaxZone == "" {
+		input.TaxZone = TaxZoneFTZ
+	}
+	taxBps, taxLabel, err := taxRateFor(input.TaxZone, input.TaxCategory)
+	if err != nil {
+		return err
+	}
+
 	validIncoterms := map[string]bool{"EXW": true, "FCA": true, "FAS": true, "FOB": true, "CFR": true, "CIF": true, "CPT": true, "CIP": true, "DPU": true, "DAP": true, "DDP": true}
 	if !validIncoterms[strings.ToUpper(input.Incoterm)] {
 		return fmt.Errorf("invalid incoterm: %s", input.Incoterm)
@@ -212,6 +230,8 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.LeadTime = input.LeadTime
 	q.Data.DiscountPercent = input.DiscountPercent
 	q.Data.ProfitMargin = input.ProfitMargin
+	q.Data.TaxZone = input.TaxZone
+	q.Data.TaxCategory = input.TaxCategory
 	q.Data.Incoterm = input.Incoterm
 
 	items := buildItems(input.Items, input.ProfitMargin)
@@ -226,10 +246,18 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.DiscountAmount = discountAmount
 	q.Data.GrandTotal = grandTotal
 
+	taxAmount := calcTax(grandTotal, taxBps)
+	q.Data.TaxRateBps = taxBps
+	q.Data.TaxAmount = taxAmount
+	q.Data.NettProfit = grandTotal - taxAmount
+	q.Data.TaxLabel = taxLabel
+
 	displaySubTotal, displayDiscountAmount, displayGrandTotal := buildViews(subTotal, discountAmount, grandTotal)
 	q.Data.DisplaySubTotal = displaySubTotal
 	q.Data.DisplayDiscountAmount = displayDiscountAmount
 	q.Data.DisplayGrandTotal = displayGrandTotal
+	q.Data.DisplayTaxAmount = formatRupiah(taxAmount)
+	q.Data.DisplayNettProfit = formatRupiah(q.Data.NettProfit)
 
 	return nil
 }

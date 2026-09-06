@@ -24,6 +24,8 @@ export namespace backend {
 	    RecipientName: string;
 	    DiscountPercent: number;
 	    ProfitMargin: number;
+	    TaxZone: string;
+	    TaxCategory: string;
 	    Validity: number;
 	    PaymentTerm: number;
 	    LeadTime: number;
@@ -41,6 +43,8 @@ export namespace backend {
 	        this.RecipientName = source["RecipientName"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.ProfitMargin = source["ProfitMargin"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxCategory = source["TaxCategory"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
 	        this.LeadTime = source["LeadTime"];
