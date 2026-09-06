@@ -98,8 +98,10 @@ type QuotationData struct {
 // Quotation is the Wails-bound application struct.
 // It owns the Wails context and the full data bag for rendering.
 type Quotation struct {
-	ctx  context.Context
-	Data QuotationData
+	ctx       context.Context
+	Data      QuotationData
+	lastInput QuotationInput
+	prepared  bool
 }
 
 var customerMap = map[uint8]string{
@@ -258,6 +260,9 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.DisplayGrandTotal = displayGrandTotal
 	q.Data.DisplayTaxAmount = formatRupiah(taxAmount)
 	q.Data.DisplayNettProfit = formatRupiah(q.Data.NettProfit)
+
+	q.lastInput = input
+	q.prepared = true
 
 	return nil
 }

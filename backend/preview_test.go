@@ -1,0 +1,133 @@
+package backend
+
+import (
+	"context"
+	"strings"
+	"testing"
+)
+
+func testPreviewInput() QuotationInput {
+	return QuotationInput{
+		Items: []QuotationItemInput{
+			{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000},
+			{Description: "Item B", Qty: 1, UoM: "Unit", UnitPrice: 50000},
+		},
+		Subject:         "Test",
+		RecipientName:   "Test",
+		Validity:        30,
+		PaymentTerm:     30,
+		LeadTime:        30,
+		CustomerID:      2,
+		Incoterm:        "EXW",
+		ProfitMargin:    20,
+		DiscountPercent: 10,
+		TaxZone:         TaxZoneNonFTZ,
+		TaxCategory:     TaxCategorySupplyInstall,
+	}
+}
+
+// Cost 250.000 (2x100.000 + 1x50.000); margin 20% -> sell 300.000
+// (2x120.000 + 1x60.000); discount 10% -> grand 270.000;
+// tax 2% -> 5.400; nett 264.600.
+func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
+	q := &Quotation{}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	prev, err := q.GetCustomerPreview()
+	if err != nil {
+		t.Fatalf("GetCustomerPreview failed: %v", err)
+	}
+
+	if len(prev.Items) != 2 {
+		t.Fatalf("preview items = %d; want 2", len(prev.Items))
+	}
+	if prev.Items[0].UnitPrice != 120000 || prev.Items[0].Total != 240000 {
+		t.Errorf("item 0 = %d/%d; want 120000/240000", prev.Items[0].UnitPrice, prev.Items[0].Total)
+	}
+	if prev.SubTotal != 300000 || prev.DiscountAmount != 30000 || prev.GrandTotal != 270000 {
+		t.Errorf("totals = %d/%d/%d; want 300000/30000/270000", prev.SubTotal, prev.DiscountAmount, prev.GrandTotal)
+	}
+	if prev.SubTotal != q.Data.SubTotal || prev.GrandTotal != q.Data.GrandTotal {
+		t.Error("customer preview diverges from PDF-bound QuotationData")
+	}
+}
+
+func TestGetInternalBreakdown(t *testing.T) {
+	q := &Quotation{}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	bd, err := q.GetInternalBreakdown()
+	if err != nil {
+		t.Fatalf("GetInternalBreakdown failed: %v", err)
+	}
+
+	if bd.CostSubtotal != 250000 {
+		t.Errorf("CostSubtotal = %d; want 250000", bd.CostSubtotal)
+	}
+	if bd.SellSubtotal != 300000 {
+		t.Errorf("SellSubtotal = %d; want 300000", bd.SellSubtotal)
+	}
+	if bd.DiscountCost != 25000 {
+		t.Errorf("DiscountCost = %d; want 25000", bd.DiscountCost)
+	}
+	if bd.CostGrand != 225000 {
+		t.Errorf("CostGrand = %d; want 225000", bd.CostGrand)
+	}
+	if bd.GrandTotal != 270000 {
+		t.Errorf("GrandTotal = %d; want 270000", bd.GrandTotal)
+	}
+	if bd.ProfitAmount != 45000 {
+		t.Errorf("ProfitAmount = %d; want 45000 (270000-225000)", bd.ProfitAmount)
+	}
+	if bd.TaxAmount != 5400 {
+		t.Errorf("TaxAmount = %d; want 5400", bd.TaxAmount)
+	}
+	if bd.NettProfit != 264600 {
+		t.Errorf("NettProfit = %d; want 264600", bd.NettProfit)
+	}
+	if len(bd.Items) != 2 {
+		t.Fatalf("breakdown items = %d; want 2", len(bd.Items))
+	}
+	if bd.Items[0].CostUnit != 100000 || bd.Items[0].SellUnit != 120000 {
+		t.Errorf("item 0 cost/sell unit = %d/%d; want 100000/120000", bd.Items[0].CostUnit, bd.Items[0].SellUnit)
+	}
+}
+
+func TestPreviewRequiresPrepare(t *testing.T) {
+	q := &Quotation{}
+	if _, err := q.GetCustomerPreview(); err == nil {
+		t.Error("expected GetCustomerPreview to fail before Prepare")
+	}
+	if _, err := q.GetInternalBreakdown(); err == nil {
+		t.Error("expected GetInternalBreakdown to fail before Prepare")
+	}
+}
+
+func TestRenderedQuotationHidesInternalValues(t *testing.T) {
+	q := &Quotation{}
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	var body strings.Builder
+	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+		t.Fatalf("template execute failed: %v", err)
+	}
+	rendered := body.String()
+
+	for _, forbidden := range []string{"Tax", "Nett", "Margin", "Profit", "Internal"} {
+		if strings.Contains(rendered, forbidden) {
+			t.Errorf("rendered quotation leaks internal concept %q", forbidden)
+		}
+	}
+	if !strings.Contains(rendered, "270.000") {
+		t.Error("rendered quotation missing customer grand total 270.000")
+	}
+}
