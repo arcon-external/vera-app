@@ -6,14 +6,14 @@ export function Export() {
   return window['go']['backend']['Quotation']['Export']();
 }
 
-export function Prepare(arg1) {
-  return window['go']['backend']['Quotation']['Prepare'](arg1);
-}
-
 export function GetCustomerPreview() {
   return window['go']['backend']['Quotation']['GetCustomerPreview']();
 }
 
 export function GetInternalBreakdown() {
   return window['go']['backend']['Quotation']['GetInternalBreakdown']();
+}
+
+export function Prepare(arg1) {
+  return window['go']['backend']['Quotation']['Prepare'](arg1);
 }
