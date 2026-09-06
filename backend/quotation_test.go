@@ -81,14 +81,14 @@ func TestGeneratePDF(t *testing.T) {
 				UnitPrice:   15300000,
 			},
 		},
-		Subject:          "Supply & Installation of Electrical and Mechanical Systems at PT Example Plant",
-		RecipientName:    "Budi Santoso",
-		DiscountPercent:  5,
-		Validity:         30,
-		PaymentTerm:      90,
-		LeadTime:         60,
-		CustomerID:       2,
-		Incoterm:          "FOB",
+		Subject:         "Supply & Installation of Electrical and Mechanical Systems at PT Example Plant",
+		RecipientName:   "Budi Santoso",
+		DiscountPercent: 5,
+		Validity:        30,
+		PaymentTerm:     90,
+		LeadTime:        60,
+		CustomerID:      2,
+		Incoterm:        "FOB",
 	})
 
 	quoteID, err := generateQuoteNumber(q.Data.CustomerID)
@@ -204,7 +204,7 @@ func TestBuildItems(t *testing.T) {
 		{Description: "Item B", Qty: 3, UoM: "Unit", UnitPrice: 5000},
 	}
 
-	items := buildItems(inputs)
+	items := buildItems(inputs, 0)
 	if len(items) != 2 {
 		t.Fatalf("buildItems returned %d items; want 2", len(items))
 	}
@@ -227,7 +227,7 @@ func TestBuildItems(t *testing.T) {
 }
 
 func TestBuildItemsEmpty(t *testing.T) {
-	items := buildItems(nil)
+	items := buildItems(nil, 0)
 	if items == nil {
 		t.Fatal("buildItems(nil) returned nil; want empty slice")
 	}
@@ -402,25 +402,25 @@ func TestPrepareValidation(t *testing.T) {
 		{
 			name: "empty subject",
 			input: QuotationInput{
-				CustomerID:     2,
-				Items:          []QuotationItemInput{validItem},
-				Subject:        "",
-				RecipientName:  "Test",
-				Validity:       30,
-				PaymentTerm:    30,
-				LeadTime:       30,
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      30,
 			},
 		},
 		{
 			name: "empty recipient name",
 			input: QuotationInput{
-				CustomerID:     2,
-				Items:          []QuotationItemInput{validItem},
-				Subject:        "Test",
-				RecipientName:  "",
-				Validity:       30,
-				PaymentTerm:    30,
-				LeadTime:       30,
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "Test",
+				RecipientName: "",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      30,
 			},
 		},
 		{
@@ -470,6 +470,19 @@ func TestPrepareValidation(t *testing.T) {
 				PaymentTerm:     30,
 				LeadTime:        30,
 				DiscountPercent: 101,
+			},
+		},
+		{
+			name: "margin exceeds 100",
+			input: QuotationInput{
+				CustomerID:    2,
+				Items:         []QuotationItemInput{validItem},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      30,
+				ProfitMargin:  101,
 			},
 		},
 	}

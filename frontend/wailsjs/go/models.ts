@@ -23,6 +23,7 @@ export namespace backend {
 	    Subject: string;
 	    RecipientName: string;
 	    DiscountPercent: number;
+	    ProfitMargin: number;
 	    Validity: number;
 	    PaymentTerm: number;
 	    LeadTime: number;
@@ -39,6 +40,7 @@ export namespace backend {
 	        this.Subject = source["Subject"];
 	        this.RecipientName = source["RecipientName"];
 	        this.DiscountPercent = source["DiscountPercent"];
+	        this.ProfitMargin = source["ProfitMargin"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
 	        this.LeadTime = source["LeadTime"];
