@@ -63,4 +63,5 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   DisplayNett: string;
   Items: ArchivedQuotationItem[];
   HTMLSnapshot: string;
+  AvailableRevisions: number[];
 }

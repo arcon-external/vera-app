@@ -73,9 +73,9 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
             Archive
           </h1>
           <p className="mt-1 max-w-2xl text-body text-ink-500">
-            Every exported quotation, newest entry first. Open one to inspect
-            its internal economics, review the customer copy, or create the
-            next revision.
+            One row per quotation showing its latest revision, newest first.
+            Open one to inspect its internal economics, review the customer
+            copy, step back through earlier revisions, or create the next one.
           </p>
         </div>
         <div className="flex items-center gap-2.5">
@@ -128,7 +128,9 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                   <th className="px-5 py-3 font-medium">Quotation</th>
                   <th className="px-4 py-3 font-medium">Customer</th>
                   <th className="px-4 py-3 font-medium">Subject</th>
-                  <th className="px-4 py-3 text-center font-medium">Rev</th>
+                  <th className="px-4 py-3 text-center font-medium">
+                    Latest rev
+                  </th>
                   <th className="px-4 py-3 text-right font-medium">
                     Grand total
                   </th>
@@ -139,12 +141,16 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                 {rows.map((row) => (
                   <tr
                     key={row.ID}
-                    className="group transition-colors duration-150 hover:bg-paper-subtle/60"
+                    onClick={() => onOpenQuotation(row.ID, row.RevisionNumber)}
+                    className="group cursor-pointer transition-colors duration-150 hover:bg-paper-subtle/60"
                   >
                     <td className="px-5 py-3 align-top">
                       <button
                         type="button"
-                        onClick={() => onOpenQuotation(row.ID, row.RevisionNumber)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenQuotation(row.ID, row.RevisionNumber);
+                        }}
                         className="rounded text-body font-medium text-ink-900 underline-offset-4 transition-colors duration-150 hover:text-accent-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
                       >
                         <span className="tnum">{row.QuoteNumber}</span>
@@ -175,14 +181,20 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                           <Button
                             variant="danger"
                             size="sm"
-                            onClick={() => void handleDelete(row.ID)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDelete(row.ID);
+                            }}
                           >
                             Confirm
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setConfirmingId(null)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setConfirmingId(null);
+                            }}
                           >
                             Cancel
                           </Button>
@@ -192,7 +204,10 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                           variant="ghost"
                           size="sm"
                           aria-label={`Delete quotation ${row.QuoteNumber}`}
-                          onClick={() => requestDelete(row.ID)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            requestDelete(row.ID);
+                          }}
                           className="hover:!bg-danger-50 hover:!text-danger-600"
                         >
                           Delete

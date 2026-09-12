@@ -3,9 +3,18 @@ package store
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
+
+func revisionList(revisions []int16) string {
+	parts := make([]string, 0, len(revisions))
+	for _, revision := range revisions {
+		parts = append(parts, strconv.Itoa(int(revision)))
+	}
+	return strings.Join(parts, ",")
+}
 
 func TestQuotationRevisionPersistence(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
@@ -105,8 +114,12 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list quotations: %v", err)
 	}
-	if len(list) != 2 || list[0].RevisionNumber != 1 || list[1].RevisionNumber != 0 {
-		t.Fatalf("list = %#v; want both revisions in descending order", list)
+	// The archive shows one row per quotation at its newest revision.
+	if len(list) != 1 || list[0].RevisionNumber != 1 {
+		t.Fatalf("list = %#v; want a single row at revision 1", list)
+	}
+	if gaps := revisionList(latest.AvailableRevisions); gaps != "1,0" {
+		t.Errorf("available revisions = %s; want 1,0", gaps)
 	}
 
 	if err := database.DeleteQuotation(ctx, first.ID); err != nil {

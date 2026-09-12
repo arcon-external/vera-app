@@ -73,6 +73,7 @@ type ArchivedQuotation struct {
 	DisplayNett                 string
 	Items                       []ArchivedQuotationItem
 	HTMLSnapshot                string
+	AvailableRevisions          []int16
 }
 
 func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
@@ -196,5 +197,6 @@ func mapArchivedQuotation(record store.QuotationRecord) ArchivedQuotation {
 		DisplayNett:                 formatSignedRupiah(record.Totals.NettProfit),
 		Items:                       items,
 		HTMLSnapshot:                record.HTMLSnapshot,
+		AvailableRevisions:          record.AvailableRevisions,
 	}
 }
