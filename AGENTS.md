@@ -1,0 +1,371 @@
+# AGENTS.md
+
+Operational guide for coding agents working in `vera-app`. Read this before making
+changes.
+
+---
+
+## 1. Project Snapshot
+
+- **App:** Wails v2 desktop quotation generator for PT Arcon Penta Persada.
+- **Backend:** Go in `backend/` — quotation pricing, HTML templating, PDF rendering
+  via `chromedp` (headless Chrome `PrintToPDF`).
+- **Persistence:** PostgreSQL via `backend/store` (pgx v5), configured entirely by
+  environment variables.
+- **Frontend:** React 18 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
+  (v3.1).
+- **Go module:** `vera-app` (Go 1.26).
+- **Wails bindings:** `frontend/wailsjs/go/*` are generated. Treat them as build
+  output; keep them in sync when Go signatures change.
+
+## 2. Repository Map
+
+| Path | Purpose |
+| --- | --- |
+| `main.go` | Wails startup, Postgres open, binding registration |
+| `backend/quotation.go` | `Prepare`/`Export` flow, input + data models |
+| `backend/builder.go` | Per-item pricing, totals, markup math |
+| `backend/tax.go` | Tax zone/category → basis-point rates, tax + nett |
+| `backend/preview.go` | Customer/internal preview DTOs, template HTML preview |
+| `backend/archive.go` | Archive list/detail/revision Wails methods |
+| `backend/format.go` | Rupiah + description formatting |
+| `backend/template.go` | Embedded template/asset loading |
+| `backend/store/` | Postgres config, migrations, repositories |
+| `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template |
+| `backend/template/css/template-fixed.css` | PDF/preview styles |
+| `frontend/src/App.tsx` | Application shell/state, page routing |
+| `frontend/src/components/` | UI components (shell, ledger, review, archive, detail) |
+| `frontend/src/tax.ts` | Tax options, rates, paste normalizers |
+| `frontend/src/format.ts` | IDR formatting + client-side margin math |
+| `frontend/wailsjs/go/*` | Generated Wails bindings |
+| `.env.example` | Documented Postgres variable names (no secrets) |
+| `test-data/` | Local Excel fixtures (gitignored) |
+
+## 3. Setup Commands
+
+Run from the repository root unless noted.
+
+```bash
+go mod download
+npm --prefix frontend install
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+```
+
+Postgres must be configured for the app to start. Create a local, gitignored `.env`:
+
+```bash
+VERA_POSTGRES_DSN=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+VERA_POSTGRES_SCHEMA=vera
+```
+
+Never commit credentials or a real DSN. `.env.example` documents the variable names.
+Startup runs versioned migrations in the configured schema.
+
+## 4. Development Commands
+
+```bash
+# Load Postgres configuration into the shell, then run the desktop loop
+set -a; source .env; set +a
+wails dev
+
+# Frontend-only loop
+npm --prefix frontend run dev
+```
+
+## 5. Build Commands
+
+```bash
+# Frontend type-check + production bundle (also the TypeScript gate)
+npm --prefix frontend run build
+
+# Compile all Go packages (compiles Wails and its dependencies too)
+go build ./...
+
+# Wails desktop build
+wails build
+wails build --clean
+```
+
+Platform helper scripts live in `scripts/`.
+
+## 6. Lint / Format / Static Analysis
+
+There is no frontend lint script and no Makefile task.
+
+```bash
+gofmt -w .            # format (writes)
+gofmt -l .            # format check (must print nothing)
+go vet ./...          # static analysis
+npm --prefix frontend run build   # strict TypeScript validation
+```
+
+## 7. Test Commands
+
+Current tests are Go tests (backend packages). There is no frontend test runner.
+
+```bash
+go test ./...                                # all packages
+go test ./backend                            # quotation/pricing/tax/archive units
+go test -race ./...                          # race detector
+go test ./backend -run '^TestBuildPricing' -v
+```
+
+The Postgres repository test is skipped unless a test DSN is supplied. Use a
+throwaway database/schema, never the production one:
+
+```bash
+VERA_POSTGRES_TEST_DSN='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=disable' \
+  go test ./backend/store -run TestQuotationRevisionPersistence -v
+```
+
+`TestGeneratePDF` exercises `chromedp` and needs a working Chrome runtime.
+
+## 8. Code Style Guidelines
+
+### General
+
+- Keep changes small, targeted, and aligned with nearby code (KISS/YAGNI).
+- Preserve boundaries: pricing/domain logic in Go, presentation in React.
+- Prefer explicit control flow and clear state transitions.
+
+### Go
+
+- Run `gofmt` on every edited Go file.
+- Import groups: stdlib, then external/module imports.
+- Remove unused imports and dead code before finishing.
+- Exported identifiers `PascalCase`; unexported `camelCase`; keep acronyms
+  consistent (`PDF`, `HTML`, `CSS`, `IDR`).
+- Check every returned error; wrap with context: `fmt.Errorf("context: %w", err)`.
+- Validate inputs before expensive operations or file writes.
+- `os.WriteFile` uses explicit mode (`0o644` unless required otherwise).
+- Use `uint64`/`int64` IDR amounts; never float for money. Multiply before divide.
+  Signed results (profit/loss) use `int64`.
+
+### React / TypeScript
+
+- Use ES modules; keep imports minimal and consistently ordered.
+- Use configured alias imports (`@backend/*`) for Wails-generated bindings.
+- Keep TypeScript strict-mode compatible (`frontend/tsconfig.json`).
+- Explicit types for component props and public utility APIs.
+- Components/files `PascalCase`; functions/variables `camelCase`.
+- All IDR amounts render with `tabular-nums` and `whitespace-nowrap`.
+
+### Styling
+
+- Tailwind is the primary styling path; use the tokens in
+  `frontend/tailwind.config.cjs` (colors, type scale, shadows, easing).
+- Keep `frontend/src/index.css` minimal and global-only.
+- **Tailwind is v3.1: there is no numeric `min-h-*` / `line-clamp-*` utility.**
+  Use the `minHeight` scale defined in `tailwind.config.cjs`, `py` for height, or
+  arbitrary values (`min-h-[42px]`). Verify any new utility actually appears in
+  `frontend/dist/assets/*.css`.
+- Do not change the light theme or introduce competing styling systems.
+
+## 9. Wails Integration Rules
+
+- Frontend-callable methods must be exported on bound structs.
+- If method signatures change, regenerate and verify `frontend/wailsjs/go/*`.
+- Keep `Startup` initialization safe for both runtime and tests.
+- `main.go` opens Postgres before `wails.Run`; startup must fail clearly when the
+  database is misconfigured.
+
+## 10. Domain Invariants (do not break)
+
+- **Per-item margin:** each line has an independent `MarginEnabled` + `MarginPercent`.
+  `MarginalizedUnit = UnitCost + UnitCost * margin% / 100`, then multiply by quantity.
+- **Tax is internal only:** calculated once on the marginalized grand total
+  (`Tax = Grand * bps / 10000`), never allocated per line.
+- **Nett profit** = marginalized grand after tax − original grand total (signed).
+- **The customer PDF/template shows only marginalized prices before tax.** Margin
+  percentage, tax, and nett profit must never appear in the customer output. There is
+  a test asserting this (`TestRenderedQuotationHidesInternalValues`) — keep it green.
+- **Revisions are immutable:** first export is revision `00`; each edit creates the
+  next revision. Never mutate a stored revision.
+- **Discount** applies to the sell side; cost-side discount is shown for internal
+  transparency only.
+
+---
+
+## 11. GitHub Issues as Task Management
+
+All work is tracked via GitHub Issues at **`arcon-external/vera-app`**.
+
+> Always pass `--repo arcon-external/vera-app` explicitly. The same GitHub account
+> owns unrelated projects; filing here by default is not guaranteed. Never file
+> vera-app work in another repository.
+
+### Issue lifecycle
+
+```
+Open → Label & Assign self → Plan (comment) → Branch → Implement → Test
+     → PR → Merge → Delete branch → Close → Next issue
+```
+
+- Label: assign a proper label (`development`, `documentation`, `bug`, `enhancement`,
+  `qa-audit`).
+- Assignee: assign yourself.
+- One issue = one branch = one PR. Never work on `main` directly.
+
+### Issue body (problem statement)
+
+Every issue must contain:
+
+- **Title:** imperative mood with a conventional-commit prefix (`feat:`, `fix:`,
+  `chore:`, `tune:`, `docs:`, `refactor:`, `test:`).
+- **Problem:** what is broken or missing, with exact `file:line` references.
+- **Goal:** what "done" looks like.
+- **Scope:** what is in and out.
+- **Success Criteria:** checklist of verifiable conditions.
+
+### Issue comment (implementation plan)
+
+The first comment on every issue must contain:
+
+- Step-by-step implementation plan.
+- File-by-file changes.
+- Test plan.
+- Verification steps.
+
+### Issue → Commit linking
+
+Every commit that resolves an issue must reference it (same repository number):
+
+```
+fix: description of change
+
+Resolves #37
+```
+
+For multiple commits per issue, each commit references the issue number.
+
+### Branch & Pull Request workflow
+
+1. **Branch naming:** `<type>/NNN-short-slug`, e.g. `feat/89-archive-filter`,
+   `fix/76-pdf-margin`.
+2. **Branch from up-to-date `main`:**
+   ```bash
+   git checkout main && git pull --ff-only && git checkout -b feat/NNN-slug
+   ```
+3. **Work only on that branch** — one issue per branch, one PR per branch.
+4. **PR:** title = the conventional commit message; body = short summary +
+   `Resolves #NNN`; base = `main`.
+5. **Merge:** squash-merge so `main` stays linear, keeping `Resolves #NNN` in the
+   squash body so GitHub auto-closes the issue:
+   ```bash
+   gh pr merge --squash --delete-branch
+   ```
+6. **Delete the branch** after merge (the flag above does it).
+7. Pick the next issue and repeat.
+
+> **No auto-deploy.** `vera-app` is a desktop application: merging to `main` does not
+> deploy anything. Build a release locally when needed (Section 13).
+
+> **Cross-repo transfer is not available.** GitHub only allows issue transfer within
+> the same owner; `arcon-external/vera-app` and a personal-owner repo cannot exchange
+> issues. File in the right repo the first time.
+
+### Closing issues
+
+Close the issue only after:
+
+1. The PR is squash-merged to `main` (the `Resolves #NNN` body auto-closes it).
+2. All gates pass (Section 12).
+3. The issue's success criteria are met.
+
+---
+
+## 12. Testing Gates
+
+Every commit must pass all gates before push:
+
+```bash
+gofmt -l .                        # must print nothing
+go vet ./...                      # must pass
+go test -race ./...               # must pass
+npm --prefix frontend run build   # TypeScript + production bundle
+```
+
+If a gate fails, fix it before committing. Do not commit partially working code.
+For anything touching pricing, tax, or persistence, also run the Postgres integration
+test from Section 7.
+
+---
+
+## 13. Release Process
+
+### When to release
+
+- After a batch of related features.
+- After a significant bug fix.
+- When the user requests a release.
+
+### Release naming
+
+Semantic versioning: `vMAJOR.MINOR.PATCH`.
+
+- **MAJOR:** breaking changes
+- **MINOR:** new features (backwards compatible)
+- **PATCH:** bug fixes
+
+### Release steps
+
+1. Verify all gates pass on `main`.
+2. Build the desktop artifact: `wails build` (or the platform script in `scripts/`).
+3. Create and push an annotated tag:
+   ```bash
+   git tag -a v0.2.0 -m "v0.2.0: description"
+   git push origin v0.2.0
+   ```
+4. Create a GitHub Release with grouped notes:
+   ```bash
+   gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
+   ```
+
+---
+
+## 14. Architecture Principles
+
+- **Single pricing pipeline:** `Prepare` validates, computes per-item prices, then
+  derives original/marginalized/tax/nett totals. Both preview and PDF read from the
+  same computed `QuotationData`.
+- **Split presentation:** `GetCustomerPreview` (safe to show) is separated from
+  `GetInternalBreakdown` (never exported). Keep the boundary explicit.
+- **Normalized persistence:** customers, quotations, immutable revisions, revision
+  items, revision totals, and rendered documents. Referential integrity via foreign
+  keys; money as `BIGINT`; rates as basis points.
+- **Config through environment only:** no secrets in source, logs, or errors; DSNs
+  are redacted before logging.
+- **Fail clearly:** startup errors name the missing configuration/operation, never
+  print credentials.
+
+## 15. Environment & Secrets
+
+| Variable | Purpose |
+| --- | --- |
+| `VERA_POSTGRES_DSN` | Primary Postgres connection string |
+| `VERA_POSTGRES_SCHEMA` | Schema name (default `vera`) |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE` | Fallback |
+| `VERA_POSTGRES_TEST_DSN` | Test-only DSN for `backend/store` integration tests |
+
+`.env` is gitignored. Never commit a real password, paste one into an issue, or print
+one in logs.
+
+## 16. Known Gotchas
+
+- **Tailwind 3.1** lacks numeric `min-h-*` and `line-clamp-*`; see Section 8.
+- `test-data/` is gitignored: fixture changes are on-disk only and never land via PR.
+- `frontend/wailsjs/*` is generated; regenerate rather than hand-editing behavior.
+- `backend/store` tests skip without `VERA_POSTGRES_TEST_DSN`; a green `go test ./...`
+  does not mean the Postgres path ran.
+- `golang.org/x/crypto`, `pgx/v5`, and `echo/v4` are the dependency areas most often
+  flagged by Dependabot; `echo` is transitive via Wails and may need a direct override.
+
+## 17. Cursor / Copilot Rules Status
+
+Checked paths:
+
+- `.cursorrules`
+- `.cursor/rules/`
+- `.github/copilot-instructions.md`
+
+Status: none present. If added later, read and follow them before making changes.
