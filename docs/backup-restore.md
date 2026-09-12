@@ -81,8 +81,9 @@ docker exec vera-postgres psql -U vera_app -d vera_restore_drill -Atc \
 docker exec vera-postgres psql -U vera_app -d vera -c "DROP DATABASE vera_restore_drill;"
 ```
 
-Last successful drill: 2026-09-12 — restored 2.0 MB dump, all 10 `vera.*` tables
-present, `quotations=2`, `revisions=3`, scratch DB dropped afterwards.
+Last successful drill: 2026-09-12 — restored 2.0 MB dump with the in-image
+`pg_restore` 16.15 (vera-api container) into a scratch DB, all 10 `vera.*`
+tables present, `quotations=2`, `revisions=3`, scratch DB dropped afterwards.
 
 ## Real restore (production `vera` database)
 
