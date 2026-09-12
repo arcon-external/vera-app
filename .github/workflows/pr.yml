@@ -1,0 +1,64 @@
+name: PR gates
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    name: Go gates
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vera
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: quotes
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U vera -d quotes"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VERA_POSTGRES_TEST_DSN: postgres://vera:secret@localhost:55432/quotes?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test with race detector
+        run: go test -race ./...
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix frontend ci
+
+      - name: Type-check and build
+        run: npm --prefix frontend run build
