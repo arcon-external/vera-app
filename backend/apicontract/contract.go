@@ -1,4 +1,4 @@
-package api
+package apicontract
 
 // This file defines the shared HTTP contract between veraserver and the
 // desktop client. Field names are stable API; the desktop code-generates or

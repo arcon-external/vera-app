@@ -29,6 +29,20 @@ Transport encryption is provided by WireGuard (Tailscale). Moving behind NPM
 with HTTPS requires a public hostname; until one exists, do not publish any
 other port.
 
+## Desktop configuration
+
+The desktop app needs only the server address:
+
+```bash
+export VERA_API_URL='http://100.93.103.83:8081'
+```
+
+It holds no `VERA_POSTGRES_DSN` and never opens a database connection. Login
+issues the bearer token stored in the OS keychain; sign-in, prepare, export,
+archive, and delete all travel over the API. PDF rendering stays local. The
+desktop requires network access to the server — offline mode is gone by
+design; document this for staff laptops leaving the office network.
+
 ## Deploy a new build
 
 ```bash

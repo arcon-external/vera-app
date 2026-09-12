@@ -3,9 +3,11 @@ package backend
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"vera-app/backend/apicontract"
 	"vera-app/backend/auth"
 	"vera-app/backend/store"
 )
@@ -137,20 +140,28 @@ func (q *Quotation) SetAuthService(service *auth.Service) {
 // requireUser denies callers without a signed-in user. Auth enforcement is
 // nil-safe in tests: methods using it must set the service in production.
 func (q *Quotation) requireUser(ctx context.Context) error {
-	if q.auth == nil {
-		return fmt.Errorf("authentication is not configured")
+	if q.auth != nil {
+		_, err := q.auth.RequireUser(ctx)
+		return err
 	}
-	_, err := q.auth.RequireUser(ctx)
-	return err
+	if SessionToken() == "" {
+		return fmt.Errorf("not signed in")
+	}
+	return nil
 }
 
 // requireAdmin denies callers without an admin role.
 func (q *Quotation) requireAdmin(ctx context.Context) error {
-	if q.auth == nil {
-		return fmt.Errorf("authentication is not configured")
+	if q.auth != nil {
+		_, err := q.auth.RequireAdmin(ctx)
+		return err
 	}
-	_, err := q.auth.RequireAdmin(ctx)
-	return err
+	// Without a local auth service the role is enforced server-side, which
+	// surfaces 403 for staff. A token must still be present to call at all.
+	if SessionToken() == "" {
+		return fmt.Errorf("not signed in")
+	}
+	return nil
 }
 
 // SetRevisionContext tells Export whether this is a new quotation or the
@@ -387,19 +398,25 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	return nil
 }
 
-// Export opens a native save file dialog, generates the quote number,
-// builds the PDF, and writes it to the chosen path. The quote number
-// is only consumed after the user confirms the save dialog, preventing
-// wasted sequence increments on cancellation.
+// saveFileDialog opens the native save dialog. It is a variable so tests can
+// substitute a stub; production uses the Wails runtime dialog.
+var saveFileDialog = runtime.SaveFileDialog
+
+// Export opens a native save file dialog, persists the revision through the
+// API server (which allocates the quote number), builds the PDF locally,
+// writes it to the chosen path, and uploads the bytes back to the server.
+// The quote number is only consumed after the user confirms the save dialog,
+// preventing wasted sequence increments on cancellation.
 func (q *Quotation) Export() error {
 	if err := q.requireUser(q.ctx); err != nil {
 		return err
 	}
-	if q.store == nil {
-		return fmt.Errorf("Postgres store is not configured")
+	client, err := api()
+	if err != nil {
+		return err
 	}
 
-	filePath, err := runtime.SaveFileDialog(q.ctx, runtime.SaveDialogOptions{
+	filePath, err := saveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
 		DefaultFilename: "quotation.pdf",
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
@@ -412,26 +429,26 @@ func (q *Quotation) Export() error {
 		return fmt.Errorf("user cancelled")
 	}
 
-	if q.archiveQuoteNumber != "" {
-		q.Data.QuoteNumber = q.archiveQuoteNumber
-		q.Data.RevisionID = q.archiveRevision
-	} else {
-		sequenceContext := q.ctx
-		if sequenceContext == nil {
-			sequenceContext = context.Background()
-		}
-		sequenceID, err := q.store.NextQuoteSequence(sequenceContext)
-		if err != nil {
-			return fmt.Errorf("generate quote number from Postgres: %w", err)
-		}
-		q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, sequenceID)
-		q.Data.RevisionID = 0
-	}
-
 	validatedPath, err := validateSavePath(filePath)
 	if err != nil {
 		return fmt.Errorf("validate quotation path: %w", err)
 	}
+
+	payload := map[string]any{"input": q.lastInput}
+	if q.archiveQuoteNumber != "" {
+		payload["quoteNumber"] = q.archiveQuoteNumber
+		payload["revision"] = q.archiveRevision
+	}
+	var exported apicontract.ExportResponse
+	if err := client.Post("/v1/quotations/export", payload, &exported); err != nil {
+		return err
+	}
+	if exported.QuoteNumber == "" {
+		return fmt.Errorf("export quotation: empty quote number from server")
+	}
+	q.Data.QuoteNumber = exported.QuoteNumber
+	q.Data.RevisionID = uint16(exported.Revision)
+
 	pdfBuf, err := q.build()
 	if err != nil {
 		return fmt.Errorf("build quotation: %w", err)
@@ -439,12 +456,19 @@ func (q *Quotation) Export() error {
 	if err := os.WriteFile(validatedPath, pdfBuf, 0o644); err != nil {
 		return fmt.Errorf("write quotation: %w", err)
 	}
-	htmlSnapshot, err := q.GetQuotationPreviewHTML()
-	if err != nil {
-		return fmt.Errorf("render quotation archive snapshot: %w", err)
+	var document struct {
+		HasPDF bool `json:"hasPdf"`
 	}
-	if _, err := q.store.SaveRevision(q.context(), q.revisionDraft(htmlSnapshot, pdfBuf, validatedPath)); err != nil {
-		return fmt.Errorf("archive quotation revision: %w", err)
+	if err := client.Put(
+		"/v1/quotations/"+strconv.FormatInt(exported.ID, 10)+
+			"/revisions/"+strconv.Itoa(int(exported.Revision))+"/document",
+		map[string]string{
+			"pdfBase64": base64.StdEncoding.EncodeToString(pdfBuf),
+			"pdfPath":   validatedPath,
+		},
+		&document,
+	); err != nil {
+		return fmt.Errorf("attach quotation PDF: %w", err)
 	}
 
 	return nil

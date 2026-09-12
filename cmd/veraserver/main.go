@@ -41,6 +41,16 @@ func run() error {
 	}
 	defer database.Close()
 
+	bootstrapName := os.Getenv("VERA_BOOTSTRAP_ADMIN_NAME")
+	bootstrapEmail := os.Getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
+	if bootstrapName == "" {
+		bootstrapName = bootstrapEmail
+	}
+	if err := ensureBootstrap(ctx, database, bootstrapEmail, bootstrapName,
+		os.Getenv("VERA_BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
+		return fmt.Errorf("auth bootstrap failed: %w", err)
+	}
+
 	templates := &backend.Quotation{}
 	if err := backend.Startup(templates, ctx); err != nil {
 		return fmt.Errorf("load quotation templates: %w", err)
@@ -67,4 +77,24 @@ func run() error {
 	case err := <-stopped:
 		return err
 	}
+}
+
+// ensureBootstrap creates the first admin from environment configuration when
+// no users exist. It is a no-op once any user exists.
+func ensureBootstrap(ctx context.Context, database *store.Store, email, displayName, password string) error {
+	count, err := database.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	if email == "" || password == "" {
+		return fmt.Errorf("no users exist: set VERA_BOOTSTRAP_ADMIN_EMAIL and VERA_BOOTSTRAP_ADMIN_PASSWORD to create the first admin")
+	}
+	service := auth.NewService(database)
+	if _, err := service.Bootstrap(ctx, email, displayName, password); err != nil {
+		return err
+	}
+	return nil
 }

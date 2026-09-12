@@ -44,13 +44,22 @@ Before you begin, ensure you have the following installed:
     npm install
     ```
 
-3. Configure PostgreSQL before starting the desktop app:
+3. Configure the desktop app to reach the API server:
+   ```bash
+   export VERA_API_URL='http://100.93.103.83:8081'
+   ```
+
+   The desktop holds no database credentials. All data flows through
+   `veraserver` over TLS; see `docs/api-deploy.md`. For local development
+   against a server on the same machine, `http://127.0.0.1:8080` works.
+
+4. Configure PostgreSQL before starting the **server** (not the desktop app):
    ```bash
    export VERA_POSTGRES_DSN='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require'
    export VERA_POSTGRES_SCHEMA='vera'
    ```
 
-   The application runs versioned migrations in the configured schema at
+   The server runs versioned migrations in the configured schema at
    startup. Keep the real DSN in the process environment or a local ignored
    `.env` file; never commit credentials. `.env.example` documents the
    required variable names.

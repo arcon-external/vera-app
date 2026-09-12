@@ -7,8 +7,7 @@ import (
 	"os"
 
 	"vera-app/backend"
-	"vera-app/backend/auth"
-	"vera-app/backend/store"
+	"vera-app/backend/apiclient"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -22,32 +21,21 @@ var assets embed.FS
 
 func main() {
 	quotationApp := &backend.Quotation{}
-	database, err := store.OpenFromEnvironment(context.Background())
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "database startup failed: %v\n", err)
-		os.Exit(1)
-	}
-	defer database.Close()
-	quotationApp.SetStore(database)
 
-	authService := auth.NewService(database)
-	quotationApp.SetAuthService(authService)
-	authAPI := backend.NewAuthAPI(authService)
-
-	bootstrapName := os.Getenv("VERA_BOOTSTRAP_ADMIN_NAME")
-	bootstrapEmail := os.Getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
-	if bootstrapName == "" {
-		bootstrapName = bootstrapEmail
+	// The desktop never touches Postgres directly. All data flows through
+	// veraserver; VERA_API_URL points at it (office server by default).
+	apiBase := os.Getenv("VERA_API_URL")
+	if apiBase == "" {
+		apiBase = "http://127.0.0.1:8080"
 	}
-	if err := backend.EnsureBootstrap(context.Background(), authService,
-		bootstrapEmail,
-		bootstrapName,
-		os.Getenv("VERA_BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
-		fmt.Fprintf(os.Stderr, "auth bootstrap failed: %v\n", err)
-		os.Exit(1)
+	client := apiclient.New(apiBase, backend.SessionToken)
+	client.OnUnauthorized = func() {
+		_ = backend.ClearSessionToken()
 	}
+	backend.ConfigureAPI(client)
+	authAPI := backend.NewAuthAPI()
 
-	err = wails.Run(&options.App{
+	err := wails.Run(&options.App{
 		Title:            "Vera",
 		Width:            1024,
 		Height:           768,
