@@ -23,7 +23,9 @@ function Amount({
     success: "font-semibold text-success-700",
   } as const;
   return (
-    <span className={`tnum whitespace-nowrap ${tones[tone]}`}>Rp{value}</span>
+    <span className={`tnum whitespace-nowrap text-body ${tones[tone]}`}>
+      Rp{value}
+    </span>
   );
 }
 
@@ -40,7 +42,7 @@ function SummaryRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-6 border-b border-rule py-2 last:border-b-0">
-      <span className="min-w-0 text-small text-ink-500">{label}</span>
+      <span className="min-w-0 text-body text-ink-500">{label}</span>
       <Amount value={value} strong={strong} tone={tone} />
     </div>
   );
@@ -103,7 +105,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
         />
         <div className="p-5 lg:p-6">
           <TableFrame>
-            <table className="w-full min-w-[840px] table-fixed text-left">
+            <table className="w-full min-w-[840px] table-fixed text-left text-body">
               <colgroup>
                 <col className="w-12" />
                 <col />
@@ -170,7 +172,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
         />
         <div className="p-5 lg:p-6">
           <TableFrame>
-            <table className="w-full min-w-[860px] table-fixed text-left">
+            <table className="w-full min-w-[860px] table-fixed text-left text-body">
               <colgroup>
                 <col className="w-12" />
                 <col />
@@ -220,7 +222,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
             </table>
           </TableFrame>
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
             <div className="rounded-lg border border-rule bg-white p-4">
               <p className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
                 Marginalized total

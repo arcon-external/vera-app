@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 type ButtonVariant = "primary" | "dark" | "secondary" | "ghost" | "danger";
-type ButtonSize = "sm" | "md";
+type ButtonSize = "xs" | "sm" | "md";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -26,8 +26,9 @@ const variants: Record<ButtonVariant, string> = {
 };
 
 const sizes: Record<ButtonSize, string> = {
-  sm: "min-h-9 px-3.5 text-small",
-  md: "min-h-11 px-5 text-small",
+  xs: "min-h-8 px-3 py-1.5 text-small",
+  sm: "min-h-9 px-3.5 py-2.5 text-small",
+  md: "min-h-10 px-4 py-3 text-small",
 };
 
 export function Button({
@@ -70,7 +71,7 @@ export function SectionHeading({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-3 flex items-baseline gap-3">
+    <div className="mb-3 flex items-center gap-3">
       <h2 className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
         {title}
       </h2>

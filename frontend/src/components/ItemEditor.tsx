@@ -183,13 +183,10 @@ function ItemRow({
     "w-full rounded-md border border-rule bg-white px-2.5 py-2 text-body text-ink-900 outline-none transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
   return (
-    <div
-      className="grid grid-cols-1 gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50 lg:grid-cols-[minmax(0,1fr)_72px_68px_126px_184px_36px] lg:items-start"
-      style={{ animation: `item-in 200ms cubic-bezier(0.25,1,0.5,1) both` }}
-    >
+    <div className="grid animate-item-in grid-cols-1 gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50 lg:grid-cols-[minmax(0,1fr)_72px_68px_126px_184px_36px] lg:items-start">
       <div className="min-w-0">
         <div className="relative">
-          <span className="pointer-events-none absolute left-2.5 top-2 text-caption tnum text-ink-400">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-caption tnum text-ink-400">
             {String(index + 1).padStart(2, "0")}
           </span>
           <input
@@ -209,7 +206,7 @@ function ItemRow({
           <button
             type="button"
             onClick={onToggleSubItems}
-            className="inline-flex min-h-7 items-center gap-1 rounded-md px-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
           >
             <svg
               width="9"
@@ -265,7 +262,7 @@ function ItemRow({
             <button
               type="button"
               onClick={() => onAddSubItem(item.key)}
-              className="inline-flex min-h-7 items-center gap-1 rounded-md px-1.5 text-caption text-ink-400 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 text-caption text-ink-400 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
             >
               <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M8 3.333v9.334M3.333 8h9.334" />
@@ -349,7 +346,7 @@ function ItemRow({
                 />
               </button>
               <div
-                className={`flex min-w-0 flex-1 items-center rounded-md border px-2 py-1.5 transition-colors duration-150 ${
+                className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
                   item.marginEnabled
                     ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
                     : "border-rule bg-paper-subtle"
@@ -371,9 +368,9 @@ function ItemRow({
                       ).toString()
                     )
                   }
-                  className="w-9 bg-transparent text-right text-small tnum text-ink-900 outline-none disabled:text-ink-350"
+                  className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-none disabled:text-ink-350"
                 />
-                <span className="ml-0.5 text-caption text-ink-400">%</span>
+                <span className="ml-0.5 text-body text-ink-400">%</span>
               </div>
             </div>
             <div className="min-w-0 lg:px-0.5 lg:text-right">

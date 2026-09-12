@@ -111,6 +111,19 @@ module.exports = {
         title: ["19px", { lineHeight: "26px", letterSpacing: "-0.02em" }],
         display: ["26px", { lineHeight: "32px", letterSpacing: "-0.03em" }],
       },
+      // Tailwind 3.1 ships no numeric min-height scale, so `min-h-10` and
+      // friends silently produced nothing. Define them here; the default
+      // full/screen/min/max/fit values are still merged in.
+      minHeight: {
+        6: "24px",
+        7: "28px",
+        8: "32px",
+        9: "36px",
+        10: "40px",
+        11: "44px",
+        12: "48px",
+        14: "56px",
+      },
       boxShadow: {
         card: "0 1px 2px rgba(60, 52, 34, 0.04), 0 0 0 1px rgba(230, 227, 220, 0.9)",
         pop: "0 12px 32px rgba(50, 44, 30, 0.12), 0 2px 8px rgba(50, 44, 30, 0.06)",

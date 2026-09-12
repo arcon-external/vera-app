@@ -122,7 +122,7 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
           </div>
         ) : (
           <div className="overflow-x-auto scroll-thin">
-            <table className="w-full min-w-[860px] text-left">
+            <table className="w-full min-w-[860px] text-left text-body">
               <thead>
                 <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
                   <th className="px-5 py-3 font-medium">Quotation</th>
@@ -144,7 +144,7 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                     onClick={() => onOpenQuotation(row.ID, row.RevisionNumber)}
                     className="group cursor-pointer transition-colors duration-150 hover:bg-paper-subtle/60"
                   >
-                    <td className="px-5 py-3 align-top">
+                    <td className="px-5 py-3 align-middle">
                       <button
                         type="button"
                         onClick={(event) => {
@@ -159,23 +159,25 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                         {row.CreatedAt.slice(0, 10)}
                       </p>
                     </td>
-                    <td className="px-4 py-3 align-top text-body text-ink-700">
+                    <td className="px-4 py-3 align-middle text-body text-ink-700">
                       {row.CustomerName}
                     </td>
-                    <td className="max-w-[320px] px-4 py-3 align-top text-body text-ink-600">
-                      <span className="line-clamp-2">{row.Subject}</span>
+                    <td className="max-w-[320px] px-4 py-3 align-middle text-body text-ink-600">
+                      <span className="[display:-webkit-box] overflow-hidden [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+                        {row.Subject}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 align-top text-center">
+                    <td className="px-4 py-3 align-middle text-center">
                       <Badge tone="neutral">
                         <span className="tnum">
                           {String(row.RevisionNumber).padStart(2, "0")}
                         </span>
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-right align-top text-body font-medium tnum text-ink-950">
+                    <td className="px-4 py-3 text-right align-middle text-body font-medium tnum text-ink-950">
                       Rp{row.DisplayGrand}
                     </td>
-                    <td className="px-5 py-3 text-right align-top">
+                    <td className="px-5 py-3 text-right align-middle">
                       {confirmingId === row.ID ? (
                         <span className="inline-flex items-center gap-1.5">
                           <Button

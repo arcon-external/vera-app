@@ -23,7 +23,7 @@ export function AppShell({
   return (
     <div className="flex min-h-full flex-col bg-paper">
       <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1560px] items-center gap-6 px-5 lg:px-8">
+        <div className="mx-auto flex h-16 max-w-[1560px] items-center gap-6 px-5 lg:px-8">
           <div className="flex items-baseline gap-2.5">
             <span className="text-[17px] font-semibold tracking-[-0.03em] text-ink-950">
               Vera
@@ -43,7 +43,7 @@ export function AppShell({
                   type="button"
                   aria-current={active ? "page" : undefined}
                   onClick={tab.id === "create" ? onOpenEditor : onOpenArchive}
-                  className={`min-h-10 rounded-lg px-4 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                  className={`min-h-9 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                     active
                       ? "bg-ink-900 text-white"
                       : "text-ink-500 hover:bg-paper-muted hover:text-ink-900"

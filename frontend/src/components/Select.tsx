@@ -209,7 +209,7 @@ export function Select({
                     aria-selected={selected}
                     onMouseEnter={() => setHighlighted(index)}
                     onClick={() => commit(index)}
-                    className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-body transition-colors duration-100 ${
+                    className={`flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left text-body transition-colors duration-100 ${
                       active
                         ? "bg-accent-50 font-medium text-accent-800"
                         : "text-ink-700"
