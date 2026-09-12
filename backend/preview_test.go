@@ -136,3 +136,30 @@ func TestRenderedQuotationHidesInternalValues(t *testing.T) {
 		t.Error("rendered quotation contains original unit prices")
 	}
 }
+
+func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
+	q := &Quotation{}
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	previewHTML, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		t.Fatalf("GetQuotationPreviewHTML failed: %v", err)
+	}
+
+	if !strings.Contains(previewHTML, "<title>Quotation</title>") {
+		t.Error("quotation preview does not use the customer template")
+	}
+	if !strings.Contains(previewHTML, "120.000") || !strings.Contains(previewHTML, "270.000") {
+		t.Error("quotation preview is missing marginalized customer prices")
+	}
+	for _, forbidden := range []string{"Tax", "Nett", "Margin", "Profit", "Internal"} {
+		if strings.Contains(previewHTML, forbidden) {
+			t.Errorf("quotation preview leaks internal concept %q", forbidden)
+		}
+	}
+}

@@ -14,6 +14,10 @@ export function GetInternalBreakdown() {
   return window['go']['backend']['Quotation']['GetInternalBreakdown']();
 }
 
+export function GetQuotationPreviewHTML() {
+  return window['go']['backend']['Quotation']['GetQuotationPreviewHTML']();
+}
+
 export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
 }

@@ -8,4 +8,6 @@ export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
+export function GetQuotationPreviewHTML():Promise<string>;
+
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
