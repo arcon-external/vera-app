@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"vera-app/backend"
+	"vera-app/backend/apicontract"
 	"vera-app/backend/store"
 )
 
@@ -115,7 +116,7 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
-	return context.JSON(http.StatusCreated, ExportResponse{
+	return context.JSON(http.StatusCreated, apicontract.ExportResponse{
 		ID:          record.ID,
 		QuoteNumber: record.QuoteNumber,
 		Revision:    record.RevisionNumber,
@@ -128,9 +129,9 @@ func (s *Server) listEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "list quotations"})
 	}
-	summaries := make([]QuotationSummaryRow, 0, len(rows))
+	summaries := make([]apicontract.QuotationSummaryRow, 0, len(rows))
 	for _, row := range rows {
-		summaries = append(summaries, QuotationSummaryRow{
+		summaries = append(summaries, apicontract.QuotationSummaryRow{
 			ID:             row.ID,
 			QuoteNumber:    row.QuoteNumber,
 			RevisionNumber: row.RevisionNumber,
@@ -205,7 +206,7 @@ func (s *Server) attachDocumentEndpoint(context echo.Context) error {
 	if err != nil || revision < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid revision"})
 	}
-	var request AttachDocumentRequest
+	var request apicontract.AttachDocumentRequest
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
@@ -222,10 +223,10 @@ func (s *Server) attachDocumentEndpoint(context echo.Context) error {
 	return context.JSON(http.StatusOK, map[string]any{"hasPdf": true})
 }
 
-func mapDetail(record store.QuotationRecord, hasPDF bool) QuotationDetail {
-	items := make([]QuotationItemRow, 0, len(record.Items))
+func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationDetail {
+	items := make([]apicontract.QuotationItemRow, 0, len(record.Items))
 	for _, item := range record.Items {
-		items = append(items, QuotationItemRow{
+		items = append(items, apicontract.QuotationItemRow{
 			ItemNo:                   item.ItemNo,
 			Description:              item.Description,
 			Qty:                      item.Qty,
@@ -244,7 +245,7 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) QuotationDetail {
 			DisplayMarginAmount:      formatAmount(item.MarginAmount),
 		})
 	}
-	return QuotationDetail{
+	return apicontract.QuotationDetail{
 		ID:                          record.ID,
 		QuoteNumber:                 record.QuoteNumber,
 		Revision:                    record.RevisionNumber,

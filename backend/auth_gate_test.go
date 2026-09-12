@@ -25,6 +25,10 @@ func gatedPrepareInput() QuotationInput {
 }
 
 func TestPrepareRequiresSignIn(t *testing.T) {
+	t.Setenv("VERA_NO_KEYRING", "1")
+	if err := ClearSessionToken(); err != nil {
+		t.Fatalf("clear session: %v", err)
+	}
 	q := &Quotation{}
 	if err := q.Prepare(gatedPrepareInput()); err == nil {
 		t.Fatal("Prepare without auth service succeeded; want denial")

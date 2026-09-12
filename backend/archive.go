@@ -1,10 +1,9 @@
 package backend
 
 import (
-	"fmt"
-	"time"
+	"strconv"
 
-	"vera-app/backend/store"
+	"vera-app/backend/apicontract"
 )
 
 type ArchivedQuotationSummary struct {
@@ -80,135 +79,123 @@ func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return nil, err
 	}
-	if q.store == nil {
-		return nil, fmt.Errorf("Postgres store is not configured")
-	}
-	rows, err := q.store.ListQuotations(q.context())
+	client, err := api()
 	if err != nil {
 		return nil, err
 	}
-	result := make([]ArchivedQuotationSummary, 0, len(rows))
-	for _, row := range rows {
+	var response struct {
+		Quotations []apicontract.QuotationSummaryRow `json:"quotations"`
+	}
+	if err := client.Get("/v1/quotations", &response); err != nil {
+		return nil, err
+	}
+	result := make([]ArchivedQuotationSummary, 0, len(response.Quotations))
+	for _, row := range response.Quotations {
 		result = append(result, ArchivedQuotationSummary{
 			ID:             row.ID,
 			QuoteNumber:    row.QuoteNumber,
 			RevisionNumber: row.RevisionNumber,
 			CustomerName:   row.CustomerName,
 			Subject:        row.Subject,
-			CreatedAt:      row.CreatedAt.Format(time.RFC3339),
+			CreatedAt:      row.CreatedAt,
 			GrandTotal:     row.GrandTotal,
-			DisplayGrand:   formatSignedRupiah(row.GrandTotal),
+			DisplayGrand:   row.DisplayGrand,
 		})
 	}
 	return result, nil
 }
 
 func (q *Quotation) GetQuotation(id int64) (ArchivedQuotation, error) {
-	if err := q.requireUser(q.ctx); err != nil {
-		return ArchivedQuotation{}, err
-	}
-	if q.store == nil {
-		return ArchivedQuotation{}, fmt.Errorf("Postgres store is not configured")
-	}
-	record, err := q.store.GetQuotation(q.context(), id, nil)
-	if err != nil {
-		return ArchivedQuotation{}, err
-	}
-	return mapArchivedQuotation(record), nil
+	return q.fetchQuotation("/v1/quotations/" + strconv.FormatInt(id, 10))
 }
 
 func (q *Quotation) GetQuotationRevision(id int64, revision int16) (ArchivedQuotation, error) {
+	return q.fetchQuotation("/v1/quotations/" + strconv.FormatInt(id, 10) +
+		"?revision=" + strconv.Itoa(int(revision)))
+}
+
+func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return ArchivedQuotation{}, err
 	}
-	if q.store == nil {
-		return ArchivedQuotation{}, fmt.Errorf("Postgres store is not configured")
-	}
-	record, err := q.store.GetQuotation(q.context(), id, &revision)
+	client, err := api()
 	if err != nil {
 		return ArchivedQuotation{}, err
 	}
-	return mapArchivedQuotation(record), nil
+	var detail apicontract.QuotationDetail
+	if err := client.Get(path, &detail); err != nil {
+		return ArchivedQuotation{}, err
+	}
+	items := make([]ArchivedQuotationItem, 0, len(detail.Items))
+	for _, item := range detail.Items {
+		items = append(items, ArchivedQuotationItem{
+			ItemNo:                   item.ItemNo,
+			Description:              item.Description,
+			Qty:                      item.Qty,
+			UoM:                      item.UoM,
+			UnitPrice:                item.OriginalUnitPrice,
+			DisplayUnitPrice:         item.DisplayOriginalUnit,
+			MarginEnabled:            item.MarginEnabled,
+			MarginPercent:            item.MarginPercent,
+			MarginAmount:             item.MarginAmount,
+			DisplayMarginAmount:      item.DisplayMarginAmount,
+			OriginalTotal:            item.OriginalTotal,
+			DisplayOriginalTotal:     item.DisplayOriginalTotal,
+			MarginalizedUnitPrice:    item.MarginalizedUnitPrice,
+			DisplayMarginalizedUnit:  item.DisplayMarginalizedUnit,
+			MarginalizedTotal:        item.MarginalizedTotal,
+			DisplayMarginalizedTotal: item.DisplayMarginalizedTotal,
+		})
+	}
+	return ArchivedQuotation{
+		ArchivedQuotationSummary: ArchivedQuotationSummary{
+			ID:             detail.ID,
+			QuoteNumber:    detail.QuoteNumber,
+			RevisionNumber: detail.Revision,
+			CustomerName:   detail.CustomerName,
+			Subject:        detail.Subject,
+			CreatedAt:      "",
+			GrandTotal:     detail.GrandTotal,
+			DisplayGrand:   detail.DisplayMarginalizedGrand,
+		},
+		RecipientName:               detail.RecipientName,
+		Incoterm:                    detail.Incoterm,
+		DiscountPercent:             int16(detail.DiscountPercent),
+		TaxZone:                     detail.TaxZone,
+		TaxCategory:                 detail.TaxCategory,
+		OriginalSubtotal:            detail.OriginalSubtotal,
+		OriginalDiscount:            detail.OriginalDiscount,
+		OriginalGrand:               detail.OriginalGrand,
+		MarginalizedSubtotal:        detail.MarginalizedSubtotal,
+		MarginalizedDiscount:        detail.MarginalizedDiscount,
+		MarginalizedGrand:           detail.MarginalizedGrand,
+		TaxAmount:                   detail.TaxAmount,
+		MarginalizedAfterTax:        detail.MarginalizedGrandAfterTax,
+		ProfitAmount:                detail.ProfitAmount,
+		NettProfit:                  detail.NettProfit,
+		DisplayOriginalSubtotal:     detail.DisplayOriginalSubtotal,
+		DisplayOriginalDiscount:     detail.DisplayOriginalDiscount,
+		DisplayOriginalGrand:        detail.DisplayOriginalGrand,
+		DisplayMarginalizedSubtotal: detail.DisplayMarginalizedSubtotal,
+		DisplayMarginalizedDiscount: detail.DisplayMarginalizedDiscount,
+		DisplayMarginalizedGrand:    detail.DisplayMarginalizedGrand,
+		DisplayTax:                  detail.DisplayTax,
+		DisplayMarginalizedAfterTax: detail.DisplayMarginalizedAfterTax,
+		DisplayProfit:               detail.DisplayProfit,
+		DisplayNett:                 detail.DisplayNett,
+		Items:                       items,
+		HTMLSnapshot:                detail.HTMLSnapshot,
+		AvailableRevisions:          detail.AvailableRevisions,
+	}, nil
 }
 
 func (q *Quotation) DeleteQuotation(id int64) error {
 	if err := q.requireAdmin(q.ctx); err != nil {
 		return err
 	}
-	if q.store == nil {
-		return fmt.Errorf("Postgres store is not configured")
+	client, err := api()
+	if err != nil {
+		return err
 	}
-	return q.store.DeleteQuotation(q.context(), id)
-}
-
-func mapArchivedQuotation(record store.QuotationRecord) ArchivedQuotation {
-	items := make([]ArchivedQuotationItem, 0, len(record.Items))
-	for _, item := range record.Items {
-		items = append(items, ArchivedQuotationItem{
-			ItemNo:                   item.ItemNo,
-			Description:              item.Description,
-			Qty:                      item.Qty,
-			UoM:                      item.UoM,
-			UnitPrice:                item.UnitPrice,
-			DisplayUnitPrice:         formatRupiah(uint64(item.UnitPrice)),
-			MarginEnabled:            item.MarginEnabled,
-			MarginPercent:            item.MarginPercent,
-			MarginAmount:             item.MarginAmount,
-			DisplayMarginAmount:      formatSignedRupiah(item.MarginAmount),
-			OriginalTotal:            item.OriginalTotal,
-			DisplayOriginalTotal:     formatSignedRupiah(item.OriginalTotal),
-			MarginalizedUnitPrice:    item.MarginalizedUnitPrice,
-			DisplayMarginalizedUnit:  formatSignedRupiah(item.MarginalizedUnitPrice),
-			MarginalizedTotal:        item.MarginalizedTotal,
-			DisplayMarginalizedTotal: formatSignedRupiah(item.MarginalizedTotal),
-		})
-	}
-
-	return ArchivedQuotation{
-		ArchivedQuotationSummary: ArchivedQuotationSummary{
-			ID:             record.ID,
-			QuoteNumber:    record.QuoteNumber,
-			RevisionNumber: record.RevisionNumber,
-			CustomerName:   record.CustomerName,
-			Subject:        record.Subject,
-			CreatedAt:      record.CreatedAt.Format(time.RFC3339),
-			GrandTotal:     record.GrandTotal,
-			DisplayGrand:   formatSignedRupiah(record.GrandTotal),
-		},
-		CustomerCode:                record.CustomerCode,
-		CustomerAddress:             record.CustomerAddress,
-		RecipientName:               record.RecipientName,
-		RecipientAddress:            record.RecipientAddress,
-		Incoterm:                    record.Incoterm,
-		ValidityDays:                record.ValidityDays,
-		PaymentTermDays:             record.PaymentTermDays,
-		LeadTimeDays:                record.LeadTimeDays,
-		DiscountPercent:             record.DiscountPercent,
-		TaxZone:                     record.TaxZone,
-		TaxCategory:                 record.TaxCategory,
-		TaxRateBps:                  record.TaxRateBps,
-		OriginalSubtotal:            record.Totals.OriginalSubtotal,
-		OriginalDiscount:            record.Totals.OriginalDiscount,
-		OriginalGrand:               record.Totals.OriginalGrand,
-		MarginalizedSubtotal:        record.Totals.MarginalizedSubtotal,
-		MarginalizedDiscount:        record.Totals.MarginalizedDiscount,
-		MarginalizedGrand:           record.Totals.MarginalizedGrand,
-		TaxAmount:                   record.Totals.TaxAmount,
-		MarginalizedAfterTax:        record.Totals.MarginalizedGrandAfterTax,
-		ProfitAmount:                record.Totals.ProfitAmount,
-		NettProfit:                  record.Totals.NettProfit,
-		DisplayOriginalSubtotal:     formatSignedRupiah(record.Totals.OriginalSubtotal),
-		DisplayOriginalDiscount:     formatSignedRupiah(record.Totals.OriginalDiscount),
-		DisplayOriginalGrand:        formatSignedRupiah(record.Totals.OriginalGrand),
-		DisplayMarginalizedSubtotal: formatSignedRupiah(record.Totals.MarginalizedSubtotal),
-		DisplayMarginalizedDiscount: formatSignedRupiah(record.Totals.MarginalizedDiscount),
-		DisplayMarginalizedGrand:    formatSignedRupiah(record.Totals.MarginalizedGrand),
-		DisplayTax:                  formatSignedRupiah(record.Totals.TaxAmount),
-		DisplayMarginalizedAfterTax: formatSignedRupiah(record.Totals.MarginalizedGrandAfterTax),
-		DisplayProfit:               formatSignedRupiah(record.Totals.ProfitAmount),
-		DisplayNett:                 formatSignedRupiah(record.Totals.NettProfit),
-		Items:                       items,
-		HTMLSnapshot:                record.HTMLSnapshot,
-		AvailableRevisions:          record.AvailableRevisions,
-	}
+	return client.Delete("/v1/quotations/" + strconv.FormatInt(id, 10))
 }

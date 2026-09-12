@@ -3,10 +3,6 @@ package backend
 import (
 	"context"
 	"fmt"
-	"time"
-
-	"vera-app/backend/auth"
-	"vera-app/backend/store"
 )
 
 // AuthUserDTO is the user shape exposed to the frontend. It never contains
@@ -21,79 +17,93 @@ type AuthUserDTO struct {
 	LastLoginAt        string
 }
 
-// AuthAPI exposes authentication to the frontend. All quotation methods
-// require a signed-in user; destructive/admin methods require an admin.
-type AuthAPI struct {
-	service *auth.Service
+// serverUser mirrors the veraserver user payload.
+type serverUser struct {
+	ID                 int64  `json:"id"`
+	Email              string `json:"email"`
+	DisplayName        string `json:"displayName"`
+	Role               string `json:"role"`
+	MustChangePassword bool   `json:"mustChangePassword"`
 }
 
-func NewAuthAPI(service *auth.Service) *AuthAPI {
-	return &AuthAPI{service: service}
+// AuthAPI exposes authentication to the frontend. It talks to veraserver;
+// session tokens live in memory mirrored to the OS keychain.
+type AuthAPI struct{}
+
+// NewAuthAPI builds the frontend auth binding. The shared API client must be
+// configured first via ConfigureAPI.
+func NewAuthAPI() *AuthAPI {
+	return &AuthAPI{}
 }
 
-func toAuthUserDTO(user store.AuthUser) AuthUserDTO {
-	lastLogin := ""
-	if !user.LastLoginAt.IsZero() {
-		lastLogin = user.LastLoginAt.Format(time.RFC3339)
-	}
+func toAuthUserDTO(user serverUser) AuthUserDTO {
 	return AuthUserDTO{
 		ID:                 user.ID,
 		Email:              user.Email,
 		DisplayName:        user.DisplayName,
 		Role:               user.Role,
-		IsActive:           user.IsActive,
+		IsActive:           true,
 		MustChangePassword: user.MustChangePassword,
-		LastLoginAt:        lastLogin,
 	}
 }
 
 // Login signs in with email and password and remembers the session.
 func (a *AuthAPI) Login(ctx context.Context, email, password string) (AuthUserDTO, error) {
-	user, err := a.service.LoginAndRemember(ctx, email, password)
+	client, err := api()
 	if err != nil {
 		return AuthUserDTO{}, err
 	}
-	return toAuthUserDTO(user), nil
+	var response struct {
+		Token string     `json:"token"`
+		User  serverUser `json:"user"`
+	}
+	if err := client.Post("/v1/auth/login", map[string]string{
+		"email":    email,
+		"password": password,
+	}, &response); err != nil {
+		return AuthUserDTO{}, err
+	}
+	if response.Token == "" {
+		return AuthUserDTO{}, fmt.Errorf("sign in failed")
+	}
+	if err := SetSessionToken(response.Token); err != nil {
+		return AuthUserDTO{}, err
+	}
+	return toAuthUserDTO(response.User), nil
 }
 
 // Logout signs out the active session.
 func (a *AuthAPI) Logout(ctx context.Context) error {
-	return a.service.LogoutCurrent(ctx)
+	if client, err := api(); err == nil {
+		_ = client.Post("/v1/auth/logout", nil, nil)
+	}
+	return ClearSessionToken()
 }
 
 // RestoreSession validates the saved session, if any.
 func (a *AuthAPI) RestoreSession(ctx context.Context) (AuthUserDTO, error) {
-	user, err := a.service.Restore(ctx)
-	if err != nil {
-		return AuthUserDTO{}, err
+	if SessionToken() == "" {
+		return AuthUserDTO{}, fmt.Errorf("no saved session")
 	}
-	return toAuthUserDTO(user), nil
+	return a.CurrentUser(ctx)
 }
 
 // CurrentUser returns the signed-in user.
 func (a *AuthAPI) CurrentUser(ctx context.Context) (AuthUserDTO, error) {
-	user, err := a.service.RequireUser(ctx)
+	client, err := api()
 	if err != nil {
+		return AuthUserDTO{}, err
+	}
+	var user serverUser
+	if err := client.Get("/v1/auth/me", &user); err != nil {
 		return AuthUserDTO{}, err
 	}
 	return toAuthUserDTO(user), nil
 }
 
-// EnsureBootstrap creates the first admin from environment configuration when
-// no users exist. It is a no-op once any user exists.
-func EnsureBootstrap(ctx context.Context, service *auth.Service, email, displayName, password string) error {
-	count, err := service.UserCount(ctx)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return nil
-	}
-	if email == "" || password == "" {
-		return fmt.Errorf("no users exist: set VERA_BOOTSTRAP_ADMIN_EMAIL and VERA_BOOTSTRAP_ADMIN_PASSWORD to create the first admin")
-	}
-	if _, err := service.Bootstrap(ctx, email, displayName, password); err != nil {
-		return err
-	}
+// EnsureBootstrap is a no-op on the desktop: the first admin is created by
+// the server at startup from its own environment. It remains so existing
+// callers keep compiling.
+func EnsureBootstrap(ctx context.Context, email, displayName, password string) error {
 	return nil
 }
