@@ -43,6 +43,7 @@ func main() {
 		Assets:           assets,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup: func(ctx context.Context) {
+			adminAPI.SetContext(ctx)
 			if err := backend.Startup(quotationApp, ctx); err != nil {
 				fmt.Fprintf(os.Stderr, "startup failed: %v\n", err)
 				os.Exit(1)

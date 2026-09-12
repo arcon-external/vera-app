@@ -10,6 +10,10 @@ export function DecideDeletion(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['DecideDeletion'](arg1, arg2);
 }
 
+export function DownloadBackup() {
+  return window['go']['backend']['AdminAPI']['DownloadBackup']();
+}
+
 export function IssuePasswordReset(arg1) {
   return window['go']['backend']['AdminAPI']['IssuePasswordReset'](arg1);
 }
@@ -20,6 +24,10 @@ export function ListDeletionRequests() {
 
 export function ListUsers() {
   return window['go']['backend']['AdminAPI']['ListUsers']();
+}
+
+export function SetContext(arg1) {
+  return window['go']['backend']['AdminAPI']['SetContext'](arg1);
 }
 
 export function SetUserActive(arg1, arg2) {
