@@ -254,7 +254,7 @@ function ItemRow({
                   type="button"
                   aria-label={`Remove sub-item ${subIndex + 1} from line ${index + 1}`}
                   onClick={() => onRemoveSubItem(item.key, subIndex)}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40"
                 >
                   <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M4 4l8 8M12 4l-8 8" />
@@ -393,7 +393,7 @@ function ItemRow({
         aria-label={`Remove line ${index + 1}`}
         onClick={() => onRemoveItem(item.key)}
         disabled={!canRemove}
-        className="mx-auto flex h-8 w-8 items-center justify-center self-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
+        className="mx-auto flex h-9 w-9 items-center justify-center self-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4m2 0v9.333a1.333 1.333 0 01-1.334 1.334H4.667a1.333 1.333 0 01-1.334-1.334V4h9.334z" />

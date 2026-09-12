@@ -97,6 +97,9 @@ type QuotationRecord struct {
 	HTMLSnapshot     string
 	PDFData          []byte
 	PDFPath          string
+	// AvailableRevisions lists every revision number for the quotation,
+	// newest first, so the UI can offer a revision selector.
+	AvailableRevisions []int16
 }
 
 func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) {
@@ -105,8 +108,11 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 		return nil, err
 	}
 	schema := s.configSchema()
+	// One row per quotation: DISTINCT ON collapses each quotation to its
+	// highest revision, so the archive shows the latest state of every quote.
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
-		SELECT q.id, q.quote_number, r.revision_number, c.legal_name,
+		SELECT DISTINCT ON (q.id)
+		       q.id, q.quote_number, r.revision_number, c.legal_name,
 		       r.subject, r.created_at, t.marginalized_grand_total
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
@@ -251,6 +257,26 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	if err := rows.Err(); err != nil {
 		return QuotationRecord{}, fmt.Errorf("iterate quotation items: %w", err)
 	}
+
+	revisionRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT revision_number FROM %s.quotation_revisions
+		WHERE quotation_id = $1
+		ORDER BY revision_number DESC`, schema), quotationID)
+	if err != nil {
+		return QuotationRecord{}, fmt.Errorf("list quotation revisions: %w", err)
+	}
+	defer revisionRows.Close()
+	for revisionRows.Next() {
+		var revisionNumber int16
+		if err := revisionRows.Scan(&revisionNumber); err != nil {
+			return QuotationRecord{}, fmt.Errorf("scan quotation revision: %w", err)
+		}
+		record.AvailableRevisions = append(record.AvailableRevisions, revisionNumber)
+	}
+	if err := revisionRows.Err(); err != nil {
+		return QuotationRecord{}, fmt.Errorf("iterate quotation revisions: %w", err)
+	}
+
 	return record, nil
 }
 

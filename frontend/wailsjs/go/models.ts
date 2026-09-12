@@ -85,6 +85,7 @@ export namespace backend {
 	    DisplayNett: string;
 	    Items: ArchivedQuotationItem[];
 	    HTMLSnapshot: string;
+	    AvailableRevisions: number[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotation(source);
@@ -134,6 +135,7 @@ export namespace backend {
 	        this.DisplayNett = source["DisplayNett"];
 	        this.Items = this.convertValues(source["Items"], ArchivedQuotationItem);
 	        this.HTMLSnapshot = source["HTMLSnapshot"];
+	        this.AvailableRevisions = source["AvailableRevisions"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
