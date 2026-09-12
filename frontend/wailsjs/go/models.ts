@@ -616,6 +616,23 @@ export namespace backend {
 		    return a;
 		}
 	}
+	
+	export class RestoreResult {
+	    SafetySnapshot: string;
+	    Quotations: number;
+	    Revisions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RestoreResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.SafetySnapshot = source["SafetySnapshot"];
+	        this.Quotations = source["Quotations"];
+	        this.Revisions = source["Revisions"];
+	    }
+	}
 
 }
 

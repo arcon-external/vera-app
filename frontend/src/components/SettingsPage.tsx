@@ -4,6 +4,7 @@ import {
   DecideDeletion,
   DownloadBackup,
   ListDeletionRequests,
+  RestoreBackup,
 } from "@backend/backend/AdminAPI";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -52,6 +53,7 @@ export function SettingsPage({
       {isAdmin ? (
         <>
           <BackupCard />
+          <RestoreCard />
           <DeletionQueue />
         </>
       ) : null}
@@ -316,15 +318,86 @@ function BackupCard() {
     <Card className="p-5">
       <SectionHeading title="Database backup" />
       <p className="max-w-2xl text-body text-ink-600">
-        Download the newest nightly database backup to this machine. Restores
-        are performed from the server shell following{" "}
-        <span className="font-medium text-ink-900">docs/backup-restore.md</span>;
-        there is intentionally no one-click restore in the app.
+        Download the newest nightly database backup to this machine. To
+        restore one, use the restore section below — it takes a safety
+        snapshot first and signs everyone out.
       </p>
       <div className="mt-4">
         <Button variant="secondary" onClick={() => void download()} disabled={busy}>
           {busy ? "Preparing…" : "Download latest backup"}
         </Button>
+      </div>
+    </Card>
+  );
+}
+
+interface RestoreOutcome {
+  SafetySnapshot: string;
+  Quotations: number;
+  Revisions: number;
+}
+
+function RestoreCard() {
+  const [confirmText, setConfirmText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<RestoreOutcome | null>(null);
+  const { pushToast } = useToast();
+  const armed = confirmText.trim().toUpperCase() === "RESTORE";
+
+  const restore = async () => {
+    if (busy || !armed) return;
+    setBusy(true);
+    setOutcome(null);
+    try {
+      const result = (await RestoreBackup()) as RestoreOutcome;
+      setOutcome(result);
+      setConfirmText("");
+      pushToast(
+        "success",
+        `Restore complete: ${result.Quotations} quotations, ${result.Revisions} revisions. Everyone has been signed out — sign in again.`
+      );
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't restore the backup."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="border-danger-200 p-5">
+      <SectionHeading title="Restore database" />
+      <StatusBanner tone="danger">
+        Restoring replaces the entire database with the selected backup. A
+        safety snapshot of the current state is taken first, and{" "}
+        <span className="font-semibold">everyone is signed out immediately</span>{" "}
+        — including you. Coordinate with the team before proceeding.
+      </StatusBanner>
+      <div className="mt-4 grid max-w-xl gap-3">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-caption font-medium text-ink-600">
+            Type RESTORE to arm the restore button
+          </span>
+          <input
+            type="text"
+            value={confirmText}
+            onChange={(event) => setConfirmText(event.target.value)}
+            placeholder="RESTORE"
+            autoComplete="off"
+            className={fieldClass}
+          />
+        </label>
+        <div>
+          <Button variant="danger" onClick={() => void restore()} disabled={busy || !armed}>
+            {busy ? "Restoring… (this takes a while)" : "Select backup and restore"}
+          </Button>
+        </div>
+        {outcome ? (
+          <p className="text-caption leading-relaxed text-ink-500">
+            Restored {outcome.Quotations} quotations and {outcome.Revisions} revisions.
+            Safety snapshot: <span className="font-medium text-ink-900">{outcome.SafetySnapshot}</span>.
+            Sign in again to continue.
+          </p>
+        ) : null}
       </div>
     </Card>
   );

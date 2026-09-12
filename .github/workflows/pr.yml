@@ -53,6 +53,11 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Install PostgreSQL client (matches service version)
+        # The restore drill test shells out to pg_dump/pg_restore, which
+        # refuse to talk to a newer server — the client major must be 16.
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+
       - name: go test with race detector
         # -short skips TestGeneratePDF, which needs a Chrome sandbox that
         # GitHub-hosted runners cannot provide. Run it locally without -short.

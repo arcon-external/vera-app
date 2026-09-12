@@ -21,11 +21,26 @@ type Server struct {
 	service   *auth.Service
 	templates *backend.Quotation
 	backupDir string
+	dsn       string
 }
 
 // SetBackupDir overrides the backup directory (tests and operators).
 func (s *Server) SetBackupDir(dir string) {
 	s.backupDir = dir
+}
+
+// SetDSN configures the connection string used by backup subprocesses
+// (pg_dump/pg_restore). It is separate from the pool so tests can point it
+// at a disposable database.
+func (s *Server) SetDSN(dsn string) {
+	s.dsn = dsn
+}
+
+func (s *Server) dsnOrEmpty() string {
+	if s.dsn != "" {
+		return s.dsn
+	}
+	return s.database.DSN()
 }
 
 func (s *Server) backupDirOrDefault() string {
@@ -68,6 +83,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/auth/deletion-request", server.requestDeletion, server.requireSession)
 	server.echo.GET("/v1/admin/deletion-requests", server.listDeletionRequests, server.requireSession, server.requireAdmin)
 	server.echo.GET("/v1/admin/backup/latest", server.downloadBackup, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/backup/restore", server.restoreBackup, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/approve", server.decideDeletion(true), server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/reject", server.decideDeletion(false), server.requireSession, server.requireAdmin)
 	return server

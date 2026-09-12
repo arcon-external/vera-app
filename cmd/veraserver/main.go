@@ -57,6 +57,7 @@ func run() error {
 	}
 
 	server := api.NewServer(database, auth.NewService(database), templates)
+	server.SetDSN(config.DSN)
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           server,
