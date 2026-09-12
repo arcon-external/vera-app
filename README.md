@@ -41,8 +41,19 @@ Before you begin, ensure you have the following installed:
 2. Install frontend dependencies:
    ```bash
    cd frontend
-   npm install
+    npm install
+    ```
+
+3. Configure PostgreSQL before starting the desktop app:
+   ```bash
+   export VERA_POSTGRES_DSN='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require'
+   export VERA_POSTGRES_SCHEMA='vera'
    ```
+
+   The application runs versioned migrations in the configured schema at
+   startup. Keep the real DSN in the process environment or a local ignored
+   `.env` file; never commit credentials. `.env.example` documents the
+   required variable names.
 
 ## 💻 Development
 

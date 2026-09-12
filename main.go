@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"vera-app/backend"
+	"vera-app/backend/store"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -20,8 +21,15 @@ var assets embed.FS
 
 func main() {
 	quotationApp := &backend.Quotation{}
+	database, err := store.OpenFromEnvironment(context.Background())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "database startup failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer database.Close()
+	quotationApp.SetStore(database)
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:            "Vera",
 		Width:            1024,
 		Height:           768,

@@ -5,8 +5,16 @@ go 1.26.1
 require (
 	github.com/chromedp/cdproto v0.0.0-20260405000525-47a8ff65b46a
 	github.com/chromedp/chromedp v0.15.1
+	github.com/jackc/pgx/v5 v5.7.6
 	github.com/wailsapp/wails/v2 v2.11.0
 	golang.org/x/text v0.37.0
+)
+
+require (
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 )
 
 require (
