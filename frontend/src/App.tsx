@@ -21,7 +21,12 @@ import { SummaryRail } from "./components/SummaryRail";
 import { Button, SectionHeading, StatusBanner } from "./components/ui";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import type { ArchivedQuotation } from "./archive";
-import { TAX_CATEGORY_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
+import {
+  TAX_CATEGORY_OPTIONS,
+  TAX_ZONE_OPTIONS,
+  normalizeTaxCategory,
+  normalizeTaxZone,
+} from "./tax";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -458,16 +463,34 @@ function App() {
         .map(parseRow);
       if (rows.length === 0) return;
       const cols = rows[0];
-      setDetails((current) => ({
-        ...current,
-        subject: (cols[0] || "").trim(),
-        recipientName: (cols[1] || "").trim(),
-        validity: Number.parseInt(cols[2], 10) || 30,
-        paymentTerm: Number.parseInt(cols[3], 10) || 90,
-        leadTime: Number.parseInt(cols[4], 10) || 60,
-        discountPercent: Math.min(Number.parseInt(cols[5], 10) || 5, 100),
-        incoterm: (cols[7] || "").trim() || "EXW",
-      }));
+      const pastedZone = (cols[8] || "").trim();
+      const pastedCategory = (cols[9] || "").trim();
+
+      setDetails((current) => {
+        const next: DetailsState = {
+          ...current,
+          subject: (cols[0] || "").trim(),
+          recipientName: (cols[1] || "").trim(),
+          validity: Number.parseInt(cols[2], 10) || 30,
+          paymentTerm: Number.parseInt(cols[3], 10) || 90,
+          leadTime: Number.parseInt(cols[4], 10) || 60,
+          discountPercent: Math.min(Number.parseInt(cols[5], 10) || 5, 100),
+          incoterm: (cols[7] || "").trim() || "EXW",
+        };
+
+        // Only touch the tax fields when the pasted row actually carries them,
+        // so a plain details paste leaves the current selection alone.
+        if (pastedZone !== "") {
+          next.taxZone = normalizeTaxZone(pastedZone);
+        }
+        if (next.taxZone !== "NonFTZ") {
+          next.taxCategory = "";
+        } else if (pastedCategory !== "") {
+          next.taxCategory = normalizeTaxCategory(pastedCategory);
+        }
+
+        return next;
+      });
       setCustomerId(Number.parseInt(cols[6], 10) || 2);
     },
     []
