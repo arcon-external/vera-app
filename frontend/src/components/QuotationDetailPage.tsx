@@ -104,19 +104,19 @@ export function QuotationDetailPage({
         switching ? "opacity-60" : "opacity-100"
       }`}
     >
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M10 3.5L5.5 8 10 12.5" />
-            </svg>
-            Archive
-          </button>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
+      <header>
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M10 3.5L5.5 8 10 12.5" />
+          </svg>
+          Archive
+        </button>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <h1
               id="quotation-detail-heading"
               className="tnum text-display font-semibold text-ink-950"
@@ -140,13 +140,13 @@ export function QuotationDetailPage({
               </Badge>
             )}
           </div>
-          <p className="mt-1.5 max-w-3xl text-body text-ink-500">
-            {quotation.CustomerName} — {quotation.Subject}
-          </p>
+          <Button variant="primary" onClick={() => onEdit(quotation)}>
+            Edit revision {padRevision(quotation.RevisionNumber)}
+          </Button>
         </div>
-        <Button variant="primary" onClick={() => onEdit(quotation)}>
-          Edit revision {padRevision(quotation.RevisionNumber)}
-        </Button>
+        <p className="mt-2 max-w-3xl text-body text-ink-500">
+          {quotation.CustomerName} — {quotation.Subject}
+        </p>
       </header>
 
       <Card className="border-internal-200 bg-internal-50/40 p-5">
@@ -165,7 +165,7 @@ export function QuotationDetailPage({
         </div>
 
         <div className="mt-5 overflow-x-auto scroll-thin rounded-lg border border-internal-200 bg-white">
-          <table className="w-full min-w-[860px] table-fixed text-left">
+          <table className="w-full min-w-[860px] table-fixed text-left text-body">
             <colgroup>
               <col className="w-12" />
               <col />
@@ -217,7 +217,7 @@ export function QuotationDetailPage({
           </table>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
           <div className="rounded-lg border border-rule bg-white p-4">
             <p className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
               Original baseline

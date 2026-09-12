@@ -196,7 +196,7 @@ export function DetailsPanel({
                           taxCategory: option.value === "FTZ" ? "" : value.taxCategory,
                         })
                       }
-                      className={`min-h-9 rounded-md px-4 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                      className={`min-h-9 rounded-md px-4 py-2 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                         selected
                           ? "bg-white text-ink-950 shadow-card"
                           : "text-ink-500 hover:text-ink-800"

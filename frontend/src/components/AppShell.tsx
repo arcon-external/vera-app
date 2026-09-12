@@ -43,7 +43,7 @@ export function AppShell({
                   type="button"
                   aria-current={active ? "page" : undefined}
                   onClick={tab.id === "create" ? onOpenEditor : onOpenArchive}
-                  className={`min-h-10 rounded-lg px-4 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                  className={`min-h-9 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                     active
                       ? "bg-ink-900 text-white"
                       : "text-ink-500 hover:bg-paper-muted hover:text-ink-900"
