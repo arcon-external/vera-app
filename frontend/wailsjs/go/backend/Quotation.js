@@ -6,8 +6,16 @@ export function ClearRevisionContext() {
   return window['go']['backend']['Quotation']['ClearRevisionContext']();
 }
 
+export function CustomerID() {
+  return window['go']['backend']['Quotation']['CustomerID']();
+}
+
 export function DeleteQuotation(arg1) {
   return window['go']['backend']['Quotation']['DeleteQuotation'](arg1);
+}
+
+export function DraftRevision(arg1, arg2, arg3) {
+  return window['go']['backend']['Quotation']['DraftRevision'](arg1, arg2, arg3);
 }
 
 export function Export() {
@@ -40,6 +48,14 @@ export function ListQuotations() {
 
 export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
+}
+
+export function SetAuthService(arg1) {
+  return window['go']['backend']['Quotation']['SetAuthService'](arg1);
+}
+
+export function SetQuoteNumber(arg1, arg2) {
+  return window['go']['backend']['Quotation']['SetQuoteNumber'](arg1, arg2);
 }
 
 export function SetRevisionContext(arg1, arg2) {

@@ -48,7 +48,7 @@ func toAuthUserDTO(user serverUser) AuthUserDTO {
 }
 
 // Login signs in with email and password and remembers the session.
-func (a *AuthAPI) Login(ctx context.Context, email, password string) (AuthUserDTO, error) {
+func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
 	client, err := api()
 	if err != nil {
 		return AuthUserDTO{}, err
@@ -73,7 +73,7 @@ func (a *AuthAPI) Login(ctx context.Context, email, password string) (AuthUserDT
 }
 
 // Logout signs out the active session.
-func (a *AuthAPI) Logout(ctx context.Context) error {
+func (a *AuthAPI) Logout() error {
 	if client, err := api(); err == nil {
 		_ = client.Post("/v1/auth/logout", nil, nil)
 	}
@@ -81,15 +81,15 @@ func (a *AuthAPI) Logout(ctx context.Context) error {
 }
 
 // RestoreSession validates the saved session, if any.
-func (a *AuthAPI) RestoreSession(ctx context.Context) (AuthUserDTO, error) {
+func (a *AuthAPI) RestoreSession() (AuthUserDTO, error) {
 	if SessionToken() == "" {
 		return AuthUserDTO{}, fmt.Errorf("no saved session")
 	}
-	return a.CurrentUser(ctx)
+	return a.CurrentUser()
 }
 
 // CurrentUser returns the signed-in user.
-func (a *AuthAPI) CurrentUser(ctx context.Context) (AuthUserDTO, error) {
+func (a *AuthAPI) CurrentUser() (AuthUserDTO, error) {
 	client, err := api()
 	if err != nil {
 		return AuthUserDTO{}, err
