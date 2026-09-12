@@ -1,8 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GetQuotationRevision } from "@backend/backend/Quotation";
 import type { ArchivedQuotation } from "../archive";
 import { useToast } from "../toast";
+import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
+
+function padRevision(revision: number): string {
+  return String(revision).padStart(2, "0");
+}
 
 interface QuotationDetailPageProps {
   quotationID: number;
@@ -19,12 +24,26 @@ export function QuotationDetailPage({
 }: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [switching, setSwitching] = useState(false);
+  const [activeRevision, setActiveRevision] = useState(revision);
   const { pushToast } = useToast();
+
+  // Reset to the revision requested by the archive when the target changes.
+  // Clearing the loaded record makes a different quotation show the skeleton
+  // rather than the previous quotation's data.
+  useEffect(() => {
+    setActiveRevision(revision);
+    setQuotation(null);
+  }, [revision, quotationID]);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    void GetQuotationRevision(quotationID, revision)
+    if (quotation === null) {
+      setLoading(true);
+    } else {
+      setSwitching(true);
+    }
+    void GetQuotationRevision(quotationID, activeRevision)
       .then((result) => {
         if (active) setQuotation(result as ArchivedQuotation);
       })
@@ -35,12 +54,29 @@ export function QuotationDetailPage({
         );
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          setSwitching(false);
+        }
       });
     return () => {
       active = false;
     };
-  }, [quotationID, revision, pushToast]);
+    // `quotation` is intentionally excluded: it only distinguishes the first
+    // load from a revision switch and would otherwise re-trigger the fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotationID, activeRevision, pushToast]);
+
+  const revisionOptions = useMemo(() => {
+    const revisions = quotation?.AvailableRevisions ?? [activeRevision];
+    return revisions.map((value, index) => ({
+      value,
+      label:
+        index === 0
+          ? `Revision ${padRevision(value)} — latest`
+          : `Revision ${padRevision(value)}`,
+    }));
+  }, [quotation?.AvailableRevisions, activeRevision]);
 
   if (loading) {
     return (
@@ -61,7 +97,13 @@ export function QuotationDetailPage({
   }
 
   return (
-    <section aria-labelledby="quotation-detail-heading" className="space-y-6">
+    <section
+      aria-labelledby="quotation-detail-heading"
+      aria-busy={switching}
+      className={`space-y-6 transition-opacity duration-200 ease-out-quart ${
+        switching ? "opacity-60" : "opacity-100"
+      }`}
+    >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <button
@@ -81,18 +123,29 @@ export function QuotationDetailPage({
             >
               {quotation.QuoteNumber}
             </h1>
-            <Badge tone="accent">
-              <span className="tnum">
-                Revision {String(quotation.RevisionNumber).padStart(2, "0")}
-              </span>
-            </Badge>
+            {revisionOptions.length > 1 ? (
+              <div className="w-[220px]">
+                <Select
+                  value={activeRevision}
+                  options={revisionOptions}
+                  ariaLabel="Quotation revision"
+                  onChange={(next) => setActiveRevision(Number(next))}
+                />
+              </div>
+            ) : (
+              <Badge tone="accent">
+                <span className="tnum">
+                  Revision {padRevision(quotation.RevisionNumber)}
+                </span>
+              </Badge>
+            )}
           </div>
           <p className="mt-1.5 max-w-3xl text-body text-ink-500">
             {quotation.CustomerName} — {quotation.Subject}
           </p>
         </div>
         <Button variant="primary" onClick={() => onEdit(quotation)}>
-          Edit quotation
+          Edit revision {padRevision(quotation.RevisionNumber)}
         </Button>
       </header>
 
