@@ -234,14 +234,11 @@ export function DetailsPanel({
                   Free trade zone (FTZ)
                 </p>
                 <p className="mt-1 text-caption leading-relaxed text-ink-500">
-                  No withholding tax is deducted from this quotation. The
-                  customer sees the full grand total, and the internal
-                  breakdown records it as the nett amount with no separate tax
-                  line.
+                  No withholding tax is deducted, so the grand total is also
+                  the nett amount payable.
                 </p>
                 <p className="mt-2 border-t border-rule pt-2 text-caption leading-relaxed text-ink-500">
-                  Switch to Non-FTZ when the scope is delivered outside the
-                  Batam free trade zone.
+                  Use Non-FTZ for work outside the free trade zone.
                 </p>
               </div>
             )}
