@@ -30,11 +30,11 @@ func testServer(t *testing.T, schema string) (*Server, context.Context) {
 	if _, err := service.Bootstrap(ctx, "api-admin@example.com", "API Admin", "test-password"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	return NewServer(database, service), ctx
+	return NewServer(database, service, nil), ctx
 }
 
 func TestHealthzNeedsNoAuth(t *testing.T) {
-	server := NewServer(nil, nil)
+	server := NewServer(nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)

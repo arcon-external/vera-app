@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"vera-app/backend"
 	"vera-app/backend/api"
 	"vera-app/backend/auth"
 	"vera-app/backend/store"
@@ -40,7 +41,12 @@ func run() error {
 	}
 	defer database.Close()
 
-	server := api.NewServer(database, auth.NewService(database))
+	templates := &backend.Quotation{}
+	if err := backend.Startup(templates, ctx); err != nil {
+		return fmt.Errorf("load quotation templates: %w", err)
+	}
+
+	server := api.NewServer(database, auth.NewService(database), templates)
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           server,

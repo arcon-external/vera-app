@@ -564,3 +564,49 @@ func nilIfEmptyString(value string) *string {
 	}
 	return &value
 }
+
+// AttachDocument stores PDF bytes/path for an existing revision's document
+// row. It is how the desktop uploads locally rendered PDFs after a
+// server-side export persisted the revision with only the HTML snapshot.
+func (s *Store) AttachDocument(ctx context.Context, quotationID int64, revision int16, pdfData []byte, pdfPath string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	if len(pdfData) == 0 && pdfPath == "" {
+		return fmt.Errorf("pdf bytes or path are required")
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_documents d
+		SET pdf_data = $1, pdf_path = $2
+		FROM %s.quotation_revisions r
+		WHERE d.revision_id = r.id
+		  AND r.quotation_id = $3 AND r.revision_number = $4`, s.configSchema(), s.configSchema()),
+		nilIfEmptyBytes(pdfData), nilIfEmptyString(pdfPath), quotationID, revision)
+	if err != nil {
+		return fmt.Errorf("attach quotation document: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("quotation %d revision %d not found", quotationID, revision)
+	}
+	return nil
+}
+
+// HasDocumentPDF reports whether a revision already has PDF bytes or a path.
+func (s *Store) HasDocumentPDF(ctx context.Context, quotationID int64, revision int16) (bool, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return false, err
+	}
+	var hasPDF bool
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT d.pdf_data IS NOT NULL OR d.pdf_path IS NOT NULL
+		FROM %s.quotation_documents d
+		JOIN %s.quotation_revisions r ON r.id = d.revision_id
+		WHERE r.quotation_id = $1 AND r.revision_number = $2`, s.configSchema(), s.configSchema()),
+		quotationID, revision).Scan(&hasPDF)
+	if err != nil {
+		return false, fmt.Errorf("check quotation document: %w", err)
+	}
+	return hasPDF, nil
+}
