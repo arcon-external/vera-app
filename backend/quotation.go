@@ -21,7 +21,6 @@ type QuotationInput struct {
 	Subject         string
 	RecipientName   string
 	DiscountPercent uint8
-	ProfitMargin    uint8
 	TaxZone         string
 	TaxCategory     string
 	Validity        uint8
@@ -34,65 +33,79 @@ type QuotationInput struct {
 // QuotationItemInput is a single line item from the frontend.
 // No is assigned by the backend. UnitPrice is in raw IDR.
 type QuotationItemInput struct {
-	Description string
-	Qty         uint32
-	UoM         string
-	UnitPrice   uint64
+	Description   string
+	Qty           uint32
+	UoM           string
+	UnitPrice     uint64
+	MarginEnabled bool
+	MarginPercent uint8
 }
 
 // QuotationItem is a prepared line item with computed display fields
 // ready for template rendering.
 type QuotationItem struct {
-	Description      string
-	DisplayDesc      template.HTML
-	UoM              string
-	DisplayUnitPrice string
-	DisplayTotal     string
-	UnitPrice        uint64
-	Total            uint64
-	No               uint32
-	Qty              uint32
+	Description              string
+	DisplayDesc              template.HTML
+	UoM                      string
+	DisplayOriginalUnitPrice string
+	DisplayOriginalTotal     string
+	DisplayUnitPrice         string
+	DisplayTotal             string
+	DisplayMarginAmount      string
+	OriginalUnitPrice        uint64
+	OriginalTotal            uint64
+	MarginAmount             uint64
+	UnitPrice                uint64
+	Total                    uint64
+	MarginEnabled            bool
+	MarginPercent            uint8
+	No                       uint32
+	Qty                      uint32
 }
 
 // QuotationData is the full template data bag.
 // It combines static template assets (set once at startup by readTemplate)
 // with business data (set per-export by Prepare).
 type QuotationData struct {
-	Items                 []QuotationItem
-	CustomCSS             template.CSS
-	HtmlTemplate          *template.Template
-	LogoBase64            string
-	SignatureBase64       string
-	FontRegularBase64     string
-	FontBoldBase64        string
-	Date                  string
-	ValidUntil            string
-	RecipientName         string
-	RecipientCompany      string
-	RecipientAddress      string
-	QuoteNumber           string
-	Subject               string
-	DisplaySubTotal       string
-	DisplayDiscountAmount string
-	DisplayGrandTotal     string
-	SubTotal              uint64
-	DiscountAmount        uint64
-	GrandTotal            uint64
-	TaxRateBps            uint16
-	TaxAmount             uint64
-	NettProfit            uint64
-	TaxLabel              string
-	DisplayTaxAmount      string
-	DisplayNettProfit     string
-	Validity              uint8
-	PaymentTerm           uint8
-	LeadTime              uint8
-	DiscountPercent       uint8
-	ProfitMargin          uint8
-	TaxZone               string
-	TaxCategory           string
-	CustomerID            uint8
-	Incoterm              string
+	Items                     []QuotationItem
+	CustomCSS                 template.CSS
+	HtmlTemplate              *template.Template
+	LogoBase64                string
+	SignatureBase64           string
+	FontRegularBase64         string
+	FontBoldBase64            string
+	Date                      string
+	ValidUntil                string
+	RecipientName             string
+	RecipientCompany          string
+	RecipientAddress          string
+	QuoteNumber               string
+	Subject                   string
+	DisplaySubTotal           string
+	DisplayDiscountAmount     string
+	DisplayGrandTotal         string
+	SubTotal                  uint64
+	DiscountAmount            uint64
+	GrandTotal                uint64
+	OriginalSubTotal          uint64
+	OriginalDiscountAmount    uint64
+	OriginalGrandTotal        uint64
+	MarginalizedGrandAfterTax uint64
+	ProfitAmount              int64
+	TaxRateBps                uint16
+	TaxAmount                 uint64
+	NettProfit                int64
+	TaxLabel                  string
+	DisplayTaxAmount          string
+	DisplayNettProfit         string
+	Validity                  uint8
+	PaymentTerm               uint8
+	LeadTime                  uint8
+	DiscountPercent           uint8
+	TaxZone                   string
+	TaxCategory               string
+	CustomerID                uint8
+	Incoterm                  string
 }
 
 // Quotation is the Wails-bound application struct.
@@ -177,6 +190,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		if strings.TrimSpace(item.UoM) == "" {
 			return fmt.Errorf("item unit of measure is required")
 		}
+
+		if item.MarginPercent > 100 {
+			return fmt.Errorf("item margin percent cannot be greater than 100")
+		}
 	}
 
 	if input.Subject == "" {
@@ -203,10 +220,6 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("discount percent cannot be greater than 100")
 	}
 
-	if input.ProfitMargin > 100 {
-		return fmt.Errorf("profit margin cannot be greater than 100")
-	}
-
 	if input.TaxZone == "" {
 		input.TaxZone = TaxZoneFTZ
 	}
@@ -231,35 +244,42 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTime = input.LeadTime
 	q.Data.DiscountPercent = input.DiscountPercent
-	q.Data.ProfitMargin = input.ProfitMargin
 	q.Data.TaxZone = input.TaxZone
 	q.Data.TaxCategory = input.TaxCategory
 	q.Data.Incoterm = input.Incoterm
 
-	items := buildItems(input.Items, input.ProfitMargin)
+	items := buildItems(input.Items)
 	q.Data.Items = items
 
 	date, validUntil := buildDates(input.Validity)
 	q.Data.Date = date
 	q.Data.ValidUntil = validUntil
 
-	subTotal, discountAmount, grandTotal := buildPrices(items, input.DiscountPercent)
-	q.Data.SubTotal = subTotal
-	q.Data.DiscountAmount = discountAmount
-	q.Data.GrandTotal = grandTotal
+	pricing := buildPricing(items, input.DiscountPercent, taxBps)
+	q.Data.SubTotal = pricing.MarginalizedSubtotal
+	q.Data.DiscountAmount = pricing.MarginalizedDiscount
+	q.Data.GrandTotal = pricing.MarginalizedGrand
+	q.Data.OriginalSubTotal = pricing.OriginalSubtotal
+	q.Data.OriginalDiscountAmount = pricing.OriginalDiscount
+	q.Data.OriginalGrandTotal = pricing.OriginalGrand
+	q.Data.MarginalizedGrandAfterTax = pricing.MarginalizedGrandAfterTax
+	q.Data.ProfitAmount = pricing.ProfitAmount
 
-	taxAmount := calcTax(grandTotal, taxBps)
 	q.Data.TaxRateBps = taxBps
-	q.Data.TaxAmount = taxAmount
-	q.Data.NettProfit = grandTotal - taxAmount
+	q.Data.TaxAmount = pricing.TaxAmount
+	q.Data.NettProfit = pricing.NettProfit
 	q.Data.TaxLabel = taxLabel
 
-	displaySubTotal, displayDiscountAmount, displayGrandTotal := buildViews(subTotal, discountAmount, grandTotal)
+	displaySubTotal, displayDiscountAmount, displayGrandTotal := buildViews(
+		pricing.MarginalizedSubtotal,
+		pricing.MarginalizedDiscount,
+		pricing.MarginalizedGrand,
+	)
 	q.Data.DisplaySubTotal = displaySubTotal
 	q.Data.DisplayDiscountAmount = displayDiscountAmount
 	q.Data.DisplayGrandTotal = displayGrandTotal
-	q.Data.DisplayTaxAmount = formatRupiah(taxAmount)
-	q.Data.DisplayNettProfit = formatRupiah(q.Data.NettProfit)
+	q.Data.DisplayTaxAmount = formatRupiah(pricing.TaxAmount)
+	q.Data.DisplayNettProfit = formatSignedRupiah(q.Data.NettProfit)
 
 	q.lastInput = input
 	q.prepared = true

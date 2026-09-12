@@ -9,8 +9,8 @@ import (
 func testPreviewInput() QuotationInput {
 	return QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000},
-			{Description: "Item B", Qty: 1, UoM: "Unit", UnitPrice: 50000},
+			{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
+			{Description: "Item B", Qty: 1, UoM: "Unit", UnitPrice: 50000, MarginEnabled: true, MarginPercent: 20},
 		},
 		Subject:         "Test",
 		RecipientName:   "Test",
@@ -19,7 +19,6 @@ func testPreviewInput() QuotationInput {
 		LeadTime:        30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
-		ProfitMargin:    20,
 		DiscountPercent: 10,
 		TaxZone:         TaxZoneNonFTZ,
 		TaxCategory:     TaxCategorySupplyInstall,
@@ -28,7 +27,7 @@ func testPreviewInput() QuotationInput {
 
 // Cost 250.000 (2x100.000 + 1x50.000); margin 20% -> sell 300.000
 // (2x120.000 + 1x60.000); discount 10% -> grand 270.000;
-// tax 2% -> 5.400; nett 264.600.
+// tax 2% -> 5.400; after-tax customer grand 264.600; nett profit 39.600.
 func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
 	q := &Quotation{}
 	if err := q.Prepare(testPreviewInput()); err != nil {
@@ -86,8 +85,8 @@ func TestGetInternalBreakdown(t *testing.T) {
 	if bd.TaxAmount != 5400 {
 		t.Errorf("TaxAmount = %d; want 5400", bd.TaxAmount)
 	}
-	if bd.NettProfit != 264600 {
-		t.Errorf("NettProfit = %d; want 264600", bd.NettProfit)
+	if bd.NettProfit != 39600 {
+		t.Errorf("NettProfit = %d; want 39600", bd.NettProfit)
 	}
 	if len(bd.Items) != 2 {
 		t.Fatalf("breakdown items = %d; want 2", len(bd.Items))
@@ -129,5 +128,11 @@ func TestRenderedQuotationHidesInternalValues(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "270.000") {
 		t.Error("rendered quotation missing customer grand total 270.000")
+	}
+	if !strings.Contains(rendered, "120.000") || !strings.Contains(rendered, "60.000") {
+		t.Error("rendered quotation is missing marginalized unit prices")
+	}
+	if strings.Contains(rendered, "100.000") || strings.Contains(rendered, "50.000") {
+		t.Error("rendered quotation contains original unit prices")
 	}
 }

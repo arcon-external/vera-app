@@ -28,10 +28,10 @@ func TestApplyMarkup(t *testing.T) {
 
 func TestBuildItemsAppliesMargin(t *testing.T) {
 	inputs := []QuotationItemInput{
-		{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000},
+		{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
 	}
 
-	items := buildItems(inputs, 20)
+	items := buildItems(inputs)
 	if len(items) != 1 {
 		t.Fatalf("buildItems returned %d items; want 1", len(items))
 	}
@@ -69,7 +69,7 @@ func TestPrepareRejectsMarginOver100(t *testing.T) {
 	q := &Quotation{}
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000},
+			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000, MarginEnabled: true, MarginPercent: 101},
 		},
 		Subject:       "Test",
 		RecipientName: "Test",
@@ -78,7 +78,6 @@ func TestPrepareRejectsMarginOver100(t *testing.T) {
 		LeadTime:      30,
 		CustomerID:    2,
 		Incoterm:      "EXW",
-		ProfitMargin:  101,
 	})
 	if err == nil {
 		t.Fatal("expected error for margin > 100 but got nil")

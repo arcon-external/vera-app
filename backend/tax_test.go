@@ -110,7 +110,7 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	q := &Quotation{}
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000},
+			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
 		},
 		Subject:         "Test",
 		RecipientName:   "Test",
@@ -119,7 +119,6 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 		LeadTime:        30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
-		ProfitMargin:    20,
 		DiscountPercent: 10,
 		TaxZone:         TaxZoneNonFTZ,
 		TaxCategory:     TaxCategorySupplyInstall,
@@ -139,8 +138,11 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	if q.Data.TaxAmount != 2160 {
 		t.Errorf("TaxAmount = %d; want 2160", q.Data.TaxAmount)
 	}
-	if q.Data.NettProfit != 105840 {
-		t.Errorf("NettProfit = %d; want 105840", q.Data.NettProfit)
+	if q.Data.MarginalizedGrandAfterTax != 105840 {
+		t.Errorf("MarginalizedGrandAfterTax = %d; want 105840", q.Data.MarginalizedGrandAfterTax)
+	}
+	if q.Data.NettProfit != 15840 {
+		t.Errorf("NettProfit = %d; want 15840", q.Data.NettProfit)
 	}
 }
 
@@ -169,8 +171,11 @@ func TestPrepareComputesNett(t *testing.T) {
 	if q.Data.TaxAmount != 20000 {
 		t.Errorf("TaxAmount = %d; want 20000", q.Data.TaxAmount)
 	}
-	if q.Data.NettProfit != 980000 {
-		t.Errorf("NettProfit = %d; want 980000", q.Data.NettProfit)
+	if q.Data.MarginalizedGrandAfterTax != 980000 {
+		t.Errorf("MarginalizedGrandAfterTax = %d; want 980000", q.Data.MarginalizedGrandAfterTax)
+	}
+	if q.Data.NettProfit != -20000 {
+		t.Errorf("NettProfit = %d; want -20000", q.Data.NettProfit)
 	}
 
 	ftz := &Quotation{}
@@ -193,7 +198,10 @@ func TestPrepareComputesNett(t *testing.T) {
 	if ftz.Data.TaxAmount != 0 {
 		t.Errorf("FTZ TaxAmount = %d; want 0", ftz.Data.TaxAmount)
 	}
-	if ftz.Data.NettProfit != ftz.Data.GrandTotal {
-		t.Errorf("FTZ NettProfit = %d; want GrandTotal %d", ftz.Data.NettProfit, ftz.Data.GrandTotal)
+	if ftz.Data.MarginalizedGrandAfterTax != ftz.Data.GrandTotal {
+		t.Errorf("FTZ MarginalizedGrandAfterTax = %d; want GrandTotal %d", ftz.Data.MarginalizedGrandAfterTax, ftz.Data.GrandTotal)
+	}
+	if ftz.Data.NettProfit != 0 {
+		t.Errorf("FTZ NettProfit = %d; want 0", ftz.Data.NettProfit)
 	}
 }
