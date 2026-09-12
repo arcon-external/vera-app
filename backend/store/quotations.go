@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -109,13 +110,9 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 		       r.subject, r.created_at, t.marginalized_grand_total
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
-		JOIN LATERAL (
-			SELECT * FROM %s.quotation_revisions
-			WHERE quotation_id = q.id
-			ORDER BY revision_number DESC LIMIT 1
-		) r ON TRUE
+		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
 		JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
-		ORDER BY r.created_at DESC, q.id DESC`, schema, schema, schema, schema))
+		ORDER BY q.id DESC, r.revision_number DESC`, schema, schema, schema, schema))
 	if err != nil {
 		return nil, fmt.Errorf("list quotations: %w", err)
 	}
@@ -488,6 +485,14 @@ func ensureQuotation(ctx context.Context, tx pgx.Tx, schema string, draft Revisi
 	if err := tx.QueryRow(ctx, fmt.Sprintf(
 		"SELECT id FROM %s.quotations WHERE quote_number = $1 FOR UPDATE", schema,
 	), draft.QuoteNumber).Scan(&quoteID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) && draft.RevisionNumber == 0 {
+			if err := tx.QueryRow(ctx, fmt.Sprintf(`
+				INSERT INTO %s.quotations (quote_number, customer_id)
+				VALUES ($1, $2) RETURNING id`, schema), draft.QuoteNumber, customerID).Scan(&quoteID); err != nil {
+				return 0, "", 0, fmt.Errorf("insert quotation %q: %w", draft.QuoteNumber, err)
+			}
+			return quoteID, draft.QuoteNumber, 0, nil
+		}
 		return 0, "", 0, fmt.Errorf("find quotation %q: %w", draft.QuoteNumber, err)
 	}
 	var expectedRevision int16

@@ -22,6 +22,8 @@ export interface CustomerPreview {
   RecipientName: string;
   RecipientCompany: string;
   RecipientAddress: string;
+  QuoteNumber: string;
+  RevisionID: number;
   Incoterm: string;
   DisplaySubTotal: string;
   DisplayDiscountAmount: string;

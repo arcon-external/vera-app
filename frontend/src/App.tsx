@@ -5,12 +5,17 @@ import {
   GetCustomerPreview,
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
+  SetRevisionContext,
+  ClearRevisionContext,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { Select } from "./components/Select";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import { useToast } from "./toast";
+import { ArchivePage } from "./components/ArchivePage";
+import { QuotationDetailPage } from "./components/QuotationDetailPage";
+import type { ArchivedQuotation } from "./archive";
 
 interface ItemRow {
   key: number;
@@ -177,6 +182,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
+  const [page, setPage] = useState<"create" | "archive" | "detail">("create");
+  const [selectedQuotation, setSelectedQuotation] = useState<{ id: number; revision: number } | null>(null);
+  const [editingQuote, setEditingQuote] = useState<{ number: string; revision: number } | null>(null);
   const nextKey = useRef(1);
   const [items, setItems] = useState<ItemRow[]>([newItem(0)]);
   const [subject, setSubject] = useState("");
@@ -201,6 +209,73 @@ function App() {
     setBreakdown(null);
     setQuotationHTML(null);
   }, []);
+
+  const handleNewQuotation = useCallback(() => {
+    void ClearRevisionContext().catch(() => undefined);
+    nextKey.current = 1;
+    setItems([newItem(0)]);
+    setSubject("");
+    setRecipientName("");
+    setCustomerId(2);
+    setValidity(30);
+    setPaymentTerm(90);
+    setLeadTime(60);
+    setDiscountPercent(5);
+    setTaxZone("FTZ");
+    setTaxCategory("");
+    setIncoterm("EXW");
+    setEditingQuote(null);
+    clearPreview();
+    setStatus({ type: "idle", message: "" });
+    setPage("create");
+  }, [clearPreview]);
+
+  const handleOpenQuotation = useCallback((id: number, revision: number) => {
+    setSelectedQuotation({ id, revision });
+    setPage("detail");
+  }, []);
+
+  const handleEditQuotation = useCallback(
+    async (quotation: ArchivedQuotation) => {
+      try {
+        await SetRevisionContext(quotation.QuoteNumber, quotation.RevisionNumber + 1);
+        nextKey.current = quotation.Items.length;
+        setItems(
+          quotation.Items.map((item, index) => {
+            const parsed = parseSubItems(item.Description);
+            return {
+              key: index,
+              description: parsed.description,
+              subItems: parsed.subItems,
+              qty: String(item.Qty),
+              uom: item.UoM,
+              unitPrice: String(item.UnitPrice),
+              marginEnabled: item.MarginEnabled,
+              marginPercent: String(item.MarginPercent),
+            };
+          })
+        );
+        setSubject(quotation.Subject);
+        setRecipientName(quotation.RecipientName);
+        setCustomerId(quotation.CustomerCode);
+        setValidity(quotation.ValidityDays);
+        setPaymentTerm(quotation.PaymentTermDays);
+        setLeadTime(quotation.LeadTimeDays);
+        setDiscountPercent(quotation.DiscountPercent);
+        setTaxZone(quotation.TaxZone);
+        setTaxCategory(quotation.TaxCategory);
+        setIncoterm(quotation.Incoterm);
+        setEditingQuote({ number: quotation.QuoteNumber, revision: quotation.RevisionNumber + 1 });
+        clearPreview();
+        setStatus({ type: "idle", message: "" });
+        setPage("create");
+        pushToast("info", `Editing ${quotation.QuoteNumber}. Saving will create revision ${String(quotation.RevisionNumber + 1).padStart(2, "0")}.`);
+      } catch {
+        pushToast("error", "We couldn't start editing this quotation. Try again.");
+      }
+    },
+    [clearPreview, pushToast]
+  );
 
   // Any input edit invalidates the review: the user must re-Prepare.
   useEffect(() => {
@@ -405,6 +480,8 @@ function App() {
     try {
       await Export();
       clearPreview();
+      void ClearRevisionContext().catch(() => undefined);
+      setEditingQuote(null);
       setStatus({ type: "idle", message: "" });
       pushToast("success", "Quotation exported successfully.");
     } catch (err: unknown) {
@@ -449,15 +526,35 @@ function App() {
             </h1>
             <p className="mt-1 text-[13px] text-slate-400">Quotation Generator</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="h-[1px] w-8 bg-slate-200" />
-            <span className="text-[11px] tracking-[0.15em] uppercase text-slate-400">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleNewQuotation}
+              className={`min-h-10 rounded-lg px-3 text-[12px] font-medium transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                page === "create" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-white hover:text-slate-900"
+              }`}
+            >
+              New quotation
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage("archive")}
+              className={`min-h-10 rounded-lg px-3 text-[12px] font-medium transition active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                page !== "create" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-white hover:text-slate-900"
+              }`}
+            >
+              Archive
+            </button>
+            <div className="ml-2 hidden h-[1px] w-8 bg-slate-200 sm:block" />
+            <span className="hidden text-[11px] tracking-[0.15em] uppercase text-slate-400 lg:block">
               PT Arcon Penta Persada
             </span>
           </div>
         </header>
 
         <main className="flex flex-col gap-8">
+          {page === "create" && (
+            <>
           <section>
             <div className="mb-4 flex items-center gap-3">
               <span className={sectionLabel}>Customer</span>
@@ -903,6 +1000,22 @@ function App() {
               </button>
             </div>
           </section>
+            </>
+          )}
+          {page === "archive" && (
+            <ArchivePage
+              onNewQuotation={handleNewQuotation}
+              onOpenQuotation={handleOpenQuotation}
+            />
+          )}
+          {page === "detail" && selectedQuotation !== null && (
+            <QuotationDetailPage
+              quotationID={selectedQuotation.id}
+              revision={selectedQuotation.revision}
+              onBack={() => setPage("archive")}
+              onEdit={handleEditQuotation}
+            />
+          )}
         </main>
 
         <footer className="mt-16 border-t border-slate-100 pt-6 text-center">
