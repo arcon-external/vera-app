@@ -24,6 +24,32 @@ export const TAX_CATEGORY_OPTIONS: readonly TaxCategoryOption[] = [
   },
 ] as const;
 
+/**
+ * Normalizes a pasted tax zone. Accepts the stored value, the display label,
+ * or a rate; anything that is not clearly Non-FTZ is treated as FTZ.
+ */
+export function normalizeTaxZone(raw: string): "FTZ" | "NonFTZ" {
+  const value = raw.toLowerCase().replace(/[^a-z]/g, "");
+  if (value.includes("non")) return "NonFTZ";
+  return "FTZ";
+}
+
+/**
+ * Normalizes a pasted tax category. Accepts stored values, human labels, and
+ * bare rates such as "11%", "2%", or "1.75%". Returns "" when unrecognized.
+ */
+export function normalizeTaxCategory(raw: string): string {
+  const value = raw.toLowerCase().replace(/[^a-z0-9.]/g, "");
+  if (!value) return "";
+  if (value.includes("construction")) return "SupplyInstallConstruction";
+  if (value.includes("install")) return "SupplyInstall";
+  if (value.includes("supply")) return "SupplyOnly";
+  if (value.includes("1.75") || value.includes("175")) return "SupplyInstallConstruction";
+  if (value.includes("11")) return "SupplyOnly";
+  if (value.includes("2")) return "SupplyInstall";
+  return "";
+}
+
 export function taxRateBps(zone: string, category: string): number {
   if (zone !== "NonFTZ") return 0;
   const match = TAX_CATEGORY_OPTIONS.find((option) => option.value === category);
