@@ -45,17 +45,22 @@ design; document this for staff laptops leaving the office network.
 
 ## Deploy a new build
 
-```bash
-# on the dev machine (uncommitted work must be committed first)
-docker build --platform linux/amd64 -f Dockerfile.veraserver -t vera-api:YYYYmmdd .
-docker save vera-api:YYYYmmdd | ssh 3studio-server-tail 'docker load'
+Use the script (single source of truth — do not hand-edit tags anymore):
 
-# on the server
-cd ~/vera-api
-sed -i 's/^\(\s*image: vera-api:\).*/\1YYYYmmdd/' compose.yml
-docker compose up -d --force-recreate
-curl -s http://100.93.103.83:8081/healthz   # {"status":"ok"}
+```bash
+./scripts/deploy.sh <full-40-char-sha> [--dry-run]
 ```
+
+It resolves the SHA tag to an immutable digest in `ghcr.io`, pins the
+server compose file to it (image line only, secrets untouched), recreates,
+probes `/healthz` plus one authenticated route (401 = fully booted), and
+prints expected vs running digest. Any failure exits non-zero. Rollback is
+the same command with the previous SHA.
+
+Prerequisites: `docker login ghcr.io` with package-pull access (classic PAT
+with `read:packages`; the gh CLI token is insufficient for private org
+packages) and passwordless SSH to the server. The old date-tag workflow
+(`docker save` + `docker load` + hand-edited tags) is retired.
 
 ## Smoke test (no test users left behind)
 
