@@ -1,5 +1,13 @@
 package backend
 
+import (
+	"context"
+	"fmt"
+	"os"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
 // ManagedUser is the admin-facing user shape. It never contains password
 // hashes, session tokens, or invite tokens.
 type ManagedUser struct {
@@ -14,12 +22,19 @@ type ManagedUser struct {
 
 // AdminAPI exposes user management to the frontend. Every method requires an
 // admin session; the server enforces this independently.
-type AdminAPI struct{}
+type AdminAPI struct {
+	ctx context.Context
+}
 
 // NewAdminAPI builds the frontend admin binding. The shared API client must
 // be configured first via ConfigureAPI.
 func NewAdminAPI() *AdminAPI {
 	return &AdminAPI{}
+}
+
+// SetContext stores the Wails runtime context for native dialogs.
+func (a *AdminAPI) SetContext(ctx context.Context) {
+	a.ctx = ctx
 }
 
 func (a *AdminAPI) ListUsers() ([]ManagedUser, error) {
@@ -137,4 +152,32 @@ func itoa(n int64) string {
 		return "-" + string(digits)
 	}
 	return string(digits)
+}
+
+// DownloadBackup fetches the newest database dump through a save dialog and
+// writes it to the chosen path. It returns the written path for confirmation.
+func (a *AdminAPI) DownloadBackup() (string, error) {
+	client, err := api()
+	if err != nil {
+		return "", err
+	}
+	filename, data, err := client.Download("/v1/admin/backup/latest", "vera-backup.dump")
+	if err != nil {
+		return "", err
+	}
+	filePath, err := saveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Database Backup",
+		DefaultFilename: filename,
+		Filters:         []runtime.FileFilter{{DisplayName: "Postgres Dump (*.dump)", Pattern: "*.dump"}},
+	})
+	if err != nil {
+		return "", fmt.Errorf("open save dialog: %w", err)
+	}
+	if filePath == "" {
+		return "", fmt.Errorf("user cancelled")
+	}
+	if err := os.WriteFile(filePath, data, 0o600); err != nil {
+		return "", fmt.Errorf("write backup: %w", err)
+	}
+	return filePath, nil
 }

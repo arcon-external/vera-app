@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"time"
 )
 
@@ -119,4 +121,41 @@ func (c *Client) Patch(path string, body, out any) error {
 // Delete performs an authenticated DELETE.
 func (c *Client) Delete(path string) error {
 	return c.do(http.MethodDelete, path, nil, nil)
+}
+
+// Download performs an authenticated GET returning raw bytes and the
+// filename from Content-Disposition (falling back to defaultName).
+func (c *Client) Download(path, defaultName string) (filename string, data []byte, err error) {
+	request, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", nil, fmt.Errorf("build API request: %w", err)
+	}
+	if token := c.token(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", nil, fmt.Errorf("reach the quotation server: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		if c.OnUnauthorized != nil {
+			c.OnUnauthorized()
+		}
+		return "", nil, fmt.Errorf("signed out; sign in again")
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("%s", apiError(response, "server request failed"))
+	}
+	data, err = io.ReadAll(io.LimitReader(response.Body, 512<<20))
+	if err != nil {
+		return "", nil, fmt.Errorf("read download: %w", err)
+	}
+	filename = defaultName
+	if _, params, err := mime.ParseMediaType(response.Header.Get("Content-Disposition")); err == nil {
+		if name := params["filename"]; name != "" {
+			filename = filepath.Base(name)
+		}
+	}
+	return filename, data, nil
 }

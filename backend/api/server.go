@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -19,6 +20,22 @@ type Server struct {
 	database  *store.Store
 	service   *auth.Service
 	templates *backend.Quotation
+	backupDir string
+}
+
+// SetBackupDir overrides the backup directory (tests and operators).
+func (s *Server) SetBackupDir(dir string) {
+	s.backupDir = dir
+}
+
+func (s *Server) backupDirOrDefault() string {
+	if s.backupDir != "" {
+		return s.backupDir
+	}
+	if dir := os.Getenv("VERA_BACKUP_DIR"); dir != "" {
+		return dir
+	}
+	return "/home/tristan/backups/vera"
 }
 
 // NewServer builds the router. Templates carries preloaded PDF template
@@ -50,6 +67,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/auth/logout-everywhere", server.logoutEverywhere, server.requireSession)
 	server.echo.POST("/v1/auth/deletion-request", server.requestDeletion, server.requireSession)
 	server.echo.GET("/v1/admin/deletion-requests", server.listDeletionRequests, server.requireSession, server.requireAdmin)
+	server.echo.GET("/v1/admin/backup/latest", server.downloadBackup, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/approve", server.decideDeletion(true), server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/reject", server.decideDeletion(false), server.requireSession, server.requireAdmin)
 	return server

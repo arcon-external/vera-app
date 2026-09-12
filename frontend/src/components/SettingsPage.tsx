@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChangePassword, LogoutEverywhere, RequestDeletion, UpdateProfile } from "@backend/backend/AuthAPI";
 import {
   DecideDeletion,
+  DownloadBackup,
   ListDeletionRequests,
 } from "@backend/backend/AdminAPI";
 import { useToast } from "../toast";
@@ -48,7 +49,12 @@ export function SettingsPage({
       <PasswordCard />
       <SessionsCard />
       <DeletionCard />
-      {isAdmin ? <DeletionQueue /> : null}
+      {isAdmin ? (
+        <>
+          <BackupCard />
+          <DeletionQueue />
+        </>
+      ) : null}
     </section>
   );
 }
@@ -285,6 +291,41 @@ function PasswordCard() {
           </Button>
         </div>
       </form>
+    </Card>
+  );
+}
+
+function BackupCard() {
+  const [busy, setBusy] = useState(false);
+  const { pushToast } = useToast();
+
+  const download = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const path = (await DownloadBackup()) as string;
+      pushToast("success", `Backup saved to ${path}.`);
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't download the backup."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Database backup" />
+      <p className="max-w-2xl text-body text-ink-600">
+        Download the newest nightly database backup to this machine. Restores
+        are performed from the server shell following{" "}
+        <span className="font-medium text-ink-900">docs/backup-restore.md</span>;
+        there is intentionally no one-click restore in the app.
+      </p>
+      <div className="mt-4">
+        <Button variant="secondary" onClick={() => void download()} disabled={busy}>
+          {busy ? "Preparing…" : "Download latest backup"}
+        </Button>
+      </div>
     </Card>
   );
 }
