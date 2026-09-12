@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { GetQuotationRevision } from "@backend/backend/Quotation";
 import type { ArchivedQuotation } from "../archive";
 import { useToast } from "../toast";
+import { Badge, Button, Card, SectionHeading } from "./ui";
 
 interface QuotationDetailPageProps {
   quotationID: number;
@@ -10,11 +11,12 @@ interface QuotationDetailPageProps {
   onEdit: (quotation: ArchivedQuotation) => void;
 }
 
-function DetailAmount({ value, strong = false }: { value: string; strong?: boolean }) {
-  return <span className={`whitespace-nowrap tabular-nums ${strong ? "font-semibold text-slate-900" : "text-slate-800"}`}>Rp{value}</span>;
-}
-
-export function QuotationDetailPage({ quotationID, revision, onBack, onEdit }: QuotationDetailPageProps) {
+export function QuotationDetailPage({
+  quotationID,
+  revision,
+  onBack,
+  onEdit,
+}: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
   const [loading, setLoading] = useState(true);
   const { pushToast } = useToast();
@@ -27,7 +29,10 @@ export function QuotationDetailPage({ quotationID, revision, onBack, onEdit }: Q
         if (active) setQuotation(result as ArchivedQuotation);
       })
       .catch(() => {
-        pushToast("error", "We couldn't load this quotation. Return to the archive and try again.");
+        pushToast(
+          "error",
+          "We couldn't load this quotation. Return to the archive and try again."
+        );
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -38,135 +43,214 @@ export function QuotationDetailPage({ quotationID, revision, onBack, onEdit }: Q
   }, [quotationID, revision, pushToast]);
 
   if (loading) {
-    return <div className="h-64 animate-pulse rounded-2xl bg-slate-100" aria-label="Loading quotation" />;
-  }
-
-  if (!quotation) {
     return (
-      <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
-        <p className="text-[14px] font-medium text-red-800">Quotation not found.</p>
-        <button type="button" onClick={onBack} className="mt-4 min-h-11 rounded-xl border border-red-200 px-4 text-[13px] font-medium text-red-700">
-          Return to archive
-        </button>
+      <div className="space-y-4" aria-label="Loading quotation">
+        <div className="h-8 w-64 animate-pulse rounded-md bg-paper-muted" />
+        <div className="h-72 animate-pulse rounded-xl bg-paper-muted" />
       </div>
     );
   }
 
+  if (!quotation) {
+    return (
+      <Card className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <p className="text-body text-danger-700">Quotation not found.</p>
+        <Button onClick={onBack}>Return to archive</Button>
+      </Card>
+    );
+  }
+
   return (
-    <section className="space-y-8" aria-labelledby="quotation-detail-heading">
+    <section aria-labelledby="quotation-detail-heading" className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <button type="button" onClick={onBack} className="text-[12px] font-medium text-slate-400 hover:text-slate-800">
-            ← Back to archive
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M10 3.5L5.5 8 10 12.5" />
+            </svg>
+            Archive
           </button>
-          <div className="mt-4 flex flex-wrap items-baseline gap-3">
-            <h2 id="quotation-detail-heading" className="text-[26px] font-semibold tracking-[-0.03em] text-slate-900">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <h1
+              id="quotation-detail-heading"
+              className="tnum text-display font-semibold text-ink-950"
+            >
               {quotation.QuoteNumber}
-            </h2>
-            <span className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-medium tabular-nums text-slate-500">
-              Revision {String(quotation.RevisionNumber).padStart(2, "0")}
-            </span>
+            </h1>
+            <Badge tone="accent">
+              <span className="tnum">
+                Revision {String(quotation.RevisionNumber).padStart(2, "0")}
+              </span>
+            </Badge>
           </div>
-          <p className="mt-2 text-[14px] text-slate-500">
-            {quotation.CustomerName} · {quotation.Subject}
+          <p className="mt-1.5 max-w-3xl text-body text-ink-500">
+            {quotation.CustomerName} — {quotation.Subject}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onEdit(quotation)}
-          className="min-h-11 rounded-xl bg-emerald-600 px-4 text-[13px] font-semibold text-white transition hover:bg-emerald-500 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-        >
+        <Button variant="primary" onClick={() => onEdit(quotation)}>
           Edit quotation
-        </button>
+        </Button>
       </header>
 
-      <article className="rounded-2xl border border-amber-200/80 bg-amber-50/35 p-6 md:p-8">
-        <div className="mb-6">
-          <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-slate-400">Internal record</p>
-          <h3 className="mt-2 text-[18px] font-semibold text-slate-900">Line economics and totals</h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-slate-500">
-            These values are retained for internal review and never appear in the customer quotation.
-          </p>
+      <Card className="border-internal-200 bg-internal-50/40 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionHeading title="Internal record" />
+            <h2 className="text-title font-semibold text-ink-950">
+              Line economics and totals
+            </h2>
+            <p className="mt-1 max-w-2xl text-small text-ink-500">
+              Retained for internal review. None of these values appear in the
+              customer quotation.
+            </p>
+          </div>
+          <Badge tone="internal">Internal only</Badge>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-amber-100 bg-white/70">
-          <table className="w-full min-w-[860px] table-fixed text-[13px]">
+        <div className="mt-5 overflow-x-auto scroll-thin rounded-lg border border-internal-200 bg-white">
+          <table className="w-full min-w-[860px] table-fixed text-left">
             <colgroup>
               <col className="w-12" />
               <col />
               <col className="w-24" />
               <col className="w-56" />
-              <col className="w-52" />
+              <col className="w-48" />
             </colgroup>
             <thead>
-              <tr className="border-b border-amber-100 text-left text-[11px] font-medium tracking-[0.08em] uppercase text-slate-500">
-                <th className="px-4 py-3">No</th>
-                <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3 text-center">Qty</th>
-                <th className="px-4 py-3 text-right">Unit after margin</th>
-                <th className="px-4 py-3 text-right">Total after margin</th>
+              <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
+                <th className="px-4 py-2.5 font-medium">No</th>
+                <th className="px-4 py-2.5 font-medium">Description</th>
+                <th className="px-4 py-2.5 text-center font-medium">Qty</th>
+                <th className="px-4 py-2.5 text-right font-medium">
+                  Unit after margin
+                </th>
+                <th className="px-4 py-2.5 text-right font-medium">
+                  Total after margin
+                </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-amber-100/80">
+            <tbody className="divide-y divide-rule">
               {quotation.Items.map((item) => (
                 <tr key={item.ItemNo} className="align-top">
-                  <td className="px-4 py-3 text-slate-400">{item.ItemNo}</td>
-                  <td className="whitespace-pre-wrap break-words px-4 py-3 leading-relaxed text-slate-700">{item.Description}</td>
-                  <td className="px-4 py-3 text-center whitespace-nowrap text-slate-700">{item.Qty} {item.UoM}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="font-medium"><DetailAmount value={item.DisplayMarginalizedUnit} /></div>
-                    <div className="mt-1 text-[11px] text-amber-700">
-                      {item.MarginEnabled ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}` : "Margin off"}
+                  <td className="tnum px-4 py-2.5 text-ink-400">
+                    {item.ItemNo}
+                  </td>
+                  <td className="whitespace-pre-wrap break-words px-4 py-2.5 text-body leading-relaxed text-ink-700">
+                    {item.Description}
+                  </td>
+                  <td className="px-4 py-2.5 text-center text-body tnum text-ink-700">
+                    {item.Qty} {item.UoM}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="tnum text-body font-medium text-ink-900">
+                      Rp{item.DisplayMarginalizedUnit}
+                    </div>
+                    <div className="tnum mt-0.5 text-caption text-internal-700">
+                      {item.MarginEnabled
+                        ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
+                        : "No margin"}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right"><DetailAmount value={item.DisplayMarginalizedTotal} /></td>
+                  <td className="tnum px-4 py-2.5 text-right text-body text-ink-900">
+                    Rp{item.DisplayMarginalizedTotal}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-xl border border-amber-100 bg-white/70 p-4">
-            <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-slate-400">Original baseline</p>
-            <div className="mt-2 divide-y divide-slate-100">
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-lg border border-rule bg-white p-4">
+            <p className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
+              Original baseline
+            </p>
+            <dl className="mt-2.5 divide-y divide-rule">
               <DetailRow label="Original subtotal" value={quotation.DisplayOriginalSubtotal} />
-              <DetailRow label={`Discount (${quotation.DiscountPercent}%)`} value={quotation.DisplayOriginalDiscount} />
+              <DetailRow
+                label={`Discount ${quotation.DiscountPercent}%`}
+                value={quotation.DisplayOriginalDiscount}
+              />
               <DetailRow label="Original grand total" value={quotation.DisplayOriginalGrand} />
-            </div>
+            </dl>
           </div>
-          <div className="rounded-xl border border-amber-100 bg-white/70 p-4">
-            <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-slate-400">Marginalized result</p>
-            <div className="mt-2 divide-y divide-slate-100">
-              <DetailRow label="Marginalized subtotal" value={quotation.DisplayMarginalizedSubtotal} />
-              <DetailRow label={`Discount (${quotation.DiscountPercent}%)`} value={quotation.DisplayMarginalizedDiscount} />
-              <DetailRow label="Grand total before tax" value={quotation.DisplayMarginalizedGrand} />
-              <DetailRow label={`Tax — ${quotation.TaxCategory || quotation.TaxZone}`} value={quotation.DisplayTax} />
-              <DetailRow label="Grand total after tax" value={quotation.DisplayMarginalizedAfterTax} />
+          <div className="rounded-lg border border-rule bg-white p-4">
+            <p className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
+              Marginalized result
+            </p>
+            <dl className="mt-2.5 divide-y divide-rule">
+              <DetailRow
+                label="Customer subtotal"
+                value={quotation.DisplayMarginalizedSubtotal}
+              />
+              <DetailRow
+                label={`Discount ${quotation.DiscountPercent}%`}
+                value={quotation.DisplayMarginalizedDiscount}
+              />
+              <DetailRow
+                label="Grand total before tax"
+                value={quotation.DisplayMarginalizedGrand}
+              />
+              <DetailRow
+                label={`Tax — ${quotation.TaxCategory || quotation.TaxZone}`}
+                value={quotation.DisplayTax}
+              />
+              <DetailRow
+                label="Grand total after tax"
+                value={quotation.DisplayMarginalizedAfterTax}
+              />
               <DetailRow label="Nett profit" value={quotation.DisplayNett} strong />
-            </div>
+            </dl>
           </div>
         </div>
-      </article>
+      </Card>
 
-      <article className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-        <header className="border-b border-slate-100 px-6 py-5 md:px-8">
-          <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-slate-400">Customer copy</p>
-          <h3 className="mt-2 text-[18px] font-semibold text-slate-900">Rendered quotation</h3>
+      <Card className="overflow-hidden">
+        <header className="border-b border-rule px-5 py-4">
+          <h2 className="text-title font-semibold text-ink-950">
+            Customer copy
+          </h2>
+          <p className="mt-1 text-small text-ink-500">
+            The rendered quotation as the customer receives it. Margin, tax,
+            and nett profit are excluded.
+          </p>
         </header>
-        <div className="bg-slate-100/70 p-3 md:p-6">
-          <iframe title="Rendered quotation" srcDoc={quotation.HTMLSnapshot} sandbox="" className="h-[760px] w-full border-0 bg-white shadow-[0_1px_3px_rgba(15,23,42,0.08)]" />
+        <div className="bg-paper-muted p-3 lg:p-5">
+          <iframe
+            title="Rendered quotation"
+            srcDoc={quotation.HTMLSnapshot}
+            sandbox=""
+            className="h-[min(820px,72vh)] min-h-[420px] w-full border-0 bg-white shadow-card"
+          />
         </div>
-      </article>
+      </Card>
     </section>
   );
 }
 
-function DetailRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function DetailRow({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5 text-[13px]">
-      <span className="text-slate-500">{label}</span>
-      <DetailAmount value={value} strong={strong} />
+    <div className="flex items-baseline justify-between gap-4 py-2">
+      <dt className="text-small text-ink-500">{label}</dt>
+      <dd
+        className={`tnum text-small ${
+          strong ? "font-semibold text-ink-950" : "text-ink-900"
+        }`}
+      >
+        Rp{value}
+      </dd>
     </div>
   );
 }

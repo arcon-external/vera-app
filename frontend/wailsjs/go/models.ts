@@ -1,5 +1,186 @@
 export namespace backend {
 	
+	export class ArchivedQuotationItem {
+	    ItemNo: number;
+	    Description: string;
+	    Qty: number;
+	    UoM: string;
+	    UnitPrice: number;
+	    DisplayUnitPrice: string;
+	    MarginEnabled: boolean;
+	    MarginPercent: number;
+	    MarginAmount: number;
+	    DisplayMarginAmount: string;
+	    OriginalTotal: number;
+	    DisplayOriginalTotal: string;
+	    MarginalizedUnitPrice: number;
+	    DisplayMarginalizedUnit: string;
+	    MarginalizedTotal: number;
+	    DisplayMarginalizedTotal: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ArchivedQuotationItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ItemNo = source["ItemNo"];
+	        this.Description = source["Description"];
+	        this.Qty = source["Qty"];
+	        this.UoM = source["UoM"];
+	        this.UnitPrice = source["UnitPrice"];
+	        this.DisplayUnitPrice = source["DisplayUnitPrice"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginAmount = source["MarginAmount"];
+	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	    }
+	}
+	export class ArchivedQuotation {
+	    ID: number;
+	    QuoteNumber: string;
+	    RevisionNumber: number;
+	    CustomerName: string;
+	    Subject: string;
+	    CreatedAt: string;
+	    GrandTotal: number;
+	    DisplayGrand: string;
+	    CustomerCode: number;
+	    CustomerAddress: string;
+	    RecipientName: string;
+	    RecipientAddress: string;
+	    Incoterm: string;
+	    ValidityDays: number;
+	    PaymentTermDays: number;
+	    LeadTimeDays: number;
+	    DiscountPercent: number;
+	    TaxZone: string;
+	    TaxCategory: string;
+	    TaxRateBps: number;
+	    OriginalSubtotal: number;
+	    OriginalDiscount: number;
+	    OriginalGrand: number;
+	    MarginalizedSubtotal: number;
+	    MarginalizedDiscount: number;
+	    MarginalizedGrand: number;
+	    TaxAmount: number;
+	    MarginalizedAfterTax: number;
+	    ProfitAmount: number;
+	    NettProfit: number;
+	    DisplayOriginalSubtotal: string;
+	    DisplayOriginalDiscount: string;
+	    DisplayOriginalGrand: string;
+	    DisplayMarginalizedSubtotal: string;
+	    DisplayMarginalizedDiscount: string;
+	    DisplayMarginalizedGrand: string;
+	    DisplayTax: string;
+	    DisplayMarginalizedAfterTax: string;
+	    DisplayProfit: string;
+	    DisplayNett: string;
+	    Items: ArchivedQuotationItem[];
+	    HTMLSnapshot: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ArchivedQuotation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.Subject = source["Subject"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.GrandTotal = source["GrandTotal"];
+	        this.DisplayGrand = source["DisplayGrand"];
+	        this.CustomerCode = source["CustomerCode"];
+	        this.CustomerAddress = source["CustomerAddress"];
+	        this.RecipientName = source["RecipientName"];
+	        this.RecipientAddress = source["RecipientAddress"];
+	        this.Incoterm = source["Incoterm"];
+	        this.ValidityDays = source["ValidityDays"];
+	        this.PaymentTermDays = source["PaymentTermDays"];
+	        this.LeadTimeDays = source["LeadTimeDays"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxCategory = source["TaxCategory"];
+	        this.TaxRateBps = source["TaxRateBps"];
+	        this.OriginalSubtotal = source["OriginalSubtotal"];
+	        this.OriginalDiscount = source["OriginalDiscount"];
+	        this.OriginalGrand = source["OriginalGrand"];
+	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
+	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
+	        this.MarginalizedGrand = source["MarginalizedGrand"];
+	        this.TaxAmount = source["TaxAmount"];
+	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
+	        this.ProfitAmount = source["ProfitAmount"];
+	        this.NettProfit = source["NettProfit"];
+	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
+	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
+	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
+	        this.DisplayMarginalizedSubtotal = source["DisplayMarginalizedSubtotal"];
+	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
+	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
+	        this.DisplayTax = source["DisplayTax"];
+	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
+	        this.DisplayProfit = source["DisplayProfit"];
+	        this.DisplayNett = source["DisplayNett"];
+	        this.Items = this.convertValues(source["Items"], ArchivedQuotationItem);
+	        this.HTMLSnapshot = source["HTMLSnapshot"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class ArchivedQuotationSummary {
+	    ID: number;
+	    QuoteNumber: string;
+	    RevisionNumber: number;
+	    CustomerName: string;
+	    Subject: string;
+	    CreatedAt: string;
+	    GrandTotal: number;
+	    DisplayGrand: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ArchivedQuotationSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.Subject = source["Subject"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.GrandTotal = source["GrandTotal"];
+	        this.DisplayGrand = source["DisplayGrand"];
+	    }
+	}
 	export class CustomerPreviewItem {
 	    Description: string;
 	    DisplayDesc: string;
@@ -346,3 +527,21 @@ export namespace backend {
 	}
 
 }
+
+export namespace store {
+	
+	export class Store {
+	
+	
+	    static createFrom(source: any = {}) {
+	        return new Store(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	
+	    }
+	}
+
+}
+

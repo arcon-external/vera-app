@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DeleteQuotation, ListQuotations } from "@backend/backend/Quotation";
 import type { ArchivedQuotationSummary } from "../archive";
 import { useToast } from "../toast";
+import { Badge, Button, Card } from "./ui";
 
 interface ArchivePageProps {
   onNewQuotation: () => void;
@@ -12,6 +13,8 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
   const [rows, setRows] = useState<ArchivedQuotationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { pushToast } = useToast();
 
   const load = useCallback(async () => {
@@ -21,7 +24,8 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
       const result = (await ListQuotations()) as ArchivedQuotationSummary[];
       setRows(result);
     } catch {
-      const message = "We couldn't load the quotation archive. Check the database connection and try again.";
+      const message =
+        "We couldn't load the quotation archive. Check the database connection and try again.";
       setError(message);
       pushToast("error", message);
     } finally {
@@ -33,13 +37,25 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
     void load();
   }, [load]);
 
+  useEffect(
+    () => () => {
+      if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    },
+    []
+  );
+
+  const requestDelete = (id: number) => {
+    setConfirmingId(id);
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
+    confirmTimer.current = setTimeout(() => setConfirmingId(null), 6000);
+  };
+
   const handleDelete = async (id: number) => {
-    if (!window.confirm("Delete this quotation and all of its revisions? This cannot be undone.")) {
-      return;
-    }
+    if (confirmTimer.current) clearTimeout(confirmTimer.current);
     try {
       await DeleteQuotation(id);
       setRows((current) => current.filter((row) => row.ID !== id));
+      setConfirmingId(null);
       pushToast("success", "Quotation deleted.");
     } catch {
       pushToast("error", "We couldn't delete this quotation. Try again.");
@@ -47,118 +63,141 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
   };
 
   return (
-    <section className="space-y-8" aria-labelledby="archive-heading">
+    <section aria-labelledby="archive-heading" className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[11px] font-medium tracking-[0.2em] uppercase text-slate-400">
+          <h1
+            id="archive-heading"
+            className="text-title font-semibold text-ink-950"
+          >
             Archive
-          </p>
-          <h2 id="archive-heading" className="mt-2 text-[26px] font-semibold tracking-[-0.03em] text-slate-900">
-            Quotation history
-          </h2>
-          <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-slate-500">
-            Open a quotation to inspect its internal calculations, review its customer copy, or create the next revision.
+          </h1>
+          <p className="mt-1 max-w-2xl text-body text-ink-500">
+            Every exported quotation, newest entry first. Open one to inspect
+            its internal economics, review the customer copy, or create the
+            next revision.
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-[13px] font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-          >
+        <div className="flex items-center gap-2.5">
+          <Button onClick={() => void load()} disabled={loading}>
             Refresh
-          </button>
-          <button
-            type="button"
-            onClick={onNewQuotation}
-            className="min-h-11 rounded-xl bg-emerald-600 px-4 text-[13px] font-semibold text-white transition hover:bg-emerald-500 active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-          >
+          </Button>
+          <Button variant="primary" onClick={onNewQuotation}>
             New quotation
-          </button>
+          </Button>
         </div>
       </header>
 
-      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-        {loading && (
+      <Card className="overflow-hidden">
+        {loading ? (
           <div className="space-y-3 p-6" aria-label="Loading quotations">
-            {[0, 1, 2].map((item) => (
-              <div key={item} className="h-14 animate-pulse rounded-xl bg-slate-100" />
+            {[0, 1, 2, 3].map((item) => (
+              <div
+                key={item}
+                className="h-12 animate-pulse rounded-lg bg-paper-muted"
+              />
             ))}
           </div>
-        )}
-
-        {!loading && error && (
-          <div className="p-8 text-center">
-            <p className="text-[14px] font-medium text-red-700">{error}</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="mt-4 min-h-11 rounded-xl border border-red-200 px-4 text-[13px] font-medium text-red-700 transition hover:bg-red-50 active:scale-[0.98]"
-            >
-              Try again
-            </button>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
+            <p className="max-w-md text-body text-danger-700">{error}</p>
+            <Button onClick={() => void load()}>Try again</Button>
           </div>
-        )}
-
-        {!loading && !error && rows.length === 0 && (
-          <div className="p-12 text-center">
-            <p className="text-[15px] font-medium text-slate-800">No quotations saved yet.</p>
-            <p className="mx-auto mt-2 max-w-md text-[13px] leading-relaxed text-slate-500">
-              Prepare and export your first quotation to start a revision history.
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-rule bg-paper-subtle text-ink-400">
+              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <path d="M2 3.333h12v9.334H2zM2 6.667h12M5.333 9.333h2" />
+              </svg>
+            </span>
+            <p className="text-lead font-medium text-ink-900">
+              No quotations saved yet
             </p>
-            <button
-              type="button"
-              onClick={onNewQuotation}
-              className="mt-5 min-h-11 rounded-xl bg-emerald-600 px-4 text-[13px] font-semibold text-white transition hover:bg-emerald-500 active:scale-[0.98]"
-            >
+            <p className="max-w-md text-body text-ink-500">
+              Prepare and export a quotation to start its revision history.
+            </p>
+            <Button variant="primary" onClick={onNewQuotation} className="mt-1">
               Create quotation
-            </button>
+            </Button>
           </div>
-        )}
-
-        {!loading && !error && rows.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-[13px]">
+        ) : (
+          <div className="overflow-x-auto scroll-thin">
+            <table className="w-full min-w-[860px] text-left">
               <thead>
-                <tr className="border-b border-slate-100 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
-                  <th className="px-6 py-4 font-medium">Quotation</th>
-                  <th className="px-4 py-4 font-medium">Customer</th>
-                  <th className="px-4 py-4 font-medium">Subject</th>
-                  <th className="px-4 py-4 text-center font-medium">Revision</th>
-                  <th className="px-4 py-4 text-right font-medium">Grand total</th>
-                  <th className="px-6 py-4" />
+                <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
+                  <th className="px-5 py-3 font-medium">Quotation</th>
+                  <th className="px-4 py-3 font-medium">Customer</th>
+                  <th className="px-4 py-3 font-medium">Subject</th>
+                  <th className="px-4 py-3 text-center font-medium">Rev</th>
+                  <th className="px-4 py-3 text-right font-medium">
+                    Grand total
+                  </th>
+                  <th className="px-5 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-rule">
                 {rows.map((row) => (
-                  <tr key={row.ID} className="group transition hover:bg-slate-50/70">
-                    <td className="px-6 py-4">
+                  <tr
+                    key={row.ID}
+                    className="group transition-colors duration-150 hover:bg-paper-subtle/60"
+                  >
+                    <td className="px-5 py-3 align-top">
                       <button
                         type="button"
                         onClick={() => onOpenQuotation(row.ID, row.RevisionNumber)}
-                        className="text-left font-semibold text-slate-900 underline-offset-4 hover:text-emerald-700 hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        className="rounded text-body font-medium text-ink-900 underline-offset-4 transition-colors duration-150 hover:text-accent-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
                       >
-                        {row.QuoteNumber}
+                        <span className="tnum">{row.QuoteNumber}</span>
                       </button>
-                      <p className="mt-1 text-[11px] text-slate-400">{row.CreatedAt.slice(0, 10)}</p>
+                      <p className="tnum mt-0.5 text-caption text-ink-400">
+                        {row.CreatedAt.slice(0, 10)}
+                      </p>
                     </td>
-                    <td className="px-4 py-4 text-slate-700">{row.CustomerName}</td>
-                    <td className="max-w-[260px] px-4 py-4 text-slate-600">{row.Subject}</td>
-                    <td className="px-4 py-4 text-center tabular-nums text-slate-500">
-                      {String(row.RevisionNumber).padStart(2, "0")}
+                    <td className="px-4 py-3 align-top text-body text-ink-700">
+                      {row.CustomerName}
                     </td>
-                    <td className="px-4 py-4 text-right font-medium tabular-nums text-slate-800">
+                    <td className="max-w-[320px] px-4 py-3 align-top text-body text-ink-600">
+                      <span className="line-clamp-2">{row.Subject}</span>
+                    </td>
+                    <td className="px-4 py-3 align-top text-center">
+                      <Badge tone="neutral">
+                        <span className="tnum">
+                          {String(row.RevisionNumber).padStart(2, "0")}
+                        </span>
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3 text-right align-top text-body font-medium tnum text-ink-950">
                       Rp{row.DisplayGrand}
                     </td>
-                    <td className="px-6 py-4 text-right">
-                      <button
-                        type="button"
-                        aria-label={`Delete quotation ${row.QuoteNumber}`}
-                        onClick={() => void handleDelete(row.ID)}
-                        className="min-h-11 rounded-lg px-3 text-[12px] font-medium text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-red-500/20"
-                      >
-                        Delete
-                      </button>
+                    <td className="px-5 py-3 text-right align-top">
+                      {confirmingId === row.ID ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            onClick={() => void handleDelete(row.ID)}
+                          >
+                            Confirm
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </span>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Delete quotation ${row.QuoteNumber}`}
+                          onClick={() => requestDelete(row.ID)}
+                          className="hover:!bg-danger-50 hover:!text-danger-600"
+                        >
+                          Delete
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -166,7 +205,14 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
             </table>
           </div>
         )}
-      </div>
+      </Card>
+
+      {rows.length > 0 ? (
+        <p className="text-caption text-ink-500">
+          Deleting a quotation also removes every revision it contains. This
+          cannot be undone.
+        </p>
+      ) : null}
     </section>
   );
 }
