@@ -496,6 +496,30 @@ export namespace backend {
 		}
 	}
 	
+	export class ManagedUser {
+	    ID: number;
+	    Email: string;
+	    DisplayName: string;
+	    Role: string;
+	    IsActive: boolean;
+	    MustChangePassword: boolean;
+	    LastLoginAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedUser(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Email = source["Email"];
+	        this.DisplayName = source["DisplayName"];
+	        this.Role = source["Role"];
+	        this.IsActive = source["IsActive"];
+	        this.MustChangePassword = source["MustChangePassword"];
+	        this.LastLoginAt = source["LastLoginAt"];
+	    }
+	}
 	export class QuotationItemInput {
 	    Description: string;
 	    Qty: number;

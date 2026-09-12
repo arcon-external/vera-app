@@ -111,6 +111,11 @@ func (c *Client) Put(path string, body, out any) error {
 	return c.do(http.MethodPut, path, body, out)
 }
 
+// Patch performs an authenticated PATCH with an optional JSON body.
+func (c *Client) Patch(path string, body, out any) error {
+	return c.do(http.MethodPatch, path, body, out)
+}
+
 // Delete performs an authenticated DELETE.
 func (c *Client) Delete(path string) error {
 	return c.do(http.MethodDelete, path, nil, nil)

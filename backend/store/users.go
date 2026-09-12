@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -71,6 +74,49 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (AuthUser, err
 		user.LastLoginAt = *lastLogin
 	}
 	return user, nil
+}
+
+// GetUserByID returns a single user by ID.
+func (s *Store) GetUserByID(ctx context.Context, userID int64) (AuthUser, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return AuthUser{}, err
+	}
+	var user AuthUser
+	var lastLogin *time.Time
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT id, email, display_name, password_hash,
+		       role, is_active, must_change_password, last_login_at
+		FROM %s.users WHERE id = $1`, s.configSchema()),
+		userID).Scan(
+		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
+		&user.Role, &user.IsActive, &user.MustChangePassword,
+		&lastLogin)
+	if err != nil {
+		return AuthUser{}, fmt.Errorf("get user: %w", err)
+	}
+	if lastLogin != nil {
+		user.LastLoginAt = *lastLogin
+	}
+	return user, nil
+}
+
+// SetMustChangePassword flags a user to change their password on next use.
+func (s *Store) SetMustChangePassword(ctx context.Context, userID int64, mustChange bool) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(
+		"UPDATE %s.users SET must_change_password = $2 WHERE id = $1", s.configSchema()),
+		userID, mustChange)
+	if err != nil {
+		return fmt.Errorf("set must-change flag: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
 }
 
 // CountUsers returns the number of user rows, used by the one-time bootstrap.
@@ -160,6 +206,97 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID int64) error {
 	return nil
 }
 
+// ListUsers returns all users ordered by ID. Password hashes are included in
+// the struct but must never be serialized to clients; handlers map to DTOs.
+func (s *Store) ListUsers(ctx context.Context) ([]AuthUser, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT id, email, display_name, password_hash,
+		       role, is_active, must_change_password, last_login_at
+		FROM %s.users ORDER BY id`, s.configSchema()))
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]AuthUser, 0)
+	for rows.Next() {
+		var user AuthUser
+		var lastLogin *time.Time
+		if err := rows.Scan(
+			&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
+			&user.Role, &user.IsActive, &user.MustChangePassword,
+			&lastLogin); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		if lastLogin != nil {
+			user.LastLoginAt = *lastLogin
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate users: %w", err)
+	}
+	return users, nil
+}
+
+// SetUserRole changes a user's role.
+func (s *Store) SetUserRole(ctx context.Context, userID int64, role string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	if role != "staff" && role != "admin" {
+		return fmt.Errorf("invalid role %q", role)
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(
+		"UPDATE %s.users SET role = $2 WHERE id = $1", s.configSchema()),
+		userID, role)
+	if err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// SetUserActive enables or disables a user account.
+func (s *Store) SetUserActive(ctx context.Context, userID int64, active bool) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(
+		"UPDATE %s.users SET is_active = $2 WHERE id = $1", s.configSchema()),
+		userID, active)
+	if err != nil {
+		return fmt.Errorf("set user active: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
+	}
+	return nil
+}
+
+// CountActiveAdmins returns the number of enabled admin accounts.
+func (s *Store) CountActiveAdmins(ctx context.Context) (int, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s.users WHERE role = 'admin' AND is_active = TRUE",
+		s.configSchema())).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count active admins: %w", err)
+	}
+	return count, nil
+}
+
 // TouchLogin updates the user's last-login timestamp.
 func (s *Store) TouchLogin(ctx context.Context, userID int64, now time.Time) error {
 	pool, err := s.poolOrError()
@@ -170,6 +307,115 @@ func (s *Store) TouchLogin(ctx context.Context, userID int64, now time.Time) err
 		UPDATE %s.users SET last_login_at = $2 WHERE id = $1`, s.configSchema()),
 		userID, now); err != nil {
 		return fmt.Errorf("touch login: %w", err)
+	}
+	return nil
+}
+
+// IssueInviteToken creates a fresh single-use invite/reset token, replacing
+// any outstanding tokens for the user so only the newest one works.
+func (s *Store) IssueInviteToken(ctx context.Context, userID int64, expiresAt time.Time) (string, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return "", err
+	}
+	var exists bool
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		"SELECT EXISTS (SELECT 1 FROM %s.users WHERE id = $1)", s.configSchema()),
+		userID).Scan(&exists); err != nil {
+		return "", fmt.Errorf("check user: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("user %d not found", userID)
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate invite token: %w", err)
+	}
+	token := hex.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(token))
+	tokenHash := hex.EncodeToString(sum[:])
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin invite transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		"DELETE FROM %s.invite_tokens WHERE user_id = $1", s.configSchema()),
+		userID); err != nil {
+		return "", fmt.Errorf("clear old invite tokens: %w", err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.invite_tokens (user_id, token_hash, expires_at)
+		VALUES ($1, $2, $3)`, s.configSchema()),
+		userID, tokenHash, expiresAt); err != nil {
+		return "", fmt.Errorf("insert invite token: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit invite token: %w", err)
+	}
+	return token, nil
+}
+
+// RedeemInviteToken consumes a valid invite token: it marks the token used,
+// sets the new password hash, and clears the must-change flag. Reuse,
+// expiry, and unknown tokens all fail.
+func (s *Store) RedeemInviteToken(ctx context.Context, token, passwordHash string, now time.Time) (int64, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(passwordHash) == "" {
+		return 0, fmt.Errorf("password hash is required")
+	}
+	sum := sha256.Sum256([]byte(token))
+	tokenHash := hex.EncodeToString(sum[:])
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin redeem transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var userID int64
+	err = tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE %s.invite_tokens SET used_at = $1
+		WHERE token_hash = $2 AND used_at IS NULL AND expires_at > $1
+		RETURNING user_id`, s.configSchema()), now, tokenHash).Scan(&userID)
+	if err != nil {
+		return 0, fmt.Errorf("invalid or expired invite token")
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.users SET password_hash = $2, must_change_password = FALSE
+		WHERE id = $1`, s.configSchema()), userID, passwordHash); err != nil {
+		return 0, fmt.Errorf("set redeemed password: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit invite redeem: %w", err)
+	}
+	return userID, nil
+}
+
+// SetPassword replaces a user's password hash directly (admin reset path;
+// the user is flagged to change it on next use).
+func (s *Store) SetPassword(ctx context.Context, userID int64, passwordHash string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(passwordHash) == "" {
+		return fmt.Errorf("password hash is required")
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.users SET password_hash = $2, must_change_password = TRUE
+		WHERE id = $1`, s.configSchema()), userID, passwordHash)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("user %d not found", userID)
 	}
 	return nil
 }

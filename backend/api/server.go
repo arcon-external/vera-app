@@ -39,6 +39,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
+	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/users", server.createUser, server.requireSession, server.requireAdmin)
+	server.echo.PATCH("/v1/admin/users/:id/role", server.setUserRole, server.requireSession, server.requireAdmin)
+	server.echo.PATCH("/v1/admin/users/:id/active", server.setUserActive, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/users/:id/reset", server.resetUser, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/auth/redeem", server.redeemInvite)
 	return server
 }
 
