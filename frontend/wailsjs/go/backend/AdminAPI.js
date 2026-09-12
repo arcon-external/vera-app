@@ -6,8 +6,16 @@ export function CreateUser(arg1, arg2, arg3) {
   return window['go']['backend']['AdminAPI']['CreateUser'](arg1, arg2, arg3);
 }
 
+export function DecideDeletion(arg1, arg2) {
+  return window['go']['backend']['AdminAPI']['DecideDeletion'](arg1, arg2);
+}
+
 export function IssuePasswordReset(arg1) {
   return window['go']['backend']['AdminAPI']['IssuePasswordReset'](arg1);
+}
+
+export function ListDeletionRequests() {
+  return window['go']['backend']['AdminAPI']['ListDeletionRequests']();
 }
 
 export function ListUsers() {

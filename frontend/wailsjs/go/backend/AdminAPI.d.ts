@@ -4,7 +4,11 @@ import {backend} from '../models';
 
 export function CreateUser(arg1:string,arg2:string,arg3:string):Promise<backend.ManagedUser>;
 
+export function DecideDeletion(arg1:number,arg2:boolean):Promise<void>;
+
 export function IssuePasswordReset(arg1:number):Promise<string>;
+
+export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
 
 export function ListUsers():Promise<Array<backend.ManagedUser>>;
 

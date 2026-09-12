@@ -347,6 +347,28 @@ export namespace backend {
 		}
 	}
 	
+	export class DeletionRequest {
+	    ID: number;
+	    UserID: number;
+	    Email: string;
+	    DisplayName: string;
+	    Status: string;
+	    RequestedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.UserID = source["UserID"];
+	        this.Email = source["Email"];
+	        this.DisplayName = source["DisplayName"];
+	        this.Status = source["Status"];
+	        this.RequestedAt = source["RequestedAt"];
+	    }
+	}
 	export class InternalPreviewItem {
 	    Description: string;
 	    CostUnit: number;

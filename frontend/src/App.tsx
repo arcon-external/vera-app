@@ -30,6 +30,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { UsersPage } from "./components/UsersPage";
+import { SettingsPage } from "./components/SettingsPage";
 import { Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
@@ -176,7 +177,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
-  const [page, setPage] = useState<"create" | "archive" | "detail" | "users">("create");
+  const [page, setPage] = useState<"create" | "archive" | "detail" | "users" | "settings">("create");
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -587,6 +588,7 @@ function App() {
       onOpenEditor={() => setPage("create")}
       onOpenArchive={() => setPage("archive")}
       onOpenUsers={() => setPage("users")}
+      onOpenSettings={() => setPage("settings")}
       showUsersTab={user?.Role === "admin"}
       user={user}
       onSignOut={() => void handleSignOut()}
@@ -759,6 +761,10 @@ function App() {
       ) : null}
 
       {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
+
+      {page === "settings" && user !== null ? (
+        <SettingsPage isAdmin={user.Role === "admin"} />
+      ) : null}
     </AppShell>
       )}
     </>
