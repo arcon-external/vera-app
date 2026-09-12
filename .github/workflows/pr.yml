@@ -54,7 +54,9 @@ jobs:
         run: go vet ./...
 
       - name: go test with race detector
-        run: go test -race ./...
+        # -short skips TestGeneratePDF, which needs a Chrome sandbox that
+        # GitHub-hosted runners cannot provide. Run it locally without -short.
+        run: go test -race -short ./...
 
   frontend:
     name: Frontend build
