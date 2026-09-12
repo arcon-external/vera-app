@@ -1,10 +1,17 @@
 export interface CustomerPreviewItem {
   Description: string;
   UoM: string;
+  DisplayOriginalUnitPrice: string;
+  DisplayOriginalTotal: string;
   DisplayUnitPrice: string;
   DisplayTotal: string;
+  OriginalUnitPrice: number;
+  OriginalTotal: number;
   UnitPrice: number;
   Total: number;
+  MarginEnabled: boolean;
+  MarginPercent: number;
+  MarginAmount: number;
   No: number;
   Qty: number;
 }
@@ -22,6 +29,12 @@ export interface CustomerPreview {
   SubTotal: number;
   DiscountAmount: number;
   GrandTotal: number;
+  OriginalSubTotal: number;
+  OriginalDiscountAmount: number;
+  OriginalGrandTotal: number;
+  MarginalizedGrandAfterTax: number;
+  ProfitAmount: number;
+  NettProfit: number;
   DiscountPercent: number;
 }
 
@@ -31,6 +44,18 @@ export interface InternalPreviewItem {
   SellUnit: number;
   CostTotal: number;
   SellTotal: number;
+  OriginalUnitPrice: number;
+  OriginalTotal: number;
+  MarginalizedUnitPrice: number;
+  MarginalizedTotal: number;
+  DisplayOriginalUnitPrice: string;
+  DisplayOriginalTotal: string;
+  DisplayMarginalizedUnit: string;
+  DisplayMarginalizedTotal: string;
+  DisplayMarginAmount: string;
+  MarginEnabled: boolean;
+  MarginPercent: number;
+  MarginAmount: number;
   No: number;
   Qty: number;
 }
@@ -57,6 +82,12 @@ export interface InternalBreakdown {
   TaxAmount: number;
   NettProfit: number;
   TaxRateBps: number;
-  MarginPercent: number;
   DiscountPercent: number;
+  OriginalSubtotal: number;
+  OriginalDiscount: number;
+  OriginalGrand: number;
+  MarginalizedSubtotal: number;
+  MarginalizedDiscount: number;
+  MarginalizedGrand: number;
+  MarginalizedGrandAfterTax: number;
 }

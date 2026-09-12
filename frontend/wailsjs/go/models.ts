@@ -4,10 +4,17 @@ export namespace backend {
 	    Description: string;
 	    DisplayDesc: string;
 	    UoM: string;
+	    DisplayOriginalUnitPrice: string;
+	    DisplayOriginalTotal: string;
 	    DisplayUnitPrice: string;
 	    DisplayTotal: string;
+	    OriginalUnitPrice: number;
+	    OriginalTotal: number;
 	    UnitPrice: number;
 	    Total: number;
+	    MarginEnabled: boolean;
+	    MarginPercent: number;
+	    MarginAmount: number;
 	    No: number;
 	    Qty: number;
 	
@@ -20,10 +27,17 @@ export namespace backend {
 	        this.Description = source["Description"];
 	        this.DisplayDesc = source["DisplayDesc"];
 	        this.UoM = source["UoM"];
+	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
 	        this.DisplayUnitPrice = source["DisplayUnitPrice"];
 	        this.DisplayTotal = source["DisplayTotal"];
+	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
+	        this.OriginalTotal = source["OriginalTotal"];
 	        this.UnitPrice = source["UnitPrice"];
 	        this.Total = source["Total"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginAmount = source["MarginAmount"];
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	    }
@@ -43,6 +57,12 @@ export namespace backend {
 	    SubTotal: number;
 	    DiscountAmount: number;
 	    GrandTotal: number;
+	    OriginalSubTotal: number;
+	    OriginalDiscountAmount: number;
+	    OriginalGrandTotal: number;
+	    MarginalizedGrandAfterTax: number;
+	    ProfitAmount: number;
+	    NettProfit: number;
 	    DiscountPercent: number;
 	    Validity: number;
 	    PaymentTerm: number;
@@ -68,6 +88,12 @@ export namespace backend {
 	        this.SubTotal = source["SubTotal"];
 	        this.DiscountAmount = source["DiscountAmount"];
 	        this.GrandTotal = source["GrandTotal"];
+	        this.OriginalSubTotal = source["OriginalSubTotal"];
+	        this.OriginalDiscountAmount = source["OriginalDiscountAmount"];
+	        this.OriginalGrandTotal = source["OriginalGrandTotal"];
+	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
+	        this.ProfitAmount = source["ProfitAmount"];
+	        this.NettProfit = source["NettProfit"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
@@ -99,6 +125,18 @@ export namespace backend {
 	    SellUnit: number;
 	    CostTotal: number;
 	    SellTotal: number;
+	    OriginalUnitPrice: number;
+	    OriginalTotal: number;
+	    MarginalizedUnitPrice: number;
+	    MarginalizedTotal: number;
+	    DisplayOriginalUnitPrice: string;
+	    DisplayOriginalTotal: string;
+	    DisplayMarginalizedUnit: string;
+	    DisplayMarginalizedTotal: string;
+	    DisplayMarginAmount: string;
+	    MarginEnabled: boolean;
+	    MarginPercent: number;
+	    MarginAmount: number;
 	    No: number;
 	    Qty: number;
 	
@@ -113,6 +151,18 @@ export namespace backend {
 	        this.SellUnit = source["SellUnit"];
 	        this.CostTotal = source["CostTotal"];
 	        this.SellTotal = source["SellTotal"];
+	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
+	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginAmount = source["MarginAmount"];
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	    }
@@ -139,8 +189,14 @@ export namespace backend {
 	    TaxAmount: number;
 	    NettProfit: number;
 	    TaxRateBps: number;
-	    MarginPercent: number;
 	    DiscountPercent: number;
+	    OriginalSubtotal: number;
+	    OriginalDiscount: number;
+	    OriginalGrand: number;
+	    MarginalizedSubtotal: number;
+	    MarginalizedDiscount: number;
+	    MarginalizedGrand: number;
+	    MarginalizedGrandAfterTax: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new InternalBreakdown(source);
@@ -169,8 +225,14 @@ export namespace backend {
 	        this.TaxAmount = source["TaxAmount"];
 	        this.NettProfit = source["NettProfit"];
 	        this.TaxRateBps = source["TaxRateBps"];
-	        this.MarginPercent = source["MarginPercent"];
 	        this.DiscountPercent = source["DiscountPercent"];
+	        this.OriginalSubtotal = source["OriginalSubtotal"];
+	        this.OriginalDiscount = source["OriginalDiscount"];
+	        this.OriginalGrand = source["OriginalGrand"];
+	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
+	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
+	        this.MarginalizedGrand = source["MarginalizedGrand"];
+	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -197,6 +259,8 @@ export namespace backend {
 	    Qty: number;
 	    UoM: string;
 	    UnitPrice: number;
+	    MarginEnabled: boolean;
+	    MarginPercent: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new QuotationItemInput(source);
@@ -208,6 +272,8 @@ export namespace backend {
 	        this.Qty = source["Qty"];
 	        this.UoM = source["UoM"];
 	        this.UnitPrice = source["UnitPrice"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.MarginPercent = source["MarginPercent"];
 	    }
 	}
 	export class QuotationInput {
@@ -215,7 +281,6 @@ export namespace backend {
 	    Subject: string;
 	    RecipientName: string;
 	    DiscountPercent: number;
-	    ProfitMargin: number;
 	    TaxZone: string;
 	    TaxCategory: string;
 	    Validity: number;
@@ -234,7 +299,6 @@ export namespace backend {
 	        this.Subject = source["Subject"];
 	        this.RecipientName = source["RecipientName"];
 	        this.DiscountPercent = source["DiscountPercent"];
-	        this.ProfitMargin = source["ProfitMargin"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
 	        this.Validity = source["Validity"];
@@ -264,4 +328,3 @@ export namespace backend {
 	}
 
 }
-

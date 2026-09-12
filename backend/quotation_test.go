@@ -204,7 +204,7 @@ func TestBuildItems(t *testing.T) {
 		{Description: "Item B", Qty: 3, UoM: "Unit", UnitPrice: 5000},
 	}
 
-	items := buildItems(inputs, 0)
+	items := buildItems(inputs)
 	if len(items) != 2 {
 		t.Fatalf("buildItems returned %d items; want 2", len(items))
 	}
@@ -227,7 +227,7 @@ func TestBuildItems(t *testing.T) {
 }
 
 func TestBuildItemsEmpty(t *testing.T) {
-	items := buildItems(nil, 0)
+	items := buildItems(nil)
 	if items == nil {
 		t.Fatal("buildItems(nil) returned nil; want empty slice")
 	}
@@ -475,14 +475,20 @@ func TestPrepareValidation(t *testing.T) {
 		{
 			name: "margin exceeds 100",
 			input: QuotationInput{
-				CustomerID:    2,
-				Items:         []QuotationItemInput{validItem},
+				CustomerID: 2,
+				Items: []QuotationItemInput{{
+					Description:   validItem.Description,
+					Qty:           validItem.Qty,
+					UoM:           validItem.UoM,
+					UnitPrice:     validItem.UnitPrice,
+					MarginEnabled: true,
+					MarginPercent: 101,
+				}},
 				Subject:       "Test",
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   30,
 				LeadTime:      30,
-				ProfitMargin:  101,
 			},
 		},
 	}
