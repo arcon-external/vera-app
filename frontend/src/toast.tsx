@@ -38,7 +38,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       <div
         aria-label="Notifications"
-        className="pointer-events-none fixed right-4 top-4 z-40 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2"
+        className="pointer-events-none fixed bottom-20 right-5 z-40 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2"
       >
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />
@@ -79,9 +79,15 @@ function ToastItem({
   }, [startTimer]);
 
   const styles: Record<ToastType, string> = {
-    success: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    error: "border-red-200 bg-red-50 text-red-900",
-    info: "border-slate-200 bg-white text-slate-800",
+    success: "border-success-200 bg-success-50 text-success-900",
+    error: "border-danger-200 bg-danger-50 text-danger-800",
+    info: "border-rule bg-white text-ink-800",
+  };
+
+  const dots: Record<ToastType, string> = {
+    success: "bg-success-500",
+    error: "bg-danger-500",
+    info: "bg-accent-500",
   };
 
   return (
@@ -92,18 +98,22 @@ function ToastItem({
       onMouseLeave={() => {
         if (timer.current === null && remaining.current > 0) startTimer();
       }}
-      className={`pointer-events-auto flex min-h-12 items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-[0_8px_24px_rgba(15,23,42,0.10)] ${styles[toast.type]}`}
-      style={{ animation: "toastIn 180ms cubic-bezier(0.23, 1, 0.32, 1) forwards" }}
+      className={`pointer-events-auto flex min-h-12 animate-toast-in items-start gap-3 rounded-lg border px-4 py-3 text-small shadow-pop ${styles[toast.type]}`}
     >
-      <span aria-hidden="true" className="mt-1 h-2 w-2 shrink-0 rounded-full bg-current opacity-60" />
+      <span
+        aria-hidden="true"
+        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dots[toast.type]}`}
+      />
       <span className="flex-1 leading-relaxed">{toast.message}</span>
       <button
         type="button"
         aria-label="Dismiss notification"
         onClick={() => onDismiss(toast.id)}
-        className="-mr-2 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-current opacity-60 transition hover:bg-black/5 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-current/30 active:scale-[0.96]"
+        className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-current opacity-55 transition-colors duration-150 hover:bg-black/5 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/30 active:scale-[0.96]"
       >
-        <span aria-hidden="true" className="text-[18px] leading-none">×</span>
+        <span aria-hidden="true" className="text-base leading-none">
+          ×
+        </span>
       </button>
     </div>
   );
