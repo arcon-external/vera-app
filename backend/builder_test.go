@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"testing"
+
+	"vera-app/backend/auth"
+)
 
 func TestApplyMarkup(t *testing.T) {
 	cases := []struct {
@@ -67,6 +71,7 @@ func TestBuildPricesDiscountsSellSide(t *testing.T) {
 
 func TestPrepareRejectsMarginOver100(t *testing.T) {
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
 			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000, MarginEnabled: true, MarginPercent: 101},

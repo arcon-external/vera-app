@@ -125,6 +125,9 @@ type InternalBreakdown struct {
 // GetCustomerPreview returns the customer-facing quotation derived from the
 // last successful Prepare call. It fails if Prepare has not been called.
 func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return CustomerPreview{}, err
+	}
 	if !q.prepared {
 		return CustomerPreview{}, fmt.Errorf("no prepared quotation: call Prepare first")
 	}
@@ -184,6 +187,9 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 // GetQuotationPreviewHTML renders the same customer-facing HTML used by PDF
 // export. It intentionally exposes no internal pricing fields to the frontend.
 func (q *Quotation) GetQuotationPreviewHTML() (string, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return "", err
+	}
 	if !q.prepared {
 		return "", fmt.Errorf("no prepared quotation: call Prepare first")
 	}
@@ -203,6 +209,9 @@ func (q *Quotation) GetQuotationPreviewHTML() (string, error) {
 // derived from the last successful Prepare call. It fails if Prepare has
 // not been called.
 func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return InternalBreakdown{}, err
+	}
 	if !q.prepared {
 		return InternalBreakdown{}, fmt.Errorf("no prepared quotation: call Prepare first")
 	}

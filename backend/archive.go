@@ -77,6 +77,9 @@ type ArchivedQuotation struct {
 }
 
 func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return nil, err
+	}
 	if q.store == nil {
 		return nil, fmt.Errorf("Postgres store is not configured")
 	}
@@ -101,6 +104,9 @@ func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
 }
 
 func (q *Quotation) GetQuotation(id int64) (ArchivedQuotation, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return ArchivedQuotation{}, err
+	}
 	if q.store == nil {
 		return ArchivedQuotation{}, fmt.Errorf("Postgres store is not configured")
 	}
@@ -112,6 +118,9 @@ func (q *Quotation) GetQuotation(id int64) (ArchivedQuotation, error) {
 }
 
 func (q *Quotation) GetQuotationRevision(id int64, revision int16) (ArchivedQuotation, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return ArchivedQuotation{}, err
+	}
 	if q.store == nil {
 		return ArchivedQuotation{}, fmt.Errorf("Postgres store is not configured")
 	}
@@ -123,6 +132,9 @@ func (q *Quotation) GetQuotationRevision(id int64, revision int16) (ArchivedQuot
 }
 
 func (q *Quotation) DeleteQuotation(id int64) error {
+	if err := q.requireAdmin(q.ctx); err != nil {
+		return err
+	}
 	if q.store == nil {
 		return fmt.Errorf("Postgres store is not configured")
 	}

@@ -1,5 +1,29 @@
 export namespace backend {
 	
+	export class AuthUserDTO {
+	    ID: number;
+	    Email: string;
+	    DisplayName: string;
+	    Role: string;
+	    IsActive: boolean;
+	    MustChangePassword: boolean;
+	    LastLoginAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuthUserDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Email = source["Email"];
+	        this.DisplayName = source["DisplayName"];
+	        this.Role = source["Role"];
+	        this.IsActive = source["IsActive"];
+	        this.MustChangePassword = source["MustChangePassword"];
+	        this.LastLoginAt = source["LastLoginAt"];
+	    }
+	}
 	export class ArchivedQuotationItem {
 	    ItemNo: number;
 	    Description: string;

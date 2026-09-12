@@ -27,6 +27,9 @@ import {
   normalizeTaxCategory,
   normalizeTaxZone,
 } from "./tax";
+import { LoginPage } from "./components/LoginPage";
+import type { SignedInUser } from "./components/LoginPage";
+import { Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -193,6 +196,16 @@ function App() {
   const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
   const [quotationHTML, setQuotationHTML] = useState<string | null>(null);
   const { pushToast } = useToast();
+  const [user, setUser] = useState<SignedInUser | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  // Restore the keychain session on startup; otherwise show the login page.
+  useEffect(() => {
+    RestoreSession()
+      .then((restored) => setUser(restored as SignedInUser))
+      .catch(() => setUser(null))
+      .finally(() => setCheckingSession(false));
+  }, []);
 
   const clearPreview = useCallback(() => {
     setCustomerPreview(null);
@@ -209,6 +222,18 @@ function App() {
     clearPreview();
     setStatus({ type: "idle", message: "" });
   }, [clearPreview]);
+
+  const handleSignOut = useCallback(async () => {
+    try {
+      await Logout();
+    } catch {
+      // Session may already be invalid; sign out locally regardless.
+    } finally {
+      setUser(null);
+      resetForm();
+      setPage("create");
+    }
+  }, [resetForm]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);
@@ -548,10 +573,20 @@ function App() {
   };
 
   return (
+    <>
+      {checkingSession ? (
+        <div className="flex min-h-full items-center justify-center px-5">
+          <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />
+        </div>
+      ) : user === null ? (
+        <LoginPage onSignedIn={setUser} />
+      ) : (
     <AppShell
       page={page}
       onOpenEditor={() => setPage("create")}
       onOpenArchive={() => setPage("archive")}
+      user={user}
+      onSignOut={() => void handleSignOut()}
       actionBar={
         page === "create" ? (
           <>
@@ -720,6 +755,8 @@ function App() {
         />
       ) : null}
     </AppShell>
+      )}
+    </>
   );
 }
 
