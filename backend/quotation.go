@@ -13,6 +13,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"vera-app/backend/auth"
 	"vera-app/backend/store"
 )
 
@@ -119,6 +120,7 @@ type Quotation struct {
 	lastInput          QuotationInput
 	prepared           bool
 	store              *store.Store
+	auth               *auth.Service
 	archiveQuoteNumber string
 	archiveRevision    uint16
 }
@@ -127,9 +129,36 @@ func (q *Quotation) SetStore(database *store.Store) {
 	q.store = database
 }
 
+// SetAuthService attaches the authentication service used to gate methods.
+func (q *Quotation) SetAuthService(service *auth.Service) {
+	q.auth = service
+}
+
+// requireUser denies callers without a signed-in user. Auth enforcement is
+// nil-safe in tests: methods using it must set the service in production.
+func (q *Quotation) requireUser(ctx context.Context) error {
+	if q.auth == nil {
+		return fmt.Errorf("authentication is not configured")
+	}
+	_, err := q.auth.RequireUser(ctx)
+	return err
+}
+
+// requireAdmin denies callers without an admin role.
+func (q *Quotation) requireAdmin(ctx context.Context) error {
+	if q.auth == nil {
+		return fmt.Errorf("authentication is not configured")
+	}
+	_, err := q.auth.RequireAdmin(ctx)
+	return err
+}
+
 // SetRevisionContext tells Export whether this is a new quotation or the
 // next immutable revision of an archived quotation.
 func (q *Quotation) SetRevisionContext(quoteNumber string, revision uint16) error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
 	if strings.TrimSpace(quoteNumber) == "" {
 		return fmt.Errorf("quote number is required for a revision")
 	}
@@ -191,6 +220,9 @@ func formatQuoteNumber(cusID uint8, seqID uint16) string {
 // consuming a sequence number if the user never saves. Returns an error
 // describing the first validation failure, or nil on success.
 func (q *Quotation) Prepare(input QuotationInput) error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
 	customerExists := checkCustomerID(input.CustomerID)
 	if !customerExists {
 		return fmt.Errorf("invalid customer ID: %d", input.CustomerID)
@@ -314,6 +346,9 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 // is only consumed after the user confirms the save dialog, preventing
 // wasted sequence increments on cancellation.
 func (q *Quotation) Export() error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
 	if q.store == nil {
 		return fmt.Errorf("Postgres store is not configured")
 	}

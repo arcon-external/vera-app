@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"vera-app/backend"
+	"vera-app/backend/auth"
 	"vera-app/backend/store"
 
 	"github.com/wailsapp/wails/v2"
@@ -29,6 +30,23 @@ func main() {
 	defer database.Close()
 	quotationApp.SetStore(database)
 
+	authService := auth.NewService(database)
+	quotationApp.SetAuthService(authService)
+	authAPI := backend.NewAuthAPI(authService)
+
+	bootstrapName := os.Getenv("VERA_BOOTSTRAP_ADMIN_NAME")
+	bootstrapEmail := os.Getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
+	if bootstrapName == "" {
+		bootstrapName = bootstrapEmail
+	}
+	if err := backend.EnsureBootstrap(context.Background(), authService,
+		bootstrapEmail,
+		bootstrapName,
+		os.Getenv("VERA_BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
+		fmt.Fprintf(os.Stderr, "auth bootstrap failed: %v\n", err)
+		os.Exit(1)
+	}
+
 	err = wails.Run(&options.App{
 		Title:            "Vera",
 		Width:            1024,
@@ -43,6 +61,7 @@ func main() {
 		},
 		Bind: []interface{}{
 			quotationApp,
+			authAPI,
 		},
 	})
 

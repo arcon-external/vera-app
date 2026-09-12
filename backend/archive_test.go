@@ -2,10 +2,13 @@ package backend
 
 import (
 	"testing"
+
+	"vera-app/backend/auth"
 )
 
 func TestRevisionDraftPreservesInternalAndCustomerValues(t *testing.T) {
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 	q.Data = QuotationData{
 		CustomerID:                2,
 		RecipientCompany:          "PT. Test Customer",

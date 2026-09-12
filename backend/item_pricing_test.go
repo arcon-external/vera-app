@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"testing"
+
+	"vera-app/backend/auth"
+)
 
 func TestBuildItemsUsesPerItemMargins(t *testing.T) {
 	items := buildItems([]QuotationItemInput{
@@ -89,6 +93,7 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 
 func TestPrepareRejectsItemMarginOver100(t *testing.T) {
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
 			{

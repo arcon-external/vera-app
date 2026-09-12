@@ -1,6 +1,10 @@
 package backend
 
-import "testing"
+import (
+	"testing"
+
+	"vera-app/backend/auth"
+)
 
 func TestTaxRateFor(t *testing.T) {
 	cases := []struct {
@@ -108,6 +112,7 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	// Cost 100.000, margin 20% -> sell 120.000; discount 10% -> grand
 	// 108.000; NonFTZ 2% -> tax 2.160, nett 105.840.
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
 			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
@@ -148,6 +153,7 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 
 func TestPrepareComputesNett(t *testing.T) {
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
 			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000000},
@@ -179,6 +185,7 @@ func TestPrepareComputesNett(t *testing.T) {
 	}
 
 	ftz := &Quotation{}
+	ftz.SetAuthService(auth.StaffTestService())
 	err = ftz.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
 			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000000},

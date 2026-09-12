@@ -6,6 +6,8 @@ interface AppShellProps {
   onOpenArchive: () => void;
   children: ReactNode;
   actionBar?: ReactNode;
+  user?: { DisplayName: string; Role: string } | null;
+  onSignOut?: () => void;
 }
 
 const tabs = [
@@ -19,6 +21,8 @@ export function AppShell({
   onOpenArchive,
   children,
   actionBar,
+  user,
+  onSignOut,
 }: AppShellProps) {
   return (
     <div className="flex min-h-full flex-col bg-paper">
@@ -58,6 +62,25 @@ export function AppShell({
           <span className="ml-auto hidden text-micro font-medium uppercase tracking-[0.16em] text-ink-500 lg:block">
             PT Arcon Penta Persada
           </span>
+          {user ? (
+            <div className="ml-auto flex items-center gap-2 lg:ml-0">
+              <span className="hidden text-caption text-ink-500 sm:inline">
+                {user.DisplayName}
+                {user.Role === "admin" ? (
+                  <span className="ml-1.5 rounded-md border border-accent-200 bg-accent-50 px-1.5 py-0.5 text-micro font-medium uppercase text-accent-700">
+                    Admin
+                  </span>
+                ) : null}
+              </span>
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="inline-flex min-h-8 items-center rounded-md px-2 py-1.5 text-caption text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              >
+                Sign out
+              </button>
+            </div>
+          ) : null}
         </div>
       </header>
 

@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"vera-app/backend/auth"
 )
 
 func TestGeneratePDF(t *testing.T) {
 	ctx := context.Background()
 	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
 
 	err := Startup(q, ctx)
 	if err != nil {
@@ -492,6 +495,7 @@ func TestPrepareValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			q := &Quotation{}
+			q.SetAuthService(auth.StaffTestService())
 			err := q.Prepare(tc.input)
 			if err == nil {
 				t.Error("expected error but got nil")

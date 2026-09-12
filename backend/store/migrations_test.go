@@ -10,17 +10,42 @@ func TestLoadMigrationsReplacesSchemaPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMigrations failed: %v", err)
 	}
-	if len(migrations) != 1 {
-		t.Fatalf("migration count = %d; want 1", len(migrations))
+	if len(migrations) != 3 {
+		t.Fatalf("migration count = %d; want 3", len(migrations))
 	}
-	if migrations[0].version != 1 {
-		t.Errorf("migration version = %d; want 1", migrations[0].version)
+	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 {
+		t.Errorf("migration versions = %d, %d, %d; want 1, 2, 3",
+			migrations[0].version, migrations[1].version, migrations[2].version)
 	}
-	if strings.Contains(migrations[0].sql, "{{schema}}") {
-		t.Error("migration still contains an unresolved schema placeholder")
+	for _, migration := range migrations {
+		if strings.Contains(migration.sql, "{{schema}}") {
+			t.Errorf("migration %d still contains an unresolved schema placeholder", migration.version)
+		}
 	}
 	if !strings.Contains(migrations[0].sql, `"vera_test".quotation_revisions`) {
 		t.Error("migration does not qualify quotation revisions with the configured schema")
+	}
+	if !strings.Contains(migrations[1].sql, `"vera_test".users`) {
+		t.Error("auth migration does not qualify users with the configured schema")
+	}
+}
+
+func TestRemoveGoogleMigrationRepairsLegacySchema(t *testing.T) {
+	migrations, err := loadMigrations("vera_test")
+	if err != nil {
+		t.Fatalf("loadMigrations failed: %v", err)
+	}
+	sql := migrations[2].sql
+	for _, expected := range []string{
+		"DROP COLUMN IF EXISTS google_sub",
+		"password_hash SET NOT NULL",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Errorf("repair migration missing %q", expected)
+		}
+	}
+	if strings.Contains(sql, "{{schema}}") {
+		t.Error("repair migration still contains an unresolved schema placeholder")
 	}
 }
 
