@@ -10,6 +10,7 @@ import { backend } from "@backend/models";
 import { Select } from "./components/Select";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
+import { useToast } from "./toast";
 
 interface ItemRow {
   key: number;
@@ -165,6 +166,16 @@ function buildDescription(description: string, subItems: string[]): string {
   return parts.join("\n");
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 function App() {
   const nextKey = useRef(1);
   const [items, setItems] = useState<ItemRow[]>([newItem(0)]);
@@ -183,6 +194,7 @@ function App() {
     useState<CustomerPreview | null>(null);
   const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
   const [quotationHTML, setQuotationHTML] = useState<string | null>(null);
+  const { pushToast } = useToast();
 
   const clearPreview = useCallback(() => {
     setCustomerPreview(null);
@@ -356,12 +368,14 @@ function App() {
       setBreakdown(internal as InternalBreakdown);
       setQuotationHTML(String(quotationPreviewHTML));
       setStatus({ type: "ready", message: "Quotation prepared — review and export" });
+      pushToast("success", "Quotation prepared. Review the totals before exporting.");
     } catch (err: unknown) {
       clearPreview();
-      const msg = typeof err === "string" ? err : "Validation failed";
+      const msg = getErrorMessage(err, "We couldn't prepare the quotation. Check the form and try again.");
       setStatus({ type: "error", message: msg });
+      pushToast("error", msg);
     }
-  }, [items, subject, recipientName, discountPercent, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm, clearPreview]);
+  }, [items, subject, recipientName, discountPercent, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm, clearPreview, pushToast]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -392,16 +406,19 @@ function App() {
       await Export();
       clearPreview();
       setStatus({ type: "idle", message: "" });
+      pushToast("success", "Quotation exported successfully.");
     } catch (err: unknown) {
-      const msg = typeof err === "string" ? err : "Export failed";
+      const msg = getErrorMessage(err, "We couldn't export the quotation. Check the save location and try again.");
       if (msg.includes("user cancelled") || msg.includes("cancelled")) {
         setStatus({ type: "ready", message: "Quotation prepared — review and export" });
+        pushToast("info", "Export cancelled. Your quotation is still ready to review.");
         return;
       }
       clearPreview();
       setStatus({ type: "error", message: msg });
+      pushToast("error", msg);
     }
-  }, [clearPreview]);
+  }, [clearPreview, pushToast]);
 
   const statusStyles: Record<StatusState["type"], string> = {
     idle: "hidden",
@@ -910,6 +927,16 @@ function App() {
           from {
             opacity: 0;
             transform: translateY(-4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        @keyframes toastIn {
+          from {
+            opacity: 0;
+            transform: translateY(-6px);
           }
           to {
             opacity: 1;
