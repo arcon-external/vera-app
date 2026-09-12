@@ -10,12 +10,12 @@ func TestLoadMigrationsReplacesSchemaPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMigrations failed: %v", err)
 	}
-	if len(migrations) != 5 {
-		t.Fatalf("migration count = %d; want 5", len(migrations))
+	if len(migrations) != 6 {
+		t.Fatalf("migration count = %d; want 6", len(migrations))
 	}
-	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 || migrations[3].version != 4 || migrations[4].version != 5 {
-		t.Errorf("migration versions = %d, %d, %d, %d, %d; want 1, 2, 3, 4, 5",
-			migrations[0].version, migrations[1].version, migrations[2].version, migrations[3].version, migrations[4].version)
+	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 || migrations[3].version != 4 || migrations[4].version != 5 || migrations[5].version != 6 {
+		t.Errorf("migration versions = %d, %d, %d, %d, %d, %d; want 1, 2, 3, 4, 5, 6",
+			migrations[0].version, migrations[1].version, migrations[2].version, migrations[3].version, migrations[4].version, migrations[5].version)
 	}
 	for _, migration := range migrations {
 		if strings.Contains(migration.sql, "{{schema}}") {

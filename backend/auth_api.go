@@ -15,6 +15,7 @@ type AuthUserDTO struct {
 	IsActive           bool
 	MustChangePassword bool
 	LastLoginAt        string
+	AvatarURL          string
 }
 
 // serverUser mirrors the veraserver user payload.
@@ -24,6 +25,7 @@ type serverUser struct {
 	DisplayName        string `json:"displayName"`
 	Role               string `json:"role"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+	AvatarURL          string `json:"avatarUrl"`
 }
 
 // AuthAPI exposes authentication to the frontend. It talks to veraserver;
@@ -44,6 +46,7 @@ func toAuthUserDTO(user serverUser) AuthUserDTO {
 		Role:               user.Role,
 		IsActive:           true,
 		MustChangePassword: user.MustChangePassword,
+		AvatarURL:          user.AvatarURL,
 	}
 }
 
@@ -154,6 +157,29 @@ func (a *AuthAPI) RequestDeletion(confirmed bool) (DeletionRequest, error) {
 		return DeletionRequest{}, err
 	}
 	return DeletionRequest{ID: response.ID, Status: response.Status}, nil
+}
+
+// UpdateProfile changes the signed-in user's display name and/or avatar.
+// Empty display name leaves the name unchanged; removeAvatar clears the
+// picture; avatarBase64/avatarMime upload a replacement.
+func (a *AuthAPI) UpdateProfile(displayName, avatarBase64, avatarMime string, removeAvatar bool) (AuthUserDTO, error) {
+	client, err := api()
+	if err != nil {
+		return AuthUserDTO{}, err
+	}
+	var response struct {
+		DisplayName string `json:"displayName"`
+		AvatarURL   string `json:"avatarUrl"`
+	}
+	if err := client.Patch("/v1/auth/profile", map[string]any{
+		"displayName":  displayName,
+		"avatarBase64": avatarBase64,
+		"avatarMime":   avatarMime,
+		"removeAvatar": removeAvatar,
+	}, &response); err != nil {
+		return AuthUserDTO{}, err
+	}
+	return a.CurrentUser()
 }
 
 // EnsureBootstrap is a no-op on the desktop: the first admin is created by

@@ -7,6 +7,7 @@ export interface SignedInUser {
   Email: string;
   DisplayName: string;
   Role: string;
+  AvatarURL?: string;
 }
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => void }) {

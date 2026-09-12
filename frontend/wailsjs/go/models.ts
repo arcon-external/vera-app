@@ -208,6 +208,7 @@ export namespace backend {
 	    IsActive: boolean;
 	    MustChangePassword: boolean;
 	    LastLoginAt: string;
+	    AvatarURL: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new AuthUserDTO(source);
@@ -222,6 +223,7 @@ export namespace backend {
 	        this.IsActive = source["IsActive"];
 	        this.MustChangePassword = source["MustChangePassword"];
 	        this.LastLoginAt = source["LastLoginAt"];
+	        this.AvatarURL = source["AvatarURL"];
 	    }
 	}
 	export class CustomerPreviewItem {

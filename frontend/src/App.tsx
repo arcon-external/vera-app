@@ -763,7 +763,11 @@ function App() {
       {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
 
       {page === "settings" && user !== null ? (
-        <SettingsPage isAdmin={user.Role === "admin"} />
+        <SettingsPage
+          isAdmin={user.Role === "admin"}
+          user={user}
+          onProfileChanged={setUser}
+        />
       ) : null}
     </AppShell>
       )}

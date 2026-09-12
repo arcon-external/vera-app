@@ -1,0 +1,3 @@
+ALTER TABLE {{schema}}.users
+    ADD COLUMN IF NOT EXISTS avatar BYTEA,
+    ADD COLUMN IF NOT EXISTS avatar_mime TEXT NOT NULL DEFAULT '';
