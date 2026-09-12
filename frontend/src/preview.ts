@@ -72,6 +72,13 @@ export interface InternalBreakdown {
   DisplayProfit: string;
   DisplayTax: string;
   DisplayNett: string;
+  DisplayOriginalSubtotal: string;
+  DisplayOriginalDiscount: string;
+  DisplayOriginalGrand: string;
+  DisplayMarginalizedSubtotal: string;
+  DisplayMarginalizedDiscount: string;
+  DisplayMarginalizedGrand: string;
+  DisplayMarginalizedAfterTax: string;
   CostSubtotal: number;
   SellSubtotal: number;
   DiscountCost: number;

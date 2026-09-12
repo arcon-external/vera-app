@@ -4,6 +4,7 @@ import {
   Export,
   GetCustomerPreview,
   GetInternalBreakdown,
+  GetQuotationPreviewHTML,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { Select } from "./components/Select";
@@ -181,10 +182,12 @@ function App() {
   const [customerPreview, setCustomerPreview] =
     useState<CustomerPreview | null>(null);
   const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
+  const [quotationHTML, setQuotationHTML] = useState<string | null>(null);
 
   const clearPreview = useCallback(() => {
     setCustomerPreview(null);
     setBreakdown(null);
+    setQuotationHTML(null);
   }, []);
 
   // Any input edit invalidates the review: the user must re-Prepare.
@@ -344,12 +347,14 @@ function App() {
 
     try {
       await Prepare(input);
-      const [customer, internal] = await Promise.all([
+      const [customer, internal, quotationPreviewHTML] = await Promise.all([
         GetCustomerPreview(),
         GetInternalBreakdown(),
+        GetQuotationPreviewHTML(),
       ]);
       setCustomerPreview(customer as CustomerPreview);
       setBreakdown(internal as InternalBreakdown);
+      setQuotationHTML(String(quotationPreviewHTML));
       setStatus({ type: "ready", message: "Quotation prepared — review and export" });
     } catch (err: unknown) {
       clearPreview();
@@ -812,8 +817,12 @@ function App() {
             </div>
           </section>
 
-          {customerPreview !== null && breakdown !== null && (
-            <ReviewPanel customer={customerPreview} internal={breakdown} />
+          {customerPreview !== null && breakdown !== null && quotationHTML !== null && (
+            <ReviewPanel
+              customer={customerPreview}
+              internal={breakdown}
+              quotationHTML={quotationHTML}
+            />
           )}
 
           <section className="flex flex-col items-center gap-3">
