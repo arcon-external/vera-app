@@ -122,7 +122,7 @@ export function ReviewPanel({ customer, internal }: ReviewPanelProps) {
 
           <div className="divide-y divide-amber-100/80">
             <Row
-              label={`Cost subtotal (before ${internal.MarginPercent}% margin)`}
+              label="Original cost subtotal"
               value={internal.DisplayCost}
             />
             <Row label="Sell subtotal (after margin)" value={internal.DisplaySell} />

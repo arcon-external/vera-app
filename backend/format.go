@@ -15,6 +15,10 @@ func formatRupiah(amount uint64) string {
 	return rupiahPrinter.Sprintf("%d", amount)
 }
 
+func formatSignedRupiah(amount int64) string {
+	return rupiahPrinter.Sprintf("%d", amount)
+}
+
 func formatDescription(raw string) template.HTML {
 	clean := strings.ReplaceAll(raw, "\r\n", "\n")
 	lines := strings.Split(clean, "\n")

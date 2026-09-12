@@ -17,6 +17,8 @@ interface ItemRow {
   qty: string;
   uom: string;
   unitPrice: string;
+  marginEnabled: boolean;
+  marginPercent: string;
 }
 
 interface StatusState {
@@ -86,6 +88,8 @@ const DEFAULT_ITEM: ItemRow = {
   qty: "1",
   uom: "Lot",
   unitPrice: "",
+  marginEnabled: false,
+  marginPercent: "0",
 };
 
 function newItem(key: number): ItemRow {
@@ -170,7 +174,6 @@ function App() {
   const [paymentTerm, setPaymentTerm] = useState(90);
   const [leadTime, setLeadTime] = useState(60);
   const [discountPercent, setDiscountPercent] = useState(5);
-  const [profitMargin, setProfitMargin] = useState(0);
   const [taxZone, setTaxZone] = useState("FTZ");
   const [taxCategory, setTaxCategory] = useState("");
   const [incoterm, setIncoterm] = useState("EXW");
@@ -193,7 +196,6 @@ function App() {
     subject,
     recipientName,
     discountPercent,
-    profitMargin,
     taxZone,
     taxCategory,
     validity,
@@ -216,7 +218,7 @@ function App() {
   }, []);
 
   const handleItemChange = useCallback(
-    (key: number, field: keyof ItemRow, value: string | string[]) => {
+    (key: number, field: keyof ItemRow, value: string | string[] | boolean) => {
       setItems((prev) =>
         prev.map((item) => (item.key === key ? { ...item, [field]: value } : item))
       );
@@ -284,6 +286,11 @@ function App() {
             uom: (cols[1] || "").trim() || "Lot",
             qty: (cols[2] || "").trim() || "1",
             unitPrice: (cols[3] || "").replace(/\D/g, "").trim(),
+            marginPercent: Math.min(
+              Number.parseInt((cols[4] || "").replace(/\D/g, "")) || 0,
+              100
+            ).toString(),
+            marginEnabled: Number.parseInt((cols[4] || "").replace(/\D/g, "")) > 0,
           };
         });
 
@@ -316,6 +323,8 @@ function App() {
           Qty: Number.parseInt(item.qty) || 0,
           UoM: item.uom,
           UnitPrice: Number.parseInt(item.unitPrice) || 0,
+          MarginEnabled: item.marginEnabled,
+          MarginPercent: Number.parseInt(item.marginPercent) || 0,
         })
       );
 
@@ -324,7 +333,6 @@ function App() {
       Subject: subject,
       RecipientName: recipientName,
       DiscountPercent: discountPercent,
-      ProfitMargin: profitMargin,
       TaxZone: taxZone,
       TaxCategory: taxZone === "NonFTZ" ? taxCategory : "",
       Validity: validity,
@@ -348,7 +356,7 @@ function App() {
       const msg = typeof err === "string" ? err : "Validation failed";
       setStatus({ type: "error", message: msg });
     }
-  }, [items, subject, recipientName, discountPercent, profitMargin, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm, clearPreview]);
+  }, [items, subject, recipientName, discountPercent, taxZone, taxCategory, validity, paymentTerm, leadTime, customerId, incoterm, clearPreview]);
 
   const handlePasteDetails = useCallback(
     (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -366,7 +374,6 @@ function App() {
       setDiscountPercent(Math.min(Number.parseInt(cols[5]) || 5, 100));
       setCustomerId(Number.parseInt(cols[6]) || 2);
       setIncoterm((cols[7] || "").trim() || "EXW");
-      setProfitMargin(Math.min(Number.parseInt(cols[8]) || 0, 100));
       const pastedZone = (cols[9] || "").trim();
       setTaxZone(pastedZone === "NonFTZ" ? "NonFTZ" : "FTZ");
       setTaxCategory((cols[10] || "").trim());
@@ -453,11 +460,12 @@ function App() {
             </div>
 
             <div className={`${card} overflow-hidden`}>
-              <div className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
+              <div className="grid grid-cols-[1.4fr_0.58fr_0.52fr_0.9fr_1fr_auto] gap-3 border-b border-slate-100 px-6 py-3 text-[11px] font-medium tracking-[0.08em] uppercase text-slate-400">
                 <span>Description</span>
                 <span>UoM</span>
                 <span>Qty</span>
                 <span>Cost Price (IDR)</span>
+                <span>Margin</span>
                 <span />
               </div>
 
@@ -471,7 +479,7 @@ function App() {
                       opacity: 0,
                     }}
                   >
-                    <div className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 px-6 pt-3 items-start group">
+                    <div className="grid grid-cols-[1.4fr_0.58fr_0.52fr_0.9fr_1fr_auto] gap-3 px-6 pt-3 items-start group">
                       <input
                         type="text"
                         placeholder="Service or product description. Paste from Excel"
@@ -514,6 +522,52 @@ function App() {
                         }
                         className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[14px] text-slate-800 placeholder-slate-400 outline-none transition duration-200 hover:border-slate-300 focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/10"
                       />
+                      <div className="flex min-w-0 flex-wrap items-center gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={item.marginEnabled}
+                          aria-label={`Enable profit margin for item ${idx + 1}`}
+                          onClick={() =>
+                            handleItemChange(item.key, "marginEnabled", !item.marginEnabled)
+                          }
+                          className={`inline-flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium transition duration-200 active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-emerald-500/20 ${
+                            item.marginEnabled
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              item.marginEnabled ? "bg-emerald-500" : "bg-slate-300"
+                            }`}
+                          />
+                          {item.marginEnabled ? "On" : "Off"}
+                        </button>
+                        {item.marginEnabled && (
+                          <div className="flex items-center rounded-lg border border-emerald-200 bg-white px-2 py-2">
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              aria-label={`Profit margin percentage for item ${idx + 1}`}
+                              value={item.marginPercent}
+                              onChange={(e) =>
+                                handleItemChange(
+                                  item.key,
+                                  "marginPercent",
+                                  Math.min(
+                                    Number(e.target.value.replace(/\D/g, "")) || 0,
+                                    100
+                                  ).toString()
+                                )
+                              }
+                              className="w-9 bg-transparent text-center text-[13px] text-slate-800 outline-none"
+                            />
+                            <span className="text-[12px] text-slate-400">%</span>
+                          </div>
+                        )}
+                      </div>
                       <button
                         onClick={() => handleRemoveItem(item.key)}
                         disabled={items.length <= 1}
@@ -530,9 +584,9 @@ function App() {
                         {item.subItems.map((sub, si) => (
                           <div
                             key={si}
-                            className="grid grid-cols-[1.5fr_0.62fr_0.55fr_0.95fr_auto] gap-3 pr-6 py-1 items-center"
+                            className="grid grid-cols-[1.4fr_0.58fr_0.52fr_0.9fr_1fr_auto] gap-3 pr-6 py-1 items-center"
                           >
-                            <div className="col-span-4 flex items-center gap-2">
+                            <div className="col-span-5 flex items-center gap-2">
                               <span className="flex-shrink-0 text-[11px] text-slate-400 select-none">
                                 &mdash;
                               </span>
@@ -691,26 +745,6 @@ function App() {
                         value={discountPercent}
                         onChange={(e) =>
                           setDiscountPercent(
-                            Math.min(Number(e.target.value.replace(/\D/g, "")) || 0, 100)
-                          )
-                        }
-                        className={inputFieldCenter}
-                      />
-                      <span className={inputSuffix}>%</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-[12px] font-medium tracking-[0.06em] uppercase text-slate-400">
-                      Margin
-                    </label>
-                    <div className={inputGroup} title="Customer price = cost × (1 + margin)">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={profitMargin}
-                        onChange={(e) =>
-                          setProfitMargin(
                             Math.min(Number(e.target.value.replace(/\D/g, "")) || 0, 100)
                           )
                         }
