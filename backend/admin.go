@@ -89,6 +89,37 @@ func (a *AdminAPI) IssuePasswordReset(id int64) (string, error) {
 	return response.Token, nil
 }
 
+// ListDeletionRequests returns pending account-deletion requests.
+func (a *AdminAPI) ListDeletionRequests() ([]DeletionRequest, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Requests []DeletionRequest `json:"requests"`
+	}
+	if err := client.Get("/v1/admin/deletion-requests", &response); err != nil {
+		return nil, err
+	}
+	if response.Requests == nil {
+		response.Requests = []DeletionRequest{}
+	}
+	return response.Requests, nil
+}
+
+// DecideDeletion approves (soft-delete) or rejects a deletion request.
+func (a *AdminAPI) DecideDeletion(id int64, approve bool) error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	action := "reject"
+	if approve {
+		action = "approve"
+	}
+	return client.Post("/v1/admin/deletion-requests/"+itoa(id)+"/"+action, nil, nil)
+}
+
 func itoa(n int64) string {
 	if n == 0 {
 		return "0"

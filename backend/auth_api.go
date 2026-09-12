@@ -101,6 +101,61 @@ func (a *AuthAPI) CurrentUser() (AuthUserDTO, error) {
 	return toAuthUserDTO(user), nil
 }
 
+// ChangePassword sets a new password. The current password is required
+// unless the account is flagged for first setup.
+func (a *AuthAPI) ChangePassword(currentPassword, newPassword string) error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	return client.Patch("/v1/auth/password", map[string]string{
+		"currentPassword": currentPassword,
+		"newPassword":     newPassword,
+	}, nil)
+}
+
+// LogoutEverywhere revokes all sessions for the signed-in user, including
+// the current one.
+func (a *AuthAPI) LogoutEverywhere() error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	if err := client.Post("/v1/auth/logout-everywhere", nil, nil); err != nil {
+		return err
+	}
+	return ClearSessionToken()
+}
+
+// DeletionRequest is a pending account-deletion request.
+type DeletionRequest struct {
+	ID          int64
+	UserID      int64
+	Email       string
+	DisplayName string
+	Status      string
+	RequestedAt string
+}
+
+// RequestDeletion opens a deletion request for the signed-in user. The
+// confirmed flag is the explicit second confirmation.
+func (a *AuthAPI) RequestDeletion(confirmed bool) (DeletionRequest, error) {
+	client, err := api()
+	if err != nil {
+		return DeletionRequest{}, err
+	}
+	var response struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := client.Post("/v1/auth/deletion-request", map[string]bool{
+		"confirm": confirmed,
+	}, &response); err != nil {
+		return DeletionRequest{}, err
+	}
+	return DeletionRequest{ID: response.ID, Status: response.Status}, nil
+}
+
 // EnsureBootstrap is a no-op on the desktop: the first admin is created by
 // the server at startup from its own environment. It remains so existing
 // callers keep compiling.

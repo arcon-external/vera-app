@@ -45,6 +45,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.PATCH("/v1/admin/users/:id/active", server.setUserActive, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/users/:id/reset", server.resetUser, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/auth/redeem", server.redeemInvite)
+	server.echo.PATCH("/v1/auth/password", server.changePassword, server.requireSession)
+	server.echo.POST("/v1/auth/logout-everywhere", server.logoutEverywhere, server.requireSession)
+	server.echo.POST("/v1/auth/deletion-request", server.requestDeletion, server.requireSession)
+	server.echo.GET("/v1/admin/deletion-requests", server.listDeletionRequests, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/deletion-requests/:id/approve", server.decideDeletion(true), server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/deletion-requests/:id/reject", server.decideDeletion(false), server.requireSession, server.requireAdmin)
 	return server
 }
 
