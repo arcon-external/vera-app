@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChangePassword, LogoutEverywhere, RequestDeletion } from "@backend/backend/AuthAPI";
+import { ChangePassword, LogoutEverywhere, RequestDeletion, UpdateProfile } from "@backend/backend/AuthAPI";
 import {
   DecideDeletion,
   ListDeletionRequests,
 } from "@backend/backend/AdminAPI";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+import type { SignedInUser } from "./LoginPage";
 
 interface DeletionRequestRow {
   ID: number;
@@ -23,7 +24,15 @@ function errorMessage(err: unknown, fallback: string): string {
 const fieldClass =
   "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
-export function SettingsPage({ isAdmin }: { isAdmin: boolean }) {
+export function SettingsPage({
+  isAdmin,
+  user,
+  onProfileChanged,
+}: {
+  isAdmin: boolean;
+  user: SignedInUser;
+  onProfileChanged: (user: SignedInUser) => void;
+}) {
   return (
     <section aria-labelledby="settings-heading" className="space-y-6">
       <div>
@@ -35,11 +44,163 @@ export function SettingsPage({ isAdmin }: { isAdmin: boolean }) {
         </p>
       </div>
 
+      <ProfileCard user={user} onProfileChanged={onProfileChanged} />
       <PasswordCard />
       <SessionsCard />
       <DeletionCard />
       {isAdmin ? <DeletionQueue /> : null}
     </section>
+  );
+}
+
+function ProfileCard({
+  user,
+  onProfileChanged,
+}: {
+  user: SignedInUser;
+  onProfileChanged: (user: SignedInUser) => void;
+}) {
+  const [displayName, setDisplayName] = useState(user.DisplayName);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ base64: string; mime: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  const pickFile = async (file: File | undefined) => {
+    setError("");
+    setPendingFile(null);
+    setPreview(null);
+    if (!file) return;
+    if (file.size > 512 * 1024) {
+      setError("That picture is over 512KB. Choose a smaller file.");
+      return;
+    }
+    if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) {
+      setError("Pictures must be PNG, JPEG, GIF, or WebP.");
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(file);
+    }).catch(() => {
+      setError("We couldn't read that file.");
+      return null;
+    });
+    if (!dataUrl) return;
+    const match = /^data:(image\/[a-z+]+);base64,(.+)$/.exec(dataUrl);
+    if (!match) {
+      setError("We couldn't read that file.");
+      return;
+    }
+    setPreview(dataUrl);
+    setPendingFile({ base64: match[2], mime: match[1] });
+  };
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = (await UpdateProfile(
+        displayName.trim() === user.DisplayName ? "" : displayName.trim(),
+        pendingFile?.base64 ?? "",
+        pendingFile?.mime ?? "",
+        false
+      )) as SignedInUser;
+      onProfileChanged(updated);
+      setDisplayName(updated.DisplayName);
+      setPendingFile(null);
+      setPreview(null);
+      pushToast("success", "Profile updated.");
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't update your profile.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await UpdateProfile("", "", "", true);
+      onProfileChanged({ ...user, AvatarURL: undefined });
+      setPendingFile(null);
+      setPreview(null);
+      pushToast("success", "Profile picture removed.");
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't remove your picture.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shown = preview ?? user.AvatarURL ?? null;
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Profile" />
+      <form onSubmit={save} className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex flex-col items-center gap-2">
+          <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-accent-100 text-lead font-semibold text-accent-800" aria-hidden="true">
+            {shown ? (
+              <img src={shown} alt="" className="h-full w-full object-cover" />
+            ) : (
+              user.DisplayName.slice(0, 2).toUpperCase()
+            )}
+          </span>
+          <label className="cursor-pointer text-caption font-medium text-accent-700 hover:underline">
+            Choose picture
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="sr-only"
+              onChange={(event) => void pickFile(event.target.files?.[0])}
+            />
+          </label>
+          {shown ? (
+            <button
+              type="button"
+              onClick={() => void remove()}
+              className="text-caption text-ink-400 hover:text-danger-600 hover:underline"
+            >
+              Remove
+            </button>
+          ) : null}
+        </div>
+        <div className="grid flex-1 gap-4">
+          {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">Display name</span>
+            <input
+              type="text"
+              value={displayName}
+              maxLength={80}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="How your name appears"
+              className={fieldClass}
+            />
+          </label>
+          <div>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Saving…" : "Save profile"}
+            </Button>
+          </div>
+        </div>
+      </form>
+      <p className="mt-3 text-caption leading-relaxed text-ink-400">
+        Pictures must be PNG, JPEG, GIF, or WebP, under 512KB and 1024px per side.
+      </p>
+    </Card>
   );
 }
 

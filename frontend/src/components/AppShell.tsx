@@ -10,7 +10,7 @@ interface AppShellProps {
   showUsersTab?: boolean;
   children: ReactNode;
   actionBar?: ReactNode;
-  user?: { DisplayName: string; Email: string; Role: string } | null;
+  user?: { DisplayName: string; Email: string; Role: string; AvatarURL?: string } | null;
   onSignOut?: () => void;
 }
 
@@ -106,8 +106,12 @@ export function AppShell({
                 aria-label={`Account menu for ${user.DisplayName}`}
                 className="inline-flex min-h-9 items-center gap-2 rounded-lg px-2.5 py-2 transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
               >
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent-100 text-caption font-semibold text-accent-800" aria-hidden="true">
-                  {initials(user.DisplayName)}
+                <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-accent-100 text-caption font-semibold text-accent-800" aria-hidden="true">
+                  {user.AvatarURL ? (
+                    <img src={user.AvatarURL} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    initials(user.DisplayName)
+                  )}
                 </span>
                 <span className="hidden text-left sm:block">
                   <span className="block max-w-[160px] truncate text-small font-medium leading-tight text-ink-900">

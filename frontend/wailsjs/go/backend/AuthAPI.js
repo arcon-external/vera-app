@@ -29,3 +29,7 @@ export function RequestDeletion(arg1) {
 export function RestoreSession() {
   return window['go']['backend']['AuthAPI']['RestoreSession']();
 }
+
+export function UpdateProfile(arg1, arg2, arg3, arg4) {
+  return window['go']['backend']['AuthAPI']['UpdateProfile'](arg1, arg2, arg3, arg4);
+}

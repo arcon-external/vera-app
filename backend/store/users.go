@@ -20,6 +20,8 @@ type AuthUser struct {
 	IsActive           bool
 	MustChangePassword bool
 	LastLoginAt        time.Time
+	Avatar             []byte
+	AvatarMime         string
 }
 
 // CreateUser inserts a user. Email/password is the only login method, so a
@@ -61,12 +63,12 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (AuthUser, err
 	var lastLogin *time.Time
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT id, email, display_name, password_hash,
-		       role, is_active, must_change_password, last_login_at
+		       role, is_active, must_change_password, last_login_at, avatar, avatar_mime
 		FROM %s.users WHERE LOWER(email) = LOWER($1)`, s.configSchema()),
 		email).Scan(
 		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 		&user.Role, &user.IsActive, &user.MustChangePassword,
-		&lastLogin)
+		&lastLogin, &user.Avatar, &user.AvatarMime)
 	if err != nil {
 		return AuthUser{}, fmt.Errorf("get user by email: %w", err)
 	}
@@ -86,12 +88,12 @@ func (s *Store) GetUserByID(ctx context.Context, userID int64) (AuthUser, error)
 	var lastLogin *time.Time
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT id, email, display_name, password_hash,
-		       role, is_active, must_change_password, last_login_at
+		       role, is_active, must_change_password, last_login_at, avatar, avatar_mime
 		FROM %s.users WHERE id = $1`, s.configSchema()),
 		userID).Scan(
 		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 		&user.Role, &user.IsActive, &user.MustChangePassword,
-		&lastLogin)
+		&lastLogin, &user.Avatar, &user.AvatarMime)
 	if err != nil {
 		return AuthUser{}, fmt.Errorf("get user: %w", err)
 	}
@@ -158,7 +160,7 @@ func (s *Store) GetSessionUser(ctx context.Context, tokenHash string, now time.T
 	var lastLogin *time.Time
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT u.id, u.email, u.display_name, u.password_hash,
-		       u.role, u.is_active, u.must_change_password, u.last_login_at
+		       u.role, u.is_active, u.must_change_password, u.last_login_at, u.avatar, u.avatar_mime
 		FROM %s.sessions s
 		JOIN %s.users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.revoked_at IS NULL
@@ -166,7 +168,7 @@ func (s *Store) GetSessionUser(ctx context.Context, tokenHash string, now time.T
 		tokenHash, now).Scan(
 		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 		&user.Role, &user.IsActive, &user.MustChangePassword,
-		&lastLogin)
+		&lastLogin, &user.Avatar, &user.AvatarMime)
 	if err != nil {
 		return AuthUser{}, fmt.Errorf("get session user: %w", err)
 	}
@@ -215,7 +217,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]AuthUser, error) {
 	}
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT id, email, display_name, password_hash,
-		       role, is_active, must_change_password, last_login_at
+		       role, is_active, must_change_password, last_login_at, avatar, avatar_mime
 		FROM %s.users ORDER BY id`, s.configSchema()))
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
@@ -229,7 +231,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]AuthUser, error) {
 		if err := rows.Scan(
 			&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 			&user.Role, &user.IsActive, &user.MustChangePassword,
-			&lastLogin); err != nil {
+			&lastLogin, &user.Avatar, &user.AvatarMime); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
 		if lastLogin != nil {
@@ -295,6 +297,45 @@ func (s *Store) CountActiveAdmins(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("count active admins: %w", err)
 	}
 	return count, nil
+}
+
+// SetProfile updates a user's display name and/or avatar. Empty display
+// name leaves the name unchanged; clearAvatar removes the picture.
+func (s *Store) SetProfile(ctx context.Context, userID int64, displayName string, avatar []byte, mime string, clearAvatar bool) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin profile update: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if displayName != "" {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			"UPDATE %s.users SET display_name = $2 WHERE id = $1", s.configSchema()),
+			userID, displayName); err != nil {
+			return fmt.Errorf("update display name: %w", err)
+		}
+	}
+	if clearAvatar {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			"UPDATE %s.users SET avatar = NULL, avatar_mime = '' WHERE id = $1", s.configSchema()),
+			userID); err != nil {
+			return fmt.Errorf("clear avatar: %w", err)
+		}
+	} else if avatar != nil {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			"UPDATE %s.users SET avatar = $2, avatar_mime = $3 WHERE id = $1", s.configSchema()),
+			userID, avatar, mime); err != nil {
+			return fmt.Errorf("update avatar: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit profile update: %w", err)
+	}
+	return nil
 }
 
 // TouchLogin updates the user's last-login timestamp.

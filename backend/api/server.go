@@ -45,6 +45,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.PATCH("/v1/admin/users/:id/active", server.setUserActive, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/users/:id/reset", server.resetUser, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/auth/redeem", server.redeemInvite)
+	server.echo.PATCH("/v1/auth/profile", server.updateProfile, server.requireSession)
 	server.echo.PATCH("/v1/auth/password", server.changePassword, server.requireSession)
 	server.echo.POST("/v1/auth/logout-everywhere", server.logoutEverywhere, server.requireSession)
 	server.echo.POST("/v1/auth/deletion-request", server.requestDeletion, server.requireSession)
@@ -98,12 +99,16 @@ func (s *Server) logout(context echo.Context) error {
 
 func (s *Server) me(context echo.Context) error {
 	user, _ := context.Get("user").(store.AuthUser)
-	return context.JSON(http.StatusOK, map[string]any{
+	response := map[string]any{
 		"id":          user.ID,
 		"email":       user.Email,
 		"displayName": user.DisplayName,
 		"role":        user.Role,
-	})
+	}
+	if url := avatarURL(user); url != "" {
+		response["avatarUrl"] = url
+	}
+	return context.JSON(http.StatusOK, response)
 }
 
 // requireSession validates the bearer token and stores the user for handlers.

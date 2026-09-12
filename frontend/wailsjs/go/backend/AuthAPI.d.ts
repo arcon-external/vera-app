@@ -15,3 +15,5 @@ export function LogoutEverywhere():Promise<void>;
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;
 
 export function RestoreSession():Promise<backend.AuthUserDTO>;
+
+export function UpdateProfile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<backend.AuthUserDTO>;
