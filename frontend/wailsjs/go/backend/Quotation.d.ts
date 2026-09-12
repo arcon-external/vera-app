@@ -10,4 +10,16 @@ export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
 export function GetQuotationPreviewHTML():Promise<string>;
 
+export function SetRevisionContext(arg1:string, arg2:number):Promise<void>;
+
+export function ClearRevisionContext():Promise<void>;
+
+export function ListQuotations():Promise<unknown>;
+
+export function GetQuotation(arg1:number):Promise<unknown>;
+
+export function GetQuotationRevision(arg1:number, arg2:number):Promise<unknown>;
+
+export function DeleteQuotation(arg1:number):Promise<void>;
+
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;

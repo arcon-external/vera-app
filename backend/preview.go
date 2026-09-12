@@ -35,6 +35,8 @@ type CustomerPreview struct {
 	RecipientName             string
 	RecipientCompany          string
 	RecipientAddress          string
+	QuoteNumber               string
+	RevisionID                uint16
 	Date                      string
 	ValidUntil                string
 	Incoterm                  string
@@ -155,6 +157,8 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 		RecipientName:             q.Data.RecipientName,
 		RecipientCompany:          q.Data.RecipientCompany,
 		RecipientAddress:          q.Data.RecipientAddress,
+		QuoteNumber:               q.Data.QuoteNumber,
+		RevisionID:                q.Data.RevisionID,
 		Date:                      q.Data.Date,
 		ValidUntil:                q.Data.ValidUntil,
 		Incoterm:                  q.Data.Incoterm,
