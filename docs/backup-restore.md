@@ -30,6 +30,30 @@ A healthy run logs `wrote .../vera-<stamp>.dump (<size>)` plus `retention pass d
 If you see `BACKUP FAILED`, check that the `vera-postgres` container is up and
 that `.env` still has `POSTGRES_PASSWORD`.
 
+## Restore from the dashboard (guarded API flow)
+
+Admins can restore without shell access from **Settings → Restore database**:
+
+1. Type `RESTORE` to arm the button (this is the first confirmation).
+2. Click **Select backup and restore** and pick a `vera-*.dump` file
+   (second confirmation is the file dialog).
+3. The server validates the `PGDMP` header **before touching the database**,
+   takes a safety snapshot
+   (`vera-pre-restore-<stamp>.dump` in the backup dir), then drops and
+   restores the schema, verifies row counts, and records a `backup.restore`
+   audit entry.
+4. **Everyone is signed out immediately** — the sessions table is wiped with
+   the schema by design. Sign in again and confirm the archive list.
+
+Non-dump uploads are rejected with 422 and leave the database untouched.
+Staff receive 403. If the restore fails halfway, the error names the safety
+snapshot — roll back to it with the same flow.
+
+The API container mounts the backup dir **read-write** (snapshots must be
+writable) and ships `postgresql-client-16` to match the server version —
+`pg_dump` refuses to talk to a newer server, so the client major must stay
+in lockstep with `vera-postgres`.
+
 ## Restore drill (do this before any real restore)
 
 Always prove the dump against a throwaway database first:

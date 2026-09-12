@@ -26,6 +26,10 @@ export function ListUsers() {
   return window['go']['backend']['AdminAPI']['ListUsers']();
 }
 
+export function RestoreBackup() {
+  return window['go']['backend']['AdminAPI']['RestoreBackup']();
+}
+
 export function SetContext(arg1) {
   return window['go']['backend']['AdminAPI']['SetContext'](arg1);
 }

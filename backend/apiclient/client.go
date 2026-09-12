@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"time"
@@ -121,6 +122,52 @@ func (c *Client) Patch(path string, body, out any) error {
 // Delete performs an authenticated DELETE.
 func (c *Client) Delete(path string) error {
 	return c.do(http.MethodDelete, path, nil, nil)
+}
+
+// Upload posts a multipart file field and decodes the JSON response into
+// out (may be nil). It is used for admin backup restores.
+func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(fieldName, filename)
+	if err != nil {
+		return fmt.Errorf("build upload: %w", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		return fmt.Errorf("build upload: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("build upload: %w", err)
+	}
+	request, err := http.NewRequest(http.MethodPost, c.baseURL+path, &body)
+	if err != nil {
+		return fmt.Errorf("build API request: %w", err)
+	}
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	if token := c.token(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return fmt.Errorf("reach the quotation server: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusUnauthorized {
+		if c.OnUnauthorized != nil {
+			c.OnUnauthorized()
+		}
+		return fmt.Errorf("signed out; sign in again")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("%s", apiError(response, "server request failed"))
+	}
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode server response: %w", err)
+	}
+	return nil
 }
 
 // Download performs an authenticated GET returning raw bytes and the

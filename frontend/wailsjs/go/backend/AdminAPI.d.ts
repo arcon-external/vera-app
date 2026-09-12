@@ -15,6 +15,8 @@ export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
 
 export function ListUsers():Promise<Array<backend.ManagedUser>>;
 
+export function RestoreBackup():Promise<backend.RestoreResult>;
+
 export function SetContext(arg1:context.Context):Promise<void>;
 
 export function SetUserActive(arg1:number,arg2:boolean):Promise<void>;

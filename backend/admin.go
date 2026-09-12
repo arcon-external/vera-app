@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -180,4 +181,56 @@ func (a *AdminAPI) DownloadBackup() (string, error) {
 		return "", fmt.Errorf("write backup: %w", err)
 	}
 	return filePath, nil
+}
+
+// openFileDialog opens the native file picker. It is a variable so tests can
+// substitute a stub; production uses the Wails runtime dialog.
+var openFileDialog = runtime.OpenFileDialog
+
+// RestoreResult reports what a backup restore did.
+type RestoreResult struct {
+	SafetySnapshot string
+	Quotations     int64
+	Revisions      int64
+}
+
+// RestoreBackup opens a file dialog for a dump, validates the PGDMP magic
+// client-side, and uploads it for a server-side restore. The caller must
+// have completed the typed-confirm step; the native dialog is the second
+// confirmation. Everyone is signed out by a successful restore.
+func (a *AdminAPI) RestoreBackup() (RestoreResult, error) {
+	client, err := api()
+	if err != nil {
+		return RestoreResult{}, err
+	}
+	filePath, err := openFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:   "Select Database Backup to Restore",
+		Filters: []runtime.FileFilter{{DisplayName: "Postgres Dump (*.dump)", Pattern: "*.dump"}},
+	})
+	if err != nil {
+		return RestoreResult{}, fmt.Errorf("open file dialog: %w", err)
+	}
+	if filePath == "" {
+		return RestoreResult{}, fmt.Errorf("user cancelled")
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return RestoreResult{}, fmt.Errorf("read backup file: %w", err)
+	}
+	if len(data) < 5 || len(data) > 512<<20 || string(data[:5]) != "PGDMP" {
+		return RestoreResult{}, fmt.Errorf("not a Postgres custom-format dump (missing PGDMP header)")
+	}
+	var response struct {
+		SafetySnapshot string `json:"safetySnapshot"`
+		Quotations     int64  `json:"quotations"`
+		Revisions      int64  `json:"revisions"`
+	}
+	if err := client.Upload("/v1/admin/backup/restore", "dump", filepath.Base(filePath), data, &response); err != nil {
+		return RestoreResult{}, err
+	}
+	return RestoreResult{
+		SafetySnapshot: response.SafetySnapshot,
+		Quotations:     response.Quotations,
+		Revisions:      response.Revisions,
+	}, nil
 }
