@@ -105,8 +105,8 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list quotations: %v", err)
 	}
-	if len(list) != 1 || list[0].RevisionNumber != 1 {
-		t.Fatalf("list = %#v; want one latest revision", list)
+	if len(list) != 2 || list[0].RevisionNumber != 1 || list[1].RevisionNumber != 0 {
+		t.Fatalf("list = %#v; want both revisions in descending order", list)
 	}
 
 	if err := database.DeleteQuotation(ctx, first.ID); err != nil {
@@ -114,5 +114,18 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	}
 	if _, err := database.GetQuotation(ctx, first.ID, nil); err == nil {
 		t.Fatal("expected deleted quotation lookup to fail")
+	}
+
+	draft.QuoteNumber = "15029999"
+	draft.RevisionNumber = 0
+	explicit, err := database.SaveRevision(ctx, draft)
+	if err != nil {
+		t.Fatalf("save explicitly numbered revision 0: %v", err)
+	}
+	if explicit.QuoteNumber != "15029999" || explicit.RevisionNumber != 0 {
+		t.Errorf("explicit revision = %q/%d; want 15029999/0", explicit.QuoteNumber, explicit.RevisionNumber)
+	}
+	if err := database.DeleteQuotation(ctx, explicit.ID); err != nil {
+		t.Fatalf("delete explicitly numbered quotation: %v", err)
 	}
 }

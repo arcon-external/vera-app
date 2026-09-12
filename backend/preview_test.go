@@ -154,6 +154,9 @@ func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
 	if !strings.Contains(previewHTML, "<title>Quotation</title>") {
 		t.Error("quotation preview does not use the customer template")
 	}
+	if !strings.Contains(previewHTML, "Revision") || !strings.Contains(previewHTML, ">00<") {
+		t.Error("quotation preview is missing revision 00")
+	}
 	if !strings.Contains(previewHTML, "120.000") || !strings.Contains(previewHTML, "270.000") {
 		t.Error("quotation preview is missing marginalized customer prices")
 	}

@@ -48,6 +48,8 @@ export namespace backend {
 	    RecipientName: string;
 	    RecipientCompany: string;
 	    RecipientAddress: string;
+	    QuoteNumber: string;
+	    RevisionID: number;
 	    Date: string;
 	    ValidUntil: string;
 	    Incoterm: string;
@@ -79,6 +81,8 @@ export namespace backend {
 	        this.RecipientName = source["RecipientName"];
 	        this.RecipientCompany = source["RecipientCompany"];
 	        this.RecipientAddress = source["RecipientAddress"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.RevisionID = source["RevisionID"];
 	        this.Date = source["Date"];
 	        this.ValidUntil = source["ValidUntil"];
 	        this.Incoterm = source["Incoterm"];

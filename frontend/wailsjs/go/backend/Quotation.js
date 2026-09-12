@@ -18,6 +18,30 @@ export function GetQuotationPreviewHTML() {
   return window['go']['backend']['Quotation']['GetQuotationPreviewHTML']();
 }
 
+export function SetRevisionContext(arg1, arg2) {
+  return window['go']['backend']['Quotation']['SetRevisionContext'](arg1, arg2);
+}
+
+export function ClearRevisionContext() {
+  return window['go']['backend']['Quotation']['ClearRevisionContext']();
+}
+
+export function ListQuotations() {
+  return window['go']['backend']['Quotation']['ListQuotations']();
+}
+
+export function GetQuotation(arg1) {
+  return window['go']['backend']['Quotation']['GetQuotation'](arg1);
+}
+
+export function GetQuotationRevision(arg1, arg2) {
+  return window['go']['backend']['Quotation']['GetQuotationRevision'](arg1, arg2);
+}
+
+export function DeleteQuotation(arg1) {
+  return window['go']['backend']['Quotation']['DeleteQuotation'](arg1);
+}
+
 export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
 }

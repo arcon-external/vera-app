@@ -82,6 +82,7 @@ type QuotationData struct {
 	RecipientCompany          string
 	RecipientAddress          string
 	QuoteNumber               string
+	RevisionID                uint16
 	Subject                   string
 	DisplaySubTotal           string
 	DisplayDiscountAmount     string
@@ -113,15 +114,37 @@ type QuotationData struct {
 // Quotation is the Wails-bound application struct.
 // It owns the Wails context and the full data bag for rendering.
 type Quotation struct {
-	ctx       context.Context
-	Data      QuotationData
-	lastInput QuotationInput
-	prepared  bool
-	store     *store.Store
+	ctx                context.Context
+	Data               QuotationData
+	lastInput          QuotationInput
+	prepared           bool
+	store              *store.Store
+	archiveQuoteNumber string
+	archiveRevision    uint16
 }
 
 func (q *Quotation) SetStore(database *store.Store) {
 	q.store = database
+}
+
+// SetRevisionContext tells Export whether this is a new quotation or the
+// next immutable revision of an archived quotation.
+func (q *Quotation) SetRevisionContext(quoteNumber string, revision uint16) error {
+	if strings.TrimSpace(quoteNumber) == "" {
+		return fmt.Errorf("quote number is required for a revision")
+	}
+	q.archiveQuoteNumber = strings.TrimSpace(quoteNumber)
+	q.archiveRevision = revision
+	q.Data.QuoteNumber = q.archiveQuoteNumber
+	q.Data.RevisionID = revision
+	return nil
+}
+
+func (q *Quotation) ClearRevisionContext() {
+	q.archiveQuoteNumber = ""
+	q.archiveRevision = 0
+	q.Data.QuoteNumber = ""
+	q.Data.RevisionID = 0
 }
 
 var customerMap = map[uint8]string{
@@ -291,6 +314,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 // is only consumed after the user confirms the save dialog, preventing
 // wasted sequence increments on cancellation.
 func (q *Quotation) Export() error {
+	if q.store == nil {
+		return fmt.Errorf("Postgres store is not configured")
+	}
+
 	filePath, err := runtime.SaveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
 		DefaultFilename: "quotation.pdf",
@@ -304,44 +331,103 @@ func (q *Quotation) Export() error {
 		return fmt.Errorf("user cancelled")
 	}
 
-	if q.store == nil {
-		return fmt.Errorf("Postgres store is not configured")
+	if q.archiveQuoteNumber != "" {
+		q.Data.QuoteNumber = q.archiveQuoteNumber
+		q.Data.RevisionID = q.archiveRevision
+	} else {
+		sequenceContext := q.ctx
+		if sequenceContext == nil {
+			sequenceContext = context.Background()
+		}
+		sequenceID, err := q.store.NextQuoteSequence(sequenceContext)
+		if err != nil {
+			return fmt.Errorf("generate quote number from Postgres: %w", err)
+		}
+		q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, sequenceID)
+		q.Data.RevisionID = 0
 	}
-	sequenceContext := q.ctx
-	if sequenceContext == nil {
-		sequenceContext = context.Background()
-	}
-	sequenceID, err := q.store.NextQuoteSequence(sequenceContext)
-	if err != nil {
-		return fmt.Errorf("generate quote number from Postgres: %w", err)
-	}
-	q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, sequenceID)
 
-	err = q.save(filePath)
+	validatedPath, err := validateSavePath(filePath)
 	if err != nil {
-		return fmt.Errorf("save quotation: %w", err)
+		return fmt.Errorf("validate quotation path: %w", err)
+	}
+	pdfBuf, err := q.build()
+	if err != nil {
+		return fmt.Errorf("build quotation: %w", err)
+	}
+	if err := os.WriteFile(validatedPath, pdfBuf, 0o644); err != nil {
+		return fmt.Errorf("write quotation: %w", err)
+	}
+	htmlSnapshot, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		return fmt.Errorf("render quotation archive snapshot: %w", err)
+	}
+	if _, err := q.store.SaveRevision(q.context(), q.revisionDraft(htmlSnapshot, pdfBuf, validatedPath)); err != nil {
+		return fmt.Errorf("archive quotation revision: %w", err)
 	}
 
 	return nil
 }
 
-func (q *Quotation) save(path string) error {
-	validatedPath, err := validateSavePath(path)
-	if err != nil {
-		return err
+func (q *Quotation) context() context.Context {
+	if q.ctx == nil {
+		return context.Background()
+	}
+	return q.ctx
+}
+
+func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath string) store.RevisionDraft {
+	items := make([]store.RevisionItem, 0, len(q.Data.Items))
+	for _, item := range q.Data.Items {
+		items = append(items, store.RevisionItem{
+			ItemNo:                int(item.No),
+			Description:           item.Description,
+			Qty:                   int64(item.Qty),
+			UoM:                   item.UoM,
+			UnitPrice:             int64(item.OriginalUnitPrice),
+			MarginEnabled:         item.MarginEnabled,
+			MarginPercent:         int16(item.MarginPercent),
+			MarginAmount:          int64(item.MarginAmount),
+			OriginalTotal:         int64(item.OriginalTotal),
+			MarginalizedUnitPrice: int64(item.UnitPrice),
+			MarginalizedTotal:     int64(item.Total),
+		})
 	}
 
-	pdfBuf, err := q.build()
-	if err != nil {
-		return err
+	return store.RevisionDraft{
+		QuoteNumber:      q.Data.QuoteNumber,
+		CustomerCode:     int16(q.Data.CustomerID),
+		CustomerName:     q.Data.RecipientCompany,
+		CustomerAddress:  q.Data.RecipientAddress,
+		RevisionNumber:   int16(q.Data.RevisionID),
+		RecipientName:    q.Data.RecipientName,
+		RecipientAddress: q.Data.RecipientAddress,
+		Subject:          q.Data.Subject,
+		Incoterm:         q.Data.Incoterm,
+		ValidityDays:     int16(q.Data.Validity),
+		PaymentTermDays:  int16(q.Data.PaymentTerm),
+		LeadTimeDays:     int16(q.Data.LeadTime),
+		DiscountPercent:  int16(q.Data.DiscountPercent),
+		TaxZone:          q.Data.TaxZone,
+		TaxCategory:      q.Data.TaxCategory,
+		TaxRateBps:       int16(q.Data.TaxRateBps),
+		Items:            items,
+		Totals: store.RevisionTotals{
+			OriginalSubtotal:          int64(q.Data.OriginalSubTotal),
+			OriginalDiscount:          int64(q.Data.OriginalDiscountAmount),
+			OriginalGrand:             int64(q.Data.OriginalGrandTotal),
+			MarginalizedSubtotal:      int64(q.Data.SubTotal),
+			MarginalizedDiscount:      int64(q.Data.DiscountAmount),
+			MarginalizedGrand:         int64(q.Data.GrandTotal),
+			TaxAmount:                 int64(q.Data.TaxAmount),
+			MarginalizedGrandAfterTax: int64(q.Data.MarginalizedGrandAfterTax),
+			ProfitAmount:              q.Data.ProfitAmount,
+			NettProfit:                q.Data.NettProfit,
+		},
+		HTMLSnapshot: htmlSnapshot,
+		PDFData:      pdfData,
+		PDFPath:      pdfPath,
 	}
-
-	err = os.WriteFile(validatedPath, pdfBuf, 0o644)
-	if err != nil {
-		return fmt.Errorf("write file: %w", err)
-	}
-
-	return nil
 }
 
 func (q *Quotation) build() ([]byte, error) {
