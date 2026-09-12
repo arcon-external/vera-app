@@ -29,6 +29,7 @@ import {
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
+import { UsersPage } from "./components/UsersPage";
 import { Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
@@ -175,7 +176,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
-  const [page, setPage] = useState<"create" | "archive" | "detail">("create");
+  const [page, setPage] = useState<"create" | "archive" | "detail" | "users">("create");
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -585,6 +586,8 @@ function App() {
       page={page}
       onOpenEditor={() => setPage("create")}
       onOpenArchive={() => setPage("archive")}
+      onOpenUsers={() => setPage("users")}
+      showUsersTab={user?.Role === "admin"}
       user={user}
       onSignOut={() => void handleSignOut()}
       actionBar={
@@ -754,6 +757,8 @@ function App() {
           onEdit={handleEditQuotation}
         />
       ) : null}
+
+      {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
     </AppShell>
       )}
     </>
