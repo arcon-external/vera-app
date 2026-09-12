@@ -179,6 +179,13 @@ export namespace backend {
 	    DisplayProfit: string;
 	    DisplayTax: string;
 	    DisplayNett: string;
+	    DisplayOriginalSubtotal: string;
+	    DisplayOriginalDiscount: string;
+	    DisplayOriginalGrand: string;
+	    DisplayMarginalizedSubtotal: string;
+	    DisplayMarginalizedDiscount: string;
+	    DisplayMarginalizedGrand: string;
+	    DisplayMarginalizedAfterTax: string;
 	    CostSubtotal: number;
 	    SellSubtotal: number;
 	    DiscountCost: number;
@@ -215,6 +222,13 @@ export namespace backend {
 	        this.DisplayProfit = source["DisplayProfit"];
 	        this.DisplayTax = source["DisplayTax"];
 	        this.DisplayNett = source["DisplayNett"];
+	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
+	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
+	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
+	        this.DisplayMarginalizedSubtotal = source["DisplayMarginalizedSubtotal"];
+	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
+	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
+	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
 	        this.CostSubtotal = source["CostSubtotal"];
 	        this.SellSubtotal = source["SellSubtotal"];
 	        this.DiscountCost = source["DiscountCost"];
