@@ -12,6 +12,9 @@ import (
 )
 
 func TestGeneratePDF(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs a Chrome sandbox; run without -short locally")
+	}
 	ctx := context.Background()
 	q := &Quotation{}
 	q.SetAuthService(auth.StaffTestService())
