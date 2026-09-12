@@ -661,7 +661,7 @@ function App() {
               </div>
             </div>
 
-            <div className="xl:sticky xl:top-[72px] xl:self-start">
+            <div className="xl:sticky xl:top-[80px] xl:self-start">
               <SummaryRail
                 items={items}
                 discountPercent={details.discountPercent}

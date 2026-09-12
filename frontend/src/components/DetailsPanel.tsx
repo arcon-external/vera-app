@@ -172,7 +172,7 @@ export function DetailsPanel({
         </div>
 
         <div className="lg:col-span-2">
-          <div className="grid gap-5 border-t border-rule pt-5 lg:grid-cols-2">
+          <div className="grid items-start gap-5 border-t border-rule pt-5 lg:grid-cols-2">
             <div>
               <span className="mb-1.5 block text-caption font-medium text-ink-600">
                 Tax zone
@@ -196,7 +196,7 @@ export function DetailsPanel({
                           taxCategory: option.value === "FTZ" ? "" : value.taxCategory,
                         })
                       }
-                      className={`min-h-9 rounded-md px-4 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                         selected
                           ? "bg-white text-ink-950 shadow-card"
                           : "text-ink-500 hover:text-ink-800"
@@ -229,12 +229,16 @@ export function DetailsPanel({
                 />
               </Field>
             ) : (
-              <div className="rounded-lg border border-rule bg-paper-subtle px-4 py-3">
+              <div className="rounded-lg border border-rule bg-paper-subtle px-4 py-3.5">
                 <p className="text-small font-medium text-ink-700">
-                  Free trade zone
+                  Free trade zone (FTZ)
                 </p>
-                <p className="mt-0.5 text-caption text-ink-500">
-                  No withholding tax is applied to this quotation.
+                <p className="mt-1 text-caption leading-relaxed text-ink-500">
+                  No withholding tax is deducted, so the grand total is also
+                  the nett amount payable.
+                </p>
+                <p className="mt-2 border-t border-rule pt-2 text-caption leading-relaxed text-ink-500">
+                  Use Non-FTZ for work outside the free trade zone.
                 </p>
               </div>
             )}
