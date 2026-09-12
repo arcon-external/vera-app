@@ -12,6 +12,8 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"vera-app/backend/store"
 )
 
 // QuotationInput is the data contract between the frontend and the backend.
@@ -115,6 +117,11 @@ type Quotation struct {
 	Data      QuotationData
 	lastInput QuotationInput
 	prepared  bool
+	store     *store.Store
+}
+
+func (q *Quotation) SetStore(database *store.Store) {
+	q.store = database
 }
 
 var customerMap = map[uint8]string{
@@ -150,14 +157,6 @@ func Startup(quotation *Quotation, ctx context.Context) error {
 func checkCustomerID(id uint8) bool {
 	_, exists := customerMap[id]
 	return exists
-}
-
-func generateQuoteNumber(cusID uint8) (string, error) {
-	seqID, err := getNextSequence()
-	if err != nil {
-		return "", fmt.Errorf("get next sequence: %w", err)
-	}
-	return formatQuoteNumber(cusID, seqID), nil
 }
 
 func formatQuoteNumber(cusID uint8, seqID uint16) string {
@@ -305,11 +304,18 @@ func (q *Quotation) Export() error {
 		return fmt.Errorf("user cancelled")
 	}
 
-	quoteID, err := generateQuoteNumber(q.Data.CustomerID)
-	if err != nil {
-		return fmt.Errorf("generate quote number: %w", err)
+	if q.store == nil {
+		return fmt.Errorf("Postgres store is not configured")
 	}
-	q.Data.QuoteNumber = quoteID
+	sequenceContext := q.ctx
+	if sequenceContext == nil {
+		sequenceContext = context.Background()
+	}
+	sequenceID, err := q.store.NextQuoteSequence(sequenceContext)
+	if err != nil {
+		return fmt.Errorf("generate quote number from Postgres: %w", err)
+	}
+	q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, sequenceID)
 
 	err = q.save(filePath)
 	if err != nil {

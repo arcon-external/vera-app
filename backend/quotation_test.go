@@ -91,11 +91,7 @@ func TestGeneratePDF(t *testing.T) {
 		Incoterm:        "FOB",
 	})
 
-	quoteID, err := generateQuoteNumber(q.Data.CustomerID)
-	if err != nil {
-		t.Fatalf("generate quote number: %v", err)
-	}
-	q.Data.QuoteNumber = quoteID
+	q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, 1)
 
 	pdfBuf, err := q.build()
 	if err != nil {
