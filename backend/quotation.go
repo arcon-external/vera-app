@@ -215,6 +215,52 @@ func formatQuoteNumber(cusID uint8, seqID uint16) string {
 	return fmt.Sprintf("15%02d%04d", cusID, seqID)
 }
 
+// FormatQuoteNumber renders a quotation number for a customer and sequence.
+// It is the shared implementation used by desktop export and the API server.
+func FormatQuoteNumber(cusID uint8, seqID uint16) string {
+	return formatQuoteNumber(cusID, seqID)
+}
+
+// NewQuotationForRequest builds a request-scoped quotation wired with the
+// store, the caller's identity, and preloaded template assets. The API server
+// uses one instance per request because Quotation carries mutable state.
+func NewQuotationForRequest(database *store.Store, user store.AuthUser, templates *Quotation) *Quotation {
+	quotation := &Quotation{}
+	quotation.SetStore(database)
+	quotation.SetAuthService(auth.NewStaticService(user, nil))
+	if templates != nil {
+		quotation.Data.HtmlTemplate = templates.Data.HtmlTemplate
+		quotation.Data.CustomCSS = templates.Data.CustomCSS
+		quotation.Data.LogoBase64 = templates.Data.LogoBase64
+		quotation.Data.SignatureBase64 = templates.Data.SignatureBase64
+		quotation.Data.FontRegularBase64 = templates.Data.FontRegularBase64
+		quotation.Data.FontBoldBase64 = templates.Data.FontBoldBase64
+	}
+	return quotation
+}
+
+// DraftRevision builds the immutable archive draft for prepared data. The
+// caller supplies the rendered HTML snapshot and optional PDF bytes/path;
+// PDF attachment may arrive later via the document endpoint.
+func (q *Quotation) DraftRevision(htmlSnapshot string, pdfData []byte, pdfPath string) (store.RevisionDraft, error) {
+	if !q.prepared {
+		return store.RevisionDraft{}, fmt.Errorf("no prepared quotation: call Prepare first")
+	}
+	return q.revisionDraft(htmlSnapshot, pdfData, pdfPath), nil
+}
+
+// CustomerID returns the prepared quotation's customer ID.
+func (q *Quotation) CustomerID() uint8 {
+	return q.Data.CustomerID
+}
+
+// SetQuoteNumber assigns an allocated quote number and revision, used by the
+// API server which allocates sequences itself instead of showing a dialog.
+func (q *Quotation) SetQuoteNumber(quoteNumber string, revision uint16) {
+	q.Data.QuoteNumber = quoteNumber
+	q.Data.RevisionID = revision
+}
+
 // Prepare validates user input and populates the QuotationData business fields.
 // It does not generate the quote number — that is deferred to Export to avoid
 // consuming a sequence number if the user never saves. Returns an error

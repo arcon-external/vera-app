@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"vera-app/backend"
 	"vera-app/backend/auth"
 	"vera-app/backend/store"
 )
@@ -14,21 +15,30 @@ import (
 // sessions: login issues a bearer token, and protected routes validate it
 // (expiry + revocation + active user) on every request.
 type Server struct {
-	echo     *echo.Echo
-	database *store.Store
-	service  *auth.Service
+	echo      *echo.Echo
+	database  *store.Store
+	service   *auth.Service
+	templates *backend.Quotation
 }
 
-// NewServer builds the router. Database and service may be nil only for
-// serving /healthz in tests; auth routes require them.
-func NewServer(database *store.Store, service *auth.Service) *Server {
-	server := &Server{echo: echo.New(), database: database, service: service}
+// NewServer builds the router. Templates carries preloaded PDF template
+// assets used to render customer HTML snapshots; it may be nil only in
+// tests that never touch snapshot rendering.
+func NewServer(database *store.Store, service *auth.Service, templates *backend.Quotation) *Server {
+	server := &Server{echo: echo.New(), database: database, service: service, templates: templates}
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
 	server.echo.GET("/healthz", server.healthz)
 	server.echo.POST("/v1/auth/login", server.login)
 	server.echo.POST("/v1/auth/logout", server.logout, server.requireSession)
 	server.echo.GET("/v1/auth/me", server.me, server.requireSession)
+	server.echo.POST("/v1/quotations/prepare", server.prepareEndpoint, server.requireSession)
+	server.echo.POST("/v1/quotations/export", server.exportEndpoint, server.requireSession)
+	server.echo.GET("/v1/quotations", server.listEndpoint, server.requireSession)
+	server.echo.GET("/v1/quotations/:id", server.detailEndpoint, server.requireSession)
+	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
+	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
+	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	return server
 }
 
@@ -96,6 +106,17 @@ func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired session"})
 		}
 		context.Set("user", user)
+		return next(context)
+	}
+}
+
+// requireAdmin denies non-admin callers. It must run after requireSession.
+func (s *Server) requireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(context echo.Context) error {
+		user, _ := context.Get("user").(store.AuthUser)
+		if err := auth.RequireRole(user, "admin"); err != nil {
+			return context.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+		}
 		return next(context)
 	}
 }
