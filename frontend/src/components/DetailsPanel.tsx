@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Card, SectionHeading } from "./ui";
 import { Select } from "./Select";
-import { taxRateLabel } from "../tax";
+import { SERVICE_CATEGORY_OPTIONS, taxRateLabel } from "../tax";
 
 export interface DetailsState {
   subject: string;
@@ -12,7 +12,8 @@ export interface DetailsState {
   discountPercent: number;
   incoterm: string;
   taxZone: string;
-  taxCategory: string;
+  taxType: string;
+  serviceCategory: string;
 }
 
 interface DetailsPanelProps {
@@ -21,7 +22,7 @@ interface DetailsPanelProps {
   customerId: number;
   incotermOptions: readonly { value: string | number; label: string }[];
   taxZoneOptions: readonly { value: string; label: string }[];
-  taxCategoryOptions: readonly { value: string; label: string }[];
+  taxTypeOptions: readonly { value: string; label: string }[];
   onChange: (patch: Partial<DetailsState>) => void;
   onCustomerChange: (value: number) => void;
   onPaste: (event: React.ClipboardEvent<HTMLInputElement>) => void;
@@ -91,15 +92,12 @@ export function DetailsPanel({
   customerId,
   incotermOptions,
   taxZoneOptions,
-  taxCategoryOptions,
+  taxTypeOptions,
   onChange,
   onCustomerChange,
   onPaste,
 }: DetailsPanelProps) {
-  const localizedTax =
-    value.taxZone === "FTZ"
-      ? "0%"
-      : taxRateLabel(value.taxZone, value.taxCategory);
+  const localizedTax = taxRateLabel(value.taxZone, value.taxType, value.serviceCategory);
 
   return (
     <Card className="p-5">
@@ -193,7 +191,6 @@ export function DetailsPanel({
                       onClick={() =>
                         onChange({
                           taxZone: option.value,
-                          taxCategory: option.value === "FTZ" ? "" : value.taxCategory,
                         })
                       }
                       className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
@@ -208,34 +205,92 @@ export function DetailsPanel({
                 })}
               </div>
               <p className="mt-2 text-caption text-ink-500">
-                Withholding tax applies to the grand total, not individual
-                lines. Current rate {localizedTax}.
+                Only PPN appears on the customer quotation. Current rate{" "}
+                {localizedTax}.
               </p>
             </div>
 
-            {value.taxZone === "NonFTZ" ? (
-              <Field label="Tax category">
+            <div>
+              <span className="mb-1.5 block text-caption font-medium text-ink-600">
+                Tax type
+              </span>
+              <div
+                role="radiogroup"
+                aria-label="Tax type"
+                className="inline-flex rounded-lg border border-rule bg-paper-muted p-0.5"
+              >
+                {taxTypeOptions.map((option) => {
+                  const selected = value.taxType === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() =>
+                        onChange({
+                          taxType: option.value,
+                          serviceCategory:
+                            option.value === "Services" ? value.serviceCategory : "",
+                        })
+                      }
+                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                        selected
+                          ? "bg-white text-ink-950 shadow-card"
+                          : "text-ink-500 hover:text-ink-800"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-2 text-caption text-ink-500">
+                {value.taxType === "Services"
+                  ? "Services tax stays internal — never on the quotation."
+                  : value.taxZone === "NonFTZ"
+                    ? "Goods PPN 11% is added to the quotation after discount."
+                    : "FTZ goods carry no tax."}
+              </p>
+            </div>
+
+            {value.taxType === "Services" ? (
+              <Field label="Service category">
                 <Select
-                  value={value.taxCategory}
-                  ariaLabel="Tax category"
+                  value={value.serviceCategory}
+                  ariaLabel="Service category"
                   options={[
                     { value: "", label: "Select category" },
-                    ...taxCategoryOptions.map((option) => ({
+                    ...SERVICE_CATEGORY_OPTIONS.map((option) => ({
                       value: option.value,
-                      label: `${option.label} — ${taxRateLabel("NonFTZ", option.value)}`,
+                      label: `${option.label} — ${
+                        option.value === "Construction"
+                          ? "1,75% final"
+                          : "2% withholding"
+                      }`,
                     })),
                   ]}
-                  onChange={(next) => onChange({ taxCategory: String(next) })}
+                  onChange={(next) => onChange({ serviceCategory: String(next) })}
                 />
               </Field>
+            ) : value.taxZone === "NonFTZ" ? (
+              <div className="rounded-lg border border-rule bg-paper-subtle px-4 py-3.5">
+                <p className="text-small font-medium text-ink-700">
+                  Goods with PPN 11%
+                </p>
+                <p className="mt-1 text-caption leading-relaxed text-ink-500">
+                  PPN is added after subtotal and discount, before the grand
+                  total on the customer quotation.
+                </p>
+              </div>
             ) : (
               <div className="rounded-lg border border-rule bg-paper-subtle px-4 py-3.5">
                 <p className="text-small font-medium text-ink-700">
                   Free trade zone (FTZ)
                 </p>
                 <p className="mt-1 text-caption leading-relaxed text-ink-500">
-                  No withholding tax is deducted, so the grand total is also
-                  the nett amount payable.
+                  No tax is charged, so the grand total is also the nett
+                  amount payable.
                 </p>
                 <p className="mt-2 border-t border-rule pt-2 text-caption leading-relaxed text-ink-500">
                   Use Non-FTZ for work outside the free trade zone.

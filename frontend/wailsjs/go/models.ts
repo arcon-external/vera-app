@@ -90,6 +90,7 @@ export namespace backend {
 	    MarginalizedGrand: number;
 	    PpnAmount: number;
 	    CustomerGrandTotal: number;
+	    DisplayPpn: string;
 	    TaxAmount: number;
 	    MarginalizedAfterTax: number;
 	    ProfitAmount: number;
@@ -144,6 +145,7 @@ export namespace backend {
 	        this.MarginalizedGrand = source["MarginalizedGrand"];
 	        this.PpnAmount = source["PpnAmount"];
 	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
+	        this.DisplayPpn = source["DisplayPpn"];
 	        this.TaxAmount = source["TaxAmount"];
 	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
 	        this.ProfitAmount = source["ProfitAmount"];

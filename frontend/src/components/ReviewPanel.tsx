@@ -167,7 +167,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
         <StageHeader
           step="02 — Internal breakdown"
           title="Margin and tax calculation"
-          description="Margin is applied per unit. Withholding tax is deducted once from the grand total below and is not allocated to individual lines."
+          description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation; services tax stays internal and is never allocated to individual lines."
           badge={<Badge tone="internal">Internal only — never exported</Badge>}
         />
         <div className="p-5 lg:p-6">
@@ -241,10 +241,18 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                   value={internal.DisplayMarginalizedGrand}
                   strong
                 />
-                <SummaryRow
-                  label={`Tax — ${internal.TaxLabel}`}
-                  value={`−${internal.DisplayTax}`}
-                />
+                {internal.PpnAmount > 0 ? (
+                  <SummaryRow
+                    label="PPN 11% (on the quotation)"
+                    value={`+${internal.DisplayPpn}`}
+                  />
+                ) : null}
+                {internal.TaxAmount > 0 ? (
+                  <SummaryRow
+                    label={`Services tax, internal — ${internal.TaxLabel}`}
+                    value={`−${internal.DisplayTax}`}
+                  />
+                ) : null}
                 <SummaryRow
                   label="Grand total after tax"
                   value={internal.DisplayMarginalizedAfterTax}
@@ -277,7 +285,8 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                   </span>
                 </div>
                 <p className="mt-1 text-caption text-success-100">
-                  Grand total after tax minus original grand total
+                  Customer grand total minus original grand total, less
+                  services tax
                 </p>
               </div>
             </div>

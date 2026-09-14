@@ -118,6 +118,10 @@
 						<span>Discount ({{.DiscountPercent}}%)</span>
 						<span>Rp{{.DisplayDiscountAmount}}</span>
 					</div>
+					{{if .PpnAmount}}<div class="line ppn">
+						<span>PPN 11%</span>
+						<span>Rp{{.DisplayPpnAmount}}</span>
+					</div>{{end}}
 					<div class="line grand">
 						<span>Grand Total</span>
 						<span>Rp{{.DisplayGrandTotal}}</span>

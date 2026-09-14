@@ -22,9 +22,12 @@ import { Button, SectionHeading, StatusBanner } from "./components/ui";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import type { ArchivedQuotation } from "./archive";
 import {
-  TAX_CATEGORY_OPTIONS,
+  TAX_TYPE_OPTIONS,
   TAX_ZONE_OPTIONS,
-  normalizeTaxCategory,
+  legacyServiceCategory,
+  legacyTaxType,
+  normalizeServiceCategory,
+  normalizeTaxType,
   normalizeTaxZone,
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
@@ -94,7 +97,8 @@ const DEFAULT_DETAILS: DetailsState = {
   discountPercent: 5,
   incoterm: "EXW",
   taxZone: "FTZ",
-  taxCategory: "",
+  taxType: "Goods",
+  serviceCategory: "",
 };
 
 function newItem(key: number): EditorItem {
@@ -296,7 +300,9 @@ function App() {
           discountPercent: quotation.DiscountPercent,
           incoterm: quotation.Incoterm,
           taxZone: quotation.TaxZone,
-          taxCategory: quotation.TaxCategory,
+          taxType: quotation.TaxType || legacyTaxType(quotation.TaxCategory),
+          serviceCategory:
+            quotation.ServiceCategory || legacyServiceCategory(quotation.TaxCategory),
         });
         setCustomerId(quotation.CustomerCode);
         setEditingQuote({
@@ -456,7 +462,10 @@ function App() {
       RecipientName: details.recipientName,
       DiscountPercent: details.discountPercent,
       TaxZone: details.taxZone,
-      TaxCategory: details.taxZone === "NonFTZ" ? details.taxCategory : "",
+      TaxType: details.taxType,
+      ServiceCategory:
+        details.taxType === "Services" ? details.serviceCategory : "",
+      TaxCategory: "",
       Validity: details.validity,
       PaymentTerm: details.paymentTerm,
       LeadTime: details.leadTime,
@@ -498,7 +507,8 @@ function App() {
       if (rows.length === 0) return;
       const cols = rows[0];
       const pastedZone = (cols[8] || "").trim();
-      const pastedCategory = (cols[9] || "").trim();
+      const pastedType = (cols[9] || "").trim();
+      const pastedServiceCategory = (cols[10] || "").trim();
 
       setDetails((current) => {
         const next: DetailsState = {
@@ -514,13 +524,16 @@ function App() {
 
         // Only touch the tax fields when the pasted row actually carries them,
         // so a plain details paste leaves the current selection alone.
+        // Columns: 8 = zone, 9 = type (Goods/Services), 10 = service category.
         if (pastedZone !== "") {
           next.taxZone = normalizeTaxZone(pastedZone);
         }
-        if (next.taxZone !== "NonFTZ") {
-          next.taxCategory = "";
-        } else if (pastedCategory !== "") {
-          next.taxCategory = normalizeTaxCategory(pastedCategory);
+        if (pastedType !== "") {
+          next.taxType = normalizeTaxType(pastedType);
+          next.serviceCategory = "";
+        }
+        if (next.taxType === "Services" && pastedServiceCategory !== "") {
+          next.serviceCategory = normalizeServiceCategory(pastedServiceCategory);
         }
 
         return next;
@@ -702,7 +715,7 @@ function App() {
                 customerOptions={CUSTOMER_OPTIONS}
                 incotermOptions={INCOTERM_OPTIONS}
                 taxZoneOptions={TAX_ZONE_OPTIONS}
-                taxCategoryOptions={TAX_CATEGORY_OPTIONS}
+                taxTypeOptions={TAX_TYPE_OPTIONS}
                 onChange={(patch) => setDetails((current) => ({ ...current, ...patch }))}
                 onCustomerChange={setCustomerId}
                 onPaste={handlePasteDetails}
@@ -736,7 +749,8 @@ function App() {
                 items={items}
                 discountPercent={details.discountPercent}
                 taxZone={details.taxZone}
-                taxCategory={details.taxCategory}
+                taxType={details.taxType}
+                serviceCategory={details.serviceCategory}
               />
             </div>
           </div>

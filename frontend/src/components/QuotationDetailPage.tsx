@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { GetQuotationRevision } from "@backend/backend/Quotation";
 import type { ArchivedQuotation } from "../archive";
+
+function taxDetailLabel(quotation: ArchivedQuotation): string {
+  if (quotation.ServiceCategory === "Construction") return "Construction 1,75% final";
+  if (quotation.ServiceCategory === "NonConstruction") {
+    return "Non-construction 2% withholding";
+  }
+  return quotation.TaxCategory || quotation.TaxZone;
+}
 import { useToast } from "../toast";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
@@ -248,10 +256,18 @@ export function QuotationDetailPage({
                 label="Grand total before tax"
                 value={quotation.DisplayMarginalizedGrand}
               />
-              <DetailRow
-                label={`Tax — ${quotation.TaxCategory || quotation.TaxZone}`}
-                value={quotation.DisplayTax}
-              />
+              {quotation.PpnAmount > 0 ? (
+                <DetailRow
+                  label="PPN 11% (on the quotation)"
+                  value={`+${quotation.DisplayPpn}`}
+                />
+              ) : null}
+              {quotation.TaxAmount > 0 ? (
+                <DetailRow
+                  label={`Services tax, internal — ${taxDetailLabel(quotation)}`}
+                  value={quotation.DisplayTax}
+                />
+              ) : null}
               <DetailRow
                 label="Grand total after tax"
                 value={quotation.DisplayMarginalizedAfterTax}

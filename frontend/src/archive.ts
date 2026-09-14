@@ -40,6 +40,8 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   DiscountPercent: number;
   TaxZone: string;
   TaxCategory: string;
+  TaxType: string;
+  ServiceCategory: string;
   TaxRateBps: number;
   OriginalSubtotal: number;
   OriginalDiscount: number;
@@ -47,6 +49,8 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   MarginalizedSubtotal: number;
   MarginalizedDiscount: number;
   MarginalizedGrand: number;
+  PpnAmount: number;
+  DisplayPpn: string;
   TaxAmount: number;
   MarginalizedAfterTax: number;
   ProfitAmount: number;
