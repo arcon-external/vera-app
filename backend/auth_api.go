@@ -75,6 +75,29 @@ func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
 	return toAuthUserDTO(response.User), nil
 }
 
+// RedeemInvite activates an account with an invite or password-reset code,
+// setting its password. It signs no one in; the user signs in afterwards.
+// Valid codes are single-use and expire after an hour.
+func (a *AuthAPI) RedeemInvite(token, newPassword string) error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := client.Post("/v1/auth/redeem", map[string]string{
+		"token":       token,
+		"newPassword": newPassword,
+	}, &response); err != nil {
+		return err
+	}
+	if response.Status != "ok" {
+		return fmt.Errorf("invite code was not accepted")
+	}
+	return nil
+}
+
 // Logout signs out the active session.
 func (a *AuthAPI) Logout() error {
 	if client, err := api(); err == nil {
