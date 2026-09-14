@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"vera-app/backend/auth"
+	"vera-app/backend/store"
 )
 
 const inviteTTL = time.Hour
@@ -135,6 +136,31 @@ func (s *Server) setUserRole(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "update role"})
 	}
 	return context.JSON(http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) deleteUser(context echo.Context) error {
+	id, ok := parseUserID(context)
+	if !ok {
+		return nil
+	}
+	me, _ := context.Get("user").(store.AuthUser)
+	if id == me.ID {
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "you cannot permanently delete your own account"})
+	}
+	email, err := s.database.DeleteUser(context.Request().Context(), id)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "not found"):
+			return context.JSON(http.StatusNotFound, map[string]string{"error": "user not found"})
+		case strings.Contains(err.Error(), "still active"):
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "deactivate the account first; permanent deletion is for inactive users only"})
+		default:
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "delete user"})
+		}
+	}
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "user.delete", nil, "permanently deleted "+email)
+	return context.JSON(http.StatusOK, map[string]string{"email": email})
 }
 
 func (s *Server) setUserActive(context echo.Context) error {

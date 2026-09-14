@@ -197,5 +197,5 @@ func (q *Quotation) DeleteQuotation(id int64) error {
 	if err != nil {
 		return err
 	}
-	return client.Delete("/v1/quotations/" + strconv.FormatInt(id, 10))
+	return client.Delete("/v1/quotations/"+strconv.FormatInt(id, 10), nil)
 }

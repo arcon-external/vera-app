@@ -10,6 +10,10 @@ export function DecideDeletion(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['DecideDeletion'](arg1, arg2);
 }
 
+export function DeleteUser(arg1) {
+  return window['go']['backend']['AdminAPI']['DeleteUser'](arg1);
+}
+
 export function DownloadBackup() {
   return window['go']['backend']['AdminAPI']['DownloadBackup']();
 }

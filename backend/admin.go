@@ -91,6 +91,22 @@ func (a *AdminAPI) SetUserActive(id int64, active bool) error {
 	}, nil)
 }
 
+// DeleteUser permanently removes an inactive user. The server refuses
+// active targets and self-deletion; the caller confirms explicitly first.
+func (a *AdminAPI) DeleteUser(id int64) (string, error) {
+	client, err := api()
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		Email string `json:"email"`
+	}
+	if err := client.Delete("/v1/admin/users/"+itoa(id), &response); err != nil {
+		return "", err
+	}
+	return response.Email, nil
+}
+
 func (a *AdminAPI) IssuePasswordReset(id int64) (string, error) {
 	client, err := api()
 	if err != nil {
