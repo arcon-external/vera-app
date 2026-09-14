@@ -432,6 +432,29 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 // substitute a stub; production uses the Wails runtime dialog.
 var saveFileDialog = runtime.SaveFileDialog
 
+// exportFilename previews the Arcon_Quotation name for the save dialog.
+// Archive re-exports already know their number; new quotations peek the next
+// sequence without consuming it. Any failure falls back to quotation.pdf so
+// export always proceeds; the server allocates authoritatively at export.
+func (q *Quotation) exportFilename() string {
+	if q.archiveQuoteNumber != "" {
+		return BuildExportFilename(q.archiveQuoteNumber, q.archiveRevision, q.lastInput.Subject)
+	}
+	var sequence uint16
+	if client, err := api(); err == nil {
+		var response struct {
+			Sequence uint16 `json:"sequence"`
+		}
+		if err := client.Get("/v1/quotations/next-sequence", &response); err == nil {
+			sequence = response.Sequence
+		}
+	}
+	if sequence == 0 {
+		return "quotation.pdf"
+	}
+	return BuildExportFilename(FormatQuoteNumber(q.lastInput.CustomerID, sequence), 0, q.lastInput.Subject)
+}
+
 // Export opens a native save file dialog, persists the revision through the
 // API server (which allocates the quote number), builds the PDF locally,
 // writes it to the chosen path, and uploads the bytes back to the server.
@@ -448,7 +471,7 @@ func (q *Quotation) Export() error {
 
 	filePath, err := saveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
-		DefaultFilename: "quotation.pdf",
+		DefaultFilename: q.exportFilename(),
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
 	})
 	if err != nil {

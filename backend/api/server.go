@@ -70,6 +70,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/quotations/prepare", server.prepareEndpoint, server.requireSession)
 	server.echo.POST("/v1/quotations/export", server.exportEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations", server.listEndpoint, server.requireSession)
+	server.echo.GET("/v1/quotations/next-sequence", server.nextSequence, server.requireSession)
 	server.echo.GET("/v1/quotations/:id", server.detailEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)

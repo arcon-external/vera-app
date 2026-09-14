@@ -142,3 +142,33 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 		t.Fatalf("delete explicitly numbered quotation: %v", err)
 	}
 }
+
+func TestPeekQuoteSequenceNeverConsumes(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
+	}
+
+	ctx := context.Background()
+	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_peek"})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer database.Close()
+
+	if got, err := database.PeekQuoteSequence(ctx); err != nil || got != 1 {
+		t.Fatalf("fresh peek = %d, %v; want 1, nil", got, err)
+	}
+	for want := uint16(1); want <= 2; want++ {
+		got, err := database.NextQuoteSequence(ctx)
+		if err != nil || got != want {
+			t.Fatalf("allocate = %d, %v; want %d, nil", got, err, want)
+		}
+	}
+	if got, err := database.PeekQuoteSequence(ctx); err != nil || got != 3 {
+		t.Fatalf("peek after two allocations = %d, %v; want 3, nil", got, err)
+	}
+	if got, err := database.NextQuoteSequence(ctx); err != nil || got != 3 {
+		t.Fatalf("allocate after peek = %d, %v; want 3, nil", got, err)
+	}
+}
