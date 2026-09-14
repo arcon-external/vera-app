@@ -134,7 +134,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
       <div className="w-full max-w-[420px]">
         <div className="mb-6 flex flex-col items-center text-center">
           <span
-            className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent-700 text-title font-semibold text-white shadow-card"
+            className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink-900 text-title font-semibold text-white shadow-card"
             aria-hidden="true"
           >
             V
@@ -191,7 +191,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
                 <span className="text-caption text-ink-500">Caps Lock is on.</span>
               ) : null}
             </label>
-            <Button type="submit" variant="primary" disabled={busy} className="mt-1 w-full">
+            <Button type="submit" variant="dark" disabled={busy} className="mt-1 w-full">
               {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
