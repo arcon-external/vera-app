@@ -120,6 +120,11 @@ VERA_POSTGRES_TEST_DSN='postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=disa
 
 `TestGeneratePDF` exercises `chromedp` and needs a working Chrome runtime.
 
+The disposable test database major must match the toolchain pin (currently
+Postgres 18: run `postgres:18-alpine` locally, same as `.github/workflows/pr.yml`,
+client from `postgresql@18`). A newer dump/restore client against an older
+server fails (`unrecognized configuration parameter "transaction_timeout"`).
+
 ## 8. Code Style Guidelines
 
 ### General

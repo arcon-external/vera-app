@@ -58,20 +58,21 @@ func postRestore(t *testing.T, server *Server, token string, body *bytes.Buffer,
 func requireBinaries(t *testing.T) {
 	t.Helper()
 	// pg_dump refuses to talk to a newer server, so the client must be at
-	// least as new as the test database (16). Prefer an explicit bindir,
-	// then a Homebrew postgresql@17, then whatever is on PATH.
+	// least as new as the test database (18, matching Neon production).
+	// Prefer an explicit bindir, then Homebrew, then whatever is on PATH.
 	candidates := []string{}
 	if dir := os.Getenv("VERA_PG_BIN_DIR"); dir != "" {
 		candidates = append(candidates, filepath.Join(dir, "pg_dump"))
 	}
 	candidates = append(candidates,
-		"/opt/homebrew/opt/postgresql@16/bin/pg_dump",
+		"/opt/homebrew/opt/postgresql@18/bin/pg_dump",
 		"/opt/homebrew/opt/postgresql@17/bin/pg_dump",
-		"/usr/lib/postgresql/16/bin/pg_dump",
+		"/opt/homebrew/opt/postgresql@16/bin/pg_dump",
+		"/usr/lib/postgresql/18/bin/pg_dump",
 		"pg_dump",
 	)
 	for _, candidate := range candidates {
-		if major := pgBinMajor(candidate); major >= 16 {
+		if major := pgBinMajor(candidate); major >= 18 {
 			pgDumpBin = candidate
 			pgRestoreBin = filepath.Join(filepath.Dir(candidate), "pg_restore")
 			t.Cleanup(func() { pgDumpBin = "pg_dump"; pgRestoreBin = "pg_restore" })

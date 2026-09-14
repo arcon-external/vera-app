@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: vera
           POSTGRES_PASSWORD: secret
@@ -55,8 +55,13 @@ jobs:
 
       - name: Install PostgreSQL client (matches service version)
         # The restore drill test shells out to pg_dump/pg_restore, which
-        # refuse to talk to a newer server — the client major must be 16.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+        # refuse to talk to a newer server — the client major must be 18.
+        # Noble has no PG18 package, so take it from PGDG like the image.
+        run: |
+          sudo apt-get install -y -qq curl gnupg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
 
       - name: go test with race detector
         # -short skips TestGeneratePDF, which needs a Chrome sandbox that
