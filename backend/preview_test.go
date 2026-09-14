@@ -236,3 +236,27 @@ func TestRenderedQuotationPPN(t *testing.T) {
 		}
 	})
 }
+
+func TestRenderedQuotationTitle(t *testing.T) {
+	q := &Quotation{}
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	var body strings.Builder
+	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+		t.Fatalf("template execute failed: %v", err)
+	}
+	rendered := body.String()
+	if !strings.Contains(rendered, `<h2 class="doc-title">QUOTATION</h2>`) {
+		t.Error("rendered quotation missing QUOTATION title block")
+	}
+	titleIdx := strings.Index(rendered, "doc-title")
+	recipientIdx := strings.Index(rendered, "recipient-row")
+	if titleIdx < 0 || recipientIdx < 0 || titleIdx > recipientIdx {
+		t.Error("QUOTATION title must sit between the header and the info cards")
+	}
+}

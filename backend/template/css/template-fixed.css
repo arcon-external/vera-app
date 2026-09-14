@@ -84,6 +84,17 @@
 			height: auto;
 		}
 
+		.doc-title {
+			margin: 0;
+			padding: 10px 24px 0;
+			font-size: 22px;
+			font-weight: 700;
+			letter-spacing: 0.28em;
+			text-indent: 0.28em;
+			text-align: center;
+			color: var(--deep-blue);
+		}
+
 		.quote-meta {
 			display: grid;
 			grid-template-columns: auto auto;
