@@ -202,11 +202,18 @@ function App() {
   const [checkingSession, setCheckingSession] = useState(true);
 
   // Restore the keychain session on startup; otherwise show the login page.
+  // The try/catch also covers plain-browser dev, where the Wails runtime
+  // (window.go) does not exist and the binding throws synchronously.
   useEffect(() => {
-    RestoreSession()
-      .then((restored) => setUser(restored as SignedInUser))
-      .catch(() => setUser(null))
-      .finally(() => setCheckingSession(false));
+    try {
+      RestoreSession()
+        .then((restored) => setUser(restored as SignedInUser))
+        .catch(() => setUser(null))
+        .finally(() => setCheckingSession(false));
+    } catch {
+      setUser(null);
+      setCheckingSession(false);
+    }
   }, []);
 
   const clearPreview = useCallback(() => {
