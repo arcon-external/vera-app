@@ -136,3 +136,27 @@ func TestRestoreBackupRejectsNonDumpBeforeUpload(t *testing.T) {
 		t.Errorf("server hit %d times for a client-rejected file; want 0", calls)
 	}
 }
+
+func TestRedeemInviteReturnsEmail(t *testing.T) {
+	t.Setenv("VERA_NO_KEYRING", "1")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/auth/redeem" {
+			t.Errorf("path = %s; want /v1/auth/redeem", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":"ok","email":"newbie@example.com"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previous := apiClient
+	ConfigureAPI(apiclient.New(server.URL, SessionToken))
+	t.Cleanup(func() { apiClient = previous })
+
+	email, err := NewAuthAPI().RedeemInvite("some-token", "a-long-enough-password")
+	if err != nil {
+		t.Fatalf("RedeemInvite failed: %v", err)
+	}
+	if email != "newbie@example.com" {
+		t.Errorf("email = %q; want newbie@example.com", email)
+	}
+}

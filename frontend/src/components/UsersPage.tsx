@@ -26,6 +26,7 @@ export function UsersPage() {
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteText, setDeleteText] = useState("");
+  const [codeCopied, setCodeCopied] = useState(false);
   const [invite, setInvite] = useState<{ email: string; token: string } | null>(null);
   const { pushToast } = useToast();
 
@@ -95,9 +96,19 @@ export function UsersPage() {
     try {
       const token = (await IssuePasswordReset(user.ID)) as string;
       setInvite({ email: user.Email, token });
+      setCodeCopied(false);
       pushToast("success", `Invite code issued for ${user.Email}.`);
     } catch (err: unknown) {
       pushToast("error", errorMessage(err, "We couldn't issue an invite code."));
+    }
+  };
+
+  const copyInviteCode = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCodeCopied(true);
+    } catch {
+      setCodeCopied(false);
     }
   };
 
@@ -135,6 +146,7 @@ export function UsersPage() {
           onDone={(email, token) => {
             setShowCreate(false);
             setInvite({ email, token });
+            setCodeCopied(false);
             void refreshRow();
           }}
           onCancel={() => setShowCreate(false)}
@@ -144,7 +156,18 @@ export function UsersPage() {
       {invite ? (
         <StatusBanner tone="info">
           <span className="font-medium">Invite code for {invite.email}:</span>{" "}
-          <code className="tnum rounded bg-white/70 px-1.5 py-0.5">{invite.token}</code>{" "}
+          <button
+            type="button"
+            title="Click to copy"
+            aria-label={`Copy invite code for ${invite.email}`}
+            onClick={() => void copyInviteCode(invite.token)}
+            className="tnum rounded bg-white/70 px-1.5 py-0.5 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+          >
+            {invite.token}
+          </button>{" "}
+          <span className="text-caption">
+            {codeCopied ? "Copied." : "Click the code to copy. "}
+          </span>
           Share it once — a new code replaces this one, and it expires in an hour.
           <button
             type="button"

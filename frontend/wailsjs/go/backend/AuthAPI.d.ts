@@ -12,7 +12,7 @@ export function Logout():Promise<void>;
 
 export function LogoutEverywhere():Promise<void>;
 
-export function RedeemInvite(arg1:string,arg2:string):Promise<void>;
+export function RedeemInvite(arg1:string,arg2:string):Promise<string>;
 
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;
 

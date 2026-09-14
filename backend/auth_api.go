@@ -76,26 +76,28 @@ func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
 }
 
 // RedeemInvite activates an account with an invite or password-reset code,
-// setting its password. It signs no one in; the user signs in afterwards.
-// Valid codes are single-use and expire after an hour.
-func (a *AuthAPI) RedeemInvite(token, newPassword string) error {
+// setting its password. It returns the activated email address. It signs no
+// one in; the user signs in afterwards. Valid codes are single-use and
+// expire after an hour.
+func (a *AuthAPI) RedeemInvite(token, newPassword string) (string, error) {
 	client, err := api()
 	if err != nil {
-		return err
+		return "", err
 	}
 	var response struct {
 		Status string `json:"status"`
+		Email  string `json:"email"`
 	}
 	if err := client.Post("/v1/auth/redeem", map[string]string{
 		"token":       token,
 		"newPassword": newPassword,
 	}, &response); err != nil {
-		return err
+		return "", err
 	}
-	if response.Status != "ok" {
-		return fmt.Errorf("invite code was not accepted")
+	if response.Status != "ok" || response.Email == "" {
+		return "", fmt.Errorf("invite code was not accepted")
 	}
-	return nil
+	return response.Email, nil
 }
 
 // Logout signs out the active session.

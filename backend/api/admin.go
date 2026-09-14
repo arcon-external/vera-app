@@ -218,8 +218,13 @@ func (s *Server) redeemInvite(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "redeem invite"})
 	}
-	if _, err := s.database.RedeemInviteToken(context.Request().Context(), request.Token, hash, time.Now()); err != nil {
+	userID, err := s.database.RedeemInviteToken(context.Request().Context(), request.Token, hash, time.Now())
+	if err != nil {
 		return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired invite token"})
 	}
-	return context.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	user, err := s.database.GetUserByID(context.Request().Context(), userID)
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "redeem invite"})
+	}
+	return context.JSON(http.StatusOK, map[string]string{"status": "ok", "email": user.Email})
 }
