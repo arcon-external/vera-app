@@ -84,10 +84,57 @@ function ToastItem({
     info: "border-rule bg-white text-ink-800",
   };
 
-  const dots: Record<ToastType, string> = {
-    success: "bg-success-500",
-    error: "bg-danger-500",
-    info: "bg-accent-500",
+  const icons: Record<ToastType, React.ReactNode> = {
+    success: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M8.5 12.5l2.5 2.5 4.5-5.5" />
+      </svg>
+    ),
+    error: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7.5v5.5" />
+        <circle cx="12" cy="16.5" r="0.5" fill="currentColor" />
+      </svg>
+    ),
+    info: (
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5" />
+        <circle cx="12" cy="8" r="0.5" fill="currentColor" />
+      </svg>
+    ),
   };
 
   return (
@@ -102,9 +149,17 @@ function ToastItem({
     >
       <span
         aria-hidden="true"
-        className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dots[toast.type]}`}
-      />
-      <span className="flex-1 leading-relaxed">{toast.message}</span>
+        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center ${
+          toast.type === "success"
+            ? "text-success-600"
+            : toast.type === "error"
+              ? "text-danger-500"
+              : "text-accent-600"
+        }`}
+      >
+        {icons[toast.type]}
+      </span>
+      <span className="flex-1 leading-snug">{toast.message}</span>
       <button
         type="button"
         aria-label="Dismiss notification"

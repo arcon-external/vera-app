@@ -182,10 +182,13 @@ func TestInviteTokenSingleUse(t *testing.T) {
 	}
 
 	// Redeeming consumes the token.
-	code, _ := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",
+	code, redeemed := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",
 		`{"token":"`+firstToken+`","newPassword":"invite-password"}`)
 	if code != http.StatusOK {
 		t.Fatalf("first redeem = %d; want 200", code)
+	}
+	if email, _ := redeemed["email"].(string); email != "invite@example.com" {
+		t.Errorf("redeem email = %q; want invite@example.com", email)
 	}
 	// Reuse is rejected.
 	if code, _ := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",

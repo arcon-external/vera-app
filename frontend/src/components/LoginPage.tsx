@@ -111,7 +111,8 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [activated, setActivated] = useState(false);
+  const [activatedEmail, setActivatedEmail] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -131,7 +132,18 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
   const switchMode = (next: "signin" | "setup") => {
     setMode(next);
     setError("");
-    setActivated(false);
+    setActivatedEmail(null);
+    setCopied(false);
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
   };
 
   const activate = async (event: React.FormEvent) => {
@@ -153,8 +165,8 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
     setBusy(true);
     setError("");
     try {
-      await RedeemInvite(token, newPassword);
-      setActivated(true);
+      const email = (await RedeemInvite(token, newPassword)) as string;
+      setActivatedEmail(email);
       setCode("");
       setNewPassword("");
       setConfirmPassword("");
@@ -253,13 +265,23 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
               </button>
             </p>
           </form>
-          ) : activated ? (
+          ) : activatedEmail ? (
           <div className="flex flex-col gap-4">
             <StatusBanner tone="info">
               Your account is activated. Sign in with your new password.
             </StatusBanner>
+            <div className="flex items-center justify-between gap-3 rounded-md border border-rule bg-paper-subtle px-3 py-2.5">
+              <span className="truncate text-body text-ink-900">{activatedEmail}</span>
+              <button
+                type="button"
+                onClick={() => void copyText(activatedEmail)}
+                className="shrink-0 rounded-md px-2 py-1 text-caption font-medium text-ink-600 transition hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
             <Button variant="dark" onClick={() => switchMode("signin")} className="w-full">
-              Back to sign in
+              Finish — back to sign in
             </Button>
           </div>
           ) : (
