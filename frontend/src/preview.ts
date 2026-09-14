@@ -28,9 +28,11 @@ export interface CustomerPreview {
   DisplaySubTotal: string;
   DisplayDiscountAmount: string;
   DisplayGrandTotal: string;
+  DisplayPpnAmount: string;
   SubTotal: number;
   DiscountAmount: number;
   GrandTotal: number;
+  PpnAmount: number;
   OriginalSubTotal: number;
   OriginalDiscountAmount: number;
   OriginalGrandTotal: number;
@@ -65,6 +67,10 @@ export interface InternalPreviewItem {
 export interface InternalBreakdown {
   Items: InternalPreviewItem[];
   TaxLabel: string;
+  TaxType: string;
+  ServiceCategory: string;
+  PpnAmount: number;
+  DisplayPpn: string;
   DisplayCost: string;
   DisplaySell: string;
   DisplayCostDisc: string;

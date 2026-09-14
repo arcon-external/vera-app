@@ -173,3 +173,66 @@ func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderedQuotationPPN(t *testing.T) {
+	render := func(t *testing.T, zone, taxType, category string) string {
+		t.Helper()
+		q := &Quotation{}
+		q.SetAuthService(auth.StaffTestService())
+		if err := Startup(q, context.Background()); err != nil {
+			t.Fatalf("startup failed: %v", err)
+		}
+		in := testPreviewInput()
+		in.TaxZone = zone
+		in.TaxType = taxType
+		in.ServiceCategory = category
+		in.TaxCategory = ""
+		if err := q.Prepare(in); err != nil {
+			t.Fatalf("Prepare failed: %v", err)
+		}
+		var body strings.Builder
+		if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+			t.Fatalf("template execute failed: %v", err)
+		}
+		return body.String()
+	}
+
+	t.Run("non-FTZ goods show PPN and PPN-inclusive grand", func(t *testing.T) {
+		// Sell 300.000, discount 10% -> 270.000; PPN 11% -> 29.700;
+		// customer grand 299.700.
+		rendered := render(t, TaxZoneNonFTZ, TaxTypeGoods, "")
+		if !strings.Contains(rendered, "PPN 11%") {
+			t.Error("non-FTZ goods quotation missing PPN row")
+		}
+		if !strings.Contains(rendered, "29.700") {
+			t.Error("non-FTZ goods quotation missing PPN amount 29.700")
+		}
+		if !strings.Contains(rendered, "299.700") {
+			t.Error("non-FTZ goods quotation missing PPN-inclusive grand 299.700")
+		}
+		for _, forbidden := range []string{"Nett", "Margin", "Profit", "Internal", "withholding", "final"} {
+			if strings.Contains(rendered, forbidden) {
+				t.Errorf("rendered quotation leaks internal concept %q", forbidden)
+			}
+		}
+	})
+
+	t.Run("FTZ goods show no tax row", func(t *testing.T) {
+		rendered := render(t, TaxZoneFTZ, TaxTypeGoods, "")
+		if strings.Contains(rendered, "PPN") {
+			t.Error("FTZ quotation must not show any tax row")
+		}
+		if !strings.Contains(rendered, "270.000") {
+			t.Error("FTZ quotation missing grand total 270.000")
+		}
+	})
+
+	t.Run("services show no tax row in any zone", func(t *testing.T) {
+		for _, zone := range []string{TaxZoneFTZ, TaxZoneNonFTZ} {
+			rendered := render(t, zone, TaxTypeServices, ServiceCategoryConstruction)
+			if strings.Contains(rendered, "PPN") {
+				t.Errorf("%s services quotation must not show any tax row", zone)
+			}
+		}
+	})
+}

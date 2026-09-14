@@ -60,6 +60,7 @@ type ArchivedQuotation struct {
 	MarginalizedGrand           int64
 	PpnAmount                   int64
 	CustomerGrandTotal          int64
+	DisplayPpn                  string
 	TaxAmount                   int64
 	MarginalizedAfterTax        int64
 	ProfitAmount                int64
@@ -170,6 +171,8 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		TaxType:                     detail.TaxType,
 		ServiceCategory:             detail.ServiceCategory,
 		PpnAmount:                   detail.PpnAmount,
+		CustomerGrandTotal:          detail.GrandTotal,
+		DisplayPpn:                  detail.DisplayPpn,
 		OriginalSubtotal:            detail.OriginalSubtotal,
 		OriginalDiscount:            detail.OriginalDiscount,
 		OriginalGrand:               detail.OriginalGrand,

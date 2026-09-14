@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge, Card } from "./ui";
-import { taxRateBps, taxRateLabel } from "../tax";
+import { ppnRateBps, servicesRateBps, taxRateLabel } from "../tax";
 import { applyMargin, formatIdr, parseIntOrZero } from "../format";
 
 export interface PricedItem {
@@ -14,7 +14,8 @@ interface SummaryRailProps {
   items: PricedItem[];
   discountPercent: number;
   taxZone: string;
-  taxCategory: string;
+  taxType: string;
+  serviceCategory: string;
   variant?: "editor" | "internal";
   footer?: ReactNode;
 }
@@ -23,7 +24,8 @@ export function computePricing(
   items: PricedItem[],
   discountPercent: number,
   taxZone: string,
-  taxCategory: string
+  taxType: string,
+  serviceCategory: string
 ) {
   let costSubtotal = 0;
   let sellSubtotal = 0;
@@ -45,10 +47,13 @@ export function computePricing(
   const originalDiscount = Math.trunc((costSubtotal * discountPercent) / 100);
   const originalGrand = costSubtotal - originalDiscount;
   const sellDiscount = Math.trunc((sellSubtotal * discountPercent) / 100);
-  const grandBeforeTax = sellSubtotal - sellDiscount;
+  const sellGrand = sellSubtotal - sellDiscount;
 
-  const rateBps = taxRateBps(taxZone, taxCategory);
-  const taxAmount = Math.trunc((grandBeforeTax * rateBps) / 10000);
+  const ppnBps = ppnRateBps(taxZone, taxType);
+  const ppnAmount = Math.trunc((sellGrand * ppnBps) / 10000);
+  const customerGrand = sellGrand + ppnAmount;
+  const servicesBps = servicesRateBps(taxType, serviceCategory);
+  const servicesTax = Math.trunc((sellGrand * servicesBps) / 10000);
 
   return {
     costSubtotal,
@@ -56,13 +61,17 @@ export function computePricing(
     originalDiscount,
     originalGrand,
     sellDiscount,
-    grandBeforeTax,
-    taxAmount,
-    grandAfterTax: grandBeforeTax - taxAmount,
-    netProfit: grandBeforeTax - taxAmount - originalGrand,
-    profitBeforeTax: grandBeforeTax - originalGrand,
+    sellGrand,
+    grandBeforeTax: sellGrand,
+    ppnAmount,
+    customerGrand,
+    taxAmount: servicesTax,
+    grandAfterTax: customerGrand - servicesTax,
+    netProfit: customerGrand - originalGrand - servicesTax,
+    profitBeforeTax: customerGrand - originalGrand,
     marginedLines,
-    rateBps,
+    ppnBps,
+    rateBps: servicesBps,
   };
 }
 
@@ -70,12 +79,13 @@ export function SummaryRail({
   items,
   discountPercent,
   taxZone,
-  taxCategory,
+  taxType,
+  serviceCategory,
   variant = "editor",
   footer,
 }: SummaryRailProps) {
-  const pricing = computePricing(items, discountPercent, taxZone, taxCategory);
-  const taxLabel = taxRateLabel(taxZone, taxCategory);
+  const pricing = computePricing(items, discountPercent, taxZone, taxType, serviceCategory);
+  const taxLabel = taxRateLabel(taxZone, taxType, serviceCategory);
 
   return (
     <Card className="p-5">
@@ -100,17 +110,21 @@ export function SummaryRail({
             value={-pricing.sellDiscount}
           />
         ) : null}
+        {pricing.ppnAmount > 0 ? (
+          <AmountRow label="PPN 11%" value={pricing.ppnAmount} />
+        ) : null}
         <div className="border-t border-rule pt-2.5">
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-small font-medium text-ink-800">
               Grand total
             </span>
             <span className="tnum text-lead font-semibold text-ink-950">
-              Rp{formatIdr(pricing.grandBeforeTax)}
+              Rp{formatIdr(pricing.customerGrand)}
             </span>
           </div>
           <p className="mt-0.5 text-caption text-ink-500">
-            Customer-facing amount, before withholding tax
+            Customer-facing amount
+            {pricing.ppnAmount > 0 ? ", including PPN" : ", no tax added"}
           </p>
         </div>
       </div>
@@ -119,11 +133,15 @@ export function SummaryRail({
         <div className="flex items-center justify-between gap-2">
           <Badge tone="internal">Internal only</Badge>
           <span className="tnum text-caption text-internal-700">
-            {taxZone === "FTZ" ? "FTZ · 0% tax" : `Non-FTZ · ${taxLabel}`}
+            {taxZone === "FTZ" && taxType !== "Services"
+              ? "FTZ · 0% tax"
+              : `Tax · ${taxLabel}`}
           </span>
         </div>
         <div className="mt-3 space-y-2">
-          <AmountRow label="Tax withheld" value={-pricing.taxAmount} />
+          {pricing.taxAmount > 0 ? (
+            <AmountRow label="Services tax (internal)" value={-pricing.taxAmount} />
+          ) : null}
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-small text-internal-700">Nett after tax</span>
             <span className="tnum text-body font-semibold text-internal-900">
@@ -148,7 +166,7 @@ export function SummaryRail({
 
       {variant === "internal" && pricing.profitBeforeTax !== pricing.netProfit ? (
         <p className="mt-2 text-caption text-ink-500">
-          Profit before withholding tax: Rp{formatIdr(pricing.profitBeforeTax)}
+          Profit before tax: Rp{formatIdr(pricing.profitBeforeTax)}
         </p>
       ) : null}
 
