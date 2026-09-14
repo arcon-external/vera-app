@@ -61,6 +61,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
 	server.echo.GET("/healthz", server.healthz)
+	// /health mirrors /healthz: some edges (Cloud Run's) swallow the exact
+	// /healthz path, so monitors and deploys probe /health instead.
+	server.echo.GET("/health", server.healthz)
 	server.echo.POST("/v1/auth/login", server.login)
 	server.echo.POST("/v1/auth/logout", server.logout, server.requireSession)
 	server.echo.GET("/v1/auth/me", server.me, server.requireSession)
