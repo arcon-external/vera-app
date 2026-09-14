@@ -79,6 +79,8 @@ export namespace backend {
 	    DiscountPercent: number;
 	    TaxZone: string;
 	    TaxCategory: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    TaxRateBps: number;
 	    OriginalSubtotal: number;
 	    OriginalDiscount: number;
@@ -86,6 +88,8 @@ export namespace backend {
 	    MarginalizedSubtotal: number;
 	    MarginalizedDiscount: number;
 	    MarginalizedGrand: number;
+	    PpnAmount: number;
+	    CustomerGrandTotal: number;
 	    TaxAmount: number;
 	    MarginalizedAfterTax: number;
 	    ProfitAmount: number;
@@ -129,6 +133,8 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.TaxRateBps = source["TaxRateBps"];
 	        this.OriginalSubtotal = source["OriginalSubtotal"];
 	        this.OriginalDiscount = source["OriginalDiscount"];
@@ -136,6 +142,8 @@ export namespace backend {
 	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
 	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
 	        this.MarginalizedGrand = source["MarginalizedGrand"];
+	        this.PpnAmount = source["PpnAmount"];
+	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
 	        this.TaxAmount = source["TaxAmount"];
 	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
 	        this.ProfitAmount = source["ProfitAmount"];
@@ -282,9 +290,11 @@ export namespace backend {
 	    DisplaySubTotal: string;
 	    DisplayDiscountAmount: string;
 	    DisplayGrandTotal: string;
+	    DisplayPpnAmount: string;
 	    SubTotal: number;
 	    DiscountAmount: number;
 	    GrandTotal: number;
+	    PpnAmount: number;
 	    OriginalSubTotal: number;
 	    OriginalDiscountAmount: number;
 	    OriginalGrandTotal: number;
@@ -315,9 +325,11 @@ export namespace backend {
 	        this.DisplaySubTotal = source["DisplaySubTotal"];
 	        this.DisplayDiscountAmount = source["DisplayDiscountAmount"];
 	        this.DisplayGrandTotal = source["DisplayGrandTotal"];
+	        this.DisplayPpnAmount = source["DisplayPpnAmount"];
 	        this.SubTotal = source["SubTotal"];
 	        this.DiscountAmount = source["DiscountAmount"];
 	        this.GrandTotal = source["GrandTotal"];
+	        this.PpnAmount = source["PpnAmount"];
 	        this.OriginalSubTotal = source["OriginalSubTotal"];
 	        this.OriginalDiscountAmount = source["OriginalDiscountAmount"];
 	        this.OriginalGrandTotal = source["OriginalGrandTotal"];
@@ -422,6 +434,10 @@ export namespace backend {
 	export class InternalBreakdown {
 	    Items: InternalPreviewItem[];
 	    TaxLabel: string;
+	    TaxType: string;
+	    ServiceCategory: string;
+	    PpnAmount: number;
+	    DisplayPpn: string;
 	    DisplayCost: string;
 	    DisplaySell: string;
 	    DisplayCostDisc: string;
@@ -465,6 +481,10 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Items = this.convertValues(source["Items"], InternalPreviewItem);
 	        this.TaxLabel = source["TaxLabel"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
+	        this.PpnAmount = source["PpnAmount"];
+	        this.DisplayPpn = source["DisplayPpn"];
 	        this.DisplayCost = source["DisplayCost"];
 	        this.DisplaySell = source["DisplaySell"];
 	        this.DisplayCostDisc = source["DisplayCostDisc"];
@@ -573,6 +593,8 @@ export namespace backend {
 	    DiscountPercent: number;
 	    TaxZone: string;
 	    TaxCategory: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    Validity: number;
 	    PaymentTerm: number;
 	    LeadTime: number;
@@ -591,6 +613,8 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
 	        this.LeadTime = source["LeadTime"];
@@ -649,6 +673,8 @@ export namespace store {
 	    MarginalizedGrandAfterTax: number;
 	    ProfitAmount: number;
 	    NettProfit: number;
+	    PpnAmount: number;
+	    CustomerGrandTotal: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new RevisionTotals(source);
@@ -666,6 +692,8 @@ export namespace store {
 	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
 	        this.ProfitAmount = source["ProfitAmount"];
 	        this.NettProfit = source["NettProfit"];
+	        this.PpnAmount = source["PpnAmount"];
+	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
 	    }
 	}
 	export class RevisionItem {
@@ -716,6 +744,8 @@ export namespace store {
 	    DiscountPercent: number;
 	    TaxZone: string;
 	    TaxCategory: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    TaxRateBps: number;
 	    Items: RevisionItem[];
 	    Totals: RevisionTotals;
@@ -745,6 +775,8 @@ export namespace store {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.TaxRateBps = source["TaxRateBps"];
 	        this.Items = this.convertValues(source["Items"], RevisionItem);
 	        this.Totals = this.convertValues(source["Totals"], RevisionTotals);

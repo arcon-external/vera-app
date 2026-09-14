@@ -29,6 +29,8 @@ type QuotationInput struct {
 	DiscountPercent uint8
 	TaxZone         string
 	TaxCategory     string
+	TaxType         string
+	ServiceCategory string
 	Validity        uint8
 	PaymentTerm     uint8
 	LeadTime        uint8
@@ -94,6 +96,7 @@ type QuotationData struct {
 	SubTotal                  uint64
 	DiscountAmount            uint64
 	GrandTotal                uint64
+	SellGrandTotal            uint64
 	OriginalSubTotal          uint64
 	OriginalDiscountAmount    uint64
 	OriginalGrandTotal        uint64
@@ -101,6 +104,8 @@ type QuotationData struct {
 	ProfitAmount              int64
 	TaxRateBps                uint16
 	TaxAmount                 uint64
+	PpnAmount                 uint64
+	DisplayPpnAmount          string
 	NettProfit                int64
 	TaxLabel                  string
 	DisplayTaxAmount          string
@@ -111,6 +116,8 @@ type QuotationData struct {
 	DiscountPercent           uint8
 	TaxZone                   string
 	TaxCategory               string
+	TaxType                   string
+	ServiceCategory           string
 	CustomerID                uint8
 	Incoterm                  string
 }
@@ -334,7 +341,25 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	if input.TaxZone == "" {
 		input.TaxZone = TaxZoneFTZ
 	}
-	taxBps, taxLabel, err := taxRateFor(input.TaxZone, input.TaxCategory)
+	taxType, serviceCategory := input.TaxType, input.ServiceCategory
+	if taxType == "" {
+		// Old clients send only TaxCategory; map it forward so mixed-version
+		// rollouts keep working. Old FTZ sends nothing at all: it is goods.
+		// An old category alongside FTZ stays rejected, as before.
+		if input.TaxZone == TaxZoneFTZ {
+			if input.TaxCategory != "" {
+				return fmt.Errorf("FTZ must not have a tax category")
+			}
+			taxType = TaxTypeGoods
+		} else {
+			var ok bool
+			taxType, serviceCategory, ok = legacyTaxCategoryToNew(input.TaxCategory)
+			if !ok {
+				return fmt.Errorf("invalid tax category: %q", input.TaxCategory)
+			}
+		}
+	}
+	ppnBps, servicesBps, taxLabel, err := resolveTax(input.TaxZone, taxType, serviceCategory)
 	if err != nil {
 		return err
 	}
@@ -357,6 +382,8 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.DiscountPercent = input.DiscountPercent
 	q.Data.TaxZone = input.TaxZone
 	q.Data.TaxCategory = input.TaxCategory
+	q.Data.TaxType = taxType
+	q.Data.ServiceCategory = serviceCategory
 	q.Data.Incoterm = input.Incoterm
 
 	items := buildItems(input.Items)
@@ -366,17 +393,19 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.Date = date
 	q.Data.ValidUntil = validUntil
 
-	pricing := buildPricing(items, input.DiscountPercent, taxBps)
+	pricing := buildPricing(items, input.DiscountPercent, ppnBps, servicesBps)
 	q.Data.SubTotal = pricing.MarginalizedSubtotal
 	q.Data.DiscountAmount = pricing.MarginalizedDiscount
-	q.Data.GrandTotal = pricing.MarginalizedGrand
+	q.Data.GrandTotal = pricing.CustomerGrandTotal
+	q.Data.SellGrandTotal = pricing.MarginalizedGrand
 	q.Data.OriginalSubTotal = pricing.OriginalSubtotal
 	q.Data.OriginalDiscountAmount = pricing.OriginalDiscount
 	q.Data.OriginalGrandTotal = pricing.OriginalGrand
 	q.Data.MarginalizedGrandAfterTax = pricing.MarginalizedGrandAfterTax
 	q.Data.ProfitAmount = pricing.ProfitAmount
+	q.Data.PpnAmount = pricing.PpnAmount
 
-	q.Data.TaxRateBps = taxBps
+	q.Data.TaxRateBps = ppnBps + servicesBps
 	q.Data.TaxAmount = pricing.TaxAmount
 	q.Data.NettProfit = pricing.NettProfit
 	q.Data.TaxLabel = taxLabel
@@ -384,11 +413,12 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	displaySubTotal, displayDiscountAmount, displayGrandTotal := buildViews(
 		pricing.MarginalizedSubtotal,
 		pricing.MarginalizedDiscount,
-		pricing.MarginalizedGrand,
+		pricing.CustomerGrandTotal,
 	)
 	q.Data.DisplaySubTotal = displaySubTotal
 	q.Data.DisplayDiscountAmount = displayDiscountAmount
 	q.Data.DisplayGrandTotal = displayGrandTotal
+	q.Data.DisplayPpnAmount = formatRupiah(pricing.PpnAmount)
 	q.Data.DisplayTaxAmount = formatRupiah(pricing.TaxAmount)
 	q.Data.DisplayNettProfit = formatSignedRupiah(q.Data.NettProfit)
 
@@ -515,6 +545,8 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 		DiscountPercent:  int16(q.Data.DiscountPercent),
 		TaxZone:          q.Data.TaxZone,
 		TaxCategory:      q.Data.TaxCategory,
+		TaxType:          q.Data.TaxType,
+		ServiceCategory:  q.Data.ServiceCategory,
 		TaxRateBps:       int16(q.Data.TaxRateBps),
 		Items:            items,
 		Totals: store.RevisionTotals{
@@ -523,11 +555,13 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 			OriginalGrand:             int64(q.Data.OriginalGrandTotal),
 			MarginalizedSubtotal:      int64(q.Data.SubTotal),
 			MarginalizedDiscount:      int64(q.Data.DiscountAmount),
-			MarginalizedGrand:         int64(q.Data.GrandTotal),
+			MarginalizedGrand:         int64(q.Data.SellGrandTotal),
 			TaxAmount:                 int64(q.Data.TaxAmount),
 			MarginalizedGrandAfterTax: int64(q.Data.MarginalizedGrandAfterTax),
 			ProfitAmount:              q.Data.ProfitAmount,
 			NettProfit:                q.Data.NettProfit,
+			PpnAmount:                 int64(q.Data.PpnAmount),
+			CustomerGrandTotal:        int64(q.Data.GrandTotal),
 		},
 		HTMLSnapshot: htmlSnapshot,
 		PDFData:      pdfData,

@@ -49,6 +49,8 @@ type ArchivedQuotation struct {
 	DiscountPercent             int16
 	TaxZone                     string
 	TaxCategory                 string
+	TaxType                     string
+	ServiceCategory             string
 	TaxRateBps                  int16
 	OriginalSubtotal            int64
 	OriginalDiscount            int64
@@ -56,6 +58,8 @@ type ArchivedQuotation struct {
 	MarginalizedSubtotal        int64
 	MarginalizedDiscount        int64
 	MarginalizedGrand           int64
+	PpnAmount                   int64
+	CustomerGrandTotal          int64
 	TaxAmount                   int64
 	MarginalizedAfterTax        int64
 	ProfitAmount                int64
@@ -163,6 +167,9 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		DiscountPercent:             int16(detail.DiscountPercent),
 		TaxZone:                     detail.TaxZone,
 		TaxCategory:                 detail.TaxCategory,
+		TaxType:                     detail.TaxType,
+		ServiceCategory:             detail.ServiceCategory,
+		PpnAmount:                   detail.PpnAmount,
 		OriginalSubtotal:            detail.OriginalSubtotal,
 		OriginalDiscount:            detail.OriginalDiscount,
 		OriginalGrand:               detail.OriginalGrand,
