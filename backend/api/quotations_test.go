@@ -304,3 +304,29 @@ func TestAttachDocumentAfterExport(t *testing.T) {
 		t.Errorf("attach response = %v; want hasPdf true", attached)
 	}
 }
+
+func TestNextSequencePreviewsWithoutConsuming(t *testing.T) {
+	server, _, token := adminTestSetup(t, "vera_api_next_seq")
+
+	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence", "")
+	if code != http.StatusOK {
+		t.Fatalf("next-sequence = %d; want 200", code)
+	}
+	first, _ := body["sequence"].(float64)
+	if first != 1 {
+		t.Fatalf("sequence = %v; want 1 on a fresh database", body["sequence"])
+	}
+
+	// A second preview observes the same number: nothing was consumed.
+	code, again := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence", "")
+	if code != http.StatusOK {
+		t.Fatalf("second next-sequence = %d; want 200", code)
+	}
+	if again["sequence"] != body["sequence"] {
+		t.Errorf("second preview = %v; want stable %v", again["sequence"], body["sequence"])
+	}
+
+	if code, _ := doAdminRequest(t, server, "", http.MethodGet, "/v1/quotations/next-sequence", ""); code != http.StatusUnauthorized {
+		t.Errorf("anonymous next-sequence = %d; want 401", code)
+	}
+}

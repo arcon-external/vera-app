@@ -124,6 +124,17 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	})
 }
 
+// nextSequence previews the next allocatable quote sequence without
+// consuming it, so the desktop can pre-fill the save dialog filename.
+// Allocation at export stays authoritative.
+func (s *Server) nextSequence(context echo.Context) error {
+	sequence, err := s.database.PeekQuoteSequence(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "preview quote number"})
+	}
+	return context.JSON(http.StatusOK, map[string]uint16{"sequence": sequence})
+}
+
 func (s *Server) listEndpoint(context echo.Context) error {
 	rows, err := s.database.ListQuotations(context.Request().Context())
 	if err != nil {
