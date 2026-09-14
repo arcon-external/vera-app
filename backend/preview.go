@@ -43,9 +43,11 @@ type CustomerPreview struct {
 	DisplaySubTotal           string
 	DisplayDiscountAmount     string
 	DisplayGrandTotal         string
+	DisplayPpnAmount          string
 	SubTotal                  uint64
 	DiscountAmount            uint64
 	GrandTotal                uint64
+	PpnAmount                 uint64
 	OriginalSubTotal          uint64
 	OriginalDiscountAmount    uint64
 	OriginalGrandTotal        uint64
@@ -86,6 +88,10 @@ type InternalPreviewItem struct {
 type InternalBreakdown struct {
 	Items                       []InternalPreviewItem
 	TaxLabel                    string
+	TaxType                     string
+	ServiceCategory             string
+	PpnAmount                   uint64
+	DisplayPpn                  string
 	DisplayCost                 string
 	DisplaySell                 string
 	DisplayCostDisc             string
@@ -168,9 +174,11 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 		DisplaySubTotal:           q.Data.DisplaySubTotal,
 		DisplayDiscountAmount:     q.Data.DisplayDiscountAmount,
 		DisplayGrandTotal:         q.Data.DisplayGrandTotal,
+		DisplayPpnAmount:          q.Data.DisplayPpnAmount,
 		SubTotal:                  q.Data.SubTotal,
 		DiscountAmount:            q.Data.DiscountAmount,
 		GrandTotal:                q.Data.GrandTotal,
+		PpnAmount:                 q.Data.PpnAmount,
 		OriginalSubTotal:          q.Data.OriginalSubTotal,
 		OriginalDiscountAmount:    q.Data.OriginalDiscountAmount,
 		OriginalGrandTotal:        q.Data.OriginalGrandTotal,
@@ -244,6 +252,10 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 	return InternalBreakdown{
 		Items:                       items,
 		TaxLabel:                    q.Data.TaxLabel,
+		TaxType:                     q.Data.TaxType,
+		ServiceCategory:             q.Data.ServiceCategory,
+		PpnAmount:                   q.Data.PpnAmount,
+		DisplayPpn:                  q.Data.DisplayPpnAmount,
 		DisplayCost:                 formatRupiah(q.Data.OriginalSubTotal),
 		DisplaySell:                 formatRupiah(q.Data.SubTotal),
 		DisplayCostDisc:             formatRupiah(q.Data.OriginalDiscountAmount),
@@ -258,7 +270,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 		DisplayOriginalGrand:        formatRupiah(q.Data.OriginalGrandTotal),
 		DisplayMarginalizedSubtotal: formatRupiah(q.Data.SubTotal),
 		DisplayMarginalizedDiscount: formatRupiah(q.Data.DiscountAmount),
-		DisplayMarginalizedGrand:    formatRupiah(q.Data.GrandTotal),
+		DisplayMarginalizedGrand:    formatRupiah(q.Data.SellGrandTotal),
 		DisplayMarginalizedAfterTax: formatRupiah(q.Data.MarginalizedGrandAfterTax),
 		CostSubtotal:                q.Data.OriginalSubTotal,
 		SellSubtotal:                q.Data.SubTotal,
@@ -276,7 +288,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 		OriginalGrand:               q.Data.OriginalGrandTotal,
 		MarginalizedSubtotal:        q.Data.SubTotal,
 		MarginalizedDiscount:        q.Data.DiscountAmount,
-		MarginalizedGrand:           q.Data.GrandTotal,
+		MarginalizedGrand:           q.Data.SellGrandTotal,
 		MarginalizedGrandAfterTax:   q.Data.MarginalizedGrandAfterTax,
 	}, nil
 }

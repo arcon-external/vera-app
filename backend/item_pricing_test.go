@@ -66,7 +66,7 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 		},
 	})
 
-	pricing := buildPricing(items, 10, 200)
+	pricing := buildPricing(items, 10, 0, 200)
 
 	if pricing.OriginalSubtotal != 250000 {
 		t.Errorf("original subtotal = %d; want 250000", pricing.OriginalSubtotal)

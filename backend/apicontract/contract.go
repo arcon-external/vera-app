@@ -58,6 +58,8 @@ type QuotationDetail struct {
 	DiscountPercent             int16              `json:"discountPercent"`
 	TaxZone                     string             `json:"taxZone"`
 	TaxCategory                 string             `json:"taxCategory"`
+	TaxType                     string             `json:"taxType"`
+	ServiceCategory             string             `json:"serviceCategory"`
 	TaxLabel                    string             `json:"taxLabel"`
 	OriginalSubtotal            int64              `json:"originalSubtotal"`
 	OriginalDiscount            int64              `json:"originalDiscount"`
@@ -66,6 +68,7 @@ type QuotationDetail struct {
 	MarginalizedDiscount        int64              `json:"marginalizedDiscount"`
 	MarginalizedGrand           int64              `json:"marginalizedGrand"`
 	GrandTotal                  int64              `json:"grandTotal"`
+	PpnAmount                   int64              `json:"ppnAmount"`
 	TaxAmount                   int64              `json:"taxAmount"`
 	MarginalizedGrandAfterTax   int64              `json:"marginalizedGrandAfterTax"`
 	ProfitAmount                int64              `json:"profitAmount"`
@@ -76,6 +79,7 @@ type QuotationDetail struct {
 	DisplayMarginalizedSubtotal string             `json:"displayMarginalizedSubtotal"`
 	DisplayMarginalizedDiscount string             `json:"displayMarginalizedDiscount"`
 	DisplayMarginalizedGrand    string             `json:"displayMarginalizedGrand"`
+	DisplayPpn                  string             `json:"displayPpn"`
 	DisplayTax                  string             `json:"displayTax"`
 	DisplayMarginalizedAfterTax string             `json:"displayMarginalizedAfterTax"`
 	DisplayProfit               string             `json:"displayProfit"`

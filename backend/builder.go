@@ -17,6 +17,8 @@ type PricingSummary struct {
 	MarginalizedGrandAfterTax uint64
 	ProfitAmount              int64
 	NettProfit                int64
+	PpnAmount                 uint64
+	CustomerGrandTotal        uint64
 }
 
 func buildItems(inputItems []QuotationItemInput) []QuotationItem {
@@ -67,7 +69,7 @@ func buildPrices(items []QuotationItem, discountPercent uint8) (uint64, uint64, 
 	return subTotal, discountAmount, grandTotal
 }
 
-func buildPricing(items []QuotationItem, discountPercent uint8, taxRateBps uint16) PricingSummary {
+func buildPricing(items []QuotationItem, discountPercent uint8, ppnBps, servicesBps uint16) PricingSummary {
 	var originalSubtotal uint64
 	var marginalizedSubtotal uint64
 	for _, item := range items {
@@ -79,8 +81,12 @@ func buildPricing(items []QuotationItem, discountPercent uint8, taxRateBps uint1
 	originalGrand := originalSubtotal - originalDiscount
 	marginalizedDiscount := marginalizedSubtotal * uint64(discountPercent) / 100
 	marginalizedGrand := marginalizedSubtotal - marginalizedDiscount
-	taxAmount := calcTax(marginalizedGrand, taxRateBps)
-	marginalizedGrandAfterTax := marginalizedGrand - taxAmount
+	// PPN applies to the sell grand after discount (non-FTZ goods only) and
+	// is part of the customer document. Services tax stays internal.
+	ppnAmount := calcTax(marginalizedGrand, ppnBps)
+	customerGrand := marginalizedGrand + ppnAmount
+	servicesTax := calcTax(marginalizedGrand, servicesBps)
+	marginalizedGrandAfterTax := marginalizedGrand - servicesTax
 
 	return PricingSummary{
 		OriginalSubtotal:          originalSubtotal,
@@ -89,10 +95,12 @@ func buildPricing(items []QuotationItem, discountPercent uint8, taxRateBps uint1
 		MarginalizedSubtotal:      marginalizedSubtotal,
 		MarginalizedDiscount:      marginalizedDiscount,
 		MarginalizedGrand:         marginalizedGrand,
-		TaxAmount:                 taxAmount,
+		TaxAmount:                 servicesTax,
 		MarginalizedGrandAfterTax: marginalizedGrandAfterTax,
 		ProfitAmount:              signedDifference(marginalizedGrand, originalGrand),
-		NettProfit:                signedDifference(marginalizedGrandAfterTax, originalGrand),
+		NettProfit:                int64(customerGrand) - int64(originalGrand) - int64(servicesTax),
+		PpnAmount:                 ppnAmount,
+		CustomerGrandTotal:        customerGrand,
 	}
 }
 

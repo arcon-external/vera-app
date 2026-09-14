@@ -36,6 +36,8 @@ type RevisionTotals struct {
 	MarginalizedGrandAfterTax int64
 	ProfitAmount              int64
 	NettProfit                int64
+	PpnAmount                 int64
+	CustomerGrandTotal        int64
 }
 
 // RevisionDraft is a complete immutable snapshot. QuoteNumber may be empty
@@ -58,6 +60,8 @@ type RevisionDraft struct {
 	DiscountPercent  int16
 	TaxZone          string
 	TaxCategory      string
+	TaxType          string
+	ServiceCategory  string
 	TaxRateBps       int16
 
 	Items        []RevisionItem
@@ -91,6 +95,8 @@ type QuotationRecord struct {
 	DiscountPercent  int16
 	TaxZone          string
 	TaxCategory      string
+	TaxType          string
+	ServiceCategory  string
 	TaxRateBps       int16
 	Items            []RevisionItem
 	Totals           RevisionTotals
@@ -113,7 +119,7 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT DISTINCT ON (q.id)
 		       q.id, q.quote_number, r.revision_number, c.legal_name,
-		       r.subject, r.created_at, t.marginalized_grand_total
+		       r.subject, r.created_at, t.customer_grand_total
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
@@ -157,12 +163,13 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       c.legal_name, ca.address, r.recipient_name, r.recipient_address,
 		       r.subject, r.incoterm, r.validity_days, r.payment_term_days,
 		       r.lead_time_days, r.discount_percent, r.tax_zone, r.tax_category,
-		       r.tax_rate_bps, r.created_at,
+		       r.tax_rate_bps, r.tax_type, r.service_category, r.created_at,
 		       d.html_snapshot, d.pdf_data, COALESCE(d.pdf_path, ''),
 		       t.original_subtotal, t.original_discount, t.original_grand_total,
 		       t.marginalized_subtotal, t.marginalized_discount,
 		       t.marginalized_grand_total, t.tax_amount,
-		       t.marginalized_grand_after_tax, t.profit_amount, t.nett_profit
+		       t.marginalized_grand_after_tax, t.profit_amount, t.nett_profit,
+		       t.ppn_amount, t.customer_grand_total
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		LEFT JOIN LATERAL (
@@ -200,6 +207,8 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.TaxZone,
 		&record.TaxCategory,
 		&record.TaxRateBps,
+		&record.TaxType,
+		&record.ServiceCategory,
 		&record.CreatedAt,
 		&record.HTMLSnapshot,
 		&record.PDFData,
@@ -214,11 +223,13 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.Totals.MarginalizedGrandAfterTax,
 		&record.Totals.ProfitAmount,
 		&record.Totals.NettProfit,
+		&record.Totals.PpnAmount,
+		&record.Totals.CustomerGrandTotal,
 	)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("get quotation %d: %w", quotationID, err)
 	}
-	record.GrandTotal = record.Totals.MarginalizedGrand
+	record.GrandTotal = record.Totals.CustomerGrandTotal
 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT item_no, description, qty, uom, unit_price, margin_enabled,
@@ -328,8 +339,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		INSERT INTO %s.quotation_revisions (
 			quotation_id, revision_number, recipient_name, recipient_address,
 			subject, incoterm, validity_days, payment_term_days, lead_time_days,
-			discount_percent, tax_zone, tax_category, tax_rate_bps
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			discount_percent, tax_zone, tax_category, tax_rate_bps,
+			tax_type, service_category
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING id`, schema),
 		quoteID,
 		revisionNumber,
@@ -344,6 +356,8 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		draft.TaxZone,
 		draft.TaxCategory,
 		draft.TaxRateBps,
+		draft.TaxType,
+		draft.ServiceCategory,
 	).Scan(&revisionID)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("insert quotation revision %d: %w", revisionNumber, err)
@@ -377,8 +391,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		INSERT INTO %s.quotation_revision_totals (
 			revision_id, original_subtotal, original_discount, original_grand_total,
 			marginalized_subtotal, marginalized_discount, marginalized_grand_total,
-			tax_amount, marginalized_grand_after_tax, profit_amount, nett_profit
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, schema),
+			tax_amount, marginalized_grand_after_tax, profit_amount, nett_profit,
+			ppn_amount, customer_grand_total
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, schema),
 		revisionID,
 		draft.Totals.OriginalSubtotal,
 		draft.Totals.OriginalDiscount,
@@ -390,6 +405,8 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		draft.Totals.MarginalizedGrandAfterTax,
 		draft.Totals.ProfitAmount,
 		draft.Totals.NettProfit,
+		draft.Totals.PpnAmount,
+		draft.Totals.CustomerGrandTotal,
 	); err != nil {
 		return QuotationRecord{}, fmt.Errorf("insert quotation revision totals: %w", err)
 	}
