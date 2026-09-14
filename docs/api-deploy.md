@@ -23,7 +23,15 @@ every call, login rate limiting (5 failures → cooldown).
 | Compose file | `/home/tristan/vera-api/compose.yml` (mode `600`, holds the DSN) |
 | Image | `vera-api:<date>` built from `Dockerfile.veraserver` (`--platform linux/amd64`) |
 | Listen | `100.93.103.83:8081` → container `:8080` (Tailscale only) |
-| Database | same `vera-postgres` Postgres, `vera` schema |
+| Database | `vera-postgres` Postgres, `vera` schema, reached as `vera-postgres:5432` over the shared `vera-net` Docker network |
+
+The database publishes **no host port** (nothing listens on 5432, on any
+interface). The API's DSN uses the container name, so a host reboot can
+never strand the API the way the Sep-14 outage did: the tail-IP port bind
+is gone, and the API's restart policy bridges Postgres's boot window
+(recovered in seconds in a down/up drill). Only `:8081` is host-published —
+desktops need it; nothing else should be. Operators reach Postgres with
+`docker exec vera-postgres psql`, never over TCP.
 
 Transport encryption is provided by WireGuard (Tailscale). Moving behind NPM
 with HTTPS requires a public hostname; until one exists, do not publish any
