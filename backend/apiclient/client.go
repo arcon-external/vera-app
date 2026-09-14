@@ -120,8 +120,8 @@ func (c *Client) Patch(path string, body, out any) error {
 }
 
 // Delete performs an authenticated DELETE.
-func (c *Client) Delete(path string) error {
-	return c.do(http.MethodDelete, path, nil, nil)
+func (c *Client) Delete(path string, out any) error {
+	return c.do(http.MethodDelete, path, nil, out)
 }
 
 // Upload posts a multipart file field and decodes the JSON response into

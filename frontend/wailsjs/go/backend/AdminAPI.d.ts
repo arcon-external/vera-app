@@ -7,6 +7,8 @@ export function CreateUser(arg1:string,arg2:string,arg3:string):Promise<backend.
 
 export function DecideDeletion(arg1:number,arg2:boolean):Promise<void>;
 
+export function DeleteUser(arg1:number):Promise<string>;
+
 export function DownloadBackup():Promise<string>;
 
 export function IssuePasswordReset(arg1:number):Promise<string>;

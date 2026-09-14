@@ -284,6 +284,34 @@ func (s *Store) SetUserActive(ctx context.Context, userID int64, active bool) er
 	return nil
 }
 
+// DeleteUser permanently removes a user row. Sessions, invite tokens, and
+// pending deletion requests die with it (CASCADE); audit entries survive
+// with nulled references (SET NULL). Only inactive users may be deleted —
+// callers enforce soft-delete-first. It returns the removed email so the
+// caller can record it in the audit trail before the row vanishes.
+func (s *Store) DeleteUser(ctx context.Context, userID int64) (string, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return "", err
+	}
+	var email string
+	var active bool
+	err = pool.QueryRow(ctx, fmt.Sprintf(
+		"SELECT email, is_active FROM %s.users WHERE id = $1",
+		s.configSchema()), userID).Scan(&email, &active)
+	if err != nil {
+		return "", fmt.Errorf("user %d not found", userID)
+	}
+	if active {
+		return "", fmt.Errorf("user %d is still active: deactivate first", userID)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		"DELETE FROM %s.users WHERE id = $1", s.configSchema()), userID); err != nil {
+		return "", fmt.Errorf("delete user: %w", err)
+	}
+	return email, nil
+}
+
 // CountActiveAdmins returns the number of enabled admin accounts.
 func (s *Store) CountActiveAdmins(ctx context.Context) (int, error) {
 	pool, err := s.poolOrError()

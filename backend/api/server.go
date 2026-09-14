@@ -76,6 +76,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.PATCH("/v1/admin/users/:id/role", server.setUserRole, server.requireSession, server.requireAdmin)
 	server.echo.PATCH("/v1/admin/users/:id/active", server.setUserActive, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/users/:id/reset", server.resetUser, server.requireSession, server.requireAdmin)
+	server.echo.DELETE("/v1/admin/users/:id", server.deleteUser, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/auth/redeem", server.redeemInvite)
 	server.echo.PATCH("/v1/auth/profile", server.updateProfile, server.requireSession)
 	server.echo.PATCH("/v1/auth/password", server.changePassword, server.requireSession)

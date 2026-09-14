@@ -78,6 +78,34 @@ func TestRestoreBackupUploadsSelectedDump(t *testing.T) {
 	}
 }
 
+func TestDeleteUserReturnsRemovedEmail(t *testing.T) {
+	t.Setenv("VERA_NO_KEYRING", "1")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodDelete || request.URL.Path != "/v1/admin/users/42" {
+			t.Errorf("request = %s %s; want DELETE /v1/admin/users/42", request.Method, request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"email":"gone@example.com"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previous := apiClient
+	ConfigureAPI(apiclient.New(server.URL, SessionToken))
+	t.Cleanup(func() { apiClient = previous })
+	if err := SetSessionToken("test-token"); err != nil {
+		t.Fatalf("set test session: %v", err)
+	}
+	t.Cleanup(func() { _ = ClearSessionToken() })
+
+	email, err := NewAdminAPI().DeleteUser(42)
+	if err != nil {
+		t.Fatalf("DeleteUser failed: %v", err)
+	}
+	if email != "gone@example.com" {
+		t.Errorf("email = %q; want gone@example.com", email)
+	}
+}
+
 func TestRestoreBackupRejectsNonDumpBeforeUpload(t *testing.T) {
 	t.Setenv("VERA_NO_KEYRING", "1")
 	calls := 0

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CreateUser,
+  DeleteUser,
   IssuePasswordReset,
   ListUsers,
   SetUserActive,
@@ -23,6 +24,8 @@ export function UsersPage() {
   const [query, setQuery] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteText, setDeleteText] = useState("");
   const [invite, setInvite] = useState<{ email: string; token: string } | null>(null);
   const { pushToast } = useToast();
 
@@ -95,6 +98,18 @@ export function UsersPage() {
       pushToast("success", `Invite code issued for ${user.Email}.`);
     } catch (err: unknown) {
       pushToast("error", errorMessage(err, "We couldn't issue an invite code."));
+    }
+  };
+
+  const handleDelete = async (user: ManagedUser) => {
+    try {
+      const email = (await DeleteUser(user.ID)) as string;
+      pushToast("success", `Permanently deleted ${email}.`);
+      setDeleteId(null);
+      setDeleteText("");
+      await refreshRow();
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't delete this account."));
     }
   };
 
@@ -193,7 +208,8 @@ export function UsersPage() {
               </thead>
               <tbody className="divide-y divide-rule">
                 {visible.map((user) => (
-                  <tr key={user.ID} className="align-top transition-colors duration-150 hover:bg-paper-subtle/50">
+                  <Fragment key={user.ID}>
+                  <tr className="align-top transition-colors duration-150 hover:bg-paper-subtle/50">
                     <td className="px-5 py-3">
                       <div className="font-medium text-ink-900">{user.DisplayName}</div>
                       <div className="mt-0.5 text-caption text-ink-500">{user.Email}</div>
@@ -239,6 +255,20 @@ export function UsersPage() {
                         >
                           Invite code
                         </Button>
+                        {!user.IsActive && deleteId !== user.ID ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-label={`Permanently delete ${user.Email}`}
+                            onClick={() => {
+                              setDeleteId(user.ID);
+                              setDeleteText("");
+                            }}
+                            className="hover:!bg-danger-50 hover:!text-danger-600"
+                          >
+                            Delete
+                          </Button>
+                        ) : null}
                         {confirmId === user.ID ? (
                           <>
                             <Button
@@ -270,6 +300,50 @@ export function UsersPage() {
                       </div>
                     </td>
                   </tr>
+                  {deleteId === user.ID ? (
+                    <tr className="bg-danger-50/50">
+                      <td colSpan={5} className="px-5 py-3">
+                        <p className="text-small text-ink-800">
+                          Permanently delete{" "}
+                          <span className="font-medium">{user.Email}</span>? Their
+                          sessions and codes go with the account; audit entries
+                          stay but lose the name. Type the email to confirm.
+                        </p>
+                        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            value={deleteText}
+                            onChange={(event) => setDeleteText(event.target.value)}
+                            placeholder={user.Email}
+                            aria-label={`Type ${user.Email} to confirm deletion`}
+                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-danger-300 focus:ring-2 focus:ring-danger-500/20"
+                          />
+                          <div className="flex gap-1.5">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              disabled={deleteText.trim().toLowerCase() !== user.Email.toLowerCase()}
+                              onClick={() => void handleDelete(user)}
+                            >
+                              Delete forever
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setDeleteId(null);
+                                setDeleteText("");
+                              }}
+                            >
+                              Keep
+                            </Button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -279,7 +353,8 @@ export function UsersPage() {
 
       <p className="text-caption leading-relaxed text-ink-400">
         Deactivating signs the person out on their device immediately. Role and
-        status changes take effect on their next action.
+        status changes take effect on their next action. Deletion is permanent
+        and only offered for deactivated accounts.
       </p>
     </section>
   );
