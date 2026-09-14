@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Login } from "@backend/backend/AuthAPI";
+import { Login, RedeemInvite } from "@backend/backend/AuthAPI";
 import { Button, Card, StatusBanner } from "./ui";
 
 export interface SignedInUser {
@@ -101,12 +101,17 @@ function EyeIcon({ off }: { off: boolean }) {
 }
 
 export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => void }) {
+  const [mode, setMode] = useState<"signin" | "setup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [activated, setActivated] = useState(false);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -118,6 +123,48 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
       onSignedIn(user);
     } catch (err: unknown) {
       setError(typeof err === "string" ? err : "We couldn't sign you in. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchMode = (next: "signin" | "setup") => {
+    setMode(next);
+    setError("");
+    setActivated(false);
+  };
+
+  const activate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    const token = code.trim();
+    if (!token) {
+      setError("Enter the invite code your administrator shared.");
+      return;
+    }
+    if (newPassword.length < 10) {
+      setError("Choose a password of at least 10 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("The two passwords don't match.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await RedeemInvite(token, newPassword);
+      setActivated(true);
+      setCode("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: unknown) {
+      const message = typeof err === "string" ? err : "";
+      if (/invalid|expired/i.test(message)) {
+        setError("That code is invalid or expired. Ask your administrator for a new one.");
+      } else {
+        setError(message || "We couldn't activate your account. Try again.");
+      }
     } finally {
       setBusy(false);
     }
@@ -147,6 +194,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
           </p>
         </div>
         <Card className="p-6">
+          {mode === "signin" ? (
           <form onSubmit={submit} className="flex flex-col gap-4">
             {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
             <label className="flex flex-col gap-1.5">
@@ -194,7 +242,98 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
             <Button type="submit" variant="dark" disabled={busy} className="mt-1 w-full">
               {busy ? "Signing in…" : "Sign in"}
             </Button>
+            <p className="text-center text-caption text-ink-500">
+              First time here?{" "}
+              <button
+                type="button"
+                onClick={() => switchMode("setup")}
+                className="font-medium text-ink-900 underline underline-offset-2 hover:text-ink-700"
+              >
+                Activate with an invite code
+              </button>
+            </p>
           </form>
+          ) : activated ? (
+          <div className="flex flex-col gap-4">
+            <StatusBanner tone="info">
+              Your account is activated. Sign in with your new password.
+            </StatusBanner>
+            <Button variant="dark" onClick={() => switchMode("signin")} className="w-full">
+              Back to sign in
+            </Button>
+          </div>
+          ) : (
+          <form onSubmit={activate} className="flex flex-col gap-4">
+            {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+            <label className="flex flex-col gap-1.5">
+              <span className="text-caption font-medium text-ink-600">Invite code</span>
+              <input
+                type="text"
+                autoComplete="off"
+                autoFocus
+                required
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder="Paste the code from your administrator"
+                className={inputClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-caption font-medium text-ink-600">New password</span>
+              <span className="relative block">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  onKeyDown={trackCaps}
+                  onKeyUp={trackCaps}
+                  placeholder="At least 10 characters"
+                  className={`${inputClass} pr-11`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  tabIndex={-1}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-ink-400 transition hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                >
+                  <EyeIcon off={showPassword} />
+                </button>
+              </span>
+              {capsOn ? (
+                <span className="text-caption text-ink-500">Caps Lock is on.</span>
+              ) : null}
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-caption font-medium text-ink-600">Confirm password</span>
+              <input
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                required
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                placeholder="Repeat the new password"
+                className={inputClass}
+              />
+            </label>
+            <Button type="submit" variant="dark" disabled={busy} className="mt-1 w-full">
+              {busy ? "Activating…" : "Activate account"}
+            </Button>
+            <p className="text-center text-caption text-ink-500">
+              Already activated?{" "}
+              <button
+                type="button"
+                onClick={() => switchMode("signin")}
+                className="font-medium text-ink-900 underline underline-offset-2 hover:text-ink-700"
+              >
+                Back to sign in
+              </button>
+            </p>
+          </form>
+          )}
         </Card>
         <ul className="mt-6 flex flex-col gap-2.5 border-t border-rule pt-5">
           <li className="flex items-center justify-center gap-2 text-caption text-ink-500">
