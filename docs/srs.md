@@ -110,7 +110,7 @@ only**, never in images, repos, or logs.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /healthz` | none | Liveness (no DB touch — safe for monitors) |
+| `GET /healthz`, `GET /health` | none | Liveness (no DB touch — safe for monitors; `/health` where edges swallow `/healthz`, e.g. Cloud Run) |
 | `POST /v1/auth/login` | no | `{email,password}` → `{token,user}`; generic 401, rate-limited |
 | `POST /v1/auth/logout` | bearer | revoke token, `204` |
 | `GET /v1/auth/me` | bearer | current user or `401` |
