@@ -11,6 +11,15 @@ export function parseIntOrZero(value: string): number {
 }
 
 /**
+ * Formats a raw digit string for money inputs with thousand delimiters.
+ * Empty stays empty so untouched fields never read "0".
+ */
+export function formatMoneyInput(raw: string): string {
+  if (raw === "") return "";
+  return formatIdr(parseIntOrZero(raw));
+}
+
+/**
  * Applies a percentage margin to a unit cost using integer IDR arithmetic,
  * matching the backend's truncation: cost + trunc(cost * percent / 100).
  */

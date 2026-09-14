@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Button } from "./ui";
-import { applyMargin, formatIdr, parseIntOrZero } from "../format";
+import { applyMargin, formatIdr, formatMoneyInput, parseIntOrZero } from "../format";
 
 export interface EditorItem {
   key: number;
@@ -313,7 +313,7 @@ function ItemRow({
             inputMode="numeric"
             aria-label={`Cost price for line ${index + 1}`}
             placeholder="0"
-            value={item.unitPrice}
+            value={formatMoneyInput(item.unitPrice)}
             onChange={(event) =>
               onChange(item.key, "unitPrice", event.target.value.replace(/\D/g, ""))
             }
