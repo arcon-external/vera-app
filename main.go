@@ -23,11 +23,11 @@ func main() {
 	quotationApp := &backend.Quotation{}
 
 	// The desktop never touches Postgres directly. All data flows through
-	// veraserver; VERA_API_URL points at it (public funnel by default,
-	// override for dev or the personal tailnet address).
+	// veraserver; VERA_API_URL points at it (Cloud Run primary by default,
+	// override for dev, tailnet, or a future custom domain).
 	apiBase := os.Getenv("VERA_API_URL")
 	if apiBase == "" {
-		apiBase = "https://3studio-server.tailca1027.ts.net:10000"
+		apiBase = "https://vera-api-171860943410.asia-southeast1.run.app"
 	}
 	client := apiclient.New(apiBase, backend.SessionToken)
 	client.OnUnauthorized = func() {
