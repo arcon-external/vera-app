@@ -3,77 +3,65 @@
 ## What it is
 
 `cmd/veraserver` is a small Echo HTTP service exposing quotation data over
-the tailnet. The desktop app will talk to it instead of holding Postgres
-credentials (cutover tracked in #80). PDF rendering stays local forever.
+HTTPS. The desktop app talks to it instead of holding Postgres credentials.
+PDF rendering stays local forever.
 
 | Route | Auth | Purpose |
 |---|---|---|
-| `GET /healthz` | none | liveness probe |
+| `GET /health`, `GET /healthz` | none | liveness probes (no DB touch; note `/healthz` is swallowed by some edges — probe `/health`) |
 | `POST /v1/auth/login` | no | `{email,password}` → `{token,user}`; generic 401 on failure |
 | `POST /v1/auth/logout` | bearer | revokes the token, `204` |
 | `GET /v1/auth/me` | bearer | current user or `401` |
+| `POST /v1/auth/redeem` | no | invite/reset code → password set (single-use, 1h) |
 
 Sessions reuse `backend/auth` exactly: 8h idle expiry, revocation-checked on
 every call, login rate limiting (5 failures → cooldown).
 
-## Server layout (`3studio-server`)
+## Where it runs (Cloud Run, primary)
 
-| What | Location |
+| What | Value |
 |---|---|
-| Compose file | `/home/tristan/vera-api/compose.yml` (mode `600`, holds the DSN) |
-| Image | `vera-api:<date>` built from `Dockerfile.veraserver` (`--platform linux/amd64`) |
-| Listen | `100.93.103.83:8081` → container `:8080` (Tailscale only) |
-| Database | `vera-postgres` Postgres, `vera` schema, reached as `vera-postgres:5432` over the shared `vera-net` Docker network |
+| Service | `vera-api`, region `asia-southeast1`, project `vera-app-508411` |
+| URL | `https://vera-api-171860943410.asia-southeast1.run.app` |
+| Image | `asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-<commit>` |
+| Shape | 1 vCPU / 512 MB, min 0 (cold starts OK), max 2 |
+| Env | `VERA_API_ADDR=:8080`, `VERA_POSTGRES_SCHEMA=vera`, `VERA_BACKUP_BUCKET=vera-backups-508411`, `VERA_POSTGRES_DSN` (secret, TLS required) |
+| Database | Neon PG18 Singapore, `neondb`, `vera` schema, direct endpoint (never `-pooler`) |
 
-The database publishes **no host port** (nothing listens on 5432, on any
-interface). The API's DSN uses the container name, so a host reboot can
-never strand the API the way the Sep-14 outage did: the tail-IP port bind
-is gone, and the API's restart policy bridges Postgres's boot window
-(recovered in seconds in a down/up drill). Only `:8081` is host-published —
-desktops need it; nothing else should be. Operators reach Postgres with
-`docker exec vera-postgres psql`, never over TCP.
+Transport encryption is Cloud Run managed TLS. The desktop holds no
+`VERA_POSTGRES_DSN` and never opens a database connection. PDF rendering
+stays local. Offline mode is gone by design.
 
-Transport encryption is provided by WireGuard (Tailscale). Moving behind NPM
-with HTTPS requires a public hostname; until one exists, do not publish any
-other port.
+History: 3studio-server (Docker) and Tailscale Funnel hosted this before
+Sep 2026; both retired. Nothing project-related remains on that box.
 
-## Desktop configuration
+## Deploy (automatic)
 
-The desktop app needs only the server address:
+Merging to `main` triggers `.github/workflows/deploy.yml`: build
+`linux/amd64`, push the `sha-<commit>` tag, deploy image-only (env,
+including secrets, persists untouched), then probe `/health` + one
+authenticated-route `401`. Any failure fails the run loudly; traffic never
+moves to a bad revision. Auth is Workload Identity Federation — no stored
+GCP keys. Rollback is the previous Cloud Run revision, one click.
 
-```bash
-export VERA_API_URL='http://100.93.103.83:8081'
-```
-
-It holds no `VERA_POSTGRES_DSN` and never opens a database connection. Login
-issues the bearer token stored in the OS keychain; sign-in, prepare, export,
-archive, and delete all travel over the API. PDF rendering stays local. The
-desktop requires network access to the server — offline mode is gone by
-design; document this for staff laptops leaving the office network.
-
-## Deploy a new build
-
-Use the script (single source of truth — do not hand-edit tags anymore):
+Manual fallback (same checks by hand):
 
 ```bash
-./scripts/deploy.sh <full-40-char-sha> [--dry-run]
+SHA=$(git rev-parse HEAD)
+docker build --platform linux/amd64 -f Dockerfile.veraserver \
+  -t asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-$SHA .
+docker push asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-$SHA
+gcloud run deploy vera-api --image ...:sha-$SHA \
+  --region asia-southeast1 --platform managed --project=vera-app-508411
+BASE=https://vera-api-171860943410.asia-southeast1.run.app
+curl -s $BASE/health                                   # {"status":"ok"}
+curl -s -o /dev/null -w "%{http_code}\n" $BASE/v1/admin/users   # 401
 ```
-
-It resolves the SHA tag to an immutable digest in `ghcr.io`, pins the
-server compose file to it (image line only, secrets untouched), recreates,
-probes `/healthz` plus one authenticated route (401 = fully booted), and
-prints expected vs running digest. Any failure exits non-zero. Rollback is
-the same command with the previous SHA.
-
-Prerequisites: `docker login ghcr.io` with package-pull access (classic PAT
-with `read:packages`; the gh CLI token is insufficient for private org
-packages) and passwordless SSH to the server. The old date-tag workflow
-(`docker save` + `docker load` + hand-edited tags) is retired.
 
 ## Smoke test (no test users left behind)
 
 ```bash
-BASE=http://100.93.103.83:8081
+BASE=https://vera-api-171860943410.asia-southeast1.run.app
 # create a temporary user with a known Argon2id hash, then:
 curl -s -X POST $BASE/v1/auth/login \
   -H 'Content-Type: application/json' \
@@ -86,11 +74,28 @@ curl -s -o /dev/null -w "%{http_code}\n" $BASE/v1/auth/me \
 # delete the drill user afterwards
 ```
 
-Last verified live: 2026-09-12 (login 200, me 200, logout 204, post-logout 401).
+Last verified live: 2026-09-15 (health ok, gates 401, bogus-login generic 401, auto-deploy green end to end).
+
+## Credential rotation (standing procedure)
+
+Rotations happen only as a dance — reset, hand over, confirm live — because
+pooled connections mask a dead password for up to an hour while health
+checks stay green:
+
+1. Reset the password in Neon console (Roles → `neondb_owner`).
+2. Update **both** consumers in one pass: Cloud Run env
+   (`gcloud run services update vera-api ... --update-env-vars
+   'VERA_POSTGRES_DSN=...'`) and Secret Manager `vera-neon-password`
+   (new version; the dumps workflow reads it).
+3. Verify: `/health` ok + bogus-login generic 401 (proves fresh connections)
+   + one dispatched backup run (proves the secret path).
+4. Never rotate solo: an un-updated consumer fails silently behind its pool.
 
 ## Notes and limits
 
-- Port `8080` on the server is taken by AdGuard; the API uses `8081`.
 - Always build with `--platform linux/amd64` — a darwin/arm64 image fails on
-  the server with `exec format error`.
-- `GET /healthz` is the container healthcheck and the deploy check.
+  Cloud Run with `exec format error`.
+- Cold starts are normal (min-instances 0); startup retries the DB briefly
+  for Neon wake-ups, then fails fast.
+- Startup needs a reachable database; a bad DSN fails the revision (traffic
+  stays put) — check Cloud Run logs, not the service URL.
