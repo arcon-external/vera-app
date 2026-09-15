@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -82,4 +84,56 @@ func firstBytes(body []byte) string {
 		return string(body[:24]) + "…"
 	}
 	return string(body)
+}
+
+type fakeBackupSource struct {
+	name string
+	data []byte
+	err  error
+}
+
+func (f *fakeBackupSource) latest(_ context.Context) (string, []byte, error) {
+	if f.err != nil {
+		return "", nil, f.err
+	}
+	return f.name, f.data, nil
+}
+
+func TestDownloadBackupFromSourceStreamsBytes(t *testing.T) {
+	server, _, token := adminTestSetup(t, "vera_api_backup_src")
+	server.SetBackupSource(&fakeBackupSource{
+		name: "vera-20240101-000000.dump",
+		data: []byte("bucket-dump-bytes"),
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/admin/backup/latest", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("download = %d; want 200", recorder.Code)
+	}
+	body, err := io.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "bucket-dump-bytes" {
+		t.Errorf("downloaded %q; want source bytes", firstBytes(body))
+	}
+	if disposition := recorder.Header().Get("Content-Disposition"); !strings.Contains(disposition, "vera-20240101-000000.dump") {
+		t.Errorf("Content-Disposition = %q; want source filename", disposition)
+	}
+}
+
+func TestDownloadBackupSourceEmptyIs404(t *testing.T) {
+	server, _, token := adminTestSetup(t, "vera_api_backup_srcempty")
+	server.SetBackupSource(&fakeBackupSource{err: errors.New("no backups available")})
+
+	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/admin/backup/latest", "")
+	if code != http.StatusNotFound {
+		t.Fatalf("empty source = %d; want 404", code)
+	}
+	if message, _ := body["error"].(string); message == "" {
+		t.Error("empty source should explain that no backups are available")
+	}
 }
