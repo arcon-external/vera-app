@@ -149,7 +149,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
   const activate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
-    const token = code.trim();
+    const token = code.replace(/\s/g, "");
     if (!token) {
       setError("Enter the invite code your administrator shared.");
       return;
@@ -265,21 +265,23 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
               </button>
             </p>
           </form>
-          ) : activatedEmail ? (
+          ) : activatedEmail !== null ? (
           <div className="flex flex-col gap-4">
             <StatusBanner tone="info">
               Your account is activated. Sign in with your new password.
             </StatusBanner>
-            <div className="flex items-center justify-between gap-3 rounded-md border border-rule bg-paper-subtle px-3 py-2.5">
-              <span className="truncate text-body text-ink-900">{activatedEmail}</span>
-              <button
-                type="button"
-                onClick={() => void copyText(activatedEmail)}
-                className="shrink-0 rounded-md px-2 py-1 text-caption font-medium text-ink-600 transition hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </div>
+            {activatedEmail ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-rule bg-paper-subtle px-3 py-2.5">
+                <span className="truncate text-body text-ink-900">{activatedEmail}</span>
+                <button
+                  type="button"
+                  onClick={() => void copyText(activatedEmail)}
+                  className="shrink-0 rounded-md px-2 py-1 text-caption font-medium text-ink-600 transition hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                >
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ) : null}
             <Button variant="dark" onClick={() => switchMode("signin")} className="w-full">
               Finish — back to sign in
             </Button>
