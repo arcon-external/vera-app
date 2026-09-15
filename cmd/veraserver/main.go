@@ -35,7 +35,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	database, err := store.Open(ctx, config)
+	// Neon sleeps after 5 idle minutes; the first connection attempt of a
+	// cold deploy may catch it waking. Retry briefly so sleepy databases
+	// don't fail rollouts, then fail fast for real outages.
+	database, err := openStoreWithRetry(ctx, config, 10, 3*time.Second, store.Open)
 	if err != nil {
 		return err
 	}
