@@ -1,21 +1,44 @@
 package api
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"cloud.google.com/go/storage"
 	"github.com/labstack/echo/v4"
+	"google.golang.org/api/iterator"
 )
 
-// latestBackup returns the newest vera-*.dump file in dir.
-func latestBackup(dir string) (string, error) {
-	entries, err := os.ReadDir(dir)
+// maxBackupDownload caps a streamed dump at 512MB. Production dumps are a
+// few MB; anything larger is almost certainly a mistake.
+const maxBackupDownload = 512 << 20
+
+// backupSource yields the newest available dump. The directory source serves
+// local files (tests, local dev); the bucket source serves object storage.
+type backupSource interface {
+	latest(ctx context.Context) (name string, data []byte, err error)
+}
+
+// SetBackupSource overrides the backup source (tests and operators).
+func (s *Server) SetBackupSource(source backupSource) {
+	s.backups = source
+}
+
+// dirBackupSource serves vera-*.dump files from a directory, newest first.
+type dirBackupSource struct {
+	dir string
+}
+
+func (d *dirBackupSource) latest(ctx context.Context) (string, []byte, error) {
+	entries, err := os.ReadDir(d.dir)
 	if err != nil {
-		return "", fmt.Errorf("read backup directory: %w", err)
+		return "", nil, fmt.Errorf("read backup directory: %w", err)
 	}
 	type candidate struct {
 		path    string
@@ -31,19 +54,81 @@ func latestBackup(dir string) (string, error) {
 		if err != nil {
 			continue
 		}
-		dumps = append(dumps, candidate{filepath.Join(dir, name), info.ModTime().UnixNano()})
+		dumps = append(dumps, candidate{filepath.Join(d.dir, name), info.ModTime().UnixNano()})
 	}
 	if len(dumps) == 0 {
-		return "", fmt.Errorf("no backups available")
+		return "", nil, fmt.Errorf("no backups available")
 	}
 	sort.Slice(dumps, func(i, j int) bool { return dumps[i].modTime > dumps[j].modTime })
-	return dumps[0].path, nil
+	data, err := os.ReadFile(dumps[0].path)
+	if err != nil {
+		return "", nil, fmt.Errorf("read newest dump: %w", err)
+	}
+	return filepath.Base(dumps[0].path), data, nil
+}
+
+// gcsBackupSource serves vera-*.dump objects from a bucket, newest first.
+type gcsBackupSource struct {
+	bucket string
+}
+
+func (g *gcsBackupSource) latest(ctx context.Context) (string, []byte, error) {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return "", nil, fmt.Errorf("open backup storage: %w", err)
+	}
+	defer client.Close()
+	query := &storage.Query{Prefix: "vera-"}
+	it := client.Bucket(g.bucket).Objects(ctx, query)
+	var newestName string
+	var newestTime int64
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return "", nil, fmt.Errorf("list backups: %w", err)
+		}
+		if !strings.HasSuffix(attrs.Name, ".dump") {
+			continue
+		}
+		if timestamp := attrs.Updated.UnixNano(); timestamp > newestTime {
+			newestTime = timestamp
+			newestName = attrs.Name
+		}
+	}
+	if newestName == "" {
+		return "", nil, fmt.Errorf("no backups available")
+	}
+	reader, err := client.Bucket(g.bucket).Object(newestName).NewReader(ctx)
+	if err != nil {
+		return "", nil, fmt.Errorf("open newest dump: %w", err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(io.LimitReader(reader, maxBackupDownload+1))
+	if err != nil {
+		return "", nil, fmt.Errorf("read newest dump: %w", err)
+	}
+	if len(data) > maxBackupDownload {
+		return "", nil, fmt.Errorf("newest dump exceeds 512MB")
+	}
+	return newestName, data, nil
 }
 
 func (s *Server) downloadBackup(context echo.Context) error {
-	path, err := latestBackup(s.backupDirOrDefault())
+	source := s.backups
+	if source == nil {
+		if bucket := os.Getenv("VERA_BACKUP_BUCKET"); bucket != "" {
+			source = &gcsBackupSource{bucket: bucket}
+		} else {
+			source = &dirBackupSource{dir: s.backupDirOrDefault()}
+		}
+	}
+	name, data, err := source.latest(context.Request().Context())
 	if err != nil {
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "no backups available yet"})
 	}
-	return context.Attachment(path, filepath.Base(path))
+	context.Response().Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename=%q`, filepath.Base(name)))
+	return context.Blob(http.StatusOK, "application/octet-stream", data)
 }
