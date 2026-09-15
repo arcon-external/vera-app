@@ -12,26 +12,42 @@ jobs:
   deploy:
     name: Build, push, deploy
     runs-on: ubuntu-latest
-    # Skips cleanly until the owner completes the one-time GCP setup
-    # (WIF pool + service account, see docs/api-deploy.md).
-    if: ${{ secrets.GCP_WIF_PROVIDER != '' && secrets.GCP_SERVICE_ACCOUNT != '' }}
     steps:
+      - name: Check deploy readiness
+        id: ready
+        # Skips cleanly until the owner completes the one-time GCP setup
+        # (WIF pool + service account, see docs/api-deploy.md). Secrets are
+        # read here at step level, which keeps the workflow parseable in
+        # every trigger context; every step below gates on this output.
+        run: |
+          if [ -z "${{ secrets.GCP_WIF_PROVIDER }}" ] || [ -z "${{ secrets.GCP_SERVICE_ACCOUNT }}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "GCP deploy secrets not configured; skipping."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout
+        if: steps.ready.outputs.ready == 'true'
         uses: actions/checkout@v6
 
       - name: Authenticate to Google Cloud
+        if: steps.ready.outputs.ready == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Docker Buildx
+        if: steps.ready.outputs.ready == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Artifact Registry
+        if: steps.ready.outputs.ready == 'true'
         run: gcloud auth configure-docker asia-southeast1-docker.pkg.dev --quiet
 
       - name: Build and push (commit SHA tag only)
+        if: steps.ready.outputs.ready == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -41,6 +57,7 @@ jobs:
           tags: asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-${{ github.sha }}
 
       - name: Deploy image to Cloud Run
+        if: steps.ready.outputs.ready == 'true'
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: vera-api
@@ -51,6 +68,7 @@ jobs:
         # this step updates the image only and never sees secrets.
 
       - name: Verify live service
+        if: steps.ready.outputs.ready == 'true'
         run: |
           BASE="https://vera-api-171860943410.asia-southeast1.run.app"
           for i in $(seq 1 30); do
