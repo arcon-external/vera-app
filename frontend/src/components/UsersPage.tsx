@@ -10,6 +10,7 @@ import {
 import { backend } from "@backend/models";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { Select } from "./Select";
 
 type ManagedUser = backend.ManagedUser;
 
@@ -161,8 +162,23 @@ export function UsersPage() {
             title="Click to copy"
             aria-label={`Copy invite code for ${invite.email}`}
             onClick={() => void copyInviteCode(invite.token)}
-            className="tnum rounded bg-white/70 px-1.5 py-0.5 transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+            className="tnum inline-flex cursor-pointer items-center gap-1.5 rounded border border-transparent bg-white/70 px-1.5 py-0.5 transition hover:border-rule-strong hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
           >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+              className="shrink-0 opacity-60"
+            >
+              <rect x="9" y="9" width="12" height="12" rx="2" />
+              <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+            </svg>
             {invite.token}
           </button>{" "}
           <span className="text-caption">
@@ -232,7 +248,7 @@ export function UsersPage() {
               <tbody className="divide-y divide-rule">
                 {visible.map((user) => (
                   <Fragment key={user.ID}>
-                  <tr className="align-top transition-colors duration-150 hover:bg-paper-subtle/50">
+                  <tr className="align-middle transition-colors duration-150 hover:bg-paper-subtle/50">
                     <td className="px-5 py-3">
                       <div className="font-medium text-ink-900">{user.DisplayName}</div>
                       <div className="mt-0.5 text-caption text-ink-500">{user.Email}</div>
@@ -454,14 +470,15 @@ function CreateUserForm({
         </label>
         <label className="flex flex-col gap-1.5">
           <span className="text-caption font-medium text-ink-600">Role</span>
-          <select
+          <Select
             value={role}
-            onChange={(event) => setRole(event.target.value)}
-            className={`${fieldClass} cursor-pointer`}
-          >
-            <option value="staff">Staff — quotations only</option>
-            <option value="admin">Admin — full access</option>
-          </select>
+            ariaLabel="Role"
+            options={[
+              { value: "staff", label: "Staff — quotations only" },
+              { value: "admin", label: "Admin — full access" },
+            ]}
+            onChange={(next) => setRole(String(next))}
+          />
         </label>
         <div className="flex items-end gap-2">
           <Button type="submit" variant="primary" disabled={busy} className="flex-1">

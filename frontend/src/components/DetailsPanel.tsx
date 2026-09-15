@@ -1,7 +1,12 @@
 import type { ReactNode } from "react";
 import { Card, SectionHeading } from "./ui";
 import { Select } from "./Select";
-import { SERVICE_CATEGORY_OPTIONS, taxRateLabel } from "../tax";
+import {
+  SERVICE_CATEGORY_OPTIONS,
+  ppnRateBps,
+  servicesRateBps,
+  taxRateLabel,
+} from "../tax";
 
 export interface DetailsState {
   subject: string;
@@ -83,6 +88,41 @@ function NumberField({
         <span className="text-caption text-ink-400">{suffix}</span>
       </div>
     </Field>
+  );
+}
+
+function TaxSummaryCard({
+  taxZone,
+  taxType,
+  serviceCategory,
+}: {
+  taxZone: string;
+  taxType: string;
+  serviceCategory: string;
+}) {
+  const ppn = ppnRateBps(taxZone, taxType);
+  const services = servicesRateBps(taxType, serviceCategory);
+  return (
+    <div className="rounded-lg border border-rule bg-paper-subtle px-4 py-3.5">
+      <p className="text-small font-medium text-ink-700">What this means</p>
+      {ppn > 0 ? (
+        <p className="mt-1 text-caption leading-relaxed text-ink-500">
+          PPN 11% is added after subtotal and discount on the customer
+          quotation.
+        </p>
+      ) : null}
+      {services > 0 ? (
+        <p className="mt-1 text-caption leading-relaxed text-ink-500">
+          Services tax {taxRateLabel(taxZone, taxType, serviceCategory)} stays
+          internal — it never appears on the quotation.
+        </p>
+      ) : null}
+      {ppn === 0 && services === 0 ? (
+        <p className="mt-1 text-caption leading-relaxed text-ink-500">
+          No tax. The grand total is also the nett amount payable.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -297,6 +337,11 @@ export function DetailsPanel({
                 </p>
               </div>
             )}
+            <TaxSummaryCard
+              taxZone={value.taxZone}
+              taxType={value.taxType}
+              serviceCategory={value.serviceCategory}
+            />
           </div>
         </div>
       </div>
