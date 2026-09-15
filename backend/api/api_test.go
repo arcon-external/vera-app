@@ -43,6 +43,20 @@ func TestHealthzNeedsNoAuth(t *testing.T) {
 	}
 }
 
+// Monitors (e.g. UptimeRobot) poll with HEAD; both health paths must
+// answer it like their GET twins.
+func TestHealthHead(t *testing.T) {
+	server := NewServer(nil, nil, nil)
+	for _, path := range []string{"/healthz", "/health"} {
+		request := httptest.NewRequest(http.MethodHead, path, nil)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Errorf("HEAD %s = %d; want 200", path, recorder.Code)
+		}
+	}
+}
+
 func TestLoginLogoutMeFlow(t *testing.T) {
 	server, _ := testServer(t, "vera_api_test_flow")
 
