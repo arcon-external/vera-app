@@ -1,0 +1,54 @@
+name: Nightly database dump
+
+on:
+  schedule:
+    # 02:00 WIB (UTC+7).
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  dump:
+    name: Dump Neon to bucket
+    runs-on: ubuntu-latest
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo apt-get install -y -qq curl gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
+
+      - name: Read DB password
+        id: dbpass
+        run: |
+          PASSWORD="$(gcloud secrets versions access latest --secret=vera-neon-password --project=vera-app-508411)"
+          echo "::add-mask::$PASSWORD"
+          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+
+      - name: Dump and upload
+        env:
+          PGPASSWORD: ${{ steps.dbpass.outputs.password }}
+        run: |
+          set -euo pipefail
+          STAMP=$(date +%Y%m%d-%H%M%S)
+          export PGSSLMODE=require
+          pg_dump -h ep-frosty-field-b3szqzqb.c-4.ap-southeast-1.aws.neon.tech \
+            -U neondb_owner -d neondb -Fc -f "vera-$STAMP.dump"
+          head -c 5 "vera-$STAMP.dump" | grep -q PGDMP
+          gcloud storage cp "vera-$STAMP.dump" gs://vera-backups-508411/ --project=vera-app-508411
+          rm -f "vera-$STAMP.dump"
+
+      - name: Prune beyond 14
+        run: |
+          gcloud storage ls gs://vera-backups-508411/vera-*.dump --project=vera-app-508411 \
+            | sort -r | tail -n +15 | xargs -r gcloud storage rm --project=vera-app-508411
