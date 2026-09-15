@@ -76,9 +76,10 @@ func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
 }
 
 // RedeemInvite activates an account with an invite or password-reset code,
-// setting its password. It returns the activated email address. It signs no
-// one in; the user signs in afterwards. Valid codes are single-use and
-// expire after an hour.
+// setting its password. It returns the activated email address, or "" when
+// talking to an older server that only reports status (generic success).
+// It signs no one in; the user signs in afterwards. Valid codes are
+// single-use and expire after an hour.
 func (a *AuthAPI) RedeemInvite(token, newPassword string) (string, error) {
 	client, err := api()
 	if err != nil {
@@ -94,7 +95,7 @@ func (a *AuthAPI) RedeemInvite(token, newPassword string) (string, error) {
 	}, &response); err != nil {
 		return "", err
 	}
-	if response.Status != "ok" || response.Email == "" {
+	if response.Status != "ok" {
 		return "", fmt.Errorf("invite code was not accepted")
 	}
 	return response.Email, nil

@@ -160,3 +160,24 @@ func TestRedeemInviteReturnsEmail(t *testing.T) {
 		t.Errorf("email = %q; want newbie@example.com", email)
 	}
 }
+
+func TestRedeemInviteToleratesOldServer(t *testing.T) {
+	t.Setenv("VERA_NO_KEYRING", "1")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"status":"ok"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previous := apiClient
+	ConfigureAPI(apiclient.New(server.URL, SessionToken))
+	t.Cleanup(func() { apiClient = previous })
+
+	email, err := NewAuthAPI().RedeemInvite("some-token", "a-long-enough-password")
+	if err != nil {
+		t.Fatalf("ok-without-email must succeed, got: %v", err)
+	}
+	if email != "" {
+		t.Errorf("email = %q; want empty (generic success)", email)
+	}
+}
