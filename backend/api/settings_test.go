@@ -145,3 +145,26 @@ func TestDeletionRequestApproveFlow(t *testing.T) {
 		t.Fatalf("admin me after refused delete = %d; want 200", code)
 	}
 }
+
+func TestApproveDeletionSignsOutEverywhere(t *testing.T) {
+	server, database, adminToken := adminTestSetup(t, "vera_api_deletion_signout")
+	seedStaff(t, database, "leaving-staff@example.com", "staff-password")
+	staffToken := doLogin(t, server, "leaving-staff@example.com", "staff-password")
+
+	code, requested := doAdminRequest(t, server, staffToken, http.MethodPost, "/v1/auth/deletion-request", `{"confirm":true}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("request deletion = %d; want 202", code)
+	}
+	requestID, _ := requested["id"].(float64)
+
+	code, _ = doAdminRequest(t, server, adminToken, http.MethodPost,
+		"/v1/admin/deletion-requests/"+strconv.FormatInt(int64(requestID), 10)+"/approve", "")
+	if code != http.StatusOK {
+		t.Fatalf("approve deletion = %d; want 200", code)
+	}
+
+	// The staff session dies with the approval.
+	if code, _ := doAdminRequest(t, server, staffToken, http.MethodGet, "/v1/auth/me", ""); code != http.StatusUnauthorized {
+		t.Errorf("session after approval = %d; want 401", code)
+	}
+}

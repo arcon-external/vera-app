@@ -34,7 +34,7 @@ import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { UsersPage } from "./components/UsersPage";
 import { SettingsPage } from "./components/SettingsPage";
-import { Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { CurrentUser, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -205,6 +205,8 @@ function App() {
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
 
+  const signedIn = user !== null;
+
   // Restore the keychain session on startup; otherwise show the login page.
   // The try/catch also covers plain-browser dev, where the Wails runtime
   // (window.go) does not exist and the binding throws synchronously.
@@ -247,6 +249,30 @@ function App() {
       setPage("create");
     }
   }, [resetForm]);
+
+  // Revalidate the session while signed in so server-side revocation
+  // (deactivation, approved deletion, password change) signs the device out
+  // within about a minute. Network errors are ignored: an offline laptop
+  // waking up must not be signed out by a failed poll.
+  useEffect(() => {
+    if (!signedIn) return;
+    const timer = window.setInterval(() => {
+      CurrentUser()
+        .then((restored) => setUser(restored as SignedInUser))
+        .catch((err: unknown) => {
+          const message = typeof err === "string" ? err : "";
+          if (message.startsWith("reach the quotation server")) return;
+          setUser(null);
+          resetForm();
+          setPage("create");
+          pushToast(
+            "error",
+            "You've been signed out. Contact your administrator if this was unexpected."
+          );
+        });
+    }, 60000);
+    return () => window.clearInterval(timer);
+  }, [signedIn, resetForm, pushToast]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);

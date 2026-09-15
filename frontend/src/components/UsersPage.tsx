@@ -391,9 +391,9 @@ export function UsersPage() {
       </Card>
 
       <p className="text-caption leading-relaxed text-ink-400">
-        Deactivating signs the person out on their device immediately. Role and
-        status changes take effect on their next action. Deletion is permanent
-        and only offered for deactivated accounts.
+        Deactivating signs the person out on their device within about a
+        minute. Role and status changes take effect on their next action.
+        Deletion is permanent and only offered for deactivated accounts.
       </p>
     </section>
   );
