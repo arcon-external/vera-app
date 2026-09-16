@@ -533,7 +533,12 @@ function DeletionQueue() {
   const decide = async (id: number, approve: boolean) => {
     try {
       await DecideDeletion(id, approve);
-      pushToast("success", approve ? "Account deleted." : "Request rejected.");
+      pushToast(
+        "success",
+        approve
+          ? "Approved. They'll be signed out within a minute."
+          : "Request rejected."
+      );
       await load();
     } catch (err: unknown) {
       pushToast("error", errorMessage(err, "We couldn't decide this request."));
@@ -545,8 +550,8 @@ function DeletionQueue() {
       <div className="border-b border-rule px-5 py-4">
         <SectionHeading title="Deletion requests" />
         <p className="text-body text-ink-500">
-          Approving deactivates the account immediately and signs them out
-          everywhere. Records are kept; nothing is purged.
+          Approving deactivates the account and signs them out everywhere
+          within about a minute. Records are kept; nothing is purged.
         </p>
       </div>
       {loading ? (

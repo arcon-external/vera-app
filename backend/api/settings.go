@@ -79,6 +79,25 @@ func (s *Server) requestDeletion(context echo.Context) error {
 	return context.JSON(http.StatusAccepted, map[string]any{"id": record.ID, "status": record.Status})
 }
 
+// myDeletionRequests returns the signed-in user's own deletion requests,
+// newest first, including decided ones so staff can follow outcomes.
+func (s *Server) myDeletionRequests(context echo.Context) error {
+	me := sessionUser(context)
+	requests, err := s.database.ListUserDeletionRequests(context.Request().Context(), me.ID)
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "list deletion requests"})
+	}
+	result := make([]map[string]any, 0, len(requests))
+	for _, request := range requests {
+		result = append(result, map[string]any{
+			"id":          request.ID,
+			"status":      request.Status,
+			"requestedAt": request.RequestedAt,
+		})
+	}
+	return context.JSON(http.StatusOK, result)
+}
+
 func (s *Server) listDeletionRequests(context echo.Context) error {
 	requests, err := s.database.ListDeletionRequests(context.Request().Context())
 	if err != nil {

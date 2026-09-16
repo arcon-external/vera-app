@@ -90,6 +90,38 @@ func (s *Store) RequestDeletion(ctx context.Context, userID int64) (DeletionRequ
 	return request, nil
 }
 
+// ListUserDeletionRequests returns a user's own requests, newest first,
+// including decided ones so staff can see outcomes.
+func (s *Store) ListUserDeletionRequests(ctx context.Context, userID int64) ([]DeletionRequest, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT id, user_id, status, requested_at
+		FROM %s.deletion_requests
+		WHERE user_id = $1
+		ORDER BY requested_at DESC`, s.configSchema()),
+		userID)
+	if err != nil {
+		return nil, fmt.Errorf("list user deletion requests: %w", err)
+	}
+	defer rows.Close()
+
+	requests := make([]DeletionRequest, 0)
+	for rows.Next() {
+		var request DeletionRequest
+		if err := rows.Scan(&request.ID, &request.UserID, &request.Status, &request.RequestedAt); err != nil {
+			return nil, fmt.Errorf("scan user deletion request: %w", err)
+		}
+		requests = append(requests, request)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user deletion requests: %w", err)
+	}
+	return requests, nil
+}
+
 // ListDeletionRequests returns pending requests newest first with user info.
 func (s *Store) ListDeletionRequests(ctx context.Context) ([]DeletionRequest, error) {
 	pool, err := s.poolOrError()

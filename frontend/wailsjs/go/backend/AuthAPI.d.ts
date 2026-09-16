@@ -12,6 +12,8 @@ export function Logout():Promise<void>;
 
 export function LogoutEverywhere():Promise<void>;
 
+export function MyDeletionRequests():Promise<Array<backend.OwnDeletionRequest>>;
+
 export function RedeemInvite(arg1:string,arg2:string):Promise<string>;
 
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;

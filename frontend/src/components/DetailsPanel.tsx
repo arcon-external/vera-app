@@ -332,9 +332,6 @@ export function DetailsPanel({
                   No tax is charged, so the grand total is also the nett
                   amount payable.
                 </p>
-                <p className="mt-2 border-t border-rule pt-2 text-caption leading-relaxed text-ink-500">
-                  Use Non-FTZ for work outside the free trade zone.
-                </p>
               </div>
             )}
             <TaxSummaryCard

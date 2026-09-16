@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 )
@@ -166,5 +168,55 @@ func TestApproveDeletionSignsOutEverywhere(t *testing.T) {
 	// The staff session dies with the approval.
 	if code, _ := doAdminRequest(t, server, staffToken, http.MethodGet, "/v1/auth/me", ""); code != http.StatusUnauthorized {
 		t.Errorf("session after approval = %d; want 401", code)
+	}
+}
+
+func TestMyDeletionRequestsShowsOwnOnly(t *testing.T) {
+	server, database, _ := adminTestSetup(t, "vera_api_mine_requests")
+	seedStaff(t, database, "mine-staff@example.com", "staff-password")
+	seedStaff(t, database, "other-staff@example.com", "staff-password")
+	staffToken := doLogin(t, server, "mine-staff@example.com", "staff-password")
+	otherToken := doLogin(t, server, "other-staff@example.com", "staff-password")
+
+	getMine := func(token string) (int, []map[string]any) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/v1/auth/deletion-requests/mine", nil)
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		var decoded []map[string]any
+		if recorder.Code == http.StatusOK && len(recorder.Body.Bytes()) > 0 {
+			if err := json.Unmarshal(recorder.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("GET mine: decode response: %v", err)
+			}
+		}
+		return recorder.Code, decoded
+	}
+
+	code, _ := doAdminRequest(t, server, staffToken, http.MethodPost, "/v1/auth/deletion-request", `{"confirm":true}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("request deletion = %d; want 202", code)
+	}
+
+	code, other := getMine(otherToken)
+	if code != http.StatusOK {
+		t.Fatalf("other mine requests = %d; want 200", code)
+	}
+	if len(other) != 0 {
+		t.Errorf("other staff sees %d requests; want none", len(other))
+	}
+
+	code, mine := getMine(staffToken)
+	if code != http.StatusOK {
+		t.Fatalf("mine requests = %d; want 200", code)
+	}
+	if len(mine) != 1 || mine[0]["status"] != "pending" {
+		t.Errorf("own request missing from mine list: %v", mine)
+	}
+
+	if code, _ := getMine(""); code != http.StatusUnauthorized {
+		t.Errorf("anonymous mine requests = %d; want 401", code)
 	}
 }

@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { NotificationBell } from "./NotificationBell";
+import type { SignedInUser } from "./LoginPage";
 
 interface AppShellProps {
   page: "create" | "archive" | "detail" | "users" | "settings";
@@ -10,7 +12,7 @@ interface AppShellProps {
   showUsersTab?: boolean;
   children: ReactNode;
   actionBar?: ReactNode;
-  user?: { DisplayName: string; Email: string; Role: string; AvatarURL?: string } | null;
+  user?: SignedInUser | null;
   onSignOut?: () => void;
 }
 
@@ -92,7 +94,9 @@ export function AppShell({
             PT Arcon Penta Persada
           </span>
           {user ? (
-            <div className="relative ml-auto flex items-center gap-2 lg:ml-0">
+            <>
+              <NotificationBell user={user} />
+              <div className="relative ml-auto flex items-center gap-2 lg:ml-0">
               <button
                 type="button"
                 onClick={() => setMenuOpen((open) => !open)}
@@ -171,6 +175,7 @@ export function AppShell({
                 </div>
               ) : null}
             </div>
+            </>
           ) : null}
         </div>
       </header>

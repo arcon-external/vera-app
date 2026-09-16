@@ -185,6 +185,33 @@ func (a *AuthAPI) RequestDeletion(confirmed bool) (DeletionRequest, error) {
 	return DeletionRequest{ID: response.ID, Status: response.Status}, nil
 }
 
+// OwnDeletionRequest is a signed-in user's own deletion request status.
+type OwnDeletionRequest struct {
+	ID     int64
+	Status string
+}
+
+// MyDeletionRequests lists the signed-in user's own deletion requests,
+// newest first, for the notifications bell and the settings view.
+func (a *AuthAPI) MyDeletionRequests() ([]OwnDeletionRequest, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response []struct {
+		ID     int64  `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := client.Get("/v1/auth/deletion-requests/mine", &response); err != nil {
+		return nil, err
+	}
+	requests := make([]OwnDeletionRequest, 0, len(response))
+	for _, item := range response {
+		requests = append(requests, OwnDeletionRequest{ID: item.ID, Status: item.Status})
+	}
+	return requests, nil
+}
+
 // UpdateProfile changes the signed-in user's display name and/or avatar.
 // Empty display name leaves the name unchanged; removeAvatar clears the
 // picture; avatarBase64/avatarMime upload a replacement.
