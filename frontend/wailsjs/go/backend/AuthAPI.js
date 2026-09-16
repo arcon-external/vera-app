@@ -22,6 +22,10 @@ export function LogoutEverywhere() {
   return window['go']['backend']['AuthAPI']['LogoutEverywhere']();
 }
 
+export function MyDeletionRequests() {
+  return window['go']['backend']['AuthAPI']['MyDeletionRequests']();
+}
+
 export function RedeemInvite(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['RedeemInvite'](arg1, arg2);
 }

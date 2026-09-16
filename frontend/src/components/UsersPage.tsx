@@ -286,11 +286,12 @@ export function UsersPage() {
                       {user.LastLoginAt ? user.LastLoginAt.slice(0, 10) : "—"}
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex items-center justify-end gap-1.5">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
                         <Button
                           variant="ghost"
                           size="sm"
                           onClick={() => void handleReset(user)}
+                          className="shrink-0 whitespace-nowrap"
                         >
                           Invite code
                         </Button>
@@ -303,7 +304,7 @@ export function UsersPage() {
                               setDeleteId(user.ID);
                               setDeleteText("");
                             }}
-                            className="hover:!bg-danger-50 hover:!text-danger-600"
+                            className="shrink-0 whitespace-nowrap hover:!bg-danger-50 hover:!text-danger-600"
                           >
                             Delete
                           </Button>
@@ -314,6 +315,7 @@ export function UsersPage() {
                               variant="danger"
                               size="sm"
                               onClick={() => void handleActive(user, !user.IsActive)}
+                              className="shrink-0 whitespace-nowrap"
                             >
                               Confirm
                             </Button>
@@ -321,6 +323,7 @@ export function UsersPage() {
                               variant="ghost"
                               size="sm"
                               onClick={() => setConfirmId(null)}
+                              className="shrink-0 whitespace-nowrap"
                             >
                               Keep
                             </Button>
@@ -331,7 +334,7 @@ export function UsersPage() {
                             size="sm"
                             aria-label={user.IsActive ? `Deactivate ${user.Email}` : `Reactivate ${user.Email}`}
                             onClick={() => setConfirmId(user.ID)}
-                            className="hover:!bg-danger-50 hover:!text-danger-600"
+                            className="shrink-0 whitespace-nowrap hover:!bg-danger-50 hover:!text-danger-600"
                           >
                             {user.IsActive ? "Deactivate" : "Reactivate"}
                           </Button>

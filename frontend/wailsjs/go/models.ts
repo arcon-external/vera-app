@@ -566,6 +566,20 @@ export namespace backend {
 	        this.LastLoginAt = source["LastLoginAt"];
 	    }
 	}
+	export class OwnDeletionRequest {
+	    ID: number;
+	    Status: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OwnDeletionRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Status = source["Status"];
+	    }
+	}
 	export class QuotationItemInput {
 	    Description: string;
 	    Qty: number;
