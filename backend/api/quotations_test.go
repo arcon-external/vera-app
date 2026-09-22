@@ -137,6 +137,80 @@ func TestPrepareEndpointRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestExportSnapshotCarriesVerificationQR(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_quote_qr")
+
+	code, exported := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, quotationInput())
+	if code != http.StatusCreated {
+		t.Fatalf("export = %d; want 201 (%v)", code, exported)
+	}
+	shortID, _ := exported["shortId"].(string)
+	if shortID == "" {
+		t.Fatal("export carries no shortId")
+	}
+	id, _ := exported["id"].(float64)
+	quotePath := "/v1/quotations/" + strconv.Itoa(int(id))
+
+	code, detail := doJSON(t, server, http.MethodGet, quotePath, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail = %d; want 200", code)
+	}
+	snapshot, _ := detail["htmlSnapshot"].(string)
+	if !strings.Contains(snapshot, "data:image/png;base64,") {
+		t.Error("stored snapshot has no QR image")
+	}
+	if !strings.Contains(snapshot, "Scan to verify this quotation") {
+		t.Error("stored snapshot has no verification caption")
+	}
+	if !strings.Contains(snapshot, "Doc ID") {
+		t.Error("stored snapshot has no document id line")
+	}
+	// The stored snapshot must never carry the scanned signature image: the
+	// verification code replaces it.
+	if strings.Contains(snapshot, `class="signature"`) {
+		t.Error("snapshot still renders the old signature block")
+	}
+
+	// The printed code must resolve: the same handle the portal serves.
+	request := httptest.NewRequest(http.MethodGet, "/v/"+shortID, nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Errorf("printed code resolved to %d; want 200", recorder.Code)
+	}
+}
+
+func TestRevisionReusesQuotationVerificationIdentity(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_quote_qr_rev")
+
+	code, first := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, quotationInput())
+	if code != http.StatusCreated {
+		t.Fatalf("first export = %d", code)
+	}
+	quoteNumber, _ := first["quoteNumber"].(string)
+	firstShort, _ := first["shortId"].(string)
+	firstUUID, _ := first["uuid"].(string)
+
+	second := quotationInput()
+	code, revised := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, map[string]any{
+		"input": second, "quoteNumber": quoteNumber, "revision": 1,
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("revision export = %d; want 201 (%v)", code, revised)
+	}
+	secondShort, _ := revised["shortId"].(string)
+	secondUUID, _ := revised["uuid"].(string)
+
+	// A revision is the same quotation: same external identity, different
+	// verification handle (one handle per revision).
+	if secondUUID != firstUUID {
+		t.Errorf("revision uuid = %q; want the quotation's %q", secondUUID, firstUUID)
+	}
+	if secondShort == firstShort {
+		t.Error("two revisions share one verification handle; codes would collide")
+	}
+}
+
 func TestExportHeaderTracksCompanyProfile(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_quote_company")
 	database, err := store.Open(context.Background(), store.Config{

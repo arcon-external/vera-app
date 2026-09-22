@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,13 @@ type Client struct {
 	token          func() string
 	http           *http.Client
 	OnUnauthorized func()
+}
+
+// BaseURL reports the API address this client talks to. The verification
+// portal is served by the same service, so documents printed by this client
+// link back to it.
+func (c *Client) BaseURL() string {
+	return strings.TrimRight(c.baseURL, "/")
 }
 
 // New builds a client for a base URL like https://vera.example.com.

@@ -360,6 +360,51 @@
 			height: auto;
 		}
 
+		.verify {
+			margin-top: 18px;
+			display: flex;
+			justify-content: flex-end;
+			align-items: flex-end;
+			gap: 14px;
+		}
+
+		.verify-caption {
+			text-align: right;
+			font-size: 10px;
+			line-height: 1.5;
+			color: #3a4466;
+			padding-bottom: 2px;
+		}
+
+		.verify-caption strong {
+			display: block;
+			font-size: 11px;
+			color: var(--accent-blue);
+			margin-bottom: 1px;
+		}
+
+		.verify-docid {
+			display: block;
+			font-size: 9px;
+			color: #8a93b2;
+			letter-spacing: 0.02em;
+		}
+
+		.verify-qr {
+			width: 110px;
+			height: 110px;
+			padding: 4px;
+			border: 1px solid #c9d9ff;
+			border-radius: 8px;
+			background: #fff;
+		}
+
+		.verify-qr img {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+
 		@media print {
 			body {
 				background: #fff;

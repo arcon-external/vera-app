@@ -137,9 +137,25 @@
 				which will receive our prompt and careful attention.
 			</p>
 
+			{{/* Layout A (approved): the verification code replaces the scanned
+			     signature block. The caption carries the issuer identity that the
+			     signature used to convey. */}}
+			{{if .VerifyQRBase64}}
+			<div class="verify">
+				<div class="verify-caption">
+					<strong>{{.CompanyName}}</strong>
+					Scan to verify this quotation
+					<span class="verify-docid">Doc ID {{.VerifyShortID}}</span>
+				</div>
+				<div class="verify-qr">
+					<img src="data:image/png;base64,{{.VerifyQRBase64}}" alt="Verification QR code">
+				</div>
+			</div>
+			{{else}}
 			<div class="signature">
 				<img src="data:image/png;base64,{{.SignatureBase64}}" alt="signature">
 			</div>
+			{{end}}
 		</main>
 	</div>
 </body>

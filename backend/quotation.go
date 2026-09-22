@@ -75,22 +75,31 @@ type QuotationItem struct {
 // It combines static template assets (set once at startup by readTemplate)
 // with business data (set per-export by Prepare).
 type QuotationData struct {
-	Items                     []QuotationItem
-	CustomCSS                 template.CSS
-	HtmlTemplate              *template.Template
-	LogoBase64                string
-	SignatureBase64           string
-	FontRegularBase64         string
-	FontBoldBase64            string
-	Date                      string
-	ValidUntil                string
-	CompanyName               string
-	CompanyAddress            string
-	RecipientName             string
-	RecipientCompany          string
-	RecipientAddress          string
-	QuoteNumber               string
-	QuoteUUID                 string
+	Items             []QuotationItem
+	CustomCSS         template.CSS
+	HtmlTemplate      *template.Template
+	LogoBase64        string
+	SignatureBase64   string
+	FontRegularBase64 string
+	FontBoldBase64    string
+	Date              string
+	ValidUntil        string
+	CompanyName       string
+	CompanyAddress    string
+	RecipientName     string
+	RecipientCompany  string
+	RecipientAddress  string
+	QuoteNumber       string
+	QuoteUUID         string
+	// VerifyURL is the public verification address printed as a QR code on
+	// the document. Empty before export (the handle does not exist yet), in
+	// which case the template omits the code rather than printing a dead one.
+	VerifyURL      string
+	VerifyQRBase64 string
+	// VerifyShortID is the handle inside VerifyURL, printed in the caption so
+	// a reader (or a support call) can reference the document without
+	// scanning it.
+	VerifyShortID             string
 	RevisionID                uint16
 	Subject                   string
 	DisplaySubTotal           string
@@ -374,6 +383,31 @@ func (q *Quotation) CustomerID() uint8 {
 	return q.Data.CustomerID
 }
 
+// SetVerifyURL records the public verification address and renders its QR
+// image for the document. It is set once the revision's verification handle
+// exists — after the server has allocated the revision.
+func (q *Quotation) SetVerifyURL(url string) error {
+	trimmed := strings.TrimSpace(url)
+	if trimmed == "" {
+		q.Data.VerifyURL = ""
+		q.Data.VerifyQRBase64 = ""
+		q.Data.VerifyShortID = ""
+		return nil
+	}
+	encoded, err := BuildVerificationQR(trimmed)
+	if err != nil {
+		return err
+	}
+	q.Data.VerifyURL = trimmed
+	q.Data.VerifyQRBase64 = encoded
+	q.Data.VerifyShortID = trimmed[strings.LastIndex(trimmed, "/")+1:]
+	return nil
+}
+
+// VerifyURL returns the verification address currently bound to the
+// document, if any.
+func (q *Quotation) VerifyURL() string { return q.Data.VerifyURL }
+
 // SetQuoteNumber assigns an allocated quote number and revision, used by the
 // API server which allocates sequences itself instead of showing a dialog.
 func (q *Quotation) SetQuoteNumber(quoteNumber string, revision uint16) {
@@ -612,6 +646,15 @@ func (q *Quotation) Export() error {
 	q.Data.QuoteNumber = exported.QuoteNumber
 	q.Data.QuoteUUID = exported.UUID
 	q.Data.RevisionID = uint16(exported.Revision)
+
+	// Bind the printed document to its verification address. The server
+	// already rendered the same link into the stored snapshot, so the PDF
+	// this client builds and the archived copy agree.
+	if exported.ShortID != "" {
+		if err := q.SetVerifyURL(client.BaseURL() + "/v/" + exported.ShortID); err != nil {
+			return fmt.Errorf("build verification code: %w", err)
+		}
+	}
 
 	pdfBuf, err := q.build()
 	if err != nil {
