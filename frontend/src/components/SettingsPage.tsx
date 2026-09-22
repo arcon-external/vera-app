@@ -11,6 +11,7 @@ import {
 } from "@backend/backend/AdminAPI";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { Select } from "./Select";
 import type { SignedInUser } from "./LoginPage";
 
 interface DeletionRequestRow {
@@ -355,6 +356,45 @@ type CompanyForm = {
   taxId: string;
 };
 
+const COUNTRY_CODES = [
+  { value: "+62", label: "+62 Indonesia" },
+  { value: "+65", label: "+65 Singapore" },
+  { value: "+60", label: "+60 Malaysia" },
+  { value: "+66", label: "+66 Thailand" },
+  { value: "+84", label: "+84 Vietnam" },
+  { value: "+63", label: "+63 Philippines" },
+  { value: "+81", label: "+81 Japan" },
+  { value: "+86", label: "+86 China" },
+  { value: "+82", label: "+82 South Korea" },
+  { value: "+91", label: "+91 India" },
+  { value: "+1", label: "+1 USA / Canada" },
+  { value: "+44", label: "+44 UK" },
+] as const;
+
+const DEFAULT_COUNTRY_CODE = "+62";
+
+// splitPhoneCode divides a stored number into a known country code and the
+// national remainder. Unknown formats come back unsplit under the default
+// code so saving preserves them verbatim instead of mangling them.
+function splitPhoneCode(stored: string): { code: string; national: string; matched: boolean } {
+  const trimmed = stored.trim();
+  const squished = trimmed.replace(/[\s\-().]/g, "");
+  const codes = COUNTRY_CODES.map((option) => option.value).sort((a, b) => b.length - a.length);
+  for (const code of codes) {
+    if (squished.startsWith(code)) {
+      let i = 0;
+      let need = code.length;
+      while (i < trimmed.length && need > 0) {
+        if (!/[\s\-().]/.test(trimmed[i])) need--;
+        i++;
+      }
+      const national = trimmed.slice(i).replace(/^[\s\-().]+/, "");
+      return { code, national, matched: true };
+    }
+  }
+  return { code: DEFAULT_COUNTRY_CODE, national: trimmed, matched: false };
+}
+
 function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
@@ -366,7 +406,16 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [phoneCode, setPhoneCode] = useState<string>(DEFAULT_COUNTRY_CODE);
+  const [phoneParsed, setPhoneParsed] = useState(true);
   const { pushToast } = useToast();
+
+  const applyStoredPhone = (stored: string) => {
+    const split = splitPhoneCode(stored ?? "");
+    setPhoneCode(split.code);
+    setPhoneParsed(split.matched);
+    return split.national;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -376,7 +425,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
       setForm({
         legalName: profile.LegalName ?? "",
         address: profile.Address ?? "",
-        phone: profile.Phone ?? "",
+        phone: applyStoredPhone(profile.Phone ?? ""),
         email: profile.Email ?? "",
         taxId: profile.TaxID ?? "",
       });
@@ -395,20 +444,33 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (busy) return;
+    const national = form.phone.trim();
+    // Untouched unknown formats save verbatim; everything else composes
+    // code + national so the stored value stays dialable.
+    const composed =
+      national === "" || (!phoneParsed && phoneCode === DEFAULT_COUNTRY_CODE)
+        ? national
+        : `${phoneCode}-${national}`;
+    if (composed.length > 40) {
+      const message = "That phone number is too long.";
+      setError(message);
+      pushToast("error", message);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
       const updated = (await UpdateCompanyProfile({
         LegalName: form.legalName.trim(),
         Address: form.address.trim(),
-        Phone: form.phone.trim(),
+        Phone: composed,
         Email: form.email.trim(),
         TaxID: form.taxId.trim(),
       })) as backend.CompanyProfile;
       setForm({
         legalName: updated.LegalName ?? "",
         address: updated.Address ?? "",
-        phone: updated.Phone ?? "",
+        phone: applyStoredPhone(updated.Phone ?? ""),
         email: updated.Email ?? "",
         taxId: updated.TaxID ?? "",
       });
@@ -457,17 +519,30 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             />
           </label>
           <div className="grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5">
               <span className="text-caption font-medium text-ink-600">Phone</span>
-              <input
-                type="tel"
-                maxLength={40}
-                value={form.phone}
-                onChange={set("phone")}
-                placeholder="+62-…"
-                className={fieldClass}
-              />
-            </label>
+              <div className="flex gap-2">
+                <Select
+                  value={phoneCode}
+                  options={COUNTRY_CODES}
+                  ariaLabel="Country code"
+                  onChange={(next) => {
+                    setPhoneCode(String(next));
+                    setPhoneParsed(true);
+                  }}
+                  className="w-40 shrink-0"
+                />
+                <input
+                  type="tel"
+                  maxLength={32}
+                  value={form.phone}
+                  onChange={set("phone")}
+                  placeholder="778-…"
+                  aria-label="Phone number without country code"
+                  className={fieldClass}
+                />
+              </div>
+            </div>
             <label className="flex flex-col gap-1.5">
               <span className="text-caption font-medium text-ink-600">Email</span>
               <input
