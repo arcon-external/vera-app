@@ -618,6 +618,26 @@ export namespace backend {
 		}
 	}
 	
+	export class ManagedClient {
+	    ID: number;
+	    Code: number;
+	    Name: string;
+	    PrimaryAddress: string;
+	    QuotationCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedClient(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Code = source["Code"];
+	        this.Name = source["Name"];
+	        this.PrimaryAddress = source["PrimaryAddress"];
+	        this.QuotationCount = source["QuotationCount"];
+	    }
+	}
 	export class ManagedUser {
 	    ID: number;
 	    Email: string;

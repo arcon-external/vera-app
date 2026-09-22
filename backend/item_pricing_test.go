@@ -92,7 +92,7 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 }
 
 func TestPrepareRejectsItemMarginOver100(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{

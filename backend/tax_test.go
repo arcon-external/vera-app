@@ -111,7 +111,7 @@ func TestPrepareTaxValidation(t *testing.T) {
 func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	// Cost 100.000, margin 20% -> sell 120.000; discount 10% -> grand
 	// 108.000; NonFTZ 2% -> tax 2.160, nett 105.840.
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
@@ -152,7 +152,7 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 }
 
 func TestPrepareComputesNett(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
@@ -184,7 +184,7 @@ func TestPrepareComputesNett(t *testing.T) {
 		t.Errorf("NettProfit = %d; want -20000", q.Data.NettProfit)
 	}
 
-	ftz := &Quotation{}
+	ftz := newTestQuotation()
 	ftz.SetAuthService(auth.StaffTestService())
 	err = ftz.Prepare(QuotationInput{
 		Items: []QuotationItemInput{

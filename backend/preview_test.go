@@ -31,7 +31,7 @@ func testPreviewInput() QuotationInput {
 // (2x120.000 + 1x60.000); discount 10% -> grand 270.000;
 // tax 2% -> 5.400; after-tax customer grand 264.600; nett profit 39.600.
 func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := q.Prepare(testPreviewInput()); err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -57,7 +57,7 @@ func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
 }
 
 func TestGetInternalBreakdown(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := q.Prepare(testPreviewInput()); err != nil {
 		t.Fatalf("Prepare failed: %v", err)
@@ -101,7 +101,7 @@ func TestGetInternalBreakdown(t *testing.T) {
 }
 
 func TestPreviewRequiresPrepare(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if _, err := q.GetCustomerPreview(); err == nil {
 		t.Error("expected GetCustomerPreview to fail before Prepare")
@@ -112,7 +112,7 @@ func TestPreviewRequiresPrepare(t *testing.T) {
 }
 
 func TestRenderedQuotationHidesInternalValues(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := Startup(q, context.Background()); err != nil {
 		t.Fatalf("startup failed: %v", err)
@@ -144,7 +144,7 @@ func TestRenderedQuotationHidesInternalValues(t *testing.T) {
 }
 
 func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := Startup(q, context.Background()); err != nil {
 		t.Fatalf("startup failed: %v", err)
@@ -177,7 +177,7 @@ func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
 func TestRenderedQuotationPPN(t *testing.T) {
 	render := func(t *testing.T, zone, taxType, category string) string {
 		t.Helper()
-		q := &Quotation{}
+		q := newTestQuotation()
 		q.SetAuthService(auth.StaffTestService())
 		if err := Startup(q, context.Background()); err != nil {
 			t.Fatalf("startup failed: %v", err)
@@ -238,7 +238,7 @@ func TestRenderedQuotationPPN(t *testing.T) {
 }
 
 func TestRenderedQuotationTitle(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := Startup(q, context.Background()); err != nil {
 		t.Fatalf("startup failed: %v", err)

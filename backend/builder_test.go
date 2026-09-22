@@ -70,7 +70,7 @@ func TestBuildPricesDiscountsSellSide(t *testing.T) {
 }
 
 func TestPrepareRejectsMarginOver100(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{

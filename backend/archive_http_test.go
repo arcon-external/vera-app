@@ -45,7 +45,7 @@ func TestListQuotationsMapsContract(t *testing.T) {
 		})
 	})
 
-	q := &Quotation{}
+	q := newTestQuotation()
 	rows, err := q.ListQuotations()
 	if err != nil {
 		t.Fatalf("ListQuotations failed: %v", err)
@@ -65,7 +65,7 @@ func TestListQuotationsMapsContract(t *testing.T) {
 func TestListQuotationsRequiresSignIn(t *testing.T) {
 	t.Setenv("VERA_NO_KEYRING", "1")
 	_ = ClearSessionToken()
-	q := &Quotation{}
+	q := newTestQuotation()
 	if _, err := q.ListQuotations(); err == nil {
 		t.Fatal("ListQuotations without a session succeeded; want denial")
 	}
@@ -103,7 +103,7 @@ func TestGetQuotationMapsDetail(t *testing.T) {
 		})
 	})
 
-	q := &Quotation{}
+	q := newTestQuotation()
 	detail, err := q.GetQuotationRevision(5, 1)
 	if err != nil {
 		t.Fatalf("GetQuotationRevision failed: %v", err)
@@ -131,7 +131,7 @@ func TestDeleteSurfacesServerDenial(t *testing.T) {
 		_ = json.NewEncoder(writer).Encode(map[string]string{"error": "admin access required"})
 	})
 
-	q := &Quotation{}
+	q := newTestQuotation()
 	err := q.DeleteQuotation(9)
 	if err == nil || !strings.Contains(err.Error(), "admin access required") {
 		t.Fatalf("delete error = %v; want server 403 text", err)
@@ -169,7 +169,7 @@ func TestExportPersistsUploadsAndWritesPDF(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ClearSessionToken() })
 
-	q := &Quotation{}
+	q := newTestQuotation()
 	if err := Startup(q, context.Background()); err != nil {
 		t.Fatalf("startup: %v", err)
 	}

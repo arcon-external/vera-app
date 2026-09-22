@@ -24,6 +24,8 @@ export function GetQuotationPreviewHTML():Promise<string>;
 
 export function GetQuotationRevision(arg1:number,arg2:number):Promise<backend.ArchivedQuotation>;
 
+export function ListCustomers():Promise<Array<backend.ManagedClient>>;
+
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;

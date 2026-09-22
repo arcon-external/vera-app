@@ -5,11 +5,15 @@ import {context} from '../models';
 
 export function CreateUser(arg1:string,arg2:string,arg3:string):Promise<backend.ManagedUser>;
 
+export function CreateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
+
 export function DecideDeletion(arg1:number,arg2:boolean):Promise<void>;
 
 export function DecideEmailChange(arg1:number,arg2:boolean):Promise<void>;
 
 export function DeleteUser(arg1:number):Promise<string>;
+
+export function DeleteClient(arg1:number):Promise<string>;
 
 export function DownloadBackup():Promise<string>;
 
@@ -20,6 +24,8 @@ export function IssuePasswordReset(arg1:number):Promise<string>;
 export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
 
 export function ListEmailChangeRequests():Promise<Array<backend.EmailChangeRow>>;
+
+export function ListClients():Promise<Array<backend.ManagedClient>>;
 
 export function ListUsers():Promise<Array<backend.ManagedUser>>;
 
@@ -32,5 +38,7 @@ export function SetUserActive(arg1:number,arg2:boolean):Promise<void>;
 export function SetUserEmail(arg1:number,arg2:string):Promise<backend.EmailChangeResult>;
 
 export function SetUserRole(arg1:number,arg2:string):Promise<void>;
+
+export function UpdateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
 
 export function UpdateCompanyProfile(arg1:backend.CompanyProfile):Promise<backend.CompanyProfile>;

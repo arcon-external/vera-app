@@ -6,6 +6,10 @@ export function CreateUser(arg1, arg2, arg3) {
   return window['go']['backend']['AdminAPI']['CreateUser'](arg1, arg2, arg3);
 }
 
+export function CreateClient(arg1, arg2, arg3) {
+  return window['go']['backend']['AdminAPI']['CreateClient'](arg1, arg2, arg3);
+}
+
 export function DecideDeletion(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['DecideDeletion'](arg1, arg2);
 }
@@ -16,6 +20,10 @@ export function DecideEmailChange(arg1, arg2) {
 
 export function DeleteUser(arg1) {
   return window['go']['backend']['AdminAPI']['DeleteUser'](arg1);
+}
+
+export function DeleteClient(arg1) {
+  return window['go']['backend']['AdminAPI']['DeleteClient'](arg1);
 }
 
 export function DownloadBackup() {
@@ -36,6 +44,10 @@ export function ListDeletionRequests() {
 
 export function ListEmailChangeRequests() {
   return window['go']['backend']['AdminAPI']['ListEmailChangeRequests']();
+}
+
+export function ListClients() {
+  return window['go']['backend']['AdminAPI']['ListClients']();
 }
 
 export function ListUsers() {
@@ -60,6 +72,10 @@ export function SetUserEmail(arg1, arg2) {
 
 export function SetUserRole(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['SetUserRole'](arg1, arg2);
+}
+
+export function UpdateClient(arg1, arg2, arg3) {
+  return window['go']['backend']['AdminAPI']['UpdateClient'](arg1, arg2, arg3);
 }
 
 export function UpdateCompanyProfile(arg1) {

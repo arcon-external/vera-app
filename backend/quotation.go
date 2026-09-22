@@ -134,6 +134,10 @@ type Quotation struct {
 	auth               *auth.Service
 	archiveQuoteNumber string
 	archiveRevision    uint16
+	// customerDirectory caches the server-owned client list for desktop
+	// Prepare resolution. The server path always resolves via the store;
+	// both read the same truth.
+	customerDirectory []ManagedClient
 }
 
 func (q *Quotation) SetStore(database *store.Store) {
@@ -195,22 +199,6 @@ func (q *Quotation) ClearRevisionContext() {
 	q.Data.RevisionID = 0
 }
 
-var customerMap = map[uint8]string{
-	2: "PT. Infineon Technologies Batam",
-	3: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
-	4: "PT. Datalec Global Solution",
-	5: "PT. Panasonic Industrial Devices Batam",
-	6: "PT. Surya Teknologi Batam",
-}
-
-var addressMap = map[uint8]string{
-	2: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
-	3: "Kecamatan Nongsa, Kota Batam, Kepulauan Riau, Indonesia",
-	4: "Ruko Pollux Habibie No.E16, Kota Batam, Kepulauan Riau, Indonesia",
-	5: "Puri Industrial Park, Baloi Permai, Batam Kota, Kepulauan Riau, Indonesia",
-	6: "Batam Industrial Park, Jalan Beringin Lot 312-313, Muka Kuning Batam, Kepulauan Riau, Indonesia",
-}
-
 // Startup initialises the Quotation struct at app launch.
 // It stores the Wails context (required for runtime.SaveFileDialog)
 // and loads all static template assets (CSS, HTML, fonts, logo, signature).
@@ -225,16 +213,59 @@ func Startup(quotation *Quotation, ctx context.Context) error {
 	return nil
 }
 
-func checkCustomerID(id uint8) bool {
-	_, exists := customerMap[id]
-	return exists
+// ListCustomers fetches the server-owned client directory for the editor
+// dropdown and caches it for Prepare resolution.
+func (q *Quotation) ListCustomers() ([]ManagedClient, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return nil, err
+	}
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Clients []ManagedClient `json:"clients"`
+	}
+	if err := client.Get("/v1/clients", &response); err != nil {
+		return nil, err
+	}
+	if response.Clients == nil {
+		response.Clients = []ManagedClient{}
+	}
+	q.customerDirectory = response.Clients
+	return response.Clients, nil
 }
 
-// ValidCustomerID reports whether id is a known customer code. The API
-// server uses it to validate peek/export callers without duplicating the
-// customer map.
-func ValidCustomerID(id uint8) bool {
-	return checkCustomerID(id)
+// resolveCustomer maps a client code to display name and default address.
+// The server path resolves via the store (authoritative); the desktop path
+// resolves from the cached directory, refreshing once on a miss (a client
+// added on another device after sign-in).
+func (q *Quotation) resolveCustomer(id uint8) (company, address string, err error) {
+	if q.store != nil {
+		ref, err := q.store.GetCustomerByCode(q.context(), int(id))
+		if err != nil {
+			return "", "", fmt.Errorf("invalid customer ID: %d", id)
+		}
+		return ref.Name, ref.Address, nil
+	}
+	lookup := func() (string, string, bool) {
+		for _, entry := range q.customerDirectory {
+			if int(entry.Code) == int(id) {
+				return entry.Name, entry.PrimaryAddress, true
+			}
+		}
+		return "", "", false
+	}
+	if company, address, ok := lookup(); ok {
+		return company, address, nil
+	}
+	if _, err := q.ListCustomers(); err != nil {
+		return "", "", fmt.Errorf("invalid customer ID: %d (refresh the client list and try again)", id)
+	}
+	if company, address, ok := lookup(); ok {
+		return company, address, nil
+	}
+	return "", "", fmt.Errorf("invalid customer ID: %d", id)
 }
 
 // FormatQuoteNumber renders a plain-digit quotation number for a customer,
@@ -293,9 +324,9 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	if err := q.requireUser(q.ctx); err != nil {
 		return err
 	}
-	customerExists := checkCustomerID(input.CustomerID)
-	if !customerExists {
-		return fmt.Errorf("invalid customer ID: %d", input.CustomerID)
+	companyName, companyAddress, err := q.resolveCustomer(input.CustomerID)
+	if err != nil {
+		return err
 	}
 
 	if len(input.Items) < 1 {
@@ -378,8 +409,8 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.CustomerID = input.CustomerID
 
 	q.Data.RecipientName = input.RecipientName
-	q.Data.RecipientCompany = customerMap[input.CustomerID]
-	q.Data.RecipientAddress = addressMap[input.CustomerID]
+	q.Data.RecipientCompany = companyName
+	q.Data.RecipientAddress = companyAddress
 
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
