@@ -54,3 +54,28 @@ func TestCompanyProfileAdminRoundTrip(t *testing.T) {
 		t.Errorf("audit company.update = %d, %v; want 1, nil", count, err)
 	}
 }
+
+func TestCompanyIdentityServesAllRoles(t *testing.T) {
+	server, _, token := adminTestSetup(t, "vera_api_company_identity")
+
+	code, _ := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company",
+		`{"legalName":"PT Live Identity"}`)
+	if code != http.StatusOK {
+		t.Fatalf("rename = %d; want 200", code)
+	}
+
+	staffToken := staffLogin(t, server, "vera_api_company_identity")
+	code, body := doAdminRequest(t, server, staffToken, http.MethodGet, "/v1/company", "")
+	if code != http.StatusOK {
+		t.Fatalf("staff identity = %d; want 200", code)
+	}
+	if body["legalName"] != "PT Live Identity" {
+		t.Errorf("legalName = %v; want the stored name", body["legalName"])
+	}
+	if _, leaked := body["logoPath"]; leaked {
+		t.Error("logo path leaks into the identity DTO")
+	}
+	if code, _ := doAdminRequest(t, server, "", http.MethodGet, "/v1/company", ""); code != http.StatusUnauthorized {
+		t.Errorf("anon identity = %d; want 401", code)
+	}
+}

@@ -260,6 +260,20 @@ func (a *AuthAPI) MyEmailChangeRequests() ([]EmailChangeRequest, error) {
 	return response.Requests, nil
 }
 
+// GetCompany loads the company identity for UI surfaces (shell header).
+// Every signed-in role may read; writes stay admin-only.
+func (a *AuthAPI) GetCompany() (CompanyProfile, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	var profile CompanyProfile
+	if err := client.Get("/v1/company", &profile); err != nil {
+		return CompanyProfile{}, err
+	}
+	return profile, nil
+}
+
 // UpdateProfile changes the signed-in user's display name and/or avatar.
 // Empty display name leaves the name unchanged; removeAvatar clears the
 // picture; avatarBase64/avatarMime upload a replacement.

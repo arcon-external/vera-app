@@ -33,10 +33,12 @@ export function SettingsPage({
   isAdmin,
   user,
   onProfileChanged,
+  onCompanyChanged,
 }: {
   isAdmin: boolean;
   user: SignedInUser;
   onProfileChanged: (user: SignedInUser) => void;
+  onCompanyChanged?: () => void;
 }) {
   const [section, setSection] = useState<"general" | "company">("general");
   return (
@@ -86,7 +88,7 @@ export function SettingsPage({
       ) : null}
 
       {section === "company" && isAdmin ? (
-        <CompanyProfileCard />
+        <CompanyProfileCard onSaved={onCompanyChanged} />
       ) : (
         <>
           <ProfileCard user={user} onProfileChanged={onProfileChanged} />
@@ -353,7 +355,7 @@ type CompanyForm = {
   taxId: string;
 };
 
-function CompanyProfileCard() {
+function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
@@ -411,6 +413,7 @@ function CompanyProfileCard() {
         taxId: updated.TaxID ?? "",
       });
       pushToast("success", "Company profile saved.");
+      onSaved?.();
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't save the company profile.");
       setError(message);
