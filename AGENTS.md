@@ -202,6 +202,13 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.
   Codes 02-06 were seeded by migration 011 from the retired hard-coded maps.
+- **Verification:** every revision is signed at export (Ed25519, key from
+  `VERA_SIGNING_KEY`, never in source or the database) over a canonical field
+  set pinned by `backend/signing.go`'s format test. The public portal at
+  `/v/<shortId>` (and `POST /verify`) renders valid / superseded / mismatch /
+  not-found. `short_id` identifies one *revision*. Never change the canonical
+  format without a migration story: existing printed codes must keep
+  verifying. TLS is Google-managed — never self-signed.
 
 ---
 

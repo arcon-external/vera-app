@@ -115,6 +115,16 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "build revision draft"})
 	}
+	// Sign the canonical field set at export time. The signature travels
+	// with the revision and is what the public verification portal checks,
+	// so it must cover exactly what was issued.
+	if s.signer != nil {
+		signature, digest := s.signer.SignRevision(backend.SignableFromData(quotation.Data))
+		draft.Signature = signature
+		draft.SigKeyID = s.signer.KeyID()
+		draft.CanonicalSHA256 = digest
+		draft.IssuerName = quotation.Data.CompanyName
+	}
 	record, err := s.database.SaveRevision(context.Request().Context(), draft)
 	if err != nil {
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
@@ -123,6 +133,7 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		ID:           record.ID,
 		QuoteNumber:  record.QuoteNumber,
 		UUID:         record.UUID,
+		ShortID:      record.ShortID,
 		Revision:     record.RevisionNumber,
 		GrandTotal:   uint64(record.Totals.MarginalizedGrand),
 		SequenceWarn: sequenceWarn,

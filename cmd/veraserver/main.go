@@ -61,6 +61,16 @@ func run() error {
 
 	server := api.NewServer(database, auth.NewService(database), templates)
 	server.SetDSN(config.DSN)
+
+	// Signing is required: without it documents cannot be verified, so a
+	// misconfigured deploy must fail here rather than print unverifiable
+	// quotations. The key arrives through the environment only.
+	signer, err := backend.LoadSignerFromEnvironment(ctx, database)
+	if err != nil {
+		return fmt.Errorf("signing setup failed: %w", err)
+	}
+	server.SetSigner(signer)
+
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           server,
