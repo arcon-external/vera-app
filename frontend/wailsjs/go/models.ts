@@ -385,6 +385,62 @@ export namespace backend {
 	        this.RequestedAt = source["RequestedAt"];
 	    }
 	}
+	export class EmailChangeRequest {
+	    ID: number;
+	    ProposedEmail: string;
+	    Status: string;
+	    RequestedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmailChangeRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.ProposedEmail = source["ProposedEmail"];
+	        this.Status = source["Status"];
+	        this.RequestedAt = source["RequestedAt"];
+	    }
+	}
+	export class EmailChangeResult {
+	    Email: string;
+	    PreviousEmail: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmailChangeResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Email = source["Email"];
+	        this.PreviousEmail = source["PreviousEmail"];
+	    }
+	}
+	export class EmailChangeRow {
+	    ID: number;
+	    UserID: number;
+	    Email: string;
+	    DisplayName: string;
+	    ProposedEmail: string;
+	    Status: string;
+	    RequestedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new EmailChangeRow(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.UserID = source["UserID"];
+	        this.Email = source["Email"];
+	        this.DisplayName = source["DisplayName"];
+	        this.ProposedEmail = source["ProposedEmail"];
+	        this.Status = source["Status"];
+	        this.RequestedAt = source["RequestedAt"];
+	    }
+	}
 	export class InternalPreviewItem {
 	    Description: string;
 	    CostUnit: number;

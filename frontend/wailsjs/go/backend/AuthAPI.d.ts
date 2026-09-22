@@ -14,9 +14,13 @@ export function LogoutEverywhere():Promise<void>;
 
 export function MyDeletionRequests():Promise<Array<backend.OwnDeletionRequest>>;
 
+export function MyEmailChangeRequests():Promise<Array<backend.EmailChangeRequest>>;
+
 export function RedeemInvite(arg1:string,arg2:string):Promise<string>;
 
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;
+
+export function RequestEmailChange(arg1:string):Promise<backend.EmailChangeRequest>;
 
 export function RestoreSession():Promise<backend.AuthUserDTO>;
 

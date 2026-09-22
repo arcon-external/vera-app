@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChangePassword, LogoutEverywhere, RequestDeletion, UpdateProfile } from "@backend/backend/AuthAPI";
+import { ChangePassword, LogoutEverywhere, MyEmailChangeRequests, RequestDeletion, RequestEmailChange, UpdateProfile } from "@backend/backend/AuthAPI";
+import { backend } from "@backend/models";
 import {
   DecideDeletion,
   DownloadBackup,
@@ -47,6 +48,7 @@ export function SettingsPage({
       </div>
 
       <ProfileCard user={user} onProfileChanged={onProfileChanged} />
+      <EmailCard user={user} />
       <PasswordCard />
       <SessionsCard />
       <DeletionCard />
@@ -208,6 +210,93 @@ function ProfileCard({
       <p className="mt-3 text-caption leading-relaxed text-ink-400">
         Pictures must be PNG, JPEG, GIF, or WebP, under 512KB and 1024px per side.
       </p>
+    </Card>
+  );
+}
+
+function EmailCard({ user }: { user: SignedInUser }) {
+  const [proposed, setProposed] = useState("");
+  const [rows, setRows] = useState<backend.EmailChangeRequest[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  const load = useCallback(async () => {
+    try {
+      const result = (await MyEmailChangeRequests()) as backend.EmailChangeRequest[];
+      setRows(result);
+    } catch {
+      // Listing is best-effort; request errors surface on submit.
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const next = proposed.trim();
+    if (!next || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await RequestEmailChange(next);
+      setProposed("");
+      pushToast("success", "Request sent. An admin must approve it before anything changes.");
+      await load();
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't send your request.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pending = rows.some((row) => row.Status === "pending");
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Email address" />
+      <p className="max-w-2xl text-body text-ink-600">
+        Signed in as <span className="font-medium text-ink-900">{user.Email}</span>.
+        Changing it needs an admin's approval — you stay signed in until then.
+      </p>
+      <form onSubmit={submit} className="mt-4 grid max-w-xl gap-3">
+        {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+        <label className="flex flex-col gap-1.5">
+          <span className="text-caption font-medium text-ink-600">Proposed email</span>
+          <input
+            type="email"
+            required
+            value={proposed}
+            onChange={(event) => setProposed(event.target.value)}
+            placeholder="you@company.com"
+            disabled={pending}
+            className={fieldClass}
+          />
+        </label>
+        <div>
+          <Button type="submit" variant="secondary" disabled={busy || !proposed.trim() || pending}>
+            {busy ? "Sending…" : pending ? "Request pending" : "Request email change"}
+          </Button>
+        </div>
+      </form>
+      {rows.length > 0 ? (
+        <ul className="mt-4 divide-y divide-rule rounded-lg border border-rule">
+          {rows.map((row) => (
+            <li key={row.ID} className="flex flex-wrap items-center gap-2 px-4 py-2.5">
+              <span className="min-w-0 flex-1 truncate text-body text-ink-800">
+                {row.ProposedEmail}
+              </span>
+              <Badge tone={row.Status === "approved" ? "success" : row.Status === "rejected" ? "neutral" : "internal"}>
+                {row.Status === "pending" ? "Pending" : row.Status === "approved" ? "Approved" : "Rejected"}
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </Card>
   );
 }
