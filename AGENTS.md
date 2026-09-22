@@ -188,6 +188,11 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   next revision. Never mutate a stored revision.
 - **Discount** applies to the sell side; cost-side discount is shown for internal
   transparency only.
+- **Numbering:** quote numbers are plain-digit `15CCYYNNNN` (no grouped display),
+  allocated per (customer, issue-year) cycle starting at 1 every January; past 9999
+  the sequence widens to 5 digits instead of wrapping, with a warn flag at 8000.
+  Numbers are issued in the creation year (no backdating). UUID on `quotations`
+  is the stable external key; the bigint id stays the relational key.
 
 ---
 

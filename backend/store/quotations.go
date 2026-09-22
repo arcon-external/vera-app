@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"vera-app/backend/apicontract"
 )
 
 type RevisionItem struct {
@@ -84,6 +86,9 @@ type QuotationSummary struct {
 
 type QuotationRecord struct {
 	QuotationSummary
+	// UUID is the stable external key, decoupled from the human-facing
+	// quote number. Bigint ID stays the relational key.
+	UUID             string
 	CustomerCode     int16
 	CustomerAddress  string
 	RecipientName    string
@@ -159,7 +164,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	}
 	schema := s.configSchema()
 	filter := fmt.Sprintf(`
-		SELECT q.id, q.quote_number, r.revision_number, c.customer_code,
+		SELECT q.id, q.uuid::text, q.quote_number, r.revision_number, c.customer_code,
 		       c.legal_name, ca.address, r.recipient_name, r.recipient_address,
 		       r.subject, r.incoterm, r.validity_days, r.payment_term_days,
 		       r.lead_time_days, r.discount_percent, r.tax_zone, r.tax_category,
@@ -191,6 +196,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	var record QuotationRecord
 	err = pool.QueryRow(ctx, filter, args...).Scan(
 		&record.ID,
+		&record.UUID,
 		&record.QuoteNumber,
 		&record.RevisionNumber,
 		&record.CustomerCode,
@@ -329,7 +335,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		return QuotationRecord{}, err
 	}
 
-	quoteID, quoteNumber, revisionNumber, err := ensureQuotation(ctx, tx, schema, draft, customerID)
+	quoteID, quoteUUID, quoteNumber, revisionNumber, err := ensureQuotation(ctx, tx, schema, draft, customerID)
 	if err != nil {
 		return QuotationRecord{}, err
 	}
@@ -448,6 +454,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			Subject:        draft.Subject,
 			GrandTotal:     draft.Totals.MarginalizedGrand,
 		},
+		UUID:             quoteUUID,
 		CustomerCode:     draft.CustomerCode,
 		CustomerAddress:  draft.CustomerAddress,
 		RecipientName:    draft.RecipientName,
@@ -505,64 +512,68 @@ func upsertCustomer(ctx context.Context, tx pgx.Tx, schema string, draft Revisio
 	return customerID, nil
 }
 
-func ensureQuotation(ctx context.Context, tx pgx.Tx, schema string, draft RevisionDraft, customerID int64) (int64, string, int16, error) {
+func ensureQuotation(ctx context.Context, tx pgx.Tx, schema string, draft RevisionDraft, customerID int64) (int64, string, string, int16, error) {
 	if draft.QuoteNumber == "" {
 		if draft.RevisionNumber != 0 {
-			return 0, "", 0, fmt.Errorf("new quotation must start at revision 0")
+			return 0, "", "", 0, fmt.Errorf("new quotation must start at revision 0")
 		}
-		sequence, err := nextQuoteSequenceTx(ctx, tx, schema)
+		yy := CurrentYY()
+		sequence, err := nextQuoteSequenceTx(ctx, tx, schema, int(draft.CustomerCode), yy)
 		if err != nil {
-			return 0, "", 0, err
+			return 0, "", "", 0, err
 		}
-		quoteNumber := fmt.Sprintf("15%02d%04d", draft.CustomerCode, sequence)
+		quoteNumber := apicontract.FormatQuoteNumber(int(draft.CustomerCode), yy, sequence)
 		var quoteID int64
+		var quoteUUID string
 		if err := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO %s.quotations (quote_number, customer_id)
-			VALUES ($1, $2) RETURNING id`, schema), quoteNumber, customerID).Scan(&quoteID); err != nil {
-			return 0, "", 0, fmt.Errorf("insert quotation: %w", err)
+			VALUES ($1, $2) RETURNING id, uuid::text`, schema), quoteNumber, customerID).Scan(&quoteID, &quoteUUID); err != nil {
+			return 0, "", "", 0, fmt.Errorf("insert quotation: %w", err)
 		}
-		return quoteID, quoteNumber, 0, nil
+		return quoteID, quoteUUID, quoteNumber, 0, nil
 	}
 
 	var quoteID int64
+	var quoteUUID string
 	if err := tx.QueryRow(ctx, fmt.Sprintf(
-		"SELECT id FROM %s.quotations WHERE quote_number = $1 FOR UPDATE", schema,
-	), draft.QuoteNumber).Scan(&quoteID); err != nil {
+		"SELECT id, uuid::text FROM %s.quotations WHERE quote_number = $1 FOR UPDATE", schema,
+	), draft.QuoteNumber).Scan(&quoteID, &quoteUUID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) && draft.RevisionNumber == 0 {
 			if err := tx.QueryRow(ctx, fmt.Sprintf(`
 				INSERT INTO %s.quotations (quote_number, customer_id)
-				VALUES ($1, $2) RETURNING id`, schema), draft.QuoteNumber, customerID).Scan(&quoteID); err != nil {
-				return 0, "", 0, fmt.Errorf("insert quotation %q: %w", draft.QuoteNumber, err)
+				VALUES ($1, $2) RETURNING id, uuid::text`, schema), draft.QuoteNumber, customerID).Scan(&quoteID, &quoteUUID); err != nil {
+				return 0, "", "", 0, fmt.Errorf("insert quotation %q: %w", draft.QuoteNumber, err)
 			}
-			return quoteID, draft.QuoteNumber, 0, nil
+			return quoteID, quoteUUID, draft.QuoteNumber, 0, nil
 		}
-		return 0, "", 0, fmt.Errorf("find quotation %q: %w", draft.QuoteNumber, err)
+		return 0, "", "", 0, fmt.Errorf("find quotation %q: %w", draft.QuoteNumber, err)
 	}
 	var expectedRevision int16
 	if err := tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT COALESCE(MAX(revision_number), -1) + 1
 		FROM %s.quotation_revisions WHERE quotation_id = $1`, schema), quoteID).Scan(&expectedRevision); err != nil {
-		return 0, "", 0, fmt.Errorf("find next revision for quotation %q: %w", draft.QuoteNumber, err)
+		return 0, "", "", 0, fmt.Errorf("find next revision for quotation %q: %w", draft.QuoteNumber, err)
 	}
 	if draft.RevisionNumber != expectedRevision {
-		return 0, "", 0, fmt.Errorf("revision %d is not the next revision; want %d", draft.RevisionNumber, expectedRevision)
+		return 0, "", "", 0, fmt.Errorf("revision %d is not the next revision; want %d", draft.RevisionNumber, expectedRevision)
 	}
-	return quoteID, draft.QuoteNumber, draft.RevisionNumber, nil
+	return quoteID, quoteUUID, draft.QuoteNumber, draft.RevisionNumber, nil
 }
 
-func nextQuoteSequenceTx(ctx context.Context, tx pgx.Tx, schema string) (int64, error) {
+func nextQuoteSequenceTx(ctx context.Context, tx pgx.Tx, schema string, customerCode, yy int) (int64, error) {
+	key := SequenceKey(customerCode, yy)
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO %s.sequence_counters (name, next_value)
-		VALUES ('quotation', 1)
-		ON CONFLICT (name) DO NOTHING`, schema)); err != nil {
+		VALUES ($1, 1)
+		ON CONFLICT (name) DO NOTHING`, schema), key); err != nil {
 		return 0, fmt.Errorf("initialize quote sequence: %w", err)
 	}
 	var sequence int64
 	if err := tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.sequence_counters
 		SET next_value = next_value + 1
-		WHERE name = 'quotation' AND next_value <= 9999
-		RETURNING next_value - 1`, schema)).Scan(&sequence); err != nil {
+		WHERE name = $1 AND next_value <= $2
+		RETURNING next_value - 1`, schema), key, SequenceMax).Scan(&sequence); err != nil {
 		return 0, fmt.Errorf("allocate quote sequence: %w", err)
 	}
 	return sequence, nil

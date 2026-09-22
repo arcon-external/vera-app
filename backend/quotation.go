@@ -88,6 +88,7 @@ type QuotationData struct {
 	RecipientCompany          string
 	RecipientAddress          string
 	QuoteNumber               string
+	QuoteUUID                 string
 	RevisionID                uint16
 	Subject                   string
 	DisplaySubTotal           string
@@ -229,14 +230,19 @@ func checkCustomerID(id uint8) bool {
 	return exists
 }
 
-func formatQuoteNumber(cusID uint8, seqID uint16) string {
-	return fmt.Sprintf("15%02d%04d", cusID, seqID)
+// ValidCustomerID reports whether id is a known customer code. The API
+// server uses it to validate peek/export callers without duplicating the
+// customer map.
+func ValidCustomerID(id uint8) bool {
+	return checkCustomerID(id)
 }
 
-// FormatQuoteNumber renders a quotation number for a customer and sequence.
-// It is the shared implementation used by desktop export and the API server.
-func FormatQuoteNumber(cusID uint8, seqID uint16) string {
-	return formatQuoteNumber(cusID, seqID)
+// FormatQuoteNumber renders a plain-digit quotation number for a customer,
+// issue year, and sequence. It is the shared implementation used by desktop
+// export and the API server; the canonical format lives in apicontract so
+// store can build numbers without an import cycle.
+func FormatQuoteNumber(cusID uint8, yy uint8, seq int64) string {
+	return apicontract.FormatQuoteNumber(int(cusID), int(yy), seq)
 }
 
 // NewQuotationForRequest builds a request-scoped quotation wired with the
@@ -434,25 +440,26 @@ var saveFileDialog = runtime.SaveFileDialog
 
 // exportFilename previews the Arcon_Quotation name for the save dialog.
 // Archive re-exports already know their number; new quotations peek the next
-// sequence without consuming it. Any failure falls back to quotation.pdf so
-// export always proceeds; the server allocates authoritatively at export.
+// full number (server owns the format) without consuming it. Any failure
+// falls back to quotation.pdf so export always proceeds; the server
+// allocates authoritatively at export.
 func (q *Quotation) exportFilename() string {
 	if q.archiveQuoteNumber != "" {
 		return BuildExportFilename(q.archiveQuoteNumber, q.archiveRevision, q.lastInput.Subject)
 	}
-	var sequence uint16
+	var number string
 	if client, err := api(); err == nil {
 		var response struct {
-			Sequence uint16 `json:"sequence"`
+			Number string `json:"number"`
 		}
-		if err := client.Get("/v1/quotations/next-sequence", &response); err == nil {
-			sequence = response.Sequence
+		if err := client.Get("/v1/quotations/next-sequence?customerId="+strconv.Itoa(int(q.lastInput.CustomerID)), &response); err == nil {
+			number = response.Number
 		}
 	}
-	if sequence == 0 {
+	if number == "" {
 		return "quotation.pdf"
 	}
-	return BuildExportFilename(FormatQuoteNumber(q.lastInput.CustomerID, sequence), 0, q.lastInput.Subject)
+	return BuildExportFilename(number, 0, q.lastInput.Subject)
 }
 
 // Export opens a native save file dialog, persists the revision through the
@@ -500,6 +507,7 @@ func (q *Quotation) Export() error {
 		return fmt.Errorf("export quotation: empty quote number from server")
 	}
 	q.Data.QuoteNumber = exported.QuoteNumber
+	q.Data.QuoteUUID = exported.UUID
 	q.Data.RevisionID = uint16(exported.Revision)
 
 	pdfBuf, err := q.build()

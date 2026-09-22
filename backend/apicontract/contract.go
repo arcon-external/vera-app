@@ -1,15 +1,41 @@
 package apicontract
 
+import "fmt"
+
+// This file defines the shared HTTP contract between veraserver and the
+// desktop client. Field names are stable API; the desktop code-generates or
+// mirrors these shapes in #80.
+
+// FormatQuoteNumber renders a plain-digit quotation number: 15 + 2-digit
+// customer code + 2-digit issue year + sequence. The normal width is 10
+// digits (0001-9999); past 9999 the sequence widens to 5 digits instead of
+// wrapping, so overflow years print 11 digits. No grouped display anywhere.
+// It lives here (not backend) so store can build numbers without importing
+// backend, which would be an import cycle.
+func FormatQuoteNumber(customerCode, yy int, seq int64) string {
+	return fmt.Sprintf("15%02d%02d%04d", customerCode, yy, seq)
+}
+
 // This file defines the shared HTTP contract between veraserver and the
 // desktop client. Field names are stable API; the desktop code-generates or
 // mirrors these shapes in #80.
 
 // ExportResponse identifies the persisted revision.
 type ExportResponse struct {
-	ID          int64  `json:"id"`
-	QuoteNumber string `json:"quoteNumber"`
-	Revision    int16  `json:"revision"`
-	GrandTotal  uint64 `json:"grandTotal"`
+	ID           int64  `json:"id"`
+	QuoteNumber  string `json:"quoteNumber"`
+	UUID         string `json:"uuid"`
+	Revision     int16  `json:"revision"`
+	GrandTotal   uint64 `json:"grandTotal"`
+	SequenceWarn bool   `json:"sequenceWarn,omitempty"`
+}
+
+// PeekNumberResponse previews the next allocatable quote number without
+// consuming it. Warn turns true once the customer-year cycle reaches the
+// alert threshold.
+type PeekNumberResponse struct {
+	Number string `json:"number"`
+	Warn   bool   `json:"warn"`
 }
 
 // QuotationSummaryRow is one archive row: always the latest revision.
@@ -49,6 +75,7 @@ type QuotationItemRow struct {
 type QuotationDetail struct {
 	ID                          int64              `json:"id"`
 	QuoteNumber                 string             `json:"quoteNumber"`
+	UUID                        string             `json:"uuid"`
 	Revision                    int16              `json:"revision"`
 	AvailableRevisions          []int16            `json:"availableRevisions"`
 	CustomerName                string             `json:"customerName"`

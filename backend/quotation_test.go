@@ -97,7 +97,8 @@ func TestGeneratePDF(t *testing.T) {
 		Incoterm:        "FOB",
 	})
 
-	q.Data.QuoteNumber = formatQuoteNumber(q.Data.CustomerID, 1)
+	q.Data.QuoteNumber = FormatQuoteNumber(q.Data.CustomerID, 26, 1)
+	q.Data.QuoteUUID = "00000000-0000-0000-0000-000000000000"
 
 	pdfBuf, err := q.build()
 	if err != nil {
@@ -340,23 +341,25 @@ func TestNewQuotationItem(t *testing.T) {
 func TestFormatQuoteNumber(t *testing.T) {
 	cases := []struct {
 		cusID uint8
-		seqID uint16
+		yy    uint8
+		seqID int64
 		want  string
 	}{
-		{2, 1, "15020001"},
-		{3, 5, "15030005"},
-		{6, 42, "15060042"},
-		{2, 0, "15020000"},
-		{6, 1, "15060001"},
-		{2, 9999, "15029999"},
-		{6, 9999, "15069999"},
-		{5, 100, "15050100"},
+		{2, 26, 1, "1502260001"},
+		{3, 26, 5, "1503260005"},
+		{6, 26, 42, "1506260042"},
+		{2, 26, 0, "1502260000"},
+		{6, 27, 1, "1506270001"},
+		{2, 26, 9999, "1502269999"},
+		{6, 26, 9999, "1506269999"},
+		{5, 26, 100, "1505260100"},
+		{2, 26, 10000, "15022610000"},
 	}
 
 	for _, tc := range cases {
-		got := formatQuoteNumber(tc.cusID, tc.seqID)
+		got := FormatQuoteNumber(tc.cusID, tc.yy, tc.seqID)
 		if got != tc.want {
-			t.Errorf("formatQuoteNumber(%d, %d) = %q; want %q", tc.cusID, tc.seqID, got, tc.want)
+			t.Errorf("FormatQuoteNumber(%d, %d, %d) = %q; want %q", tc.cusID, tc.yy, tc.seqID, got, tc.want)
 		}
 	}
 }

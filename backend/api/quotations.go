@@ -94,14 +94,17 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	}
 
+	sequenceWarn := false
 	if quoteNumber != "" {
 		quotation.SetQuoteNumber(quoteNumber, uint16(revision))
 	} else {
-		sequence, err := s.database.NextQuoteSequence(context.Request().Context())
+		yy := store.CurrentYY()
+		sequence, warn, err := s.database.NextQuoteSequence(context.Request().Context(), int(input.CustomerID), yy)
 		if err != nil {
 			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "allocate quote number"})
 		}
-		quotation.SetQuoteNumber(backend.FormatQuoteNumber(quotation.CustomerID(), sequence), 0)
+		sequenceWarn = warn
+		quotation.SetQuoteNumber(backend.FormatQuoteNumber(input.CustomerID, uint8(yy), sequence), 0)
 	}
 
 	snapshot, err := quotation.GetQuotationPreviewHTML()
@@ -117,22 +120,33 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
 	return context.JSON(http.StatusCreated, apicontract.ExportResponse{
-		ID:          record.ID,
-		QuoteNumber: record.QuoteNumber,
-		Revision:    record.RevisionNumber,
-		GrandTotal:  uint64(record.Totals.MarginalizedGrand),
+		ID:           record.ID,
+		QuoteNumber:  record.QuoteNumber,
+		UUID:         record.UUID,
+		Revision:     record.RevisionNumber,
+		GrandTotal:   uint64(record.Totals.MarginalizedGrand),
+		SequenceWarn: sequenceWarn,
 	})
 }
 
-// nextSequence previews the next allocatable quote sequence without
-// consuming it, so the desktop can pre-fill the save dialog filename.
-// Allocation at export stays authoritative.
+// nextSequence previews the next full quote number for a customer without
+// consuming it, so the desktop can pre-fill the save dialog filename. The
+// server owns the format: callers pass ?customerId= and display the returned
+// number verbatim. Allocation at export stays authoritative.
 func (s *Server) nextSequence(context echo.Context) error {
-	sequence, err := s.database.PeekQuoteSequence(context.Request().Context())
+	customerID, err := strconv.Atoi(context.QueryParam("customerId"))
+	if err != nil || customerID < 1 || customerID > 255 || !backend.ValidCustomerID(uint8(customerID)) {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "valid customerId is required"})
+	}
+	yy := store.CurrentYY()
+	sequence, warn, err := s.database.PeekQuoteSequence(context.Request().Context(), customerID, yy)
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "preview quote number"})
 	}
-	return context.JSON(http.StatusOK, map[string]uint16{"sequence": sequence})
+	return context.JSON(http.StatusOK, apicontract.PeekNumberResponse{
+		Number: backend.FormatQuoteNumber(uint8(customerID), uint8(yy), sequence),
+		Warn:   warn,
+	})
 }
 
 func (s *Server) listEndpoint(context echo.Context) error {
@@ -259,6 +273,7 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 	return apicontract.QuotationDetail{
 		ID:                          record.ID,
 		QuoteNumber:                 record.QuoteNumber,
+		UUID:                        record.UUID,
 		Revision:                    record.RevisionNumber,
 		AvailableRevisions:          record.AvailableRevisions,
 		CustomerName:                record.CustomerName,
