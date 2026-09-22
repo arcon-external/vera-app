@@ -45,8 +45,15 @@ jobs:
           PGSSLMODE: require
         run: |
           set -euo pipefail
+          # Call the pinned client by path: runner images ship an older
+          # preinstalled client that wins on PATH, and a mismatched pg_dump
+          # refuses to talk to the server. The major must match Neon (18);
+          # assert it so a drift fails loudly here instead of at 02:00.
+          PG_BIN=/usr/lib/postgresql/18/bin
+          "$PG_BIN/pg_dump" --version | grep -qE " 18\." || {
+            echo "pg_dump is not 18: $("$PG_BIN/pg_dump" --version)" >&2; exit 1; }
           STAMP=$(date +%Y%m%d-%H%M%S)
-          pg_dump "$VERA_DSN" -Fc -f "vera-$STAMP.dump"
+          "$PG_BIN/pg_dump" "$VERA_DSN" -Fc -f "vera-$STAMP.dump"
           head -c 5 "vera-$STAMP.dump" | grep -q PGDMP
           gcloud storage cp "vera-$STAMP.dump" gs://vera-backups-508411/ --project=vera-app-508411
           rm -f "vera-$STAMP.dump"
