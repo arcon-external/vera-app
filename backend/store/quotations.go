@@ -575,9 +575,21 @@ func ensureQuotation(ctx context.Context, tx pgx.Tx, schema string, draft Revisi
 		"SELECT id, uuid::text FROM %s.quotations WHERE quote_number = $1 FOR UPDATE", schema,
 	), draft.QuoteNumber).Scan(&quoteID, &quoteUUID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) && draft.RevisionNumber == 0 {
+			// First revision of a quotation the API already numbered: the
+			// insert must reuse the caller's identity, never the column
+			// default, or the printed handle and the stored handle diverge
+			// (production incident: snapshot QR resolved to nothing).
+			newUUID := draft.QuotationUUID
+			if newUUID == "" {
+				var genErr error
+				newUUID, genErr = NewQuotationUUID()
+				if genErr != nil {
+					return 0, "", "", 0, genErr
+				}
+			}
 			if err := tx.QueryRow(ctx, fmt.Sprintf(`
-				INSERT INTO %s.quotations (quote_number, customer_id)
-				VALUES ($1, $2) RETURNING id, uuid::text`, schema), draft.QuoteNumber, customerID).Scan(&quoteID, &quoteUUID); err != nil {
+				INSERT INTO %s.quotations (quote_number, customer_id, uuid)
+				VALUES ($1, $2, $3) RETURNING id, uuid::text`, schema), draft.QuoteNumber, customerID, newUUID).Scan(&quoteID, &quoteUUID); err != nil {
 				return 0, "", "", 0, fmt.Errorf("insert quotation %q: %w", draft.QuoteNumber, err)
 			}
 			return quoteID, quoteUUID, draft.QuoteNumber, 0, nil

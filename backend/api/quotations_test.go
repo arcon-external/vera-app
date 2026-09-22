@@ -165,6 +165,16 @@ func TestExportSnapshotCarriesVerificationQR(t *testing.T) {
 	if !strings.Contains(snapshot, "or enter code ") {
 		t.Error("stored snapshot has no verification code line")
 	}
+	// The code printed in the snapshot must be the handle the portal serves
+	// for this revision — never a handle derived from anywhere else. This is
+	// the assertion that would have caught production's mismatched row.
+	printed := snapshot
+	if idx := strings.Index(printed, "or enter code "); idx >= 0 {
+		printed = printed[idx+len("or enter code ") : idx+len("or enter code ")+16]
+	}
+	if printed != shortID {
+		t.Errorf("snapshot prints handle %q; want the stored %q", printed, shortID)
+	}
 	// The stored snapshot must never carry the scanned signature image: the
 	// verification code replaces it.
 	if strings.Contains(snapshot, `class="signature"`) {
