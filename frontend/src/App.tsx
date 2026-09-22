@@ -34,13 +34,15 @@ import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { UsersPage } from "./components/UsersPage";
 import { SettingsPage } from "./components/SettingsPage";
-import { CurrentUser, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
 interface StatusState {
   type: "idle" | "loading" | "error";
   message: string;
 }
+
+const DEFAULT_COMPANY_NAME = "PT Arcon Penta Persada";
 
 const CUSTOMERS: Record<number, string> = {
   2: "Infineon Technologies",
@@ -204,8 +206,25 @@ function App() {
   const { pushToast } = useToast();
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
+  const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
 
   const signedIn = user !== null;
+
+  // Company identity tracks the stored profile; the baked-in default shows
+  // while loading or when the server is unreachable — never blank.
+  const loadCompany = useCallback(async () => {
+    try {
+      const profile = (await GetCompany()) as backend.CompanyProfile;
+      if (profile?.LegalName?.trim()) setCompanyName(profile.LegalName.trim());
+    } catch {
+      // Offline or plain-browser dev: keep the default.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (signedIn) void loadCompany();
+    else setCompanyName(DEFAULT_COMPANY_NAME);
+  }, [signedIn, loadCompany]);
 
   // Restore the keychain session on startup; otherwise show the login page.
   // The try/catch also covers plain-browser dev, where the Wails runtime
@@ -636,6 +655,7 @@ function App() {
       onOpenUsers={() => setPage("users")}
       onOpenSettings={() => setPage("settings")}
       showUsersTab={user?.Role === "admin"}
+      companyName={companyName}
       user={user}
       onSignOut={() => void handleSignOut()}
       actionBar={
@@ -814,6 +834,7 @@ function App() {
           isAdmin={user.Role === "admin"}
           user={user}
           onProfileChanged={setUser}
+          onCompanyChanged={() => void loadCompany()}
         />
       ) : null}
     </AppShell>

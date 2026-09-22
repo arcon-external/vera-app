@@ -10,6 +10,7 @@ interface AppShellProps {
   onOpenUsers?: () => void;
   onOpenSettings?: () => void;
   showUsersTab?: boolean;
+  companyName?: string;
   children: ReactNode;
   actionBar?: ReactNode;
   user?: SignedInUser | null;
@@ -42,6 +43,7 @@ export function AppShell({
   onOpenUsers,
   onOpenSettings,
   showUsersTab = false,
+  companyName = "PT Arcon Penta Persada",
   children,
   actionBar,
   user,
@@ -91,7 +93,7 @@ export function AppShell({
           </nav>
 
           <span className="ml-auto hidden text-micro font-medium uppercase tracking-[0.16em] text-ink-500 lg:block">
-            PT Arcon Penta Persada
+            {companyName}
           </span>
           {user ? (
             <>

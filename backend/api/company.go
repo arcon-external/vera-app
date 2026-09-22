@@ -30,6 +30,18 @@ func (s *Server) getCompanyProfile(context echo.Context) error {
 		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID))
 }
 
+// getCompanyIdentity serves the company identity to every signed-in role
+// so UI surfaces (shell header) track the stored profile. No audit: reads
+// must stay cheap and silent.
+func (s *Server) getCompanyIdentity(context echo.Context) error {
+	profile, err := s.database.GetCompanyProfile(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
+	}
+	return context.JSON(http.StatusOK, companyDTO(
+		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID))
+}
+
 func (s *Server) updateCompanyProfile(context echo.Context) error {
 	var request struct {
 		LegalName string `json:"legalName"`

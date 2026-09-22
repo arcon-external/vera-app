@@ -10,6 +10,10 @@ export function CurrentUser() {
   return window['go']['backend']['AuthAPI']['CurrentUser']();
 }
 
+export function GetCompany() {
+  return window['go']['backend']['AuthAPI']['GetCompany']();
+}
+
 export function Login(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['Login'](arg1, arg2);
 }
