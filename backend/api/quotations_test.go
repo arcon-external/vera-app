@@ -162,8 +162,8 @@ func TestExportSnapshotCarriesVerificationQR(t *testing.T) {
 	if !strings.Contains(snapshot, "Scan to verify this quotation") {
 		t.Error("stored snapshot has no verification caption")
 	}
-	if !strings.Contains(snapshot, "Doc ID") {
-		t.Error("stored snapshot has no document id line")
+	if !strings.Contains(snapshot, "or enter code ") {
+		t.Error("stored snapshot has no verification code line")
 	}
 	// The stored snapshot must never carry the scanned signature image: the
 	// verification code replaces it.
