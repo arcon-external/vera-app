@@ -236,6 +236,26 @@ export namespace backend {
 	        this.AvatarURL = source["AvatarURL"];
 	    }
 	}
+	export class CompanyProfile {
+	    LegalName: string;
+	    Address: string;
+	    Phone: string;
+	    Email: string;
+	    TaxID: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompanyProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.LegalName = source["LegalName"];
+	        this.Address = source["Address"];
+	        this.Phone = source["Phone"];
+	        this.Email = source["Email"];
+	        this.TaxID = source["TaxID"];
+	    }
+	}
 	export class CustomerPreviewItem {
 	    Description: string;
 	    DisplayDesc: string;

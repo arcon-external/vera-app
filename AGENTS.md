@@ -193,6 +193,9 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   the sequence widens to 5 digits instead of wrapping, with a warn flag at 8000.
   Numbers are issued in the creation year (no backdating). UUID on `quotations`
   is the stable external key; the bigint id stays the relational key.
+- **Company profile** is a singleton row edited only via admin endpoints and shown
+  only in the admin Company settings section. The PDF header is still baked in
+  until it is wired through (follow-up).
 
 ---
 

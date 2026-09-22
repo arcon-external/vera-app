@@ -188,6 +188,49 @@ func (a *AdminAPI) DecideEmailChange(id int64, approve bool) error {
 	return client.Post("/v1/admin/email-change-requests/"+itoa(id)+"/"+action, nil, nil)
 }
 
+// CompanyProfile is the editable company identity for the admin-only
+// Company section of Settings.
+type CompanyProfile struct {
+	LegalName string
+	Address   string
+	Phone     string
+	Email     string
+	TaxID     string
+}
+
+// GetCompanyProfile loads the company profile.
+func (a *AdminAPI) GetCompanyProfile() (CompanyProfile, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	var profile CompanyProfile
+	if err := client.Get("/v1/admin/company", &profile); err != nil {
+		return CompanyProfile{}, err
+	}
+	return profile, nil
+}
+
+// UpdateCompanyProfile full-replaces the editable company fields. Empty
+// strings clear a field, except legal name which is always required.
+func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	var updated CompanyProfile
+	if err := client.Put("/v1/admin/company", map[string]string{
+		"legalName": profile.LegalName,
+		"address":   profile.Address,
+		"phone":     profile.Phone,
+		"email":     profile.Email,
+		"taxId":     profile.TaxID,
+	}, &updated); err != nil {
+		return CompanyProfile{}, err
+	}
+	return updated, nil
+}
+
 // ListDeletionRequests returns pending account-deletion requests.
 func (a *AdminAPI) ListDeletionRequests() ([]DeletionRequest, error) {
 	client, err := api()

@@ -22,6 +22,10 @@ export function DownloadBackup() {
   return window['go']['backend']['AdminAPI']['DownloadBackup']();
 }
 
+export function GetCompanyProfile() {
+  return window['go']['backend']['AdminAPI']['GetCompanyProfile']();
+}
+
 export function IssuePasswordReset(arg1) {
   return window['go']['backend']['AdminAPI']['IssuePasswordReset'](arg1);
 }
@@ -56,4 +60,8 @@ export function SetUserEmail(arg1, arg2) {
 
 export function SetUserRole(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['SetUserRole'](arg1, arg2);
+}
+
+export function UpdateCompanyProfile(arg1) {
+  return window['go']['backend']['AdminAPI']['UpdateCompanyProfile'](arg1);
 }
