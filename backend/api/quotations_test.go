@@ -150,6 +150,10 @@ func TestExportCreatesImmutableRevisions(t *testing.T) {
 	if quoteNumber == "" {
 		t.Fatal("empty quote number")
 	}
+	uuid, _ := first["uuid"].(string)
+	if uuid == "" {
+		t.Fatal("empty quotation uuid")
+	}
 	quoteID, _ := first["id"].(float64)
 	if quoteID == 0 {
 		t.Fatal("empty quotation id")
@@ -167,6 +171,9 @@ func TestExportCreatesImmutableRevisions(t *testing.T) {
 	}
 	if second["revision"] != 1.0 {
 		t.Errorf("second revision = %v; want 1", second["revision"])
+	}
+	if second["uuid"] != uuid {
+		t.Errorf("revision uuid = %v; want stable %s", second["uuid"], uuid)
 	}
 
 	code, revisions := doJSON(t, server, http.MethodGet, quotePath+"/revisions", token, nil)
@@ -308,25 +315,47 @@ func TestAttachDocumentAfterExport(t *testing.T) {
 func TestNextSequencePreviewsWithoutConsuming(t *testing.T) {
 	server, _, token := adminTestSetup(t, "vera_api_next_seq")
 
-	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence", "")
+	wantNumber := backend.FormatQuoteNumber(2, uint8(store.CurrentYY()), 1)
+	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence?customerId=2", "")
 	if code != http.StatusOK {
 		t.Fatalf("next-sequence = %d; want 200", code)
 	}
-	first, _ := body["sequence"].(float64)
-	if first != 1 {
-		t.Fatalf("sequence = %v; want 1 on a fresh database", body["sequence"])
+	if body["number"] != wantNumber {
+		t.Fatalf("number = %v; want %s on a fresh database", body["number"], wantNumber)
+	}
+	if warn, _ := body["warn"].(bool); warn {
+		t.Errorf("warn = true; want false on a fresh cycle")
 	}
 
 	// A second preview observes the same number: nothing was consumed.
-	code, again := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence", "")
+	code, again := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence?customerId=2", "")
 	if code != http.StatusOK {
 		t.Fatalf("second next-sequence = %d; want 200", code)
 	}
-	if again["sequence"] != body["sequence"] {
-		t.Errorf("second preview = %v; want stable %v", again["sequence"], body["sequence"])
+	if again["number"] != body["number"] {
+		t.Errorf("second preview = %v; want stable %v", again["number"], body["number"])
 	}
 
-	if code, _ := doAdminRequest(t, server, "", http.MethodGet, "/v1/quotations/next-sequence", ""); code != http.StatusUnauthorized {
+	// Peek is per-customer: another customer starts at its own 1.
+	code, other := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence?customerId=4", "")
+	if code != http.StatusOK {
+		t.Fatalf("other customer next-sequence = %d; want 200", code)
+	}
+	if want := backend.FormatQuoteNumber(4, uint8(store.CurrentYY()), 1); other["number"] != want {
+		t.Errorf("other customer number = %v; want %s", other["number"], want)
+	}
+
+	for _, path := range []string{
+		"/v1/quotations/next-sequence",
+		"/v1/quotations/next-sequence?customerId=99",
+		"/v1/quotations/next-sequence?customerId=abc",
+	} {
+		if code, _ := doAdminRequest(t, server, token, http.MethodGet, path, ""); code != http.StatusBadRequest {
+			t.Errorf("GET %s = %d; want 400", path, code)
+		}
+	}
+
+	if code, _ := doAdminRequest(t, server, "", http.MethodGet, "/v1/quotations/next-sequence?customerId=2", ""); code != http.StatusUnauthorized {
 		t.Errorf("anonymous next-sequence = %d; want 401", code)
 	}
 }
