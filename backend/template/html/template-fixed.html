@@ -44,7 +44,6 @@
 						<dt>Revision</dt>
 						<dd>{{printf "%02d" .RevisionID}}</dd>
 					</dl>
-					{{if .QuoteUUID}}<p class="doc-id">Doc ID {{.QuoteUUID}}</p>{{end}}
 					<div class="meta-decor" aria-hidden="true"></div>
 				</div>
 			</section>
@@ -145,7 +144,7 @@
 				<div class="verify-caption">
 					<strong>{{.CompanyName}}</strong>
 					Scan to verify this quotation
-					<span class="verify-docid">Doc ID {{.VerifyShortID}}</span>
+					<span class="verify-code">or enter code {{.VerifyShortID}}</span>
 				</div>
 				<div class="verify-qr">
 					<img src="data:image/png;base64,{{.VerifyQRBase64}}" alt="Verification QR code">
