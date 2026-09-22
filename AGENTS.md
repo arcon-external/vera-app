@@ -199,6 +199,7 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - **Clients are database rows, never code:** the editor dropdown, Prepare
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.
+  Codes 02-06 were seeded by migration 011 from the retired hard-coded maps.
 
 ---
 
