@@ -212,6 +212,54 @@ func (a *AuthAPI) MyDeletionRequests() ([]OwnDeletionRequest, error) {
 	return requests, nil
 }
 
+// EmailChangeRequest is a staff email-change request with its outcome.
+type EmailChangeRequest struct {
+	ID            int64
+	ProposedEmail string
+	Status        string
+	RequestedAt   string
+}
+
+// RequestEmailChange files an email-change request carrying a proposed
+// address. Approval flips the login email and signs the account out
+// everywhere; nothing changes until an admin approves.
+func (a *AuthAPI) RequestEmailChange(proposedEmail string) (EmailChangeRequest, error) {
+	client, err := api()
+	if err != nil {
+		return EmailChangeRequest{}, err
+	}
+	var response struct {
+		ID            int64  `json:"id"`
+		ProposedEmail string `json:"proposedEmail"`
+		Status        string `json:"status"`
+	}
+	if err := client.Post("/v1/auth/email-change-request", map[string]string{
+		"proposedEmail": proposedEmail,
+	}, &response); err != nil {
+		return EmailChangeRequest{}, err
+	}
+	return EmailChangeRequest{ID: response.ID, ProposedEmail: response.ProposedEmail, Status: response.Status}, nil
+}
+
+// MyEmailChangeRequests lists the signed-in user's own requests, newest
+// first, for the settings view.
+func (a *AuthAPI) MyEmailChangeRequests() ([]EmailChangeRequest, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Requests []EmailChangeRequest `json:"requests"`
+	}
+	if err := client.Get("/v1/auth/email-change-requests/mine", &response); err != nil {
+		return nil, err
+	}
+	if response.Requests == nil {
+		response.Requests = []EmailChangeRequest{}
+	}
+	return response.Requests, nil
+}
+
 // UpdateProfile changes the signed-in user's display name and/or avatar.
 // Empty display name leaves the name unchanged; removeAvatar clears the
 // picture; avatarBase64/avatarMime upload a replacement.

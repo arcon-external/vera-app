@@ -1,10 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CreateUser,
+  DecideEmailChange,
   DeleteUser,
   IssuePasswordReset,
+  ListEmailChangeRequests,
   ListUsers,
   SetUserActive,
+  SetUserEmail,
   SetUserRole,
 } from "@backend/backend/AdminAPI";
 import { backend } from "@backend/models";
@@ -13,6 +16,7 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 import { Select } from "./Select";
 
 type ManagedUser = backend.ManagedUser;
+type EmailChangeRow = backend.EmailChangeRow;
 
 function errorMessage(err: unknown, fallback: string): string {
   return typeof err === "string" && err.trim() ? err : fallback;
@@ -27,6 +31,9 @@ export function UsersPage() {
   const [confirmId, setConfirmId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteText, setDeleteText] = useState("");
+  const [emailId, setEmailId] = useState<number | null>(null);
+  const [emailText, setEmailText] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [invite, setInvite] = useState<{ email: string; token: string } | null>(null);
   const { pushToast } = useToast();
@@ -122,6 +129,29 @@ export function UsersPage() {
       await refreshRow();
     } catch (err: unknown) {
       pushToast("error", errorMessage(err, "We couldn't delete this account."));
+    }
+  };
+
+  const handleEmailSave = async (user: ManagedUser) => {
+    const next = emailText.trim();
+    if (!next || emailBusy) return;
+    setEmailBusy(true);
+    try {
+      const result = (await SetUserEmail(user.ID, next)) as {
+        Email: string;
+        PreviousEmail: string;
+      };
+      pushToast(
+        "success",
+        `${result.PreviousEmail} is now ${result.Email}. They were signed out everywhere.`
+      );
+      setEmailId(null);
+      setEmailText("");
+      await refreshRow();
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't change this email."));
+    } finally {
+      setEmailBusy(false);
     }
   };
 
@@ -295,6 +325,18 @@ export function UsersPage() {
                         >
                           Invite code
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Change email for ${user.Email}`}
+                          onClick={() => {
+                            setEmailId(user.ID);
+                            setEmailText(user.Email);
+                          }}
+                          className="shrink-0 whitespace-nowrap"
+                        >
+                          Email
+                        </Button>
                         {!user.IsActive && deleteId !== user.ID ? (
                           <Button
                             variant="ghost"
@@ -342,6 +384,48 @@ export function UsersPage() {
                       </div>
                     </td>
                   </tr>
+                  {emailId === user.ID ? (
+                    <tr className="bg-accent-50/50">
+                      <td colSpan={5} className="px-5 py-3">
+                        <p className="text-small text-ink-800">
+                          Change the login email for{" "}
+                          <span className="font-medium">{user.DisplayName}</span>.
+                          They are signed out everywhere immediately.
+                        </p>
+                        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                          <input
+                            type="email"
+                            autoComplete="off"
+                            value={emailText}
+                            onChange={(event) => setEmailText(event.target.value)}
+                            placeholder="new@company.com"
+                            aria-label={`New email for ${user.DisplayName}`}
+                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+                          />
+                          <div className="flex gap-1.5">
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              disabled={emailBusy || !emailText.trim()}
+                              onClick={() => void handleEmailSave(user)}
+                            >
+                              {emailBusy ? "Saving…" : "Save email"}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEmailId(null);
+                                setEmailText("");
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
                   {deleteId === user.ID ? (
                     <tr className="bg-danger-50/50">
                       <td colSpan={5} className="px-5 py-3">
@@ -393,12 +477,94 @@ export function UsersPage() {
         )}
       </Card>
 
+      <EmailChangeQueue />
+
       <p className="text-caption leading-relaxed text-ink-400">
         Deactivating signs the person out on their device within about a
         minute. Role and status changes take effect on their next action.
         Deletion is permanent and only offered for deactivated accounts.
+        Changing an email signs that person out everywhere at once.
       </p>
     </section>
+  );
+}
+
+function EmailChangeQueue() {
+  const [rows, setRows] = useState<EmailChangeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { pushToast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = (await ListEmailChangeRequests()) as EmailChangeRow[];
+      setRows(result);
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't load email change requests."));
+    } finally {
+      setLoading(false);
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const decide = async (row: EmailChangeRow, approve: boolean) => {
+    try {
+      await DecideEmailChange(row.ID, approve);
+      pushToast(
+        "success",
+        approve
+          ? `${row.Email} is now ${row.ProposedEmail}. They were signed out everywhere.`
+          : `Email change for ${row.DisplayName} rejected.`
+      );
+      await load();
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't decide this request."));
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-rule px-5 py-4">
+        <SectionHeading title="Email change requests" />
+        <p className="text-body text-ink-500">
+          Approving flips the login email at once and signs them out
+          everywhere. Nothing changes until you approve.
+        </p>
+      </div>
+      {loading ? (
+        <div className="h-24 animate-pulse rounded-xl bg-paper-muted m-5" aria-label="Loading requests" />
+      ) : rows.length === 0 ? (
+        <p className="px-5 py-8 text-center text-body text-ink-500">
+          No pending requests.
+        </p>
+      ) : (
+        <ul className="divide-y divide-rule">
+          {rows.map((row) => (
+            <li key={row.ID} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-ink-900">{row.DisplayName}</div>
+                <div className="mt-0.5 text-caption text-ink-500">
+                  {row.Email} → <span className="font-medium text-ink-800">{row.ProposedEmail}</span>
+                  {" "}· requested {row.RequestedAt.slice(0, 10)}
+                </div>
+              </div>
+              <Badge tone="internal">Pending</Badge>
+              <div className="flex items-center gap-1.5">
+                <Button variant="primary" size="sm" onClick={() => void decide(row, true)}>
+                  Approve
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void decide(row, false)}>
+                  Reject
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 

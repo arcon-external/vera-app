@@ -26,12 +26,20 @@ export function MyDeletionRequests() {
   return window['go']['backend']['AuthAPI']['MyDeletionRequests']();
 }
 
+export function MyEmailChangeRequests() {
+  return window['go']['backend']['AuthAPI']['MyEmailChangeRequests']();
+}
+
 export function RedeemInvite(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['RedeemInvite'](arg1, arg2);
 }
 
 export function RequestDeletion(arg1) {
   return window['go']['backend']['AuthAPI']['RequestDeletion'](arg1);
+}
+
+export function RequestEmailChange(arg1) {
+  return window['go']['backend']['AuthAPI']['RequestEmailChange'](arg1);
 }
 
 export function RestoreSession() {

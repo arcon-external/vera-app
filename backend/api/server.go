@@ -95,6 +95,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/admin/backup/restore", server.restoreBackup, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/approve", server.decideDeletion(true), server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/deletion-requests/:id/reject", server.decideDeletion(false), server.requireSession, server.requireAdmin)
+	server.echo.PATCH("/v1/admin/users/:id/email", server.setUserEmail, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/auth/email-change-request", server.requestEmailChange, server.requireSession)
+	server.echo.GET("/v1/auth/email-change-requests/mine", server.myEmailChangeRequests, server.requireSession)
+	server.echo.GET("/v1/admin/email-change-requests", server.listEmailChangeRequests, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/email-change-requests/:id/approve", server.decideEmailChange(true), server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/admin/email-change-requests/:id/reject", server.decideEmailChange(false), server.requireSession, server.requireAdmin)
 	return server
 }
 

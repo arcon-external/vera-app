@@ -121,6 +121,73 @@ func (a *AdminAPI) IssuePasswordReset(id int64) (string, error) {
 	return response.Token, nil
 }
 
+// EmailChangeResult reports a completed direct email change.
+type EmailChangeResult struct {
+	Email         string
+	PreviousEmail string
+}
+
+// SetUserEmail changes a user's login email immediately. Sessions die
+// with the flip, so the caller warns the target to sign in again.
+func (a *AdminAPI) SetUserEmail(id int64, email string) (EmailChangeResult, error) {
+	client, err := api()
+	if err != nil {
+		return EmailChangeResult{}, err
+	}
+	var response struct {
+		Email         string `json:"email"`
+		PreviousEmail string `json:"previousEmail"`
+	}
+	if err := client.Patch("/v1/admin/users/"+itoa(id)+"/email", map[string]string{
+		"email": email,
+	}, &response); err != nil {
+		return EmailChangeResult{}, err
+	}
+	return EmailChangeResult{Email: response.Email, PreviousEmail: response.PreviousEmail}, nil
+}
+
+// EmailChangeRow is one pending email-change request for the admin queue.
+type EmailChangeRow struct {
+	ID            int64
+	UserID        int64
+	Email         string
+	DisplayName   string
+	ProposedEmail string
+	Status        string
+	RequestedAt   string
+}
+
+// ListEmailChangeRequests returns pending email-change requests.
+func (a *AdminAPI) ListEmailChangeRequests() ([]EmailChangeRow, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Requests []EmailChangeRow `json:"requests"`
+	}
+	if err := client.Get("/v1/admin/email-change-requests", &response); err != nil {
+		return nil, err
+	}
+	if response.Requests == nil {
+		response.Requests = []EmailChangeRow{}
+	}
+	return response.Requests, nil
+}
+
+// DecideEmailChange approves (flip + sign-out) or rejects a request.
+func (a *AdminAPI) DecideEmailChange(id int64, approve bool) error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	action := "reject"
+	if approve {
+		action = "approve"
+	}
+	return client.Post("/v1/admin/email-change-requests/"+itoa(id)+"/"+action, nil, nil)
+}
+
 // ListDeletionRequests returns pending account-deletion requests.
 func (a *AdminAPI) ListDeletionRequests() ([]DeletionRequest, error) {
 	client, err := api()

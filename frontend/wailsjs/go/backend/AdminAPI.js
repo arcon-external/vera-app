@@ -10,6 +10,10 @@ export function DecideDeletion(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['DecideDeletion'](arg1, arg2);
 }
 
+export function DecideEmailChange(arg1, arg2) {
+  return window['go']['backend']['AdminAPI']['DecideEmailChange'](arg1, arg2);
+}
+
 export function DeleteUser(arg1) {
   return window['go']['backend']['AdminAPI']['DeleteUser'](arg1);
 }
@@ -26,6 +30,10 @@ export function ListDeletionRequests() {
   return window['go']['backend']['AdminAPI']['ListDeletionRequests']();
 }
 
+export function ListEmailChangeRequests() {
+  return window['go']['backend']['AdminAPI']['ListEmailChangeRequests']();
+}
+
 export function ListUsers() {
   return window['go']['backend']['AdminAPI']['ListUsers']();
 }
@@ -40,6 +48,10 @@ export function SetContext(arg1) {
 
 export function SetUserActive(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['SetUserActive'](arg1, arg2);
+}
+
+export function SetUserEmail(arg1, arg2) {
+  return window['go']['backend']['AdminAPI']['SetUserEmail'](arg1, arg2);
 }
 
 export function SetUserRole(arg1, arg2) {
