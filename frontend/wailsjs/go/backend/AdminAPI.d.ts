@@ -13,6 +13,8 @@ export function DeleteUser(arg1:number):Promise<string>;
 
 export function DownloadBackup():Promise<string>;
 
+export function GetCompanyProfile():Promise<backend.CompanyProfile>;
+
 export function IssuePasswordReset(arg1:number):Promise<string>;
 
 export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
@@ -30,3 +32,5 @@ export function SetUserActive(arg1:number,arg2:boolean):Promise<void>;
 export function SetUserEmail(arg1:number,arg2:string):Promise<backend.EmailChangeResult>;
 
 export function SetUserRole(arg1:number,arg2:string):Promise<void>;
+
+export function UpdateCompanyProfile(arg1:backend.CompanyProfile):Promise<backend.CompanyProfile>;

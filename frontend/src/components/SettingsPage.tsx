@@ -4,8 +4,10 @@ import { backend } from "@backend/models";
 import {
   DecideDeletion,
   DownloadBackup,
+  GetCompanyProfile,
   ListDeletionRequests,
   RestoreBackup,
+  UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -36,6 +38,7 @@ export function SettingsPage({
   user: SignedInUser;
   onProfileChanged: (user: SignedInUser) => void;
 }) {
+  const [section, setSection] = useState<"general" | "company">("general");
   return (
     <section aria-labelledby="settings-heading" className="space-y-6">
       <div>
@@ -43,22 +46,63 @@ export function SettingsPage({
           Settings
         </h1>
         <p className="mt-1.5 max-w-3xl text-body text-ink-500">
-          Your own account. Team management lives on the Team page for admins.
+          {section === "company"
+            ? "How the company appears across the app. Only admins see this section."
+            : "Your own account. Team management lives on the Team page for admins."}
         </p>
       </div>
 
-      <ProfileCard user={user} onProfileChanged={onProfileChanged} />
-      <EmailCard user={user} />
-      <PasswordCard />
-      <SessionsCard />
-      <DeletionCard />
       {isAdmin ? (
-        <>
-          <BackupCard />
-          <RestoreCard />
-          <DeletionQueue />
-        </>
+        <div
+          role="tablist"
+          aria-label="Settings sections"
+          className="inline-flex rounded-lg border border-rule bg-paper-muted p-0.5"
+        >
+          {(
+            [
+              { id: "general", label: "General" },
+              { id: "company", label: "Company" },
+            ] as const
+          ).map((tab) => {
+            const selected = section === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setSection(tab.id)}
+                className={`min-h-8 rounded-md px-4 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                  selected
+                    ? "bg-white text-ink-950 shadow-card"
+                    : "text-ink-500 hover:text-ink-800"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       ) : null}
+
+      {section === "company" && isAdmin ? (
+        <CompanyProfileCard />
+      ) : (
+        <>
+          <ProfileCard user={user} onProfileChanged={onProfileChanged} />
+          <EmailCard user={user} />
+          <PasswordCard />
+          <SessionsCard />
+          <DeletionCard />
+          {isAdmin ? (
+            <>
+              <BackupCard />
+              <RestoreCard />
+              <DeletionQueue />
+            </>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -297,6 +341,163 @@ function EmailCard({ user }: { user: SignedInUser }) {
           ))}
         </ul>
       ) : null}
+    </Card>
+  );
+}
+
+type CompanyForm = {
+  legalName: string;
+  address: string;
+  phone: string;
+  email: string;
+  taxId: string;
+};
+
+function CompanyProfileCard() {
+  const [form, setForm] = useState<CompanyForm>({
+    legalName: "",
+    address: "",
+    phone: "",
+    email: "",
+    taxId: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const profile = (await GetCompanyProfile()) as backend.CompanyProfile;
+      setForm({
+        legalName: profile.LegalName ?? "",
+        address: profile.Address ?? "",
+        phone: profile.Phone ?? "",
+        email: profile.Email ?? "",
+        taxId: profile.TaxID ?? "",
+      });
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't load the company profile.");
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const updated = (await UpdateCompanyProfile({
+        LegalName: form.legalName.trim(),
+        Address: form.address.trim(),
+        Phone: form.phone.trim(),
+        Email: form.email.trim(),
+        TaxID: form.taxId.trim(),
+      })) as backend.CompanyProfile;
+      setForm({
+        legalName: updated.LegalName ?? "",
+        address: updated.Address ?? "",
+        phone: updated.Phone ?? "",
+        email: updated.Email ?? "",
+        taxId: updated.TaxID ?? "",
+      });
+      pushToast("success", "Company profile saved.");
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't save the company profile.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const set = (field: keyof CompanyForm) => (event: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Company profile" />
+      {loading ? (
+        <div className="h-48 animate-pulse rounded-xl bg-paper-muted" aria-label="Loading company profile" />
+      ) : (
+        <form onSubmit={save} className="grid max-w-2xl gap-4">
+          {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">Legal name</span>
+            <input
+              type="text"
+              required
+              maxLength={160}
+              value={form.legalName}
+              onChange={set("legalName")}
+              placeholder="PT Arcon Penta Persada"
+              className={fieldClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">Address</span>
+            <input
+              type="text"
+              value={form.address}
+              onChange={set("address")}
+              placeholder="Street, city, province"
+              className={fieldClass}
+            />
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-caption font-medium text-ink-600">Phone</span>
+              <input
+                type="tel"
+                maxLength={40}
+                value={form.phone}
+                onChange={set("phone")}
+                placeholder="+62-…"
+                className={fieldClass}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-caption font-medium text-ink-600">Email</span>
+              <input
+                type="email"
+                value={form.email}
+                onChange={set("email")}
+                placeholder="info@company.co.id"
+                className={fieldClass}
+              />
+            </label>
+          </div>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">Tax ID (NPWP)</span>
+            <input
+              type="text"
+              maxLength={40}
+              value={form.taxId}
+              onChange={set("taxId")}
+              placeholder="00.000.000.0-000.000"
+              className={fieldClass}
+            />
+          </label>
+          <div>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Saving…" : "Save company profile"}
+            </Button>
+          </div>
+        </form>
+      )}
+      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
+        Only admins see this section. The quotation PDF header still uses its
+        baked-in identity until a follow-up wires this profile through.
+      </p>
     </Card>
   );
 }

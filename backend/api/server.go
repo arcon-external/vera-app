@@ -101,6 +101,8 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/admin/email-change-requests", server.listEmailChangeRequests, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/email-change-requests/:id/approve", server.decideEmailChange(true), server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/email-change-requests/:id/reject", server.decideEmailChange(false), server.requireSession, server.requireAdmin)
+	server.echo.GET("/v1/admin/company", server.getCompanyProfile, server.requireSession, server.requireAdmin)
+	server.echo.PUT("/v1/admin/company", server.updateCompanyProfile, server.requireSession, server.requireAdmin)
 	return server
 }
 
