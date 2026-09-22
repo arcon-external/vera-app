@@ -165,3 +165,64 @@ func TestClientDeleteBlockedByQuotations(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyClientSeedPopulatesDirectory(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
+	}
+	ctx := context.Background()
+	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_client_seed"})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer database.Close()
+
+	rows, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	byCode := make(map[int16]ManagedClient)
+	for _, row := range rows {
+		byCode[row.Code] = row
+	}
+	for code, name := range map[int16]string{
+		2: "PT. Infineon Technologies Batam",
+		3: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+		4: "PT. Datalec Global Solution",
+		5: "PT. Panasonic Industrial Devices Batam",
+		6: "PT. Surya Teknologi Batam",
+	} {
+		row, ok := byCode[code]
+		if !ok {
+			t.Errorf("seeded code %02d missing from directory", code)
+			continue
+		}
+		if row.Name != name {
+			t.Errorf("code %02d name = %q; want %q", code, row.Name, name)
+		}
+		if row.PrimaryAddress == "" {
+			t.Errorf("code %02d has no primary address", code)
+		}
+	}
+
+	// Existing rows are never overwritten: rename one, re-run every
+	// migration, and confirm the rename survives.
+	seeded, err := database.GetClientByID(ctx, byCode[2].ID)
+	if err != nil {
+		t.Fatalf("fetch seeded client: %v", err)
+	}
+	if _, err := database.UpdateClient(ctx, seeded.ID, "Custom Name", seeded.PrimaryAddress); err != nil {
+		t.Fatalf("rename seeded client: %v", err)
+	}
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("re-migrate: %v", err)
+	}
+	kept, err := database.GetClientByID(ctx, seeded.ID)
+	if err != nil {
+		t.Fatalf("fetch renamed client: %v", err)
+	}
+	if kept.Name != "Custom Name" {
+		t.Errorf("name after re-migrate = %q; want rename preserved", kept.Name)
+	}
+}
