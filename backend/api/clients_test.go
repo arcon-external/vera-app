@@ -32,8 +32,15 @@ func TestClientsListServesAllRoles(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("staff list = %d; want 200", code)
 	}
-	if _, ok := body["clients"]; !ok {
-		t.Fatalf("list has no clients envelope: %v", body)
+	rows, _ := body["clients"].([]any)
+	if len(rows) == 0 {
+		t.Fatal("list is empty; want the seeded legacy clients")
+	}
+	first, _ := rows[0].(map[string]any)
+	for _, key := range []string{"id", "code", "name", "primaryAddress", "quotationCount"} {
+		if _, ok := first[key]; !ok {
+			t.Errorf("list row missing %q (desktop reads PrimaryAddress): %v", key, first)
+		}
 	}
 	if code, _ := doAdminRequest(t, server, "", http.MethodGet, "/v1/clients", ""); code != http.StatusUnauthorized {
 		t.Errorf("anon list = %d; want 401", code)
@@ -57,6 +64,9 @@ func TestClientsAdminCRUD(t *testing.T) {
 	}
 	if created["code"] != 80.0 || created["name"] != "API Client A" {
 		t.Errorf("created = %v; want code 80", created)
+	}
+	if created["primaryAddress"] != "Street 1" {
+		t.Errorf("created address = %v; want the stored address under primaryAddress", created["primaryAddress"])
 	}
 	id := int64(created["id"].(float64))
 	path := "/v1/admin/clients/" + strconv.FormatInt(id, 10)

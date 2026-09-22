@@ -14,7 +14,7 @@ func clientDTO(id int64, code int16, name, address string, quotationCount int64)
 		"id":             id,
 		"code":           code,
 		"name":           name,
-		"address":        address,
+		"primaryAddress": address,
 		"quotationCount": quotationCount,
 	}
 }
