@@ -39,3 +39,7 @@ export function SetQuoteNumber(arg1:string,arg2:number):Promise<void>;
 export function SetRevisionContext(arg1:string,arg2:number):Promise<void>;
 
 export function SetStore(arg1:store.Store):Promise<void>;
+
+export function SetVerifyURL(arg1:string):Promise<void>;
+
+export function VerifyURL():Promise<string>;

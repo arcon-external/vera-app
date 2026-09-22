@@ -73,3 +73,11 @@ export function SetRevisionContext(arg1, arg2) {
 export function SetStore(arg1) {
   return window['go']['backend']['Quotation']['SetStore'](arg1);
 }
+
+export function SetVerifyURL(arg1) {
+  return window['go']['backend']['Quotation']['SetVerifyURL'](arg1);
+}
+
+export function VerifyURL() {
+  return window['go']['backend']['Quotation']['VerifyURL']();
+}
