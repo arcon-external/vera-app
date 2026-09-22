@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -226,5 +227,99 @@ func TestRestoreHappyPathRollsBackMarkerRow(t *testing.T) {
 	}
 	if _, present := response["revisions"]; !present {
 		t.Error("response has no revisions count")
+	}
+}
+
+// fakeBackupSink records snapshot uploads in memory, optionally failing.
+type fakeBackupSink struct {
+	files map[string][]byte
+	err   error
+}
+
+func (f *fakeBackupSink) put(ctx context.Context, name string, data []byte) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.files == nil {
+		f.files = make(map[string][]byte)
+	}
+	f.files[name] = append([]byte(nil), data...)
+	return nil
+}
+
+// stubDumpTools makes pg_dump write canned bytes to its -f target while
+// every other tool invocation exits 0 without touching anything.
+func stubDumpTools(t *testing.T, snapshotBytes string) {
+	t.Helper()
+	previous := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		for i, arg := range args {
+			if arg == "-f" && i+1 < len(args) {
+				path := args[i+1]
+				return exec.Command("sh", "-c", "printf '%s' '"+snapshotBytes+"' > \""+path+"\"")
+			}
+		}
+		return exec.Command("sh", "-c", "exit 0")
+	}
+	t.Cleanup(func() { execCommand = previous })
+}
+
+func TestRestoreSnapshotUploadsToSink(t *testing.T) {
+	server, database, token := adminTestSetup(t, "vera_api_restore_sink")
+	backupDir := t.TempDir()
+	server.SetBackupDir(backupDir)
+	server.SetDSN(database.DSN())
+	sink := &fakeBackupSink{}
+	server.SetBackupSink(sink)
+	stubDumpTools(t, "PGDMPsnapshot-bytes")
+
+	body, contentType := multipartDump(t, "dump", "x.dump", []byte("PGDMPfake-but-valid-magic"))
+	code, response := postRestore(t, server, token, body, contentType)
+	if code != http.StatusOK {
+		t.Fatalf("restore = %d; want 200 (%v)", code, response["error"])
+	}
+	snapshot, _ := response["safetySnapshot"].(string)
+	if snapshot == "" || !strings.HasPrefix(snapshot, "vera-pre-restore-") {
+		t.Fatalf("safetySnapshot = %q; want the snapshot name", snapshot)
+	}
+	got, ok := sink.files[snapshot]
+	if !ok {
+		t.Fatalf("snapshot %q never reached the sink", snapshot)
+	}
+	if string(got) != "PGDMPsnapshot-bytes" {
+		t.Errorf("uploaded bytes = %q; want the pg_dump output", got)
+	}
+	// The staging file is dropped after a successful upload: the bucket
+	// copy is the snapshot now.
+	if entries, _ := os.ReadDir(backupDir); len(entries) != 0 {
+		t.Errorf("backup dir holds %d files after upload; want empty", len(entries))
+	}
+}
+
+func TestRestoreSnapshotUploadFailureLeavesDBUntouched(t *testing.T) {
+	server, database, token := adminTestSetup(t, "vera_api_restore_sinkfail")
+	server.SetBackupDir(t.TempDir())
+	server.SetDSN(database.DSN())
+	server.SetBackupSink(&fakeBackupSink{err: errors.New("bucket down")})
+	stubDumpTools(t, "PGDMPsnapshot-bytes")
+
+	beforeQ, beforeR, err := database.RestoreRowCounts(context.Background())
+	if err != nil {
+		t.Fatalf("row counts before: %v", err)
+	}
+	body, contentType := multipartDump(t, "dump", "x.dump", []byte("PGDMPfake-but-valid-magic"))
+	code, response := postRestore(t, server, token, body, contentType)
+	if code != http.StatusInternalServerError {
+		t.Fatalf("upload failure = %d; want 500", code)
+	}
+	if message, _ := response["error"].(string); !strings.Contains(message, "untouched") {
+		t.Errorf("error = %q; want untouched guarantee", message)
+	}
+	afterQ, afterR, err := database.RestoreRowCounts(context.Background())
+	if err != nil {
+		t.Fatalf("row counts after: %v", err)
+	}
+	if afterQ != beforeQ || afterR != beforeR {
+		t.Errorf("row counts changed on upload failure: (%d,%d) -> (%d,%d)", beforeQ, beforeR, afterQ, afterR)
 	}
 }

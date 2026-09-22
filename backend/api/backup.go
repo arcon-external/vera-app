@@ -25,6 +25,55 @@ type backupSource interface {
 	latest(ctx context.Context) (name string, data []byte, err error)
 }
 
+// backupSink receives a safety snapshot. When no sink is configured the
+// staged file on disk IS the snapshot (local dev, tests); the bucket sink
+// uploads to object storage so the rollback artifact outlives the instance.
+type backupSink interface {
+	put(ctx context.Context, name string, data []byte) error
+}
+
+// SetBackupSink overrides the snapshot sink (tests use a fake).
+func (s *Server) SetBackupSink(sink backupSink) {
+	s.sink = sink
+}
+
+// gcsBackupSink uploads snapshots to a bucket under their plain names, so
+// the existing latest-backup endpoint (prefix vera-*.dump) can serve them.
+type gcsBackupSink struct {
+	bucket string
+}
+
+func (g *gcsBackupSink) put(ctx context.Context, name string, data []byte) error {
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return fmt.Errorf("open backup storage: %w", err)
+	}
+	defer client.Close()
+	writer := client.Bucket(g.bucket).Object(name).NewWriter(ctx)
+	writer.ContentType = "application/octet-stream"
+	if _, err := writer.Write(data); err != nil {
+		_ = writer.Close()
+		return fmt.Errorf("write snapshot object: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("finish snapshot object: %w", err)
+	}
+	return nil
+}
+
+// snapshotSink resolves the configured sink: explicit override first, then
+// the bucket when VERA_BACKUP_BUCKET is set, else nil for local-file
+// snapshots. The bucket name is returned for bucket-addressed messages.
+func (s *Server) snapshotSink() (backupSink, string) {
+	if s.sink != nil {
+		return s.sink, ""
+	}
+	if bucket := os.Getenv("VERA_BACKUP_BUCKET"); bucket != "" {
+		return &gcsBackupSink{bucket: bucket}, bucket
+	}
+	return nil, ""
+}
+
 // SetBackupSource overrides the backup source (tests and operators).
 func (s *Server) SetBackupSource(source backupSource) {
 	s.backups = source
