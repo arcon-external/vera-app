@@ -251,12 +251,12 @@ func TestRenderedQuotationTitle(t *testing.T) {
 		t.Fatalf("template execute failed: %v", err)
 	}
 	rendered := body.String()
-	if !strings.Contains(rendered, `<h2 class="doc-title">QUOTATION</h2>`) {
-		t.Error("rendered quotation missing QUOTATION title block")
+	if !strings.Contains(rendered, `<h2 class="doc-eyebrow">QUOTATION</h2>`) {
+		t.Error("rendered quotation missing QUOTATION eyebrow block")
 	}
-	titleIdx := strings.Index(rendered, "doc-title")
+	eyebrowIdx := strings.Index(rendered, "doc-eyebrow")
 	recipientIdx := strings.Index(rendered, "recipient-row")
-	if titleIdx < 0 || recipientIdx < 0 || titleIdx > recipientIdx {
-		t.Error("QUOTATION title must sit between the header and the info cards")
+	if eyebrowIdx < 0 || recipientIdx < 0 || eyebrowIdx > recipientIdx {
+		t.Error("QUOTATION eyebrow must sit between the header and the info cards")
 	}
 }
