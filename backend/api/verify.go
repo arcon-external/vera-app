@@ -74,6 +74,55 @@ func (v verifyView) IsUnavailable() bool {
 	return v.Verdict == verdictUnavailable
 }
 
+// Input bounds. Every field a reader can type is length-bounded before it
+// reaches a query or the page: an unbounded field on a public endpoint is a
+// memory and reflection problem waiting to happen.
+const (
+	maxLookupInput = 256  // a pasted link plus slack
+	maxClaimNumber = 32   // quotation numbers are 10-11 digits
+	maxClaimAmount = 32   // amounts are digits, possibly with separators
+	maxVerifyBody  = 4096 // the whole form, generous for three fields
+)
+
+// verificationCSP locks the page down: nothing loads, nothing frames it, and
+// forms may only post back here. Inline styles are required by the single
+// embedded stylesheet; no scripts exist on this page at all.
+const verificationCSP = "default-src 'none'; style-src 'unsafe-inline'; " +
+	"form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+
+// sanitizeLookupInput bounds a lookup value before any parsing.
+func sanitizeLookupInput(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if len(trimmed) > maxLookupInput {
+		return ""
+	}
+	return trimmed
+}
+
+// sanitizeClaim bounds a comparison field and normalizes the numeric ones to
+// digits. Returning "" means "nothing to compare", never "compare empty".
+func sanitizeClaim(field, raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	switch field {
+	case "number":
+		if len(trimmed) > maxClaimNumber {
+			return ""
+		}
+		// Quotation numbers are digits; anything else cannot match a record.
+		return onlyDigits(trimmed)
+	case "amount":
+		if len(trimmed) > maxClaimAmount {
+			return ""
+		}
+		return onlyDigits(trimmed)
+	default:
+		return ""
+	}
+}
+
 // normalizeLookupID accepts a raw handle or any URL containing one, so a
 // pasted link works as well as a typed id. It never returns partial input.
 func normalizeLookupID(raw string) string {
@@ -125,6 +174,10 @@ func (s *Server) renderVerify(context echo.Context, status int, view verifyView)
 	context.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	context.Response().Header().Set("X-Frame-Options", "DENY")
 	context.Response().Header().Set("Referrer-Policy", "no-referrer")
+	context.Response().Header().Set("Content-Security-Policy", verificationCSP)
+	// Verification results are per-request facts and must never be cached by
+	// a proxy or a shared device: a stale "Verified" is worse than none.
+	context.Response().Header().Set("Cache-Control", "no-store, max-age=0")
 	return context.Render(status, "verify_template.html", view)
 }
 
@@ -288,7 +341,7 @@ func (s *Server) verifyPage(context echo.Context) error {
 		return s.renderVerify(context, http.StatusTooManyRequests,
 			verifyView{Verdict: verdictUnavailable, LookupID: "", Detail: "Too many checks from this device. Please wait a moment and try again."})
 	}
-	view := s.verifyDocument(context, context.Param("id"), nil)
+	view := s.verifyDocument(context, sanitizeLookupInput(context.Param("id")), nil)
 	status := http.StatusOK
 	if view.IsNotFound() {
 		status = http.StatusNotFound
@@ -303,10 +356,10 @@ func (s *Server) verifySubmit(context echo.Context) error {
 		return s.renderVerify(context, http.StatusTooManyRequests,
 			verifyView{Verdict: verdictUnavailable, Detail: "Too many checks from this device. Please wait a moment and try again."})
 	}
-	id := context.FormValue("id")
+	id := sanitizeLookupInput(context.FormValue("id"))
 	claims := map[string]string{}
 	for _, field := range []string{"number", "amount"} {
-		if value := strings.TrimSpace(context.FormValue(field)); value != "" {
+		if value := sanitizeClaim(field, context.FormValue(field)); value != "" {
 			claims[field] = value
 		}
 	}

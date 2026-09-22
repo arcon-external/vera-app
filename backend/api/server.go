@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	echoMiddleware "github.com/labstack/echo/v4/middleware"
 
 	"vera-app/backend"
 	"vera-app/backend/auth"
@@ -121,9 +122,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// surfaces. Writes stay admin-only above.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)
 	// Public verification surface. Deliberately registered without
-	// requireSession and with no write path: see docs in verify.go.
+	// requireSession and with no write path: see docs in verify.go. The POST
+	// route carries a body limit so an oversized form is rejected before it
+	// is parsed.
 	server.echo.GET("/v/:id", server.verifyPage)
-	server.echo.POST("/verify", server.verifySubmit)
+	server.echo.POST("/verify", server.verifySubmit, echoMiddleware.BodyLimit("4K"))
 	server.echo.GET("/v1/clients", server.listClients, server.requireSession)
 	server.echo.POST("/v1/admin/clients", server.createClient, server.requireSession, server.requireAdmin)
 	server.echo.PATCH("/v1/admin/clients/:id", server.updateClient, server.requireSession, server.requireAdmin)
