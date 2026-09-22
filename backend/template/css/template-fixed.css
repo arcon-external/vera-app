@@ -342,15 +342,26 @@
 			color: #364066;
 		}
 
-		.signature {
-			margin-top: 16px;
+		.verify-pending {
+			margin-top: 18px;
 			display: flex;
 			justify-content: flex-end;
+			align-items: center;
+			gap: 14px;
+			color: #8a93b2;
 		}
 
-		.signature img {
-			width: 170px;
-			height: auto;
+		.verify-pending strong {
+			font-size: 11px;
+			color: var(--accent-blue);
+		}
+
+		.verify-pending span {
+			font-size: 10px;
+			border: 1px dashed #c9d9ff;
+			border-radius: 8px;
+			padding: 10px 14px;
+			background: #f8fbff;
 		}
 
 		.verify {

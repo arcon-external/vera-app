@@ -138,7 +138,9 @@
 
 			{{/* Layout A (approved): the verification code replaces the scanned
 			     signature block. The caption carries the issuer identity that the
-			     signature used to convey. */}}
+			     signature used to convey. Before export there is no handle yet,
+			     so the preview shows a placeholder instead of a code that would
+			     resolve to nothing. */}}
 			{{if .VerifyQRBase64}}
 			<div class="verify">
 				<div class="verify-caption">
@@ -151,8 +153,9 @@
 				</div>
 			</div>
 			{{else}}
-			<div class="signature">
-				<img src="data:image/png;base64,{{.SignatureBase64}}" alt="signature">
+			<div class="verify-pending">
+				<strong>{{.CompanyName}}</strong>
+				<span>Verification code is added when you export</span>
 			</div>
 			{{end}}
 		</main>
