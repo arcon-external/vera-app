@@ -23,6 +23,7 @@ type Server struct {
 	backupDir string
 	dsn       string
 	backups   backupSource
+	sink      backupSink
 }
 
 // SetBackupDir overrides the backup directory (tests and operators).
