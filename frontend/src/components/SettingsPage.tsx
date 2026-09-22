@@ -9,6 +9,7 @@ import {
   RestoreBackup,
   UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
+import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 import { Select } from "./Select";
@@ -475,6 +476,12 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         taxId: updated.TaxID ?? "",
       });
       pushToast("success", "Company profile saved.");
+      try {
+        await RefreshCompanyIdentity();
+      } catch {
+        // Previews keep the previous header until the next sign-in;
+        // the stored profile (and shell name) already updated above.
+      }
       onSaved?.();
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't save the company profile.");
@@ -554,17 +561,6 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               />
             </label>
           </div>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-caption font-medium text-ink-600">Tax ID (NPWP)</span>
-            <input
-              type="text"
-              maxLength={40}
-              value={form.taxId}
-              onChange={set("taxId")}
-              placeholder="00.000.000.0-000.000"
-              className={fieldClass}
-            />
-          </label>
           <div>
             <Button type="submit" variant="primary" disabled={busy}>
               {busy ? "Saving…" : "Save company profile"}

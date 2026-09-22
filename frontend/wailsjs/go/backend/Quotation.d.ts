@@ -30,6 +30,8 @@ export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 
+export function RefreshCompanyIdentity():Promise<void>;
+
 export function SetAuthService(arg1:auth.Service):Promise<void>;
 
 export function SetQuoteNumber(arg1:string,arg2:number):Promise<void>;

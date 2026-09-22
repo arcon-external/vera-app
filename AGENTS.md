@@ -194,8 +194,10 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   Numbers are issued in the creation year (no backdating). UUID on `quotations`
   is the stable external key; the bigint id stays the relational key.
 - **Company profile** is a singleton row edited only via admin endpoints and shown
-  only in the admin Company settings section. The PDF header is still baked in
-  until it is wired through (follow-up).
+  only in the admin Company settings section. Only the name and address print
+  on quotations (phone/email/NPWP appear nowhere in the template); the NPWP
+  field is hidden from the form while its column stays dormant for invoices.
+  Header edits affect future quotations only — archived snapshots keep theirs.
 - **Clients are database rows, never code:** the editor dropdown, Prepare
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.
