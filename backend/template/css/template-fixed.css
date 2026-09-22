@@ -84,15 +84,23 @@
 			height: auto;
 		}
 
-		.doc-title {
+		.doc-eyebrow {
+			display: flex;
+			align-items: center;
+			gap: 12px;
 			margin: 0;
-			padding: 10px 24px 0;
-			font-size: 22px;
+			padding: 14px 24px 0;
+			font-size: 13px;
 			font-weight: 700;
-			letter-spacing: 0.28em;
-			text-indent: 0.28em;
-			text-align: center;
+			letter-spacing: 0.32em;
 			color: var(--deep-blue);
+		}
+
+		.doc-eyebrow::after {
+			content: "";
+			flex: 1;
+			height: 1px;
+			background: #c9d9ff;
 		}
 
 		.quote-meta {
