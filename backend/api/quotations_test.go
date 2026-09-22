@@ -137,6 +137,43 @@ func TestPrepareEndpointRejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestExportHeaderTracksCompanyProfile(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_quote_company")
+	database, err := store.Open(context.Background(), store.Config{
+		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
+		Schema: "vera_api_quote_company",
+	})
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer database.Close()
+
+	if _, err := database.UpdateCompanyProfile(context.Background(), store.CompanyProfile{
+		LegalName: "PT Live Header",
+		Address:   "Live Street 9",
+	}); err != nil {
+		t.Fatalf("update company profile: %v", err)
+	}
+
+	code, exported := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, quotationInput())
+	if code != http.StatusCreated {
+		t.Fatalf("export = %d; want 201 (%v)", code, exported)
+	}
+	id, _ := exported["id"].(float64)
+	quotePath := "/v1/quotations/" + strconv.Itoa(int(id))
+
+	code, detail := doJSON(t, server, http.MethodGet, quotePath, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail = %d; want 200", code)
+	}
+	snapshot, _ := detail["htmlSnapshot"].(string)
+	for _, want := range []string{"PT Live Header", "Live Street 9"} {
+		if !strings.Contains(snapshot, want) {
+			t.Errorf("snapshot missing stored %q", want)
+		}
+	}
+}
+
 func TestExportCreatesImmutableRevisions(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_quote_export")
 

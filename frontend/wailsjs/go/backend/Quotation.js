@@ -54,6 +54,10 @@ export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
 }
 
+export function RefreshCompanyIdentity() {
+  return window['go']['backend']['Quotation']['RefreshCompanyIdentity']();
+}
+
 export function SetAuthService(arg1) {
   return window['go']['backend']['Quotation']['SetAuthService'](arg1);
 }

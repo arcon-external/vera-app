@@ -84,6 +84,8 @@ type QuotationData struct {
 	FontBoldBase64            string
 	Date                      string
 	ValidUntil                string
+	CompanyName               string
+	CompanyAddress            string
 	RecipientName             string
 	RecipientCompany          string
 	RecipientAddress          string
@@ -138,6 +140,69 @@ type Quotation struct {
 	// Prepare resolution. The server path always resolves via the store;
 	// both read the same truth.
 	customerDirectory []ManagedClient
+	// companyIdentity caches the stored company profile for desktop
+	// rendering. Same pattern as the client directory.
+	companyIdentity *CompanyIdentity
+}
+
+// CompanyIdentity is the quotation-relevant slice of the company profile:
+// name and address are the only profile values the template prints.
+type CompanyIdentity struct {
+	Name    string
+	Address string
+}
+
+// DefaultCompanyIdentity is the last-resort header when the stored profile
+// is unreachable (offline desktop with an empty cache). It is a fallback,
+// never data: reachable paths always print stored values.
+func DefaultCompanyIdentity() CompanyIdentity {
+	return CompanyIdentity{
+		Name:    "PT Arcon Penta Persada",
+		Address: "Perkantoran Graha Kadin Blk C no. 6 Jl. Engku Putri, Kel. Belian, Kec. Batam, Kota Batam 29433, Indonesia",
+	}
+}
+
+// RefreshCompanyIdentity reloads the cached company profile from the
+// server. The Company form calls it after every save so the next preview
+// prints fresh values without a restart.
+func (q *Quotation) RefreshCompanyIdentity() error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	var profile CompanyProfile
+	if err := client.Get("/v1/company", &profile); err != nil {
+		return err
+	}
+	q.companyIdentity = &CompanyIdentity{Name: profile.LegalName, Address: profile.Address}
+	return nil
+}
+
+// resolveCompanyIdentity maps the stored profile to header values. The
+// server path resolves via the store (authoritative, fresh every render);
+// the desktop path uses the cache, fetching once when empty and falling
+// back to built-in defaults only when unreachable.
+func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
+	if q.store != nil {
+		profile, err := q.store.GetCompanyProfile(q.context())
+		if err != nil {
+			return CompanyIdentity{}, err
+		}
+		return CompanyIdentity{Name: profile.LegalName, Address: profile.Address}, nil
+	}
+	if q.companyIdentity == nil {
+		if err := q.RefreshCompanyIdentity(); err != nil {
+			return DefaultCompanyIdentity(), nil
+		}
+	}
+	identity := *q.companyIdentity
+	if strings.TrimSpace(identity.Name) == "" {
+		identity.Name = DefaultCompanyIdentity().Name
+	}
+	return identity, nil
 }
 
 func (q *Quotation) SetStore(database *store.Store) {
@@ -411,6 +476,13 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.RecipientName = input.RecipientName
 	q.Data.RecipientCompany = companyName
 	q.Data.RecipientAddress = companyAddress
+
+	identity, err := q.resolveCompanyIdentity()
+	if err != nil {
+		return err
+	}
+	q.Data.CompanyName = identity.Name
+	q.Data.CompanyAddress = identity.Address
 
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
