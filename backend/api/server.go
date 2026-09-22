@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -24,6 +25,16 @@ type Server struct {
 	dsn       string
 	backups   backupSource
 	sink      backupSink
+	signer    *backend.Signer
+	// verifyLimiter throttles the public verification surface per client IP.
+	verifyLimiter *ipRateLimiter
+}
+
+// SetSigner attaches the revision signer. Without it, exports store unsigned
+// revisions and the portal reports verification unavailable — production
+// wires it from VERA_SIGNING_KEY at boot.
+func (s *Server) SetSigner(signer *backend.Signer) {
+	s.signer = signer
 }
 
 // SetBackupDir overrides the backup directory (tests and operators).
@@ -59,9 +70,11 @@ func (s *Server) backupDirOrDefault() string {
 // assets used to render customer HTML snapshots; it may be nil only in
 // tests that never touch snapshot rendering.
 func NewServer(database *store.Store, service *auth.Service, templates *backend.Quotation) *Server {
-	server := &Server{echo: echo.New(), database: database, service: service, templates: templates}
+	server := &Server{echo: echo.New(), database: database, service: service, templates: templates,
+		verifyLimiter: newIPRateLimiter(30, time.Minute)}
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
+	server.echo.Renderer = &verifyRenderer{}
 	server.echo.GET("/healthz", server.healthz)
 	server.echo.HEAD("/healthz", server.healthz)
 	// /health mirrors /healthz: some edges (Cloud Run's) swallow the exact
@@ -107,6 +120,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// Session-readable company identity for the app shell and other UI
 	// surfaces. Writes stay admin-only above.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)
+	// Public verification surface. Deliberately registered without
+	// requireSession and with no write path: see docs in verify.go.
+	server.echo.GET("/v/:id", server.verifyPage)
+	server.echo.POST("/verify", server.verifySubmit)
 	server.echo.GET("/v1/clients", server.listClients, server.requireSession)
 	server.echo.POST("/v1/admin/clients", server.createClient, server.requireSession, server.requireAdmin)
 	server.echo.PATCH("/v1/admin/clients/:id", server.updateClient, server.requireSession, server.requireAdmin)

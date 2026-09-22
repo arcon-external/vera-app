@@ -72,6 +72,15 @@ type RevisionDraft struct {
 	PDFData      []byte
 	PDFPath      string
 	DocumentHash string
+
+	// Signature authenticates the canonical field set (see backend/signing.go).
+	// Empty on legacy revisions; they self-heal on first verification.
+	Signature       string
+	SigKeyID        string
+	CanonicalSHA256 string
+	// IssuerName is the company identity as issued. It is signed, so a later
+	// company rename cannot rewrite or invalidate historical documents.
+	IssuerName string
 }
 
 type QuotationSummary struct {
@@ -108,6 +117,13 @@ type QuotationRecord struct {
 	HTMLSnapshot     string
 	PDFData          []byte
 	PDFPath          string
+	// ShortID is the public verification handle (non-enumerable prefix of
+	// the quotation UUID) and Signature authenticates the canonical field
+	// set. Both are set by the store/export path, never by clients.
+	ShortID         string
+	Signature       string
+	SigKeyID        string
+	CanonicalSHA256 string
 	// AvailableRevisions lists every revision number for the quotation,
 	// newest first, so the UI can offer a revision selector.
 	AvailableRevisions []int16
@@ -346,8 +362,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			quotation_id, revision_number, recipient_name, recipient_address,
 			subject, incoterm, validity_days, payment_term_days, lead_time_days,
 			discount_percent, tax_zone, tax_category, tax_rate_bps,
-			tax_type, service_category
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			tax_type, service_category,
+			short_id, signature, sig_key_id, canonical_sha256, issuer_name
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 		RETURNING id`, schema),
 		quoteID,
 		revisionNumber,
@@ -364,6 +381,11 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		draft.TaxRateBps,
 		draft.TaxType,
 		draft.ServiceCategory,
+		ShortIDForRevision(quoteUUID, revisionNumber),
+		draft.Signature,
+		draft.SigKeyID,
+		draft.CanonicalSHA256,
+		draft.IssuerName,
 	).Scan(&revisionID)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("insert quotation revision %d: %w", revisionNumber, err)
@@ -455,6 +477,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			GrandTotal:     draft.Totals.MarginalizedGrand,
 		},
 		UUID:             quoteUUID,
+		ShortID:          ShortIDForRevision(quoteUUID, revisionNumber),
 		CustomerCode:     draft.CustomerCode,
 		CustomerAddress:  draft.CustomerAddress,
 		RecipientName:    draft.RecipientName,

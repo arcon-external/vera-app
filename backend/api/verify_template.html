@@ -1,0 +1,228 @@
+{{/* Public verification page. Theme follows the quotation template
+     (deep blue / accent blue / soft blue), never the desktop app: a
+     customer scanning a quotation should feel they were handed more of the
+     same document, not a different product. */}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="robots" content="noindex, nofollow">
+	<title>Document verification — {{if .Issuer}}{{.Issuer}}{{else}}PT Arcon Penta Persada{{end}}</title>
+	<style>
+		* { box-sizing: border-box; margin: 0; padding: 0; }
+		:root {
+			--deep-blue: #1A237E;
+			--accent-blue: #284AF3;
+			--soft-blue: #D6E4FF;
+			--rule: #c9d9ff;
+			--ink: #1a1a1a;
+			--muted: #3a4466;
+			--paper: #ffffff;
+			--ok: #1B7F3B;
+			--ok-bg: #eef8f1;
+			--warn: #9A6100;
+			--warn-bg: #fdf6e7;
+			--bad: #B3261E;
+			--bad-bg: #fdeeed;
+			--neutral: #5b6478;
+			--neutral-bg: #f4f6fa;
+		}
+		body {
+			font-family: Inter, -apple-system, "Segoe UI", Roboto, sans-serif;
+			font-size: 15px;
+			line-height: 1.55;
+			color: var(--ink);
+			background: linear-gradient(165deg, #ffffff 0%, #f4f7ff 65%, #eaf0ff 100%);
+			min-height: 100vh;
+			padding: 28px 16px 56px;
+		}
+		.sheet {
+			max-width: 720px;
+			margin: 0 auto;
+			background: var(--paper);
+			border: 1px solid #c6d4ff;
+			border-radius: 14px;
+			overflow: hidden;
+			box-shadow: 0 18px 44px rgba(26, 35, 126, 0.08);
+		}
+		.ribbon { height: 10px; background: linear-gradient(90deg, var(--deep-blue) 0%, var(--accent-blue) 100%); }
+		.inner { padding: 26px 28px 30px; }
+		.eyebrow {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 0.3em;
+			color: var(--deep-blue);
+			text-transform: uppercase;
+		}
+		.eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+		.issuer { margin-top: 18px; font-size: 19px; font-weight: 700; color: var(--accent-blue); }
+
+		.verdict {
+			margin-top: 18px;
+			border-radius: 12px;
+			padding: 18px 20px;
+			border: 1px solid var(--rule);
+			background: var(--neutral-bg);
+		}
+		.verdict h1 { font-size: 22px; line-height: 1.2; margin-bottom: 6px; }
+		.verdict p { color: var(--muted); }
+		.verdict .mark {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 0.14em;
+			text-transform: uppercase;
+			margin-bottom: 10px;
+		}
+		.verdict-valid { border-color: #bfe0c8; background: var(--ok-bg); }
+		.verdict-valid h1, .verdict-valid .mark { color: var(--ok); }
+		.verdict-superseded { border-color: #e8d9a8; background: var(--warn-bg); }
+		.verdict-superseded h1, .verdict-superseded .mark { color: var(--warn); }
+		.verdict-mismatch { border-color: #f0c2be; background: var(--bad-bg); }
+		.verdict-mismatch h1, .verdict-mismatch .mark { color: var(--bad); }
+		.verdict-notfound h1, .verdict-notfound .mark { color: var(--neutral); }
+		.verdict-unavailable h1, .verdict-unavailable .mark { color: var(--neutral); }
+
+		.fields { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
+		.field { border-top: 1px solid #e6ecfb; padding-top: 10px; }
+		.field dt {
+			font-size: 11px;
+			font-weight: 700;
+			letter-spacing: 0.1em;
+			text-transform: uppercase;
+			color: #7a85a3;
+			margin-bottom: 3px;
+		}
+		.field dd { font-size: 15px; font-weight: 600; color: #26304d; }
+		.field dd.amount { font-size: 17px; font-weight: 700; color: var(--deep-blue); font-variant-numeric: tabular-nums; }
+		.field.wide { grid-column: 1 / -1; }
+
+		.diffs { margin-top: 22px; }
+		.diffs h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--bad); margin-bottom: 10px; }
+		.diff {
+			border: 1px solid #f0c2be;
+			border-radius: 10px;
+			padding: 12px 14px;
+			margin-bottom: 10px;
+			background: #fff;
+		}
+		.diff-label { font-weight: 700; color: #26304d; margin-bottom: 8px; }
+		.diff-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
+		.diff-row .k { color: #7a85a3; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: block; }
+		.diff-row .claimed { color: var(--bad); font-weight: 700; }
+		.diff-row .record { color: #26304d; font-weight: 700; }
+		.diff-meaning { margin-top: 8px; font-size: 13px; color: var(--muted); }
+
+		.lookup { margin-top: 26px; border-top: 1px solid #e6ecfb; padding-top: 18px; }
+		.lookup h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--deep-blue); margin-bottom: 6px; }
+		.lookup p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+		.lookup form { display: grid; gap: 10px; }
+		.lookup label { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #7a85a3; display: block; margin-bottom: 4px; }
+		.lookup input {
+			width: 100%;
+			padding: 10px 12px;
+			border: 1px solid var(--rule);
+			border-radius: 8px;
+			font-size: 14px;
+			color: var(--ink);
+			background: #fff;
+		}
+		.lookup input:focus { outline: 2px solid rgba(40, 74, 243, 0.25); border-color: var(--accent-blue); }
+		.lookup .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+		.lookup button {
+			justify-self: start;
+			margin-top: 2px;
+			background: var(--deep-blue);
+			color: #fff;
+			border: 0;
+			border-radius: 8px;
+			padding: 11px 20px;
+			font-size: 14px;
+			font-weight: 600;
+			cursor: pointer;
+		}
+		.lookup button:hover { background: var(--accent-blue); }
+		.foot { margin-top: 24px; font-size: 12px; color: #7a85a3; text-align: center; }
+		@media (max-width: 560px) {
+			.inner { padding: 20px 18px 24px; }
+			.fields { grid-template-columns: 1fr; }
+			.lookup .row { grid-template-columns: 1fr; }
+		}
+	</style>
+</head>
+<body>
+	<div class="sheet">
+		<div class="ribbon"></div>
+		<div class="inner">
+			<div class="eyebrow">Document verification</div>
+			{{if .Issuer}}<div class="issuer">{{.Issuer}}</div>{{else}}<div class="issuer">PT Arcon Penta Persada</div>{{end}}
+
+			<div class="verdict {{if .IsVerified}}verdict-valid{{else if .IsSuperseded}}verdict-superseded{{else if .IsMismatch}}verdict-mismatch{{else if .IsUnavailable}}verdict-unavailable{{else}}verdict-notfound{{end}}">
+				<div class="mark">
+					{{if .IsVerified}}&#10003; Verified{{else if .IsSuperseded}}&#8635; Superseded{{else if .IsMismatch}}&#10007; Mismatch{{else if .IsUnavailable}}&#9888; Unavailable{{else}}&#8212; Not found{{end}}
+				</div>
+				<h1>{{.Headline}}</h1>
+				<p>{{.Detail}}</p>
+			</div>
+
+			{{if or .IsVerified .IsSuperseded .IsMismatch}}
+			<dl class="fields">
+				<div class="field"><dt>Quotation No.</dt><dd>{{.QuoteNo}}</dd></div>
+				<div class="field"><dt>Revision</dt><dd>{{.Revision}}</dd></div>
+				<div class="field"><dt>Issue date</dt><dd>{{.IssueDate}}</dd></div>
+				<div class="field"><dt>Issued to</dt><dd>{{.Recipient}}</dd></div>
+				<div class="field wide"><dt>Grand total (as issued)</dt><dd class="amount">{{.Total}}</dd></div>
+			</dl>
+			{{end}}
+
+			{{if .Diffs}}
+			<div class="diffs">
+				<h2>What differs from our record</h2>
+				{{range .Diffs}}
+				<div class="diff">
+					<div class="diff-label">{{if .Matches}}&#10003;{{else}}&#10007;{{end}} {{.Label}}</div>
+					<div class="diff-row">
+						<span><span class="k">On your document</span><span class="{{if .Matches}}record{{else}}claimed{{end}}">{{.Claimed}}</span></span>
+						<span><span class="k">Our record</span><span class="record">{{.Record}}</span></span>
+					</div>
+					<div class="diff-meaning">{{.Meaning}}</div>
+				</div>
+				{{end}}
+			</div>
+			{{end}}
+
+			<div class="lookup">
+				<h2>Check another document</h2>
+				<p>Paste the link from the QR code, or type the code printed under it. Add the values you can read on the page to compare them against our record.</p>
+				<form method="post" action="/verify">
+					<div>
+						<label for="id">Document link or code</label>
+						<input id="id" name="id" type="text" autocomplete="off" placeholder="https://…/v/9f3a4c2e1b7d4a8e" required>
+					</div>
+					<div class="row">
+						<div>
+							<label for="number">Quotation No. on the page (optional)</label>
+							<input id="number" name="number" type="text" autocomplete="off" placeholder="15020005">
+						</div>
+						<div>
+							<label for="amount">Grand total on the page (optional)</label>
+							<input id="amount" name="amount" type="text" autocomplete="off" placeholder="Rp305.805">
+						</div>
+					</div>
+					<button type="submit">Verify document</button>
+				</form>
+			</div>
+
+			<div class="foot">
+				Verification checks the signature issued with the document. It never displays internal pricing.
+			</div>
+		</div>
+	</div>
+</body>
+</html>

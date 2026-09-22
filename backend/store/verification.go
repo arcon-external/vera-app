@@ -1,0 +1,234 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// ShortIDLength is the public verification handle width. The handle must
+// identify one *revision* — two revisions of the same quotation are
+// different documents and must never share a code — so it composes the
+// first 14 hex characters of the quotation UUID (56 bits: not enumerable)
+// with the revision number in 2 hex digits.
+const ShortIDLength = 16
+
+// maxEncodableRevision bounds the 2-hex-digit revision field. Exceeding it
+// would silently shorten the handle, so the store refuses instead.
+const maxEncodableRevision = 255
+
+// ShortIDForRevision derives the public verification handle for one
+// revision. Empty when the UUID is malformed or the revision number cannot
+// be encoded; callers treat that as "no verification handle" rather than
+// guessing.
+func ShortIDForRevision(uuid string, revision int16) string {
+	compact := strings.ReplaceAll(strings.TrimSpace(uuid), "-", "")
+	if len(compact) < 14 {
+		return ""
+	}
+	if revision < 0 || revision > maxEncodableRevision {
+		return ""
+	}
+	return strings.ToLower(compact[:14]) + fmt.Sprintf("%02x", revision)
+}
+
+// SigningKeyRecord is a public key in the verification registry. Private
+// keys never live here.
+type SigningKeyRecord struct {
+	KeyID     string
+	PublicKey string
+	Active    bool
+	CreatedAt time.Time
+	RetiredAt *time.Time
+}
+
+// RegisterSigningKey adds a public key to the registry. Re-registering the
+// same key id is a no-op, so boot is idempotent across restarts.
+func (s *Store) RegisterSigningKey(ctx context.Context, keyID, publicKey string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(keyID) == "" || strings.TrimSpace(publicKey) == "" {
+		return fmt.Errorf("signing key id and public key are required")
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.signing_keys (key_id, public_key)
+		VALUES ($1, $2)
+		ON CONFLICT (key_id) DO NOTHING`, s.configSchema()),
+		keyID, publicKey); err != nil {
+		return fmt.Errorf("register signing key: %w", err)
+	}
+	return nil
+}
+
+// GetSigningKey returns one registered public key.
+func (s *Store) GetSigningKey(ctx context.Context, keyID string) (SigningKeyRecord, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return SigningKeyRecord{}, err
+	}
+	var record SigningKeyRecord
+	var retiredAt *time.Time
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT key_id, public_key, active, created_at, retired_at
+		FROM %s.signing_keys WHERE key_id = $1`, s.configSchema()),
+		keyID).Scan(&record.KeyID, &record.PublicKey, &record.Active, &record.CreatedAt, &retiredAt)
+	if err != nil {
+		return SigningKeyRecord{}, fmt.Errorf("signing key %q not found", keyID)
+	}
+	record.RetiredAt = retiredAt
+	return record, nil
+}
+
+// RevisionEvidence is the minimal verification surface for one revision.
+// It carries exactly what the portal needs to render a verdict — no line
+// items, no internal economics, no customer identifiers beyond the
+// recipient already printed on the document.
+type RevisionEvidence struct {
+	ShortID          string
+	QuotationID      int64
+	QuoteNumber      string
+	RevisionNumber   int16
+	RecipientName    string
+	RecipientCompany string
+	RecipientAddress string
+	Subject          string
+	Incoterm         string
+	ValidityDays     int16
+	PaymentTermDays  int16
+	LeadTimeDays     int16
+	DiscountPercent  int16
+	IssuerName       string
+	CreatedAt        time.Time
+	Signature        string
+	SigKeyID         string
+	CanonicalSHA256  string
+	Subtotal         int64
+	DiscountAmount   int64
+	PpnAmount        int64
+	GrandTotal       int64
+	ItemCount        int
+	Items            []EvidenceItem
+}
+
+// EvidenceItem is the customer-visible slice of a line: description, qty,
+// unit, and the marginalized prices that print on the document. Cost and
+// margin never enter the verification surface.
+type EvidenceItem struct {
+	Description string
+	Qty         int64
+	UoM         string
+	UnitPrice   int64
+	Total       int64
+}
+
+// GetRevisionEvidenceByShortID resolves a verification handle to its
+// revision evidence. Unknown or malformed handles return the same error, so
+// callers cannot distinguish "never existed" from "revoked".
+func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string) (RevisionEvidence, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return RevisionEvidence{}, err
+	}
+	normalized := strings.ToLower(strings.TrimSpace(shortID))
+	if len(normalized) != ShortIDLength {
+		return RevisionEvidence{}, fmt.Errorf("revision not found")
+	}
+	schema := s.configSchema()
+	var evidence RevisionEvidence
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT r.short_id, q.id, q.quote_number, r.revision_number,
+		       r.recipient_name, r.recipient_address, c.legal_name,
+		       r.subject, r.incoterm,
+		       r.validity_days, r.payment_term_days, r.lead_time_days,
+		       r.discount_percent, r.created_at,
+		       r.signature, r.sig_key_id, r.canonical_sha256, r.issuer_name,
+		       t.marginalized_subtotal, t.marginalized_discount,
+		       t.ppn_amount, t.customer_grand_total
+		FROM %s.quotation_revisions r
+		JOIN %s.quotations q ON q.id = r.quotation_id
+		JOIN %s.customers c ON c.id = q.customer_id
+		JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
+		WHERE r.short_id = $1`, schema, schema, schema, schema),
+		normalized).Scan(
+		&evidence.ShortID, &evidence.QuotationID, &evidence.QuoteNumber, &evidence.RevisionNumber,
+		&evidence.RecipientName, &evidence.RecipientAddress, &evidence.RecipientCompany,
+		&evidence.Subject, &evidence.Incoterm,
+		&evidence.ValidityDays, &evidence.PaymentTermDays, &evidence.LeadTimeDays,
+		&evidence.DiscountPercent, &evidence.CreatedAt,
+		&evidence.Signature, &evidence.SigKeyID, &evidence.CanonicalSHA256, &evidence.IssuerName,
+		&evidence.Subtotal, &evidence.DiscountAmount, &evidence.PpnAmount, &evidence.GrandTotal,
+	)
+	if err != nil {
+		return RevisionEvidence{}, fmt.Errorf("revision not found")
+	}
+
+	var items int
+	rows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT i.description, i.qty, i.uom,
+		       i.marginalized_unit_price, i.marginalized_total
+		FROM %s.quotation_revision_items i
+		WHERE i.revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE short_id = $1)
+		ORDER BY i.item_no`, schema, schema),
+		normalized)
+	if err != nil {
+		return RevisionEvidence{}, fmt.Errorf("get revision items: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item EvidenceItem
+		if err := rows.Scan(&item.Description, &item.Qty, &item.UoM,
+			&item.UnitPrice, &item.Total); err != nil {
+			return RevisionEvidence{}, fmt.Errorf("scan revision item: %w", err)
+		}
+		evidence.Items = append(evidence.Items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return RevisionEvidence{}, fmt.Errorf("iterate revision items: %w", err)
+	}
+	items = len(evidence.Items)
+	evidence.ItemCount = items
+	return evidence, nil
+}
+
+// LatestRevisionNumber reports the newest revision number for a quotation,
+// so the portal can flag a superseded document.
+func (s *Store) LatestRevisionNumber(ctx context.Context, quotationID int64) (int16, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return 0, err
+	}
+	var latest int16
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		`SELECT MAX(revision_number) FROM %s.quotation_revisions WHERE quotation_id = $1`,
+		s.configSchema()), quotationID).Scan(&latest); err != nil {
+		return 0, fmt.Errorf("latest revision: %w", err)
+	}
+	return latest, nil
+}
+
+// SaveRevisionSignature backfills the signature columns on a revision that
+// predates signing (short_id already exists from migration). It refuses to
+// overwrite an existing signature: stored evidence is immutable.
+func (s *Store) SaveRevisionSignature(ctx context.Context, shortID, signature, keyID, canonicalSHA256 string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions
+		SET signature = $2, sig_key_id = $3, canonical_sha256 = $4
+		WHERE short_id = $1 AND signature = ''`, s.configSchema()),
+		shortID, signature, keyID, canonicalSHA256)
+	if err != nil {
+		return fmt.Errorf("save revision signature: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		return fmt.Errorf("revision %q already signed or missing", shortID)
+	}
+	return nil
+}

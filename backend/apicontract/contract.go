@@ -22,9 +22,12 @@ func FormatQuoteNumber(customerCode, yy int, seq int64) string {
 
 // ExportResponse identifies the persisted revision.
 type ExportResponse struct {
-	ID           int64  `json:"id"`
-	QuoteNumber  string `json:"quoteNumber"`
-	UUID         string `json:"uuid"`
+	ID          int64  `json:"id"`
+	QuoteNumber string `json:"quoteNumber"`
+	UUID        string `json:"uuid"`
+	// ShortID is the public verification handle. The desktop embeds it in the
+	// QR code printed on the document.
+	ShortID      string `json:"shortId"`
 	Revision     int16  `json:"revision"`
 	GrandTotal   uint64 `json:"grandTotal"`
 	SequenceWarn bool   `json:"sequenceWarn,omitempty"`
