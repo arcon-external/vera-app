@@ -7,6 +7,7 @@ import {
   GetCompanyProfile,
   ListDeletionRequests,
   RestoreBackup,
+  SetUserEmail,
   UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
 import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
@@ -94,7 +95,7 @@ export function SettingsPage({
       ) : (
         <>
           <ProfileCard user={user} onProfileChanged={onProfileChanged} />
-          <EmailCard user={user} />
+          <EmailCard user={user} isAdmin={isAdmin} />
           <PasswordCard />
           <SessionsCard />
           <DeletionCard />
@@ -262,7 +263,100 @@ function ProfileCard({
   );
 }
 
-function EmailCard({ user }: { user: SignedInUser }) {
+function EmailCard({ user, isAdmin }: { user: SignedInUser; isAdmin: boolean }) {
+  if (isAdmin) return <AdminEmailChanger user={user} />;
+  return <StaffEmailRequest user={user} />;
+}
+
+function AdminEmailChanger({ user }: { user: SignedInUser }) {
+  const [next, setNext] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  const change = async () => {
+    const email = next.trim();
+    if (!email || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const result = (await SetUserEmail(user.ID, email)) as backend.EmailChangeResult;
+      setNext("");
+      setConfirming(false);
+      pushToast(
+        "success",
+        `Sign-in email is now ${result.Email}. All sessions ended — sign in again with the new address.`
+      );
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't change this email.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Email address" />
+      <p className="max-w-2xl text-body text-ink-600">
+        Signed in as <span className="font-medium text-ink-900">{user.Email}</span>.
+        As an admin you can change it immediately — every session, including
+        this one, ends at once.
+      </p>
+      {!confirming ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (next.trim()) {
+              setError("");
+              setConfirming(true);
+            }
+          }}
+          className="mt-4 grid max-w-xl gap-3"
+        >
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">New email</span>
+            <input
+              type="email"
+              required
+              value={next}
+              onChange={(event) => setNext(event.target.value)}
+              placeholder="you@company.com"
+              className={fieldClass}
+            />
+          </label>
+          <div>
+            <Button type="submit" variant="primary" disabled={!next.trim()}>
+              Change email
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="mt-4 grid max-w-xl gap-3">
+          {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+          <StatusBanner tone="danger">
+            Change the sign-in email from{" "}
+            <span className="font-medium">{user.Email}</span> to{" "}
+            <span className="font-medium">{next.trim()}</span>? All sessions end
+            immediately, including this one.
+          </StatusBanner>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="danger" disabled={busy} onClick={() => void change()}>
+              {busy ? "Changing…" : "Change email now"}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirming(false)}>
+              Back
+            </Button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function StaffEmailRequest({ user }: { user: SignedInUser }) {
   const [proposed, setProposed] = useState("");
   const [rows, setRows] = useState<backend.EmailChangeRequest[]>([]);
   const [busy, setBusy] = useState(false);
