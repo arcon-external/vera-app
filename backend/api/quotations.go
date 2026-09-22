@@ -135,8 +135,11 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 // number verbatim. Allocation at export stays authoritative.
 func (s *Server) nextSequence(context echo.Context) error {
 	customerID, err := strconv.Atoi(context.QueryParam("customerId"))
-	if err != nil || customerID < 1 || customerID > 255 || !backend.ValidCustomerID(uint8(customerID)) {
+	if err != nil || customerID < 1 || customerID > 99 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "valid customerId is required"})
+	}
+	if _, err := s.database.GetCustomerByCode(context.Request().Context(), customerID); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "unknown customer"})
 	}
 	yy := store.CurrentYY()
 	sequence, warn, err := s.database.PeekQuoteSequence(context.Request().Context(), customerID, yy)

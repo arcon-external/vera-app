@@ -42,6 +42,10 @@ export function GetQuotationRevision(arg1, arg2) {
   return window['go']['backend']['Quotation']['GetQuotationRevision'](arg1, arg2);
 }
 
+export function ListCustomers() {
+  return window['go']['backend']['Quotation']['ListCustomers']();
+}
+
 export function ListQuotations() {
   return window['go']['backend']['Quotation']['ListQuotations']();
 }

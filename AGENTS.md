@@ -196,6 +196,9 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - **Company profile** is a singleton row edited only via admin endpoints and shown
   only in the admin Company settings section. The PDF header is still baked in
   until it is wired through (follow-up).
+- **Clients are database rows, never code:** the editor dropdown, Prepare
+  resolution, and peek validation all read the client directory (server via
+  store, desktop via fetched cache). Codes are immutable once created.
 
 ---
 

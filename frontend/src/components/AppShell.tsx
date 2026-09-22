@@ -4,12 +4,14 @@ import { NotificationBell } from "./NotificationBell";
 import type { SignedInUser } from "./LoginPage";
 
 interface AppShellProps {
-  page: "create" | "archive" | "detail" | "users" | "settings";
+  page: "create" | "archive" | "detail" | "users" | "clients" | "settings";
   onOpenEditor: () => void;
   onOpenArchive: () => void;
   onOpenUsers?: () => void;
+  onOpenClients?: () => void;
   onOpenSettings?: () => void;
   showUsersTab?: boolean;
+  showClientsTab?: boolean;
   companyName?: string;
   children: ReactNode;
   actionBar?: ReactNode;
@@ -20,6 +22,7 @@ interface AppShellProps {
 const tabs = [
   { id: "create", label: "Editor" },
   { id: "archive", label: "Archive" },
+  { id: "clients", label: "Clients" },
   { id: "users", label: "Team" },
 ] as const;
 
@@ -33,6 +36,7 @@ function initials(name: string): string {
 function isTabActive(tab: string, page: string): boolean {
   if (tab === "create") return page === "create";
   if (tab === "archive") return page === "archive" || page === "detail";
+  if (tab === "clients") return page === "clients";
   return page === "users";
 }
 
@@ -41,8 +45,10 @@ export function AppShell({
   onOpenEditor,
   onOpenArchive,
   onOpenUsers,
+  onOpenClients,
   onOpenSettings,
   showUsersTab = false,
+  showClientsTab = false,
   companyName = "PT Arcon Penta Persada",
   children,
   actionBar,
@@ -65,7 +71,11 @@ export function AppShell({
 
           <nav aria-label="Primary" className="flex items-center gap-1">
             {tabs
-              .filter((tab) => tab.id !== "users" || showUsersTab)
+              .filter((tab) => {
+                if (tab.id === "users") return showUsersTab;
+                if (tab.id === "clients") return showClientsTab;
+                return true;
+              })
               .map((tab) => {
                 const active = isTabActive(tab.id, page);
                 const open =
@@ -73,7 +83,9 @@ export function AppShell({
                     ? onOpenEditor
                     : tab.id === "archive"
                       ? onOpenArchive
-                      : onOpenUsers;
+                      : tab.id === "clients"
+                        ? onOpenClients
+                        : onOpenUsers;
                 return (
                   <button
                     key={tab.id}

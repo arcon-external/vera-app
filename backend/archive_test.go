@@ -7,7 +7,7 @@ import (
 )
 
 func TestRevisionDraftPreservesInternalAndCustomerValues(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	q.Data = QuotationData{
 		CustomerID:                2,

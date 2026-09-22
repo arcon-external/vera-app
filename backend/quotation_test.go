@@ -2,7 +2,6 @@ package backend
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +15,7 @@ func TestGeneratePDF(t *testing.T) {
 		t.Skip("needs a Chrome sandbox; run without -short locally")
 	}
 	ctx := context.Background()
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 
 	err := Startup(q, ctx)
@@ -173,31 +172,6 @@ func TestFormatRupiah(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("formatRupiah(%d) = %q; want %q", tc.amount, got, tc.want)
 		}
-	}
-}
-
-func TestCheckCustomerID(t *testing.T) {
-	cases := []struct {
-		id   uint8
-		want bool
-	}{
-		{0, false},
-		{1, false},
-		{2, true},
-		{3, true},
-		{4, true},
-		{5, true},
-		{6, true},
-		{7, false},
-		{255, false},
-	}
-
-	for _, tc := range cases {
-		t.Run(fmt.Sprintf("ID_%d", tc.id), func(t *testing.T) {
-			if got := checkCustomerID(tc.id); got != tc.want {
-				t.Errorf("checkCustomerID(%d) = %v; want %v", tc.id, got, tc.want)
-			}
-		})
 	}
 }
 
@@ -500,7 +474,7 @@ func TestPrepareValidation(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			q := &Quotation{}
+			q := newTestQuotation()
 			q.SetAuthService(auth.StaffTestService())
 			err := q.Prepare(tc.input)
 			if err == nil {

@@ -51,7 +51,7 @@ func TestResolveTaxMatrix(t *testing.T) {
 func TestPrepareGoodsPPN(t *testing.T) {
 	// Cost 100.000, no margin, no discount, NonFTZ goods:
 	// PPN 11.000, customer grand 111.000, nett 11.000.
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
@@ -85,7 +85,7 @@ func TestPrepareGoodsPPNAfterDiscount(t *testing.T) {
 	// Cost 100.000, no margin, discount 10% (applies symmetrically to cost
 	// and sell): sell grand 90.000, PPN 9.900, customer 99.900;
 	// nett 99.900 - 90.000 = 9.900 (the collected PPN).
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{

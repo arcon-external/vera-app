@@ -39,6 +39,7 @@ func testQuotationServer(t *testing.T, schema string) (*Server, string) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	server := NewServer(database, service, templates)
+	seedQuotationClient(t, database, 2, "Test Customer")
 
 	token, _, err := service.Login(ctx, "api-quote@example.com", "test-password")
 	if err != nil {
@@ -313,7 +314,9 @@ func TestAttachDocumentAfterExport(t *testing.T) {
 }
 
 func TestNextSequencePreviewsWithoutConsuming(t *testing.T) {
-	server, _, token := adminTestSetup(t, "vera_api_next_seq")
+	server, database, token := adminTestSetup(t, "vera_api_next_seq")
+	seedQuotationClient(t, database, 2, "Test Customer")
+	seedQuotationClient(t, database, 4, "Test Customer Four")
 
 	wantNumber := backend.FormatQuoteNumber(2, uint8(store.CurrentYY()), 1)
 	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/quotations/next-sequence?customerId=2", "")

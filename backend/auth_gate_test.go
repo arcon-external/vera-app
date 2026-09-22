@@ -42,7 +42,7 @@ func TestPrepareRequiresSignIn(t *testing.T) {
 }
 
 func TestStaffCanPrepareButCannotDelete(t *testing.T) {
-	q := &Quotation{}
+	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	if err := q.Prepare(gatedPrepareInput()); err != nil {
 		t.Fatalf("staff Prepare failed: %v", err)

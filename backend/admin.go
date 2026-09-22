@@ -21,6 +21,16 @@ type ManagedUser struct {
 	LastLoginAt        string
 }
 
+// ManagedClient is the admin-facing client shape with its primary address
+// and archive size.
+type ManagedClient struct {
+	ID             int64
+	Code           int16
+	Name           string
+	PrimaryAddress string
+	QuotationCount int64
+}
+
 // AdminAPI exposes user management to the frontend. Every method requires an
 // admin session; the server enforces this independently.
 type AdminAPI struct {
@@ -229,6 +239,73 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		return CompanyProfile{}, err
 	}
 	return updated, nil
+}
+
+// ListClients returns all clients ordered by code with quote counts.
+// Reads go through the shared session endpoint: every signed-in role may
+// list, only admins may mutate.
+func (a *AdminAPI) ListClients() ([]ManagedClient, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Clients []ManagedClient `json:"clients"`
+	}
+	if err := client.Get("/v1/clients", &response); err != nil {
+		return nil, err
+	}
+	if response.Clients == nil {
+		response.Clients = []ManagedClient{}
+	}
+	return response.Clients, nil
+}
+
+// CreateClient adds a client. Code 0 allocates the next free code.
+func (a *AdminAPI) CreateClient(code int64, name, address string) (ManagedClient, error) {
+	client, err := api()
+	if err != nil {
+		return ManagedClient{}, err
+	}
+	var created ManagedClient
+	if err := client.Post("/v1/admin/clients", map[string]any{
+		"code": code, "name": name, "address": address,
+	}, &created); err != nil {
+		return ManagedClient{}, err
+	}
+	return created, nil
+}
+
+// UpdateClient renames a client and replaces its primary address. The code
+// is immutable.
+func (a *AdminAPI) UpdateClient(id int64, name, address string) (ManagedClient, error) {
+	client, err := api()
+	if err != nil {
+		return ManagedClient{}, err
+	}
+	var updated ManagedClient
+	if err := client.Patch("/v1/admin/clients/"+itoa(id), map[string]string{
+		"name": name, "address": address,
+	}, &updated); err != nil {
+		return ManagedClient{}, err
+	}
+	return updated, nil
+}
+
+// DeleteClient removes a client with no quotations. Referenced clients are
+// refused server-side; the caller surfaces the count first.
+func (a *AdminAPI) DeleteClient(id int64) (string, error) {
+	client, err := api()
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		Name string `json:"name"`
+	}
+	if err := client.Delete("/v1/admin/clients/"+itoa(id), &response); err != nil {
+		return "", err
+	}
+	return response.Name, nil
 }
 
 // ListDeletionRequests returns pending account-deletion requests.

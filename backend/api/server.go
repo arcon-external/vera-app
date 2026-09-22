@@ -107,6 +107,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// Session-readable company identity for the app shell and other UI
 	// surfaces. Writes stay admin-only above.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)
+	server.echo.GET("/v1/clients", server.listClients, server.requireSession)
+	server.echo.POST("/v1/admin/clients", server.createClient, server.requireSession, server.requireAdmin)
+	server.echo.PATCH("/v1/admin/clients/:id", server.updateClient, server.requireSession, server.requireAdmin)
+	server.echo.DELETE("/v1/admin/clients/:id", server.deleteClient, server.requireSession, server.requireAdmin)
 	return server
 }
 

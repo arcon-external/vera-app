@@ -5,6 +5,7 @@ import {
   GetCustomerPreview,
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
+  ListCustomers,
   SetRevisionContext,
   ClearRevisionContext,
 } from "@backend/backend/Quotation";
@@ -33,6 +34,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { UsersPage } from "./components/UsersPage";
+import { ClientsPage } from "./components/ClientsPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
@@ -44,18 +46,11 @@ interface StatusState {
 
 const DEFAULT_COMPANY_NAME = "PT Arcon Penta Persada";
 
-const CUSTOMERS: Record<number, string> = {
-  2: "Infineon Technologies",
-  3: "H-Tech Oilfield NOV",
-  4: "Datalec Global",
-  5: "Panasonic Industrial",
-  6: "Surya Teknologi",
-};
-
-const CUSTOMER_OPTIONS = Object.entries(CUSTOMERS).map(([id, name]) => ({
-  value: Number(id),
-  label: name,
-}));
+function pickCustomerId(options: { value: number }[], current: number): number {
+  if (options.some((option) => option.value === current)) return current;
+  if (options.some((option) => option.value === 2)) return 2;
+  return options[0]?.value ?? 0;
+}
 
 const UOM_OPTIONS = [
   { value: "Lot", label: "Lot" },
@@ -183,7 +178,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
-  const [page, setPage] = useState<"create" | "archive" | "detail" | "users" | "settings">("create");
+  const [page, setPage] = useState<"create" | "archive" | "detail" | "users" | "clients" | "settings">("create");
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -197,6 +192,7 @@ function App() {
   const [items, setItems] = useState<EditorItem[]>([newItem(0)]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
   const [customerId, setCustomerId] = useState(2);
+  const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
   const [confirmingNew, setConfirmingNew] = useState(false);
   const newConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -251,11 +247,28 @@ function App() {
     nextKey.current = 1;
     setItems([newItem(0)]);
     setDetails(DEFAULT_DETAILS);
-    setCustomerId(2);
+    setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview]);
+  }, [clearPreview, customerOptions]);
+
+  // Server-owned client directory: the editor dropdown reads here, and new
+  // clients appear without a rebuild. Prepare validates server-side.
+  const loadCustomers = useCallback(async () => {
+    try {
+      const rows = (await ListCustomers()) as backend.ManagedClient[];
+      const options = rows.map((row) => ({ value: row.Code, label: row.Name }));
+      setCustomerOptions(options);
+      setCustomerId((current) => pickCustomerId(options, current));
+    } catch {
+      // Keep previous options; the server rejects unknown codes on Prepare.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (signedIn) void loadCustomers();
+  }, [signedIn, loadCustomers]);
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -653,8 +666,10 @@ function App() {
       onOpenEditor={() => setPage("create")}
       onOpenArchive={() => setPage("archive")}
       onOpenUsers={() => setPage("users")}
+      onOpenClients={() => setPage("clients")}
       onOpenSettings={() => setPage("settings")}
       showUsersTab={user?.Role === "admin"}
+      showClientsTab={user?.Role === "admin"}
       companyName={companyName}
       user={user}
       onSignOut={() => void handleSignOut()}
@@ -758,7 +773,7 @@ function App() {
               <DetailsPanel
                 value={details}
                 customerId={customerId}
-                customerOptions={CUSTOMER_OPTIONS}
+                customerOptions={customerOptions}
                 incotermOptions={INCOTERM_OPTIONS}
                 taxZoneOptions={TAX_ZONE_OPTIONS}
                 taxTypeOptions={TAX_TYPE_OPTIONS}
@@ -828,6 +843,8 @@ function App() {
       ) : null}
 
       {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
+
+      {page === "clients" && user?.Role === "admin" ? <ClientsPage /> : null}
 
       {page === "settings" && user !== null ? (
         <SettingsPage
