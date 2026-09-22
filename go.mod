@@ -7,6 +7,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20260405000525-47a8ff65b46a
 	github.com/chromedp/chromedp v0.15.1
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/wailsapp/wails/v2 v2.11.0
 	github.com/zalando/go-keyring v0.2.6
 	golang.org/x/text v0.42.0

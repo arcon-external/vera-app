@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -107,6 +109,33 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		quotation.SetQuoteNumber(backend.FormatQuoteNumber(input.CustomerID, uint8(yy), sequence), 0)
 	}
 
+	// Resolve the revision's public verification handle before rendering:
+	// the QR code printed on the document must be in the stored snapshot
+	// too, so both artifacts show the same address. A brand-new quotation
+	// needs its external identity now, which is why it is generated here
+	// rather than left to the column default.
+	var draftUUID string
+	shortID := ""
+	if quoteNumber != "" {
+		uuid, err := s.database.GetQuotationUUIDByNumber(context.Request().Context(), quoteNumber)
+		if err != nil {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "unknown quotation number"})
+		}
+		shortID = store.ShortIDForRevision(uuid, int16(revision))
+	} else {
+		uuid, err := store.NewQuotationUUID()
+		if err != nil {
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "allocate quotation identity"})
+		}
+		draftUUID = uuid
+		shortID = store.ShortIDForRevision(uuid, 0)
+	}
+	if shortID != "" {
+		if err := quotation.SetVerifyURL(s.publicBaseURL() + "/v/" + shortID); err != nil {
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "build verification code"})
+		}
+	}
+
 	snapshot, err := quotation.GetQuotationPreviewHTML()
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "render quotation snapshot"})
@@ -115,6 +144,7 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "build revision draft"})
 	}
+	draft.QuotationUUID = draftUUID
 	// Sign the canonical field set at export time. The signature travels
 	// with the revision and is what the public verification portal checks,
 	// so it must cover exactly what was issued.
@@ -138,6 +168,20 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		GrandTotal:   uint64(record.Totals.MarginalizedGrand),
 		SequenceWarn: sequenceWarn,
 	})
+}
+
+// defaultPublicBaseURL is the service address printed into verification
+// codes when VERA_PUBLIC_BASE_URL is unset. A custom domain can replace it
+// without invalidating already-printed codes: both hosts serve the portal.
+const defaultPublicBaseURL = "https://vera-api-171860943410.asia-southeast1.run.app"
+
+// publicBaseURL returns the address printed on documents as the verification
+// link. Configurable so a company domain can take over later.
+func (s *Server) publicBaseURL() string {
+	if base := strings.TrimSpace(os.Getenv("VERA_PUBLIC_BASE_URL")); base != "" {
+		return strings.TrimRight(base, "/")
+	}
+	return defaultPublicBaseURL
 }
 
 // nextSequence previews the next full quote number for a customer without

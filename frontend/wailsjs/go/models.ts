@@ -865,6 +865,10 @@ export namespace store {
 	    PDFData: number[];
 	    PDFPath: string;
 	    DocumentHash: string;
+	    Signature: string;
+	    SigKeyID: string;
+	    CanonicalSHA256: string;
+	    IssuerName: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RevisionDraft(source);
@@ -896,6 +900,10 @@ export namespace store {
 	        this.PDFData = source["PDFData"];
 	        this.PDFPath = source["PDFPath"];
 	        this.DocumentHash = source["DocumentHash"];
+	        this.Signature = source["Signature"];
+	        this.SigKeyID = source["SigKeyID"];
+	        this.CanonicalSHA256 = source["CanonicalSHA256"];
+	        this.IssuerName = source["IssuerName"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -81,6 +81,10 @@ type RevisionDraft struct {
 	// IssuerName is the company identity as issued. It is signed, so a later
 	// company rename cannot rewrite or invalidate historical documents.
 	IssuerName string
+	// QuotationUUID carries the external identity for a brand-new quotation
+	// so the caller can render its verification code before persisting.
+	// Empty for revisions and for callers that let the database assign it.
+	QuotationUUID string
 }
 
 type QuotationSummary struct {
@@ -548,6 +552,15 @@ func ensureQuotation(ctx context.Context, tx pgx.Tx, schema string, draft Revisi
 		quoteNumber := apicontract.FormatQuoteNumber(int(draft.CustomerCode), yy, sequence)
 		var quoteID int64
 		var quoteUUID string
+		if draft.QuotationUUID != "" {
+			if err := tx.QueryRow(ctx, fmt.Sprintf(`
+				INSERT INTO %s.quotations (quote_number, customer_id, uuid)
+				VALUES ($1, $2, $3) RETURNING id, uuid::text`, schema),
+				quoteNumber, customerID, draft.QuotationUUID).Scan(&quoteID, &quoteUUID); err != nil {
+				return 0, "", "", 0, fmt.Errorf("insert quotation: %w", err)
+			}
+			return quoteID, quoteUUID, quoteNumber, 0, nil
+		}
 		if err := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO %s.quotations (quote_number, customer_id)
 			VALUES ($1, $2) RETURNING id, uuid::text`, schema), quoteNumber, customerID).Scan(&quoteID, &quoteUUID); err != nil {
