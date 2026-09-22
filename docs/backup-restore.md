@@ -15,7 +15,7 @@ a past timestamp to inspect before rewinding.
 |---|---|
 | Dump files | `gs://vera-backups-508411/vera-YYYYmmdd-HHMMSS.dump` (custom format, `pg_dump -Fc`) |
 | Job | `.github/workflows/backup.yml` (scheduled 02:00 WIB + manual dispatch) |
-| DB password | Secret Manager `vera-neon-password` (read at runtime via WIF; masked in logs) |
+| DB credential | Secret Manager `vera-postgres-dsn` (read at runtime via WIF; masked in logs) |
 
 Retention: newest **14 dumps** kept; older pruned automatically after each run.
 

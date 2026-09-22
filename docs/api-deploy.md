@@ -25,7 +25,9 @@ every call, login rate limiting (5 failures → cooldown).
 | URL | `https://vera-api-171860943410.asia-southeast1.run.app` |
 | Image | `asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-<commit>` |
 | Shape | 1 vCPU / 512 MB, min 0 (cold starts OK), max 2 |
-| Env | `VERA_API_ADDR=:8080`, `VERA_POSTGRES_SCHEMA=vera`, `VERA_BACKUP_BUCKET=vera-backups-508411`, `VERA_POSTGRES_DSN` (secret, TLS required) |
+| Env | `VERA_API_ADDR=:8080`, `VERA_POSTGRES_SCHEMA=vera`, `VERA_BACKUP_BUCKET=vera-backups-508411` |
+| Secrets | `VERA_POSTGRES_DSN` ← Secret Manager `vera-postgres-dsn`; `VERA_SIGNING_KEY` ← Secret Manager `vera-signing-key` (both read at boot; the service refuses to start without the signing key) |
+| Verification | Public portal at `/v/<handle>`; QR codes print on every exported document |
 | Database | Neon PG18 Singapore, `neondb`, `vera` schema, direct endpoint (never `-pooler`) |
 
 Transport encryption is Cloud Run managed TLS. The desktop holds no
@@ -83,13 +85,22 @@ pooled connections mask a dead password for up to an hour while health
 checks stay green:
 
 1. Reset the password in Neon console (Roles → `neondb_owner`).
-2. Update **both** consumers in one pass: Cloud Run env
-   (`gcloud run services update vera-api ... --update-env-vars
-   'VERA_POSTGRES_DSN=...'`) and Secret Manager `vera-neon-password`
-   (new version; the dumps workflow reads it).
-3. Verify: `/health` ok + bogus-login generic 401 (proves fresh connections)
+2. Update the **single** source of truth: Secret Manager
+   `vera-postgres-dsn`, new version holding the full connection string
+   (`gcloud secrets versions add vera-postgres-dsn --data-file=…`).
+   Both consumers — the Cloud Run service and the nightly dumps workflow —
+   read that one secret, so a rotation cannot leave one of them stale.
+3. Roll new revisions so instances pick up the new version: service boots
+   read `latest`; a deploy or `gcloud run services update` refreshes them.
+4. Verify: `/health` ok + bogus-login generic 401 (proves fresh connections)
    + one dispatched backup run (proves the secret path).
-4. Never rotate solo: an un-updated consumer fails silently behind its pool.
+5. Never rotate solo: pooled connections hide a dead password for up to an
+   hour while health checks stay green.
+
+> `vera-neon-password` is the historical password-only record and has no
+> consumers left. Either delete it or keep it as a paper trail — but never
+> wire a consumer back to it: overlapping credential stores are what made
+> the earlier rotation look healthy while the app was already broken.
 
 ## Notes and limits
 

@@ -869,6 +869,7 @@ export namespace store {
 	    SigKeyID: string;
 	    CanonicalSHA256: string;
 	    IssuerName: string;
+	    QuotationUUID: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new RevisionDraft(source);
@@ -904,6 +905,7 @@ export namespace store {
 	        this.SigKeyID = source["SigKeyID"];
 	        this.CanonicalSHA256 = source["CanonicalSHA256"];
 	        this.IssuerName = source["IssuerName"];
+	        this.QuotationUUID = source["QuotationUUID"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

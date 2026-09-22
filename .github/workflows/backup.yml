@@ -28,22 +28,25 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
 
-      - name: Read DB password
-        id: dbpass
+      - name: Read database DSN
+        id: dsn
         run: |
-          PASSWORD="$(gcloud secrets versions access latest --secret=vera-neon-password --project=vera-app-508411)"
-          echo "::add-mask::$PASSWORD"
-          echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+          # Single source of truth for the database credential: the same
+          # secret the service reads at boot. Rotating the password means
+          # updating this one secret — two places holding overlapping
+          # credentials is how a rotation silently breaks.
+          DSN="$(gcloud secrets versions access latest --secret=vera-postgres-dsn --project=vera-app-508411 | tr -d '\n')"
+          echo "::add-mask::$DSN"
+          echo "dsn=$DSN" >> "$GITHUB_OUTPUT"
 
       - name: Dump and upload
         env:
-          PGPASSWORD: ${{ steps.dbpass.outputs.password }}
+          VERA_DSN: ${{ steps.dsn.outputs.dsn }}
+          PGSSLMODE: require
         run: |
           set -euo pipefail
           STAMP=$(date +%Y%m%d-%H%M%S)
-          export PGSSLMODE=require
-          pg_dump -h ep-frosty-field-b3szqzqb.c-4.ap-southeast-1.aws.neon.tech \
-            -U neondb_owner -d neondb -Fc -f "vera-$STAMP.dump"
+          pg_dump "$VERA_DSN" -Fc -f "vera-$STAMP.dump"
           head -c 5 "vera-$STAMP.dump" | grep -q PGDMP
           gcloud storage cp "vera-$STAMP.dump" gs://vera-backups-508411/ --project=vera-app-508411
           rm -f "vera-$STAMP.dump"
