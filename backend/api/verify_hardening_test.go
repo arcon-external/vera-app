@@ -4,8 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/labstack/echo/v4"
 )
 
 // TestVerifyInputsAreBounded proves every typed field is rejected at a
@@ -99,6 +103,68 @@ func TestVerifySetsHardeningHeaders(t *testing.T) {
 	}
 	if strings.Contains(csp, "script-src") {
 		t.Error("CSP allows scripts on a page that has none")
+	}
+}
+
+// TestForwardedHeaderCannotSpoofTheLimiter proves a client cannot rotate its
+// rate-limit identity by inventing X-Forwarded-For entries: only the address
+// the platform appended is trusted.
+func TestForwardedHeaderCannotSpoofTheLimiter(t *testing.T) {
+	resetVerifySchema(t, "vera_api_verify_spoof")
+	server, token := testQuotationServer(t, "vera_api_verify_spoof")
+	attachedTestSigner(t, server, "vera_api_verify_spoof")
+	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_spoof")
+
+	limited := false
+	for i := 0; i < 60; i++ {
+		request := httptest.NewRequest(http.MethodGet, "/v/"+shortID, nil)
+		// The attacker rotates its claimed address every request; the real
+		// peer (appended last) stays constant.
+		request.Header.Set("X-Forwarded-For", "10.0.0."+strconv.Itoa(i%254+1)+", 198.51.100.9")
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code == http.StatusTooManyRequests {
+			limited = true
+			break
+		}
+	}
+	if !limited {
+		t.Error("rotating X-Forwarded-For bypassed the rate limiter")
+	}
+}
+
+// TestClientIPTrustsOnlyAppendedAddress locks the parsing rule in place.
+func TestClientIPTrustsOnlyAppendedAddress(t *testing.T) {
+	cases := map[string]string{
+		"198.51.100.9, 203.0.113.7": "203.0.113.7", // platform appended last
+		"203.0.113.7":               "203.0.113.7",
+		"garbage, 203.0.113.7":      "203.0.113.7", // junk entry ignored
+		"203.0.113.7, not-an-ip":    "203.0.113.7", // junk appended ignored
+		// Nothing parseable: fall back to the actual peer rather than a
+		// shared bucket, so limiting still discriminates callers.
+		"not-an-ip": "192.0.2.1",
+	}
+	for header, want := range cases {
+		request := httptest.NewRequest(http.MethodGet, "/v/x", nil)
+		request.Header.Set("X-Forwarded-For", header)
+		request.RemoteAddr = "192.0.2.1:5555"
+		context := echo.New().NewContext(request, httptest.NewRecorder())
+		if got := clientIP(context); got != want {
+			t.Errorf("X-Forwarded-For %q -> %q; want %q", header, got, want)
+		}
+	}
+}
+
+// TestRateLimiterMemoryIsBounded proves the tracked set cannot be grown
+// without limit by a flood from many addresses.
+func TestRateLimiterMemoryIsBounded(t *testing.T) {
+	limiter := newIPRateLimiter(5, time.Minute)
+	limiter.maxKeys = 50
+	for i := 0; i < 500; i++ {
+		limiter.allow("10.1." + strconv.Itoa(i/256) + "." + strconv.Itoa(i%256))
+	}
+	if len(limiter.seen) > limiter.maxKeys {
+		t.Errorf("tracked keys = %d; want at most %d", len(limiter.seen), limiter.maxKeys)
 	}
 }
 

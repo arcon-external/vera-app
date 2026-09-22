@@ -6,6 +6,7 @@ import (
 	"embed"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -371,35 +372,63 @@ func (s *Server) verifySubmit(context echo.Context) error {
 	return s.renderVerify(context, status, view)
 }
 
+// clientIP returns the caller's address for rate-limit bucketing.
+//
+// Only the *last* X-Forwarded-For entry is trusted: a client can send its own
+// header, and the platform appends the real peer address after it. Reading
+// the first entry (which echo's RealIP does) lets an attacker rotate a fake
+// value and bypass the limiter entirely. Anything that is not a parseable IP
+// is discarded rather than used as a key.
 func clientIP(context echo.Context) string {
-	if forwarded := context.Request().Header.Get("X-Forwarded-For"); forwarded != "" {
-		if first := strings.TrimSpace(strings.Split(forwarded, ",")[0]); first != "" {
-			return first
+	if forwarded := context.Request().Header.Get("X-Forwarded-For"); forwarded != "" && len(forwarded) <= 512 {
+		parts := strings.Split(forwarded, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
 		}
 	}
-	return context.RealIP()
+	if host, _, err := net.SplitHostPort(context.Request().RemoteAddr); err == nil {
+		if net.ParseIP(host) != nil {
+			return host
+		}
+	}
+	return "unknown"
 }
 
 // ipRateLimiter is a small fixed-window limiter. Verification is a
 // read-only public surface, so the limit exists to make automated probing
-// expensive and noisy — not as an access control.
+// expensive and noisy — not as an access control. The tracked set is capped
+// so a flood from many distinct addresses cannot grow it without bound.
 type ipRateLimiter struct {
 	mu        sync.Mutex
 	window    time.Duration
 	limit     int
+	maxKeys   int
 	seen      map[string]int
 	windowEnd time.Time
 }
 
+// maxTrackedIPsPerWindow bounds limiter memory. Beyond it the window resets,
+// which fails open for one window rather than letting the map grow.
+const maxTrackedIPsPerWindow = 20000
+
 func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
-	return &ipRateLimiter{limit: limit, window: window, seen: map[string]int{}, windowEnd: time.Now().Add(window)}
+	return &ipRateLimiter{
+		limit:     limit,
+		window:    window,
+		maxKeys:   maxTrackedIPsPerWindow,
+		seen:      map[string]int{},
+		windowEnd: time.Now().Add(window),
+	}
 }
 
 func (l *ipRateLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
-	if now.After(l.windowEnd) {
+	if now.After(l.windowEnd) || len(l.seen) >= l.maxKeys {
 		l.seen = map[string]int{}
 		l.windowEnd = now.Add(l.window)
 	}
