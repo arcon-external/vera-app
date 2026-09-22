@@ -174,6 +174,56 @@ func TestGetQuotationPreviewHTMLUsesCustomerTemplate(t *testing.T) {
 	}
 }
 
+func TestPreviewWithoutHandleShowsPlaceholder(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	previewHTML, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		t.Fatalf("GetQuotationPreviewHTML failed: %v", err)
+	}
+	if !strings.Contains(previewHTML, "Verification code is added when you export") {
+		t.Error("preview without a handle does not show the verification placeholder")
+	}
+	if strings.Contains(previewHTML, `class="signature"`) {
+		t.Error("preview renders the retired signature block")
+	}
+	if strings.Contains(previewHTML, `class="verify-qr"`) {
+		t.Error("preview without a handle renders a QR code that would resolve to nothing")
+	}
+}
+
+func TestPreviewWithHandleShowsVerificationCode(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	if err := q.SetVerifyURL("https://vera.example.test/v/9f3a4c2e1b7d4a8e"); err != nil {
+		t.Fatalf("SetVerifyURL failed: %v", err)
+	}
+
+	previewHTML, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		t.Fatalf("GetQuotationPreviewHTML failed: %v", err)
+	}
+	if !strings.Contains(previewHTML, `class="verify-qr"`) {
+		t.Error("preview with a handle does not render the verification code")
+	}
+	if strings.Contains(previewHTML, "Verification code is added when you export") {
+		t.Error("preview with a handle still shows the placeholder")
+	}
+}
+
 func TestRenderedQuotationPPN(t *testing.T) {
 	render := func(t *testing.T, zone, taxType, category string) string {
 		t.Helper()
