@@ -709,11 +709,16 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   }
 
   return (
-    <div className="grid items-start gap-6 lg:grid-cols-2">
-      <Card className="p-5">
-        <SectionHeading title="Company profile" />
-        <form onSubmit={save} className="grid gap-4">
-          {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+    <form onSubmit={save}>
+      {error ? (
+        <div className="mb-6">
+          <StatusBanner tone="danger">{error}</StatusBanner>
+        </div>
+      ) : null}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <Card className="p-5">
+          <SectionHeading title="Company profile" />
+          <div className="grid gap-4">
           <label className="flex flex-col gap-1.5">
             <span className="text-caption font-medium text-ink-600">Legal name</span>
             <input
@@ -736,11 +741,20 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               className={fieldClass}
             />
           </label>
+          <div>
+            <Button type="submit" variant="primary" disabled={busy}>
+              {busy ? "Saving…" : "Save company profile"}
+            </Button>
+          </div>
+          </div>
+          <p className="mt-3 text-caption leading-relaxed text-ink-400">
+            Only admins see this section. The quotation header prints this name
+            and address on every new quotation.
+          </p>
+        </Card>
           {(["Quotation", "Portal"] as const).map((section) => (
-            <fieldset key={section} className="grid gap-3 rounded-lg border border-rule p-4">
-              <legend className="px-1 text-caption font-medium text-ink-600">
-                {section} colors
-              </legend>
+            <Card key={section} className="p-5">
+              <SectionHeading title={`${section} colors`} />
               <div className="grid grid-cols-2 gap-3">
                 {THEME_FIELDS.filter((field) => field.section === section).map((field) => {
                   const value = theme[field.key].trim() || DEFAULT_THEME[field.key];
@@ -779,19 +793,8 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
                   );
                 })}
               </div>
-            </fieldset>
+            </Card>
           ))}
-          <div>
-            <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "Saving…" : "Save company profile"}
-            </Button>
-          </div>
-        </form>
-        <p className="mt-3 text-caption leading-relaxed text-ink-400">
-          Only admins see this section. The quotation header prints this name
-          and address on every new quotation.
-        </p>
-      </Card>
       <Card className="p-5">
         <SectionHeading title="Logo artwork" />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
@@ -840,6 +843,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         </p>
       </Card>
     </div>
+    </form>
   );
 }
 
@@ -1131,7 +1135,7 @@ function UpdateCard({ stretch = false }: { stretch?: boolean }) {
   };
 
   return (
-    <Card className={stretch ? "flex-1 p-5" : "p-5"}>
+    <Card className={stretch ? "flex flex-1 flex-col p-5" : "p-5"}>
       <SectionHeading title="App updates" />
       {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
       <dl className="grid gap-2 text-body">
@@ -1173,7 +1177,7 @@ function UpdateCard({ stretch = false }: { stretch?: boolean }) {
           </Button>
         ) : null}
       </div>
-      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
+      <p className="mt-auto max-w-2xl pt-3 text-caption leading-relaxed text-ink-400">
         Vera checks once per launch. Download the installer for your system —
         it handles the rest.
       </p>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Login, RedeemInvite } from "@backend/backend/AuthAPI";
 import { Button, Card, StatusBanner } from "./ui";
+import { VeraLogo } from "./VeraLogo";
 
 export interface SignedInUser {
   ID: number;
@@ -192,12 +193,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
     <div className="flex min-h-full items-center justify-center px-5 py-12">
       <div className="w-full max-w-[420px]">
         <div className="mb-6 flex flex-col items-center text-center">
-          <span
-            className="flex h-12 w-12 items-center justify-center rounded-xl bg-ink-900 text-title font-semibold text-white shadow-card"
-            aria-hidden="true"
-          >
-            V
-          </span>
+          <VeraLogo className="h-12 w-auto" />
           <p className="mt-3 text-display font-semibold tracking-[-0.03em] text-ink-950">
             Vera
           </p>
