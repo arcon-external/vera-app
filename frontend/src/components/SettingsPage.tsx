@@ -31,7 +31,7 @@ export function SettingsPage({
   onProfileChanged: (user: SignedInUser) => void;
   onCompanyChanged?: () => void;
 }) {
-  const [section, setSection] = useState<"general" | "company">("general");
+  const [section, setSection] = useState<"general" | "company" | "backups">("general");
   return (
     <section aria-labelledby="settings-heading" className="space-y-6">
       <div>
@@ -41,7 +41,9 @@ export function SettingsPage({
         <p className="mt-1.5 max-w-3xl text-body text-ink-500">
           {section === "company"
             ? "How the company appears across the app. Only admins see this section."
-            : "Your own account. Team management lives on the Team page for admins."}
+            : section === "backups"
+              ? "Database safety nets. Only admins see this section."
+              : "Your own account. Team management lives on the Team page for admins."}
         </p>
       </div>
 
@@ -55,6 +57,7 @@ export function SettingsPage({
             [
               { id: "general", label: "General" },
               { id: "company", label: "Company" },
+              { id: "backups", label: "Backups" },
             ] as const
           ).map((tab) => {
             const selected = section === tab.id;
@@ -80,20 +83,21 @@ export function SettingsPage({
 
       {section === "company" && isAdmin ? (
         <CompanyProfileCard onSaved={onCompanyChanged} />
-      ) : (
+      ) : section === "backups" && isAdmin ? (
         <>
+          <BackupCard />
+          <RestoreCard />
+        </>
+      ) : (
+        <div className="grid items-start gap-6 lg:grid-cols-2">
           <ProfileCard user={user} onProfileChanged={onProfileChanged} />
           <EmailCard user={user} isAdmin={isAdmin} />
           <PasswordCard />
           <SessionsCard />
-          <DeletionCard />
-          {isAdmin ? (
-            <>
-              <BackupCard />
-              <RestoreCard />
-            </>
-          ) : null}
-        </>
+          <div className="lg:col-span-2">
+            <DeletionCard />
+          </div>
+        </div>
       )}
     </section>
   );
