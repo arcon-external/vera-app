@@ -70,7 +70,7 @@ jobs:
       - name: Verify live service
         if: steps.ready.outputs.ready == 'true'
         run: |
-          BASE="https://vera-api-171860943410.asia-southeast1.run.app"
+          BASE="https://api.arconpentapersada.co.id"
           for i in $(seq 1 30); do
             if curl -sf -m 10 "$BASE/health" >/dev/null 2>&1; then
               break
@@ -86,4 +86,12 @@ jobs:
             echo "auth gate probe = $CODE, want 401" >&2
             exit 1
           fi
-          echo "deploy verified: health OK, auth gate OK"
+          # The legacy run.app URL keeps serving in parallel so installed
+          # desktops and printed codes never break; prove it stays up.
+          LEGACY="https://vera-api-171860943410.asia-southeast1.run.app"
+          LEGACY_CODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$LEGACY/health")
+          if [ "$LEGACY_CODE" != "200" ]; then
+            echo "legacy host probe = $LEGACY_CODE, want 200" >&2
+            exit 1
+          fi
+          echo "deploy verified: health OK, auth gate OK, legacy host OK"
