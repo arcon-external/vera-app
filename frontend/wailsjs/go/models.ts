@@ -242,6 +242,7 @@ export namespace backend {
 	    Phone: string;
 	    Email: string;
 	    TaxID: string;
+	    HasLogo: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CompanyProfile(source);
@@ -254,6 +255,21 @@ export namespace backend {
 	        this.Phone = source["Phone"];
 	        this.Email = source["Email"];
 	        this.TaxID = source["TaxID"];
+	        this.HasLogo = source["HasLogo"];
+	    }
+	}
+	export class CompanyLogo {
+	    LogoBase64: string;
+	    LogoMime: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompanyLogo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.LogoBase64 = source["LogoBase64"];
+	        this.LogoMime = source["LogoMime"];
 	    }
 	}
 	export class CustomerPreviewItem {

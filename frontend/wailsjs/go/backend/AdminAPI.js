@@ -30,6 +30,14 @@ export function DownloadBackup() {
   return window['go']['backend']['AdminAPI']['DownloadBackup']();
 }
 
+export function ClearCompanyLogo() {
+  return window['go']['backend']['AdminAPI']['ClearCompanyLogo']();
+}
+
+export function GetCompanyLogo() {
+  return window['go']['backend']['AdminAPI']['GetCompanyLogo']();
+}
+
 export function GetCompanyProfile() {
   return window['go']['backend']['AdminAPI']['GetCompanyProfile']();
 }
@@ -72,6 +80,10 @@ export function SetUserEmail(arg1, arg2) {
 
 export function SetUserRole(arg1, arg2) {
   return window['go']['backend']['AdminAPI']['SetUserRole'](arg1, arg2);
+}
+
+export function SetCompanyLogo(arg1, arg2) {
+  return window['go']['backend']['AdminAPI']['SetCompanyLogo'](arg1, arg2);
 }
 
 export function UpdateClient(arg1, arg2, arg3) {

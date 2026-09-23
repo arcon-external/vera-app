@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -48,7 +49,12 @@ func TestCompanyProfileRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get stored profile: %v", err)
 	}
-	if stored != updated {
+	// CompanyProfile holds a []byte artwork field, so compare field by field.
+	if stored.LegalName != updated.LegalName || stored.Address != updated.Address ||
+		stored.Phone != updated.Phone || stored.Email != updated.Email ||
+		stored.TaxID != updated.TaxID || stored.LogoPath != updated.LogoPath ||
+		stored.LogoMime != updated.LogoMime || stored.HasLogo != updated.HasLogo ||
+		!bytes.Equal(stored.LogoBytes, updated.LogoBytes) {
 		t.Errorf("stored = %+v; want %+v", stored, updated)
 	}
 

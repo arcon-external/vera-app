@@ -118,6 +118,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/admin/email-change-requests/:id/reject", server.decideEmailChange(false), server.requireSession, server.requireAdmin)
 	server.echo.GET("/v1/admin/company", server.getCompanyProfile, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/admin/company", server.updateCompanyProfile, server.requireSession, server.requireAdmin)
+	server.echo.GET("/v1/admin/company/logo", server.getCompanyLogo, server.requireSession)
+	server.echo.PUT("/v1/admin/company/logo", server.setCompanyLogo, server.requireSession, server.requireAdmin)
+	server.echo.DELETE("/v1/admin/company/logo", server.clearCompanyLogo, server.requireSession, server.requireAdmin)
 	// Session-readable company identity for the app shell and other UI
 	// surfaces. Writes stay admin-only above.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -33,10 +34,16 @@ func decodeInput(raw map[string]any) (backend.QuotationInput, error) {
 	return input, nil
 }
 
-func (s *Server) prepareQuotation(user store.AuthUser, input backend.QuotationInput) (*backend.Quotation, error) {
+func (s *Server) prepareQuotation(ctx context.Context, user store.AuthUser, input backend.QuotationInput) (*backend.Quotation, error) {
 	quotation := backend.NewQuotationForRequest(s.database, user, s.templates)
 	if err := quotation.Prepare(input); err != nil {
 		return nil, err
+	}
+	// An uploaded logo replaces the baked asset on every server render, so
+	// previews, snapshots, and PDFs agree. Failures fall through to the
+	// baked asset rather than failing the quotation.
+	if profile, err := s.database.GetCompanyProfile(ctx); err == nil && profile.HasLogo {
+		quotation.Data.LogoBase64 = base64.StdEncoding.EncodeToString(profile.LogoBytes)
 	}
 	return quotation, nil
 }
@@ -55,7 +62,7 @@ func (s *Server) prepareEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	}
-	quotation, err := s.prepareQuotation(requestUser(context), input)
+	quotation, err := s.prepareQuotation(context.Request().Context(), requestUser(context), input)
 	if err != nil {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	}
@@ -91,7 +98,7 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	}
-	quotation, err := s.prepareQuotation(requestUser(context), input)
+	quotation, err := s.prepareQuotation(context.Request().Context(), requestUser(context), input)
 	if err != nil {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	}
