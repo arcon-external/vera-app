@@ -26,6 +26,9 @@ func latestRelease() appRelease {
 	if windows := strings.TrimSpace(os.Getenv("VERA_APP_DOWNLOAD_WINDOWS")); windows != "" {
 		downloads["windows"] = windows
 	}
+	if windowsARM64 := strings.TrimSpace(os.Getenv("VERA_APP_DOWNLOAD_WINDOWS_ARM64")); windowsARM64 != "" {
+		downloads["windows-arm64"] = windowsARM64
+	}
 	if macos := strings.TrimSpace(os.Getenv("VERA_APP_DOWNLOAD_MACOS")); macos != "" {
 		downloads["macos"] = macos
 	}

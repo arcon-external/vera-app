@@ -393,7 +393,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 | `VERA_POSTGRES_SCHEMA` | Schema name (default `vera`) |
 | `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE` | Fallback |
 | `VERA_POSTGRES_TEST_DSN` | Test-only DSN for `backend/store` integration tests |
-| `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
+| `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_WINDOWS_ARM64` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
 
 `.env` is gitignored. Never commit a real password, paste one into an issue, or print
 one in logs.

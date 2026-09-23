@@ -30,7 +30,7 @@ func TestFetchUpdateInfo(t *testing.T) {
 		"latest":       "v0.4.0",
 		"minSupported": "v0.2.0",
 		"notesUrl":     "https://example.test/notes",
-		"downloads":    map[string]string{"windows": "https://example.test/w.exe", "macos": "https://example.test/m.dmg"},
+		"downloads":    map[string]string{"windows": "https://example.test/w.exe", "windows-arm64": "https://example.test/w-arm64.exe", "macos": "https://example.test/m.dmg"},
 	}
 	cases := []struct {
 		name          string
@@ -44,6 +44,7 @@ func TestFetchUpdateInfo(t *testing.T) {
 		wantErr       bool
 	}{
 		{"newer on windows", full, 200, "v0.3.0", "windows", "amd64", true, false, "https://example.test/w.exe", false},
+		{"newer on windows arm64", full, 200, "v0.3.0", "windows", "arm64", true, false, "https://example.test/w-arm64.exe", false},
 		{"newer on mac arm", full, 200, "v0.3.0", "darwin", "arm64", true, false, "https://example.test/m.dmg", false},
 		{"newer on mac intel", full, 200, "v0.3.0", "darwin", "amd64", true, false, "https://example.test/m.dmg", false},
 		{"up to date", full, 200, "v0.4.0", "windows", "amd64", false, false, "https://example.test/w.exe", false},

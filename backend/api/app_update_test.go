@@ -12,6 +12,7 @@ func TestAppLatestServesEnvironment(t *testing.T) {
 	t.Setenv("VERA_APP_MIN_SUPPORTED", "v0.2.0")
 	t.Setenv("VERA_APP_NOTES_URL", "https://example.test/notes")
 	t.Setenv("VERA_APP_DOWNLOAD_WINDOWS", "https://example.test/w.exe")
+	t.Setenv("VERA_APP_DOWNLOAD_WINDOWS_ARM64", "https://example.test/w-arm64.exe")
 	t.Setenv("VERA_APP_DOWNLOAD_MACOS", "https://example.test/m.dmg")
 
 	server, _, _ := adminTestSetup(t, "vera_api_app_latest")
@@ -30,15 +31,15 @@ func TestAppLatestServesEnvironment(t *testing.T) {
 		t.Errorf("body = %v; want configured release state", body)
 	}
 	downloads, _ := body["downloads"].(map[string]any)
-	if downloads["windows"] != "https://example.test/w.exe" || downloads["macos"] != "https://example.test/m.dmg" {
-		t.Errorf("downloads = %v; want both assets", downloads)
+	if downloads["windows"] != "https://example.test/w.exe" || downloads["macos"] != "https://example.test/m.dmg" || downloads["windows-arm64"] != "https://example.test/w-arm64.exe" {
+		t.Errorf("downloads = %v; want all three assets", downloads)
 	}
 }
 
 func TestAppLatestEmptyWhenUnconfigured(t *testing.T) {
 	for _, key := range []string{
 		"VERA_APP_LATEST", "VERA_APP_MIN_SUPPORTED", "VERA_APP_NOTES_URL",
-		"VERA_APP_DOWNLOAD_WINDOWS", "VERA_APP_DOWNLOAD_MACOS",
+		"VERA_APP_DOWNLOAD_WINDOWS", "VERA_APP_DOWNLOAD_WINDOWS_ARM64", "VERA_APP_DOWNLOAD_MACOS",
 	} {
 		t.Setenv(key, "")
 	}
