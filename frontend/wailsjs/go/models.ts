@@ -243,6 +243,14 @@ export namespace backend {
 	    Email: string;
 	    TaxID: string;
 	    HasLogo: boolean;
+	    ThemeQDeep: string;
+	    ThemeQAccent: string;
+	    ThemeQSoft: string;
+	    ThemeQInk: string;
+	    ThemePDeep: string;
+	    ThemePAccent: string;
+	    ThemePSoft: string;
+	    ThemePInk: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new CompanyProfile(source);
@@ -256,6 +264,14 @@ export namespace backend {
 	        this.Email = source["Email"];
 	        this.TaxID = source["TaxID"];
 	        this.HasLogo = source["HasLogo"];
+	        this.ThemeQDeep = source["ThemeQDeep"];
+	        this.ThemeQAccent = source["ThemeQAccent"];
+	        this.ThemeQSoft = source["ThemeQSoft"];
+	        this.ThemeQInk = source["ThemeQInk"];
+	        this.ThemePDeep = source["ThemePDeep"];
+	        this.ThemePAccent = source["ThemePAccent"];
+	        this.ThemePSoft = source["ThemePSoft"];
+	        this.ThemePInk = source["ThemePInk"];
 	    }
 	}
 	export class CompanyLogo {

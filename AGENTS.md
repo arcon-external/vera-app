@@ -200,6 +200,10 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   Artwork uploads to `logo_bytes` (512KB cap, allowlisted types) and prints
   profile-first with baked-asset fallback. Header edits affect future
   quotations only — archived snapshots keep theirs.
+- **Brand theme:** eight `#RRGGBB` columns (4 quotation + 4 portal, independently
+  settable, strict hex validation, seeded with today's palette). Empty means
+  the stylesheet default. Portal UI copy stays hardcoded (it is language, not
+  company data); issuer falls back to the live profile name.
 - **Clients are database rows, never code:** the editor dropdown, Prepare
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.

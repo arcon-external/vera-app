@@ -10,16 +10,24 @@ import (
 	"vera-app/backend/store"
 )
 
-// companyDTO renders the editable profile plus a logo flag. Artwork bytes
+// companyDTO renders the editable profile, theme included. Artwork bytes
 // travel through the dedicated logo endpoints, never this DTO.
-func companyDTO(legalName, address, phone, email, taxID string, hasLogo bool) map[string]any {
+func companyDTO(profile store.CompanyProfile) map[string]any {
 	return map[string]any{
-		"legalName": legalName,
-		"address":   address,
-		"phone":     phone,
-		"email":     email,
-		"taxId":     taxID,
-		"hasLogo":   hasLogo,
+		"legalName":    profile.LegalName,
+		"address":      profile.Address,
+		"phone":        profile.Phone,
+		"email":        profile.Email,
+		"taxId":        profile.TaxID,
+		"hasLogo":      profile.HasLogo,
+		"themeQDeep":   profile.ThemeQDeep,
+		"themeQAccent": profile.ThemeQAccent,
+		"themeQSoft":   profile.ThemeQSoft,
+		"themeQInk":    profile.ThemeQInk,
+		"themePDeep":   profile.ThemePDeep,
+		"themePAccent": profile.ThemePAccent,
+		"themePSoft":   profile.ThemePSoft,
+		"themePInk":    profile.ThemePInk,
 	}
 }
 
@@ -28,8 +36,7 @@ func (s *Server) getCompanyProfile(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
 	}
-	return context.JSON(http.StatusOK, companyDTO(
-		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID, profile.HasLogo))
+	return context.JSON(http.StatusOK, companyDTO(profile))
 }
 
 // getCompanyIdentity serves the company identity to every signed-in role
@@ -40,34 +47,50 @@ func (s *Server) getCompanyIdentity(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
 	}
-	return context.JSON(http.StatusOK, companyDTO(
-		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID, profile.HasLogo))
+	return context.JSON(http.StatusOK, companyDTO(profile))
 }
 
 func (s *Server) updateCompanyProfile(context echo.Context) error {
 	var request struct {
-		LegalName string `json:"legalName"`
-		Address   string `json:"address"`
-		Phone     string `json:"phone"`
-		Email     string `json:"email"`
-		TaxID     string `json:"taxId"`
+		LegalName    string `json:"legalName"`
+		Address      string `json:"address"`
+		Phone        string `json:"phone"`
+		Email        string `json:"email"`
+		TaxID        string `json:"taxId"`
+		ThemeQDeep   string `json:"themeQDeep"`
+		ThemeQAccent string `json:"themeQAccent"`
+		ThemeQSoft   string `json:"themeQSoft"`
+		ThemeQInk    string `json:"themeQInk"`
+		ThemePDeep   string `json:"themePDeep"`
+		ThemePAccent string `json:"themePAccent"`
+		ThemePSoft   string `json:"themePSoft"`
+		ThemePInk    string `json:"themePInk"`
 	}
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
 	updated, err := s.database.UpdateCompanyProfile(context.Request().Context(), store.CompanyProfile{
-		LegalName: request.LegalName,
-		Address:   request.Address,
-		Phone:     request.Phone,
-		Email:     request.Email,
-		TaxID:     request.TaxID,
+		LegalName:    request.LegalName,
+		Address:      request.Address,
+		Phone:        request.Phone,
+		Email:        request.Email,
+		TaxID:        request.TaxID,
+		ThemeQDeep:   request.ThemeQDeep,
+		ThemeQAccent: request.ThemeQAccent,
+		ThemeQSoft:   request.ThemeQSoft,
+		ThemeQInk:    request.ThemeQInk,
+		ThemePDeep:   request.ThemePDeep,
+		ThemePAccent: request.ThemePAccent,
+		ThemePSoft:   request.ThemePSoft,
+		ThemePInk:    request.ThemePInk,
 	})
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "required"):
 			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "company legal name is required"})
 		case strings.Contains(err.Error(), "invalid company email"),
-			strings.Contains(err.Error(), "too long"):
+			strings.Contains(err.Error(), "too long"),
+			strings.Contains(err.Error(), "must be a #RRGGBB"):
 			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		default:
 			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "update company profile"})
@@ -76,8 +99,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 	me := sessionUser(context)
 	actorID := me.ID
 	_ = s.database.Audit(context.Request().Context(), &actorID, "company.update", nil, updated.LegalName)
-	return context.JSON(http.StatusOK, companyDTO(
-		updated.LegalName, updated.Address, updated.Phone, updated.Email, updated.TaxID, updated.HasLogo))
+	return context.JSON(http.StatusOK, companyDTO(updated))
 }
 
 // setCompanyLogo stores uploaded logo artwork. The payload mirrors the

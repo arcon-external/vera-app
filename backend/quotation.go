@@ -86,11 +86,18 @@ type QuotationData struct {
 	ValidUntil        string
 	CompanyName       string
 	CompanyAddress    string
-	RecipientName     string
-	RecipientCompany  string
-	RecipientAddress  string
-	QuoteNumber       string
-	QuoteUUID         string
+	// ThemeQ* brand colors for this document, resolved in Prepare from the
+	// company profile (server: store; desktop: cached identity) with baked
+	// defaults when unreachable. Empty means "use the stylesheet default".
+	ThemeQDeep       string
+	ThemeQAccent     string
+	ThemeQSoft       string
+	ThemeQInk        string
+	RecipientName    string
+	RecipientCompany string
+	RecipientAddress string
+	QuoteNumber      string
+	QuoteUUID        string
 	// VerifyURL is the public verification address printed as a QR code on
 	// the document. Empty before export (the handle does not exist yet), in
 	// which case the template omits the code rather than printing a dead one.
@@ -152,6 +159,9 @@ type Quotation struct {
 	// companyIdentity caches the stored company profile for desktop
 	// rendering. Same pattern as the client directory.
 	companyIdentity *CompanyIdentity
+	// cssTemplate is the parsed stylesheet, executed per render so theme
+	// values set by Prepare reach the CSS. Parsed once, executed often.
+	cssTemplate *template.Template
 }
 
 // CompanyIdentity is the quotation-relevant slice of the company profile:
@@ -159,6 +169,12 @@ type Quotation struct {
 type CompanyIdentity struct {
 	Name    string
 	Address string
+	// Theme carries the quotation brand colors. Empty values are valid and
+	// mean "use the stylesheet default" (the template guards each one).
+	ThemeQDeep   string
+	ThemeQAccent string
+	ThemeQSoft   string
+	ThemeQInk    string
 }
 
 // DefaultCompanyIdentity is the last-resort header when the stored profile
@@ -186,7 +202,14 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 	if err := client.Get("/v1/company", &profile); err != nil {
 		return err
 	}
-	q.companyIdentity = &CompanyIdentity{Name: profile.LegalName, Address: profile.Address}
+	q.companyIdentity = &CompanyIdentity{
+		Name:         profile.LegalName,
+		Address:      profile.Address,
+		ThemeQDeep:   profile.ThemeQDeep,
+		ThemeQAccent: profile.ThemeQAccent,
+		ThemeQSoft:   profile.ThemeQSoft,
+		ThemeQInk:    profile.ThemeQInk,
+	}
 	// The desktop preview renders from this instance's template data, so it
 	// needs the uploaded artwork too — otherwise previews would show the
 	// baked logo while server PDFs show the upload.
@@ -216,7 +239,14 @@ func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
 		if err != nil {
 			return CompanyIdentity{}, err
 		}
-		return CompanyIdentity{Name: profile.LegalName, Address: profile.Address}, nil
+		return CompanyIdentity{
+			Name:         profile.LegalName,
+			Address:      profile.Address,
+			ThemeQDeep:   profile.ThemeQDeep,
+			ThemeQAccent: profile.ThemeQAccent,
+			ThemeQSoft:   profile.ThemeQSoft,
+			ThemeQInk:    profile.ThemeQInk,
+		}, nil
 	}
 	if q.companyIdentity == nil {
 		if err := q.RefreshCompanyIdentity(); err != nil {
@@ -380,8 +410,24 @@ func NewQuotationForRequest(database *store.Store, user store.AuthUser, template
 		quotation.Data.SignatureBase64 = templates.Data.SignatureBase64
 		quotation.Data.FontRegularBase64 = templates.Data.FontRegularBase64
 		quotation.Data.FontBoldBase64 = templates.Data.FontBoldBase64
+		quotation.cssTemplate = templates.cssTemplate
 	}
 	return quotation
+}
+
+// refreshCustomCSS re-executes the parsed stylesheet against the current
+// data so theme values set by Prepare reach the CSS. A nil parsed template
+// (tests that never ran Startup) leaves the CSS untouched.
+func (q *Quotation) refreshCustomCSS() error {
+	if q.cssTemplate == nil {
+		return nil
+	}
+	var cssBuf strings.Builder
+	if err := q.cssTemplate.Execute(&cssBuf, q.Data); err != nil {
+		return fmt.Errorf("execute css template: %w", err)
+	}
+	q.Data.CustomCSS = template.CSS(cssBuf.String())
+	return nil
 }
 
 // DraftRevision builds the immutable archive draft for prepared data. The
@@ -533,6 +579,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	}
 	q.Data.CompanyName = identity.Name
 	q.Data.CompanyAddress = identity.Address
+	q.Data.ThemeQDeep = identity.ThemeQDeep
+	q.Data.ThemeQAccent = identity.ThemeQAccent
+	q.Data.ThemeQSoft = identity.ThemeQSoft
+	q.Data.ThemeQInk = identity.ThemeQInk
 
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
@@ -583,6 +633,13 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 	q.lastInput = input
 	q.prepared = true
+
+	// Theme values are set above; re-execute the stylesheet so they reach
+	// the CSS. A render without Startup (unit tests) keeps whatever CSS it
+	// already holds.
+	if err := q.refreshCustomCSS(); err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -18,15 +18,27 @@ func TestCompanyProfileAdminRoundTrip(t *testing.T) {
 	}
 
 	code, updated := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company",
-		`{"legalName":"  PT Example Persada ","address":"Batam","phone":"+62-778-1","email":"info@example.co.id","taxId":"00.000.000.0-000.000"}`)
+		`{"legalName":"  PT Example Persada ","address":"Batam","phone":"+62-778-1","email":"info@example.co.id","taxId":"00.000.000.0-000.000","themeQDeep":"#0A1A5C","themePInk":"#111827"}`)
 	if code != http.StatusOK {
 		t.Fatalf("put = %d; want 200 (%v)", code, updated)
 	}
 	if updated["legalName"] != "PT Example Persada" || updated["email"] != "info@example.co.id" {
 		t.Errorf("updated = %v; want trimmed fields", updated)
 	}
+	if updated["themeQDeep"] != "#0A1A5C" || updated["themePInk"] != "#111827" {
+		t.Errorf("updated theme = %v; want stored hex values", updated)
+	}
 	if _, leaked := updated["logoPath"]; leaked {
 		t.Error("logo path leaks into the DTO")
+	}
+	for _, bad := range []string{
+		`{"legalName":"PT X","themeQDeep":"deep-blue"}`,
+		`{"legalName":"PT X","themePAccent":"#FFF"}`,
+		`{"legalName":"PT X","themeQSoft":"D6E4FF"}`,
+	} {
+		if code, body := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company", bad); code != http.StatusUnprocessableEntity {
+			t.Errorf("put %s = %d (%v); want 422", bad, code, body)
+		}
 	}
 
 	if code, _ := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company",
@@ -59,7 +71,7 @@ func TestCompanyIdentityServesAllRoles(t *testing.T) {
 	server, _, token := adminTestSetup(t, "vera_api_company_identity")
 
 	code, _ := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company",
-		`{"legalName":"PT Live Identity"}`)
+		`{"legalName":"PT Live Identity","themeQDeep":"#0A1A5C"}`)
 	if code != http.StatusOK {
 		t.Fatalf("rename = %d; want 200", code)
 	}
@@ -71,6 +83,9 @@ func TestCompanyIdentityServesAllRoles(t *testing.T) {
 	}
 	if body["legalName"] != "PT Live Identity" {
 		t.Errorf("legalName = %v; want the stored name", body["legalName"])
+	}
+	if body["themeQDeep"] != "#0A1A5C" {
+		t.Errorf("themeQDeep = %v; want the stored theme for desktop caches", body["themeQDeep"])
 	}
 	if _, leaked := body["logoPath"]; leaked {
 		t.Error("logo path leaks into the identity DTO")

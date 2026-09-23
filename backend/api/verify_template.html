@@ -12,11 +12,11 @@
 	<style>
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		:root {
-			--deep-blue: #1A237E;
-			--accent-blue: #284AF3;
-			--soft-blue: #D6E4FF;
+			--deep-blue: {{if .ThemePDeep}}{{.ThemePDeep}}{{else}}#1A237E{{end}};
+			--accent-blue: {{if .ThemePAccent}}{{.ThemePAccent}}{{else}}#284AF3{{end}};
+			--soft-blue: {{if .ThemePSoft}}{{.ThemePSoft}}{{else}}#D6E4FF{{end}};
 			--rule: #c9d9ff;
-			--ink: #1a1a1a;
+			--ink: {{if .ThemePInk}}{{.ThemePInk}}{{else}}#1a1a1a{{end}};
 			--muted: #3a4466;
 			--paper: #ffffff;
 			--ok: #1B7F3B;

@@ -19,6 +19,16 @@ type CompanyProfile struct {
 	LogoBytes []byte
 	LogoMime  string
 	HasLogo   bool
+	// ThemeQ* brand colors for the quotation template, ThemeP* for the
+	// verification portal. Empty means "stylesheet default".
+	ThemeQDeep   string
+	ThemeQAccent string
+	ThemeQSoft   string
+	ThemeQInk    string
+	ThemePDeep   string
+	ThemePAccent string
+	ThemePSoft   string
+	ThemePInk    string
 }
 
 // maxCompanyLogoBytes caps uploaded artwork at 512KB, mirroring the avatar
@@ -35,6 +45,39 @@ func allowedCompanyLogoMime(mime string) bool {
 	}
 }
 
+// isHexColor validates #RRGGBB input. Theme values travel into CSS, so
+// anything but a strict hex color is rejected at the store boundary.
+func isHexColor(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// checkTheme validates the eight theme fields, all optional but strict.
+func checkTheme(profile CompanyProfile) error {
+	for _, field := range [][2]string{
+		{"quotation deep", profile.ThemeQDeep},
+		{"quotation accent", profile.ThemeQAccent},
+		{"quotation soft", profile.ThemeQSoft},
+		{"quotation ink", profile.ThemeQInk},
+		{"portal deep", profile.ThemePDeep},
+		{"portal accent", profile.ThemePAccent},
+		{"portal soft", profile.ThemePSoft},
+		{"portal ink", profile.ThemePInk},
+	} {
+		if field[1] != "" && !isHexColor(field[1]) {
+			return fmt.Errorf("company theme %s must be a #RRGGBB color", field[0])
+		}
+	}
+	return nil
+}
+
 // GetCompanyProfile returns the singleton profile, seeding the default
 // identity if the row is somehow missing.
 func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
@@ -45,11 +88,15 @@ func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
 	var profile CompanyProfile
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT legal_name, address, phone, email, tax_id, logo_path,
-		       logo_bytes, logo_mime
+		       logo_bytes, logo_mime,
+		       theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
+		       theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink
 		FROM %s.company_profile WHERE id = 1`, s.configSchema())).Scan(
 		&profile.LegalName, &profile.Address, &profile.Phone,
 		&profile.Email, &profile.TaxID, &profile.LogoPath,
-		&profile.LogoBytes, &profile.LogoMime)
+		&profile.LogoBytes, &profile.LogoMime,
+		&profile.ThemeQDeep, &profile.ThemeQAccent, &profile.ThemeQSoft, &profile.ThemeQInk,
+		&profile.ThemePDeep, &profile.ThemePAccent, &profile.ThemePSoft, &profile.ThemePInk)
 	if err != nil {
 		return CompanyProfile{}, fmt.Errorf("get company profile: %w", err)
 	}
@@ -84,18 +131,29 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 	if len(profile.TaxID) > 40 {
 		return CompanyProfile{}, fmt.Errorf("company tax ID is too long")
 	}
+	if err := checkTheme(profile); err != nil {
+		return CompanyProfile{}, err
+	}
 	var updated CompanyProfile
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.company_profile
 		SET legal_name = $1, address = $2, phone = $3, email = $4, tax_id = $5,
+		    theme_q_deep = $6, theme_q_accent = $7, theme_q_soft = $8, theme_q_ink = $9,
+		    theme_p_deep = $10, theme_p_accent = $11, theme_p_soft = $12, theme_p_ink = $13,
 		    updated_at = NOW()
 		WHERE id = 1
 		RETURNING legal_name, address, phone, email, tax_id, logo_path,
-		    logo_bytes, logo_mime`, s.configSchema()),
-		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID).Scan(
+		    logo_bytes, logo_mime,
+		    theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
+		    theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink`, s.configSchema()),
+		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID,
+		profile.ThemeQDeep, profile.ThemeQAccent, profile.ThemeQSoft, profile.ThemeQInk,
+		profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk).Scan(
 		&updated.LegalName, &updated.Address, &updated.Phone,
 		&updated.Email, &updated.TaxID, &updated.LogoPath,
-		&updated.LogoBytes, &updated.LogoMime)
+		&updated.LogoBytes, &updated.LogoMime,
+		&updated.ThemeQDeep, &updated.ThemeQAccent, &updated.ThemeQSoft, &updated.ThemeQInk,
+		&updated.ThemePDeep, &updated.ThemePAccent, &updated.ThemePSoft, &updated.ThemePInk)
 	if err != nil {
 		return CompanyProfile{}, fmt.Errorf("update company profile: %w", err)
 	}
