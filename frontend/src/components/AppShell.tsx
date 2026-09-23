@@ -109,7 +109,7 @@ export function AppShell({
           </span>
           {user ? (
             <>
-              <NotificationBell user={user} />
+              <NotificationBell user={user} onOpenTeam={onOpenUsers} />
               <div className="relative ml-auto flex items-center gap-2 lg:ml-0">
               <button
                 type="button"
