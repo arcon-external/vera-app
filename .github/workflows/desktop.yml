@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd build/bin
-          sha256sum vera-app-*-windows-amd64-installer.exe > Vera-${{ github.ref_name }}-windows-amd64-installer.exe.sha256
+          sha256sum Vera-${{ github.ref_name }}-windows-amd64-installer.exe > Vera-${{ github.ref_name }}-windows-amd64-installer.exe.sha256
           gh release upload "${{ github.ref_name }}" \
             Vera-${{ github.ref_name }}-windows-amd64-installer.exe \
             Vera-${{ github.ref_name }}-windows-amd64-installer.exe.sha256 \
