@@ -77,8 +77,11 @@ func FetchUpdateInfo(httpClient *http.Client, baseURL, current, goos, goarch str
 func downloadForPlatform(downloads map[string]string, goos, goarch string) string {
 	switch goos {
 	case "windows":
-		if goarch == "amd64" {
+		switch goarch {
+		case "amd64":
 			return downloads["windows"]
+		case "arm64":
+			return downloads["windows-arm64"]
 		}
 	case "darwin":
 		if goarch == "amd64" || goarch == "arm64" {

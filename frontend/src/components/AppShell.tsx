@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { NotificationBell } from "./NotificationBell";
+import { VeraLogo } from "./VeraLogo";
 import type { SignedInUser } from "./LoginPage";
 
 interface AppShellProps {
@@ -60,7 +61,8 @@ export function AppShell({
     <div className="flex min-h-full flex-col bg-paper">
       <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-[1560px] items-center gap-6 px-5 lg:px-8">
-          <div className="flex items-baseline gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <VeraLogo className="h-7 w-auto" />
             <span className="text-[17px] font-semibold tracking-[-0.03em] text-ink-950">
               Vera
             </span>

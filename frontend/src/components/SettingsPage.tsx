@@ -94,13 +94,15 @@ export function SettingsPage({
           <RestoreCard />
         </>
       ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <ProfileCard user={user} onProfileChanged={onProfileChanged} />
-          <EmailCard user={user} isAdmin={isAdmin} />
-          <PasswordCard />
-          <SessionsCard />
-          <div className="lg:col-span-2">
-            <UpdateCard />
+        <div className="grid items-stretch gap-6 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-6">
+            <ProfileCard user={user} onProfileChanged={onProfileChanged} />
+            <PasswordCard />
+          </div>
+          <div className="flex min-w-0 flex-col gap-6">
+            <EmailCard user={user} isAdmin={isAdmin} />
+            <SessionsCard />
+            <UpdateCard stretch />
           </div>
           <div className="lg:col-span-2">
             <DeletionCard />
@@ -697,13 +699,20 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const set = (field: keyof CompanyForm) => (event: React.ChangeEvent<HTMLInputElement>) =>
     setForm((current) => ({ ...current, [field]: event.target.value }));
 
-  return (
-    <Card className="p-5">
-      <SectionHeading title="Company profile" />
-      {loading ? (
+  if (loading) {
+    return (
+      <Card className="p-5">
+        <SectionHeading title="Company profile" />
         <div className="h-48 animate-pulse rounded-xl bg-paper-muted" aria-label="Loading company profile" />
-      ) : (
-        <form onSubmit={save} className="grid max-w-2xl gap-4">
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid items-start gap-6 lg:grid-cols-2">
+      <Card className="p-5">
+        <SectionHeading title="Company profile" />
+        <form onSubmit={save} className="grid gap-4">
           {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
           <label className="flex flex-col gap-1.5">
             <span className="text-caption font-medium text-ink-600">Legal name</span>
@@ -732,7 +741,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               <legend className="px-1 text-caption font-medium text-ink-600">
                 {section} colors
               </legend>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3">
                 {THEME_FIELDS.filter((field) => field.section === section).map((field) => {
                   const value = theme[field.key].trim() || DEFAULT_THEME[field.key];
                   const setThemeValue = (next: string) =>
@@ -778,8 +787,12 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             </Button>
           </div>
         </form>
-      )}
-      <div className="mt-6 border-t border-rule pt-5">
+        <p className="mt-3 text-caption leading-relaxed text-ink-400">
+          Only admins see this section. The quotation header prints this name
+          and address on every new quotation.
+        </p>
+      </Card>
+      <Card className="p-5">
         <SectionHeading title="Logo artwork" />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white" aria-hidden="true">
@@ -825,12 +838,8 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         <p className="mt-3 text-caption leading-relaxed text-ink-400">
           PNG, JPEG, GIF, or WebP under 512KB. Past revisions keep whatever printed.
         </p>
-      </div>
-      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
-        Only admins see this section. The quotation header prints this name
-        and address on every new quotation.
-      </p>
-    </Card>
+      </Card>
+    </div>
   );
 }
 
@@ -1071,7 +1080,7 @@ function SessionsCard() {
   );
 }
 
-function UpdateCard() {
+function UpdateCard({ stretch = false }: { stretch?: boolean }) {
   const [current, setCurrent] = useState("");
   const [info, setInfo] = useState<backend.UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
@@ -1122,10 +1131,10 @@ function UpdateCard() {
   };
 
   return (
-    <Card className="p-5">
+    <Card className={stretch ? "flex-1 p-5" : "p-5"}>
       <SectionHeading title="App updates" />
       {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
-      <dl className="grid max-w-xl gap-2 text-body">
+      <dl className="grid gap-2 text-body">
         <div className="flex items-baseline justify-between gap-4">
           <dt className="text-ink-500">Current version</dt>
           <dd className="tnum font-medium text-ink-900">{current || "dev"}</dd>
