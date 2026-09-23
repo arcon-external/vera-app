@@ -407,6 +407,11 @@ one in logs.
   does not mean the Postgres path ran.
 - `golang.org/x/crypto`, `pgx/v5`, and `echo/v4` are the dependency areas most often
   flagged by Dependabot; `echo` is transitive via Wails and may need a direct override.
+- The repo is private, so `github.com/.../releases/download/...` links 404 for
+  anyone without GitHub access (i.e. all staff). `VERA_APP_DOWNLOAD_*` must
+  point at the public `vera-downloads-508411` bucket, never at release assets
+  directly. Mirror new installers there at release time; the backups bucket
+  stays private.
 
 ## 17. Cursor / Copilot Rules Status
 
