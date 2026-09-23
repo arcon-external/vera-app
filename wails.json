@@ -8,5 +8,12 @@
   "author": {
     "name": "tristan",
     "email": "tristan.alhabas@gmail.com"
+  },
+  "info": {
+    "companyName": "PT Arcon Penta Persada",
+    "productName": "Vera",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 PT Arcon Penta Persada",
+    "comments": "Quotation Generator"
   }
 }
