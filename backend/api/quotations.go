@@ -173,7 +173,7 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 // defaultPublicBaseURL is the service address printed into verification
 // codes when VERA_PUBLIC_BASE_URL is unset. A custom domain can replace it
 // without invalidating already-printed codes: both hosts serve the portal.
-const defaultPublicBaseURL = "https://vera-api-171860943410.asia-southeast1.run.app"
+const defaultPublicBaseURL = "https://verify.arconpentapersada.co.id"
 
 // publicBaseURL returns the address printed on documents as the verification
 // link. Configurable so a company domain can take over later.

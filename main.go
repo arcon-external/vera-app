@@ -27,7 +27,7 @@ func main() {
 	// override for dev, tailnet, or a future custom domain).
 	apiBase := os.Getenv("VERA_API_URL")
 	if apiBase == "" {
-		apiBase = "https://vera-api-171860943410.asia-southeast1.run.app"
+		apiBase = "https://api.arconpentapersada.co.id"
 	}
 	client := apiclient.New(apiBase, backend.SessionToken)
 	client.OnUnauthorized = func() {

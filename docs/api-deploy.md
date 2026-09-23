@@ -22,7 +22,9 @@ every call, login rate limiting (5 failures → cooldown).
 | What | Value |
 |---|---|
 | Service | `vera-api`, region `asia-southeast1`, project `vera-app-508411` |
-| URL | `https://vera-api-171860943410.asia-southeast1.run.app` |
+| API | `https://api.arconpentapersada.co.id` (desktop default) |
+| Portal | `https://verify.arconpentapersada.co.id` (QR codes, public) |
+| Legacy | `https://vera-api-171860943410.asia-southeast1.run.app` (serves in parallel forever; old installs and printed codes) |
 | Image | `asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-<commit>` |
 | Shape | 1 vCPU / 512 MB, min 0 (cold starts OK), max 2 |
 | Env | `VERA_API_ADDR=:8080`, `VERA_POSTGRES_SCHEMA=vera`, `VERA_BACKUP_BUCKET=vera-backups-508411` |
@@ -55,7 +57,7 @@ docker build --platform linux/amd64 -f Dockerfile.veraserver \
 docker push asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-$SHA
 gcloud run deploy vera-api --image ...:sha-$SHA \
   --region asia-southeast1 --platform managed --project=vera-app-508411
-BASE=https://vera-api-171860943410.asia-southeast1.run.app
+BASE=https://api.arconpentapersada.co.id
 curl -s $BASE/health                                   # {"status":"ok"}
 curl -s -o /dev/null -w "%{http_code}\n" $BASE/v1/admin/users   # 401
 ```
@@ -63,7 +65,7 @@ curl -s -o /dev/null -w "%{http_code}\n" $BASE/v1/admin/users   # 401
 ## Smoke test (no test users left behind)
 
 ```bash
-BASE=https://vera-api-171860943410.asia-southeast1.run.app
+BASE=https://api.arconpentapersada.co.id
 # create a temporary user with a known Argon2id hash, then:
 curl -s -X POST $BASE/v1/auth/login \
   -H 'Content-Type: application/json' \
