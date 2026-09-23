@@ -336,16 +336,31 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 ### Release steps
 
 1. Verify all gates pass on `main`.
-2. Build the desktop artifact: `wails build` (or the platform script in `scripts/`).
-3. Create and push an annotated tag:
+2. Bump `wails.json` `info.productVersion` to the release version (no `v`
+   prefix — Wails convention) and commit it.
+3. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
+   (it fails loudly if Go ldflags and installer metadata disagree).
+4. Create and push an annotated tag:
    ```bash
    git tag -a v0.2.0 -m "v0.2.0: description"
    git push origin v0.2.0
    ```
-4. Create a GitHub Release with grouped notes:
+5. Create a GitHub Release with grouped notes:
    ```bash
    gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
    ```
+6. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
+   `-nsis` installer and macOS DMG, both version-stamped with sha256
+   sidecars, attached as
+   `Vera-<version>-windows-amd64-installer.exe` and
+   `Vera-<version>-macos-universal.dmg`. Those names are a contract
+   with the updater — never rename by hand.
+7. Add a Download section to the release notes with both filenames plus one
+   install line each, and these prerequisites:
+   - Windows: a Chrome installation (PDF export shells to system Chrome);
+     SmartScreen will warn on unsigned builds — expected until signing.
+   - macOS: drag Vera to Applications; on first launch of an unsigned build,
+     right-click → Open instead of double-clicking.
 
 ---
 

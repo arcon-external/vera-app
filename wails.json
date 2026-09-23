@@ -1,6 +1,6 @@
 {
-  "name": "vera-app",
-  "outputfilename": "vera-app",
+  "name": "Vera",
+  "outputfilename": "Vera",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
