@@ -1,0 +1,45 @@
+package api
+
+import (
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/labstack/echo/v4"
+)
+
+// appRelease mirrors the public update contract. Every field comes from
+// deploy-time environment so a release is a redeploy, not a code change.
+// Empty means unconfigured: clients treat that as "no update info", and the
+// updater never prompts on what it cannot name.
+type appRelease struct {
+	Latest       string            `json:"latest"`
+	MinSupported string            `json:"minSupported"`
+	NotesURL     string            `json:"notesUrl"`
+	Downloads    map[string]string `json:"downloads"`
+}
+
+// latestRelease reads the release state from the environment. Values are
+// trimmed; missing keys stay empty rather than inventing defaults.
+func latestRelease() appRelease {
+	downloads := map[string]string{}
+	if windows := strings.TrimSpace(os.Getenv("VERA_APP_DOWNLOAD_WINDOWS")); windows != "" {
+		downloads["windows"] = windows
+	}
+	if macos := strings.TrimSpace(os.Getenv("VERA_APP_DOWNLOAD_MACOS")); macos != "" {
+		downloads["macos"] = macos
+	}
+	return appRelease{
+		Latest:       strings.TrimSpace(os.Getenv("VERA_APP_LATEST")),
+		MinSupported: strings.TrimSpace(os.Getenv("VERA_APP_MIN_SUPPORTED")),
+		NotesURL:     strings.TrimSpace(os.Getenv("VERA_APP_NOTES_URL")),
+		Downloads:    downloads,
+	}
+}
+
+// getAppLatest serves the release state to every caller, signed in or not.
+// Public by design (like /healthz): the desktop checks pre-login, and a
+// version endpoint must never be able to sign anyone out.
+func (s *Server) getAppLatest(context echo.Context) error {
+	return context.JSON(http.StatusOK, latestRelease())
+}

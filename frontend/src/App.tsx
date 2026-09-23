@@ -33,6 +33,7 @@ import {
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
+import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
 import { SettingsPage } from "./components/SettingsPage";
@@ -205,6 +206,10 @@ function App() {
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
 
   const signedIn = user !== null;
+
+  // Release check runs once per launch after sign-in; the banner covers
+  // every page while Settings owns the manual re-check.
+  const { state: updateState, dismiss: dismissUpdate } = useUpdateState(signedIn);
 
   // Company identity tracks the stored profile; the baked-in default shows
   // while loading or when the server is unreachable — never blank.
@@ -661,7 +666,11 @@ function App() {
       ) : user === null ? (
         <LoginPage onSignedIn={setUser} />
       ) : (
-    <AppShell
+    <>
+      {updateState?.UpdateAvailable ? (
+        <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
+      ) : null}
+      <AppShell
       page={page}
       onOpenEditor={() => setPage("create")}
       onOpenArchive={() => setPage("archive")}
@@ -855,6 +864,7 @@ function App() {
         />
       ) : null}
     </AppShell>
+    </>
       )}
     </>
   );

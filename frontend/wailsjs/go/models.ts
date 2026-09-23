@@ -236,6 +236,28 @@ export namespace backend {
 	        this.AvatarURL = source["AvatarURL"];
 	    }
 	}
+	export class UpdateInfo {
+	    Current: string;
+	    Latest: string;
+	    UpdateAvailable: boolean;
+	    Required: boolean;
+	    NotesURL: string;
+	    DownloadURL: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Current = source["Current"];
+	        this.Latest = source["Latest"];
+	        this.UpdateAvailable = source["UpdateAvailable"];
+	        this.Required = source["Required"];
+	        this.NotesURL = source["NotesURL"];
+	        this.DownloadURL = source["DownloadURL"];
+	    }
+	}
 	export class CompanyProfile {
 	    LegalName: string;
 	    Address: string;

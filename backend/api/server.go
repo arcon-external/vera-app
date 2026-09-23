@@ -82,6 +82,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// /healthz path, so monitors and deploys probe /health instead.
 	server.echo.GET("/health", server.healthz)
 	server.echo.HEAD("/health", server.healthz)
+	// Public release state for the desktop updater. Unauthenticated like
+	// /healthz: update checks run pre-login and must never alias a 401 into
+	// a sign-out.
+	server.echo.GET("/v1/app/latest", server.getAppLatest)
 	server.echo.POST("/v1/auth/login", server.login)
 	server.echo.POST("/v1/auth/logout", server.logout, server.requireSession)
 	server.echo.GET("/v1/auth/me", server.me, server.requireSession)
