@@ -65,6 +65,12 @@ type verifyView struct {
 	Total     string
 	Diffs     []verifyFieldDiff
 	AnyClaim  bool
+	// ThemeP* brand colors for this page, resolved per request from the
+	// company profile. Empty means "use the stylesheet default".
+	ThemePDeep   string
+	ThemePAccent string
+	ThemePSoft   string
+	ThemePInk    string
 }
 
 func (v verifyView) IsVerified() bool   { return v.Verdict == verdictValid }
@@ -216,6 +222,19 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	view.Recipient = evidence.RecipientCompany
 	view.Issuer = evidence.IssuerName
 	view.Total = "Rp" + formatAmount(evidence.GrandTotal)
+
+	// Theme and issuer display follow the live company profile; a stored
+	// empty issuer (legacy rows predate it) falls back to the profile name.
+	// Either way the values shown are program data, never hardcoded text.
+	if profile, err := s.database.GetCompanyProfile(requestContext); err == nil {
+		view.ThemePDeep = profile.ThemePDeep
+		view.ThemePAccent = profile.ThemePAccent
+		view.ThemePSoft = profile.ThemePSoft
+		view.ThemePInk = profile.ThemePInk
+		if view.Issuer == "" {
+			view.Issuer = profile.LegalName
+		}
+	}
 
 	// Verify the stored signature. Legacy rows (signed before this feature
 	// existed) self-heal once, using the current key and issuer.

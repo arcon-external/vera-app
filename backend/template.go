@@ -66,6 +66,7 @@ func readTemplate(q *Quotation) error {
 		return fmt.Errorf("execute css template: %w", err)
 	}
 
+	q.cssTemplate = cssTmpl
 	q.Data.CustomCSS = template.CSS(cssBuf.String())
 	q.Data.HtmlTemplate = htmlTmpl
 	q.Data.LogoBase64 = base64.StdEncoding.EncodeToString(logoBytes)

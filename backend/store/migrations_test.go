@@ -10,12 +10,12 @@ func TestLoadMigrationsReplacesSchemaPlaceholder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMigrations failed: %v", err)
 	}
-	if len(migrations) != 13 {
-		t.Fatalf("migration count = %d; want 13", len(migrations))
+	if len(migrations) != 14 {
+		t.Fatalf("migration count = %d; want 14", len(migrations))
 	}
-	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 || migrations[3].version != 4 || migrations[4].version != 5 || migrations[5].version != 6 || migrations[6].version != 7 || migrations[7].version != 8 || migrations[8].version != 9 || migrations[9].version != 10 || migrations[10].version != 11 || migrations[11].version != 12 || migrations[12].version != 13 {
-		t.Errorf("migration versions = %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d; want 1..13",
-			migrations[0].version, migrations[1].version, migrations[2].version, migrations[3].version, migrations[4].version, migrations[5].version, migrations[6].version, migrations[7].version, migrations[8].version, migrations[9].version, migrations[10].version, migrations[11].version, migrations[12].version)
+	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 || migrations[3].version != 4 || migrations[4].version != 5 || migrations[5].version != 6 || migrations[6].version != 7 || migrations[7].version != 8 || migrations[8].version != 9 || migrations[9].version != 10 || migrations[10].version != 11 || migrations[11].version != 12 || migrations[12].version != 13 || migrations[13].version != 14 {
+		t.Errorf("migration versions = %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d; want 1..14",
+			migrations[0].version, migrations[1].version, migrations[2].version, migrations[3].version, migrations[4].version, migrations[5].version, migrations[6].version, migrations[7].version, migrations[8].version, migrations[9].version, migrations[10].version, migrations[11].version, migrations[12].version, migrations[13].version)
 	}
 	for _, migration := range migrations {
 		if strings.Contains(migration.sql, "{{schema}}") {

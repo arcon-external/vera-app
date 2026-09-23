@@ -201,12 +201,20 @@ func (a *AdminAPI) DecideEmailChange(id int64, approve bool) error {
 // CompanyProfile is the editable company identity for the admin-only
 // Company section of Settings.
 type CompanyProfile struct {
-	LegalName string
-	Address   string
-	Phone     string
-	Email     string
-	TaxID     string
-	HasLogo   bool
+	LegalName    string
+	Address      string
+	Phone        string
+	Email        string
+	TaxID        string
+	HasLogo      bool
+	ThemeQDeep   string
+	ThemeQAccent string
+	ThemeQSoft   string
+	ThemeQInk    string
+	ThemePDeep   string
+	ThemePAccent string
+	ThemePSoft   string
+	ThemePInk    string
 }
 
 // GetCompanyProfile loads the company profile.
@@ -231,11 +239,19 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 	}
 	var updated CompanyProfile
 	if err := client.Put("/v1/admin/company", map[string]string{
-		"legalName": profile.LegalName,
-		"address":   profile.Address,
-		"phone":     profile.Phone,
-		"email":     profile.Email,
-		"taxId":     profile.TaxID,
+		"legalName":    profile.LegalName,
+		"address":      profile.Address,
+		"phone":        profile.Phone,
+		"email":        profile.Email,
+		"taxId":        profile.TaxID,
+		"themeQDeep":   profile.ThemeQDeep,
+		"themeQAccent": profile.ThemeQAccent,
+		"themeQSoft":   profile.ThemeQSoft,
+		"themeQInk":    profile.ThemeQInk,
+		"themePDeep":   profile.ThemePDeep,
+		"themePAccent": profile.ThemePAccent,
+		"themePSoft":   profile.ThemePSoft,
+		"themePInk":    profile.ThemePInk,
 	}, &updated); err != nil {
 		return CompanyProfile{}, err
 	}

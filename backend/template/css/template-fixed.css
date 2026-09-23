@@ -24,10 +24,10 @@
 		}
 
 		:root {
-			--ink: #1a1a1a;
-			--deep-blue: #1A237E;
-			--accent-blue: #284AF3;
-			--soft-blue: #D6E4FF;
+			--ink: {{if .ThemeQInk}}{{.ThemeQInk}}{{else}}#1a1a1a{{end}};
+			--deep-blue: {{if .ThemeQDeep}}{{.ThemeQDeep}}{{else}}#1A237E{{end}};
+			--accent-blue: {{if .ThemeQAccent}}{{.ThemeQAccent}}{{else}}#284AF3{{end}};
+			--soft-blue: {{if .ThemeQSoft}}{{.ThemeQSoft}}{{else}}#D6E4FF{{end}};
 			--paper: #ffffff;
 			--green: #228B22;
 		}

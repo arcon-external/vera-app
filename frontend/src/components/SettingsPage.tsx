@@ -451,12 +451,64 @@ type StoredCompanyExtras = {
   taxId: string;
 };
 
+type CompanyTheme = {
+  qDeep: string;
+  qAccent: string;
+  qSoft: string;
+  qInk: string;
+  pDeep: string;
+  pAccent: string;
+  pSoft: string;
+  pInk: string;
+};
+
+const EMPTY_THEME: CompanyTheme = {
+  qDeep: "",
+  qAccent: "",
+  qSoft: "",
+  qInk: "",
+  pDeep: "",
+  pAccent: "",
+  pSoft: "",
+  pInk: "",
+};
+
+// Baked defaults mirror the migration seeds: shown when the stored value is
+// empty, so the picker never renders an invalid color.
+const DEFAULT_THEME: CompanyTheme = {
+  qDeep: "#1A237E",
+  qAccent: "#284AF3",
+  qSoft: "#D6E4FF",
+  qInk: "#1a1a1a",
+  pDeep: "#1A237E",
+  pAccent: "#284AF3",
+  pSoft: "#D6E4FF",
+  pInk: "#1a1a1a",
+};
+
+const THEME_FIELDS: {
+  key: keyof CompanyTheme;
+  section: string;
+  label: string;
+  hint: string;
+}[] = [
+  { key: "qDeep", section: "Quotation", label: "Deep", hint: "Headings, table headers, subject label, buttons, top ribbon on quotations" },
+  { key: "qAccent", section: "Quotation", label: "Accent", hint: "Company name, links and highlights on quotations" },
+  { key: "qSoft", section: "Quotation", label: "Soft", hint: "Card and section backgrounds on quotations" },
+  { key: "qInk", section: "Quotation", label: "Ink", hint: "Body text on quotations" },
+  { key: "pDeep", section: "Portal", label: "Deep", hint: "Ribbon, headings, buttons and eyebrow on the verification page" },
+  { key: "pAccent", section: "Portal", label: "Accent", hint: "Issuer name, links and button hover on the verification page" },
+  { key: "pSoft", section: "Portal", label: "Soft", hint: "Reserved section backgrounds on the verification page" },
+  { key: "pInk", section: "Portal", label: "Ink", hint: "Body text on the verification page" },
+];
+
 function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
   });
   const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "" });
+  const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -489,6 +541,16 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         phone: profile.Phone ?? "",
         email: profile.Email ?? "",
         taxId: profile.TaxID ?? "",
+      });
+      setTheme({
+        qDeep: profile.ThemeQDeep ?? "",
+        qAccent: profile.ThemeQAccent ?? "",
+        qSoft: profile.ThemeQSoft ?? "",
+        qInk: profile.ThemeQInk ?? "",
+        pDeep: profile.ThemePDeep ?? "",
+        pAccent: profile.ThemePAccent ?? "",
+        pSoft: profile.ThemePSoft ?? "",
+        pInk: profile.ThemePInk ?? "",
       });
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't load the company profile.");
@@ -582,6 +644,14 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         Email: extras.email,
         TaxID: extras.taxId,
         HasLogo: hasLogo,
+        ThemeQDeep: theme.qDeep.trim(),
+        ThemeQAccent: theme.qAccent.trim(),
+        ThemeQSoft: theme.qSoft.trim(),
+        ThemeQInk: theme.qInk.trim(),
+        ThemePDeep: theme.pDeep.trim(),
+        ThemePAccent: theme.pAccent.trim(),
+        ThemePSoft: theme.pSoft.trim(),
+        ThemePInk: theme.pInk.trim(),
       })) as backend.CompanyProfile;
       setForm({
         legalName: updated.LegalName ?? "",
@@ -591,6 +661,16 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         phone: updated.Phone ?? "",
         email: updated.Email ?? "",
         taxId: updated.TaxID ?? "",
+      });
+      setTheme({
+        qDeep: updated.ThemeQDeep ?? "",
+        qAccent: updated.ThemeQAccent ?? "",
+        qSoft: updated.ThemeQSoft ?? "",
+        qInk: updated.ThemeQInk ?? "",
+        pDeep: updated.ThemePDeep ?? "",
+        pAccent: updated.ThemePAccent ?? "",
+        pSoft: updated.ThemePSoft ?? "",
+        pInk: updated.ThemePInk ?? "",
       });
       pushToast("success", "Company profile saved.");
       try {
@@ -642,6 +722,51 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               className={fieldClass}
             />
           </label>
+          {(["Quotation", "Portal"] as const).map((section) => (
+            <fieldset key={section} className="grid gap-3 rounded-lg border border-rule p-4">
+              <legend className="px-1 text-caption font-medium text-ink-600">
+                {section} colors
+              </legend>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {THEME_FIELDS.filter((field) => field.section === section).map((field) => {
+                  const value = theme[field.key].trim() || DEFAULT_THEME[field.key];
+                  const setThemeValue = (next: string) =>
+                    setTheme((current) => ({ ...current, [field.key]: next }));
+                  return (
+                    <label
+                      key={field.key}
+                      className="flex flex-col gap-1.5"
+                      title={`${field.label}: ${field.hint}`}
+                    >
+                      <span className="text-caption font-medium text-ink-600">
+                        {field.label}
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : DEFAULT_THEME[field.key]}
+                          onChange={(event) => setThemeValue(event.target.value)}
+                          aria-label={`${section} ${field.label} color picker`}
+                          className="h-9 w-10 shrink-0 cursor-pointer rounded-md border border-rule bg-white p-1"
+                        />
+                        <input
+                          type="text"
+                          value={theme[field.key]}
+                          onChange={(event) => setThemeValue(event.target.value)}
+                          placeholder={DEFAULT_THEME[field.key]}
+                          spellCheck={false}
+                          autoComplete="off"
+                          aria-label={`${section} ${field.label} hex value`}
+                          className={`${fieldClass} font-mono`}
+                        />
+                      </span>
+                      <span className="text-caption leading-snug text-ink-400">{field.hint}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          ))}
           <div>
             <Button type="submit" variant="primary" disabled={busy}>
               {busy ? "Saving…" : "Save company profile"}
