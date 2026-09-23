@@ -1,9 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   CreateUser,
+  DecideDeletion,
   DecideEmailChange,
   DeleteUser,
   IssuePasswordReset,
+  ListDeletionRequests,
   ListEmailChangeRequests,
   ListUsers,
   SetUserActive,
@@ -17,6 +19,15 @@ import { Select } from "./Select";
 
 type ManagedUser = backend.ManagedUser;
 type EmailChangeRow = backend.EmailChangeRow;
+
+interface DeletionRequestRow {
+  ID: number;
+  UserID: number;
+  Email: string;
+  DisplayName: string;
+  Status: string;
+  RequestedAt: string;
+}
 
 function errorMessage(err: unknown, fallback: string): string {
   return typeof err === "string" && err.trim() ? err : fallback;
@@ -478,6 +489,7 @@ export function UsersPage() {
       </Card>
 
       <EmailChangeQueue />
+      <DeletionQueue />
 
       <p className="text-caption leading-relaxed text-ink-400">
         Deactivating signs the person out on their device within about a
@@ -557,6 +569,84 @@ function EmailChangeQueue() {
                   Approve
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => void decide(row, false)}>
+                  Reject
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function DeletionQueue() {
+  const [rows, setRows] = useState<DeletionRequestRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const { pushToast } = useToast();
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const result = (await ListDeletionRequests()) as DeletionRequestRow[];
+      setRows(result);
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't load deletion requests."));
+    } finally {
+      setLoading(false);
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const decide = async (id: number, approve: boolean) => {
+    try {
+      await DecideDeletion(id, approve);
+      pushToast(
+        "success",
+        approve
+          ? "Approved. They'll be signed out within a minute."
+          : "Request rejected."
+      );
+      await load();
+    } catch (err: unknown) {
+      pushToast("error", errorMessage(err, "We couldn't decide this request."));
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-rule px-5 py-4">
+        <SectionHeading title="Deletion requests" />
+        <p className="text-body text-ink-500">
+          Approving deactivates the account and signs them out everywhere
+          within about a minute. Records are kept; nothing is purged.
+        </p>
+      </div>
+      {loading ? (
+        <div className="h-24 animate-pulse rounded-xl bg-paper-muted m-5" aria-label="Loading requests" />
+      ) : rows.length === 0 ? (
+        <p className="px-5 py-8 text-center text-body text-ink-500">
+          No pending requests.
+        </p>
+      ) : (
+        <ul className="divide-y divide-rule">
+          {rows.map((row) => (
+            <li key={row.ID} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-ink-900">{row.DisplayName}</div>
+                <div className="mt-0.5 text-caption text-ink-500">
+                  {row.Email} · requested {row.RequestedAt.slice(0, 10)}
+                </div>
+              </div>
+              <Badge tone="internal">Pending</Badge>
+              <div className="flex items-center gap-1.5">
+                <Button variant="danger" size="sm" onClick={() => void decide(row.ID, true)}>
+                  Approve
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void decide(row.ID, false)}>
                   Reject
                 </Button>
               </div>

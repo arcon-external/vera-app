@@ -1,38 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ListDeletionRequests } from "@backend/backend/AdminAPI";
+import { ListEmailChangeRequests } from "@backend/backend/AdminAPI";
 import {
-  DecideDeletion,
-  ListDeletionRequests,
-} from "@backend/backend/AdminAPI";
-import { MyDeletionRequests } from "@backend/backend/AuthAPI";
+  MyDeletionRequests,
+  MyEmailChangeRequests,
+} from "@backend/backend/AuthAPI";
+import { backend } from "@backend/models";
 import { useToast } from "../toast";
 import { Badge, Button } from "./ui";
 import type { SignedInUser } from "./LoginPage";
 
-interface PendingRow {
+interface PendingDeletion {
+  kind: "deletion";
   ID: number;
-  UserID: number;
-  Email: string;
   DisplayName: string;
-  Status: string;
+  Email: string;
   RequestedAt: string;
 }
 
-interface OwnRow {
+interface PendingEmailChange {
+  kind: "email";
+  ID: number;
+  DisplayName: string;
+  Email: string;
+  ProposedEmail: string;
+  RequestedAt: string;
+}
+
+type PendingItem = PendingDeletion | PendingEmailChange;
+
+interface OwnRequest {
+  kind: "deletion" | "email";
   ID: number;
   Status: string;
+  ProposedEmail?: string;
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  return typeof err === "string" && err.trim() ? err : fallback;
+function seenKey(kind: string, userID: number): string {
+  return `vera-seen-${kind}-${userID}`;
 }
 
-function seenKey(userID: number): string {
-  return `vera-seen-deletion-${userID}`;
-}
-
-function loadSeen(userID: number): Set<number> {
+function loadSeen(kind: string, userID: number): Set<number> {
   try {
-    const raw = window.localStorage.getItem(seenKey(userID));
+    const raw = window.localStorage.getItem(seenKey(kind, userID));
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     if (Array.isArray(parsed)) {
       return new Set(parsed.filter((id): id is number => typeof id === "number"));
@@ -43,57 +53,110 @@ function loadSeen(userID: number): Set<number> {
   return new Set();
 }
 
-export function NotificationBell({ user }: { user: SignedInUser }) {
+function saveSeen(kind: string, userID: number, seen: Set<number>) {
+  try {
+    window.localStorage.setItem(seenKey(kind, userID), JSON.stringify([...seen]));
+  } catch {
+    // Storage failures must never break notifications.
+  }
+}
+
+export function NotificationBell({
+  user,
+  onOpenTeam,
+}: {
+  user: SignedInUser;
+  onOpenTeam?: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [pending, setPending] = useState<PendingRow[]>([]);
-  const [mine, setMine] = useState<OwnRow[]>([]);
-  const seenRef = useRef<Set<number>>(loadSeen(user.ID));
+  const [pending, setPending] = useState<PendingItem[]>([]);
+  const [mine, setMine] = useState<OwnRequest[]>([]);
+  const seenDeletionRef = useRef<Set<number>>(loadSeen("deletion", user.ID));
+  const seenEmailRef = useRef<Set<number>>(loadSeen("email", user.ID));
   const { pushToast } = useToast();
   const isAdmin = user.Role === "admin";
 
   const refresh = useCallback(async () => {
     try {
-      const own = (await MyDeletionRequests()) as OwnRow[];
+      const ownDeletion = (await MyDeletionRequests()) as backend.OwnDeletionRequest[];
+      const ownEmail = (await MyEmailChangeRequests()) as backend.EmailChangeRequest[];
+      const own: OwnRequest[] = [
+        ...ownDeletion.map((request) => ({
+          kind: "deletion" as const,
+          ID: request.ID,
+          Status: request.Status,
+        })),
+        ...ownEmail.map((request) => ({
+          kind: "email" as const,
+          ID: request.ID,
+          Status: request.Status,
+          ProposedEmail: request.ProposedEmail,
+        })),
+      ];
       setMine(own);
       for (const request of own) {
+        const seen = request.kind === "deletion" ? seenDeletionRef.current : seenEmailRef.current;
         if (
           (request.Status === "approved" || request.Status === "rejected") &&
-          !seenRef.current.has(request.ID)
+          !seen.has(request.ID)
         ) {
-          seenRef.current.add(request.ID);
+          seen.add(request.ID);
+          const noun = request.kind === "deletion" ? "deletion request" : "email change";
           pushToast(
             "info",
             request.Status === "approved"
-              ? "Your deletion request was approved. You'll be signed out within a minute."
-              : "Your deletion request was rejected. Your account stands as-is."
+              ? `Your ${noun} was approved.` +
+                  (request.kind === "deletion"
+                    ? " You'll be signed out within a minute."
+                    : " Use the new address next time you sign in.")
+              : `Your ${noun} was rejected. Everything stands as-is.`
           );
         }
       }
+      saveSeen("deletion", user.ID, seenDeletionRef.current);
+      saveSeen("email", user.ID, seenEmailRef.current);
       if (isAdmin) {
-        const rows = (await ListDeletionRequests()) as PendingRow[];
+        const deletions = (await ListDeletionRequests()) as backend.DeletionRequest[];
+        const emails = (await ListEmailChangeRequests()) as backend.EmailChangeRow[];
+        const rows: PendingItem[] = [
+          ...deletions.map((row) => ({
+            kind: "deletion" as const,
+            ID: row.ID,
+            DisplayName: row.DisplayName,
+            Email: row.Email,
+            RequestedAt: row.RequestedAt,
+          })),
+          ...emails.map((row) => ({
+            kind: "email" as const,
+            ID: row.ID,
+            DisplayName: row.DisplayName,
+            Email: row.Email,
+            ProposedEmail: row.ProposedEmail,
+            RequestedAt: row.RequestedAt,
+          })),
+        ];
         setPending(rows);
-        const fresh = rows.filter((row) => !seenRef.current.has(row.ID));
-        if (fresh.length > 0) {
-          for (const row of fresh) seenRef.current.add(row.ID);
+        const freshDeletion = deletions.filter((row) => !seenDeletionRef.current.has(row.ID));
+        const freshEmail = emails.filter((row) => !seenEmailRef.current.has(row.ID));
+        for (const row of freshDeletion) seenDeletionRef.current.add(row.ID);
+        for (const row of freshEmail) seenEmailRef.current.add(row.ID);
+        const freshCount = freshDeletion.length + freshEmail.length;
+        if (freshCount > 0) {
           pushToast(
             "info",
-            fresh.length === 1
-              ? `New deletion request from ${fresh[0].DisplayName}.`
-              : `${fresh.length} new deletion requests need review.`
+            freshCount === 1
+              ? "A new request needs review on the Team page."
+              : `${freshCount} new requests need review on the Team page.`
           );
         }
+        saveSeen("deletion", user.ID, seenDeletionRef.current);
+        saveSeen("email", user.ID, seenEmailRef.current);
       }
     } catch {
       // Poll failures stay silent; the session poll owns connectivity errors.
     } finally {
-      try {
-        window.localStorage.setItem(
-          seenKey(user.ID),
-          JSON.stringify([...seenRef.current])
-        );
-      } catch {
-        // Storage failures must never break notifications.
-      }
+      saveSeen("deletion", user.ID, seenDeletionRef.current);
+      saveSeen("email", user.ID, seenEmailRef.current);
     }
   }, [isAdmin, pushToast, user.ID]);
 
@@ -103,23 +166,13 @@ export function NotificationBell({ user }: { user: SignedInUser }) {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const decide = async (id: number, approve: boolean) => {
-    try {
-      await DecideDeletion(id, approve);
-      pushToast(
-        "success",
-        approve
-          ? "Approved. They'll be signed out within a minute."
-          : "Request rejected."
-      );
-      await refresh();
-    } catch (err: unknown) {
-      pushToast("error", errorMessage(err, "We couldn't decide this request."));
-    }
+  const openTeam = () => {
+    setOpen(false);
+    onOpenTeam?.();
   };
 
   // Badge counts items needing attention: pending reviews for admins,
-  // the staffer's own pending request for staff. Decided outcomes arrive
+  // the staffer's own pending requests for staff. Decided outcomes arrive
   // via toast exactly once (seen-gated above), so the badge never depends
   // on mutable ref state and cannot go stale.
   const badgeCount = isAdmin
@@ -182,34 +235,35 @@ export function NotificationBell({ user }: { user: SignedInUser }) {
               {pending.length === 0 ? (
                 <p className="py-2 text-small text-ink-500">No pending requests.</p>
               ) : (
-                <ul className="divide-y divide-rule">
-                  {pending.map((row) => (
-                    <li key={row.ID} className="flex items-center gap-2 py-2.5">
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-small font-medium text-ink-900">
-                          {row.DisplayName}
-                        </p>
-                        <p className="truncate text-caption text-ink-500">
-                          {row.Email} · {row.RequestedAt.slice(0, 10)}
-                        </p>
-                      </div>
-                      <Button
-                        variant="danger"
-                        size="xs"
-                        onClick={() => void decide(row.ID, true)}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => void decide(row.ID, false)}
-                      >
-                        Reject
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="divide-y divide-rule">
+                    {pending.map((row) => (
+                      <li key={`${row.kind}-${row.ID}`} className="flex items-center gap-2 py-2.5">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-small font-medium text-ink-900">
+                            {row.DisplayName}{" "}
+                            <span className="font-normal text-ink-400">
+                              · {row.kind === "deletion" ? "deletion" : "email change"}
+                            </span>
+                          </p>
+                          <p className="truncate text-caption text-ink-500">
+                            {row.kind === "deletion"
+                              ? `${row.Email} · ${row.RequestedAt.slice(0, 10)}`
+                              : `${row.Email} → ${row.ProposedEmail}`}
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="xs" onClick={openTeam}>
+                          Review
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="pb-1 pt-1">
+                    <Button variant="secondary" size="xs" onClick={openTeam}>
+                      Open Team page
+                    </Button>
+                  </div>
+                </>
               )}
             </div>
           ) : null}
@@ -221,17 +275,19 @@ export function NotificationBell({ user }: { user: SignedInUser }) {
               <p className="py-2 text-small text-ink-500">
                 {isAdmin
                   ? "You have no personal requests."
-                  : "No deletion requests. Request one from Settings."}
+                  : "No requests. Start one from Settings."}
               </p>
             ) : (
               <ul className="divide-y divide-rule">
                 {mine.map((request) => (
                   <li
-                    key={request.ID}
+                    key={`${request.kind}-${request.ID}`}
                     className="flex items-center justify-between gap-2 py-2"
                   >
                     <span className="text-small text-ink-700">
-                      Request #{request.ID}
+                      {request.kind === "deletion"
+                        ? `Deletion request #${request.ID}`
+                        : `Email change to ${request.ProposedEmail ?? ""}`}
                     </span>
                     <Badge
                       tone={request.Status === "pending" ? "internal" : "neutral"}
