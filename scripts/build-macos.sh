@@ -1,6 +1,6 @@
 #! /bin/bash
 # macOS universal build plus drag-to-Applications DMG.
-# Produces build/bin/vera-app-<version>-macos-universal.dmg.
+# Produces build/bin/Vera-<version>-macos-universal.dmg.
 #
 # Requires: macOS (CGO/WebKit cannot cross-compile), Go, Node 22, the Wails
 # CLI, and create-dmg (brew install create-dmg) for the DMG step. VERSION
@@ -21,7 +21,7 @@ if ! command -v create-dmg >/dev/null 2>&1; then
   echo "create-dmg not found (brew install create-dmg); leaving $APP unwrapped." >&2
   exit 1
 fi
-DMG="build/bin/vera-app-$VERSION-macos-universal.dmg"
+DMG="build/bin/Vera-$VERSION-macos-universal.dmg"
 rm -f "$DMG"
 create-dmg \
   --volname "Vera $VERSION" \

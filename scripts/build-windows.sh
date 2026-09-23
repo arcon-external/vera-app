@@ -1,6 +1,6 @@
 #! /bin/bash
 # Windows installer build. Produces the version-stamped NSIS installer at
-# build/bin/vera-app-<version>-windows-amd64-installer.exe.
+# build/bin/Vera-<version>-windows-amd64-installer.exe.
 #
 # Requires: Go, Node 22, the Wails CLI, and NSIS (makensis) for the -nsis
 # step. VERSION defaults to the current git tag (or commit when untagged,
@@ -20,7 +20,7 @@ shopt -s nullglob
 moved=0
 for f in build/bin/*-installer.exe; do
   if [[ "$f" != *"windows-amd64-installer.exe" ]]; then
-    mv "$f" "build/bin/vera-app-$VERSION-windows-amd64-installer.exe"
+    mv "$f" "build/bin/Vera-$VERSION-windows-amd64-installer.exe"
     moved=1
   fi
 done

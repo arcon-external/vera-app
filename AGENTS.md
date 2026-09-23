@@ -352,8 +352,8 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 6. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
    `-nsis` installer and macOS DMG, both version-stamped with sha256
    sidecars, attached as
-   `vera-app-<version>-windows-amd64-installer.exe` and
-   `vera-app-<version>-macos-universal.dmg`. Those names are a contract
+   `Vera-<version>-windows-amd64-installer.exe` and
+   `Vera-<version>-macos-universal.dmg`. Those names are a contract
    with the updater — never rename by hand.
 7. Add a Download section to the release notes with both filenames plus one
    install line each, and these prerequisites:

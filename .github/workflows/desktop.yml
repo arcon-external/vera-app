@@ -52,10 +52,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd build/bin
-          sha256sum vera-app-*-windows-amd64-installer.exe > vera-app-${{ github.ref_name }}-windows-amd64-installer.exe.sha256
+          sha256sum vera-app-*-windows-amd64-installer.exe > Vera-${{ github.ref_name }}-windows-amd64-installer.exe.sha256
           gh release upload "${{ github.ref_name }}" \
-            vera-app-${{ github.ref_name }}-windows-amd64-installer.exe \
-            vera-app-${{ github.ref_name }}-windows-amd64-installer.exe.sha256 \
+            Vera-${{ github.ref_name }}-windows-amd64-installer.exe \
+            Vera-${{ github.ref_name }}-windows-amd64-installer.exe.sha256 \
             --clobber
 
   macos:
@@ -96,8 +96,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd build/bin
-          shasum -a 256 vera-app-${{ github.ref_name }}-macos-universal.dmg > vera-app-${{ github.ref_name }}-macos-universal.dmg.sha256
+          shasum -a 256 Vera-${{ github.ref_name }}-macos-universal.dmg > Vera-${{ github.ref_name }}-macos-universal.dmg.sha256
           gh release upload "${{ github.ref_name }}" \
-            vera-app-${{ github.ref_name }}-macos-universal.dmg \
-            vera-app-${{ github.ref_name }}-macos-universal.dmg.sha256 \
+            Vera-${{ github.ref_name }}-macos-universal.dmg \
+            Vera-${{ github.ref_name }}-macos-universal.dmg.sha256 \
             --clobber
