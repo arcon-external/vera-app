@@ -36,6 +36,7 @@ func main() {
 	backend.ConfigureAPI(client)
 	authAPI := backend.NewAuthAPI()
 	adminAPI := backend.NewAdminAPI()
+	updateAPI := backend.NewUpdateAPI()
 
 	err := wails.Run(&options.App{
 		Title:            "Vera",
@@ -54,6 +55,7 @@ func main() {
 			quotationApp,
 			authAPI,
 			adminAPI,
+			updateAPI,
 		},
 	})
 

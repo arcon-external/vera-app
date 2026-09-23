@@ -12,6 +12,8 @@ import {
   UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
 import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
+import { CheckForUpdates, Version } from "@backend/backend/UpdateAPI";
+import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 import type { SignedInUser } from "./LoginPage";
@@ -97,6 +99,9 @@ export function SettingsPage({
           <EmailCard user={user} isAdmin={isAdmin} />
           <PasswordCard />
           <SessionsCard />
+          <div className="lg:col-span-2">
+            <UpdateCard />
+          </div>
           <div className="lg:col-span-2">
             <DeletionCard />
           </div>
@@ -1066,8 +1071,108 @@ function SessionsCard() {
   );
 }
 
-function DeletionCard() {
-  const [confirming, setConfirming] = useState(false);
+function UpdateCard() {
+  const [current, setCurrent] = useState("");
+  const [info, setInfo] = useState<backend.UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    Version()
+      .then((version) => {
+        if (!cancelled) setCurrent(String(version));
+      })
+      .catch(() => {
+        if (!cancelled) setCurrent("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const check = async () => {
+    if (checking) return;
+    setChecking(true);
+    setError("");
+    try {
+      const result = (await CheckForUpdates()) as backend.UpdateInfo;
+      setInfo(result);
+      if (result.Current) setCurrent(result.Current);
+      if (!result.UpdateAvailable) {
+        pushToast("success", "You're on the latest version.");
+      }
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't check for updates.");
+      setError(/reach|network|fetch|failed|econn|timeout/i.test(message)
+        ? "You're offline. Connect and try again."
+        : message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const openTarget = (url: string) => {
+    try {
+      if (url) BrowserOpenURL(url);
+    } catch {
+      // Opening the browser must never break Settings.
+    }
+  };
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="App updates" />
+      {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+      <dl className="grid max-w-xl gap-2 text-body">
+        <div className="flex items-baseline justify-between gap-4">
+          <dt className="text-ink-500">Current version</dt>
+          <dd className="tnum font-medium text-ink-900">{current || "dev"}</dd>
+        </div>
+        {info ? (
+          <>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-ink-500">Latest version</dt>
+              <dd className="tnum font-medium text-ink-900">{info.Latest || "unknown"}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-ink-500">Status</dt>
+              <dd className="text-right font-medium text-ink-900">
+                {info.UpdateAvailable
+                  ? info.Required
+                    ? `Update required — ${info.Latest} is the minimum supported.`
+                    : `${info.Latest} is available.`
+                  : "You're up to date."}
+              </dd>
+            </div>
+          </>
+        ) : null}
+      </dl>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" onClick={() => void check()} disabled={checking}>
+          {checking ? "Checking…" : info ? "Check again" : "Check for updates"}
+        </Button>
+        {info?.UpdateAvailable && info.DownloadURL ? (
+          <Button variant="primary" onClick={() => openTarget(info.DownloadURL)}>
+            Download update
+          </Button>
+        ) : null}
+        {info?.UpdateAvailable && !info.DownloadURL && info.NotesURL ? (
+          <Button variant="primary" onClick={() => openTarget(info.NotesURL)}>
+            See what's new
+          </Button>
+        ) : null}
+      </div>
+      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
+        Vera checks once per launch. Download the installer for your system —
+        it handles the rest.
+      </p>
+    </Card>
+  );
+}
+
+function DeletionCard() {  const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [requested, setRequested] = useState(false);
   const { pushToast } = useToast();
