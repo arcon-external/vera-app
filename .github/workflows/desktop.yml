@@ -1,0 +1,103 @@
+name: Desktop release
+
+# Builds the version-stamped desktop installers whenever a version tag is
+# pushed, and attaches them to the GitHub Release with checksums. Unsigned
+# builds are for internal/MDM distribution; signing is timed to the first
+# external user. Asset names are a contract with the updater — see the
+# updater plan — so the rename steps below are load-bearing, not cosmetic.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build installer
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./scripts/build-windows.sh
+
+      - name: Checksum and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd build/bin
+          sha256sum vera-app-*-windows-amd64-installer.exe > vera-app-${{ github.ref_name }}-windows-amd64-installer.exe.sha256
+          gh release upload "${{ github.ref_name }}" \
+            vera-app-${{ github.ref_name }}-windows-amd64-installer.exe \
+            vera-app-${{ github.ref_name }}-windows-amd64-installer.exe.sha256 \
+            --clobber
+
+  macos:
+    name: macOS disk image
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI and create-dmg
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          brew install create-dmg
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build disk image
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./scripts/build-macos.sh
+
+      - name: Checksum and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd build/bin
+          shasum -a 256 vera-app-${{ github.ref_name }}-macos-universal.dmg > vera-app-${{ github.ref_name }}-macos-universal.dmg.sha256
+          gh release upload "${{ github.ref_name }}" \
+            vera-app-${{ github.ref_name }}-macos-universal.dmg \
+            vera-app-${{ github.ref_name }}-macos-universal.dmg.sha256 \
+            --clobber
