@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { ChangePassword, LogoutEverywhere, MyEmailChangeRequests, RequestDeletion, RequestEmailChange, UpdateProfile } from "@backend/backend/AuthAPI";
 import { backend } from "@backend/models";
 import {
+  ClearCompanyLogo,
   DownloadBackup,
+  GetCompanyLogo,
   GetCompanyProfile,
   RestoreBackup,
+  SetCompanyLogo,
   SetUserEmail,
   UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
@@ -453,7 +456,21 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [hasLogo, setHasLogo] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
   const { pushToast } = useToast();
+
+  const loadLogo = useCallback(async () => {
+    try {
+      const logo = (await GetCompanyLogo()) as backend.CompanyLogo;
+      setLogoPreview(`data:${logo.LogoMime};base64,${logo.LogoBase64}`);
+      setHasLogo(true);
+    } catch {
+      setLogoPreview(null);
+      setHasLogo(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -479,7 +496,74 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadLogo();
+  }, [load, loadLogo]);
+
+  const pickLogo = async (file: File | undefined) => {
+    setError("");
+    if (!file) return;
+    if (file.size > 512 * 1024) {
+      const message = "That artwork is over 512KB. Choose a smaller file.";
+      setError(message);
+      pushToast("error", message);
+      return;
+    }
+    if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) {
+      const message = "Artwork must be PNG, JPEG, GIF, or WebP.";
+      setError(message);
+      pushToast("error", message);
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("read failed"));
+      reader.readAsDataURL(file);
+    }).catch(() => {
+      setError("We couldn't read that file.");
+      return null;
+    });
+    if (!dataUrl) return;
+    const match = /^data:(image\/[a-z+]+);base64,(.+)$/.exec(dataUrl);
+    if (!match) {
+      setError("We couldn't read that file.");
+      return;
+    }
+    if (logoBusy) return;
+    setLogoBusy(true);
+    try {
+      await SetCompanyLogo(match[2], match[1]);
+      await loadLogo();
+      await RefreshCompanyIdentity();
+      onSaved?.();
+      pushToast("success", "Logo updated on future quotations.");
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't save this artwork.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setLogoBusy(false);
+    }
+  };
+
+  const removeLogo = async () => {
+    if (logoBusy) return;
+    setLogoBusy(true);
+    setError("");
+    try {
+      await ClearCompanyLogo();
+      await loadLogo();
+      await RefreshCompanyIdentity();
+      onSaved?.();
+      pushToast("success", "Logo removed. Quotations use the built-in artwork.");
+    } catch (err: unknown) {
+      const message = errorMessage(err, "We couldn't remove the artwork.");
+      setError(message);
+      pushToast("error", message);
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -493,6 +577,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
         Phone: extras.phone,
         Email: extras.email,
         TaxID: extras.taxId,
+        HasLogo: hasLogo,
       })) as backend.CompanyProfile;
       setForm({
         legalName: updated.LegalName ?? "",
@@ -560,6 +645,53 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
           </div>
         </form>
       )}
+      <div className="mt-6 border-t border-rule pt-5">
+        <SectionHeading title="Logo artwork" />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white" aria-hidden="true">
+            {logoPreview ? (
+              <img src={logoPreview} alt="" className="h-full w-full object-contain" />
+            ) : (
+              <span className="px-2 text-center text-caption text-ink-400">Built-in artwork</span>
+            )}
+          </span>
+          <div className="grid flex-1 gap-3">
+            <p className="max-w-xl text-body text-ink-600">
+              {hasLogo
+                ? "Custom artwork prints on new quotations and previews."
+                : "No custom artwork: documents use the built-in logo."}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="cursor-pointer text-caption font-medium text-accent-700 hover:underline">
+                {logoBusy ? "Uploading…" : hasLogo ? "Replace artwork" : "Upload artwork"}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  className="sr-only"
+                  disabled={logoBusy}
+                  onChange={(event) => {
+                    void pickLogo(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              {hasLogo ? (
+                <button
+                  type="button"
+                  onClick={() => void removeLogo()}
+                  disabled={logoBusy}
+                  className="text-caption text-ink-400 hover:text-danger-600 hover:underline disabled:opacity-50"
+                >
+                  Remove
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-caption leading-relaxed text-ink-400">
+          PNG, JPEG, GIF, or WebP under 512KB. Past revisions keep whatever printed.
+        </p>
+      </div>
       <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
         Only admins see this section. The quotation header prints this name
         and address on every new quotation.

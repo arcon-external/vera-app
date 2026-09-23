@@ -206,6 +206,7 @@ type CompanyProfile struct {
 	Phone     string
 	Email     string
 	TaxID     string
+	HasLogo   bool
 }
 
 // GetCompanyProfile loads the company profile.
@@ -239,6 +240,46 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		return CompanyProfile{}, err
 	}
 	return updated, nil
+}
+
+// CompanyLogo is uploaded artwork with its MIME type for preview rendering.
+type CompanyLogo struct {
+	LogoBase64 string
+	LogoMime   string
+}
+
+// GetCompanyLogo loads the stored artwork for the settings preview.
+func (a *AdminAPI) GetCompanyLogo() (CompanyLogo, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyLogo{}, err
+	}
+	var logo CompanyLogo
+	if err := client.Get("/v1/admin/company/logo", &logo); err != nil {
+		return CompanyLogo{}, err
+	}
+	return logo, nil
+}
+
+// SetCompanyLogo stores uploaded artwork, validated server-side.
+func (a *AdminAPI) SetCompanyLogo(logoBase64, logoMime string) error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	return client.Put("/v1/admin/company/logo", map[string]string{
+		"logoBase64": logoBase64,
+		"logoMime":   logoMime,
+	}, nil)
+}
+
+// ClearCompanyLogo removes uploaded artwork, restoring the baked asset.
+func (a *AdminAPI) ClearCompanyLogo() error {
+	client, err := api()
+	if err != nil {
+		return err
+	}
+	return client.Delete("/v1/admin/company/logo", nil)
 }
 
 // ListClients returns all clients ordered by code with quote counts.

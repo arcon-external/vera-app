@@ -187,6 +187,22 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 		return err
 	}
 	q.companyIdentity = &CompanyIdentity{Name: profile.LegalName, Address: profile.Address}
+	// The desktop preview renders from this instance's template data, so it
+	// needs the uploaded artwork too — otherwise previews would show the
+	// baked logo while server PDFs show the upload.
+	if profile.HasLogo {
+		var artwork struct {
+			LogoBase64 string `json:"logoBase64"`
+			LogoMime   string `json:"logoMime"`
+		}
+		if err := client.Get("/v1/admin/company/logo", &artwork); err != nil {
+			return err
+		}
+		if artwork.LogoBase64 == "" {
+			return fmt.Errorf("company has no uploaded logo")
+		}
+		q.Data.LogoBase64 = artwork.LogoBase64
+	}
 	return nil
 }
 

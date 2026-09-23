@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strings"
 
@@ -9,15 +10,16 @@ import (
 	"vera-app/backend/store"
 )
 
-// companyDTO renders the editable profile. LogoPath stays internal until
-// the object-storage follow-up wires logo bytes.
-func companyDTO(legalName, address, phone, email, taxID string) map[string]string {
-	return map[string]string{
+// companyDTO renders the editable profile plus a logo flag. Artwork bytes
+// travel through the dedicated logo endpoints, never this DTO.
+func companyDTO(legalName, address, phone, email, taxID string, hasLogo bool) map[string]any {
+	return map[string]any{
 		"legalName": legalName,
 		"address":   address,
 		"phone":     phone,
 		"email":     email,
 		"taxId":     taxID,
+		"hasLogo":   hasLogo,
 	}
 }
 
@@ -27,7 +29,7 @@ func (s *Server) getCompanyProfile(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
 	}
 	return context.JSON(http.StatusOK, companyDTO(
-		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID))
+		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID, profile.HasLogo))
 }
 
 // getCompanyIdentity serves the company identity to every signed-in role
@@ -39,7 +41,7 @@ func (s *Server) getCompanyIdentity(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
 	}
 	return context.JSON(http.StatusOK, companyDTO(
-		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID))
+		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID, profile.HasLogo))
 }
 
 func (s *Server) updateCompanyProfile(context echo.Context) error {
@@ -75,5 +77,66 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 	actorID := me.ID
 	_ = s.database.Audit(context.Request().Context(), &actorID, "company.update", nil, updated.LegalName)
 	return context.JSON(http.StatusOK, companyDTO(
-		updated.LegalName, updated.Address, updated.Phone, updated.Email, updated.TaxID))
+		updated.LegalName, updated.Address, updated.Phone, updated.Email, updated.TaxID, updated.HasLogo))
+}
+
+// setCompanyLogo stores uploaded logo artwork. The payload mirrors the
+// avatar shape ({logoBase64, logoMime}) so the frontend reuses one picker
+// pattern; validation happens server-side regardless of what the client
+// claims.
+func (s *Server) setCompanyLogo(context echo.Context) error {
+	var request struct {
+		LogoBase64 string `json:"logoBase64"`
+		LogoMime   string `json:"logoMime"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	data, err := base64.StdEncoding.DecodeString(request.LogoBase64)
+	if err != nil || len(data) == 0 {
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "logo image data is required"})
+	}
+	profile, err := s.database.SetCompanyLogo(context.Request().Context(), data, request.LogoMime)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "must be PNG"),
+			strings.Contains(err.Error(), "over 512KB"):
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		default:
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "save company logo"})
+		}
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.logo.update", nil, profile.LogoMime)
+	return context.JSON(http.StatusOK, map[string]any{"hasLogo": profile.HasLogo})
+}
+
+// clearCompanyLogo removes the uploaded artwork, restoring the baked asset.
+func (s *Server) clearCompanyLogo(context echo.Context) error {
+	profile, err := s.database.SetCompanyLogo(context.Request().Context(), nil, "")
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "clear company logo"})
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.logo.clear", nil, "")
+	return context.JSON(http.StatusOK, map[string]any{"hasLogo": profile.HasLogo})
+}
+
+// getCompanyLogo serves the stored artwork for previews. Every signed-in
+// role may read it: the logo prints on customer documents, so hiding it
+// from staff would be security theater that breaks their previews.
+func (s *Server) getCompanyLogo(context echo.Context) error {
+	profile, err := s.database.GetCompanyProfile(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company logo"})
+	}
+	if !profile.HasLogo {
+		return context.JSON(http.StatusNotFound, map[string]string{"error": "no uploaded logo"})
+	}
+	return context.JSON(http.StatusOK, map[string]string{
+		"logoBase64": base64.StdEncoding.EncodeToString(profile.LogoBytes),
+		"logoMime":   profile.LogoMime,
+	})
 }

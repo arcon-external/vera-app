@@ -197,7 +197,9 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   only in the admin Company settings section. Only the name and address print
   on quotations (phone/email/NPWP appear nowhere in the template); the NPWP
   field is hidden from the form while its column stays dormant for invoices.
-  Header edits affect future quotations only — archived snapshots keep theirs.
+  Artwork uploads to `logo_bytes` (512KB cap, allowlisted types) and prints
+  profile-first with baked-asset fallback. Header edits affect future
+  quotations only — archived snapshots keep theirs.
 - **Clients are database rows, never code:** the editor dropdown, Prepare
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.
