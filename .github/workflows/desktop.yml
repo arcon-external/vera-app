@@ -41,8 +41,11 @@ jobs:
 
       - name: Install NSIS
         # windows-latest does not ship makensis; without it `wails build
-        # -nsis` compiles the exe but cannot package the installer.
-        run: choco install nsis -y
+        # -nsis` compiles the exe but cannot package the installer. The
+        # choco package drops no PATH entry, so export it explicitly.
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
 
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
