@@ -4,6 +4,12 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.2] - 2026-09-24
+
+### Fixed
+- Settings cards align edge-to-edge in every row at every window size.
+- Keyboard shortcut rows breathe with comfortable spacing.
+
 ## [0.3.1] - 2026-09-24
 
 ### Fixed
