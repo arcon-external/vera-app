@@ -99,7 +99,7 @@ export function SummaryRail({
       </div>
 
       <div className="mt-4 space-y-2.5">
-        <AmountRow label="Cost subtotal" value={pricing.costSubtotal} />
+        <AmountRow label="Unit subtotal" value={pricing.costSubtotal} />
         <AmountRow
           label={pricing.marginedLines > 0 ? "Customer subtotal" : "Subtotal"}
           value={pricing.sellSubtotal}

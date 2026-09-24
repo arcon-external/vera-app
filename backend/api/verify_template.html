@@ -51,6 +51,7 @@
 			box-shadow: 0 18px 44px rgba(26, 35, 126, 0.08);
 		}
 		.ribbon { height: 8px; background: linear-gradient(90deg, var(--deep-blue) 0%, var(--accent-blue) 100%); }
+	.sheet + .sheet { margin-top: 18px; }
 		.inner { padding: 20px 16px 26px; }
 		.eyebrow {
 			display: flex;
@@ -123,7 +124,7 @@
 		.diff-row .record { color: #26304d; font-weight: 700; }
 		.diff-meaning { margin-top: 8px; font-size: 13px; color: var(--muted); }
 
-		.lookup { margin-top: 24px; border-top: 1px solid #e6ecfb; padding-top: 18px; }
+		.lookup { margin-top: 0; }
 		.lookup h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--deep-blue); margin-bottom: 6px; }
 		.lookup p { font-size: 14px; color: var(--muted); margin-bottom: 14px; }
 		.lookup form { display: grid; gap: 14px; }
@@ -203,9 +204,9 @@
 				<h2>What differs from our record</h2>
 				{{range .Diffs}}
 				<div class="diff">
-					<div class="diff-label">{{if .Matches}}&#10003;{{else}}&#10007;{{end}} {{.Label}}</div>
+					<div class="diff-label">&#10007; {{.Label}}</div>
 					<div class="diff-row">
-						<span><span class="k">On your document</span><span class="{{if .Matches}}record{{else}}claimed{{end}}">{{.Claimed}}</span></span>
+						<span><span class="k">On your document</span><span class="claimed">{{.Claimed}}</span></span>
 						<span><span class="k">Our record</span><span class="record">{{.Record}}</span></span>
 					</div>
 					<div class="diff-meaning">{{.Meaning}}</div>
@@ -214,35 +215,51 @@
 			</div>
 			{{end}}
 
-			<div class="lookup">
-				<h2>Check another document</h2>
-				<p>Paste the link from the QR code, or type the code printed under it. Add the values you can read on the page to compare them against our record.</p>
-				<form method="post" action="/verify" novalidate>
-					<div>
-						<label for="id">Document link or code</label>
-						<input id="id" name="id" type="text" autocomplete="off" autocapitalize="none"
-							spellcheck="false" enterkeyhint="go" maxlength="256"
-							placeholder="https://…/v/9f3a4c2e1b7d4a8e" required>
-					</div>
-					<div class="row">
-						<div>
-							<label for="number">Quotation No. on the page</label>
-							<input id="number" name="number" type="text" inputmode="numeric"
-								autocomplete="off" maxlength="32" placeholder="15020005">
-						</div>
-						<div>
-							<label for="amount">Grand total on the page</label>
-							<input id="amount" name="amount" type="text" inputmode="numeric"
-								autocomplete="off" maxlength="32" placeholder="Rp305.805">
-						</div>
-					</div>
-					<button type="submit">Verify document</button>
-				</form>
-			</div>
+		<div class="foot">
+			Verification checks the signature issued with the document. It never displays internal pricing.
+		</div>
+	</div>
+</div>
 
-			<div class="foot">
-				Verification checks the signature issued with the document. It never displays internal pricing.
-			</div>
+<div class="sheet">
+	<div class="inner">
+		<div class="lookup">
+			<h2>Check another document</h2>
+			<p>Paste the link from the QR code, or type the code printed under it. Add the values you can read on the page to compare them against our record.</p>
+			<form method="post" action="/verify" novalidate>
+				<div>
+					<label for="id">Document link or code</label>
+					<input id="id" name="id" type="text" autocomplete="off" autocapitalize="none"
+						spellcheck="false" enterkeyhint="go" maxlength="256"
+						placeholder="Input your document link or the code under the QR" required>
+				</div>
+				<div class="row">
+					<div>
+						<label for="number">Quotation No. on the page</label>
+						<input id="number" name="number" type="text" inputmode="numeric"
+							autocomplete="off" maxlength="32" placeholder="Input your quotation number on the page">
+					</div>
+					<div>
+						<label for="amount">Grand total on the page</label>
+						<input id="amount" name="amount" type="text" inputmode="numeric"
+							autocomplete="off" maxlength="44" placeholder="Input your grand total on the page">
+					</div>
+				</div>
+				<button type="submit">Verify document</button>
+			</form>
+		</div>
+	</div>
+</div>
+<script>
+(function () {
+	var amount = document.getElementById("amount");
+	if (!amount) return;
+	amount.addEventListener("input", function () {
+		var digits = amount.value.replace(/\D/g, "").slice(0, 32);
+		amount.value = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+	});
+})();
+</script>
 		</div>
 	</div>
 </body>

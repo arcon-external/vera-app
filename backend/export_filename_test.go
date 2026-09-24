@@ -17,6 +17,7 @@ func TestBuildExportFilename(t *testing.T) {
 		{"quotes and stars stripped", "15020003", 0, `Say "hi" *now*?`, "Arcon_Quotation_15020003_Say _hi_ _now__.pdf"},
 		{"empty subject falls back", "15020003", 0, "   ", "Arcon_Quotation_15020003_Quotation.pdf"},
 		{"long subject capped", "15020003", 0, "123456789012345678901234567890123456789012345678901234567890EXTRA", "Arcon_Quotation_15020003_123456789012345678901234567890123456789012345678901234567890.pdf"},
+		{"long subject breaks at a word", "15020003", 0, "Supply & Installation of Electrical and Mechanical Systems and Panels", "Arcon_Quotation_15020003_Supply & Installation of Electrical and Mechanical Systems.pdf"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

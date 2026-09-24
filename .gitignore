@@ -59,3 +59,8 @@ backend/bin/
 test-data/
 proto/
 doc/
+
+# --- Promo video workspace ---
+promo/node_modules/
+promo/out/
+promo/public/bed.wav

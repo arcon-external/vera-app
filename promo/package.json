@@ -1,0 +1,17 @@
+{
+  "name": "vera-promo",
+  "private": true,
+  "scripts": {
+    "render:landscape": "remotion render PromoLandscape out/vera-promo-30s.mp4 --overwrite",
+    "render:vertical": "remotion render PromoVertical out/vera-promo-vertical.mp4 --overwrite",
+    "studio": "remotion studio"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.527",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.527",
+    "typescript": "^5.0.0"
+  }
+}

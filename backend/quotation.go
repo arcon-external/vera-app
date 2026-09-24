@@ -648,6 +648,18 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 // substitute a stub; production uses the Wails runtime dialog.
 var saveFileDialog = runtime.SaveFileDialog
 
+// PickDirectory opens a native folder picker for the Settings export
+// default. An empty string means the user cancelled; callers treat it as
+// "keep the current setting".
+func (q *Quotation) PickDirectory() (string, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return "", err
+	}
+	return runtime.OpenDirectoryDialog(q.ctx, runtime.OpenDialogOptions{
+		Title: "Choose export folder",
+	})
+}
+
 // exportFilename previews the Arcon_Quotation name for the save dialog.
 // Archive re-exports already know their number; new quotations peek the next
 // full number (server owns the format) without consuming it. Any failure
@@ -676,8 +688,10 @@ func (q *Quotation) exportFilename() string {
 // API server (which allocates the quote number), builds the PDF locally,
 // writes it to the chosen path, and uploads the bytes back to the server.
 // The quote number is only consumed after the user confirms the save dialog,
-// preventing wasted sequence increments on cancellation.
-func (q *Quotation) Export() error {
+// preventing wasted sequence increments on cancellation. defaultDir is the
+// caller's preferred starting folder (the Settings export default); blank
+// or missing folders fall back to the OS default silently.
+func (q *Quotation) Export(defaultDir string) error {
 	if err := q.requireUser(q.ctx); err != nil {
 		return err
 	}
@@ -686,11 +700,18 @@ func (q *Quotation) Export() error {
 		return err
 	}
 
-	filePath, err := saveFileDialog(q.ctx, runtime.SaveDialogOptions{
+	options := runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
 		DefaultFilename: q.exportFilename(),
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
-	})
+	}
+	if dir := strings.TrimSpace(defaultDir); dir != "" {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			options.DefaultDirectory = dir
+		}
+	}
+
+	filePath, err := saveFileDialog(q.ctx, options)
 	if err != nil {
 		return fmt.Errorf("open save dialog: %w", err)
 	}
