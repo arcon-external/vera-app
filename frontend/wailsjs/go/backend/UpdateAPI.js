@@ -6,6 +6,10 @@ export function CheckForUpdates() {
   return window['go']['backend']['UpdateAPI']['CheckForUpdates']();
 }
 
+export function GetChangelog() {
+  return window['go']['backend']['UpdateAPI']['GetChangelog']();
+}
+
 export function Version() {
   return window['go']['backend']['UpdateAPI']['Version']();
 }

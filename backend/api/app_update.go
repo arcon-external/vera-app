@@ -1,12 +1,16 @@
 package api
 
 import (
+	_ "embed"
 	"net/http"
 	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 )
+
+//go:embed changelog.md
+var changelogRaw string
 
 // appRelease mirrors the public update contract. Every field comes from
 // deploy-time environment so a release is a redeploy, not a code change.
@@ -45,4 +49,14 @@ func latestRelease() appRelease {
 // version endpoint must never be able to sign anyone out.
 func (s *Server) getAppLatest(context echo.Context) error {
 	return context.JSON(http.StatusOK, latestRelease())
+}
+
+// getAppChangelog serves the staff-facing release notes embedded in the
+// server binary. Public like getAppLatest: the What's New modal needs it
+// right after sign-in, offline launches simply skip the modal until the
+// server is reachable again.
+func (s *Server) getAppChangelog(context echo.Context) error {
+	return context.JSON(http.StatusOK, map[string]string{
+		"changelog": strings.TrimSpace(changelogRaw),
+	})
 }

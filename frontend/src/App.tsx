@@ -38,6 +38,9 @@ import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { loadBindings, matchShortcut } from "./shortcuts";
+import { ShortcutsHelp } from "./components/ShortcutsHelp";
+import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -210,6 +213,7 @@ function App() {
   // Release check runs once per launch after sign-in; the banner covers
   // every page while Settings owns the manual re-check.
   const { state: updateState, dismiss: dismissUpdate } = useUpdateState(signedIn);
+  const { notes: whatsNew, dismiss: dismissWhatsNew } = useWhatsNew(signedIn);
 
   // Company identity tracks the stored profile; the baked-in default shows
   // while loading or when the server is unreachable — never blank.
@@ -274,6 +278,7 @@ function App() {
   useEffect(() => {
     if (signedIn) void loadCustomers();
   }, [signedIn, loadCustomers]);
+
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -658,8 +663,86 @@ function App() {
     newConfirmTimer.current = setTimeout(() => setConfirmingNew(false), 6000);
   };
 
+  // Global shortcuts: mod+S export, mod+Enter prepare, mod+N new, Alt+1-5
+  // pages, ? overlay. Bare keys never fire while typing (the registry
+  // enforces that); grid/archive scopes own their containers. Esc layers:
+  // overlay, discard confirm, then detail back to archive.
+  const [showHelp, setShowHelp] = useState(false);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        const inGrid = (event.target as HTMLElement).closest?.("[data-grid-cell]");
+        if (inGrid) return;
+        if (whatsNew.length > 0) {
+          dismissWhatsNew();
+          return;
+        }
+        if (showHelp) {
+          setShowHelp(false);
+          return;
+        }
+        if (confirmingNew) {
+          if (newConfirmTimer.current) clearTimeout(newConfirmTimer.current);
+          setConfirmingNew(false);
+          return;
+        }
+        if (page === "detail") {
+          setPage("archive");
+          return;
+        }
+        return;
+      }
+      const action = matchShortcut(event, loadBindings(), "global");
+      if (!action) return;
+      switch (action) {
+        case "exportPdf":
+          if (page !== "create") return;
+          event.preventDefault();
+          void handleExport();
+          return;
+        case "prepare":
+          if (page !== "create") return;
+          event.preventDefault();
+          void handlePrepare();
+          return;
+        case "newQuotation":
+          event.preventDefault();
+          requestNewQuotation();
+          return;
+        case "gotoEditor":
+          setPage("create");
+          return;
+        case "gotoArchive":
+          setPage("archive");
+          return;
+        case "gotoClients":
+          if (user?.Role === "admin") setPage("clients");
+          return;
+        case "gotoTeam":
+          if (user?.Role === "admin") setPage("users");
+          return;
+        case "gotoSettings":
+          setPage("settings");
+          return;
+        case "toggleHelp":
+          setShowHelp((visible) => !visible);
+          return;
+        default:
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew]);
+
   return (
     <>
+      {showHelp && user !== null ? (
+        <ShortcutsHelp onClose={() => setShowHelp(false)} />
+      ) : null}
+      {user !== null ? (
+        <WhatsNewModal notes={whatsNew} onDismiss={dismissWhatsNew} />
+      ) : null}
       {checkingSession ? (
         <div className="flex min-h-full items-center justify-center px-5">
           <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />

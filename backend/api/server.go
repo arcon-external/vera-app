@@ -86,6 +86,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// /healthz: update checks run pre-login and must never alias a 401 into
 	// a sign-out.
 	server.echo.GET("/v1/app/latest", server.getAppLatest)
+	server.echo.GET("/v1/app/changelog", server.getAppChangelog)
 	server.echo.POST("/v1/auth/login", server.login)
 	server.echo.POST("/v1/auth/logout", server.logout, server.requireSession)
 	server.echo.GET("/v1/auth/me", server.me, server.requireSession)

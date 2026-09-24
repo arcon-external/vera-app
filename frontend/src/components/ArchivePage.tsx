@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DeleteQuotation, ListQuotations } from "@backend/backend/Quotation";
 import type { ArchivedQuotationSummary } from "../archive";
+import { loadBindings, matchShortcut } from "../shortcuts";
 import { useToast } from "../toast";
 import { Badge, Button, Card } from "./ui";
 
@@ -15,6 +16,8 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
   const [error, setError] = useState("");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const { pushToast } = useToast();
 
   const load = useCallback(async () => {
@@ -36,6 +39,40 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
   useEffect(() => {
     void load();
   }, [load]);
+
+  // List navigation: arrows move a highlight, Enter opens. Focused buttons
+  // keep native behavior (Enter clicks), so the handler yields whenever
+  // the event starts inside a control.
+  const focusRowButton = (index: number) => {
+    const button = listRef.current?.querySelector(
+      `[data-archive-row="${index}"] button`
+    );
+    if (button instanceof HTMLElement) button.focus();
+  };
+  const listKeyDown = (event: React.KeyboardEvent) => {
+    if (rows.length === 0) return;
+    const inControl = !!(event.target as HTMLElement).closest?.(
+      "button,input,select,a"
+    );
+    const action = matchShortcut(event.nativeEvent, loadBindings(), "archive");
+    if (!action) return;
+    if (action === "archiveUp" || action === "archiveDown") {
+      event.preventDefault();
+      const next =
+        action === "archiveUp"
+          ? Math.max(0, (activeIndex < 0 ? rows.length : activeIndex) - 1)
+          : Math.min(rows.length - 1, activeIndex + 1);
+      setActiveIndex(next);
+      focusRowButton(next);
+      return;
+    }
+    // Enter on a focused control keeps its native click; elsewhere it
+    // opens the highlighted row.
+    if (action === "archiveOpen" && !inControl && activeIndex >= 0 && activeIndex < rows.length) {
+      const row = rows[activeIndex];
+      onOpenQuotation(row.ID, row.RevisionNumber);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -121,7 +158,7 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto scroll-thin">
+          <div ref={listRef} onKeyDown={listKeyDown} className="overflow-x-auto scroll-thin">
             <table className="w-full min-w-[860px] text-left text-body">
               <thead>
                 <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
@@ -138,11 +175,14 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                 </tr>
               </thead>
               <tbody className="divide-y divide-rule">
-                {rows.map((row) => (
+                {rows.map((row, index) => (
                   <tr
                     key={row.ID}
+                    data-archive-row={index}
                     onClick={() => onOpenQuotation(row.ID, row.RevisionNumber)}
-                    className="group cursor-pointer transition-colors duration-150 hover:bg-paper-subtle/60"
+                    className={`group cursor-pointer transition-colors duration-150 hover:bg-paper-subtle/60 ${
+                      activeIndex === index ? "bg-paper-subtle" : ""
+                    }`}
                   >
                     <td className="px-5 py-3 align-middle">
                       <button
