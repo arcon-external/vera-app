@@ -53,7 +53,15 @@ export function SettingsPage({
   onProfileChanged: (user: SignedInUser) => void;
   onCompanyChanged?: () => void;
 }) {
-  const [section, setSection] = useState<"general" | "company" | "backups">("general");
+  const [section, setSection] = useState<"general" | "company" | "backups" | "keyboard">("general");
+  const tabs = (
+    [
+      { id: "general", label: "General", adminOnly: false },
+      { id: "company", label: "Company", adminOnly: true },
+      { id: "backups", label: "Backups", adminOnly: true },
+      { id: "keyboard", label: "Keyboard", adminOnly: false },
+    ] as const
+  ).filter((tab) => isAdmin || !tab.adminOnly);
   return (
     <section aria-labelledby="settings-heading" className="space-y-6">
       <div>
@@ -65,23 +73,18 @@ export function SettingsPage({
             ? "How the company appears across the app. Only admins see this section."
             : section === "backups"
               ? "Database safety nets. Only admins see this section."
-              : "Your own account. Team management lives on the Team page for admins."}
+              : section === "keyboard"
+                ? "Your keyboard shortcuts. Stored on this device, editable anytime."
+                : "Your own account. Team management lives on the Team page for admins."}
         </p>
       </div>
 
-      {isAdmin ? (
-        <div
-          role="tablist"
-          aria-label="Settings sections"
-          className="inline-flex rounded-lg border border-rule bg-paper-muted p-0.5"
-        >
-          {(
-            [
-              { id: "general", label: "General" },
-              { id: "company", label: "Company" },
-              { id: "backups", label: "Backups" },
-            ] as const
-          ).map((tab) => {
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="inline-flex rounded-lg border border-rule bg-paper-muted p-0.5"
+      >
+        {tabs.map((tab) => {
             const selected = section === tab.id;
             return (
               <button
@@ -101,7 +104,6 @@ export function SettingsPage({
             );
           })}
         </div>
-      ) : null}
 
       {section === "company" && isAdmin ? (
         <CompanyProfileCard onSaved={onCompanyChanged} />
@@ -110,22 +112,17 @@ export function SettingsPage({
           <BackupCard />
           <RestoreCard />
         </>
+      ) : section === "keyboard" ? (
+        <KeyboardCard />
       ) : (
-        <div className="grid items-stretch gap-6 lg:grid-cols-2">
-          <div className="flex min-w-0 flex-col gap-6">
-            <ProfileCard user={user} onProfileChanged={onProfileChanged} />
-            <PasswordCard />
-          </div>
-          <div className="flex min-w-0 flex-col gap-6">
-            <EmailCard user={user} isAdmin={isAdmin} />
-            <SessionsCard />
-            <UpdateCard stretch />
-            <ExportCard />
-          </div>
-          <div className="lg:col-span-2">
-            <KeyboardCard />
-          </div>
-          <div className="lg:col-span-2">
+        <div className="grid items-start gap-6 lg:grid-cols-2 xl:grid-cols-3">
+          <ProfileCard user={user} onProfileChanged={onProfileChanged} />
+          <EmailCard user={user} isAdmin={isAdmin} />
+          <PasswordCard />
+          <SessionsCard />
+          <UpdateCard />
+          <ExportCard />
+          <div className="lg:col-span-2 xl:col-span-3">
             <DeletionCard />
           </div>
         </div>
@@ -1105,7 +1102,7 @@ function SessionsCard() {
   );
 }
 
-function UpdateCard({ stretch = false }: { stretch?: boolean }) {
+function UpdateCard() {
   const [current, setCurrent] = useState("");
   const [info, setInfo] = useState<backend.UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
@@ -1156,7 +1153,7 @@ function UpdateCard({ stretch = false }: { stretch?: boolean }) {
   };
 
   return (
-    <Card className={stretch ? "flex flex-1 flex-col p-5" : "p-5"}>
+    <Card className="p-5">
       <SectionHeading title="App updates" />
       {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
       <dl className="grid gap-2 text-body">
@@ -1198,7 +1195,7 @@ function UpdateCard({ stretch = false }: { stretch?: boolean }) {
           </Button>
         ) : null}
       </div>
-      <p className="mt-auto max-w-2xl pt-3 text-caption leading-relaxed text-ink-400">
+      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
         Vera checks once per launch. Download the installer for your system —
         it handles the rest.
       </p>
