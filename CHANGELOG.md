@@ -4,6 +4,12 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.5] - 2026-09-24
+
+### Fixed
+- Logo sizing: breathing room in the desktop icon, tighter navbar
+  lockup, true-size marks on sign-in and activation.
+
 ## [0.3.4] - 2026-09-24
 
 ### Changed
