@@ -4,6 +4,14 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.4] - 2026-09-24
+
+### Changed
+- Refined Vera artwork across the app icon, header, and sign-in screens.
+
+### Fixed
+- Modal backdrops dim the page again behind What's New and shortcuts help.
+
 ## [0.3.3] - 2026-09-24
 
 ### Fixed
