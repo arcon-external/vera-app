@@ -4,6 +4,26 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.0] - 2026-09-24
+
+### Added
+- Keyboard shortcuts everywhere: Excel-style grid navigation in the editor
+  (arrows, Tab, Enter, Shift to reverse), one-key export, prepare, and page
+  jumps, arrow-key archive browsing, and a shortcut overlay on ?.
+- Settings Keyboard section: rebind any shortcut, reset single keys or all.
+- What's New dialog after every update, so changes are never a surprise.
+- Default export folder: the save dialog opens where you choose.
+- Portal checks list only real mismatches, with clearer hints and its own
+  verification card.
+- New Vera artwork across the app icon, header, and sign-in screens.
+
+### Changed
+- Editor column reads Unit Price everywhere it is shown.
+
+### Fixed
+- Long subjects in export filenames break at a word boundary instead of
+  mid-word.
+
 ## [0.2.2] - 2026-09-23
 
 ### Added
