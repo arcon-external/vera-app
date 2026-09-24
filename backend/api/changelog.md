@@ -4,6 +4,12 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.3] - 2026-09-24
+
+### Fixed
+- Company Logo card shows the real built-in logo, file details for
+  uploads, and a proper Upload logo button.
+
 ## [0.3.2] - 2026-09-24
 
 ### Fixed
