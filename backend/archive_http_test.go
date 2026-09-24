@@ -179,13 +179,26 @@ func TestExportPersistsUploadsAndWritesPDF(t *testing.T) {
 
 	target := filepath.Join(t.TempDir(), "quotation.pdf")
 	previousDialog := saveFileDialog
-	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+	var gotOptions runtime.SaveDialogOptions
+	saveFileDialog = func(ctx context.Context, options runtime.SaveDialogOptions) (string, error) {
+		gotOptions = options
 		return target, nil
 	}
 	t.Cleanup(func() { saveFileDialog = previousDialog })
 
-	if err := q.Export(); err != nil {
+	if err := q.Export(t.TempDir()); err != nil {
 		t.Fatalf("Export failed: %v", err)
+	}
+	if gotOptions.DefaultDirectory != t.TempDir() {
+		t.Errorf("dialog directory = %q; want the configured export folder", gotOptions.DefaultDirectory)
+	}
+	for _, dir := range []string{"   ", filepath.Join(t.TempDir(), "gone")} {
+		if err := q.Export(dir); err != nil {
+			t.Fatalf("Export(%q) failed: %v", dir, err)
+		}
+		if gotOptions.DefaultDirectory != "" {
+			t.Errorf("Export(%q) dialog directory = %q; want empty (OS default)", dir, gotOptions.DefaultDirectory)
+		}
 	}
 	if q.Data.QuoteNumber != "15020011" || q.Data.RevisionID != 0 {
 		t.Errorf("number/revision = %q/%d; want 15020011/0", q.Data.QuoteNumber, q.Data.RevisionID)

@@ -43,8 +43,14 @@ func TestVerifyInputsAreBounded(t *testing.T) {
 				t.Fatalf("status = %d; want a handled response", recorder.Code)
 			}
 			body := recorder.Body.String()
-			// Nothing typed may be reflected verbatim, escaped or not.
-			for _, marker := range []string{"<script", "onerror", "<img", "<b>", "\x00"} {
+			// Nothing typed may be reflected verbatim, escaped or not. The
+			// page carries exactly one static script (the amount grouping
+			// helper, which never interpolates user input), so <script may
+			// appear once and only once; anything more is reflection.
+			if count := strings.Count(body, "<script"); count != 1 {
+				t.Errorf("<script count = %d; want exactly the static helper", count)
+			}
+			for _, marker := range []string{"onerror", "<img", "<b>", "\x00"} {
 				if strings.Contains(body, marker) {
 					t.Errorf("unbounded input reflected: %q present in response", marker)
 				}

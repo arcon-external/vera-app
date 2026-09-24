@@ -100,7 +100,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
         <StageHeader
           step="01 — Initial preview"
           title="Original prices before margin"
-          description="The cost input used to build this quotation. No profit margin and no tax are included here."
+          description="The unit price input used to build this quotation. No profit margin and no tax are included here."
           badge={<Badge tone="neutral">Reference</Badge>}
         />
         <div className="p-5 lg:p-6">

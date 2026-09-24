@@ -18,8 +18,12 @@ export function DraftRevision(arg1, arg2, arg3) {
   return window['go']['backend']['Quotation']['DraftRevision'](arg1, arg2, arg3);
 }
 
-export function Export() {
-  return window['go']['backend']['Quotation']['Export']();
+export function Export(arg1) {
+  return window['go']['backend']['Quotation']['Export'](arg1);
+}
+
+export function PickDirectory() {
+  return window['go']['backend']['Quotation']['PickDirectory']();
 }
 
 export function GetCustomerPreview() {

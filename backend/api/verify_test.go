@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -262,7 +263,7 @@ func TestVerifySubmitComparesPaperClaims(t *testing.T) {
 	resetVerifySchema(t, "vera_api_verify_claims")
 	server, token := testQuotationServer(t, "vera_api_verify_claims")
 	attachedTestSigner(t, server, "vera_api_verify_claims")
-	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_claims")
+	shortID, quoteNumber, quotationID := exportForVerification(t, server, token, "vera_api_verify_claims")
 
 	// Matching claims keep the page valid.
 	form := url.Values{"id": {shortID}}
@@ -289,6 +290,26 @@ func TestVerifySubmitComparesPaperClaims(t *testing.T) {
 	}
 	if !strings.Contains(body, "most common sign") {
 		t.Error("claim comparison did not explain what the difference means")
+	}
+
+	// Fully matching claims must not render a differs section: there is
+	// nothing to list, and the heading would contradict the verdict.
+	code, detail := doJSON(t, server, http.MethodGet, "/v1/quotations/"+strconv.Itoa(int(quotationID)), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail = %d; want 200", code)
+	}
+	grandTotal, _ := detail["grandTotal"].(float64)
+	form = url.Values{"id": {shortID}, "number": {quoteNumber}, "amount": {strconv.FormatInt(int64(grandTotal), 10)}}
+	request = httptest.NewRequest(http.MethodPost, "/verify", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder = httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	body = recorder.Body.String()
+	if recorder.Code != http.StatusOK || !strings.Contains(body, "Verified") {
+		t.Fatalf("all-match claims = %d; want a verified page", recorder.Code)
+	}
+	if strings.Contains(body, "What differs from our record") {
+		t.Error("all-match claims rendered a differs section with nothing in it")
 	}
 }
 

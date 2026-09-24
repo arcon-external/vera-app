@@ -63,7 +63,7 @@ export function ItemEditor({
         <span>Description</span>
         <span>UoM</span>
         <span className="text-right">Qty</span>
-        <span className="text-right">Cost price (IDR)</span>
+        <span className="text-right">Unit price (IDR)</span>
         <span>Margin</span>
         <span />
       </div>
@@ -307,11 +307,11 @@ function ItemRow({
           />
         </MobileField>
 
-        <MobileField label="Cost price (IDR)">
+        <MobileField label="Unit price (IDR)">
           <input
             type="text"
             inputMode="numeric"
-            aria-label={`Cost price for line ${index + 1}`}
+            aria-label={`Unit price for line ${index + 1}`}
             placeholder="0"
             value={formatMoneyInput(item.unitPrice)}
             onChange={(event) =>

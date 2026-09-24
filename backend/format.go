@@ -92,7 +92,13 @@ func BuildExportFilename(quoteNumber string, revision uint16, subject string) st
 	cleaned = strings.Join(strings.Fields(cleaned), " ")
 	runes := []rune(cleaned)
 	if len(runes) > maxExportSubjectRunes {
-		cleaned = string(runes[:maxExportSubjectRunes])
+		cut := runes[:maxExportSubjectRunes]
+		// Break at a word boundary so long subjects never end mid-word
+		// ("...Systems a.pdf"); spaceless strings keep the hard cut.
+		if lastSpace := strings.LastIndex(string(cut), " "); lastSpace > 0 {
+			cut = cut[:lastSpace]
+		}
+		cleaned = strings.TrimSpace(string(cut))
 	}
 	if cleaned == "" {
 		cleaned = "Quotation"

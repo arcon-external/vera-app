@@ -36,7 +36,7 @@ import type { SignedInUser } from "./components/LoginPage";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
-import { SettingsPage } from "./components/SettingsPage";
+import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { useToast } from "./toast";
 
@@ -609,7 +609,8 @@ function App() {
   const handleExport = useCallback(async () => {
     setStatus({ type: "loading", message: "Rendering PDF…" });
     try {
-      await Export();
+      // Device-local export default from Settings; blank means OS default.
+      await Export(window.localStorage.getItem(EXPORT_DIR_KEY) ?? "");
       clearPreview();
       void ClearRevisionContext().catch(() => undefined);
       setEditingQuote(null);

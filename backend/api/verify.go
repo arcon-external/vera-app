@@ -268,15 +268,21 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	}
 
 	// Compare paper-side claims when the requester supplied them. This is
-	// what catches a physically altered document.
+	// what catches a physically altered document. Only real mismatches are
+	// listed: showing matching rows under a "differs" heading contradicted
+	// the verdict, so all-match comparisons leave Diffs empty and the page
+	// renders no section at all.
 	if len(claims) > 0 {
-		view.Diffs = compareClaims(claims, evidence)
-		for _, diff := range view.Diffs {
-			if !diff.Matches {
-				view.Verdict = verdictMismatch
-				view.Detail = "The details below differ from the issued record."
-				return view
+		for _, diff := range compareClaims(claims, evidence) {
+			if diff.Matches {
+				continue
 			}
+			view.Diffs = append(view.Diffs, diff)
+		}
+		if len(view.Diffs) > 0 {
+			view.Verdict = verdictMismatch
+			view.Detail = "The details below differ from the issued record."
+			return view
 		}
 	}
 

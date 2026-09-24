@@ -12,7 +12,9 @@ export function DeleteQuotation(arg1:number):Promise<void>;
 
 export function DraftRevision(arg1:string,arg2:Array<number>,arg3:string):Promise<store.RevisionDraft>;
 
-export function Export():Promise<void>;
+export function Export(arg1:string):Promise<void>;
+
+export function PickDirectory():Promise<string>;
 
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 

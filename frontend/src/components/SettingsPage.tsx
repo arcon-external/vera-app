@@ -11,7 +11,7 @@ import {
   SetUserEmail,
   UpdateCompanyProfile,
 } from "@backend/backend/AdminAPI";
-import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
+import { PickDirectory, RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { CheckForUpdates, Version } from "@backend/backend/UpdateAPI";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { useToast } from "../toast";
@@ -21,6 +21,11 @@ import type { SignedInUser } from "./LoginPage";
 function errorMessage(err: unknown, fallback: string): string {
   return typeof err === "string" && err.trim() ? err : fallback;
 }
+
+// EXPORT_DIR_KEY is the Settings export default: a device-local folder the
+// save dialog opens in. localStorage, never the server — a client-machine
+// path is meaningless anywhere else, and exports must work offline.
+export const EXPORT_DIR_KEY = "vera-export-dir";
 
 const fieldClass =
   "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
@@ -103,6 +108,7 @@ export function SettingsPage({
             <EmailCard user={user} isAdmin={isAdmin} />
             <SessionsCard />
             <UpdateCard stretch />
+            <ExportCard />
           </div>
           <div className="lg:col-span-2">
             <DeletionCard />
@@ -1180,6 +1186,86 @@ function UpdateCard({ stretch = false }: { stretch?: boolean }) {
       <p className="mt-auto max-w-2xl pt-3 text-caption leading-relaxed text-ink-400">
         Vera checks once per launch. Download the installer for your system —
         it handles the rest.
+      </p>
+    </Card>
+  );
+}
+
+function ExportCard() {
+  const [dir, setDir] = useState(() => {
+    try {
+      return window.localStorage.getItem(EXPORT_DIR_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const [busy, setBusy] = useState(false);
+  const { pushToast } = useToast();
+
+  const browse = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const picked = (await PickDirectory()) as string;
+      if (picked) setDir(picked);
+    } catch {
+      // Cancelled or unavailable: keep whatever is typed.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = () => {
+    const value = dir.trim();
+    try {
+      if (value) window.localStorage.setItem(EXPORT_DIR_KEY, value);
+      else window.localStorage.removeItem(EXPORT_DIR_KEY);
+    } catch {
+      pushToast("error", "We couldn't save this setting on this device.");
+      return;
+    }
+    pushToast("success", value ? "Export folder saved." : "Export folder cleared.");
+  };
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Export folder" />
+      <p className="max-w-2xl text-body text-ink-600">
+        The starting folder of the export save dialog. Leave empty to use the
+        system default.
+      </p>
+      <div className="mt-3 grid gap-2">
+        <input
+          type="text"
+          value={dir}
+          onChange={(event) => setDir(event.target.value)}
+          placeholder="/Users/you/Documents/Quotations"
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Default export folder"
+          className={`${fieldClass} font-mono`}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => void browse()} disabled={busy}>
+            {busy ? "Browsing…" : "Browse…"}
+          </Button>
+          <Button variant="primary" size="sm" onClick={save}>
+            Save folder
+          </Button>
+          {dir ? (
+            <button
+              type="button"
+              onClick={() => setDir("")}
+              className="text-caption text-ink-400 hover:text-danger-600 hover:underline"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
+        Stored on this device only. Exports still ask where to save every time;
+        a missing folder falls back to the system default.
       </p>
     </Card>
   );
