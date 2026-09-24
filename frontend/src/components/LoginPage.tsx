@@ -193,7 +193,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
     <div className="flex min-h-full items-center justify-center px-5 py-12">
       <div className="w-full max-w-[420px]">
         <div className="mb-6 flex flex-col items-center text-center">
-          <VeraLogo className="h-12 w-auto" />
+          <VeraLogo className="h-16 w-auto" />
           <p className="mt-3 text-display font-semibold tracking-[-0.03em] text-ink-950">
             Vera
           </p>
