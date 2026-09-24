@@ -115,7 +115,7 @@ export function SettingsPage({
       ) : section === "keyboard" ? (
         <KeyboardCard />
       ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid items-stretch gap-6 lg:grid-cols-2 xl:grid-cols-3">
           <ProfileCard user={user} onProfileChanged={onProfileChanged} />
           <EmailCard user={user} isAdmin={isAdmin} />
           <PasswordCard />
@@ -733,7 +733,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
           <StatusBanner tone="danger">{error}</StatusBanner>
         </div>
       ) : null}
-      <div className="grid items-start gap-6 lg:grid-cols-2">
+      <div className="grid items-stretch gap-6 lg:grid-cols-2">
         <Card className="p-5">
           <SectionHeading title="Company profile" />
           <div className="grid gap-4">
@@ -813,9 +813,9 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               </div>
             </Card>
           ))}
-      <Card className="p-5">
+      <Card className="flex h-full flex-col p-5">
         <SectionHeading title="Logo artwork" />
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex flex-1 flex-col justify-center gap-4 sm:flex-row sm:items-start">
           <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white" aria-hidden="true">
             {logoPreview ? (
               <img src={logoPreview} alt="" className="h-full w-full object-contain" />
@@ -1365,7 +1365,7 @@ function KeyboardCard() {
             <h3 className="mb-2 text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
               {group.title}
             </h3>
-            <dl className="grid gap-1.5">
+            <dl className="grid gap-3">
               {group.ids.map((id) => {
                 const action = SHORTCUT_ACTIONS.find((a) => a.id === id);
                 if (!action) return null;
@@ -1376,7 +1376,7 @@ function KeyboardCard() {
                     <dt className="min-w-0 text-ink-700">
                       {action.label}
                       {action.hint ? (
-                        <span className="block text-caption text-ink-400">{action.hint}</span>
+                        <span className="mt-0.5 block text-caption leading-snug text-ink-400">{action.hint}</span>
                       ) : null}
                     </dt>
                     <dd className="flex shrink-0 items-center gap-1">

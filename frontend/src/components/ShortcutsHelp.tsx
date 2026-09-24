@@ -53,7 +53,7 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
               <h3 className="mb-2 text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
                 {group.title}
               </h3>
-              <dl className="grid gap-1.5">
+              <dl className="grid gap-3">
                 {group.ids.map((id) => {
                   const action = SHORTCUT_ACTIONS.find((a) => a.id === id);
                   if (!action) return null;
