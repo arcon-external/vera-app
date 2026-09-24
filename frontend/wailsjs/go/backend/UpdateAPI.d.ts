@@ -4,4 +4,6 @@ import {backend} from '../models';
 
 export function CheckForUpdates():Promise<backend.UpdateInfo>;
 
+export function GetChangelog():Promise<string>;
+
 export function Version():Promise<string>;

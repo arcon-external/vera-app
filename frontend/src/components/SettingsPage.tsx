@@ -13,6 +13,18 @@ import {
 } from "@backend/backend/AdminAPI";
 import { PickDirectory, RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { CheckForUpdates, Version } from "@backend/backend/UpdateAPI";
+import {
+  SHORTCUT_ACTIONS,
+  bindingFromEvent,
+  formatBinding,
+  loadBindings,
+  resetBindings,
+  saveBindings,
+  validateBindings,
+  type ActionId,
+  type Binding,
+  type BindingMap,
+} from "../shortcuts";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -109,6 +121,9 @@ export function SettingsPage({
             <SessionsCard />
             <UpdateCard stretch />
             <ExportCard />
+          </div>
+          <div className="lg:col-span-2">
+            <KeyboardCard />
           </div>
           <div className="lg:col-span-2">
             <DeletionCard />
@@ -1267,6 +1282,152 @@ function ExportCard() {
         Stored on this device only. Exports still ask where to save every time;
         a missing folder falls back to the system default.
       </p>
+    </Card>
+  );
+}
+
+function KeyboardCard() {
+  const [bindings, setBindings] = useState<Record<ActionId, Binding>>(() => loadBindings());
+  const [recording, setRecording] = useState<ActionId | null>(null);
+  const [error, setError] = useState("");
+  const { pushToast } = useToast();
+
+  const persist = (next: Record<ActionId, Binding>) => {
+    const overrides: BindingMap = {};
+    for (const action of SHORTCUT_ACTIONS) {
+      const current = next[action.id];
+      const def = action.default;
+      if (
+        current.mod !== def.mod ||
+        current.ctrl !== def.ctrl ||
+        current.shift !== def.shift ||
+        current.alt !== def.alt ||
+        current.key !== def.key
+      ) {
+        overrides[action.id] = { ...current };
+      }
+    }
+    try {
+      saveBindings(overrides);
+    } catch {
+      pushToast("error", "We couldn't save this setting on this device.");
+      return;
+    }
+    setBindings(next);
+  };
+
+  const capture = (id: ActionId, event: React.KeyboardEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") {
+      setRecording(null);
+      return;
+    }
+    const binding = bindingFromEvent(event.nativeEvent);
+    if (!binding) return;
+    const next = { ...bindings, [id]: binding };
+    const conflict = validateBindings(next);
+    if (conflict) {
+      setError(conflict);
+      return;
+    }
+    setError("");
+    setRecording(null);
+    persist(next);
+    pushToast("success", "Shortcut updated. It works immediately.");
+  };
+
+  const resetOne = (id: ActionId) => {
+    const def = SHORTCUT_ACTIONS.find((action) => action.id === id);
+    if (!def) return;
+    setError("");
+    persist({ ...bindings, [id]: { ...def.default } });
+  };
+
+  const resetAll = () => {
+    resetBindings();
+    setError("");
+    setRecording(null);
+    setBindings(loadBindings());
+    pushToast("success", "Shortcuts reset to defaults.");
+  };
+
+  const groups: { title: string; ids: ActionId[] }[] = [
+    { title: "Editor", ids: ["exportPdf", "prepare", "newQuotation", "gridUp", "gridDown", "gridLeft", "gridRight", "gridEnter", "gridEnterBack"] },
+    { title: "Pages", ids: ["gotoEditor", "gotoArchive", "gotoClients", "gotoTeam", "gotoSettings", "toggleHelp"] },
+    { title: "Archive", ids: ["archiveUp", "archiveDown", "archiveOpen"] },
+  ];
+
+  return (
+    <Card className="p-5">
+      <SectionHeading title="Keyboard" />
+      {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {groups.map((group) => (
+          <div key={group.title}>
+            <h3 className="mb-2 text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
+              {group.title}
+            </h3>
+            <dl className="grid gap-1.5">
+              {group.ids.map((id) => {
+                const action = SHORTCUT_ACTIONS.find((a) => a.id === id);
+                if (!action) return null;
+                const customized =
+                  JSON.stringify(bindings[id]) !== JSON.stringify(action.default);
+                return (
+                  <div key={id} className="flex items-center justify-between gap-2 text-small">
+                    <dt className="min-w-0 text-ink-700">
+                      {action.label}
+                      {action.hint ? (
+                        <span className="block text-caption text-ink-400">{action.hint}</span>
+                      ) : null}
+                    </dt>
+                    <dd className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError("");
+                          setRecording(id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (recording === id) capture(id, event);
+                        }}
+                        aria-label={`Rebind ${action.label}. Currently ${formatBinding(bindings[id])}`}
+                        className={`tnum rounded-md border px-2 py-1 font-mono text-caption transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                          recording === id
+                            ? "border-accent-500 bg-accent-50 text-accent-700"
+                            : "border-rule bg-paper-subtle text-ink-800 hover:border-ink-300"
+                        }`}
+                      >
+                        {recording === id ? "Press keys…" : formatBinding(bindings[id])}
+                      </button>
+                      {customized ? (
+                        <button
+                          type="button"
+                          onClick={() => resetOne(id)}
+                          aria-label={`Reset ${action.label} to default`}
+                          className="rounded px-1 text-caption text-ink-400 hover:text-ink-700 hover:underline"
+                        >
+                          Reset
+                        </button>
+                      ) : null}
+                    </dd>
+                  </div>
+                );
+              })}
+            </dl>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button variant="secondary" size="sm" onClick={resetAll}>
+          Reset all to defaults
+        </Button>
+        <span className="text-caption text-ink-400">
+          Stored on this device only. Enter always moves down in the grid;
+          everything else rebinds above.
+        </span>
+      </div>
     </Card>
   );
 }

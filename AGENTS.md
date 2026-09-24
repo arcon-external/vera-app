@@ -342,26 +342,35 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 ### Release steps
 
 1. Verify all gates pass on `main`.
-2. Bump `wails.json` `info.productVersion` to the release version (no `v`
+2. Write the `CHANGELOG.md` entry for the release (Added/Changed/Fixed/
+   Security sections, staff language; internal chores omitted), copy it to
+   `backend/api/changelog.md` so the embedded copy matches byte-for-byte
+   (`TestChangelogCopyMatchesRoot` enforces this), and commit both with the
+   version bump. The What's New modal ships whatever is committed here, so
+   this step must land before the tag.
+3. Bump `wails.json` `info.productVersion` to the release version (no `v`
    prefix — Wails convention) and commit it.
-3. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
+4. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
    (it fails loudly if Go ldflags and installer metadata disagree).
-4. Create and push an annotated tag:
+5. Create and push an annotated tag:
    ```bash
    git tag -a v0.2.0 -m "v0.2.0: description"
    git push origin v0.2.0
    ```
-5. Create a GitHub Release with grouped notes:
+6. Create a GitHub Release with grouped notes:
    ```bash
    gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
    ```
-6. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
-   `-nsis` installer and macOS DMG, both version-stamped with sha256
-   sidecars, attached as
-   `Vera-<version>-windows-amd64-installer.exe` and
+7. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
+   `-nsis` installers (amd64 + arm64) and macOS DMG, all version-stamped
+   with sha256 sidecars, attached as
+   `Vera-<version>-windows-amd64-installer.exe`,
+   `Vera-<version>-windows-arm64-installer.exe`, and
    `Vera-<version>-macos-universal.dmg`. Those names are a contract
-   with the updater — never rename by hand.
-7. Add a Download section to the release notes with both filenames plus one
+   with the updater — never rename by hand. Staff download links must
+   point at the public `vera-downloads-508411` bucket mirror, never at
+   GitHub release assets (the private repo 404s anyone without access).
+8. Add a Download section to the release notes with both filenames plus one
    install line each, and these prerequisites:
    - Windows: a Chrome installation (PDF export shells to system Chrome);
      SmartScreen will warn on unsigned builds — expected until signing.

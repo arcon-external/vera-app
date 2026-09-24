@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -67,5 +68,24 @@ func TestAppLatestNeedsNoSession(t *testing.T) {
 	server.ServeHTTP(recorder, request)
 	if recorder.Code == http.StatusUnauthorized {
 		t.Fatal("public endpoint demanded a session; update checks must work pre-login")
+	}
+}
+
+func TestAppChangelogServesEmbeddedNotes(t *testing.T) {
+	server, _, _ := adminTestSetup(t, "vera_api_app_changelog")
+	request := httptest.NewRequest(http.MethodGet, "/v1/app/changelog", nil)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("changelog = %d; want 200", recorder.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, want := range []string{"# Changelog", "## [0.2.2]", "## [0.1.0]"} {
+		if !strings.Contains(body["changelog"], want) {
+			t.Errorf("changelog missing %q", want)
+		}
 	}
 }

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { loadBindings, matchShortcut } from "../shortcuts";
 import { Button } from "./ui";
 import { applyMargin, formatIdr, formatMoneyInput, parseIntOrZero } from "../format";
 
@@ -57,6 +58,87 @@ export function ItemEditor({
     [items]
   );
 
+  // Excel-style grid navigation: arrows move between cells, Tab/Enter
+  // advance (Shift reverses), edges clamp. Only the five main cells take
+  // part; sub-item inputs keep native keys. Bindings reload per keydown so
+  // Settings edits apply without a reload.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const focusCell = (row: number, col: number): boolean => {
+    const container = gridRef.current;
+    if (!container) return false;
+    const order = col <= 2 ? [col] : [col, col - 1, col + 1, col - 2, col + 2];
+    for (const candidate of order) {
+      if (candidate < 0 || candidate > 4) continue;
+      const el = container.querySelector(
+        `[data-grid-cell][data-grid-row="${row}"][data-grid-col="${candidate}"]:not([disabled])`
+      );
+      if (el instanceof HTMLElement) {
+        el.focus();
+        if (el instanceof HTMLInputElement) el.select();
+        return true;
+      }
+    }
+    return false;
+  };
+  const gridKeyDown = (event: React.KeyboardEvent) => {
+    const container = gridRef.current;
+    if (!container) return;
+    const cell = (event.target as HTMLElement).closest?.(
+      "[data-grid-cell]"
+    ) as HTMLElement | null;
+    if (!cell || !container.contains(cell)) return;
+    const row = Number(cell.dataset.gridRow ?? 0);
+    const col = Number(cell.dataset.gridCol ?? 0);
+    const native = event.nativeEvent;
+    let action = matchShortcut(native, loadBindings(), "grid");
+    // Fixed Excel keys: Enter moves down, Shift+Enter up. Enter on a
+    // dropdown keeps its native open-the-list behavior.
+    if (
+      !action &&
+      native.key === "Enter" &&
+      !native.metaKey &&
+      !native.ctrlKey &&
+      !native.altKey &&
+      cell.tagName !== "SELECT"
+    ) {
+      action = native.shiftKey ? "gridUp" : "gridDown";
+    }
+    if (!action) {
+      // Esc always lands back on the row's description cell.
+      if (native.key === "Escape") focusCell(row, 0);
+      return;
+    }
+    const lastRow = items.length - 1;
+    switch (action) {
+      case "gridUp":
+        if (row > 0) {
+          event.preventDefault();
+          focusCell(row - 1, col);
+        }
+        return;
+      case "gridDown":
+        if (row < lastRow) {
+          event.preventDefault();
+          focusCell(row + 1, col);
+        }
+        return;
+      case "gridLeft":
+      case "gridEnterBack":
+        event.preventDefault();
+        if (col > 0) focusCell(row, col - 1);
+        else if (row > 0) focusCell(row - 1, 4);
+        return;
+      case "gridRight":
+      case "gridEnter":
+        event.preventDefault();
+        if (col < 4) focusCell(row, col + 1);
+        else if (row < lastRow) focusCell(row + 1, 0);
+        return;
+      default:
+        return;
+    }
+  };
+
   return (
     <div className="overflow-hidden rounded-xl border border-rule bg-white shadow-card">
       <div className="hidden grid-cols-[minmax(0,1fr)_72px_68px_126px_184px_36px] gap-3 border-b border-rule bg-paper-subtle px-4 py-2.5 text-micro font-medium uppercase tracking-[0.1em] text-ink-500 lg:grid">
@@ -68,7 +150,7 @@ export function ItemEditor({
         <span />
       </div>
 
-      <div className="divide-y divide-rule">
+      <div ref={gridRef} onKeyDown={gridKeyDown} className="divide-y divide-rule">
         {items.map((item, index) => (
           <ItemRow
             key={item.key}
@@ -191,6 +273,9 @@ function ItemRow({
           </span>
           <input
             type="text"
+            data-grid-cell=""
+            data-grid-row={index}
+            data-grid-col={0}
             aria-label={`Description for line ${index + 1}`}
             placeholder="Service or product description — paste from Excel for multiple lines"
             value={item.description}
@@ -276,6 +361,9 @@ function ItemRow({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:contents">
         <MobileField label="UoM">
           <select
+            data-grid-cell=""
+            data-grid-row={index}
+            data-grid-col={1}
             aria-label={`Unit of measure for line ${index + 1}`}
             value={item.uom}
             onChange={(event) => onChange(item.key, "uom", event.target.value)}
@@ -296,6 +384,9 @@ function ItemRow({
         <MobileField label="Qty">
           <input
             type="text"
+            data-grid-cell=""
+            data-grid-row={index}
+            data-grid-col={2}
             inputMode="numeric"
             aria-label={`Quantity for line ${index + 1}`}
             placeholder="1"
@@ -310,6 +401,9 @@ function ItemRow({
         <MobileField label="Unit price (IDR)">
           <input
             type="text"
+            data-grid-cell=""
+            data-grid-row={index}
+            data-grid-col={3}
             inputMode="numeric"
             aria-label={`Unit price for line ${index + 1}`}
             placeholder="0"
@@ -354,6 +448,9 @@ function ItemRow({
               >
                 <input
                   type="text"
+                  data-grid-cell=""
+                  data-grid-row={index}
+                  data-grid-col={4}
                   inputMode="numeric"
                   aria-label={`Profit margin percentage for line ${index + 1}`}
                   value={item.marginPercent}

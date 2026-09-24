@@ -105,6 +105,23 @@ func (u *UpdateAPI) Version() (string, error) {
 	return AppVersion, nil
 }
 
+// GetChangelog returns the staff-facing release notes served by the API
+// server (embedded from CHANGELOG.md at build time). Transport failures
+// surface as errors so the What's New modal can stay silent offline.
+func (u *UpdateAPI) GetChangelog() (string, error) {
+	client, err := api()
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		Changelog string `json:"changelog"`
+	}
+	if err := client.Get("/v1/app/changelog", &response); err != nil {
+		return "", err
+	}
+	return response.Changelog, nil
+}
+
 // CheckForUpdates compares this build against the server's release state
 // for the current platform. It never touches authentication state: the
 // endpoint is public, and transport failures surface as errors the UI
