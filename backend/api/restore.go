@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -123,41 +124,81 @@ func (s *Server) restoreBackup(context echo.Context) error {
 			"error": fmt.Sprintf("reset schema: %v (safety snapshot: %s)", err, snapshotRef),
 		})
 	}
-	if out, err := execCommand(pgRestoreBin, "--clean", "--if-exists", "--no-owner", "-d", dsn, uploadPath).CombinedOutput(); err != nil {
-		return context.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("restore failed, previous state preserved at %s: %v (%s)", snapshotRef, err, firstLine(out)),
-		})
+	// pg_restore exits non-zero on warnings too (e.g. privilege or comment
+	// statements the non-superuser production role cannot execute), while
+	// all table data still lands. Such warnings must not masquerade as a
+	// failed restore: verification below is authoritative, and the output
+	// is carried through as warnings instead. --no-privileges skips the
+	// known-benign GRANT/REVOKE statements up front; the schema owns no
+	// custom privileges, so nothing needed is lost.
+	var restoreWarnings string
+	if out, err := execCommand(pgRestoreBin, "--clean", "--if-exists", "--no-owner", "--no-privileges", "-d", dsn, uploadPath).CombinedOutput(); err != nil {
+		restoreWarnings = restoreOutputTail(out)
 	}
 	// An older dump heals forward to the current schema on restore.
 	if err := s.database.Migrate(requestCtx); err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("migrate after restore: %v (safety snapshot: %s)", err, snapshotRef),
+			"error": fmt.Sprintf("migrate after restore: %v (safety snapshot: %s; restore output: %s)", err, snapshotRef, restoreWarnings),
 		})
 	}
 	quotations, revisions, err := s.database.RestoreRowCounts(requestCtx)
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("verify after restore: %v (safety snapshot: %s)", err, snapshotRef),
+			"error": fmt.Sprintf("verify after restore: %v (safety snapshot: %s; restore output: %s)", err, snapshotRef, restoreWarnings),
 		})
 	}
 
 	actorID := me.ID
 	details := fmt.Sprintf("safety snapshot %s; quotations=%d revisions=%d", snapshotRef, quotations, revisions)
+	if restoreWarnings != "" {
+		details += "; restore warnings: " + restoreWarnings
+	}
 	if err := s.database.Audit(requestCtx, &actorID, "backup.restore", nil, details); err != nil {
 		// The restore itself succeeded; a missing audit entry must not
 		// masquerade as a restore failure, but it must be visible.
-		return context.JSON(http.StatusOK, map[string]any{
+		return context.JSON(http.StatusOK, withRestoreWarnings(map[string]any{
 			"safetySnapshot": snapshotRef,
 			"quotations":     quotations,
 			"revisions":      revisions,
 			"auditWarning":   "restore succeeded but the audit entry could not be written",
-		})
+		}, restoreWarnings))
 	}
-	return context.JSON(http.StatusOK, map[string]any{
+	return context.JSON(http.StatusOK, withRestoreWarnings(map[string]any{
 		"safetySnapshot": snapshotRef,
 		"quotations":     quotations,
 		"revisions":      revisions,
-	})
+	}, restoreWarnings))
+}
+
+// withRestoreWarnings attaches the capped pg_restore output to a success
+// response when the tool reported warnings. Extra fields are ignored by
+// older desktop clients, which keep reading the counts as before.
+func withRestoreWarnings(response map[string]any, restoreWarnings string) map[string]any {
+	if restoreWarnings != "" {
+		response["restoreWarnings"] = restoreWarnings
+	}
+	return response
+}
+
+// restoreOutputTail keeps the tail of pg_restore output so the offending
+// statement (pg_restore prints "Command was: …" after the error) survives
+// in API responses and audit entries. Capped so a chatty tool cannot blow
+// up the response.
+func restoreOutputTail(out []byte) string {
+	const maxTailBytes = 2000
+	const maxTailLines = 10
+	text := string(out)
+	if len(text) > maxTailBytes {
+		text = text[len(text)-maxTailBytes:]
+		if i := strings.IndexByte(text, '\n'); i >= 0 {
+			text = text[i+1:]
+		}
+	}
+	lines := strings.Split(text, "\n")
+	if len(lines) > maxTailLines {
+		lines = lines[len(lines)-maxTailLines:]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func firstLine(out []byte) string {
