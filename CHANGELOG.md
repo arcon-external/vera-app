@@ -4,6 +4,13 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.3.1] - 2026-09-24
+
+### Fixed
+- Settings General tab rebalanced: no more dead empty space, cards pair
+  evenly at every window size.
+- Keyboard shortcuts moved to their own Settings tab, visible to everyone.
+
 ## [0.3.0] - 2026-09-24
 
 ### Added
