@@ -43,6 +43,9 @@ func TestCompanyLogoAdminRoundTrip(t *testing.T) {
 	if seen["logoBase64"] != artwork || seen["logoMime"] != "image/png" {
 		t.Error("staff read back different artwork than stored")
 	}
+	if builtIn, _ := seen["builtIn"].(bool); builtIn {
+		t.Error("uploaded artwork flagged builtIn")
+	}
 	if code, _ := doAdminRequest(t, server, staffToken, http.MethodPut, "/v1/admin/company/logo",
 		`{"logoBase64":"`+artwork+`","logoMime":"image/png"}`); code != http.StatusForbidden {
 		t.Errorf("staff put logo = %d; want 403", code)
@@ -61,13 +64,21 @@ func TestCompanyLogoAdminRoundTrip(t *testing.T) {
 		t.Errorf("bad base64 = %d; want 422", code)
 	}
 
-	// Clearing restores the baked asset path.
+	// Clearing restores the baked asset: the endpoint now serves the
+	// built-in bytes with builtIn set instead of a 404.
 	code, cleared := doAdminRequest(t, server, token, http.MethodDelete, "/v1/admin/company/logo", "")
 	if code != http.StatusOK {
 		t.Fatalf("clear logo = %d; want 200 (%v)", code, cleared)
 	}
-	if code, _ := doAdminRequest(t, server, token, http.MethodGet, "/v1/admin/company/logo", ""); code != http.StatusNotFound {
-		t.Errorf("get after clear = %d; want 404", code)
+	code, builtin := doAdminRequest(t, server, token, http.MethodGet, "/v1/admin/company/logo", "")
+	if code != http.StatusOK {
+		t.Fatalf("get after clear = %d; want 200", code)
+	}
+	if builtIn, _ := builtin["builtIn"].(bool); !builtIn {
+		t.Error("get after clear misses builtIn flag")
+	}
+	if builtin["logoBase64"] == "" || builtin["logoMime"] != "image/png" {
+		t.Error("get after clear does not serve the baked-in artwork")
 	}
 
 	if count, err := database.AuditCount(context.Background(), "company.logo.update"); err != nil || count != 1 {

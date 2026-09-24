@@ -299,6 +299,7 @@ export namespace backend {
 	export class CompanyLogo {
 	    LogoBase64: string;
 	    LogoMime: string;
+	    BuiltIn: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new CompanyLogo(source);
@@ -308,6 +309,7 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.LogoBase64 = source["LogoBase64"];
 	        this.LogoMime = source["LogoMime"];
+	        this.BuiltIn = source["BuiltIn"];
 	    }
 	}
 	export class CustomerPreviewItem {

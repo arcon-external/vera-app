@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
+	"vera-app/backend"
 	"vera-app/backend/store"
 )
 
@@ -146,7 +147,8 @@ func (s *Server) clearCompanyLogo(context echo.Context) error {
 	return context.JSON(http.StatusOK, map[string]any{"hasLogo": profile.HasLogo})
 }
 
-// getCompanyLogo serves the stored artwork for previews. Every signed-in
+// getCompanyLogo serves the effective artwork for previews: the upload when
+// present, otherwise the baked-in asset with builtIn set. Every signed-in
 // role may read it: the logo prints on customer documents, so hiding it
 // from staff would be security theater that breaks their previews.
 func (s *Server) getCompanyLogo(context echo.Context) error {
@@ -154,11 +156,20 @@ func (s *Server) getCompanyLogo(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company logo"})
 	}
-	if !profile.HasLogo {
-		return context.JSON(http.StatusNotFound, map[string]string{"error": "no uploaded logo"})
+	if profile.HasLogo {
+		return context.JSON(http.StatusOK, map[string]any{
+			"logoBase64": base64.StdEncoding.EncodeToString(profile.LogoBytes),
+			"logoMime":   profile.LogoMime,
+			"builtIn":    false,
+		})
 	}
-	return context.JSON(http.StatusOK, map[string]string{
-		"logoBase64": base64.StdEncoding.EncodeToString(profile.LogoBytes),
-		"logoMime":   profile.LogoMime,
+	bakedIn, err := backend.BakedInLogo()
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load built-in logo"})
+	}
+	return context.JSON(http.StatusOK, map[string]any{
+		"logoBase64": base64.StdEncoding.EncodeToString(bakedIn),
+		"logoMime":   "image/png",
+		"builtIn":    true,
 	})
 }

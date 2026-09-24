@@ -258,10 +258,13 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 	return updated, nil
 }
 
-// CompanyLogo is uploaded artwork with its MIME type for preview rendering.
+// CompanyLogo is the effective artwork with its MIME type for preview
+// rendering: the upload when present, otherwise the baked-in asset
+// (BuiltIn set) so previews never show a placeholder.
 type CompanyLogo struct {
 	LogoBase64 string
 	LogoMime   string
+	BuiltIn    bool
 }
 
 // GetCompanyLogo loads the stored artwork for the settings preview.

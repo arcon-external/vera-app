@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChangePassword, LogoutEverywhere, MyEmailChangeRequests, RequestDeletion, RequestEmailChange, UpdateProfile } from "@backend/backend/AuthAPI";
 import { backend } from "@backend/models";
 import {
@@ -540,16 +540,37 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [hasLogo, setHasLogo] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
+  const [logoMeta, setLogoMeta] = useState<string | null>(null);
+  const logoFileRef = useRef<HTMLInputElement>(null);
   const { pushToast } = useToast();
 
   const loadLogo = useCallback(async () => {
     try {
       const logo = (await GetCompanyLogo()) as backend.CompanyLogo;
-      setLogoPreview(`data:${logo.LogoMime};base64,${logo.LogoBase64}`);
-      setHasLogo(true);
+      if (!logo.LogoBase64) throw new Error("empty logo");
+      const preview = `data:${logo.LogoMime};base64,${logo.LogoBase64}`;
+      setLogoPreview(preview);
+      setHasLogo(!logo.BuiltIn);
+      const bytes = Math.floor((logo.LogoBase64.length * 3) / 4);
+      const kind = (logo.LogoMime.split("/")[1] ?? "").toUpperCase() || "Image";
+      const size =
+        bytes >= 1024
+          ? `${(bytes / 1024).toFixed(bytes >= 102400 ? 0 : 1)} KB`
+          : `${bytes} B`;
+      const dims = await new Promise<string>((resolve) => {
+        const img = new Image();
+        img.onload = () =>
+          resolve(` · ${img.naturalWidth} × ${img.naturalHeight} px`);
+        img.onerror = () => resolve("");
+        img.src = preview;
+      });
+      setLogoMeta(
+        logo.BuiltIn ? `${kind} · built in` : `${kind} · ${size}${dims}`
+      );
     } catch {
       setLogoPreview(null);
       setHasLogo(false);
+      setLogoMeta(null);
     }
   }, []);
 
@@ -594,13 +615,13 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     setError("");
     if (!file) return;
     if (file.size > 512 * 1024) {
-      const message = "That artwork is over 512KB. Choose a smaller file.";
+      const message = "That logo is over 512KB. Choose a smaller file.";
       setError(message);
       pushToast("error", message);
       return;
     }
     if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type)) {
-      const message = "Artwork must be PNG, JPEG, GIF, or WebP.";
+      const message = "Logo must be PNG, JPEG, GIF, or WebP.";
       setError(message);
       pushToast("error", message);
       return;
@@ -629,7 +650,7 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
       onSaved?.();
       pushToast("success", "Logo updated on future quotations.");
     } catch (err: unknown) {
-      const message = errorMessage(err, "We couldn't save this artwork.");
+      const message = errorMessage(err, "We couldn't save this logo.");
       setError(message);
       pushToast("error", message);
     } finally {
@@ -646,9 +667,9 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
       await loadLogo();
       await RefreshCompanyIdentity();
       onSaved?.();
-      pushToast("success", "Logo removed. Quotations use the built-in artwork.");
+      pushToast("success", "Logo removed. Quotations use the built-in logo.");
     } catch (err: unknown) {
-      const message = errorMessage(err, "We couldn't remove the artwork.");
+      const message = errorMessage(err, "We couldn't remove the logo.");
       setError(message);
       pushToast("error", message);
     } finally {
@@ -814,35 +835,47 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             </Card>
           ))}
       <Card className="flex h-full flex-col p-5">
-        <SectionHeading title="Logo artwork" />
+        <SectionHeading title="Logo" />
         <div className="flex flex-1 flex-col justify-center gap-4 sm:flex-row sm:items-start">
-          <span className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white" aria-hidden="true">
+          <span className="flex h-28 w-44 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white p-2" aria-hidden="true">
             {logoPreview ? (
               <img src={logoPreview} alt="" className="h-full w-full object-contain" />
             ) : (
-              <span className="px-2 text-center text-caption text-ink-400">Built-in artwork</span>
+              <span className="px-2 text-center text-caption text-ink-400">Built-in logo</span>
             )}
           </span>
-          <div className="grid flex-1 gap-3">
+          <div className="grid flex-1 content-start gap-2">
             <p className="max-w-xl text-body text-ink-600">
               {hasLogo
-                ? "Custom artwork prints on new quotations and previews."
-                : "No custom artwork: documents use the built-in logo."}
+                ? "Custom logo prints on new quotations and previews."
+                : "Built-in logo prints on new quotations and previews."}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="cursor-pointer text-caption font-medium text-accent-700 hover:underline">
-                {logoBusy ? "Uploading…" : hasLogo ? "Replace artwork" : "Upload artwork"}
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp"
-                  className="sr-only"
-                  disabled={logoBusy}
-                  onChange={(event) => {
-                    void pickLogo(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
+            <p className="text-caption text-ink-500">
+              Shows in the quotation header.
+              {logoMeta ? <span className="tnum"> {logoMeta}</span> : null}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => logoFileRef.current?.click()}
+                disabled={logoBusy}
+              >
+                {logoBusy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}
+              </Button>
+              <input
+                ref={logoFileRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                disabled={logoBusy}
+                onChange={(event) => {
+                  void pickLogo(event.target.files?.[0]);
+                  event.target.value = "";
+                }}
+              />
               {hasLogo ? (
                 <button
                   type="button"
