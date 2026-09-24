@@ -17,6 +17,17 @@ var htmlTemplate embed.FS
 //go:embed template/css/*
 var cssTemplate embed.FS
 
+// BakedInLogo returns the built-in company artwork shipped with the app.
+// Uploaded logos override it per profile; this is the fallback the Settings
+// preview shows when no upload exists.
+func BakedInLogo() ([]byte, error) {
+	logoBytes, err := backAssets.ReadFile("assets/arcon-logo.png")
+	if err != nil {
+		return nil, fmt.Errorf("load logo asset: %w", err)
+	}
+	return logoBytes, nil
+}
+
 func readTemplate(q *Quotation) error {
 	cssContent, err := cssTemplate.ReadFile("template/css/template-fixed.css")
 	if err != nil {
