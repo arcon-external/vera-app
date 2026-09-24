@@ -32,6 +32,10 @@ module.exports = {
         // Neutral ramp chosen so every text-bearing step clears WCAG AA (4.5:1)
         // on the paper surfaces; ink-350/300 are reserved for disabled text,
         // placeholder text, and decorative glyphs only.
+        // WARNING: bg-ink-*/<alpha> utilities do not compile under Tailwind
+        // 3.1 (verified: the class silently vanishes from the bundle while
+        // text-ink-* and other bg-*/<alpha> work). Scrims and translucent
+        // ink fills must use inline rgba(28, 27, 25, a) instead.
         ink: {
           950: "#1c1b19",
           900: "#2b2a27",

@@ -28,7 +28,8 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
   const bindings = useMemo(() => loadBindings(), []);
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/45 p-5"
+      className="fixed inset-0 z-50 flex items-center justify-center p-5"
+      style={{ backgroundColor: "rgba(28, 27, 25, 0.45)" }}
       onClick={onClose}
       role="presentation"
     >
