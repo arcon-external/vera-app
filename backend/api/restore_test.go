@@ -264,6 +264,116 @@ func stubDumpTools(t *testing.T, snapshotBytes string) {
 	t.Cleanup(func() { execCommand = previous })
 }
 
+// stubRestoreWarning makes pg_dump run for real while pg_restore is routed
+// through a wrapper that runs the real binary and then exits 1 with a
+// benign warning on stderr. It reproduces the production incident where a
+// non-superuser role is denied a privilege statement though all data lands.
+func stubRestoreWarning(t *testing.T, realRestore string) {
+	t.Helper()
+	wrapper := "#!/bin/sh\n" +
+		"REAL=\"$1\"\n" +
+		"shift\n" +
+		"\"$REAL\" \"$@\"\n" +
+		"status=$?\n" +
+		"if [ $status -eq 0 ]; then\n" +
+		"  echo 'pg_restore: WARNING: permission denied to change owner of SCHEMA public' >&2\n" +
+		"  exit 1\n" +
+		"fi\n" +
+		"exit $status\n"
+	wrapperPath := filepath.Join(t.TempDir(), "pg_restore_warn.sh")
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
+		t.Fatalf("write restore wrapper: %v", err)
+	}
+	previous := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if filepath.Base(name) == filepath.Base(realRestore) {
+			return exec.Command(wrapperPath, append([]string{realRestore}, args...)...)
+		}
+		return exec.Command(name, args...)
+	}
+	t.Cleanup(func() { execCommand = previous })
+}
+
+func TestRestoreBenignWarningStillSucceeds(t *testing.T) {
+	requireBinaries(t)
+	server, database, token := adminTestSetup(t, "vera_api_restore_warn")
+	server.SetBackupDir(t.TempDir())
+	server.SetDSN(database.DSN())
+	ctx := context.Background()
+
+	// A genuine dump of the current test database.
+	dumpPath := filepath.Join(t.TempDir(), "source.dump")
+	if out, err := exec.Command(pgDumpBin, "-Fc", "-f", dumpPath, "-d", database.DSN()).CombinedOutput(); err != nil {
+		t.Fatalf("pg_dump source: %v (%s)", err, firstLine(out))
+	}
+	dumpBytes, err := os.ReadFile(dumpPath)
+	if err != nil {
+		t.Fatalf("read source dump: %v", err)
+	}
+
+	// Marker row created AFTER the dump: a successful restore must remove it.
+	hash, err := auth.HashPassword("marker-password")
+	if err != nil {
+		t.Fatalf("hash marker password: %v", err)
+	}
+	if _, err := database.CreateUser(ctx, "restore-warn-marker@example.com", "Marker", hash, "staff"); err != nil {
+		t.Fatalf("create marker user: %v", err)
+	}
+
+	stubRestoreWarning(t, pgRestoreBin)
+
+	body, contentType := multipartDump(t, "dump", "restore.dump", dumpBytes)
+	code, response := postRestore(t, server, token, body, contentType)
+	if code != http.StatusOK {
+		t.Fatalf("restore with benign warning = %d; want 200 (%v)", code, response["error"])
+	}
+	warnings, _ := response["restoreWarnings"].(string)
+	if !strings.Contains(warnings, "permission denied") {
+		t.Errorf("restoreWarnings = %q; want the pg_restore warning", warnings)
+	}
+	if _, present := response["quotations"]; !present {
+		t.Error("response has no quotations count")
+	}
+	// The bootstrap admin comes back with the dump: the data restore
+	// really ran, this is not an empty-schema false success.
+	if _, err := database.GetUserByEmail(ctx, "api-admin@example.com"); err != nil {
+		t.Error("bootstrap admin missing after restore; want the dumped data back")
+	}
+	if _, err := database.GetUserByEmail(ctx, "restore-warn-marker@example.com"); err == nil {
+		t.Error("marker user survived the restore; want it rolled back")
+	}
+	count, err := database.AuditCount(ctx, "backup.restore")
+	if err != nil {
+		t.Fatalf("audit count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("backup.restore audit entries = %d; want 1", count)
+	}
+}
+
+func TestRestoreOutputTailCapsAndKeepsFailingStatement(t *testing.T) {
+	var noisy strings.Builder
+	for i := 0; i < 200; i++ {
+		fmt.Fprintf(&noisy, "pg_restore: line %03d of chatter\n", i)
+	}
+	noisy.WriteString("pg_restore: error: could not execute query: ERROR: permission denied to change owner of SCHEMA public\n")
+	noisy.WriteString("Command was: ALTER SCHEMA public OWNER TO postgres;\n")
+
+	tail := restoreOutputTail([]byte(noisy.String()))
+	if len(tail) > 2100 {
+		t.Errorf("tail is %d bytes; want capped near 2000", len(tail))
+	}
+	if !strings.Contains(tail, "Command was: ALTER SCHEMA public OWNER TO postgres;") {
+		t.Errorf("tail = %q; want the failing statement to survive", tail)
+	}
+	if strings.Contains(tail, "line 000 of chatter") {
+		t.Errorf("tail keeps ancient chatter; want only the tail")
+	}
+	if got := restoreOutputTail(nil); got != "" {
+		t.Errorf("empty output tail = %q; want empty", got)
+	}
+}
+
 func TestRestoreSnapshotUploadsToSink(t *testing.T) {
 	server, database, token := adminTestSetup(t, "vera_api_restore_sink")
 	backupDir := t.TempDir()
