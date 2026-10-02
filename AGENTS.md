@@ -374,30 +374,46 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    with the updater — never rename by hand. Staff download links must
    point at the public `vera-downloads-508411` bucket mirror, never at
    GitHub release assets (the private repo 404s anyone without access).
-8. Mirror the three installers into the public bucket. Staff cannot reach
-   GitHub release assets, so a release that is not mirrored is a release
-   nobody can download:
+8. **The `Announce to the updater` job does the mirroring and the updater
+   variables for you.** It runs last, gated on all three installer jobs, and is
+   the only thing that makes an installed desktop offer the new version. Watch
+   for it to go green — it is not cosmetic:
+
+   - mirrors the three installers to `gs://vera-downloads-508411/`, after
+     verifying each release asset against its `.sha256` sidecar. Staff cannot
+     reach GitHub release assets (the repo is private), so a release that is not
+     mirrored is a release nobody can download;
+   - proves each public URL serves before anything is announced, so the app is
+     never told to offer a 404;
+   - sets the six `VERA_APP_*` variables on `vera-api`, carrying
+     `VERA_APP_MIN_SUPPORTED` forward from the live revision rather than
+     hard-coding a floor;
+   - fails if `GET /v1/app/latest` still reports the old version.
+
+   It **fails** when the GCP WIF secrets are absent rather than skipping, because
+   skipping is exactly the bug it exists to prevent. It **skips** for pre-release
+   tags (`v0.5.0-rc1` and friends): those get installers built and attached but
+   are not pushed to every installed copy.
+
+   Re-run it by hand after fixing whatever it complained about:
    ```bash
-   gs://vera-downloads-508411/Vera-<version>-{macos-universal.dmg,windows-amd64-installer.exe,windows-arm64-installer.exe}
+   gh run rerun --repo arcon-external/vera-app --failed    # or re-run the job
    ```
-   Verify the sidecars with `shasum -a 256 -c` before uploading.
-9. **Point the app at the new release.** The update check reads
-   `VERA_APP_*` from the Cloud Run service's environment, not from GitHub, so
-   nothing announces a release until these are set. Skipping this is the
-   single easiest way to ship a release the app never offers:
+
+   To do it outside CI, the script is the whole sequence and takes `--dry-run`,
+   which runs every check and changes nothing:
    ```bash
-   gcloud run services update vera-api --project=vera-app-508411 --region asia-southeast1 \
-     --update-env-vars "VERA_APP_LATEST=v0.2.0,\
-   VERA_APP_MIN_SUPPORTED=v0.1.0,\
-   VERA_APP_NOTES_URL=https://github.com/arcon-external/vera-app/releases/tag/v0.2.0,\
-   VERA_APP_DOWNLOAD_WINDOWS=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-windows-amd64-installer.exe,\
-   VERA_APP_DOWNLOAD_WINDOWS_ARM64=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-windows-arm64-installer.exe,\
-   VERA_APP_DOWNLOAD_MACOS=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-macos-universal.dmg"
+   scripts/announce-release.sh --version v0.4.0 --dry-run
+   scripts/announce-release.sh --version v0.4.0
    ```
-   Then confirm the app can see it — this is the check that was missing:
+
+9. **Confirm the app can see the release** — the check that was missing when
+   v0.4.0 shipped invisible:
    ```bash
    curl -s https://api.arconpentapersada.co.id/v1/app/latest | grep -o '"latest": "[^"]*"'
    ```
+   It must print the tag you just pushed. If it prints anything older, the
+   announce job failed; read its log before doing anything else.
 10. Add a Download section to the release notes with all three filenames plus one
     install line each, and these prerequisites:
    - Windows: SmartScreen will warn on unsigned builds — expected until signing.

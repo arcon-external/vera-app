@@ -164,3 +164,88 @@ jobs:
             Vera-${{ github.ref_name }}-macos-universal.dmg \
             Vera-${{ github.ref_name }}-macos-universal.dmg.sha256 \
             --clobber
+
+  announce:
+    name: Announce to the updater
+    # Last, and only once all three installers are on the release. The updater
+    # learns about releases from six VERA_APP_* variables on the vera-api Cloud
+    # Run service and nothing else announces anything -- not the tag, not the
+    # GitHub Release. v0.4.0 shipped without this step existing and the app went
+    # on offering v0.3.5 until a user reported it, so the step is now automatic
+    # and fails loudly rather than being remembered.
+    needs: [windows, windows-arm64, macos]
+    runs-on: ubuntu-latest
+    # Least privilege for this job: read the release assets, mint a WIF token.
+    permissions:
+      contents: read
+      id-token: write
+    # Two tags in quick succession would race on the same Cloud Run env vars.
+    concurrency:
+      group: announce-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - name: Decide whether this tag should be announced
+        id: announce
+        run: |
+          # A pre-release tag gets its installers built and attached, but must
+          # not be pushed to every installed desktop. This is a deliberate skip,
+          # not a failure: unlike missing credentials below, nothing is broken
+          # and the release is still doing what it was cut for.
+          if [[ "${{ github.ref_name }}" =~ -[0-9A-Za-z.-]+$ ]]; then
+            echo "::notice::ref_name ${{ github.ref_name }} is a pre-release; building only, not announcing to all installed copies."
+            echo "should=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the updater credentials are configured
+        if: steps.announce.outputs.should == 'true'
+        run: |
+          # Fails here rather than skipping, deliberately. deploy.yml skips
+          # cleanly when its secrets are absent because nothing breaks if the
+          # API is not redeployed. Here, skipping is the exact bug being fixed:
+          # a release that reaches staff with no announcement anywhere, and no
+          # signal that the announce step did not happen.
+          for secret in GCP_WIF_PROVIDER GCP_SERVICE_ACCOUNT; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::$secret is not set, so this release cannot be announced. The installers are on the release, but no installed copy will be told about them."
+              echo "See docs/api-deploy.md for the one-time WIF setup."
+              exit 1
+            fi
+          done
+        env:
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Checkout
+        if: steps.announce.outputs.should == 'true'
+        uses: actions/checkout@v6
+
+      - name: Authenticate to Google Cloud
+        if: steps.announce.outputs.should == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Check the tools the announce script needs
+        if: steps.announce.outputs.should == 'true'
+        run: |
+          # Named up front so a runner-image change surfaces as "gcloud is
+          # missing" rather than a confusing failure from inside the script.
+          missing=""
+          for tool in gh gcloud jq curl; do
+            command -v "$tool" >/dev/null || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::runner image is missing:$missing"
+            exit 1
+          fi
+
+      - name: Mirror installers and point the updater at this release
+        if: steps.announce.outputs.should == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: ./scripts/announce-release.sh --version "${{ github.ref_name }}"
