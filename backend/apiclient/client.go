@@ -16,10 +16,10 @@ import (
 // Client talks to veraserver over TLS. The zero token provider means
 // unauthenticated (used for login and health checks).
 type Client struct {
-	baseURL        string
 	token          func() string
 	http           *http.Client
 	OnUnauthorized func()
+	baseURL        string
 }
 
 // BaseURL reports the API address this client talks to. The verification

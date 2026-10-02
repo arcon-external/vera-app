@@ -17,10 +17,10 @@ var changelogRaw string
 // Empty means unconfigured: clients treat that as "no update info", and the
 // updater never prompts on what it cannot name.
 type appRelease struct {
+	Downloads    map[string]string `json:"downloads"`
 	Latest       string            `json:"latest"`
 	MinSupported string            `json:"minSupported"`
 	NotesURL     string            `json:"notesUrl"`
-	Downloads    map[string]string `json:"downloads"`
 }
 
 // latestRelease reads the release state from the environment. Values are

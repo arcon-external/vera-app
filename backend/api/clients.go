@@ -44,9 +44,9 @@ func (s *Server) listClients(context echo.Context) error {
 
 func (s *Server) createClient(context echo.Context) error {
 	var request struct {
-		Code    int    `json:"code"`
 		Name    string `json:"name"`
 		Address string `json:"address"`
+		Code    int    `json:"code"`
 	}
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -76,9 +76,9 @@ func (s *Server) updateClient(context echo.Context) error {
 		return nil
 	}
 	var request struct {
+		Code    *int   `json:"code"`
 		Name    string `json:"name"`
 		Address string `json:"address"`
-		Code    *int   `json:"code"`
 	}
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})

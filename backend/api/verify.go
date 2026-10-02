@@ -45,32 +45,30 @@ type verifyFieldDiff struct {
 	Label   string
 	Claimed string
 	Record  string
-	Matches bool
 	Meaning string
+	Matches bool
 }
 
 // verifyView is the entire render surface. Fields absent from this struct
 // cannot reach the page, which is the structural guarantee that internal
 // economics never leak through verification.
 type verifyView struct {
-	Verdict   string
-	Headline  string
-	Detail    string
-	LookupID  string
-	QuoteNo   string
-	Revision  string
-	IssueDate string
-	Recipient string
-	Issuer    string
-	Total     string
-	Diffs     []verifyFieldDiff
-	AnyClaim  bool
-	// ThemeP* brand colors for this page, resolved per request from the
-	// company profile. Empty means "use the stylesheet default".
+	Issuer       string
+	Total        string
+	Detail       string
+	LookupID     string
+	QuoteNo      string
+	Revision     string
+	Headline     string
+	IssueDate    string
+	Verdict      string
+	Recipient    string
+	ThemePInk    string
+	ThemePSoft   string
 	ThemePDeep   string
 	ThemePAccent string
-	ThemePSoft   string
-	ThemePInk    string
+	Diffs        []verifyFieldDiff
+	AnyClaim     bool
 }
 
 func (v verifyView) IsVerified() bool   { return v.Verdict == verdictValid }
@@ -427,12 +425,12 @@ func clientIP(context echo.Context) string {
 // expensive and noisy — not as an access control. The tracked set is capped
 // so a flood from many distinct addresses cannot grow it without bound.
 type ipRateLimiter struct {
-	mu        sync.Mutex
+	windowEnd time.Time
+	seen      map[string]int
 	window    time.Duration
 	limit     int
 	maxKeys   int
-	seen      map[string]int
-	windowEnd time.Time
+	mu        sync.Mutex
 }
 
 // maxTrackedIPsPerWindow bounds limiter memory. Beyond it the window resets,

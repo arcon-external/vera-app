@@ -12,15 +12,14 @@ import (
 
 // Service orchestrates authentication over the Postgres store.
 type Service struct {
-	store   *store.Store
-	limiter *RateLimiter
-	now     func() time.Time
-
-	mu           sync.Mutex
-	currentToken string
-	hasStatic    bool
-	staticUser   *store.AuthUser
 	staticErr    error
+	store        *store.Store
+	limiter      *RateLimiter
+	now          func() time.Time
+	staticUser   *store.AuthUser
+	currentToken string
+	mu           sync.Mutex
+	hasStatic    bool
 }
 
 func NewService(database *store.Store) *Service {

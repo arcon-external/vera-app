@@ -8,24 +8,24 @@ import (
 // AuthUserDTO is the user shape exposed to the frontend. It never contains
 // password hashes or session tokens.
 type AuthUserDTO struct {
-	ID                 int64
 	Email              string
 	DisplayName        string
 	Role               string
-	IsActive           bool
-	MustChangePassword bool
 	LastLoginAt        string
 	AvatarURL          string
+	ID                 int64
+	IsActive           bool
+	MustChangePassword bool
 }
 
 // serverUser mirrors the veraserver user payload.
 type serverUser struct {
-	ID                 int64  `json:"id"`
 	Email              string `json:"email"`
 	DisplayName        string `json:"displayName"`
 	Role               string `json:"role"`
-	MustChangePassword bool   `json:"mustChangePassword"`
 	AvatarURL          string `json:"avatarUrl"`
+	ID                 int64  `json:"id"`
+	MustChangePassword bool   `json:"mustChangePassword"`
 }
 
 // AuthAPI exposes authentication to the frontend. It talks to veraserver;
@@ -158,12 +158,12 @@ func (a *AuthAPI) LogoutEverywhere() error {
 
 // DeletionRequest is a pending account-deletion request.
 type DeletionRequest struct {
-	ID          int64
-	UserID      int64
 	Email       string
 	DisplayName string
 	Status      string
 	RequestedAt string
+	ID          int64
+	UserID      int64
 }
 
 // RequestDeletion opens a deletion request for the signed-in user. The
@@ -174,8 +174,8 @@ func (a *AuthAPI) RequestDeletion(confirmed bool) (DeletionRequest, error) {
 		return DeletionRequest{}, err
 	}
 	var response struct {
-		ID     int64  `json:"id"`
 		Status string `json:"status"`
+		ID     int64  `json:"id"`
 	}
 	if err := client.Post("/v1/auth/deletion-request", map[string]bool{
 		"confirm": confirmed,
@@ -187,8 +187,8 @@ func (a *AuthAPI) RequestDeletion(confirmed bool) (DeletionRequest, error) {
 
 // OwnDeletionRequest is a signed-in user's own deletion request status.
 type OwnDeletionRequest struct {
-	ID     int64
 	Status string
+	ID     int64
 }
 
 // MyDeletionRequests lists the signed-in user's own deletion requests,
@@ -199,8 +199,8 @@ func (a *AuthAPI) MyDeletionRequests() ([]OwnDeletionRequest, error) {
 		return nil, err
 	}
 	var response []struct {
-		ID     int64  `json:"id"`
 		Status string `json:"status"`
+		ID     int64  `json:"id"`
 	}
 	if err := client.Get("/v1/auth/deletion-requests/mine", &response); err != nil {
 		return nil, err
@@ -214,10 +214,10 @@ func (a *AuthAPI) MyDeletionRequests() ([]OwnDeletionRequest, error) {
 
 // EmailChangeRequest is a staff email-change request with its outcome.
 type EmailChangeRequest struct {
-	ID            int64
 	ProposedEmail string
 	Status        string
 	RequestedAt   string
+	ID            int64
 }
 
 // RequestEmailChange files an email-change request carrying a proposed
@@ -229,9 +229,9 @@ func (a *AuthAPI) RequestEmailChange(proposedEmail string) (EmailChangeRequest, 
 		return EmailChangeRequest{}, err
 	}
 	var response struct {
-		ID            int64  `json:"id"`
 		ProposedEmail string `json:"proposedEmail"`
 		Status        string `json:"status"`
+		ID            int64  `json:"id"`
 	}
 	if err := client.Post("/v1/auth/email-change-request", map[string]string{
 		"proposedEmail": proposedEmail,

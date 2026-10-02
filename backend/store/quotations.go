@@ -14,17 +14,17 @@ import (
 )
 
 type RevisionItem struct {
-	ItemNo                int
 	Description           string
-	Qty                   int64
 	UoM                   string
+	ItemNo                int
+	Qty                   int64
 	UnitPrice             int64
-	MarginEnabled         bool
-	MarginPercent         int16
 	MarginAmount          int64
 	OriginalTotal         int64
 	MarginalizedUnitPrice int64
 	MarginalizedTotal     int64
+	MarginPercent         int16
+	MarginEnabled         bool
 }
 
 type RevisionTotals struct {
@@ -46,91 +46,74 @@ type RevisionTotals struct {
 // for a new quotation; the store allocates its sequence in the same
 // transaction and starts that quotation at revision 0.
 type RevisionDraft struct {
-	QuoteNumber     string
-	CustomerCode    int16
-	CustomerName    string
-	CustomerAddress string
-	RevisionNumber  int16
-
+	TaxCategory      string
+	PDFPath          string
+	CustomerName     string
+	CustomerAddress  string
+	QuotationUUID    string
 	RecipientName    string
 	RecipientAddress string
 	Subject          string
 	Incoterm         string
-	ValidityDays     int16
-	PaymentTermDays  int16
-	LeadTimeDays     int16
-	DiscountPercent  int16
+	IssuerName       string
+	CanonicalSHA256  string
+	SigKeyID         string
+	Signature        string
 	TaxZone          string
-	TaxCategory      string
-	TaxType          string
+	DocumentHash     string
 	ServiceCategory  string
+	QuoteNumber      string
+	HTMLSnapshot     string
+	TaxType          string
+	Items            []RevisionItem
+	PDFData          []byte
+	Totals           RevisionTotals
 	TaxRateBps       int16
-
-	Items        []RevisionItem
-	Totals       RevisionTotals
-	HTMLSnapshot string
-	PDFData      []byte
-	PDFPath      string
-	DocumentHash string
-
-	// Signature authenticates the canonical field set (see backend/signing.go).
-	// Empty on legacy revisions; they self-heal on first verification.
-	Signature       string
-	SigKeyID        string
-	CanonicalSHA256 string
-	// IssuerName is the company identity as issued. It is signed, so a later
-	// company rename cannot rewrite or invalidate historical documents.
-	IssuerName string
-	// QuotationUUID carries the external identity for a brand-new quotation
-	// so the caller can render its verification code before persisting.
-	// Empty for revisions and for callers that let the database assign it.
-	QuotationUUID string
+	CustomerCode     int16
+	DiscountPercent  int16
+	LeadTimeDays     int16
+	PaymentTermDays  int16
+	ValidityDays     int16
+	RevisionNumber   int16
 }
 
 type QuotationSummary struct {
-	ID             int64
+	CreatedAt      time.Time
 	QuoteNumber    string
-	RevisionNumber int16
 	CustomerName   string
 	Subject        string
-	CreatedAt      time.Time
+	ID             int64
 	GrandTotal     int64
+	RevisionNumber int16
 }
 
 type QuotationRecord struct {
-	QuotationSummary
-	// UUID is the stable external key, decoupled from the human-facing
-	// quote number. Bigint ID stays the relational key.
-	UUID             string
-	CustomerCode     int16
-	CustomerAddress  string
-	RecipientName    string
-	RecipientAddress string
-	Incoterm         string
-	ValidityDays     int16
-	PaymentTermDays  int16
-	LeadTimeDays     int16
-	DiscountPercent  int16
-	TaxZone          string
-	TaxCategory      string
-	TaxType          string
-	ServiceCategory  string
-	TaxRateBps       int16
-	Items            []RevisionItem
-	Totals           RevisionTotals
-	HTMLSnapshot     string
-	PDFData          []byte
-	PDFPath          string
-	// ShortID is the public verification handle (non-enumerable prefix of
-	// the quotation UUID) and Signature authenticates the canonical field
-	// set. Both are set by the store/export path, never by clients.
-	ShortID         string
-	Signature       string
-	SigKeyID        string
-	CanonicalSHA256 string
-	// AvailableRevisions lists every revision number for the quotation,
-	// newest first, so the UI can offer a revision selector.
+	UUID               string
+	ServiceCategory    string
+	PDFPath            string
+	CustomerAddress    string
+	RecipientName      string
+	RecipientAddress   string
+	Incoterm           string
+	CanonicalSHA256    string
+	SigKeyID           string
+	Signature          string
+	ShortID            string
+	TaxZone            string
+	TaxCategory        string
+	HTMLSnapshot       string
+	TaxType            string
 	AvailableRevisions []int16
+	Items              []RevisionItem
+	PDFData            []byte
+	QuotationSummary
+	Totals          RevisionTotals
+	CustomerCode    int16
+	TaxRateBps      int16
+	DiscountPercent int16
+	LeadTimeDays    int16
+	PaymentTermDays int16
+	ValidityDays    int16
 }
 
 func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) {

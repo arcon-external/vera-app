@@ -6,17 +6,17 @@ import (
 )
 
 type attempt struct {
-	failures int
 	blocked  time.Time
+	failures int
 }
 
 // RateLimiter blocks a key after maxFailures consecutive failures until the
 // cooldown passes. A success resets the counter.
 type RateLimiter struct {
-	mu          sync.Mutex
+	attempts    map[string]*attempt
 	maxFailures int
 	cooldown    time.Duration
-	attempts    map[string]*attempt
+	mu          sync.Mutex
 }
 
 func NewRateLimiter(maxFailures int, cooldown time.Duration) *RateLimiter {

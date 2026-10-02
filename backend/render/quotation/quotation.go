@@ -44,75 +44,45 @@ type Named interface {
 // other's fields, which is what keeps a change to one from silently altering the
 // other.
 type Input struct {
-	// HTML is the executed quotation template. The browser prints it as-is; the
-	// native engine ignores it entirely. If these two ever disagree about the
-	// document's content that is a bug in build(), not in a renderer.
-	HTML string
-
-	// Fonts carries the Inter faces the native renderer embeds in the PDF. It is
-	// the application's own embedded asset filesystem, so the faces are the same
-	// bytes the stylesheet feeds the browser renderer and the two cannot drift.
-	//
-	// It is an fs.FS rather than a directory path on purpose. A path is resolved
-	// against the process working directory, which a desktop application does not
-	// control: launched from Finder or a Start-menu shortcut the working
-	// directory is wherever the user happened to be, and the export failed with
-	// "open assets/inter-medium.ttf: no such file or directory" on a machine
-	// where the file was present in the application directory all along. The
-	// bytes are already in the binary, so there is nothing to look up.
-	Fonts fs.FS
-
-	// Brand theme. Four independent hex columns; empty falls back to the
-	// stylesheet default.
-	Theme Theme
-
-	// LogoPNG and QRPNG are decoded artwork, nil when absent.
-	LogoPNG []byte
-	QRPNG   []byte
-
-	CompanyName    string
-	CompanyAddress string
-
-	Subject          string
-	RecipientName    string
-	RecipientCompany string
-	RecipientAddress string
-
-	QuoteNumber string
-	Date        string
-	ValidUntil  string
-	RevisionID  uint16
-
-	// Terms are the numbered conditions. The renderer turns these into the
-	// sentences it prints, because the wording is part of the page and each
-	// renderer has to match the other.
-	Validity        uint8
-	PaymentTerm     uint8
-	LeadTime        uint8
-	Incoterm        string
-	ServiceCategory string
-
-	Items []Item
-
-	DisplaySubTotal   string
-	DisplayDiscount   string
+	Fonts             fs.FS
+	Theme             Theme
+	Date              string
 	DisplayPpn        string
+	VerificationCode  string
+	CompanyName       string
+	CompanyAddress    string
+	Subject           string
+	RecipientName     string
+	RecipientCompany  string
+	RecipientAddress  string
+	QuoteNumber       string
+	HTML              string
+	ValidUntil        string
 	DisplayGrandTotal string
+	DisplayDiscount   string
+	DisplaySubTotal   string
+	ServiceCategory   string
+	Incoterm          string
+	Items             []Item
+	LogoPNG           []byte
+	QRPNG             []byte
+	RevisionID        uint16
+	LeadTime          uint8
+	PaymentTerm       uint8
+	Validity          uint8
 	DiscountPercent   uint8
-
-	VerificationCode string
 }
 
 // Item is one quotation line as the quotation holds it. DisplayDesc is the HTML
 // formatDescription produced, bullets included; deciding how to lay that out is
 // the renderer's problem.
 type Item struct {
-	No          int
 	DisplayDesc string
-	Qty         uint32
 	UoM         string
 	UnitPrice   string
 	Total       string
+	No          int
+	Qty         uint32
 }
 
 // Theme is the four-column brand palette. The quotation and portal sets are

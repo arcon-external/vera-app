@@ -12,16 +12,16 @@ import (
 
 // AuthUser is the user record used by the authentication service.
 type AuthUser struct {
-	ID                 int64
+	LastLoginAt        time.Time
 	Email              string
 	DisplayName        string
 	PasswordHash       string
 	Role               string
+	AvatarMime         string
+	Avatar             []byte
+	ID                 int64
 	IsActive           bool
 	MustChangePassword bool
-	LastLoginAt        time.Time
-	Avatar             []byte
-	AvatarMime         string
 }
 
 // CreateUser inserts a user. Email/password is the only login method, so a

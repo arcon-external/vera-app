@@ -18,17 +18,16 @@ import (
 // sessions: login issues a bearer token, and protected routes validate it
 // (expiry + revocation + active user) on every request.
 type Server struct {
-	echo      *echo.Echo
-	database  *store.Store
-	service   *auth.Service
-	templates *backend.Quotation
-	backupDir string
-	dsn       string
-	backups   backupSource
-	sink      backupSink
-	signer    *backend.Signer
-	// verifyLimiter throttles the public verification surface per client IP.
+	backups       backupSource
+	sink          backupSink
+	echo          *echo.Echo
+	database      *store.Store
+	service       *auth.Service
+	templates     *backend.Quotation
+	signer        *backend.Signer
 	verifyLimiter *ipRateLimiter
+	backupDir     string
+	dsn           string
 }
 
 // SetSigner attaches the revision signer. Without it, exports store unsigned

@@ -11,13 +11,13 @@ import (
 // file one with a proposed address; an admin approves or rejects it.
 // Admins change emails directly via SetUserEmail and never need a row here.
 type EmailChangeRequest struct {
-	ID            int64
-	UserID        int64
+	RequestedAt   time.Time
 	Email         string
 	DisplayName   string
 	ProposedEmail string
 	Status        string
-	RequestedAt   time.Time
+	ID            int64
+	UserID        int64
 }
 
 // validEmailFormat is deliberately light: trimmed, non-empty, with address

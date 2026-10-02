@@ -31,9 +31,9 @@ import (
 func New() quotation.Named { return &lazy{} }
 
 type lazy struct {
-	once sync.Once
-	eng  *Engine
 	err  error
+	eng  *Engine
+	once sync.Once
 }
 
 // Name implements quotation.Named.

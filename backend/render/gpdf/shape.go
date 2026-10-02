@@ -21,19 +21,11 @@ package gpdf
 
 // shaper turns a string into positioned glyphs for one font program.
 type shaper struct {
-	cmap map[rune]int
-	hmtx map[int]uint16
-	upem float64
-
-	// kern maps a glyph pair to its x adjustment in font units, negative to
-	// tighten.
-	kern map[[2]int]int
-	// ligatures maps the first glyph of a sequence to its substitutions, longest
-	// match first.
-	ligatures map[int][]ligature
-
-	// fallbackGID is used for a rune with no glyph, so an unmapped character still
-	// advances the pen instead of silently swallowing the rest of the line.
+	cmap        map[rune]int
+	hmtx        map[int]uint16
+	kern        map[[2]int]int
+	ligatures   map[int][]ligature
+	upem        float64
 	fallbackGID int
 	numHMetrics int
 }
@@ -48,11 +40,10 @@ type ligature struct {
 // glyphRun is one shaped glyph: its id, its x offset from the pen position, and
 // its advance.
 type glyphRun struct {
+	text    string
 	gid     int
 	dx      float64
 	advance float64
-	// text is the source text this glyph covers, for text extraction.
-	text string
 }
 
 // parseShaper reads cmap, hmtx, GPOS kerning and GSUB ligatures from a font

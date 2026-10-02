@@ -45,15 +45,15 @@ const (
 
 // gradient is one rect to convert into a shading.
 type gradient struct {
-	x0, y0, w, h float64 // page coordinates, y measured downward from the top
-	c0, c1       string  // "#RRGGBB" endpoints
-	pageH        float64 // page height, needed to flip y back to PDF's sense
-	objNum       int     // assigned during rebuild
-
-	// from is where this gradient's search for its sentinel begins. It is
-	// carried on the gradient rather than in the loop, so that the offset
-	// survives the stream being rewritten under it.
-	from int
+	c0     string
+	c1     string
+	x0     float64
+	y0     float64
+	w      float64
+	h      float64
+	pageH  float64
+	objNum int
+	from   int
 }
 
 var (

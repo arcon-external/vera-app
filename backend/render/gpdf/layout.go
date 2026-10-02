@@ -18,39 +18,37 @@ import (
 // once, in the draw layer.
 
 type box struct {
-	x, y, w, h float64
-	fill       string
-	stroke     string
-	lw         float64
-	radius     float64
-	gradient   *ramp
-	// path, when set, overrides the rounded-rectangle outline. A disc marker has
-	// no corner-radius form: its radius is half the diameter, which leaves every
-	// straight edge at zero length and degenerates the outline into a shape whose
-	// fill shows a notch.
-	path *document.Path
-	// clip, when set, is a rounded outline the box must be intersected with.
-	// Only the items table needs it: its zebra rows and rules reach the outer
-	// edge, where the table's corners are rounded.
-	clip *clipRegion
+	gradient *ramp
+	path     *document.Path
+	clip     *clipRegion
+	fill     string
+	stroke   string
+	x        float64
+	y        float64
+	w        float64
+	h        float64
+	lw       float64
+	radius   float64
 }
 
 type ramp struct{ c0, c1 string }
 
 type run struct {
-	x, baseline float64
-	size        float64
-	text        string
-	bold        bool
-	color       string
-	// tracking adds space after each character, in points. Only the letterspaced
-	// eyebrow label uses it.
+	text     string
+	color    string
+	x        float64
+	baseline float64
+	size     float64
 	tracking float64
+	bold     bool
 }
 
 type picture struct {
-	x, y, w, h float64
-	data       []byte
+	data []byte
+	x    float64
+	y    float64
+	w    float64
+	h    float64
 }
 
 // clipRegion is a rounded outline that a set of boxes must be intersected with.
@@ -446,6 +444,13 @@ func (e *Engine) derive(in Input) metrics {
 }
 
 // rowBlock is one laid-out table row.
+//
+// This is the one type in the engine left in its natural order. The analyzer
+// wants a different permutation for eight bytes of collector scan prefix, and
+// there are about thirteen of these per document, so the saving is roughly a
+// hundred bytes on an export. Leading with the pointer-free height was tried and
+// is worse (152 leading bytes against 144). Readability wins at this volume;
+// see alignment_test.go for the rule applied to the types where it pays.
 type rowBlock struct {
 	item   Item
 	lines  []string

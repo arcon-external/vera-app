@@ -36,11 +36,11 @@ func ShortIDForRevision(uuid string, revision int16) string {
 // SigningKeyRecord is a public key in the verification registry. Private
 // keys never live here.
 type SigningKeyRecord struct {
+	CreatedAt time.Time
+	RetiredAt *time.Time
 	KeyID     string
 	PublicKey string
 	Active    bool
-	CreatedAt time.Time
-	RetiredAt *time.Time
 }
 
 // RegisterSigningKey adds a public key to the registry. Re-registering the
@@ -87,30 +87,30 @@ func (s *Store) GetSigningKey(ctx context.Context, keyID string) (SigningKeyReco
 // items, no internal economics, no customer identifiers beyond the
 // recipient already printed on the document.
 type RevisionEvidence struct {
-	ShortID          string
-	QuotationID      int64
+	CreatedAt        time.Time
+	RecipientAddress string
 	QuoteNumber      string
-	RevisionNumber   int16
+	ShortID          string
 	RecipientName    string
 	RecipientCompany string
-	RecipientAddress string
+	IssuerName       string
 	Subject          string
 	Incoterm         string
-	ValidityDays     int16
-	PaymentTermDays  int16
-	LeadTimeDays     int16
-	DiscountPercent  int16
-	IssuerName       string
-	CreatedAt        time.Time
-	Signature        string
-	SigKeyID         string
 	CanonicalSHA256  string
+	SigKeyID         string
+	Signature        string
+	Items            []EvidenceItem
 	Subtotal         int64
 	DiscountAmount   int64
 	PpnAmount        int64
 	GrandTotal       int64
 	ItemCount        int
-	Items            []EvidenceItem
+	QuotationID      int64
+	DiscountPercent  int16
+	LeadTimeDays     int16
+	PaymentTermDays  int16
+	ValidityDays     int16
+	RevisionNumber   int16
 }
 
 // EvidenceItem is the customer-visible slice of a line: description, qty,
@@ -118,8 +118,8 @@ type RevisionEvidence struct {
 // margin never enter the verification surface.
 type EvidenceItem struct {
 	Description string
-	Qty         int64
 	UoM         string
+	Qty         int64
 	UnitPrice   int64
 	Total       int64
 }

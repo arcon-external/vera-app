@@ -857,24 +857,27 @@ func (e *Engine) drawFooter(p *page, in Input, m metrics, top float64) {
 
 // totalRow is one line of the totals card.
 type totalRow struct {
-	label, value string
-	grand        bool
-	// colour overrides the card's default ink. The discount line is the only one
-	// the stylesheet tints, and it tints both its label and its value.
+	label  string
+	value  string
 	colour string
+	grand  bool
 }
 
 // totalsRows builds the totals card's lines. The labels and the conditional PPN
 // line match the template exactly.
 func (e *Engine) totalsRows(in Input) []totalRow {
+	// Keyed, not positional. The field order here is chosen for memory layout, so
+	// an unkeyed literal would silently move a value into the wrong field when
+	// that order changes -- two of these four fields are strings, so the compiler
+	// would not catch it.
 	rows := []totalRow{
-		{"Sub Total", "Rp" + in.DisplaySubTotal, false, ""},
-		{"Discount (" + in.DiscountPercent + "%)", "Rp" + in.DisplayDiscount, false, colGreen},
+		{label: "Sub Total", value: "Rp" + in.DisplaySubTotal},
+		{label: "Discount (" + in.DiscountPercent + "%)", value: "Rp" + in.DisplayDiscount, colour: colGreen},
 	}
 	if in.DisplayPpn != "" {
-		rows = append(rows, totalRow{"PPN 11%", "Rp" + in.DisplayPpn, false, ""})
+		rows = append(rows, totalRow{label: "PPN 11%", value: "Rp" + in.DisplayPpn})
 	}
-	rows = append(rows, totalRow{"Grand Total", "Rp" + in.DisplayGrandTotal, true, ""})
+	rows = append(rows, totalRow{label: "Grand Total", value: "Rp" + in.DisplayGrandTotal, grand: true})
 	return rows
 }
 

@@ -12,23 +12,23 @@ import (
 // ManagedUser is the admin-facing user shape. It never contains password
 // hashes, session tokens, or invite tokens.
 type ManagedUser struct {
-	ID                 int64
 	Email              string
 	DisplayName        string
 	Role               string
+	LastLoginAt        string
+	ID                 int64
 	IsActive           bool
 	MustChangePassword bool
-	LastLoginAt        string
 }
 
 // ManagedClient is the admin-facing client shape with its primary address
 // and archive size.
 type ManagedClient struct {
-	ID             int64
-	Code           int16
 	Name           string
 	PrimaryAddress string
+	ID             int64
 	QuotationCount int64
+	Code           int16
 }
 
 // AdminAPI exposes user management to the frontend. Every method requires an
@@ -158,13 +158,13 @@ func (a *AdminAPI) SetUserEmail(id int64, email string) (EmailChangeResult, erro
 
 // EmailChangeRow is one pending email-change request for the admin queue.
 type EmailChangeRow struct {
-	ID            int64
-	UserID        int64
 	Email         string
 	DisplayName   string
 	ProposedEmail string
 	Status        string
 	RequestedAt   string
+	ID            int64
+	UserID        int64
 }
 
 // ListEmailChangeRequests returns pending email-change requests.
@@ -201,20 +201,20 @@ func (a *AdminAPI) DecideEmailChange(id int64, approve bool) error {
 // CompanyProfile is the editable company identity for the admin-only
 // Company section of Settings.
 type CompanyProfile struct {
-	LegalName    string
-	Address      string
+	ThemeQDeep   string
+	ThemePSoft   string
 	Phone        string
 	Email        string
 	TaxID        string
-	HasLogo      bool
-	ThemeQDeep   string
-	ThemeQAccent string
+	ThemePInk    string
 	ThemeQSoft   string
+	LegalName    string
+	Address      string
 	ThemeQInk    string
 	ThemePDeep   string
 	ThemePAccent string
-	ThemePSoft   string
-	ThemePInk    string
+	ThemeQAccent string
+	HasLogo      bool
 }
 
 // GetCompanyProfile loads the company profile.

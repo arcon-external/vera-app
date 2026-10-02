@@ -10,11 +10,11 @@ import (
 // and archive size. Codes are immutable identity (numbering cycles are
 // keyed by code); names and addresses are editable.
 type ManagedClient struct {
-	ID             int64
-	Code           int16
 	Name           string
 	PrimaryAddress string
+	ID             int64
 	QuotationCount int64
+	Code           int16
 }
 
 // CustomerRef is the minimal identity Prepare needs: display name plus
