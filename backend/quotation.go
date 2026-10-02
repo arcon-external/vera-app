@@ -23,30 +23,30 @@ import (
 // QuotationInput is the data contract between the frontend and the backend.
 // The frontend sends this struct via Wails bindings when calling Prepare.
 type QuotationInput struct {
-	Items           []QuotationItemInput
+	Incoterm        string
 	Subject         string
 	RecipientName   string
-	DiscountPercent uint8
 	TaxZone         string
 	TaxCategory     string
 	TaxType         string
 	ServiceCategory string
-	Validity        uint8
+	Items           []QuotationItemInput
+	DiscountPercent uint8
 	PaymentTerm     uint8
 	LeadTime        uint8
 	CustomerID      uint8
-	Incoterm        string
+	Validity        uint8
 }
 
 // QuotationItemInput is a single line item from the frontend.
 // No is assigned by the backend. UnitPrice is in raw IDR.
 type QuotationItemInput struct {
 	Description   string
-	Qty           uint32
 	UoM           string
 	UnitPrice     uint64
+	Qty           uint32
+	MarginPercent uint16
 	MarginEnabled bool
-	MarginPercent uint8
 }
 
 // QuotationItem is a prepared line item with computed display fields
@@ -66,7 +66,7 @@ type QuotationItem struct {
 	UnitPrice                uint64
 	Total                    uint64
 	MarginEnabled            bool
-	MarginPercent            uint8
+	MarginPercent            uint16
 	No                       uint32
 	Qty                      uint32
 }
@@ -75,97 +75,77 @@ type QuotationItem struct {
 // It combines static template assets (set once at startup by readTemplate)
 // with business data (set per-export by Prepare).
 type QuotationData struct {
-	Items             []QuotationItem
-	CustomCSS         template.CSS
-	HtmlTemplate      *template.Template
-	LogoBase64        string
-	SignatureBase64   string
-	FontRegularBase64 string
-	FontBoldBase64    string
-	Date              string
-	ValidUntil        string
-	CompanyName       string
-	CompanyAddress    string
-	// ThemeQ* brand colors for this document, resolved in Prepare from the
-	// company profile (server: store; desktop: cached identity) with baked
-	// defaults when unreachable. Empty means "use the stylesheet default".
-	ThemeQDeep       string
-	ThemeQAccent     string
-	ThemeQSoft       string
-	ThemeQInk        string
-	RecipientName    string
-	RecipientCompany string
-	RecipientAddress string
-	QuoteNumber      string
-	QuoteUUID        string
-	// VerifyURL is the public verification address printed as a QR code on
-	// the document. Empty before export (the handle does not exist yet), in
-	// which case the template omits the code rather than printing a dead one.
-	VerifyURL      string
-	VerifyQRBase64 string
-	// VerifyShortID is the handle inside VerifyURL, printed in the caption so
-	// a reader (or a support call) can reference the document without
-	// scanning it.
+	HtmlTemplate              *template.Template
+	DisplayDiscountAmount     string
+	TaxZone                   string
+	LogoBase64                string
+	SignatureBase64           string
+	FontRegularBase64         string
+	FontBoldBase64            string
+	Date                      string
+	ValidUntil                string
+	CompanyName               string
+	Incoterm                  string
+	ThemeQDeep                string
+	ThemeQAccent              string
+	ThemeQSoft                string
+	ThemeQInk                 string
+	RecipientName             string
+	RecipientCompany          string
+	RecipientAddress          string
+	QuoteNumber               string
+	QuoteUUID                 string
+	VerifyURL                 string
+	VerifyQRBase64            string
 	VerifyShortID             string
-	RevisionID                uint16
+	ServiceCategory           string
 	Subject                   string
 	DisplaySubTotal           string
-	DisplayDiscountAmount     string
+	TaxType                   string
+	CustomCSS                 template.CSS
 	DisplayGrandTotal         string
-	SubTotal                  uint64
-	DiscountAmount            uint64
+	CompanyAddress            string
+	TaxCategory               string
+	DisplayNettProfit         string
+	DisplayTaxAmount          string
+	TaxLabel                  string
+	DisplayPpnAmount          string
+	Items                     []QuotationItem
 	GrandTotal                uint64
 	SellGrandTotal            uint64
-	OriginalSubTotal          uint64
-	OriginalDiscountAmount    uint64
-	OriginalGrandTotal        uint64
-	MarginalizedGrandAfterTax uint64
-	ProfitAmount              int64
-	TaxRateBps                uint16
 	TaxAmount                 uint64
-	PpnAmount                 uint64
-	DisplayPpnAmount          string
+	DiscountAmount            uint64
+	OriginalGrandTotal        uint64
 	NettProfit                int64
-	TaxLabel                  string
-	DisplayTaxAmount          string
-	DisplayNettProfit         string
-	Validity                  uint8
-	PaymentTerm               uint8
-	LeadTime                  uint8
+	OriginalDiscountAmount    uint64
+	OriginalSubTotal          uint64
+	ProfitAmount              int64
+	MarginalizedGrandAfterTax uint64
+	PpnAmount                 uint64
+	SubTotal                  uint64
+	TaxRateBps                uint16
+	RevisionID                uint16
 	DiscountPercent           uint8
-	TaxZone                   string
-	TaxCategory               string
-	TaxType                   string
-	ServiceCategory           string
+	LeadTime                  uint8
+	PaymentTerm               uint8
 	CustomerID                uint8
-	Incoterm                  string
+	Validity                  uint8
 }
 
 // Quotation is the Wails-bound application struct.
 // It owns the Wails context and the full data bag for rendering.
 type Quotation struct {
 	ctx                context.Context
-	Data               QuotationData
-	lastInput          QuotationInput
-	prepared           bool
 	store              *store.Store
 	auth               *auth.Service
+	companyIdentity    *CompanyIdentity
+	cssTemplate        *texttemplate.Template
 	archiveQuoteNumber string
+	customerDirectory  []ManagedClient
+	lastInput          QuotationInput
+	Data               QuotationData
 	archiveRevision    uint16
-	// customerDirectory caches the server-owned client list for desktop
-	// Prepare resolution. The server path always resolves via the store;
-	// both read the same truth.
-	customerDirectory []ManagedClient
-	// companyIdentity caches the stored company profile for desktop
-	// rendering. Same pattern as the client directory.
-	companyIdentity *CompanyIdentity
-	// cssTemplate is the parsed stylesheet, executed per render so theme
-	// values set by Prepare reach the CSS. Parsed once, executed often.
-	// It is a text/template, not an html/template: the stylesheet is a
-	// raw-text <style> body, and html/template HTML-escapes interpolations it
-	// cannot place in a CSS context, corrupting the embedded base64 font data
-	// URIs. See readTemplate.
-	cssTemplate *texttemplate.Template
+	prepared           bool
 }
 
 // CompanyIdentity is the quotation-relevant slice of the company profile:
@@ -522,6 +502,18 @@ func plausibleUoM(s string) bool {
 	return true
 }
 
+// MaxMarginPercent is the highest profit margin a line may carry.
+//
+// 1000% means selling at eleven times cost, which is ordinary for a low-cost
+// fitting on a service visit — the previous ceiling of 100% capped those at
+// double cost, which is not enough to build a quote around.
+//
+// It is exported because the editor clamps to the same number, and a limit that
+// exists in two places without a shared name is a limit that eventually
+// disagrees with itself. Discount percentage is a different setting and keeps
+// its own, much lower, ceiling of 100.
+const MaxMarginPercent = 1000
+
 // Prepare validates user input and populates the QuotationData business fields.
 // It does not generate the quote number — that is deferred to Export to avoid
 // consuming a sequence number if the user never saves. Returns an error
@@ -562,8 +554,8 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 			return fmt.Errorf("item %d: unit of measure %q is not a unit", i+1, item.UoM)
 		}
 
-		if item.MarginPercent > 100 {
-			return fmt.Errorf("item margin percent cannot be greater than 100")
+		if item.MarginPercent > MaxMarginPercent {
+			return fmt.Errorf("item margin percent cannot be greater than %d", MaxMarginPercent)
 		}
 	}
 

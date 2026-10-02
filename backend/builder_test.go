@@ -10,7 +10,7 @@ func TestApplyMarkup(t *testing.T) {
 	cases := []struct {
 		name   string
 		cost   uint64
-		margin uint8
+		margin uint16
 		want   uint64
 	}{
 		{"zero margin unchanged", 100000, 0, 100000},
@@ -19,6 +19,12 @@ func TestApplyMarkup(t *testing.T) {
 		{"zero cost stays zero", 0, 50, 0},
 		// Integer truncation: 999 * 15 / 100 = 149 (not 149.85)
 		{"truncates fractional rupiah", 999, 15, 1148},
+		// The ceiling: 1000% is eleven times cost, not ten.
+		{"thousand percent is eleven times cost", 150000, MaxMarginPercent, 1650000},
+		// At the ceiling the multiplier is exactly ten, so no rupiah is ever
+		// truncated -- unlike 15%, which drops a fraction. Worth pinning: the top
+		// of the range is exact where the middle is not.
+		{"thousand percent never truncates", 999, MaxMarginPercent, 10989},
 	}
 
 	for _, tc := range cases {
@@ -69,12 +75,14 @@ func TestBuildPricesDiscountsSellSide(t *testing.T) {
 	}
 }
 
-func TestPrepareRejectsMarginOver100(t *testing.T) {
+// The ceiling moved from 100 to MaxMarginPercent, so this checks the new limit
+// rather than the old one. 101% is ordinary now and must be accepted.
+func TestPrepareRejectsMarginOverCeiling(t *testing.T) {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000, MarginEnabled: true, MarginPercent: 101},
+			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 1000, MarginEnabled: true, MarginPercent: MaxMarginPercent + 1},
 		},
 		Subject:       "Test",
 		RecipientName: "Test",
@@ -85,6 +93,6 @@ func TestPrepareRejectsMarginOver100(t *testing.T) {
 		Incoterm:      "EXW",
 	})
 	if err == nil {
-		t.Fatal("expected error for margin > 100 but got nil")
+		t.Fatalf("expected error for margin > %d but got nil", MaxMarginPercent)
 	}
 }

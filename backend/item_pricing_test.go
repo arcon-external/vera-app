@@ -91,7 +91,7 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 	}
 }
 
-func TestPrepareRejectsItemMarginOver100(t *testing.T) {
+func TestPrepareRejectsItemMarginOverCeiling(t *testing.T) {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
@@ -102,7 +102,7 @@ func TestPrepareRejectsItemMarginOver100(t *testing.T) {
 				UoM:           "Lot",
 				UnitPrice:     1000,
 				MarginEnabled: true,
-				MarginPercent: 101,
+				MarginPercent: MaxMarginPercent + 1,
 			},
 		},
 		Subject:       "Test",
@@ -115,6 +115,6 @@ func TestPrepareRejectsItemMarginOver100(t *testing.T) {
 		TaxZone:       TaxZoneFTZ,
 	})
 	if err == nil {
-		t.Fatal("expected error for item margin > 100 but got nil")
+		t.Fatalf("expected error for item margin > %d but got nil", MaxMarginPercent)
 	}
 }

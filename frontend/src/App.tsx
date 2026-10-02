@@ -20,6 +20,7 @@ import type { EditorItem } from "./components/ItemEditor";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SummaryRail } from "./components/SummaryRail";
 import { Button, SectionHeading, StatusBanner } from "./components/ui";
+import { MAX_MARGIN_PERCENT } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import type { ArchivedQuotation } from "./archive";
 import {
@@ -498,7 +499,7 @@ function App() {
           const { description, subItems } = parseSubItems(cols[0] || "");
           const margin = Math.min(
             Number.parseInt((cols[4] || "").replace(/\D/g, ""), 10) || 0,
-            100
+            MAX_MARGIN_PERCENT
           );
           return {
             ...DEFAULT_ITEM,

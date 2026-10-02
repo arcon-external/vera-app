@@ -36,7 +36,7 @@ func realisticItems(n int) []QuotationItemInput {
 		96_000_000, 875_000, 22_300_000, 5_600_000, 1_050_000,
 	}
 	quantities := []uint32{1, 120, 4, 1, 12, 2, 60, 8, 3, 250}
-	margins := []uint8{20, 25, 18, 15, 22, 12, 30, 16, 24, 10}
+	margins := []uint16{20, 25, 18, 15, 22, 12, 30, 16, 24, 10}
 
 	items := make([]QuotationItemInput, 0, n)
 	for i := 0; i < n; i++ {
@@ -107,7 +107,7 @@ func BenchmarkBuildItemsAndPricing(b *testing.B) {
 // path exists to get right: cost + trunc(cost * margin / 100), in integers.
 func BenchmarkApplyMarkup(b *testing.B) {
 	costs := []uint64{1_250_000, 12_750_000, 48_500_000, 96_000_000}
-	margins := []uint8{10, 15, 20, 25, 30}
+	margins := []uint16{10, 15, 20, 25, 30}
 
 	b.ReportAllocs()
 	b.ResetTimer()
