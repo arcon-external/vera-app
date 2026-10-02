@@ -545,6 +545,118 @@ func TestPrepareRejectsUnrecognisedUoMWithLocation(t *testing.T) {
 	}
 }
 
+// TestMarginPercentCeiling pins the new limit and the ones it must not have
+// moved. The margin ceiling went from 100 to 1000, which meant widening a uint8
+// that topped out at 255 -- so the risk in this change is a limit that was raised
+// somewhere it should not have been.
+func TestMarginPercentCeiling(t *testing.T) {
+	// The types differ on purpose: margin widened to uint16 for the new ceiling,
+	// discount is still uint8 because its ceiling never moved.
+	prepare := func(margin uint16, discount uint8) error {
+		q := newTestQuotation()
+		q.SetAuthService(auth.StaffTestService())
+		return q.Prepare(QuotationInput{
+			CustomerID: 2,
+			Items: []QuotationItemInput{{
+				Description:   "Item",
+				Qty:           1,
+				UoM:           "Lot",
+				UnitPrice:     1000,
+				MarginEnabled: true,
+				MarginPercent: margin,
+			}},
+			Subject:         "Test",
+			RecipientName:   "Test",
+			Validity:        30,
+			PaymentTerm:     30,
+			LeadTime:        30,
+			Incoterm:        "FOB",
+			DiscountPercent: discount,
+		})
+	}
+
+	if MaxMarginPercent != 1000 {
+		t.Fatalf("MaxMarginPercent = %d, want 1000", MaxMarginPercent)
+	}
+
+	// A uint8 cannot hold the ceiling, so if this compiles the type is wide
+	// enough; a margin at the limit must be accepted, not merely storable.
+	if err := prepare(1000, 0); err != nil {
+		t.Errorf("a 1000%% margin was rejected: %v", err)
+	}
+	// An existing quotation at the old ceiling must still price unchanged.
+	if err := prepare(100, 0); err != nil {
+		t.Errorf("a 100%% margin was rejected: %v", err)
+	}
+	if err := prepare(0, 0); err != nil {
+		t.Errorf("a 0%% margin was rejected: %v", err)
+	}
+
+	// Above the ceiling is refused, and the message must name the real limit
+	// rather than repeating the old one.
+	err := prepare(1001, 0)
+	if err == nil {
+		t.Fatal("a 1001% margin was accepted")
+	}
+	if !strings.Contains(err.Error(), "1000") {
+		t.Errorf("error %q should name the 1000 limit", err)
+	}
+
+	// Discount is a different setting and its ceiling must not have moved with
+	// the margin. A 200% discount is nonsense and must still be refused.
+	if err := prepare(0, 200); err == nil {
+		t.Error("a 200% discount was accepted; only the margin ceiling was meant to move")
+	}
+	if err := prepare(0, 100); err != nil {
+		t.Errorf("a 100%% discount was rejected: %v", err)
+	}
+}
+
+// TestMarginCeilingPricesAsElevenTimesCost is the arithmetic the ceiling exists
+// for: a 1000% margin is eleven times cost, and a low-cost fitting has to be
+// able to carry a real number.
+func TestMarginCeilingPricesAsElevenTimesCost(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+
+	if err := q.Prepare(QuotationInput{
+		CustomerID: 2,
+		Items: []QuotationItemInput{{
+			Description:   "Fitting",
+			Qty:           2,
+			UoM:           "PC",
+			UnitPrice:     150000,
+			MarginEnabled: true,
+			MarginPercent: MaxMarginPercent,
+		}},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      30,
+		PaymentTerm:   30,
+		LeadTime:      30,
+		Incoterm:      "FOB",
+	}); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	item := q.Data.Items[0]
+	// 150000 * 11 = 1,650,000 per unit, times 2.
+	if item.UnitPrice != 1_650_000 {
+		t.Errorf("UnitPrice = %d, want 1650000", item.UnitPrice)
+	}
+	if item.Total != 3_300_000 {
+		t.Errorf("Total = %d, want 3300000", item.Total)
+	}
+	if item.OriginalUnitPrice != 150000 {
+		t.Errorf("OriginalUnitPrice = %d, want 150000 (the cost side must not move)", item.OriginalUnitPrice)
+	}
+	// Per unit, not per line: buildItems sets MarginAmount from the unit price
+	// alone, which is why the editor renders it as "+Rp.../unit". Unchanged here.
+	if item.MarginAmount != 1_500_000 {
+		t.Errorf("MarginAmount = %d, want 1500000 (per unit, not the line total)", item.MarginAmount)
+	}
+}
+
 // TestPlausibleUoM pins the bound that keeps prose out of the UoM column.
 //
 // The accept cases are the point as much as the reject ones: the editor only

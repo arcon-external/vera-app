@@ -2,7 +2,16 @@ package backend
 
 import "time"
 
-func applyMarkup(cost uint64, margin uint8) uint64 {
+// applyMarkup adds a percentage margin to a unit cost.
+//
+// The multiply is in uint64 and the division truncates, so a margin of 50 on a
+// cost of 333 adds 166 and yields 499 rather than 499.5. The frontend mirrors
+// this exactly (see applyMargin in frontend/src/format.ts) because the two must
+// not disagree about a number the customer is quoted.
+//
+// margin is uint16 rather than uint8 because the ceiling is maxMarginPercent, and
+// uint8 tops out at 255 — below the limit the app actually allows.
+func applyMarkup(cost uint64, margin uint16) uint64 {
 	return cost + cost*uint64(margin)/100
 }
 

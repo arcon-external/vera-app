@@ -86,9 +86,9 @@ func SignableFromEvidence(evidence store.RevisionEvidence) SignableRevision {
 // one at boot; a deploy without VERA_SIGNING_KEY fails there rather than
 // silently issuing unsigned documents.
 type Signer struct {
+	keyID     string
 	key       ed25519.PrivateKey
 	publicKey ed25519.PublicKey
-	keyID     string
 }
 
 // NewSigner builds the signer for a private key.

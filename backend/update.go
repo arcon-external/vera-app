@@ -13,18 +13,18 @@ import (
 type UpdateInfo struct {
 	Current         string
 	Latest          string
-	UpdateAvailable bool
-	Required        bool
 	NotesURL        string
 	DownloadURL     string
+	UpdateAvailable bool
+	Required        bool
 }
 
 // serverRelease mirrors the public /v1/app/latest contract.
 type serverRelease struct {
+	Downloads    map[string]string `json:"downloads"`
 	Latest       string            `json:"latest"`
 	MinSupported string            `json:"minSupported"`
 	NotesURL     string            `json:"notesUrl"`
-	Downloads    map[string]string `json:"downloads"`
 }
 
 // updateHTTPClient times out fast: version checks must never hang startup.

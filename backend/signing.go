@@ -21,31 +21,31 @@ const CanonicalPrefix = "VERA1:QUOTE"
 // identical canonical bytes for the same revision — that equality is what
 // lets an exported signature verify against stored rows later.
 type SignableRevision struct {
-	QuoteNumber      string
-	RevisionNumber   int16
+	IssuerName       string
 	RecipientName    string
 	RecipientCompany string
 	RecipientAddress string
 	Subject          string
 	Incoterm         string
-	ValidityDays     int16
-	PaymentTermDays  int16
-	LeadTimeDays     int16
-	DiscountPercent  int16
-	IssuerName       string
+	QuoteNumber      string
+	Items            []SignableItem
 	Subtotal         int64
 	DiscountAmount   int64
 	PpnAmount        int64
 	GrandTotal       int64
-	Items            []SignableItem
+	LeadTimeDays     int16
+	DiscountPercent  int16
+	PaymentTermDays  int16
+	ValidityDays     int16
+	RevisionNumber   int16
 }
 
 // SignableItem carries the values printed on the customer document (the
 // marginalized side), never cost or margin.
 type SignableItem struct {
 	Description string
-	Qty         int64
 	UoM         string
+	Qty         int64
 	UnitPrice   int64
 	Total       int64
 }

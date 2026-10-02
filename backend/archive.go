@@ -7,77 +7,77 @@ import (
 )
 
 type ArchivedQuotationSummary struct {
-	ID             int64
 	QuoteNumber    string
-	RevisionNumber int16
 	CustomerName   string
 	Subject        string
 	CreatedAt      string
-	GrandTotal     int64
 	DisplayGrand   string
+	ID             int64
+	GrandTotal     int64
+	RevisionNumber int16
 }
 
 type ArchivedQuotationItem struct {
-	ItemNo                   int
-	Description              string
-	Qty                      int64
-	UoM                      string
-	UnitPrice                int64
-	DisplayUnitPrice         string
-	MarginEnabled            bool
-	MarginPercent            int16
-	MarginAmount             int64
 	DisplayMarginAmount      string
-	OriginalTotal            int64
-	DisplayOriginalTotal     string
-	MarginalizedUnitPrice    int64
-	DisplayMarginalizedUnit  string
-	MarginalizedTotal        int64
+	Description              string
 	DisplayMarginalizedTotal string
+	UoM                      string
+	DisplayMarginalizedUnit  string
+	DisplayUnitPrice         string
+	DisplayOriginalTotal     string
+	MarginAmount             int64
+	ItemNo                   int
+	OriginalTotal            int64
+	MarginalizedUnitPrice    int64
+	UnitPrice                int64
+	MarginalizedTotal        int64
+	Qty                      int64
+	MarginPercent            int16
+	MarginEnabled            bool
 }
 
 type ArchivedQuotation struct {
-	ArchivedQuotationSummary
-	CustomerCode                int16
-	CustomerAddress             string
+	DisplayPpn                  string
+	DisplayOriginalGrand        string
+	DisplayOriginalDiscount     string
 	RecipientName               string
 	RecipientAddress            string
 	Incoterm                    string
-	ValidityDays                int16
-	PaymentTermDays             int16
-	LeadTimeDays                int16
-	DiscountPercent             int16
+	HTMLSnapshot                string
+	DisplayNett                 string
+	DisplayProfit               string
+	DisplayMarginalizedAfterTax string
 	TaxZone                     string
 	TaxCategory                 string
 	TaxType                     string
 	ServiceCategory             string
-	TaxRateBps                  int16
-	OriginalSubtotal            int64
-	OriginalDiscount            int64
-	OriginalGrand               int64
-	MarginalizedSubtotal        int64
-	MarginalizedDiscount        int64
-	MarginalizedGrand           int64
-	PpnAmount                   int64
-	CustomerGrandTotal          int64
-	DisplayPpn                  string
-	TaxAmount                   int64
-	MarginalizedAfterTax        int64
-	ProfitAmount                int64
-	NettProfit                  int64
-	DisplayOriginalSubtotal     string
-	DisplayOriginalDiscount     string
-	DisplayOriginalGrand        string
-	DisplayMarginalizedSubtotal string
-	DisplayMarginalizedDiscount string
-	DisplayMarginalizedGrand    string
 	DisplayTax                  string
-	DisplayMarginalizedAfterTax string
-	DisplayProfit               string
-	DisplayNett                 string
+	DisplayMarginalizedGrand    string
+	DisplayMarginalizedDiscount string
+	DisplayMarginalizedSubtotal string
+	DisplayOriginalSubtotal     string
+	CustomerAddress             string
 	Items                       []ArchivedQuotationItem
-	HTMLSnapshot                string
 	AvailableRevisions          []int16
+	ArchivedQuotationSummary
+	OriginalGrand        int64
+	OriginalSubtotal     int64
+	MarginalizedAfterTax int64
+	PpnAmount            int64
+	NettProfit           int64
+	MarginalizedSubtotal int64
+	MarginalizedDiscount int64
+	ProfitAmount         int64
+	OriginalDiscount     int64
+	TaxAmount            int64
+	MarginalizedGrand    int64
+	CustomerGrandTotal   int64
+	CustomerCode         int16
+	LeadTimeDays         int16
+	PaymentTermDays      int16
+	DiscountPercent      int16
+	ValidityDays         int16
+	TaxRateBps           int16
 }
 
 func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {

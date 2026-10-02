@@ -50,18 +50,13 @@ const (
 
 // clippedFill is one rectangle that must be intersected with a clip outline.
 type clippedFill struct {
-	// outline is the clipping path as ready-to-write PDF path operators, with y
-	// already flipped into PDF's bottom-up space. It is a string rather than
-	// geometry because the engine generates the one outline it needs itself, so
-	// there is nothing left to parse back out of a data structure.
 	outline string
-	x0, y0  float64
-	w, h    float64
+	fill    string
+	x0      float64
+	y0      float64
+	w       float64
+	h       float64
 	pageH   float64
-	// fill is the colour the rect must actually be painted in. The sentinel only
-	// marks the spot; without putting the real colour back the rect renders in
-	// the marker colour, which is how every clipped row ends up black.
-	fill string
 }
 
 // roundedOutline renders a clipRegion as PDF path operators in PDF's bottom-up

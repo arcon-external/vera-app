@@ -1,7 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { Button } from "./ui";
-import { applyMargin, formatIdr, formatMoneyInput, parseIntOrZero } from "../format";
+import {
+  applyMargin,
+  formatIdr,
+  formatMoneyInput,
+  MAX_MARGIN_PERCENT,
+  parseIntOrZero,
+} from "../format";
 
 export interface EditorItem {
   key: number;
@@ -480,7 +486,7 @@ function ItemRow({
                       "marginPercent",
                       Math.min(
                         parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                        100
+                        MAX_MARGIN_PERCENT
                       ).toString()
                     )
                   }

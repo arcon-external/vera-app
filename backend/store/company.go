@@ -10,25 +10,23 @@ import (
 // Company section of Settings. It is a singleton row (id = 1). The logo
 // artwork lives here too; empty bytes mean "use the baked asset".
 type CompanyProfile struct {
-	LegalName string
-	Address   string
-	Phone     string
-	Email     string
-	TaxID     string
-	LogoPath  string
-	LogoBytes []byte
-	LogoMime  string
-	HasLogo   bool
-	// ThemeQ* brand colors for the quotation template, ThemeP* for the
-	// verification portal. Empty means "stylesheet default".
-	ThemeQDeep   string
-	ThemeQAccent string
-	ThemeQSoft   string
 	ThemeQInk    string
+	ThemeQDeep   string
+	Phone        string
+	Email        string
+	TaxID        string
+	LogoPath     string
+	ThemePInk    string
+	LogoMime     string
+	Address      string
+	ThemeQAccent string
+	ThemePSoft   string
+	ThemeQSoft   string
+	LegalName    string
 	ThemePDeep   string
 	ThemePAccent string
-	ThemePSoft   string
-	ThemePInk    string
+	LogoBytes    []byte
+	HasLogo      bool
 }
 
 // maxCompanyLogoBytes caps uploaded artwork at 512KB, mirroring the avatar

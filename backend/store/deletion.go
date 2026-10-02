@@ -47,12 +47,12 @@ func (s *Store) UpdatePassword(ctx context.Context, userID int64, passwordHash s
 
 // DeletionRequest is a pending or decided account-deletion request.
 type DeletionRequest struct {
-	ID          int64
-	UserID      int64
+	RequestedAt time.Time
 	Email       string
 	DisplayName string
 	Status      string
-	RequestedAt time.Time
+	ID          int64
+	UserID      int64
 }
 
 // RequestDeletion opens a pending deletion request for a user. A second

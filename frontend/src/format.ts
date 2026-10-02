@@ -1,3 +1,17 @@
+/**
+ * The highest profit margin a line may carry, in percent.
+ *
+ * 1000% means selling at eleven times cost, which is ordinary for a low-cost
+ * fitting on a service visit. The previous ceiling of 100% capped those at
+ * double cost, which is not enough to build a quote around.
+ *
+ * This mirrors backend.MaxMarginPercent. Both the typing clamp and the paste
+ * clamp use it so the two cannot drift apart and reject in different places.
+ *
+ * Discount percentage is a different setting and keeps its own ceiling of 100.
+ */
+export const MAX_MARGIN_PERCENT = 1000;
+
 /** Formats a numeric IDR amount using Indonesian thousands separators. */
 export function formatIdr(value: number): string {
   if (!Number.isFinite(value)) return "0";

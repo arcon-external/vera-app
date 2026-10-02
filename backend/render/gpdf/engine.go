@@ -83,13 +83,13 @@ type Input struct {
 
 // Item is one table row.
 type Item struct {
-	No        int
 	DescMain  string
-	SubItems  []string
 	Qty       string
 	UoM       string
 	UnitPrice string
 	Total     string
+	SubItems  []string
+	No        int
 }
 
 // Engine renders one document. It is not safe for concurrent use; make one per
@@ -98,15 +98,14 @@ type Item struct {
 type Engine struct {
 	regular      *font.TrueTypeFont
 	bold         *font.TrueTypeFont
-	regularData  []byte
-	boldData     []byte
 	regularShape *shaper
 	boldShape    *shaper
-
-	// Brand colours. A quotation's four theme columns are per-document settings
-	// that resolve to a stylesheet default when unset, so they live on the
-	// engine rather than in the stylesheet constants the layout reads.
-	deep, accent, soft, ink string
+	deep         string
+	accent       string
+	soft         string
+	ink          string
+	regularData  []byte
+	boldData     []byte
 }
 
 // Theme carries the four quotable brand colours.

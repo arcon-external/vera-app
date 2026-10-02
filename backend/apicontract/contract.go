@@ -22,14 +22,12 @@ func FormatQuoteNumber(customerCode, yy int, seq int64) string {
 
 // ExportResponse identifies the persisted revision.
 type ExportResponse struct {
-	ID          int64  `json:"id"`
-	QuoteNumber string `json:"quoteNumber"`
-	UUID        string `json:"uuid"`
-	// ShortID is the public verification handle. The desktop embeds it in the
-	// QR code printed on the document.
+	QuoteNumber  string `json:"quoteNumber"`
+	UUID         string `json:"uuid"`
 	ShortID      string `json:"shortId"`
-	Revision     int16  `json:"revision"`
+	ID           int64  `json:"id"`
 	GrandTotal   uint64 `json:"grandTotal"`
+	Revision     int16  `json:"revision"`
 	SequenceWarn bool   `json:"sequenceWarn,omitempty"`
 }
 
@@ -43,79 +41,79 @@ type PeekNumberResponse struct {
 
 // QuotationSummaryRow is one archive row: always the latest revision.
 type QuotationSummaryRow struct {
-	ID             int64  `json:"id"`
 	QuoteNumber    string `json:"quoteNumber"`
-	RevisionNumber int16  `json:"revision"`
 	CustomerName   string `json:"customerName"`
 	Subject        string `json:"subject"`
 	CreatedAt      string `json:"createdAt"`
-	GrandTotal     int64  `json:"grandTotal"`
 	DisplayGrand   string `json:"displayGrand"`
+	ID             int64  `json:"id"`
+	GrandTotal     int64  `json:"grandTotal"`
+	RevisionNumber int16  `json:"revision"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.
 type QuotationItemRow struct {
-	ItemNo                   int    `json:"itemNo"`
+	DisplayOriginalUnit      string `json:"displayOriginalUnit"`
 	Description              string `json:"description"`
-	Qty                      int64  `json:"qty"`
+	DisplayMarginAmount      string `json:"displayMarginAmount"`
 	UoM                      string `json:"uom"`
+	DisplayMarginalizedTotal string `json:"displayMarginalizedTotal"`
+	DisplayMarginalizedUnit  string `json:"displayMarginalizedUnit"`
+	DisplayOriginalTotal     string `json:"displayOriginalTotal"`
 	OriginalUnitPrice        int64  `json:"originalUnitPrice"`
-	MarginEnabled            bool   `json:"marginEnabled"`
-	MarginPercent            int16  `json:"marginPercent"`
-	MarginAmount             int64  `json:"marginAmount"`
 	OriginalTotal            int64  `json:"originalTotal"`
 	MarginalizedUnitPrice    int64  `json:"marginalizedUnitPrice"`
 	MarginalizedTotal        int64  `json:"marginalizedTotal"`
-	DisplayOriginalUnit      string `json:"displayOriginalUnit"`
-	DisplayOriginalTotal     string `json:"displayOriginalTotal"`
-	DisplayMarginalizedUnit  string `json:"displayMarginalizedUnit"`
-	DisplayMarginalizedTotal string `json:"displayMarginalizedTotal"`
-	DisplayMarginAmount      string `json:"displayMarginAmount"`
+	MarginAmount             int64  `json:"marginAmount"`
+	ItemNo                   int    `json:"itemNo"`
+	Qty                      int64  `json:"qty"`
+	MarginPercent            int16  `json:"marginPercent"`
+	MarginEnabled            bool   `json:"marginEnabled"`
 }
 
 // QuotationDetail is one revision: internal economics plus the customer HTML
 // snapshot. Raw PDF bytes are intentionally absent; HasPDF reports attachment.
 type QuotationDetail struct {
-	ID                          int64              `json:"id"`
-	QuoteNumber                 string             `json:"quoteNumber"`
+	DisplayMarginalizedSubtotal string             `json:"displayMarginalizedSubtotal"`
+	DisplayMarginalizedDiscount string             `json:"displayMarginalizedDiscount"`
 	UUID                        string             `json:"uuid"`
-	Revision                    int16              `json:"revision"`
-	AvailableRevisions          []int16            `json:"availableRevisions"`
+	HTMLSnapshot                string             `json:"htmlSnapshot"`
+	DisplayNett                 string             `json:"displayNett"`
 	CustomerName                string             `json:"customerName"`
 	Subject                     string             `json:"subject"`
 	RecipientName               string             `json:"recipientName"`
 	Incoterm                    string             `json:"incoterm"`
-	DiscountPercent             int16              `json:"discountPercent"`
+	DisplayProfit               string             `json:"displayProfit"`
 	TaxZone                     string             `json:"taxZone"`
 	TaxCategory                 string             `json:"taxCategory"`
 	TaxType                     string             `json:"taxType"`
 	ServiceCategory             string             `json:"serviceCategory"`
 	TaxLabel                    string             `json:"taxLabel"`
-	OriginalSubtotal            int64              `json:"originalSubtotal"`
-	OriginalDiscount            int64              `json:"originalDiscount"`
-	OriginalGrand               int64              `json:"originalGrand"`
+	DisplayMarginalizedAfterTax string             `json:"displayMarginalizedAfterTax"`
+	DisplayTax                  string             `json:"displayTax"`
+	DisplayPpn                  string             `json:"displayPpn"`
+	DisplayMarginalizedGrand    string             `json:"displayMarginalizedGrand"`
+	DisplayOriginalGrand        string             `json:"displayOriginalGrand"`
+	QuoteNumber                 string             `json:"quoteNumber"`
+	DisplayOriginalDiscount     string             `json:"displayOriginalDiscount"`
+	DisplayOriginalSubtotal     string             `json:"displayOriginalSubtotal"`
+	AvailableRevisions          []int16            `json:"availableRevisions"`
+	Items                       []QuotationItemRow `json:"items"`
 	MarginalizedSubtotal        int64              `json:"marginalizedSubtotal"`
-	MarginalizedDiscount        int64              `json:"marginalizedDiscount"`
+	ProfitAmount                int64              `json:"profitAmount"`
 	MarginalizedGrand           int64              `json:"marginalizedGrand"`
 	GrandTotal                  int64              `json:"grandTotal"`
-	PpnAmount                   int64              `json:"ppnAmount"`
+	MarginalizedDiscount        int64              `json:"marginalizedDiscount"`
 	TaxAmount                   int64              `json:"taxAmount"`
-	MarginalizedGrandAfterTax   int64              `json:"marginalizedGrandAfterTax"`
-	ProfitAmount                int64              `json:"profitAmount"`
+	ID                          int64              `json:"id"`
 	NettProfit                  int64              `json:"nettProfit"`
-	DisplayOriginalSubtotal     string             `json:"displayOriginalSubtotal"`
-	DisplayOriginalDiscount     string             `json:"displayOriginalDiscount"`
-	DisplayOriginalGrand        string             `json:"displayOriginalGrand"`
-	DisplayMarginalizedSubtotal string             `json:"displayMarginalizedSubtotal"`
-	DisplayMarginalizedDiscount string             `json:"displayMarginalizedDiscount"`
-	DisplayMarginalizedGrand    string             `json:"displayMarginalizedGrand"`
-	DisplayPpn                  string             `json:"displayPpn"`
-	DisplayTax                  string             `json:"displayTax"`
-	DisplayMarginalizedAfterTax string             `json:"displayMarginalizedAfterTax"`
-	DisplayProfit               string             `json:"displayProfit"`
-	DisplayNett                 string             `json:"displayNett"`
-	Items                       []QuotationItemRow `json:"items"`
-	HTMLSnapshot                string             `json:"htmlSnapshot"`
+	OriginalGrand               int64              `json:"originalGrand"`
+	OriginalDiscount            int64              `json:"originalDiscount"`
+	OriginalSubtotal            int64              `json:"originalSubtotal"`
+	MarginalizedGrandAfterTax   int64              `json:"marginalizedGrandAfterTax"`
+	PpnAmount                   int64              `json:"ppnAmount"`
+	DiscountPercent             int16              `json:"discountPercent"`
+	Revision                    int16              `json:"revision"`
 	HasPDF                      bool               `json:"hasPdf"`
 }
 

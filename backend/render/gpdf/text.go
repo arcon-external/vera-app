@@ -36,13 +36,13 @@ func px(v float64) float64 { return v * ptPerPx }
 type Face struct {
 	Regular     *font.TrueTypeFont
 	Bold        *font.TrueTypeFont
-	RegularData []byte
-	BoldData    []byte
-	upem        float64
 	hmtxR       map[int]float64
 	hmtxB       map[int]float64
 	cmapR       map[rune]int
 	cmapB       map[rune]int
+	RegularData []byte
+	BoldData    []byte
+	upem        float64
 }
 
 var facesOnce sync.Once

@@ -17,10 +17,10 @@ var AppVersion = "dev"
 // Semver holds a parsed MAJOR.MINOR.PATCH triple. Prerelease suffixes are
 // accepted syntactically but ignored by Compare unless the caller opts in.
 type Semver struct {
+	Pre   string
 	Major int
 	Minor int
 	Patch int
-	Pre   string
 }
 
 // ParseSemver parses "vMAJOR.MINOR.PATCH[-pre]" (the leading v is optional).

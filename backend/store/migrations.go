@@ -15,9 +15,9 @@ import (
 var migrationFiles embed.FS
 
 type migration struct {
-	version int
 	name    string
 	sql     string
+	version int
 }
 
 func quoteIdentifier(value string) string {

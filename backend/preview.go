@@ -21,7 +21,7 @@ type CustomerPreviewItem struct {
 	UnitPrice                uint64
 	Total                    uint64
 	MarginEnabled            bool
-	MarginPercent            uint8
+	MarginPercent            uint16
 	MarginAmount             uint64
 	No                       uint32
 	Qty                      uint32
@@ -30,30 +30,30 @@ type CustomerPreviewItem struct {
 // CustomerPreview is the exact customer-facing quotation: sell prices only.
 // It must never contain margin, tax, or nett figures.
 type CustomerPreview struct {
-	Items                     []CustomerPreviewItem
+	Incoterm                  string
 	Subject                   string
 	RecipientName             string
 	RecipientCompany          string
 	RecipientAddress          string
 	QuoteNumber               string
-	RevisionID                uint16
 	Date                      string
 	ValidUntil                string
-	Incoterm                  string
+	DisplayPpnAmount          string
 	DisplaySubTotal           string
 	DisplayDiscountAmount     string
 	DisplayGrandTotal         string
-	DisplayPpnAmount          string
+	Items                     []CustomerPreviewItem
 	SubTotal                  uint64
+	OriginalGrandTotal        uint64
 	DiscountAmount            uint64
 	GrandTotal                uint64
 	PpnAmount                 uint64
 	OriginalSubTotal          uint64
 	OriginalDiscountAmount    uint64
-	OriginalGrandTotal        uint64
+	NettProfit                int64
 	MarginalizedGrandAfterTax uint64
 	ProfitAmount              int64
-	NettProfit                int64
+	RevisionID                uint16
 	DiscountPercent           uint8
 	Validity                  uint8
 	PaymentTerm               uint8
@@ -62,35 +62,35 @@ type CustomerPreview struct {
 
 // InternalPreviewItem shows the cost vs sell economics of one line.
 type InternalPreviewItem struct {
+	DisplayOriginalUnitPrice string
+	DisplayMarginAmount      string
+	DisplayMarginalizedTotal string
+	DisplayMarginalizedUnit  string
 	Description              string
-	CostUnit                 uint64
-	SellUnit                 uint64
-	CostTotal                uint64
+	DisplayOriginalTotal     string
 	SellTotal                uint64
-	OriginalUnitPrice        uint64
-	OriginalTotal            uint64
 	MarginalizedUnitPrice    uint64
 	MarginalizedTotal        uint64
-	DisplayOriginalUnitPrice string
-	DisplayOriginalTotal     string
-	DisplayMarginalizedUnit  string
-	DisplayMarginalizedTotal string
-	DisplayMarginAmount      string
-	MarginEnabled            bool
-	MarginPercent            uint8
+	OriginalTotal            uint64
+	OriginalUnitPrice        uint64
+	CostTotal                uint64
+	SellUnit                 uint64
+	CostUnit                 uint64
 	MarginAmount             uint64
 	No                       uint32
 	Qty                      uint32
+	MarginPercent            uint16
+	MarginEnabled            bool
 }
 
 // InternalBreakdown is the internal-only economics view. It must never be
 // rendered into the customer-facing PDF.
 type InternalBreakdown struct {
-	Items                       []InternalPreviewItem
-	TaxLabel                    string
+	DisplayMarginalizedGrand    string
+	DisplayNett                 string
 	TaxType                     string
 	ServiceCategory             string
-	PpnAmount                   uint64
+	DisplayMarginalizedAfterTax string
 	DisplayPpn                  string
 	DisplayCost                 string
 	DisplaySell                 string
@@ -100,32 +100,32 @@ type InternalBreakdown struct {
 	DisplayGrand                string
 	DisplayProfit               string
 	DisplayTax                  string
-	DisplayNett                 string
+	DisplayMarginalizedDiscount string
 	DisplayOriginalSubtotal     string
 	DisplayOriginalDiscount     string
 	DisplayOriginalGrand        string
+	TaxLabel                    string
 	DisplayMarginalizedSubtotal string
-	DisplayMarginalizedDiscount string
-	DisplayMarginalizedGrand    string
-	DisplayMarginalizedAfterTax string
-	CostSubtotal                uint64
+	Items                       []InternalPreviewItem
+	NettProfit                  int64
+	TaxAmount                   uint64
 	SellSubtotal                uint64
-	DiscountCost                uint64
-	DiscountSell                uint64
+	MarginalizedGrandAfterTax   uint64
+	PpnAmount                   uint64
 	CostGrand                   uint64
 	GrandTotal                  uint64
 	ProfitAmount                int64
-	TaxAmount                   uint64
-	NettProfit                  int64
-	TaxRateBps                  uint16
-	DiscountPercent             uint8
+	CostSubtotal                uint64
+	DiscountSell                uint64
+	DiscountCost                uint64
+	MarginalizedGrand           uint64
 	OriginalSubtotal            uint64
 	OriginalDiscount            uint64
 	OriginalGrand               uint64
 	MarginalizedSubtotal        uint64
 	MarginalizedDiscount        uint64
-	MarginalizedGrand           uint64
-	MarginalizedGrandAfterTax   uint64
+	TaxRateBps                  uint16
+	DiscountPercent             uint8
 }
 
 // GetCustomerPreview returns the customer-facing quotation derived from the
