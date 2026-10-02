@@ -352,14 +352,18 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    prefix — Wails convention) and commit it.
 4. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
    (it fails loudly if Go ldflags and installer metadata disagree).
-5. Create and push an annotated tag:
+5. Create the GitHub Release **before** pushing the tag. The tag triggers
+   `.github/workflows/desktop.yml`, and that workflow uploads its artefacts with
+   `gh release upload` — which fails with `release not found` if the release
+   does not exist yet. Create it first, then the tag, then the build succeeds
+   on its first run instead of needing a re-run:
+   ```bash
+   gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
+   ```
+6. Create and push an annotated tag:
    ```bash
    git tag -a v0.2.0 -m "v0.2.0: description"
    git push origin v0.2.0
-   ```
-6. Create a GitHub Release with grouped notes:
-   ```bash
-   gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
    ```
 7. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
    `-nsis` installers (amd64 + arm64) and macOS DMG, all version-stamped
@@ -370,10 +374,35 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    with the updater — never rename by hand. Staff download links must
    point at the public `vera-downloads-508411` bucket mirror, never at
    GitHub release assets (the private repo 404s anyone without access).
-8. Add a Download section to the release notes with both filenames plus one
-   install line each, and these prerequisites:
-   - Windows: a Chrome installation (PDF export shells to system Chrome);
-     SmartScreen will warn on unsigned builds — expected until signing.
+8. Mirror the three installers into the public bucket. Staff cannot reach
+   GitHub release assets, so a release that is not mirrored is a release
+   nobody can download:
+   ```bash
+   gs://vera-downloads-508411/Vera-<version>-{macos-universal.dmg,windows-amd64-installer.exe,windows-arm64-installer.exe}
+   ```
+   Verify the sidecars with `shasum -a 256 -c` before uploading.
+9. **Point the app at the new release.** The update check reads
+   `VERA_APP_*` from the Cloud Run service's environment, not from GitHub, so
+   nothing announces a release until these are set. Skipping this is the
+   single easiest way to ship a release the app never offers:
+   ```bash
+   gcloud run services update vera-api --project=vera-app-508411 --region asia-southeast1 \
+     --update-env-vars "VERA_APP_LATEST=v0.2.0,\
+   VERA_APP_MIN_SUPPORTED=v0.1.0,\
+   VERA_APP_NOTES_URL=https://github.com/arcon-external/vera-app/releases/tag/v0.2.0,\
+   VERA_APP_DOWNLOAD_WINDOWS=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-windows-amd64-installer.exe,\
+   VERA_APP_DOWNLOAD_WINDOWS_ARM64=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-windows-arm64-installer.exe,\
+   VERA_APP_DOWNLOAD_MACOS=https://storage.googleapis.com/vera-downloads-508411/Vera-v0.2.0-macos-universal.dmg"
+   ```
+   Then confirm the app can see it — this is the check that was missing:
+   ```bash
+   curl -s https://api.arconpentapersada.co.id/v1/app/latest | grep -o '"latest": "[^"]*"'
+   ```
+10. Add a Download section to the release notes with all three filenames plus one
+    install line each, and these prerequisites:
+   - Windows: SmartScreen will warn on unsigned builds — expected until signing.
+     A Chrome installation is no longer required for exporting quotations; the
+     native renderer replaced it in v0.4.0.
    - macOS: drag Vera to Applications; on first launch of an unsigned build,
      right-click → Open instead of double-clicking.
 
