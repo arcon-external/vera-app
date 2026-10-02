@@ -9,14 +9,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
+	texttemplate "text/template"
 
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"vera-app/backend/apicontract"
 	"vera-app/backend/auth"
+	"vera-app/backend/render"
+	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
 )
 
@@ -161,7 +161,11 @@ type Quotation struct {
 	companyIdentity *CompanyIdentity
 	// cssTemplate is the parsed stylesheet, executed per render so theme
 	// values set by Prepare reach the CSS. Parsed once, executed often.
-	cssTemplate *template.Template
+	// It is a text/template, not an html/template: the stylesheet is a
+	// raw-text <style> body, and html/template HTML-escapes interpolations it
+	// cannot place in a CSS context, corrupting the embedded base64 font data
+	// URIs. See readTemplate.
+	cssTemplate *texttemplate.Template
 }
 
 // CompanyIdentity is the quotation-relevant slice of the company profile:
@@ -840,53 +844,112 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 	}
 }
 
+// build renders the customer PDF through the application's selected renderer.
+//
+// The choice itself lives in backend/render, in one line, and is a compile-time
+// edit rather than a setting. This function's whole job is to hand the renderer
+// a renderer-neutral view of the quotation and get bytes back.
 func (q *Quotation) build() ([]byte, error) {
+	in, err := q.renderInput()
+	if err != nil {
+		return nil, err
+	}
+	return render.Active.Render(q.ctx, in)
+}
+
+// renderInput builds the renderer's view of this quotation.
+//
+// The HTML template is executed here rather than inside the browser renderer,
+// because executing it is a job of the application -- the renderer is handed a
+// document, not a template. It also means the browser renderer reads exactly
+// one field of the result, which is what keeps the two implementations from
+// drifting into sharing a convention that only one of them honours.
+func (q *Quotation) renderInput() (quotation.Input, error) {
 	var body bytes.Buffer
 	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
-		return nil, fmt.Errorf("execute quotation template: %w", err)
+		return quotation.Input{}, fmt.Errorf("execute quotation template: %w", err)
 	}
 
 	if body.Len() == 0 {
-		return nil, fmt.Errorf("template executed but produced empty output")
+		return quotation.Input{}, fmt.Errorf("template executed but produced empty output")
 	}
 
-	baseCtx := q.ctx
-	if baseCtx == nil {
-		baseCtx = context.Background()
-	}
-
-	ctx, cancel := chromedp.NewContext(baseCtx)
-	defer cancel()
-
-	ctx, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelTimeout()
-
-	var buf []byte
-	err := chromedp.Run(
-		ctx,
-		chromedp.Navigate("about:blank"),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			tree, err := page.GetFrameTree().Do(ctx)
-			if err != nil {
-				return err
-			}
-
-			return page.SetDocumentContent(tree.Frame.ID, body.String()).Do(ctx)
-		}),
-		chromedp.WaitVisible(`table`, chromedp.ByQuery),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			printData, _, err := page.PrintToPDF().WithPrintBackground(true).WithDisplayHeaderFooter(false).WithPaperWidth(8.27).WithPaperHeight(11.69).Do(ctx)
-			buf = printData
-			return err
-		}),
-	)
+	logo, err := decodeDataURL(q.Data.LogoBase64)
 	if err != nil {
-		return nil, fmt.Errorf("render quotation pdf: %w", err)
+		return quotation.Input{}, fmt.Errorf("decode logo: %w", err)
+	}
+	qr, err := decodeDataURL(q.Data.VerifyQRBase64)
+	if err != nil {
+		return quotation.Input{}, fmt.Errorf("decode verification qr: %w", err)
 	}
 
-	if len(buf) == 0 {
-		return nil, fmt.Errorf("render quotation pdf: empty output")
+	items := make([]quotation.Item, 0, len(q.Data.Items))
+	for _, it := range q.Data.Items {
+		items = append(items, quotation.Item{
+			No:          int(it.No),
+			DisplayDesc: string(it.DisplayDesc),
+			Qty:         it.Qty,
+			UoM:         it.UoM,
+			UnitPrice:   it.DisplayUnitPrice,
+			Total:       it.DisplayTotal,
+		})
 	}
 
-	return buf, nil
+	return quotation.Input{
+		HTML:  body.String(),
+		Fonts: backAssets,
+
+		Theme: quotation.Theme{
+			Deep:   q.Data.ThemeQDeep,
+			Accent: q.Data.ThemeQAccent,
+			Soft:   q.Data.ThemeQSoft,
+			Ink:    q.Data.ThemeQInk,
+		},
+		LogoPNG: logo,
+		QRPNG:   qr,
+
+		CompanyName:    q.Data.CompanyName,
+		CompanyAddress: q.Data.CompanyAddress,
+
+		Subject:          q.Data.Subject,
+		RecipientName:    q.Data.RecipientName,
+		RecipientCompany: q.Data.RecipientCompany,
+		RecipientAddress: q.Data.RecipientAddress,
+
+		QuoteNumber: q.Data.QuoteNumber,
+		Date:        q.Data.Date,
+		ValidUntil:  q.Data.ValidUntil,
+		RevisionID:  q.Data.RevisionID,
+
+		Validity:        q.Data.Validity,
+		PaymentTerm:     q.Data.PaymentTerm,
+		LeadTime:        q.Data.LeadTime,
+		Incoterm:        q.Data.Incoterm,
+		ServiceCategory: q.Data.ServiceCategory,
+
+		Items: items,
+
+		DisplaySubTotal:   q.Data.DisplaySubTotal,
+		DisplayDiscount:   q.Data.DisplayDiscountAmount,
+		DisplayPpn:        q.Data.DisplayPpnAmount,
+		DisplayGrandTotal: q.Data.DisplayGrandTotal,
+		DiscountPercent:   q.Data.DiscountPercent,
+
+		VerificationCode: q.Data.VerifyShortID,
+	}, nil
+}
+
+// decodeDataURL turns an embedded data URL or bare base64 payload into bytes.
+func decodeDataURL(s string) ([]byte, error) {
+	if s == "" {
+		return nil, nil
+	}
+	if i := strings.Index(s, ","); strings.HasPrefix(s, "data:") && i > 0 {
+		s = s[i+1:]
+	}
+	raw, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return nil, fmt.Errorf("base64: %w", err)
+	}
+	return raw, nil
 }

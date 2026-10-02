@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
+	texttemplate "text/template"
 )
 
 //go:embed assets/*
@@ -67,7 +68,19 @@ func readTemplate(q *Quotation) error {
 	q.Data.FontRegularBase64 = base64.StdEncoding.EncodeToString(fontRegularBytes)
 	q.Data.FontBoldBase64 = base64.StdEncoding.EncodeToString(fontBoldBytes)
 
-	cssTmpl, err := template.New("css").Parse(string(cssContent))
+	// Build the stylesheet with text/template, not html/template. The stylesheet
+	// lands in a raw-text <style> body, and html/template escapes every
+	// interpolation it cannot place in a CSS context: the embedded base64 fonts
+	// come out as "...&#43;..." instead of "...+...". Because <style> is a
+	// raw-text element the browser never decodes those entities, so the data: URI
+	// is corrupt, the @font-face fails to load, and every quotation silently
+	// falls back to Helvetica -- which is what the preview showed while the
+	// export drew Inter.
+	//
+	// text/template is safe here: every interpolation is either an embedded asset
+	// (the Inter TTFs) or a theme colour already restricted to strict #RRGGBB by
+	// store.isHexColor. Nothing user-supplied reaches this file.
+	cssTmpl, err := texttemplate.New("css").Parse(string(cssContent))
 	if err != nil {
 		return fmt.Errorf("parse css template: %w", err)
 	}
