@@ -4,6 +4,37 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.4.0] - 2026-10-02
+
+### Added
+- Profit margin per line now goes up to **1000%**, up from 100%. Low-cost items
+  sold well above cost — a fitting on a service visit, a consumable — can now
+  carry a real number. A 1000% margin means selling at eleven times cost.
+  Discount percentage is unchanged and still stops at 100%.
+
+### Changed
+- **Exports are dramatically faster and no longer depend on Google Chrome.**
+  Printing a quotation used to take about half a minute and needed a working
+  Chrome installation on the machine. Vera now builds the document itself and
+  finishes in well under a second, on any machine, with nothing else installed.
+  Staff who were told to keep Chrome installed for this can stop.
+- The quotation preview and the finished PDF now always use the same typeface.
+  The preview had been quietly falling back to a substitute font while the
+  export used the intended one, so what you approved and what the customer
+  received could differ. They now match.
+- Repeated lines of an item list are no longer given a rounded top edge. That
+  rounding belonged only to the first page, where the column headings are.
+- Spacing around the QUOTATION heading is now even above and below.
+
+### Fixed
+- A spreadsheet paste could put the wrong text in the unit-of-measure column —
+  a line would occasionally show its own description there, and in the finished
+  PDF that sentence would run into the price beside it. Pasted values are now
+  checked, and anything that is not a real unit is corrected before it can reach
+  a customer's document. If a stored quotation already carries a bad value, it
+  now shows as unrecognised in the editor instead of quietly displaying
+  something else, and preparing it is refused with a message naming the line.
+
 ## [0.3.5] - 2026-09-24
 
 ### Fixed
