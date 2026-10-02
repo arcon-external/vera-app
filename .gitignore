@@ -60,3 +60,9 @@ test-data/
 proto/
 doc/
 
+# --- Local media / promo artifacts ---
+# Timestamped output from /brag video runs and UI screenshot captures.
+# Regenerable at any time and not source — never commit.
+brag-output-*/
+ui-screens-*/
+
