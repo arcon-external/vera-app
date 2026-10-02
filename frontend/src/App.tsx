@@ -146,6 +146,33 @@ function parseRow(row: string): string[] {
   return cols;
 }
 
+// normalizeUoM turns a pasted cell into a unit of measure, or into the default
+// when it is not one.
+//
+// A pasted row is positional, and parseRow splits on tabs while honouring quotes,
+// so a description cell containing an unquoted tab arrives as two columns and the
+// tail of the description is read as the UoM. Quantity, price and margin come
+// from later columns and land correctly, which is what made the row look nearly
+// right while the UoM carried a sentence.
+//
+// Anything that is not a UoM becomes "Lot" rather than being stored: the UoM
+// control is a <select> bound to this value, so it cannot display a value
+// outside UOM_OPTIONS and would show "Lot" while the state held the text. That
+// mismatch is what let the value reach a customer quotation unnoticed, so a
+// value that cannot be displayed must not be stored either.
+//
+// The match is case-insensitive and returns the canonical spelling, so "lot"
+// and "LOT" both become "Lot".
+function normalizeUoM(raw: string): string {
+  const candidate = raw.trim();
+  if (candidate === "") return "Lot";
+
+  const match = UOM_OPTIONS.find(
+    (option) => option.value.toLowerCase() === candidate.toLowerCase()
+  );
+  return match ? match.value : "Lot";
+}
+
 function parseSubItems(text: string): { description: string; subItems: string[] } {
   const lines = text.split("\n").filter((line) => line.trim());
   const mainParts: string[] = [];
@@ -478,7 +505,7 @@ function App() {
             key: 0,
             description,
             subItems,
-            uom: (cols[1] || "").trim() || "Lot",
+            uom: normalizeUoM(cols[1] || ""),
             qty: (cols[2] || "").trim() || "1",
             unitPrice: (cols[3] || "").replace(/\D/g, "").trim(),
             marginPercent: margin.toString(),

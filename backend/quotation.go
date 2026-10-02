@@ -481,6 +481,47 @@ func (q *Quotation) SetQuoteNumber(quoteNumber string, revision uint16) {
 	q.Data.RevisionID = revision
 }
 
+// uoMMaxLen is the longest a unit of measure may be.
+//
+// This is a bound, not an allowlist, and the distinction matters. The obvious
+// rule -- the UoM must be one of the five values in the editor's UOM_OPTIONS --
+// was tried and is wrong: the test fixtures carry "Month" for a monthly
+// maintenance line and "Unit" for several others, neither of which the editor
+// offers, so a staff member preparing a service quotation cannot set them
+// through the UI at all. Enforcing the five here would reject legitimate work on
+// the server while fixing nothing the editor does not already prevent.
+//
+// So the backend checks the one thing it can check without inventing policy: that
+// the value is shaped like a unit label rather than like a sentence. That is the
+// actual harm. A pasted description whose cell contained a tab arrives as two
+// columns and its tail was stored as the UoM, then printed in the customer
+// PDF's UoM column, where it overflowed into the unit price beside it. A unit
+// label is a short token; "Repair leaking pipe 2 inch RO reject at toilet block
+// 1" is not.
+const uoMMaxLen = 12
+
+// plausibleUoM reports whether s could be a unit of measure: a short token of
+// letters and digits, allowing the punctuation units legitimately use ("m2",
+// "linear-m", "pack/6").
+//
+// A UoM that is not plausible is a value that no unit label would take, and the
+// only way one arrives is a field mix-up — so it is refused rather than printed
+// on a document a customer sees.
+func plausibleUoM(s string) bool {
+	if s == "" || len(s) > uoMMaxLen {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-', r == '/', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Prepare validates user input and populates the QuotationData business fields.
 // It does not generate the quote number — that is deferred to Export to avoid
 // consuming a sequence number if the user never saves. Returns an error
@@ -498,7 +539,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("at least one item is required")
 	}
 
-	for _, item := range input.Items {
+	for i, item := range input.Items {
 		if strings.TrimSpace(item.Description) == "" {
 			return fmt.Errorf("item description is required")
 		}
@@ -507,8 +548,18 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 			return fmt.Errorf("item quantity must be greater than zero")
 		}
 
-		if strings.TrimSpace(item.UoM) == "" {
-			return fmt.Errorf("item unit of measure is required")
+		// The UoM is the one field the editor cannot render an arbitrary value
+		// into -- a <select> bound to the stored value shows something else when
+		// the value is not one of the options -- so a value that slipped through
+		// used to reach the customer PDF silently, printed in the UoM column and
+		// overflowing into the unit price beside it. See plausibleUoM for why this
+		// is a bound rather than a list of the five units the editor offers.
+		uom := strings.TrimSpace(item.UoM)
+		if uom == "" {
+			return fmt.Errorf("item %d: unit of measure is required", i+1)
+		}
+		if !plausibleUoM(uom) {
+			return fmt.Errorf("item %d: unit of measure %q is not a unit", i+1, item.UoM)
 		}
 
 		if item.MarginPercent > 100 {

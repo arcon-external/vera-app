@@ -260,6 +260,9 @@ function ItemRow({
   const sellTotal = sellUnit * qty;
   const marginAmount = sellUnit - unitCost;
   const hasSubItems = item.subItems.length > 0;
+  // Whether the stored UoM is one the control can actually show. See the select
+  // below for why this matters.
+  const known = uomOptions.some((option) => option.value === item.uom);
 
   const cellClass =
     "w-full rounded-md border border-rule bg-white px-2.5 py-2 text-body text-ink-900 outline-none transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
@@ -373,6 +376,22 @@ function ItemRow({
                 "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767469' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
             }}
           >
+            {/*
+              A controlled <select> cannot display a value that is not one of its
+              own options, so an unrecognised stored UoM renders as "Lot" while the
+              state holds something else — and the value that gets exported is the
+              one in state, not the one on screen. That is how a description
+              reached a customer quotation's UoM column with the editor looking
+              correct.
+
+              So when the stored value is not a known option it is rendered as an
+              option of its own. It shows up as an extra entry, visibly not one of
+              the offered choices, and one click puts it right. Anything less
+              leaves this control able to misreport what will be exported.
+            */}
+            {known ? null : (
+              <option value={item.uom}>{item.uom} (not recognised)</option>
+            )}
             {uomOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
