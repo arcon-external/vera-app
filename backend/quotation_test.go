@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -379,6 +380,27 @@ func TestPrepareValidation(t *testing.T) {
 			},
 		},
 		{
+			name: "unrecognised item UoM",
+			input: QuotationInput{
+				CustomerID: 2,
+				// The shape this bug actually took: a pasted description whose
+				// cell contained a tab, so parseRow split it and the tail of the
+				// sentence was read as the UoM, then printed in the customer
+				// PDF's UoM column.
+				Items: []QuotationItemInput{{
+					Description: "Repair leaking pipe 2 inch RO reject at toilet block 1",
+					Qty:         1,
+					UoM:         "pipe 2 inch RO reject at toilet block 1",
+					UnitPrice:   5_200_000,
+				}},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      30,
+			},
+		},
+		{
 			name: "empty subject",
 			input: QuotationInput{
 				CustomerID:    2,
@@ -482,6 +504,136 @@ func TestPrepareValidation(t *testing.T) {
 			}
 			if q.Data.CustomerID != 0 {
 				t.Errorf("q.Data.CustomerID = %d; want 0 (should not be set after failure)", q.Data.CustomerID)
+			}
+		})
+	}
+}
+
+// TestPrepareRejectsUnrecognisedUoMWithLocation pins the message, because the
+// operator has to be told which row to fix and what they got.
+//
+// The line number and the offending value are the whole point: a quotation can
+// carry dozens of lines and only one of them is wrong, and the value is often a
+// long sentence from a paste rather than something recognisable at a glance.
+func TestPrepareRejectsUnrecognisedUoMWithLocation(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+
+	const bad = "Repair leaking pipe 2 inch RO reject at toilet block 1"
+	err := q.Prepare(QuotationInput{
+		CustomerID: 2,
+		Items: []QuotationItemInput{
+			{Description: "Fine", Qty: 1, UoM: "Lot", UnitPrice: 1000},
+			{Description: "Also fine", Qty: 1, UoM: "PC", UnitPrice: 1000},
+			{Description: "Broken", Qty: 1, UoM: bad, UnitPrice: 1000},
+		},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      30,
+		PaymentTerm:   30,
+		LeadTime:      30,
+		Incoterm:      "FOB",
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unrecognised UoM, got nil")
+	}
+	msg := err.Error()
+	for _, want := range []string{"item 3", bad} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not mention %q", msg, want)
+		}
+	}
+}
+
+// TestPlausibleUoM pins the bound that keeps prose out of the UoM column.
+//
+// The accept cases are the point as much as the reject ones: the editor only
+// offers five units, and a bound that were tightened into an allowlist would
+// start refusing "Month" on a maintenance line and "Unit" on a general one, both
+// of which real quotations carry.
+func TestPlausibleUoM(t *testing.T) {
+	accepted := []string{
+		"Lot", "PC", "EA", "Set", "Meter", // the units the editor offers
+		"Month", "Unit", "Box", "Pack", // real, but not offered by the editor
+		"m2", "linear-m", "pack/6", "Lt", // punctuation units use
+	}
+	for _, s := range accepted {
+		if !plausibleUoM(s) {
+			t.Errorf("plausibleUoM(%q) = false; a unit label like this must be accepted", s)
+		}
+	}
+
+	rejected := []struct {
+		name string
+		in   string
+	}{
+		{"whitespace only", "   "},
+		// The reported bug, verbatim: the tail of a description that arrived as
+		// its own column because the source cell contained a tab.
+		{"a description", "pipe 2 inch RO reject at toilet block 1"},
+		{"a full sentence", "Monthly preventive maintenance for HVAC system"},
+		{"a whole description", "Repair leaking pipe 2 inch RO reject at toilet block 1"},
+		{"punctuation a unit would not carry", "Lot (per lot)"},
+		{"just over the length cap", "ThirteenChars"},
+		{"a comma", "Lot, each"},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			if plausibleUoM(tc.in) {
+				t.Errorf("plausibleUoM(%q) = true; this is not a unit label", tc.in)
+			}
+		})
+	}
+}
+
+// TestPrepareReportsEmptyUoMAsMissing keeps the two failures distinct. An absent
+// unit and a unit that is not a unit need different corrections, and collapsing
+// them into one message would tell an operator to retype a value that was never
+// there.
+func TestPrepareReportsEmptyUoMAsMissing(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+
+	err := q.Prepare(QuotationInput{
+		CustomerID:    2,
+		Items:         []QuotationItemInput{{Description: "Item", Qty: 1, UoM: "  ", UnitPrice: 1000}},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      30,
+		PaymentTerm:   30,
+		LeadTime:      30,
+		Incoterm:      "FOB",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a blank UoM, got nil")
+	}
+	if !strings.Contains(err.Error(), "is required") {
+		t.Errorf("error %q should report the unit as required", err)
+	}
+}
+
+// TestPrepareAcceptsUnitsOutsideTheEditorList is a guard on the design decision,
+// not on the code. Enforcing the editor's five options on the server was tried
+// and reverted: it would have rejected the "Month" on a maintenance line and the
+// "Unit" on several others, both of which real quotations carry, while fixing
+// nothing the editor does not already prevent.
+func TestPrepareAcceptsUnitsOutsideTheEditorList(t *testing.T) {
+	for _, uom := range []string{"Month", "Unit", "Box"} {
+		t.Run(uom, func(t *testing.T) {
+			q := newTestQuotation()
+			q.SetAuthService(auth.StaffTestService())
+			err := q.Prepare(QuotationInput{
+				CustomerID:    2,
+				Items:         []QuotationItemInput{{Description: "Item", Qty: 1, UoM: uom, UnitPrice: 1000}},
+				Subject:       "Test",
+				RecipientName: "Test",
+				Validity:      30,
+				PaymentTerm:   30,
+				LeadTime:      30,
+				Incoterm:      "FOB",
+			})
+			if err != nil {
+				t.Errorf("Prepare rejected the legitimate UoM %q: %v", uom, err)
 			}
 		})
 	}
