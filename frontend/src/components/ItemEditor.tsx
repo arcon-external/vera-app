@@ -271,7 +271,7 @@ function ItemRow({
   const known = uomOptions.some((option) => option.value === item.uom);
 
   const cellClass =
-    "w-full rounded-md border border-rule bg-white px-2.5 py-2 text-body text-ink-900 outline-none transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+    "w-full rounded-md border border-rule bg-white px-2.5 py-2 text-body text-ink-900 outline-hidden transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
   return (
     <div className="grid animate-item-in grid-cols-1 gap-3 px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50 lg:grid-cols-[minmax(0,1fr)_72px_68px_126px_184px_36px] lg:items-start">
@@ -300,7 +300,7 @@ function ItemRow({
           <button
             type="button"
             onClick={onToggleSubItems}
-            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+            className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
           >
             <svg
               width="9"
@@ -339,13 +339,13 @@ function ItemRow({
                   onChange={(event) =>
                     onSubItemChange(item.key, subIndex, event.target.value)
                   }
-                  className="min-w-0 flex-1 rounded-md px-1.5 py-1 text-caption text-ink-700 outline-none transition-colors duration-150 placeholder:text-ink-400 hover:bg-paper-subtle focus:bg-white focus:ring-2 focus:ring-accent-500/20"
+                  className="min-w-0 flex-1 rounded-md px-1.5 py-1 text-caption text-ink-700 outline-hidden transition-colors duration-150 placeholder:text-ink-400 hover:bg-paper-subtle focus:bg-white focus:ring-2 focus:ring-accent-500/20"
                 />
                 <button
                   type="button"
                   aria-label={`Remove sub-item ${subIndex + 1} from line ${index + 1}`}
                   onClick={() => onRemoveSubItem(item.key, subIndex)}
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40"
+                  className="flex h-8 w-8 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
                 >
                   <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M4 4l8 8M12 4l-8 8" />
@@ -356,7 +356,7 @@ function ItemRow({
             <button
               type="button"
               onClick={() => onAddSubItem(item.key)}
-              className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 text-caption text-ink-400 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              className="inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 text-caption text-ink-400 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
             >
               <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M8 3.333v9.334M3.333 8h9.334" />
@@ -451,7 +451,7 @@ function ItemRow({
                 onClick={() =>
                   onChange(item.key, "marginEnabled", !item.marginEnabled)
                 }
-                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
                   item.marginEnabled
                     ? "border-accent-700 bg-accent-600"
                     : "border-rule-strong bg-paper-sunk"
@@ -490,7 +490,7 @@ function ItemRow({
                       ).toString()
                     )
                   }
-                  className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-none disabled:text-ink-350"
+                  className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
                 />
                 <span className="ml-0.5 text-body text-ink-400">%</span>
               </div>
@@ -512,7 +512,7 @@ function ItemRow({
         aria-label={`Remove line ${index + 1}`}
         onClick={() => onRemoveItem(item.key)}
         disabled={!canRemove}
-        className="mx-auto flex h-9 w-9 items-center justify-center self-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
+        className="mx-auto flex h-9 w-9 items-center justify-center self-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
       >
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M2 4h12M5.333 4V2.667a1.333 1.333 0 011.334-1.334h2.666a1.333 1.333 0 011.334 1.334V4m2 0v9.333a1.333 1.333 0 01-1.334 1.334H4.667a1.333 1.333 0 01-1.334-1.334V4h9.334z" />

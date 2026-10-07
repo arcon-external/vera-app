@@ -196,7 +196,7 @@ export function NotificationBell({
             ? `Notifications, ${badgeCount} unread`
             : "Notifications"
         }
-        className="relative inline-flex min-h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+        className="relative inline-flex min-h-9 w-9 items-center justify-center rounded-lg text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
       >
         <svg
           width="17"

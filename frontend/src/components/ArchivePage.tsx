@@ -191,7 +191,7 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                           event.stopPropagation();
                           onOpenQuotation(row.ID, row.RevisionNumber);
                         }}
-                        className="rounded text-body font-medium text-ink-900 underline-offset-4 transition-colors duration-150 hover:text-accent-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                        className="rounded text-body font-medium text-ink-900 underline-offset-4 transition-colors duration-150 hover:text-accent-700 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
                       >
                         <span className="tnum">{row.QuoteNumber}</span>
                       </button>

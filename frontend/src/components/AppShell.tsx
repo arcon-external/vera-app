@@ -94,7 +94,7 @@ export function AppShell({
                     type="button"
                     aria-current={active ? "page" : undefined}
                     onClick={open}
-                    className={`min-h-9 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                    className={`min-h-9 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                       active
                         ? "bg-ink-900 text-white"
                         : "text-ink-500 hover:bg-paper-muted hover:text-ink-900"
@@ -124,7 +124,7 @@ export function AppShell({
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 aria-label={`Account menu for ${user.DisplayName}`}
-                className="inline-flex min-h-9 items-center gap-2 rounded-lg px-2.5 py-2 transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg px-2.5 py-2 transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
               >
                 <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-accent-100 text-caption font-semibold text-accent-800" aria-hidden="true">
                   {user.AvatarURL ? (

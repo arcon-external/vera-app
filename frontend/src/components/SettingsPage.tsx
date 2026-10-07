@@ -40,7 +40,7 @@ function errorMessage(err: unknown, fallback: string): string {
 export const EXPORT_DIR_KEY = "vera-export-dir";
 
 const fieldClass =
-  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
 export function SettingsPage({
   isAdmin,
@@ -93,7 +93,7 @@ export function SettingsPage({
                 role="tab"
                 aria-selected={selected}
                 onClick={() => setSection(tab.id)}
-                className={`min-h-8 rounded-md px-4 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                className={`min-h-8 rounded-md px-4 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                   selected
                     ? "bg-white text-ink-950 shadow-card"
                     : "text-ink-500 hover:text-ink-800"
@@ -1423,7 +1423,7 @@ function KeyboardCard() {
                           if (recording === id) capture(id, event);
                         }}
                         aria-label={`Rebind ${action.label}. Currently ${formatBinding(bindings[id])}`}
-                        className={`tnum rounded-md border px-2 py-1 font-mono text-caption transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                        className={`tnum rounded-md border px-2 py-1 font-mono text-caption transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                           recording === id
                             ? "border-accent-500 bg-accent-50 text-accent-700"
                             : "border-rule bg-paper-subtle text-ink-800 hover:border-ink-300"

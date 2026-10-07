@@ -159,7 +159,7 @@ export function Select({
         aria-activedescendant={open ? `${listId.current}-${highlighted}` : undefined}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={onTriggerKeyDown}
-        className={`flex w-full items-center justify-between gap-2 rounded-md border border-rule bg-white px-3 py-2 text-left text-body text-ink-900 outline-none transition duration-150 ease-out-quart hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20 ${className}`}
+        className={`flex w-full items-center justify-between gap-2 rounded-md border border-rule bg-white px-3 py-2 text-left text-body text-ink-900 outline-hidden transition duration-150 ease-out-quart hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20 ${className}`}
       >
         <span className="truncate">{selectedLabel}</span>
         <svg
@@ -171,7 +171,7 @@ export function Select({
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className={`flex-shrink-0 text-ink-400 transition-transform duration-150 ease-out-quart ${
+          className={`shrink-0 text-ink-400 transition-transform duration-150 ease-out-quart ${
             open ? "rotate-180" : ""
           }`}
         >
