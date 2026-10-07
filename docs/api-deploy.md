@@ -48,6 +48,23 @@ authenticated-route `401`. Any failure fails the run loudly; traffic never
 moves to a bad revision. Auth is Workload Identity Federation — no stored
 GCP keys. Rollback is the previous Cloud Run revision, one click.
 
+### One-time IAM setup (what the CI service account may touch)
+
+`github-deployer@vera-app-508411.iam.gserviceaccount.com` is the identity
+behind every workflow that reaches GCP (deploy, backups, and the desktop
+release's announce job). Its grants, and why each exists:
+
+| Grant | Why |
+| --- | --- |
+| Cloud Run deploy roles on `vera-api` | `deploy.yml` image deploys |
+| Secret accessor on `vera-postgres-dsn` | `backup.yml` reads the DSN |
+| Write on `gs://vera-backups-508411/` | `backup.yml` uploads dumps |
+| `roles/storage.objectAdmin` on `gs://vera-downloads-508411/` | the desktop release's announce job mirrors installers there and overwrites on re-runs (**added 2026-10-07** — its absence failed the first live announce on v0.4.1 at the mirror step; v0.4.0 had been mirrored by hand) |
+
+The downloads bucket is public-read (`allUsers: objectViewer`) so staff can
+download; objectAdmin on it lets the CI create and overwrite the installer
+objects only — not the bucket, its policy, or any other bucket.
+
 Manual fallback (same checks by hand):
 
 ```bash

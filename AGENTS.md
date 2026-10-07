@@ -352,13 +352,16 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    prefix — Wails convention) and commit it.
 4. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
    (it fails loudly if Go ldflags and installer metadata disagree).
-5. Create the GitHub Release **before** pushing the tag. The tag triggers
-   `.github/workflows/desktop.yml`, and that workflow uploads its artefacts with
-   `gh release upload` — which fails with `release not found` if the release
-   does not exist yet. Create it first, then the tag, then the build succeeds
-   on its first run instead of needing a re-run:
+5. Push `main` **before** creating the release, and create the release with
+   an explicit `--target`. `gh release create` tags the *remote* default
+   branch head when the tag does not exist — if the version-bump commit is
+   still local, the tag lands on the commit without the bump, the desktop
+   build fails its own stamp check, and the tag has to be force-moved by
+   hand (this produced the first v0.4.1 failure). Push first, then:
    ```bash
-   gh release create v0.2.0 --title "v0.2.0 — Title" --notes "changelog"
+   git push origin main
+   gh release create v0.2.0 --target "$(git rev-parse HEAD)" \
+     --title "v0.2.0 — Title" --notes "changelog"
    ```
 6. Create and push an annotated tag:
    ```bash

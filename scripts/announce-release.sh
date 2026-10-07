@@ -208,7 +208,11 @@ else
   for asset in "${ASSETS[@]}"; do
     gcloud storage cp "$WORKDIR/$asset" "gs://${BUCKET}/${asset}" \
       --project="$PROJECT" --quiet >/dev/null 2>&1 \
-      || fail "could not upload $asset to gs://${BUCKET}/; VERA_APP_LATEST left at $LIVE_LATEST"
+      || fail "could not upload $asset to gs://${BUCKET}/; VERA_APP_LATEST left at $LIVE_LATEST.
+   Most likely the workflow's service account (github-deployer@) lacks
+   roles/storage.objectAdmin on gs://${BUCKET}/ -- one grant, see
+   docs/api-deploy.md. It can also be mirrored by hand from a machine
+   with bucket write access, then this job re-run with --failed."
   done
   note "uploaded ${#ASSETS[@]} files"
 fi
@@ -269,7 +273,13 @@ for i in $(seq 1 15); do
   note "still reports $got (attempt $i/15)"
 done
 
-got=$(printf '%s' "${ANNOUNCED:-{}}" | jq -r '.latest // ""')
+if [ -z "$ANNOUNCED" ]; then
+  fail "$PUBLIC_API/v1/app/latest returned nothing after repeated attempts; the service is up but not answering"
+fi
+# Not written as "${ANNOUNCED:-{}}": bash closes that expansion at the first
+# brace and appends a literal } to a successful response, which jq then
+# rejects -- a green announcement false-failing on its own verification.
+got=$(printf '%s' "$ANNOUNCED" | jq -r '.latest // ""')
 [ "$got" = "$VERSION" ] \
   || fail "$PUBLIC_API/v1/app/latest reports latest=$got, want $VERSION.
    The release exists and the files are on the bucket, but no installed copy
