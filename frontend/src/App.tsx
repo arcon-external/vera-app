@@ -57,12 +57,28 @@ function pickCustomerId(options: { value: number }[], current: number): number {
   return options[0]?.value ?? 0;
 }
 
+// The staff unit catalog, in the order the dropdown shows it, spelled exactly
+// as the quotation template should print it. "m2" and "m3" are area and
+// volume (the paste normalizer folds m²/m³ and other spellings onto them);
+// the backend's shape validator already accepts everything here, so the
+// catalog lives in one place on this side only. Legacy values stored before
+// this catalog (e.g. "Unit", "PC", "Meter") still display as their own value
+// through the unrecognized-option rule in ItemEditor; see #256.
 const UOM_OPTIONS = [
   { value: "Lot", label: "Lot" },
-  { value: "PC", label: "PC" },
+  { value: "Pc", label: "Pc" },
   { value: "EA", label: "EA" },
-  { value: "Set", label: "Set" },
-  { value: "Meter", label: "Meter" },
+  { value: "LS", label: "LS" },
+  { value: "set", label: "set" },
+  { value: "meter", label: "meter" },
+  { value: "m2", label: "m2" },
+  { value: "m3", label: "m3" },
+  { value: "Hour", label: "Hour" },
+  { value: "Day", label: "Day" },
+  { value: "Week", label: "Week" },
+  { value: "Month", label: "Month" },
+  { value: "Year", label: "Year" },
+  { value: "Quarter", label: "Quarter" },
 ] as const;
 
 const INCOTERM_OPTIONS = [
@@ -164,13 +180,58 @@ function parseRow(row: string): string[] {
 //
 // The match is case-insensitive and returns the canonical spelling, so "lot"
 // and "LOT" both become "Lot".
+//
+// Pasted rows rarely carry the canonical spelling: plurals ("hours"), short
+// forms ("hr", "mtr") and area/volume symbols ("m²", "sqm") all appear in real
+// spreadsheets. The alias table folds them onto the catalog rather than
+// letting a real unit fall back to Lot -- which would silently change what the
+// line means. A value with no alias still falls back, exactly as before.
+const UOM_ALIASES: Record<string, string> = {
+  lots: "Lot",
+  pc: "Pc",
+  pcs: "Pc",
+  piece: "Pc",
+  pieces: "Pc",
+  unit: "Pc",
+  units: "Pc",
+  ls: "LS",
+  lump: "LS",
+  set: "set",
+  sets: "set",
+  m: "meter",
+  mtr: "meter",
+  mtrs: "meter",
+  meters: "meter",
+  metre: "meter",
+  metres: "meter",
+  m2: "m2",
+  "m²": "m2",
+  sqm: "m2",
+  sqmeters: "m2",
+  sqmeter: "m2",
+  m3: "m3",
+  "m³": "m3",
+  cbm: "m3",
+  cum: "m3",
+  hr: "Hour",
+  hrs: "Hour",
+  hours: "Hour",
+  days: "Day",
+  weeks: "Week",
+  months: "Month",
+  years: "Year",
+  quarters: "Quarter",
+};
+
 function normalizeUoM(raw: string): string {
   const candidate = raw.trim();
   if (candidate === "") return "Lot";
 
-  const match = UOM_OPTIONS.find(
-    (option) => option.value.toLowerCase() === candidate.toLowerCase()
-  );
+  const key = candidate.toLowerCase();
+  const aliased = UOM_ALIASES[key];
+  if (aliased) return aliased;
+
+  const match = UOM_OPTIONS.find((option) => key === option.value.toLowerCase());
   return match ? match.value : "Lot";
 }
 
