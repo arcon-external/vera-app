@@ -41,3 +41,7 @@ export function applyMargin(cost: number, percent: number, enabled: boolean): nu
   if (!enabled) return cost;
   return cost + Math.trunc((cost * percent) / 100);
 }
+
+// scratch: live check that a frontend-only PR skips the Go suite's heavy
+// steps under the new scope logic (removed when this scratch branch is
+// deleted; never merged)
