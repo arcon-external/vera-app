@@ -35,8 +35,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # Full history: the scope step below diffs the PR against its merge
+          # base, which needs the base commit to be present locally.
+          fetch-depth: 0
+
+      - name: Decide whether the Go suite needs to run
+        # Skips the heavy steps ONLY for a diff that is entirely frontend UI
+        # source; every other path -- root *.md (the changelog-copy test),
+        # backend/** (embeds frontend/dist), configs, workflows -- keeps the
+        # full suite. The heavy steps run unless this step explicitly writes
+        # needs_go=false, so a crashed or confused filter fails OPEN: the
+        # worst case is an unnecessary full run, never a false green.
+        id: scope
+        continue-on-error: true
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          files="$(git diff --no-renames --name-only "$base"...HEAD)"
+          echo "changed files:"; printf '%s\n' "$files"
+          needs_go=true
+          if [ -n "$files" ]; then
+            # skip only when EVERY changed path is frontend UI source;
+            # --no-renames makes a rename two paths, so a move out of
+            # frontend/src cannot sneak through as one matching path.
+            if ! printf '%s\n' "$files" | grep -qvE '^frontend/(src|public)/'; then
+              needs_go=false
+            fi
+          fi
+          echo "Go suite runs: $needs_go"
+          echo "needs_go=$needs_go" >> "$GITHUB_OUTPUT"
 
       - name: Set up Node
+        if: steps.scope.outputs.needs_go != 'false'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -44,27 +74,33 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
+        if: steps.scope.outputs.needs_go != 'false'
         run: npm --prefix frontend ci
 
       - name: Build frontend (required for go:embed)
+        if: steps.scope.outputs.needs_go != 'false'
         run: npm --prefix frontend run build
 
       - name: Set up Go
+        if: steps.scope.outputs.needs_go != 'false'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: gofmt check
+        if: steps.scope.outputs.needs_go != 'false'
         run: test -z "$(gofmt -l .)"
 
       - name: go vet
+        if: steps.scope.outputs.needs_go != 'false'
         run: go vet ./...
 
       - name: Install PostgreSQL client (matches service version)
         # The restore drill test shells out to pg_dump/pg_restore, which
         # refuse to talk to a newer server — the client major must be 18.
         # Noble has no PG18 package, so take it from PGDG like the image.
+        if: steps.scope.outputs.needs_go != 'false'
         run: |
           sudo apt-get install -y -qq curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
@@ -74,6 +110,7 @@ jobs:
       - name: go test with race detector
         # -short skips TestGeneratePDF, which needs a Chrome sandbox that
         # GitHub-hosted runners cannot provide. Run it locally without -short.
+        if: steps.scope.outputs.needs_go != 'false'
         run: go test -race -short ./...
 
   frontend:
