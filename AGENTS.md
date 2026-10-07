@@ -321,6 +321,13 @@ If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
 test from Section 7.
 
+On CI, PRs whose diff is *entirely* `frontend/src/**` or `frontend/public/**` skip
+the Go suite's heavy steps via the scope step in `pr.yml` (the required "Go
+gates" check still reports — it just finishes fast). Every other path keeps the
+full suite, deliberately: root `*.md` feeds `TestChangelogCopyMatchesRoot`, and
+`backend/**` embeds `frontend/dist`. The classification fails open — a crashed
+or confused scope step runs the full suite rather than skipping it.
+
 ---
 
 ## 13. Release Process
