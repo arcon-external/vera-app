@@ -203,7 +203,7 @@ export function UsersPage() {
             title="Click to copy"
             aria-label={`Copy invite code for ${invite.email}`}
             onClick={() => void copyInviteCode(invite.token)}
-            className="tnum inline-flex cursor-pointer items-center gap-1.5 rounded border border-transparent bg-white/70 px-1.5 py-0.5 transition hover:border-rule-strong hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+            className="tnum inline-flex cursor-pointer items-center gap-1.5 rounded border border-transparent bg-white/70 px-1.5 py-0.5 transition hover:border-rule-strong hover:bg-white focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
           >
             <svg
               width="12"
@@ -244,7 +244,7 @@ export function UsersPage() {
             placeholder="Search name or email…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="w-full max-w-sm rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+            className="w-full max-w-sm rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
           />
         </div>
 
@@ -311,7 +311,7 @@ export function UsersPage() {
                           aria-label={`Role for ${user.Email}`}
                           value={user.Role}
                           onChange={(event) => void handleRole(user, event.target.value)}
-                          className="cursor-pointer rounded-md border border-transparent bg-transparent py-1 pr-1 text-body text-ink-800 outline-none transition hover:border-rule focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+                          className="cursor-pointer rounded-md border border-transparent bg-transparent py-1 pr-1 text-body text-ink-800 outline-hidden transition hover:border-rule focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
                         >
                           <option value="staff">Staff</option>
                           <option value="admin">Admin</option>
@@ -411,7 +411,7 @@ export function UsersPage() {
                             onChange={(event) => setEmailText(event.target.value)}
                             placeholder="new@company.com"
                             aria-label={`New email for ${user.DisplayName}`}
-                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
                           />
                           <div className="flex gap-1.5">
                             <Button
@@ -454,7 +454,7 @@ export function UsersPage() {
                             onChange={(event) => setDeleteText(event.target.value)}
                             placeholder={user.Email}
                             aria-label={`Type ${user.Email} to confirm deletion`}
-                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-danger-300 focus:ring-2 focus:ring-danger-500/20"
+                            className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-danger-300 focus:ring-2 focus:ring-danger-500/20"
                           />
                           <div className="flex gap-1.5">
                             <Button
@@ -693,7 +693,7 @@ function CreateUserForm({
   };
 
   const fieldClass =
-    "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+    "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
   return (
     <Card className="p-5">

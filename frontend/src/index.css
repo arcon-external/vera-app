@@ -1,6 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4: the CSS entrypoint imports the framework and loads the legacy
+   JS config (custom colors, type scale, minHeight, shadows, easing,
+   keyframes). The v4 upgrade from @tailwind base/components/utilities keeps
+   every custom token reachable by the same class names the app already uses. */
+@import "tailwindcss";
+@config "../tailwind.config.cjs";
 
 @layer base {
   :root {
@@ -26,7 +29,7 @@
   }
 
   :focus-visible {
-    outline: 2px solid theme("colors.accent.500");
+    outline: 2px solid var(--color-accent-500);
     outline-offset: 2px;
   }
 
@@ -48,7 +51,7 @@
 
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: theme("colors.ink.200") transparent;
+    scrollbar-color: var(--color-ink-200) transparent;
   }
 
   .scroll-thin::-webkit-scrollbar {
@@ -57,14 +60,14 @@
   }
 
   .scroll-thin::-webkit-scrollbar-thumb {
-    background-color: theme("colors.ink.200");
+    background-color: var(--color-ink-200);
     border: 3px solid transparent;
     background-clip: content-box;
     border-radius: 9999px;
   }
 
   .scroll-thin::-webkit-scrollbar-thumb:hover {
-    background-color: theme("colors.ink.300");
+    background-color: var(--color-ink-300);
   }
 }
 

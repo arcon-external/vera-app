@@ -34,7 +34,7 @@ interface DetailsPanelProps {
 }
 
 const fieldClass =
-  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
 function Field({
   label,
@@ -83,7 +83,7 @@ function NumberField({
             const next = Number.isFinite(parsed) ? parsed : 0;
             onChange(max !== undefined ? Math.min(next, max) : next);
           }}
-          className="w-full bg-transparent px-3 py-2 text-right text-body tnum text-ink-900 outline-none"
+          className="w-full bg-transparent px-3 py-2 text-right text-body tnum text-ink-900 outline-hidden"
         />
         <span className="text-caption text-ink-400">{suffix}</span>
       </div>
@@ -233,7 +233,7 @@ export function DetailsPanel({
                           taxZone: option.value,
                         })
                       }
-                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                         selected
                           ? "bg-white text-ink-950 shadow-card"
                           : "text-ink-500 hover:text-ink-800"
@@ -274,7 +274,7 @@ export function DetailsPanel({
                             option.value === "Services" ? value.serviceCategory : "",
                         })
                       }
-                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                      className={`min-h-8 rounded-md px-3 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                         selected
                           ? "bg-white text-ink-950 shadow-card"
                           : "text-ink-500 hover:text-ink-800"

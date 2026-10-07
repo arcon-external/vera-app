@@ -12,7 +12,7 @@ export interface SignedInUser {
 }
 
 const inputClass =
-  "w-full rounded-md border border-rule bg-white px-3 py-2.5 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+  "w-full rounded-md border border-rule bg-white px-3 py-2.5 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
 function ShieldIcon() {
   return (
@@ -238,7 +238,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   aria-pressed={showPassword}
                   tabIndex={-1}
-                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-ink-400 transition hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-ink-400 transition hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
                 >
                   <EyeIcon off={!showPassword} />
                 </button>
@@ -272,7 +272,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
                 <button
                   type="button"
                   onClick={() => void copyText(activatedEmail)}
-                  className="shrink-0 rounded-md px-2 py-1 text-caption font-medium text-ink-600 transition hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                  className="shrink-0 rounded-md px-2 py-1 text-caption font-medium text-ink-600 transition hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
                 >
                   {copied ? "Copied" : "Copy"}
                 </button>
@@ -318,7 +318,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   aria-pressed={showPassword}
                   tabIndex={-1}
-                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-ink-400 transition hover:text-ink-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-ink-400 transition hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
                 >
                   <EyeIcon off={!showPassword} />
                 </button>

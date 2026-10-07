@@ -116,7 +116,7 @@ export function QuotationDetailPage({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40"
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M10 3.5L5.5 8 10 12.5" />

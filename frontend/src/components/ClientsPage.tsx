@@ -136,7 +136,7 @@ export function ClientsPage() {
             placeholder="Search name or code…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="w-full max-w-sm rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+            className="w-full max-w-sm rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
           />
         </div>
 
@@ -237,7 +237,7 @@ export function ClientsPage() {
                               onChange={(event) => setEditName(event.target.value)}
                               placeholder="Legal name"
                               aria-label="Client legal name"
-                              className="w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+                              className="w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
                             />
                             <input
                               type="text"
@@ -245,7 +245,7 @@ export function ClientsPage() {
                               onChange={(event) => setEditAddress(event.target.value)}
                               placeholder="Primary address"
                               aria-label="Client primary address"
-                              className="w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
+                              className="w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20"
                             />
                             <div className="flex gap-1.5">
                               <Button
@@ -289,7 +289,7 @@ export function ClientsPage() {
                                   onChange={(event) => setDeleteText(event.target.value)}
                                   placeholder={client.Name}
                                   aria-label={`Type ${client.Name} to confirm deletion`}
-                                  className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-danger-300 focus:ring-2 focus:ring-danger-500/20"
+                                  className="w-full max-w-[280px] rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-danger-300 focus:ring-2 focus:ring-danger-500/20"
                                 />
                                 <div className="flex gap-1.5">
                                   <Button
@@ -367,7 +367,7 @@ function CreateClientForm({
   };
 
   const fieldClass =
-    "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-none transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+    "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
   return (
     <Card className="p-5">

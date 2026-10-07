@@ -164,7 +164,7 @@ function ToastItem({
         type="button"
         aria-label="Dismiss notification"
         onClick={() => onDismiss(toast.id)}
-        className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-current opacity-55 transition-colors duration-150 hover:bg-black/5 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/30 active:scale-[0.96]"
+        className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-current opacity-55 transition-colors duration-150 hover:bg-black/5 hover:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-current/30 active:scale-[0.96]"
       >
         <span aria-hidden="true" className="text-base leading-none">
           ×
