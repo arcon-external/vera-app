@@ -4,6 +4,19 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.4.1] - 2026-10-07
+
+### Added
+
+- The unit-of-measure menu now covers how jobs are actually quoted. Alongside
+  **Lot, Pc, EA, LS, set, meter**, durations — **Hour, Day, Week, Month, Year,
+  Quarter** — are now first-class choices, and **m2** and **m3** have been
+  added for areas and volumes: coatings, concrete and excavation are quoted
+  per square meter and per cubic meter.
+- Pasted spreadsheets are understood more forgivingly: `hours` becomes Hour,
+  `mtr` becomes meter, and area/volume spellings such as `sqm`, `m²` and `m³`
+  become m2 and m3, so a real unit no longer falls back to Lot during a paste.
+
 ## [0.4.0] - 2026-10-02
 
 ### Added
