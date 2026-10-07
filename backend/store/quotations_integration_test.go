@@ -19,6 +19,55 @@ func revisionList(revisions []int16) string {
 	return strings.Join(parts, ",")
 }
 
+// assertRevisionSubItems verifies a persisted revision carries its package
+// composition exactly as it was saved: two parts, keyed and ordered, with
+// sides intact. A revision is immutable, so the read-back must equal the
+// snapshot rather than a recomputation of it.
+func assertRevisionSubItems(t *testing.T, label string, record QuotationRecord) {
+	t.Helper()
+	if len(record.Items) != 1 {
+		t.Fatalf("%s: item count = %d, want 1", label, len(record.Items))
+	}
+	subItems := record.Items[0].SubItems
+	if len(subItems) != 2 {
+		t.Fatalf("%s: sub-item count = %d, want 2", label, len(subItems))
+	}
+	if subItems[0].SubNo != 1 || subItems[1].SubNo != 2 {
+		t.Errorf("%s: sub numbering = %d, %d; want 1, 2", label, subItems[0].SubNo, subItems[1].SubNo)
+	}
+	if subItems[0].Description != "Main part, 25% margin" || subItems[1].Description != "Support part, no margin" {
+		t.Errorf("%s: sub descriptions drifted: %q, %q", label, subItems[0].Description, subItems[1].Description)
+	}
+	if subItems[0].UnitCost != 80000 || subItems[0].UnitPrice != 100000 || subItems[0].Total != 100000 {
+		t.Errorf("%s: sub 1 economics = cost %d sell %d total %d; want 80000/100000/100000",
+			label, subItems[0].UnitCost, subItems[0].UnitPrice, subItems[0].Total)
+	}
+	if !subItems[0].MarginEnabled || subItems[0].MarginPercent != 25 {
+		t.Errorf("%s: sub 1 margin = enabled %v at %d%%; want 25%% enabled", label, subItems[0].MarginEnabled, subItems[0].MarginPercent)
+	}
+	if subItems[1].UnitCost != 20000 || subItems[1].UnitPrice != 20000 {
+		t.Errorf("%s: sub 2 economics = cost %d sell %d; want an unpriced part at cost", label, subItems[1].UnitCost, subItems[1].UnitPrice)
+	}
+	if subItems[1].MarginEnabled {
+		t.Errorf("%s: sub 2 margin enabled; it was saved without margin", label)
+	}
+
+	// Detail lines ride along with their parent sub on every revision read.
+	details := subItems[0].SubSubItems
+	if len(details) != 2 {
+		t.Fatalf("%s: sub 1 detail count = %d, want 2", label, len(details))
+	}
+	if details[0].SubSubNo != 1 || details[1].SubSubNo != 2 {
+		t.Errorf("%s: detail numbering = %d, %d; want 1, 2", label, details[0].SubSubNo, details[1].SubSubNo)
+	}
+	if details[0].Description != "Concrete pad and mounting rails" || details[1].Description != "Roof penetration and flashing kit" {
+		t.Errorf("%s: detail texts drifted: %q, %q", label, details[0].Description, details[1].Description)
+	}
+	if len(subItems[1].SubSubItems) != 0 {
+		t.Errorf("%s: sub 2 has no details; storage invented %d", label, len(subItems[1].SubSubItems))
+	}
+}
+
 // resetTestSequences clears counter state so sequence tests are hermetic:
 // reruns on a warm database observe the same allocations as a fresh one.
 func resetTestSequences(t *testing.T, database *Store) {
@@ -67,18 +116,56 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 		DiscountPercent:  5,
 		TaxZone:          "FTZ",
 		TaxRateBps:       0,
+		// The line is written as a coherent package: the parent is the rollup
+		// of its two parts (cost 80.000 + 20.000 = 100.000; sell 100.000 +
+		// 20.000 = 120.000), so the invariants the application holds survive
+		// storage and come back intact.
 		Items: []RevisionItem{{
 			ItemNo:                1,
-			Description:           "Test item",
+			Description:           "Test package",
 			Qty:                   1,
-			UoM:                   "Unit",
+			UoM:                   "Lot",
 			UnitPrice:             100000,
-			MarginEnabled:         true,
-			MarginPercent:         20,
+			MarginEnabled:         false,
+			MarginPercent:         0,
 			MarginAmount:          20000,
 			OriginalTotal:         100000,
 			MarginalizedUnitPrice: 120000,
 			MarginalizedTotal:     120000,
+			SubItems: []RevisionSubItem{
+				{
+					SubNo:         1,
+					Description:   "Main part, 25% margin",
+					Qty:           1,
+					UoM:           "Unit",
+					UnitCost:      80000,
+					MarginEnabled: true,
+					MarginPercent: 25,
+					UnitPrice:     100000,
+					MarginAmount:  20000,
+					Total:         100000,
+					// Detail lines carry no values: the composition of the part.
+					SubSubItems: []RevisionSubSubItem{
+						{
+							SubSubNo:    1,
+							Description: "Concrete pad and mounting rails",
+						},
+						{
+							SubSubNo:    2,
+							Description: "Roof penetration and flashing kit",
+						},
+					},
+				},
+				{
+					SubNo:       2,
+					Description: "Support part, no margin",
+					Qty:         1,
+					UoM:         "LS",
+					UnitCost:    20000,
+					UnitPrice:   20000,
+					Total:       20000,
+				},
+			},
 		}},
 		Totals: RevisionTotals{
 			OriginalSubtotal:          100000,
@@ -128,6 +215,7 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	if latest.RevisionNumber != 1 || latest.Subject != "Edited quotation" {
 		t.Errorf("latest = revision %d subject %q; want revision 1 edited quotation", latest.RevisionNumber, latest.Subject)
 	}
+	assertRevisionSubItems(t, "latest", latest)
 
 	revisionZero := int16(0)
 	historical, err := database.GetQuotation(ctx, first.ID, &revisionZero)
@@ -137,6 +225,7 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	if historical.RevisionNumber != 0 || historical.Subject != "Initial quotation" {
 		t.Errorf("historical = revision %d subject %q; want revision 0 initial quotation", historical.RevisionNumber, historical.Subject)
 	}
+	assertRevisionSubItems(t, "historical", historical)
 
 	list, err := database.ListQuotations(ctx)
 	if err != nil {

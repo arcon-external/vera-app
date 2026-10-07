@@ -84,8 +84,90 @@
 						<col style="width: 17%;">
 						<col style="width: 17%;">
 					</colgroup>
-					<tbody>
-						{{range .Items}}
+					{{range .Items}}
+
+					{{if .SubItems}}
+						{{if .ShowSubPrices}}
+						{{/* State C: the parent is a title merged across Description
+						     through Total IDR, and every sub-item is its own priced
+						     row beneath it. The parent's No. stays; the subs number
+						     X.Y. */}}
+						<tbody class="item">
+							<tr class="sub-parent">
+								<td>{{.No}}</td>
+								<td colspan="5">
+									<div class="item-desc"><div class="desc-main">{{.DisplayDesc}}</div></div>
+								</td>
+							</tr>
+							{{range .SubItems}}
+							<tr class="sub-row">
+								<td>{{.SubNo}}</td>
+								<td>
+									<div class="item-desc">
+										<div class="desc-main">{{.Description}}</div>
+										{{if .SubSubItems}}
+										{{/* Detail lines live inside their sub's row as
+										     bullets, in the same list grammar the template
+										     has always used for scope text. The X.Y.Z
+										     prefix stays muted per bullet so the three
+										     levels stay referenceable. */}}
+										<ul class="desc-subitems">
+											{{range .SubSubItems}}<li><span class="detail-no">{{.SubSubNo}}</span>{{.Description}}</li>
+											{{end}}
+										</ul>
+										{{end}}
+									</div>
+								</td>
+								<td>{{.Qty}}</td>
+								<td>{{.UoM}}</td>
+								<td>{{.DisplayUnitPrice}}</td>
+								<td>{{.DisplayTotal}}</td>
+							</tr>
+							{{end}}
+						</tbody>
+						{{else}}
+						{{/* State B: the parent keeps every column and carries the
+						     package's values; each sub prints as an unpriced scope
+						     row, merged like the state-C parent. The prices live on
+						     the main row only. Its detail lines number X.Y.Z and
+						     carry nothing to display beside the scope text. */}}
+						<tbody class="item">
+							<tr>
+								<td>{{.No}}</td>
+								<td>
+									<div class="item-desc"><div class="desc-main">{{.DisplayDesc}}</div></div>
+								</td>
+								<td>{{.Qty}}</td>
+								<td>{{.UoM}}</td>
+								<td>{{.DisplayUnitPrice}}</td>
+								<td>{{.DisplayTotal}}</td>
+							</tr>
+							{{range .SubItems}}
+							<tr class="sub-row">
+								<td>{{.SubNo}}</td>
+								<td colspan="5">
+									<div class="item-desc">
+										<div class="desc-main">{{.Description}}</div>
+										{{if .SubSubItems}}
+										{{/* Same bullet grammar as the priced side: the
+										     detail lines belong to their sub's row. */}}
+										<ul class="desc-subitems">
+											{{range .SubSubItems}}<li><span class="detail-no">{{.SubSubNo}}</span>{{.Description}}</li>
+											{{end}}
+										</ul>
+										{{end}}
+									</div>
+								</td>
+							</tr>
+							{{end}}
+						</tbody>
+						{{end}}
+
+					{{else}}
+					{{/* State A: one full-value row, exactly as this template has
+					     always rendered. Text bullets inside the description
+					     (legacy sub-lines) keep drawing from DisplayDesc. */}}
+					<tbody class="item">
 						<tr>
 							<td>{{.No}}</td>
 							<td>
@@ -96,8 +178,10 @@
 							<td>{{.DisplayUnitPrice}}</td>
 							<td>{{.DisplayTotal}}</td>
 						</tr>
-						{{end}}
 					</tbody>
+					{{end}}
+
+					{{end}}
 				</table>
 			</section>
 

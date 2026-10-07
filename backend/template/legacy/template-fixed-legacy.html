@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<style>
+		{{.CustomCSS}}
+	</style>
+	<title>Quotation</title>
+</head>
+
+<body>
+	<div class="page">
+		<div class="top-ribbon"></div>
+
+		<div class="top-lead">
+			<div class="top-brand">
+				<h1>{{.CompanyName}}</h1>
+				<p>{{.CompanyAddress}}</p>
+			</div>
+			<img src="data:image/png;base64,{{.LogoBase64}}" alt="logo">
+		</div>
+
+		<h2 class="doc-eyebrow">QUOTATION</h2>
+
+		<main class="content">
+			<section class="recipient-row">
+				<article class="card">
+					<h3>Quotation to</h3>
+					<p class="name">{{.RecipientName}}</p>
+					<p class="company">{{.RecipientCompany}}</p>
+					<p><strong>Address:</strong></p>
+					<p>{{.RecipientAddress}}</p>
+				</article>
+
+				<div class="meta-stack">
+					<dl class="quote-meta">
+						<dt>Quotation No.</dt>
+						<dd>{{.QuoteNumber}}</dd>
+						<dt>Issue Date</dt>
+						<dd>{{.Date}}</dd>
+						<dt>Valid Until</dt>
+						<dd>{{.ValidUntil}}</dd>
+						<dt>Revision</dt>
+						<dd>{{printf "%02d" .RevisionID}}</dd>
+					</dl>
+					<div class="meta-decor" aria-hidden="true"></div>
+				</div>
+			</section>
+
+			<section class="subject">
+				<div class="label">Subject</div>
+				<div class="value">{{.Subject}}</div>
+			</section>
+
+			<section class="items-wrap">
+				<table class="items-head-table">
+					<colgroup>
+						<col style="width: 7%;">
+						<col style="width: 43%;">
+						<col style="width: 8%;">
+						<col style="width: 8%;">
+						<col style="width: 17%;">
+						<col style="width: 17%;">
+					</colgroup>
+					<thead>
+						<tr>
+							<th>No.</th>
+							<th>Description</th>
+							<th>Qty.</th>
+							<th>UoM</th>
+							<th>Unit Price IDR</th>
+							<th>Total IDR</th>
+						</tr>
+					</thead>
+				</table>
+
+				<table class="items-body-table">
+					<colgroup>
+						<col style="width: 7%;">
+						<col style="width: 43%;">
+						<col style="width: 8%;">
+						<col style="width: 8%;">
+						<col style="width: 17%;">
+						<col style="width: 17%;">
+					</colgroup>
+					<tbody>
+						{{range .Items}}
+						<tr>
+							<td>{{.No}}</td>
+							<td>
+								<div class="item-desc">{{.DisplayDesc}}</div>
+							</td>
+							<td>{{.Qty}}</td>
+							<td>{{.UoM}}</td>
+							<td>{{.DisplayUnitPrice}}</td>
+							<td>{{.DisplayTotal}}</td>
+						</tr>
+						{{end}}
+					</tbody>
+				</table>
+			</section>
+
+			<section class="footer">
+				<div class="tnc">
+					<h3>Terms and Conditions</h3>
+					<p>1. Payment terms agreed for this quotation is {{.PaymentTerm}} days.</p>
+					<p>2. This quotation is valid for {{.Validity}} days.</p>
+					<p>3. Lead time is {{.LeadTime}} days.</p>
+					<p>4. Incoterms: {{.Incoterm}}</p>
+				</div>
+
+				<div class="totals">
+					<div class="line">
+						<span>Sub Total</span>
+						<span>Rp{{.DisplaySubTotal}}</span>
+					</div>
+					<div class="line discount">
+						<span>Discount ({{.DiscountPercent}}%)</span>
+						<span>Rp{{.DisplayDiscountAmount}}</span>
+					</div>
+					{{if .PpnAmount}}<div class="line ppn">
+						<span>PPN 11%</span>
+						<span>Rp{{.DisplayPpnAmount}}</span>
+					</div>{{end}}
+					<div class="line grand">
+						<span>Grand Total</span>
+						<span>Rp{{.DisplayGrandTotal}}</span>
+					</div>
+				</div>
+			</section>
+
+			<p class="closing">
+				We will be happy to supply information that you may need and trust that you call on us
+				to fill your order,
+				which will receive our prompt and careful attention.
+			</p>
+
+			{{/* Layout A (approved): the verification code replaces the scanned
+			     signature block. The caption carries the issuer identity that the
+			     signature used to convey. Before export there is no handle yet,
+			     so the preview shows a placeholder instead of a code that would
+			     resolve to nothing. */}}
+			{{if .VerifyQRBase64}}
+			<div class="verify">
+				<div class="verify-caption">
+					<strong>{{.CompanyName}}</strong>
+					Scan to verify this quotation
+					<span class="verify-code">or enter code {{.VerifyShortID}}</span>
+				</div>
+				<div class="verify-qr">
+					<img src="data:image/png;base64,{{.VerifyQRBase64}}" alt="Verification QR code">
+				</div>
+			</div>
+			{{else}}
+			<div class="verify-pending">
+				<strong>{{.CompanyName}}</strong>
+				<span>Verification code is added when you export</span>
+			</div>
+			{{end}}
+		</main>
+	</div>
+</body>
+
+</html>
