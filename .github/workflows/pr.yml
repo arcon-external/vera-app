@@ -4,6 +4,14 @@ on:
   pull_request:
     branches: [main]
 
+# Interleaved pushes to one PR otherwise run the full race suite in parallel
+# with the run the previous push started. Only the latest commit can merge, so
+# superseded runs are cancelled rather than finishing out of spite. Keyed by
+# PR number: different PRs never cancel each other.
+concurrency:
+  group: pr-gates-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   go:
     name: Go gates
