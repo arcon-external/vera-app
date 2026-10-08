@@ -318,9 +318,14 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 	for _, item := range record.Items {
 		subs := make([]apicontract.QuotationSubItemRow, 0, len(item.SubItems))
 		for _, sub := range item.SubItems {
+			details := make([]string, 0, len(sub.SubSubItems))
+			for _, detail := range sub.SubSubItems {
+				details = append(details, detail.Description)
+			}
 			subs = append(subs, apicontract.QuotationSubItemRow{
 				SubNo:                    sub.SubNo,
 				Description:              sub.Description,
+				Details:                  details,
 				Qty:                      sub.Qty,
 				UoM:                      sub.UoM,
 				OriginalUnitPrice:        sub.UnitCost,

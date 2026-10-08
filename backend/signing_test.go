@@ -83,6 +83,54 @@ grand_total: 305805`
 	}
 }
 
+// testSignableWithSubDetails is testSignableWithSubs with the subs spelling
+// out their scope lines: plain text that prints beneath a sub in both display
+// states.
+func testSignableWithSubDetails() SignableRevision {
+	r := testSignableWithSubs()
+	r.Items[0].Subs[0].Details = []string{"Panel with HMI and PLC", "Concrete pad and rails"}
+	r.Items[0].Subs[1].Details = []string{"Cable trays included"}
+	return r
+}
+
+// TestCanonicalFormatWithSubDetailsIsPinned freezes the detail-line block. A
+// detail line prints under its sub, so editing one in storage must break
+// verification exactly as editing a price does; the lines carry no values,
+// which is why they need their own coverage at all.
+func TestCanonicalFormatWithSubDetailsIsPinned(t *testing.T) {
+	want := `VERA1:QUOTE
+number: 15020005
+revision: 00
+recipient_name: Jesicha
+recipient_company: PT. Infineon Technologies Batam
+recipient_address: Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam
+subject: Supply and install scrubber control system
+incoterm: EXW
+validity_days: 30
+payment_term_days: 90
+lead_time_days: 60
+discount_percent: 5
+issuer: PT Arcon Penta Persada
+currency: IDR
+item_count: 2
+item_1: Scrubber control system, complete|1|Lot|240000|240000
+item_1_subs: 2
+item_1_sub_1: Control panel|1|Lot|150000|150000
+item_1_sub_1_detail_1: Panel with HMI and PLC
+item_1_sub_1_detail_2: Concrete pad and rails
+item_1_sub_2: Field wiring|2|EA|45000|90000
+item_1_sub_2_detail_1: Cable trays included
+item_2: Commissioning|1|Lot|50000|50000
+subtotal: 290000
+discount_amount: 14500
+ppn_amount: 30305
+grand_total: 305805`
+	got := string(CanonicalRevision(testSignableWithSubDetails()))
+	if got != want {
+		t.Errorf("canonical revision with sub details drifted:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 // TestCanonicalFormatIsPinned freezes the byte format for a revision without
 // sub-items. Changing it silently would invalidate every signature ever
 // printed, so the expected literal is deliberately verbose — editing it is a
@@ -205,7 +253,7 @@ func TestEverySignedSubFieldIsTamperProof(t *testing.T) {
 	}
 	key := ed25519.NewKeyFromSeed(seed)
 	publicKey := key.Public().(ed25519.PublicKey)
-	base := testSignableWithSubs()
+	base := testSignableWithSubDetails()
 	signature := SignCanonical(key, CanonicalRevision(base))
 
 	mutations := map[string]func(r *SignableRevision){
@@ -219,6 +267,12 @@ func TestEverySignedSubFieldIsTamperProof(t *testing.T) {
 			r.Items[0].Subs[0], r.Items[0].Subs[1] = r.Items[0].Subs[1], r.Items[0].Subs[0]
 		},
 		"sub_removed_leaving_parent": func(r *SignableRevision) { r.Items[0].Subs = nil },
+		"sub_detail_text":            func(r *SignableRevision) { r.Items[0].Subs[0].Details[0] = "Bronze panel" },
+		"sub_detail_removed":         func(r *SignableRevision) { r.Items[0].Subs[1].Details = nil },
+		"sub_detail_order": func(r *SignableRevision) {
+			d := r.Items[0].Subs[0].Details
+			d[0], d[1] = d[1], d[0]
+		},
 	}
 	for field, mutate := range mutations {
 		t.Run(field, func(t *testing.T) {
@@ -226,6 +280,9 @@ func TestEverySignedSubFieldIsTamperProof(t *testing.T) {
 			tampered.Items = append([]SignableItem(nil), base.Items...)
 			for i := range tampered.Items {
 				tampered.Items[i].Subs = append([]SignableSub(nil), base.Items[i].Subs...)
+				for j := range tampered.Items[i].Subs {
+					tampered.Items[i].Subs[j].Details = append([]string(nil), base.Items[i].Subs[j].Details...)
+				}
 			}
 			mutate(&tampered)
 			if VerifyCanonical(publicKey, CanonicalRevision(tampered), signature) {
@@ -309,5 +366,12 @@ func TestCanonicalDigestChangesWithAnyField(t *testing.T) {
 	subsDropped.Items[0].Subs = nil
 	if CanonicalDigest(CanonicalRevision(subsDropped)) == withSubs {
 		t.Error("digest unchanged after dropping the sub block")
+	}
+
+	withDetails := CanonicalDigest(CanonicalRevision(testSignableWithSubDetails()))
+	detailMutated := testSignableWithSubDetails()
+	detailMutated.Items[0].Subs[0].Details[1] = "Different detail"
+	if CanonicalDigest(CanonicalRevision(detailMutated)) == withDetails {
+		t.Error("digest unchanged after a sub detail mutation")
 	}
 }

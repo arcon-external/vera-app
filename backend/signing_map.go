@@ -17,12 +17,17 @@ func SignableFromData(data QuotationData) SignableRevision {
 	for _, item := range data.Items {
 		var subs []SignableSub
 		for _, sub := range item.SubItems {
+			details := make([]string, 0, len(sub.SubSubItems))
+			for _, detail := range sub.SubSubItems {
+				details = append(details, detail.Description)
+			}
 			subs = append(subs, SignableSub{
 				Description: sub.Description,
 				Qty:         int64(sub.Qty),
 				UoM:         sub.UoM,
 				UnitPrice:   int64(sub.UnitPrice),
 				Total:       int64(sub.Total),
+				Details:     details,
 			})
 		}
 		items = append(items, SignableItem{
@@ -72,6 +77,7 @@ func SignableFromEvidence(evidence store.RevisionEvidence) SignableRevision {
 				UoM:         sub.UoM,
 				UnitPrice:   sub.UnitPrice,
 				Total:       sub.Total,
+				Details:     append([]string(nil), sub.Details...),
 			})
 		}
 		items = append(items, SignableItem{

@@ -77,22 +77,23 @@ type QuotationItemRow struct {
 // editor and the archive detail can show what the document chose to print and
 // what it earned.
 type QuotationSubItemRow struct {
-	Description              string `json:"description"`
-	UoM                      string `json:"uom"`
-	DisplayOriginalUnit      string `json:"displayOriginalUnit"`
-	DisplayOriginalTotal     string `json:"displayOriginalTotal"`
-	DisplayMarginalizedUnit  string `json:"displayMarginalizedUnit"`
-	DisplayMarginalizedTotal string `json:"displayMarginalizedTotal"`
-	DisplayMarginAmount      string `json:"displayMarginAmount"`
-	OriginalUnitPrice        int64  `json:"originalUnitPrice"`
-	OriginalTotal            int64  `json:"originalTotal"`
-	MarginalizedUnitPrice    int64  `json:"marginalizedUnitPrice"`
-	MarginalizedTotal        int64  `json:"marginalizedTotal"`
-	MarginAmount             int64  `json:"marginAmount"`
-	SubNo                    int    `json:"subNo"`
-	Qty                      int64  `json:"qty"`
-	MarginPercent            int16  `json:"marginPercent"`
-	MarginEnabled            bool   `json:"marginEnabled"`
+	Description              string   `json:"description"`
+	Details                  []string `json:"details"`
+	UoM                      string   `json:"uom"`
+	DisplayOriginalUnit      string   `json:"displayOriginalUnit"`
+	DisplayOriginalTotal     string   `json:"displayOriginalTotal"`
+	DisplayMarginalizedUnit  string   `json:"displayMarginalizedUnit"`
+	DisplayMarginalizedTotal string   `json:"displayMarginalizedTotal"`
+	DisplayMarginAmount      string   `json:"displayMarginAmount"`
+	OriginalUnitPrice        int64    `json:"originalUnitPrice"`
+	OriginalTotal            int64    `json:"originalTotal"`
+	MarginalizedUnitPrice    int64    `json:"marginalizedUnitPrice"`
+	MarginalizedTotal        int64    `json:"marginalizedTotal"`
+	MarginAmount             int64    `json:"marginAmount"`
+	SubNo                    int      `json:"subNo"`
+	Qty                      int64    `json:"qty"`
+	MarginPercent            int16    `json:"marginPercent"`
+	MarginEnabled            bool     `json:"marginEnabled"`
 }
 
 // QuotationDetail is one revision: internal economics plus the customer HTML

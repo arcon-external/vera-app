@@ -59,15 +59,18 @@ type SignableItem struct {
 }
 
 // SignableSub is one printed sub-item row: what the customer sees, never the
-// cost side and never a margin rate. The B/C display choice is deliberately
-// not covered here -- it selects which of these signed values print, it never
-// changes a value.
+// cost side and never a margin rate. Details are the sub's scope lines --
+// description-only text that prints beneath it in both display states, so it
+// is signed content like any other printed string. The B/C display choice is
+// deliberately not covered here: it selects which of these signed values
+// print, it never changes a value.
 type SignableSub struct {
 	Description string
 	UoM         string
 	Qty         int64
 	UnitPrice   int64
 	Total       int64
+	Details     []string
 }
 
 // CanonicalRevision renders the byte string the signature covers:
@@ -109,6 +112,9 @@ func CanonicalRevision(revision SignableRevision) []byte {
 				strconv.FormatInt(sub.UnitPrice, 10),
 				strconv.FormatInt(sub.Total, 10),
 			}, "|"))
+			for k, detail := range sub.Details {
+				writeField(&b, fmt.Sprintf("item_%d_sub_%d_detail_%d", i+1, j+1, k+1), detail)
+			}
 		}
 	}
 	writeField(&b, "subtotal", strconv.FormatInt(revision.Subtotal, 10))

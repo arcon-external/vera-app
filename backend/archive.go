@@ -44,6 +44,7 @@ type ArchivedQuotationItem struct {
 type ArchivedQuotationSubItem struct {
 	DisplayMarginAmount      string
 	Description              string
+	Details                  []string
 	DisplayMarginalizedTotal string
 	UoM                      string
 	DisplayMarginalizedUnit  string
@@ -162,6 +163,7 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			subs = append(subs, ArchivedQuotationSubItem{
 				SubNo:                    sub.SubNo,
 				Description:              sub.Description,
+				Details:                  append([]string(nil), sub.Details...),
 				Qty:                      sub.Qty,
 				UoM:                      sub.UoM,
 				OriginalUnitPrice:        sub.OriginalUnitPrice,

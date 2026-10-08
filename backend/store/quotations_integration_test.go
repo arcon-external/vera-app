@@ -243,6 +243,12 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	if evidenceSubs[0].UnitPrice != 100000 || evidenceSubs[0].Total != 100000 || evidenceSubs[1].UnitPrice != 20000 {
 		t.Errorf("evidence sub economics drifted: %+v", evidenceSubs)
 	}
+	if len(evidenceSubs[0].Details) != 2 || evidenceSubs[0].Details[0] != "Concrete pad and mounting rails" {
+		t.Errorf("evidence sub details drifted: %v", evidenceSubs[0].Details)
+	}
+	if len(evidenceSubs[1].Details) != 0 {
+		t.Errorf("evidence invented details for sub 2: %v", evidenceSubs[1].Details)
+	}
 
 	revisionZero := int16(0)
 	historical, err := database.GetQuotation(ctx, first.ID, &revisionZero)
