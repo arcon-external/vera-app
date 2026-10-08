@@ -736,6 +736,10 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 	}
 	tableSides(p, m, clip, top, bodyH, colTableRule)
 	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+	// The No. cell's right edge, which is the merged cell's own left border in
+	// the browser -- every cell is bordered, so the boundary is there on the
+	// title and on every scope row, exactly as it is on a full row.
+	p.add(box{x: m.colX[1], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
 
 	// The number cell keeps its size and its centred number. Scope rows carry
 	// the part number in the lighter sub-item treatment; the title row carries
