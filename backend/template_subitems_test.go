@@ -38,24 +38,25 @@ func TestTemplateRendersAllThreeStates(t *testing.T) {
 		t.Errorf("state C sub row prices missing")
 	}
 
-	// Detail lines: bullets INSIDE their sub row's description cell, not rows
-	// of their own -- three of them across the document, numbered X.Y.Z with
-	// a muted prefix, using the same list grammar as scope text.
+	// Detail lines: plain bullets INSIDE their sub row's description cell,
+	// not rows of their own and not numbered -- three bullets across the
+	// document, in the same list grammar the template uses for scope text.
 	if strings.Contains(page, "subsub-row") {
 		t.Errorf("detail rows rendered as table rows; details belong inside the sub's description")
 	}
-	for _, want := range []string{">1.1.1<", ">1.1.2<", ">3.2.1<"} {
-		if !strings.Contains(page, want) {
-			t.Errorf("detail numbering %s missing", want)
-		}
+	if strings.Contains(page, "1.1.1") || strings.Contains(page, "3.2.1") {
+		t.Errorf("detail numbering still printed; bullets are positional only")
 	}
-	if got := strings.Count(page, `class="detail-no"`); got != 3 {
-		t.Errorf("detail prefix count = %d, want 3 (two on the B side, one on the C side)", got)
-	}
-	// Both carriers draw the same bullet grammar inside a sub row: the C
-	// controller's row and the B fan's row each hold a list.
 	if got := strings.Count(page, `<ul class="desc-subitems">`); got != 2 {
 		t.Errorf("detail bullet lists = %d, want 2", got)
+	}
+	if got := strings.Count(page, "<li>"); got != 3 {
+		t.Errorf("detail bullets = %d, want 3 (two on the B side, one on the C side)", got)
+	}
+	for _, want := range []string{"Concrete pad and anti-vibration mounting rails", "24V control wiring from the AHU panel"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("detail text %q missing", want)
+		}
 	}
 
 	// State B: its parent keeps its Qty and both price columns, and each scope

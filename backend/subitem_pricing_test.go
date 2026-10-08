@@ -124,24 +124,20 @@ func TestPackageRollupPricesPerSub(t *testing.T) {
 		t.Errorf("sub 1.3 sell unit = %d, want its cost 10562500", subs[2].UnitPrice)
 	}
 
-	// Detail lines number three levels deep and change no money at all:
-	// they describe what a part includes, so the parent rollup above must
-	// be exactly what it was before they existed.
+	// Detail lines are plain bullets and change no money at all: they
+	// describe what a part includes, so the parent rollup above must be
+	// exactly what it was before they existed.
 	lows := subs[0].SubSubItems
 	if len(lows) != 2 {
 		t.Fatalf("sub 1.1 detail count = %d, want 2", len(lows))
 	}
-	if lows[0].SubSubNo != "1.1.1" || lows[1].SubSubNo != "1.1.2" {
-		t.Errorf("detail numbering = %q, %q; want 1.1.1, 1.1.2", lows[0].SubSubNo, lows[1].SubSubNo)
-	}
 	if lows[0].Description != "Concrete pad and anti-vibration mounting rails" {
-		t.Errorf("detail 1.1.1 text drifted: %q", lows[0].Description)
+		t.Errorf("detail text drifted: %q", lows[0].Description)
 	}
-	// The C side carries one detail under 3.2; the number proves the third
-	// segment derives from item + sub placement, not a running counter.
+	// The C side carries one detail under 3.2, carried through unlabelled.
 	aircond := q.Data.Items[2]
-	if got := aircond.SubItems[1].SubSubItems[0].SubSubNo; got != "3.2.1" {
-		t.Errorf("state C detail number = %q, want 3.2.1", got)
+	if got := len(aircond.SubItems[1].SubSubItems); got != 1 {
+		t.Errorf("state C detail count = %d, want 1", got)
 	}
 
 	// Every package's sub total sums to the parent: the invariant that makes

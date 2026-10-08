@@ -110,10 +110,9 @@ type QuotationSubItem struct {
 }
 
 // QuotationSubSubItem is one detail line beneath a priced sub-item. It has no
-// values of its own -- only a description and its X.Y.Z placement in the
-// hierarchy -- which is why it carries nothing to sum.
+// values of its own and no printed label: it is a plain bullet under its sub,
+// identified by position alone (storage keeps the ordering).
 type QuotationSubSubItem struct {
-	SubSubNo    string
 	Description string
 }
 

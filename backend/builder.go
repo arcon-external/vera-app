@@ -102,7 +102,7 @@ func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSub
 			Description:       sub.Description,
 			SubNo:             fmt.Sprintf("%d.%d", parentNo, i+1),
 			UoM:               sub.UoM,
-			SubSubItems:       buildSubSubItems(parentNo, i+1, sub.SubSubItems),
+			SubSubItems:       buildSubSubItems(sub.SubSubItems),
 			OriginalUnitPrice: sub.UnitCost,
 			OriginalTotal:     uint64(sub.Qty) * sub.UnitCost,
 			UnitPrice:         sellUnit,
@@ -119,15 +119,12 @@ func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSub
 	return out
 }
 
-// buildSubSubItems numbers one part's detail lines X.Y.Z. Nothing is priced:
-// the detail lines exist to describe what the linked sub-item includes.
-func buildSubSubItems(parentNo uint32, subNo int, lows []QuotationSubSubItemInput) []QuotationSubSubItem {
+// buildSubSubItems carries one part's detail lines through. They are plain
+// bullets below their sub row -- no numbering, nothing priced.
+func buildSubSubItems(lows []QuotationSubSubItemInput) []QuotationSubSubItem {
 	out := make([]QuotationSubSubItem, 0, len(lows))
-	for i, low := range lows {
-		out = append(out, QuotationSubSubItem{
-			SubSubNo:    fmt.Sprintf("%d.%d.%d", parentNo, subNo, i+1),
-			Description: low.Description,
-		})
+	for _, low := range lows {
+		out = append(out, QuotationSubSubItem{Description: low.Description})
 	}
 	return out
 }

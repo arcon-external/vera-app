@@ -331,13 +331,6 @@
 		   for scope text -- no separate rows, no No. cell of their own. Each
 		   bullet keeps its X.Y.Z address as a muted prefix, so the hierarchy
 		   stays referenceable from prose without shouting. */
-		.items-body-table tr .desc-subitems .detail-no {
-			color: #96a0bc;
-			font-size: 10px;
-			margin-right: 7px;
-			font-variant-numeric: tabular-nums;
-		}
-
 		/* the rail hangs at 18px inside the sub's description cell; the bullet
 		   list's stock 16px indent would put its discs on top of the rail, so
 		   sub-row bullets sit one step deeper and clear it */

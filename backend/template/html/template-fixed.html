@@ -112,7 +112,7 @@
 										     prefix stays muted per bullet so the three
 										     levels stay referenceable. */}}
 										<ul class="desc-subitems">
-											{{range .SubSubItems}}<li><span class="detail-no">{{.SubSubNo}}</span>{{.Description}}</li>
+											{{range .SubSubItems}}<li>{{.Description}}</li>
 											{{end}}
 										</ul>
 										{{end}}
@@ -152,7 +152,7 @@
 										{{/* Same bullet grammar as the priced side: the
 										     detail lines belong to their sub's row. */}}
 										<ul class="desc-subitems">
-											{{range .SubSubItems}}<li><span class="detail-no">{{.SubSubNo}}</span>{{.Description}}</li>
+											{{range .SubSubItems}}<li>{{.Description}}</li>
 											{{end}}
 										</ul>
 										{{end}}
