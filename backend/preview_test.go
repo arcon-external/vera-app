@@ -310,3 +310,69 @@ func TestRenderedQuotationTitle(t *testing.T) {
 		t.Error("QUOTATION eyebrow must sit between the header and the info cards")
 	}
 }
+
+// TestRenderedQuotationHidesPackageInternals extends the no-leak rule to
+// package lines: a state-C rendering prints every sub's SELL price (that is
+// the customer's itemisation) but never a cost, a margin amount, or the
+// composed cost of the package. The figures are chosen so cost and sell differ
+// in every position, which makes the presence checks discriminating rather
+// than coincidental.
+func TestRenderedQuotationHidesPackageInternals(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(QuotationInput{
+		CustomerID: 2,
+		Items: []QuotationItemInput{{
+			Description:   "Package with mixed parts:",
+			UoM:           "Lot",
+			Qty:           1,
+			ShowSubPrices: true,
+			SubItems: []QuotationSubItemInput{
+				// Cost 1.234.000 at 25% -> sell 1.542.500, margin 308.500.
+				// No printed string contains another number as a substring,
+				// so every presence and absence check below is discriminating.
+				{Description: "First part", UoM: "EA", UnitCost: 1_234_000, Qty: 1, MarginEnabled: true, MarginPercent: 25,
+					SubSubItems: []QuotationSubSubItemInput{{Description: "Included mounting hardware"}}},
+				{Description: "Second part", UoM: "LS", UnitCost: 2_222, Qty: 1},
+			},
+		}},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      14,
+		PaymentTerm:   30,
+		LeadTime:      45,
+		Incoterm:      "FOB",
+	}); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	var body strings.Builder
+	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+		t.Fatalf("template execute failed: %v", err)
+	}
+	rendered := body.String()
+
+	// The customer's itemisation: both parts' sell prices are printed.
+	for _, want := range []string{"1.542.500", "2.222"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered package is missing sell price %s", want)
+		}
+	}
+	// The internals: part costs, the composed package cost, and every
+	// margin-shaped figure must not appear anywhere.
+	for _, forbidden := range []string{
+		"Tax", "Nett", "Margin", "Profit", "Internal",
+		"1.234.000", // margined part's cost
+		"1.236.222", // composed package cost
+		"308.500",   // margin amount
+		"25%",       // margin rate
+		"+Rp",       // margin-money phrasing
+	} {
+		if strings.Contains(rendered, forbidden) {
+			t.Errorf("rendered package leaks internal value %q", forbidden)
+		}
+	}
+}
