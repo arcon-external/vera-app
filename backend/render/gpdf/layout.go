@@ -151,8 +151,8 @@ const (
 	railLeftPx        = 18 // tr.sub-row td:nth-child(2)::before left
 	railWidthPx       = 2
 	subNumPx          = 10 // tr.sub-row td:nth-child(1) font-size
-	parentPadTopPx    = 12 // tr.sub-parent td padding: 12px 10px 7px
-	parentPadBotPx    = 7
+	parentPadTopPx    = 10 // tr.sub-parent td padding: 10px, like every other cell
+	parentPadBotPx    = 10
 
 	radiusSmPx = 8
 	// qrCardPx is the verification QR card's box, padding and border included.

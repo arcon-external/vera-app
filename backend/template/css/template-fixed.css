@@ -292,7 +292,9 @@
 		}
 
 		.items-body-table tr.sub-parent td {
-			padding: 12px 10px 7px;
+			/* Uniform padding, like every other cell: the 12/7 asymmetry made
+			   the title sit low in its band. */
+			padding: 10px;
 		}
 
 		.items-body-table tr.sub-row td {
@@ -341,6 +343,11 @@
 		.items-body-table td:nth-child(6) {
 			text-align: center;
 			white-space: nowrap;
+			/* A number reads against the row's middle, not its first prose
+			   line: in a row whose description wraps, a top-aligned figure
+			   floats beside the opening words. The description cell is not in
+			   this list and keeps flowing from the top. */
+			vertical-align: middle;
 		}
 
 		.footer {

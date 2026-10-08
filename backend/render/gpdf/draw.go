@@ -744,11 +744,11 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 		num := itoa(rb.item.No)
 		p.add(run{
 			x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(num, px(bodyPx), false))/2,
-			baseline: top + px(padTopPx) + bodyBaselineOffset,
+			baseline: centeredBlockTop(top, bodyH, px(padTopPx), 1) + bodyBaselineOffset,
 			size:     px(bodyPx), text: num, color: e.ink,
 		})
 	} else {
-		e.drawSubNumber(p, m, top, padTopPx, rb.part.SubNo)
+		e.drawSubNumber(p, m, top, bodyH, px(padTopPx), rb.part.SubNo)
 		// The rail hangs from the row's padding box, exactly as the ::before
 		// pseudo-element does: full height, 2px, at its stylesheet offset.
 		p.add(box{
@@ -777,12 +777,28 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 	}
 }
 
+// centeredBlockTop is the engine's `vertical-align: middle`: the y of a text
+// block's first line box when the block is centred in a cell's content box.
+// A block at or taller than its box starts at the padding edge, which keeps
+// single-line cells at exactly the position they had when every cell was
+// top-aligned -- the fitted geometry of single-line rows does not move.
+func centeredBlockTop(top, bodyH, padY, lineCount float64) float64 {
+	inner := bodyH - 2*padY
+	block := lineCount * descLineH
+	offset := (inner - block) / 2
+	if offset < 0 {
+		offset = 0
+	}
+	return top + padY + offset
+}
+
 // drawSubNumber centres a sub row's X.Y number in the No. column, in the
-// smaller, lighter type the stylesheet gives `tr.sub-row td:first-child`.
-func (e *Engine) drawSubNumber(p *page, m metrics, top, padTopPx float64, number string) {
+// smaller, lighter type the stylesheet gives `tr.sub-row td:first-child`. The
+// number sits in the middle of the row, like every other numeric cell.
+func (e *Engine) drawSubNumber(p *page, m metrics, top, bodyH, padY float64, number string) {
 	p.add(run{
 		x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(number, px(subNumPx), false))/2,
-		baseline: top + px(padTopPx) + subNumBaselineOffset,
+		baseline: centeredBlockTop(top, bodyH, padY, 1) + subNumBaselineOffset,
 		size:     px(subNumPx), text: number, color: colSubNo,
 	})
 }
@@ -809,7 +825,7 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	tableSides(p, m, clip, top, bodyH, colTableRule)
 	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
 
-	e.drawSubNumber(p, m, top, subRowPadPx, rb.part.SubNo)
+	e.drawSubNumber(p, m, top, bodyH, px(subRowPadPx), rb.part.SubNo)
 
 	// The rail, full height of the padding box.
 	p.add(box{
@@ -834,8 +850,9 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			return
 		}
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
-		cy := top + px(subRowPadPx) + bodyBaselineOffset
-		for _, line := range e.Wrap(text, px(bodyPx), trackW, false) {
+		lines := e.Wrap(text, px(bodyPx), trackW, false)
+		cy := centeredBlockTop(top, bodyH, px(subRowPadPx), float64(len(lines))) + bodyBaselineOffset
+		for _, line := range lines {
 			p.add(run{
 				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), false))/2,
 				baseline: cy,
@@ -883,7 +900,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	num := itoa(rb.item.No)
 	p.add(run{
 		x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(num, px(bodyPx), false))/2,
-		baseline: top + px(tdPadPx) + bodyBaselineOffset,
+		baseline: centeredBlockTop(top, bodyH, px(tdPadPx), 1) + bodyBaselineOffset,
 		size:     px(bodyPx), text: num, color: e.ink,
 	})
 
@@ -897,7 +914,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	}
 	e.drawBullets(p, subTextX, dy, rb.subs, e.ink)
 
-	centre := func(i int, text string, bold bool) {
+	centre := func(i int, text string) {
 		if text == "" {
 			return
 		}
@@ -905,24 +922,27 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 		// centres on each line rather than running into the next column. The
 		// stylesheet gives every cell `white-space: normal`, so this is what the
 		// browser does; a long unit or an unusually large figure is the case it
-		// matters for.
+		// matters for. The block is centred in the row like every numeric cell:
+		// a figure floats beside the opening words of a wrapped description
+		// otherwise.
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
-		cy := top + px(tdPadPx) + bodyBaselineOffset
-		for _, line := range e.Wrap(text, px(bodyPx), trackW, false) {
+		lines := e.Wrap(text, px(bodyPx), trackW, false)
+		cy := centeredBlockTop(top, bodyH, px(tdPadPx), float64(len(lines))) + bodyBaselineOffset
+		for _, line := range lines {
 			p.add(run{
-				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), bold))/2,
+				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), false))/2,
 				baseline: cy,
-				size:     px(bodyPx), text: line, bold: bold, color: e.ink,
+				size:     px(bodyPx), text: line, color: e.ink,
 			})
 			cy += descLineH
 		}
 	}
-	centre(2, rb.item.Qty, false)
-	centre(3, rb.item.UoM, false)
-	centre(4, rb.item.UnitPrice, false)
+	centre(2, rb.item.Qty)
+	centre(3, rb.item.UoM)
+	centre(4, rb.item.UnitPrice)
 	// The Total column is centred but not bold: the stylesheet gives every
 	// numeric cell the same treatment and only the header row carries a weight.
-	centre(5, rb.item.Total, false)
+	centre(5, rb.item.Total)
 }
 
 // drawFooterCards paints the terms and totals cards, the first of the three
