@@ -660,14 +660,19 @@ function ItemRow({
               className="flex h-9 items-center lg:justify-end"
               title="Blended margin across the sub-items: total profit over total cost. Updates as the sub-items change."
             >
-              <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
-                {rollup.cost > 0 ? blendedMarginLabel(rollup.margin) : "—"}
-              </span>
+              {rollup.cost > 0 ? (
+                <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
+                  {blendedMarginLabel(rollup.margin)}
+                </span>
+              ) : (
+                <span className="text-caption text-ink-400">—</span>
+              )}
             </div>
           </MobileField>
         </div>
       ) : null}
 
+      {!hasSubItems ? (
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:contents">
         <MobileField label="UoM">
           <UoMSelect
@@ -779,6 +784,7 @@ function ItemRow({
           </div>
         </MobileField>
       </div>
+      ) : null}
 
       <button
         type="button"
@@ -946,6 +952,15 @@ function SubRow({
             onChange={(event) => onPatch({ description: event.target.value })}
             className={subCellClass}
           />
+          <BulletsEditor
+            lines={sub.bullets}
+            addLabel="Add sub-sub-item"
+            placeholder="Sub-sub-item — what this includes"
+            ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
+            onAdd={onAddBullet}
+            onRemove={onRemoveBullet}
+            onChange={onBulletChange}
+          />
         </MobileField>
 
         <MobileField label="Qty">
@@ -1078,15 +1093,6 @@ function SubRow({
         </button>
       </div>
 
-      <BulletsEditor
-        lines={sub.bullets}
-        addLabel="Add sub-sub-item"
-        placeholder="Sub-sub-item — what this includes"
-        ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
-        onAdd={onAddBullet}
-        onRemove={onRemoveBullet}
-        onChange={onBulletChange}
-      />
     </div>
   );
 }
