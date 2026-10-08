@@ -880,7 +880,8 @@ function ItemRow({
           </div>
 
           <textarea
-            readOnly
+            value=""
+            onChange={() => undefined}
             rows={1}
             aria-label={`Paste sub-item rows for line ${index + 1}`}
             placeholder="Or paste rows from Excel — description, qty, UoM, unit cost, margin %"
