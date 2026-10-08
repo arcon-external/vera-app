@@ -25,6 +25,7 @@ type RevisionItem struct {
 	MarginalizedTotal     int64
 	MarginPercent         int16
 	MarginEnabled         bool
+	ShowSubPrices         bool
 	SubItems              []RevisionSubItem
 }
 
@@ -271,7 +272,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT item_no, description, qty, uom, unit_price, margin_enabled,
 		       margin_percent, margin_amount, original_total,
-		       marginalized_unit_price, marginalized_total
+		       marginalized_unit_price, marginalized_total, show_sub_prices
 		FROM %s.quotation_revision_items
 		WHERE revision_id = (
 			SELECT r.id FROM %s.quotation_revisions r
@@ -297,6 +298,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 			&item.OriginalTotal,
 			&item.MarginalizedUnitPrice,
 			&item.MarginalizedTotal,
+			&item.ShowSubPrices,
 		); err != nil {
 			return QuotationRecord{}, fmt.Errorf("scan quotation item: %w", err)
 		}
@@ -522,8 +524,8 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			INSERT INTO %s.quotation_revision_items (
 				revision_id, item_no, description, qty, uom, unit_price,
 				margin_enabled, margin_percent, margin_amount, original_total,
-				marginalized_unit_price, marginalized_total
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, schema),
+				marginalized_unit_price, marginalized_total, show_sub_prices
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, schema),
 			revisionID,
 			item.ItemNo,
 			item.Description,
@@ -536,6 +538,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			item.OriginalTotal,
 			item.MarginalizedUnitPrice,
 			item.MarginalizedTotal,
+			item.ShowSubPrices,
 		).Scan(&itemID); err != nil {
 			return QuotationRecord{}, fmt.Errorf("insert quotation revision item %d: %w", item.ItemNo, err)
 		}

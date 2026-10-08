@@ -30,7 +30,11 @@ func TestSignableMappersAgree(t *testing.T) {
 		PpnAmount:        30305,
 		GrandTotal:       305805,
 		Items: []QuotationItem{
-			{Description: "Scrubber panel", Qty: 2, UoM: "Lot", UnitPrice: 120000, Total: 240000},
+			{Description: "Scrubber panel", Qty: 1, UoM: "Lot", UnitPrice: 240000, Total: 240000,
+				SubItems: []QuotationSubItem{
+					{Description: "Control panel", Qty: 1, UoM: "Lot", UnitPrice: 150000, Total: 150000},
+					{Description: "Field wiring", Qty: 2, UoM: "EA", UnitPrice: 45000, Total: 90000},
+				}},
 			{Description: "Commissioning", Qty: 1, UoM: "Lot", UnitPrice: 50000, Total: 50000},
 		},
 	}
@@ -52,7 +56,11 @@ func TestSignableMappersAgree(t *testing.T) {
 		PpnAmount:        30305,
 		GrandTotal:       305805,
 		Items: []store.EvidenceItem{
-			{Description: "Scrubber panel", Qty: 2, UoM: "Lot", UnitPrice: 120000, Total: 240000},
+			{Description: "Scrubber panel", Qty: 1, UoM: "Lot", UnitPrice: 240000, Total: 240000,
+				Subs: []store.EvidenceSub{
+					{Description: "Control panel", Qty: 1, UoM: "Lot", UnitPrice: 150000, Total: 150000},
+					{Description: "Field wiring", Qty: 2, UoM: "EA", UnitPrice: 45000, Total: 90000},
+				}},
 			{Description: "Commissioning", Qty: 1, UoM: "Lot", UnitPrice: 50000, Total: 50000},
 		},
 	}

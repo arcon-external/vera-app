@@ -15,12 +15,23 @@ import (
 func SignableFromData(data QuotationData) SignableRevision {
 	items := make([]SignableItem, 0, len(data.Items))
 	for _, item := range data.Items {
+		var subs []SignableSub
+		for _, sub := range item.SubItems {
+			subs = append(subs, SignableSub{
+				Description: sub.Description,
+				Qty:         int64(sub.Qty),
+				UoM:         sub.UoM,
+				UnitPrice:   int64(sub.UnitPrice),
+				Total:       int64(sub.Total),
+			})
+		}
 		items = append(items, SignableItem{
 			Description: item.Description,
 			Qty:         int64(item.Qty),
 			UoM:         item.UoM,
 			UnitPrice:   int64(item.UnitPrice),
 			Total:       int64(item.Total),
+			Subs:        subs,
 		})
 	}
 	return SignableRevision{
@@ -53,12 +64,23 @@ func SignableFromData(data QuotationData) SignableRevision {
 func SignableFromEvidence(evidence store.RevisionEvidence) SignableRevision {
 	items := make([]SignableItem, 0, len(evidence.Items))
 	for _, item := range evidence.Items {
+		var subs []SignableSub
+		for _, sub := range item.Subs {
+			subs = append(subs, SignableSub{
+				Description: sub.Description,
+				Qty:         sub.Qty,
+				UoM:         sub.UoM,
+				UnitPrice:   sub.UnitPrice,
+				Total:       sub.Total,
+			})
+		}
 		items = append(items, SignableItem{
 			Description: item.Description,
 			Qty:         item.Qty,
 			UoM:         item.UoM,
 			UnitPrice:   item.UnitPrice,
 			Total:       item.Total,
+			Subs:        subs,
 		})
 	}
 	return SignableRevision{

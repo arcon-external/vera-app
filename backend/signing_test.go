@@ -33,9 +33,60 @@ func testSignable() SignableRevision {
 	}
 }
 
-// TestCanonicalFormatIsPinned freezes the byte format. Changing it silently
-// would invalidate every signature ever printed, so the expected literal is
-// deliberately verbose — editing it is a conscious migration, not a tweak.
+// testSignableWithSubs is testSignable with the first item itemized: two
+// sub-items under a parent whose own fields carry the rollup.
+func testSignableWithSubs() SignableRevision {
+	r := testSignable()
+	r.Items[0].Qty = 1
+	r.Items[0].Description = "Scrubber control system, complete"
+	r.Items[0].UnitPrice = 240000
+	r.Items[0].Subs = []SignableSub{
+		{Description: "Control panel", Qty: 1, UoM: "Lot", UnitPrice: 150000, Total: 150000},
+		{Description: "Field wiring", Qty: 2, UoM: "EA", UnitPrice: 45000, Total: 90000},
+	}
+	return r
+}
+
+// TestCanonicalFormatWithSubsIsPinned freezes the format for an itemized
+// revision. The sub block is appended only when an item has sub-items, which
+// TestCanonicalFormatIsPinned proves keeps every pre-sub-items payload
+// byte-identical: a forger could edit a printed sub description or price, so
+// every printed sub value must be covered by the signature.
+func TestCanonicalFormatWithSubsIsPinned(t *testing.T) {
+	want := `VERA1:QUOTE
+number: 15020005
+revision: 00
+recipient_name: Jesicha
+recipient_company: PT. Infineon Technologies Batam
+recipient_address: Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam
+subject: Supply and install scrubber control system
+incoterm: EXW
+validity_days: 30
+payment_term_days: 90
+lead_time_days: 60
+discount_percent: 5
+issuer: PT Arcon Penta Persada
+currency: IDR
+item_count: 2
+item_1: Scrubber control system, complete|1|Lot|240000|240000
+item_1_subs: 2
+item_1_sub_1: Control panel|1|Lot|150000|150000
+item_1_sub_2: Field wiring|2|EA|45000|90000
+item_2: Commissioning|1|Lot|50000|50000
+subtotal: 290000
+discount_amount: 14500
+ppn_amount: 30305
+grand_total: 305805`
+	got := string(CanonicalRevision(testSignableWithSubs()))
+	if got != want {
+		t.Errorf("canonical revision with subs drifted:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestCanonicalFormatIsPinned freezes the byte format for a revision without
+// sub-items. Changing it silently would invalidate every signature ever
+// printed, so the expected literal is deliberately verbose — editing it is a
+// conscious migration, not a tweak.
 func TestCanonicalFormatIsPinned(t *testing.T) {
 	want := `VERA1:QUOTE
 number: 15020005
@@ -144,6 +195,46 @@ func TestEverySignedFieldIsTamperProof(t *testing.T) {
 	}
 }
 
+// TestEverySignedSubFieldIsTamperProof extends the tamper matrix to the sub
+// block: every printed sub value is covered, so editing one in the store must
+// break verification even though the parent rollup itself is untouched.
+func TestEverySignedSubFieldIsTamperProof(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	for i := range seed {
+		seed[i] = byte(200 - i)
+	}
+	key := ed25519.NewKeyFromSeed(seed)
+	publicKey := key.Public().(ed25519.PublicKey)
+	base := testSignableWithSubs()
+	signature := SignCanonical(key, CanonicalRevision(base))
+
+	mutations := map[string]func(r *SignableRevision){
+		"sub_description": func(r *SignableRevision) { r.Items[0].Subs[0].Description = "Gold-plated panel" },
+		"sub_qty":         func(r *SignableRevision) { r.Items[0].Subs[1].Qty = 99 },
+		"sub_uom":         func(r *SignableRevision) { r.Items[0].Subs[1].UoM = "Lot" },
+		"sub_unit_price":  func(r *SignableRevision) { r.Items[0].Subs[0].UnitPrice = 1 },
+		"sub_total":       func(r *SignableRevision) { r.Items[0].Subs[0].Total = 1 },
+		"sub_count":       func(r *SignableRevision) { r.Items[0].Subs = r.Items[0].Subs[:1] },
+		"sub_order": func(r *SignableRevision) {
+			r.Items[0].Subs[0], r.Items[0].Subs[1] = r.Items[0].Subs[1], r.Items[0].Subs[0]
+		},
+		"sub_removed_leaving_parent": func(r *SignableRevision) { r.Items[0].Subs = nil },
+	}
+	for field, mutate := range mutations {
+		t.Run(field, func(t *testing.T) {
+			tampered := base
+			tampered.Items = append([]SignableItem(nil), base.Items...)
+			for i := range tampered.Items {
+				tampered.Items[i].Subs = append([]SignableSub(nil), base.Items[i].Subs...)
+			}
+			mutate(&tampered)
+			if VerifyCanonical(publicKey, CanonicalRevision(tampered), signature) {
+				t.Errorf("mutation of %s still verified: sub field is not covered by the signature", field)
+			}
+		})
+	}
+}
+
 func TestSigningKeyLoading(t *testing.T) {
 	seed := make([]byte, ed25519.SeedSize)
 	for i := range seed {
@@ -204,5 +295,19 @@ func TestCanonicalDigestChangesWithAnyField(t *testing.T) {
 	mutated.GrandTotal++
 	if CanonicalDigest(CanonicalRevision(mutated)) == base {
 		t.Error("digest unchanged after a field mutation")
+	}
+
+	withSubs := CanonicalDigest(CanonicalRevision(testSignableWithSubs()))
+	subMutated := testSignableWithSubs()
+	subMutated.Items[0].Subs[1].Description = "Different sub"
+	if CanonicalDigest(CanonicalRevision(subMutated)) == withSubs {
+		t.Error("digest unchanged after a sub mutation")
+	}
+	// Adding subs to a revision changes its digest: the block is not optional
+	// decoration, it is signed content.
+	subsDropped := testSignableWithSubs()
+	subsDropped.Items[0].Subs = nil
+	if CanonicalDigest(CanonicalRevision(subsDropped)) == withSubs {
+		t.Error("digest unchanged after dropping the sub block")
 	}
 }

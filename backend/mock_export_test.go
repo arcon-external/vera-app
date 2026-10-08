@@ -151,6 +151,23 @@ func TestExportMockQuotation(t *testing.T) {
 		t.Fatalf("save revision: %v", err)
 	}
 
+	// Self-check: the canonical payload the verification portal recomputes from
+	// storage must equal the one just signed, byte for byte -- otherwise the
+	// document it prints obeys a different canonical form than the one it was
+	// signed under and every itemized export would read as tampered once the
+	// new verifier deploys. This is the only place both live paths (prepared
+	// data and stored evidence) run against the same revision.
+	evidence, err := database.GetRevisionEvidenceByShortID(ctx, shortID)
+	if err != nil {
+		t.Fatalf("load evidence back: %v", err)
+	}
+	signedCanonical := string(CanonicalRevision(SignableFromData(q.Data)))
+	storedCanonical := string(CanonicalRevision(SignableFromEvidence(evidence)))
+	if signedCanonical != storedCanonical {
+		t.Errorf("signed and stored canonical payloads disagree:\n--- signed at export ---\n%s\n--- recomputed from storage ---\n%s",
+			signedCanonical, storedCanonical)
+	}
+
 	// Both renderings of the identical signed document.
 	in, err := q.renderInput()
 	if err != nil {

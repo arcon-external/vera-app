@@ -122,6 +122,20 @@ type EvidenceItem struct {
 	Qty         int64
 	UnitPrice   int64
 	Total       int64
+	// Subs is the item's printed composition when it is a main item with
+	// sub-items. Empty for every revision written before sub-items existed,
+	// which is what keeps their canonical bytes -- and their signatures --
+	// identical.
+	Subs []EvidenceSub
+}
+
+// EvidenceSub is one printed sub-item row: the customer-visible side only.
+type EvidenceSub struct {
+	Description string
+	UoM         string
+	Qty         int64
+	UnitPrice   int64
+	Total       int64
 }
 
 // GetRevisionEvidenceByShortID resolves a verification handle to its
@@ -165,9 +179,8 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		return RevisionEvidence{}, fmt.Errorf("revision not found")
 	}
 
-	var items int
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
-		SELECT i.description, i.qty, i.uom,
+		SELECT i.item_no, i.description, i.qty, i.uom,
 		       i.marginalized_unit_price, i.marginalized_total
 		FROM %s.quotation_revision_items i
 		WHERE i.revision_id = (
@@ -179,19 +192,64 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		return RevisionEvidence{}, fmt.Errorf("get revision items: %w", err)
 	}
 	defer rows.Close()
+	itemNos := make([]int, 0, len(evidence.Items))
 	for rows.Next() {
-		var item EvidenceItem
-		if err := rows.Scan(&item.Description, &item.Qty, &item.UoM,
+		var (
+			itemNo int
+			item   EvidenceItem
+		)
+		if err := rows.Scan(&itemNo, &item.Description, &item.Qty, &item.UoM,
 			&item.UnitPrice, &item.Total); err != nil {
 			return RevisionEvidence{}, fmt.Errorf("scan revision item: %w", err)
 		}
+		itemNos = append(itemNos, itemNo)
 		evidence.Items = append(evidence.Items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return RevisionEvidence{}, fmt.Errorf("iterate revision items: %w", err)
 	}
-	items = len(evidence.Items)
-	evidence.ItemCount = items
+
+	// Sub-item rows attach to their parent item by number, the same key the
+	// quotations read uses. A revision written before sub-items existed simply
+	// returns none, and its canonical payload is unchanged.
+	subRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT ri.item_no, s.description, s.qty, s.uom, s.unit_price, s.total
+		FROM %s.quotation_revision_sub_items s
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE short_id = $1)
+		ORDER BY ri.item_no, s.sub_no`, schema, schema, schema),
+		normalized)
+	if err != nil {
+		return RevisionEvidence{}, fmt.Errorf("get revision sub-items: %w", err)
+	}
+	defer subRows.Close()
+	for subRows.Next() {
+		var (
+			itemNo int
+			sub    EvidenceSub
+		)
+		if err := subRows.Scan(&itemNo, &sub.Description, &sub.Qty, &sub.UoM,
+			&sub.UnitPrice, &sub.Total); err != nil {
+			return RevisionEvidence{}, fmt.Errorf("scan revision sub-item: %w", err)
+		}
+		attached := false
+		for i, no := range itemNos {
+			if no == itemNo {
+				evidence.Items[i].Subs = append(evidence.Items[i].Subs, sub)
+				attached = true
+				break
+			}
+		}
+		if !attached {
+			return RevisionEvidence{}, fmt.Errorf("revision sub-item %d has no parent item", itemNo)
+		}
+	}
+	if err := subRows.Err(); err != nil {
+		return RevisionEvidence{}, fmt.Errorf("iterate revision sub-items: %w", err)
+	}
+	evidence.ItemCount = len(evidence.Items)
 	return evidence, nil
 }
 

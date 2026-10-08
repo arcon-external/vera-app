@@ -42,7 +42,27 @@ type SignableRevision struct {
 
 // SignableItem carries the values printed on the customer document (the
 // marginalized side), never cost or margin.
+//
+// Subs is the item's composition when it is a main item with sub-items. The
+// parent line's own fields already carry the rollup; the subs are covered
+// because they print (state C shows their descriptions, quantities and
+// prices; state B shows their descriptions as scope rows). A revision with
+// no sub-items emits no sub lines at all, so every payload signed before this
+// field existed remains byte-identical and keeps verifying.
 type SignableItem struct {
+	Description string
+	UoM         string
+	Qty         int64
+	UnitPrice   int64
+	Total       int64
+	Subs        []SignableSub
+}
+
+// SignableSub is one printed sub-item row: what the customer sees, never the
+// cost side and never a margin rate. The B/C display choice is deliberately
+// not covered here -- it selects which of these signed values print, it never
+// changes a value.
+type SignableSub struct {
 	Description string
 	UoM         string
 	Qty         int64
@@ -77,6 +97,19 @@ func CanonicalRevision(revision SignableRevision) []byte {
 			strconv.FormatInt(item.UnitPrice, 10),
 			strconv.FormatInt(item.Total, 10),
 		}, "|"))
+		if len(item.Subs) == 0 {
+			continue
+		}
+		writeField(&b, fmt.Sprintf("item_%d_subs", i+1), strconv.Itoa(len(item.Subs)))
+		for j, sub := range item.Subs {
+			writeField(&b, fmt.Sprintf("item_%d_sub_%d", i+1, j+1), strings.Join([]string{
+				sub.Description,
+				strconv.FormatInt(sub.Qty, 10),
+				sub.UoM,
+				strconv.FormatInt(sub.UnitPrice, 10),
+				strconv.FormatInt(sub.Total, 10),
+			}, "|"))
+		}
 	}
 	writeField(&b, "subtotal", strconv.FormatInt(revision.Subtotal, 10))
 	writeField(&b, "discount_amount", strconv.FormatInt(revision.DiscountAmount, 10))

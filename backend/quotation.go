@@ -1041,6 +1041,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 			OriginalTotal:         int64(item.OriginalTotal),
 			MarginalizedUnitPrice: int64(item.UnitPrice),
 			MarginalizedTotal:     int64(item.Total),
+			ShowSubPrices:         item.ShowSubPrices,
 			SubItems:              subItems,
 		})
 	}

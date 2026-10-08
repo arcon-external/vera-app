@@ -66,6 +66,9 @@ func assertRevisionSubItems(t *testing.T, label string, record QuotationRecord) 
 	if len(subItems[1].SubSubItems) != 0 {
 		t.Errorf("%s: sub 2 has no details; storage invented %d", label, len(subItems[1].SubSubItems))
 	}
+	if !record.Items[0].ShowSubPrices {
+		t.Errorf("%s: the per-line sub display choice did not survive storage", label)
+	}
 }
 
 // resetTestSequences clears counter state so sequence tests are hermetic:
@@ -132,6 +135,7 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 			OriginalTotal:         100000,
 			MarginalizedUnitPrice: 120000,
 			MarginalizedTotal:     120000,
+			ShowSubPrices:         true,
 			SubItems: []RevisionSubItem{
 				{
 					SubNo:         1,
@@ -216,6 +220,29 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 		t.Errorf("latest = revision %d subject %q; want revision 1 edited quotation", latest.RevisionNumber, latest.Subject)
 	}
 	assertRevisionSubItems(t, "latest", latest)
+
+	// The verification portal reads evidence, not the record: the canonical
+	// payload recomputed there must carry the same sub block the export signed,
+	// or every itemized document would verify as tampered.
+	// GetQuotation does not select short_id, so derive the handle the way the
+	// export did: the uuid plus the revision number.
+	evidence, err := database.GetRevisionEvidenceByShortID(ctx, ShortIDForRevision(first.UUID, 1))
+	if err != nil {
+		t.Fatalf("get revision evidence: %v", err)
+	}
+	if len(evidence.Items) != 1 {
+		t.Fatalf("evidence item count = %d, want 1", len(evidence.Items))
+	}
+	evidenceSubs := evidence.Items[0].Subs
+	if len(evidenceSubs) != 2 {
+		t.Fatalf("evidence sub count = %d, want 2", len(evidenceSubs))
+	}
+	if evidenceSubs[0].Description != "Main part, 25% margin" || evidenceSubs[1].Description != "Support part, no margin" {
+		t.Errorf("evidence sub descriptions drifted: %q, %q", evidenceSubs[0].Description, evidenceSubs[1].Description)
+	}
+	if evidenceSubs[0].UnitPrice != 100000 || evidenceSubs[0].Total != 100000 || evidenceSubs[1].UnitPrice != 20000 {
+		t.Errorf("evidence sub economics drifted: %+v", evidenceSubs)
+	}
 
 	revisionZero := int16(0)
 	historical, err := database.GetQuotation(ctx, first.ID, &revisionZero)
