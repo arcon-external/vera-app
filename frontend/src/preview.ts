@@ -42,6 +42,26 @@ export interface CustomerPreview {
   DiscountPercent: number;
 }
 
+export interface InternalPreviewSubItem {
+  SubNo: string;
+  Description: string;
+  Details: string[];
+  UoM: string;
+  Qty: number;
+  OriginalUnitPrice: number;
+  OriginalTotal: number;
+  MarginalizedUnitPrice: number;
+  MarginalizedTotal: number;
+  MarginEnabled: boolean;
+  MarginPercent: number;
+  MarginAmount: number;
+  DisplayOriginalUnitPrice: string;
+  DisplayOriginalTotal: string;
+  DisplayMarginalizedUnit: string;
+  DisplayMarginalizedTotal: string;
+  DisplayMarginAmount: string;
+}
+
 export interface InternalPreviewItem {
   Description: string;
   CostUnit: number;
@@ -57,6 +77,10 @@ export interface InternalPreviewItem {
   DisplayMarginalizedUnit: string;
   DisplayMarginalizedTotal: string;
   DisplayMarginAmount: string;
+  SubItems: InternalPreviewSubItem[];
+  DisplayMarginBlended: string;
+  MarginBlendedPercent: number;
+  MarginBlendedApprox: boolean;
   MarginEnabled: boolean;
   MarginPercent: number;
   MarginAmount: number;

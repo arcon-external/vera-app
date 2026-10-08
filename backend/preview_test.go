@@ -100,6 +100,68 @@ func TestGetInternalBreakdown(t *testing.T) {
 	}
 }
 
+// TestInternalBreakdownCarriesSubItems proves the internal breakdown shows
+// the composition and the blended margin the composition actually earned:
+// total profit over total cost, rounded half-up and marked approximate when
+// the division is not whole.
+func TestInternalBreakdownCarriesSubItems(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := q.Prepare(QuotationInput{
+		CustomerID: 2,
+		Items: []QuotationItemInput{{
+			Description:   "Package with mixed parts:",
+			UoM:           "Lot",
+			Qty:           1,
+			ShowSubPrices: true,
+			SubItems: []QuotationSubItemInput{
+				// 100000 at 25% -> 125000; then 100000 x2 with no margin.
+				// Cost 300000, sell 325000, profit 25000 -> 8.33% -> ≈8%.
+				{Description: "First part", UoM: "EA", UnitCost: 100000, Qty: 1, MarginEnabled: true, MarginPercent: 25,
+					SubSubItems: []QuotationSubSubItemInput{{Description: "Included hardware"}}},
+				{Description: "Second part", UoM: "LS", UnitCost: 100000, Qty: 2},
+			},
+		}},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      14,
+		PaymentTerm:   30,
+		LeadTime:      45,
+		Incoterm:      "FOB",
+	}); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	bd, err := q.GetInternalBreakdown()
+	if err != nil {
+		t.Fatalf("GetInternalBreakdown failed: %v", err)
+	}
+	if len(bd.Items) != 1 {
+		t.Fatalf("breakdown items = %d; want 1", len(bd.Items))
+	}
+	line := bd.Items[0]
+	if len(line.SubItems) != 2 {
+		t.Fatalf("sub-items = %d; want 2", len(line.SubItems))
+	}
+	first, second := line.SubItems[0], line.SubItems[1]
+	if first.SubNo != "1.1" || second.SubNo != "1.2" {
+		t.Errorf("sub numbers = %q/%q; want 1.1/1.2", first.SubNo, second.SubNo)
+	}
+	if first.OriginalUnitPrice != 100000 || first.MarginalizedUnitPrice != 125000 {
+		t.Errorf("sub 1 cost/sell unit = %d/%d; want 100000/125000", first.OriginalUnitPrice, first.MarginalizedUnitPrice)
+	}
+	if second.Qty != 2 || second.OriginalTotal != 200000 || second.MarginalizedTotal != 200000 {
+		t.Errorf("sub 2 qty/totals = %d/%d/%d; want 2/200000/200000", second.Qty, second.OriginalTotal, second.MarginalizedTotal)
+	}
+	if len(first.Details) != 1 || first.Details[0] != "Included hardware" {
+		t.Errorf("sub 1 details = %v; want [Included hardware]", first.Details)
+	}
+	if line.MarginBlendedPercent != 8 || !line.MarginBlendedApprox || line.DisplayMarginBlended != "≈8%" {
+		t.Errorf("blended = %d/%v/%q; want 8/true/≈8%%",
+			line.MarginBlendedPercent, line.MarginBlendedApprox, line.DisplayMarginBlended)
+	}
+}
+
 func TestPreviewRequiresPrepare(t *testing.T) {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())

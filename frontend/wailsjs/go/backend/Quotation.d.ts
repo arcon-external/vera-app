@@ -14,8 +14,6 @@ export function DraftRevision(arg1:string,arg2:Array<number>,arg3:string):Promis
 
 export function Export(arg1:string):Promise<void>;
 
-export function PickDirectory():Promise<string>;
-
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
@@ -29,6 +27,8 @@ export function GetQuotationRevision(arg1:number,arg2:number):Promise<backend.Ar
 export function ListCustomers():Promise<Array<backend.ManagedClient>>;
 
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
+
+export function PickDirectory():Promise<string>;
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 

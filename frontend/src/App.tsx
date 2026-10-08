@@ -15,8 +15,8 @@ import { ArchivePage } from "./components/ArchivePage";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
-import { ItemEditor } from "./components/ItemEditor";
-import type { EditorItem } from "./components/ItemEditor";
+import { ItemEditor, newSubItem } from "./components/ItemEditor";
+import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SummaryRail } from "./components/SummaryRail";
 import { Button, SectionHeading, StatusBanner } from "./components/ui";
@@ -98,12 +98,14 @@ const INCOTERM_OPTIONS = [
 const DEFAULT_ITEM: EditorItem = {
   key: 0,
   description: "",
-  subItems: [],
+  bullets: [],
   qty: "1",
   uom: "Lot",
   unitPrice: "",
   marginEnabled: false,
   marginPercent: "0",
+  subItems: [],
+  showSubPrices: false,
 };
 
 const DEFAULT_DETAILS: DetailsState = {
@@ -252,10 +254,10 @@ function parseSubItems(text: string): { description: string; subItems: string[] 
   return { description: mainParts.join(" "), subItems: bullets };
 }
 
-function buildDescription(description: string, subItems: string[]): string {
+function buildDescription(description: string, bullets: string[]): string {
   const parts = [description];
-  for (const sub of subItems) {
-    parts.push("- " + sub);
+  for (const line of bullets) {
+    parts.push("- " + line);
   }
   return parts.join("\n");
 }
@@ -282,6 +284,7 @@ function App() {
   } | null>(null);
 
   const nextKey = useRef(1);
+  const nextSubId = useRef(1);
   const [items, setItems] = useState<EditorItem[]>([newItem(0)]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
   const [customerId, setCustomerId] = useState(2);
@@ -343,6 +346,7 @@ function App() {
 
   const resetForm = useCallback(() => {
     nextKey.current = 1;
+    nextSubId.current = 1;
     setItems([newItem(0)]);
     setDetails(DEFAULT_DETAILS);
     setCustomerId((current) => pickCustomerId(customerOptions, current));
@@ -433,18 +437,30 @@ function App() {
           quotation.RevisionNumber + 1
         );
         nextKey.current = quotation.Items.length;
+        nextSubId.current = 1;
         setItems(
           quotation.Items.map((item, index) => {
             const parsed = parseSubItems(item.Description);
+            const subs = (item.Subs ?? []).map((sub) => ({
+              ...newSubItem(nextSubId.current++, sub.Description),
+              qty: String(sub.Qty),
+              uom: sub.UoM,
+              unitCost: String(sub.OriginalUnitPrice),
+              marginEnabled: sub.MarginEnabled,
+              marginPercent: String(sub.MarginPercent),
+              bullets: [...(sub.Details ?? [])],
+            }));
             return {
               key: index,
               description: parsed.description,
-              subItems: parsed.subItems,
+              bullets: parsed.subItems,
               qty: String(item.Qty),
               uom: item.UoM,
               unitPrice: String(item.UnitPrice),
               marginEnabled: item.MarginEnabled,
               marginPercent: String(item.MarginPercent),
+              subItems: subs,
+              showSubPrices: item.ShowSubPrices ?? false,
             };
           })
         );
@@ -508,33 +524,243 @@ function App() {
     []
   );
 
-  const handleAddSubItem = useCallback((key: number) => {
+  const handleAddBullet = useCallback((key: number) => {
     setItems((prev) =>
       prev.map((item) =>
-        item.key === key ? { ...item, subItems: [...item.subItems, ""] } : item
+        item.key === key ? { ...item, bullets: [...item.bullets, ""] } : item
       )
     );
   }, []);
 
-  const handleRemoveSubItem = useCallback((key: number, subIndex: number) => {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.key === key
-          ? { ...item, subItems: item.subItems.filter((_, i) => i !== subIndex) }
-          : item
-      )
-    );
-  }, []);
-
-  const handleSubItemChange = useCallback(
-    (key: number, subIndex: number, value: string) => {
+  const handleRemoveBullet = useCallback(
+    (key: number, bulletIndex: number) => {
       setItems((prev) =>
         prev.map((item) =>
           item.key === key
             ? {
                 ...item,
-                subItems: item.subItems.map((s, i) => (i === subIndex ? value : s)),
+                bullets: item.bullets.filter((_, i) => i !== bulletIndex),
               }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  const handleBulletChange = useCallback(
+    (key: number, bulletIndex: number, value: string) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.key === key
+            ? {
+                ...item,
+                bullets: item.bullets.map((line, i) =>
+                  i === bulletIndex ? value : line
+                ),
+              }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  // Entering sub-item mode converts the line: existing description bullets
+  // become sub-items with their text pre-filled, and the main item takes
+  // the rollup shape (Qty 1, Lot) before the user prices anything.
+  const handleEnableSubItems = useCallback((key: number) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.key !== key) return item;
+        const converted = item.bullets
+          .filter((line) => line.trim() !== "")
+          .map((line) => newSubItem(nextSubId.current++, line.trim()));
+        return {
+          ...item,
+          bullets: [],
+          qty: "1",
+          uom: "Lot",
+          showSubPrices: false,
+          subItems:
+            converted.length > 0 ? converted : [newSubItem(nextSubId.current++)],
+        };
+      })
+    );
+  }, []);
+
+  // Leaving sub-item mode keeps the composition readable as description
+  // lines; the per-sub values go away with the pricing they described.
+  const handleDisableSubItems = useCallback((key: number) => {
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.key !== key) return item;
+        const lines = item.subItems
+          .map((sub) => sub.description.trim())
+          .filter((line) => line !== "");
+        return { ...item, bullets: lines, subItems: [], showSubPrices: false };
+      })
+    );
+  }, []);
+
+  const handleAddSubRow = useCallback((key: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              subItems: [...item.subItems, newSubItem(nextSubId.current++)],
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const handleRemoveSubRow = useCallback((key: number, subId: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              subItems: item.subItems.filter((sub) => sub.id !== subId),
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const handlePatchSubRow = useCallback(
+    (key: number, subId: number, patch: Partial<EditorSubItem>) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.key === key
+            ? {
+                ...item,
+                subItems: item.subItems.map((sub) =>
+                  sub.id === subId ? { ...sub, ...patch } : sub
+                ),
+              }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  const handleMoveSubRow = useCallback(
+    (key: number, subId: number, direction: -1 | 1) => {
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.key !== key) return item;
+          const at = item.subItems.findIndex((sub) => sub.id === subId);
+          const target = at + direction;
+          if (at === -1 || target < 0 || target >= item.subItems.length) {
+            return item;
+          }
+          const next = [...item.subItems];
+          [next[at], next[target]] = [next[target], next[at]];
+          return { ...item, subItems: next };
+        })
+      );
+    },
+    []
+  );
+
+  const handleAddSubBullet = useCallback((key: number, subId: number) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              subItems: item.subItems.map((sub) =>
+                sub.id === subId ? { ...sub, bullets: [...sub.bullets, ""] } : sub
+              ),
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const handleRemoveSubBullet = useCallback(
+    (key: number, subId: number, bulletIndex: number) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.key === key
+            ? {
+                ...item,
+                subItems: item.subItems.map((sub) =>
+                  sub.id === subId
+                    ? {
+                        ...sub,
+                        bullets: sub.bullets.filter((_, i) => i !== bulletIndex),
+                      }
+                    : sub
+                ),
+              }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  const handleSubBulletChange = useCallback(
+    (key: number, subId: number, bulletIndex: number, value: string) => {
+      setItems((prev) =>
+        prev.map((item) =>
+          item.key === key
+            ? {
+                ...item,
+                subItems: item.subItems.map((sub) =>
+                  sub.id === subId
+                    ? {
+                        ...sub,
+                        bullets: sub.bullets.map((line, i) =>
+                          i === bulletIndex ? value : line
+                        ),
+                      }
+                    : sub
+                ),
+              }
+            : item
+        )
+      );
+    },
+    []
+  );
+
+  // Bulk entry: a block pasted from Excel becomes one sub-item per row.
+  // Columns are positional, matching the header the panel shows.
+  const handleSubRowPaste = useCallback(
+    (key: number, event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const raw = event.clipboardData.getData("text");
+      if (!raw.includes("\t") && !raw.includes("\n")) return;
+      event.preventDefault();
+      const rows = splitRows(raw)
+        .filter((row) => row.trim())
+        .map(parseRow);
+      const parsed = rows
+        .map((cols) => {
+          const margin = Math.min(
+            Number.parseInt((cols[4] || "").replace(/\D/g, ""), 10) || 0,
+            MAX_MARGIN_PERCENT
+          );
+          return {
+            ...newSubItem(nextSubId.current++),
+            description: (cols[0] || "").trim(),
+            qty: (cols[1] || "").trim() || "1",
+            uom: normalizeUoM(cols[2] || ""),
+            unitCost: (cols[3] || "").replace(/\D/g, "").trim(),
+            marginPercent: margin.toString(),
+            marginEnabled: margin > 0,
+          };
+        })
+        .filter((sub) => sub.description !== "");
+      if (parsed.length === 0) return;
+      setItems((prev) =>
+        prev.map((item) =>
+          item.key === key
+            ? { ...item, subItems: [...item.subItems, ...parsed] }
             : item
         )
       );
@@ -557,7 +783,7 @@ function App() {
         if (targetIndex === -1) return prev;
 
         const parsed = rows.map((cols) => {
-          const { description, subItems } = parseSubItems(cols[0] || "");
+          const { description, subItems: bullets } = parseSubItems(cols[0] || "");
           const margin = Math.min(
             Number.parseInt((cols[4] || "").replace(/\D/g, ""), 10) || 0,
             MAX_MARGIN_PERCENT
@@ -566,7 +792,7 @@ function App() {
             ...DEFAULT_ITEM,
             key: 0,
             description,
-            subItems,
+            bullets,
             uom: normalizeUoM(cols[1] || ""),
             qty: (cols[2] || "").trim() || "1",
             unitPrice: (cols[3] || "").replace(/\D/g, "").trim(),
@@ -599,19 +825,55 @@ function App() {
     const lineItems = items
       .filter(
         (item) =>
-          item.description.trim() !== "" || item.subItems.some((sub) => sub.trim())
+          item.description.trim() !== "" ||
+          item.bullets.some((line) => line.trim() !== "") ||
+          item.subItems.some((sub) => sub.description.trim() !== "")
       )
-      .map(
-        (item) =>
-          new backend.QuotationItemInput({
-            Description: buildDescription(item.description, item.subItems),
+      .map((item) => {
+        if (item.subItems.length === 0) {
+          return new backend.QuotationItemInput({
+            Description: buildDescription(item.description, item.bullets),
             Qty: Number.parseInt(item.qty, 10) || 0,
             UoM: item.uom,
             UnitPrice: Number.parseInt(item.unitPrice, 10) || 0,
             MarginEnabled: item.marginEnabled,
             MarginPercent: Number.parseInt(item.marginPercent, 10) || 0,
-          })
-      );
+            SubItems: [],
+            ShowSubPrices: false,
+          });
+        }
+        // A main item with sub-items never prices itself: Qty 1 / Lot and a
+        // zero unit price are placeholders the backend replaces with the
+        // sub-item rollup, so the margin controls do not apply either.
+        return new backend.QuotationItemInput({
+          Description: item.description,
+          Qty: 1,
+          UoM: "Lot",
+          UnitPrice: 0,
+          MarginEnabled: false,
+          MarginPercent: 0,
+          ShowSubPrices: item.showSubPrices,
+          SubItems: item.subItems.map(
+            (sub) =>
+              new backend.QuotationSubItemInput({
+                Description: sub.description,
+                Qty: Number.parseInt(sub.qty, 10) || 0,
+                UoM: sub.uom,
+                UnitCost: Number.parseInt(sub.unitCost, 10) || 0,
+                MarginEnabled: sub.marginEnabled,
+                MarginPercent: Number.parseInt(sub.marginPercent, 10) || 0,
+                SubSubItems: sub.bullets
+                  .filter((line) => line.trim() !== "")
+                  .map(
+                    (line) =>
+                      new backend.QuotationSubSubItemInput({
+                        Description: line,
+                      })
+                  ),
+              })
+          ),
+        });
+      });
 
     const input = new backend.QuotationInput({
       Items: lineItems,
@@ -728,7 +990,10 @@ function App() {
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
-    (item) => item.description.trim() !== "" || item.subItems.some((sub) => sub.trim())
+    (item) =>
+      item.description.trim() !== "" ||
+      item.bullets.some((line) => line.trim() !== "") ||
+      item.subItems.some((sub) => sub.description.trim() !== "")
   );
   const dirty =
     editingQuote !== null ||
@@ -738,7 +1003,8 @@ function App() {
       (item) =>
         item.description.trim() !== "" ||
         item.unitPrice.trim() !== "" ||
-        item.subItems.some((sub) => sub.trim() !== "")
+        item.bullets.some((line) => line.trim() !== "") ||
+        item.subItems.some((sub) => sub.description.trim() !== "")
     );
   const loading = status.type === "loading";
 
@@ -979,9 +1245,19 @@ function App() {
                   onAddItem={handleAddItem}
                   onRemoveItem={handleRemoveItem}
                   onChange={handleItemChange}
-                  onAddSubItem={handleAddSubItem}
-                  onRemoveSubItem={handleRemoveSubItem}
-                  onSubItemChange={handleSubItemChange}
+                  onAddBullet={handleAddBullet}
+                  onRemoveBullet={handleRemoveBullet}
+                  onBulletChange={handleBulletChange}
+                  onEnableSubItems={handleEnableSubItems}
+                  onDisableSubItems={handleDisableSubItems}
+                  onAddSubRow={handleAddSubRow}
+                  onRemoveSubRow={handleRemoveSubRow}
+                  onPatchSubRow={handlePatchSubRow}
+                  onMoveSubRow={handleMoveSubRow}
+                  onPasteSubRows={handleSubRowPaste}
+                  onAddSubBullet={handleAddSubBullet}
+                  onRemoveSubBullet={handleRemoveSubBullet}
+                  onSubBulletChange={handleSubBulletChange}
                   onPasteItems={handlePaste}
                 />
               </div>

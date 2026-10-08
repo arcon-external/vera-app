@@ -61,13 +61,21 @@ type CustomerPreview struct {
 }
 
 // InternalPreviewItem shows the cost vs sell economics of one line.
+//
+// SubItems carries the line's priced composition when it is a main item with
+// sub-items, and the blended fields describe the margin the composition
+// earned overall: total profit over total cost. The blend is not any single
+// rate -- it is what the summed money works out to -- so a fractional result
+// is rounded half-up and marked approximate the same way the editor shows it.
 type InternalPreviewItem struct {
 	DisplayOriginalUnitPrice string
 	DisplayMarginAmount      string
 	DisplayMarginalizedTotal string
+	DisplayMarginBlended     string
 	DisplayMarginalizedUnit  string
 	Description              string
 	DisplayOriginalTotal     string
+	SubItems                 []InternalPreviewSubItem
 	SellTotal                uint64
 	MarginalizedUnitPrice    uint64
 	MarginalizedTotal        uint64
@@ -77,10 +85,52 @@ type InternalPreviewItem struct {
 	SellUnit                 uint64
 	CostUnit                 uint64
 	MarginAmount             uint64
+	MarginBlendedPercent     uint32
 	No                       uint32
 	Qty                      uint32
 	MarginPercent            uint16
 	MarginEnabled            bool
+	MarginBlendedApprox      bool
+}
+
+// InternalPreviewSubItem is one priced sub-item inside the internal
+// breakdown: both sides, its margin, and its detail lines.
+type InternalPreviewSubItem struct {
+	Description              string
+	DisplayOriginalUnitPrice string
+	DisplayMarginAmount      string
+	DisplayMarginalizedTotal string
+	DisplayMarginalizedUnit  string
+	DisplayOriginalTotal     string
+	SubNo                    string
+	UoM                      string
+	Details                  []string
+	Qty                      uint32
+	MarginPercent            uint16
+	OriginalUnitPrice        uint64
+	OriginalTotal            uint64
+	MarginAmount             uint64
+	MarginalizedUnitPrice    uint64
+	MarginalizedTotal        uint64
+	MarginEnabled            bool
+}
+
+// blendedMarginPercent is total profit over total cost, in whole percent.
+// Exact integer results pass through; fractions round half-up and report
+// approximate so the caller can mark them. Mirrored by blendedMargin in the
+// frontend's format module.
+func blendedMarginPercent(costTotal, sellTotal uint64) (uint32, bool) {
+	if costTotal == 0 {
+		return 0, false
+	}
+	cost := int64(costTotal)
+	numerator := (int64(sellTotal) - cost) * 100
+	approx := numerator%cost != 0
+	percent := (2*numerator + cost) / (2 * cost)
+	if percent < 0 {
+		percent = 0
+	}
+	return uint32(percent), approx
 }
 
 // InternalBreakdown is the internal-only economics view. It must never be
@@ -226,7 +276,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 
 	items := make([]InternalPreviewItem, 0, len(q.Data.Items))
 	for _, item := range q.Data.Items {
-		items = append(items, InternalPreviewItem{
+		view := InternalPreviewItem{
 			Description:              item.Description,
 			CostUnit:                 item.OriginalUnitPrice,
 			SellUnit:                 item.UnitPrice,
@@ -246,7 +296,49 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 			MarginAmount:             item.MarginAmount,
 			No:                       item.No,
 			Qty:                      item.Qty,
-		})
+		}
+		if len(item.SubItems) > 0 {
+			subs := make([]InternalPreviewSubItem, 0, len(item.SubItems))
+			var costTotal, sellTotal uint64
+			for _, sub := range item.SubItems {
+				details := make([]string, 0, len(sub.SubSubItems))
+				for _, detail := range sub.SubSubItems {
+					details = append(details, detail.Description)
+				}
+				originalTotal := sub.OriginalUnitPrice * uint64(sub.Qty)
+				subs = append(subs, InternalPreviewSubItem{
+					SubNo:                    sub.SubNo,
+					Description:              sub.Description,
+					Details:                  details,
+					Qty:                      sub.Qty,
+					UoM:                      sub.UoM,
+					OriginalUnitPrice:        sub.OriginalUnitPrice,
+					OriginalTotal:            originalTotal,
+					MarginEnabled:            sub.MarginEnabled,
+					MarginPercent:            sub.MarginPercent,
+					MarginAmount:             sub.MarginAmount,
+					MarginalizedUnitPrice:    sub.UnitPrice,
+					MarginalizedTotal:        sub.Total,
+					DisplayOriginalUnitPrice: formatRupiah(sub.OriginalUnitPrice),
+					DisplayOriginalTotal:     formatRupiah(originalTotal),
+					DisplayMarginalizedUnit:  formatRupiah(sub.UnitPrice),
+					DisplayMarginalizedTotal: formatRupiah(sub.Total),
+					DisplayMarginAmount:      formatRupiah(sub.MarginAmount),
+				})
+				costTotal += originalTotal
+				sellTotal += sub.Total
+			}
+			percent, approx := blendedMarginPercent(costTotal, sellTotal)
+			view.MarginBlendedPercent = percent
+			view.MarginBlendedApprox = approx
+			if approx {
+				view.DisplayMarginBlended = fmt.Sprintf("≈%d%%", percent)
+			} else {
+				view.DisplayMarginBlended = fmt.Sprintf("%d%%", percent)
+			}
+			view.SubItems = subs
+		}
+		items = append(items, view)
 	}
 
 	return InternalBreakdown{

@@ -2,12 +2,16 @@ import type { ReactNode } from "react";
 import { Badge, Card } from "./ui";
 import { ppnRateBps, servicesRateBps, taxRateLabel } from "../tax";
 import { applyMargin, formatIdr, parseIntOrZero } from "../format";
+import { subItemsRollup } from "./ItemEditor";
+import type { EditorSubItem } from "./ItemEditor";
 
 export interface PricedItem {
   qty: string;
   unitPrice: string;
   marginEnabled: boolean;
   marginPercent: string;
+  /** Present when the line is a main item with priced sub-items. */
+  subItems?: EditorSubItem[];
 }
 
 interface SummaryRailProps {
@@ -32,6 +36,16 @@ export function computePricing(
   let marginedLines = 0;
 
   for (const item of items) {
+    const subs = item.subItems ?? [];
+    if (subs.length > 0) {
+      // A main item with sub-items prices through them: the line totals the
+      // rollup, so the summary counts the same money the backend will.
+      const rollup = subItemsRollup(subs);
+      costSubtotal += rollup.cost;
+      sellSubtotal += rollup.sell;
+      if (subs.some((sub) => sub.marginEnabled)) marginedLines += 1;
+      continue;
+    }
     const qty = parseIntOrZero(item.qty);
     const cost = parseIntOrZero(item.unitPrice);
     const sellUnit = applyMargin(
