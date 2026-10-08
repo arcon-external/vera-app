@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"vera-app/backend/auth"
@@ -202,4 +203,67 @@ func TestExportMockQuotation(t *testing.T) {
 	t.Logf("exported {TEST} quotation %s revision %d, verify at %s/v/%s",
 		record.QuoteNumber, record.RevisionNumber, base, shortID)
 	t.Logf("artifacts: %s and %s", nativePath, browserPath)
+}
+
+// TestDeleteMockQuotations removes the {TEST} mock quotations from the
+// configured database -- the cleanup the export harness deliberately does not
+// do itself, because a proof QR that verifies needs its revision to exist.
+//
+// Gated exactly like the export (explicit opt-in plus the DSN), and doubly
+// strict about what it will touch: a candidate must match BOTH the recorded
+// mock numbers AND the {TEST} subject prefix. A real quotation can therefore
+// never be deleted by this test even if it somehow received one of those
+// numbers.
+func TestDeleteMockQuotations(t *testing.T) {
+	if os.Getenv("VERA_MOCK_CLEANUP") != "1" {
+		t.Skip("set VERA_MOCK_CLEANUP=1 (with VERA_POSTGRES_DSN) to delete the {TEST} mock quotations")
+	}
+	dsn := os.Getenv("VERA_POSTGRES_DSN")
+	if dsn == "" {
+		t.Fatal("VERA_POSTGRES_DSN is required")
+	}
+	mockNumbers := map[string]bool{
+		"1502260025": true,
+		"1502260026": true,
+		"1502260027": true,
+		"1502260029": true,
+		"1502260030": true,
+	}
+	ctx := context.Background()
+	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: os.Getenv("VERA_POSTGRES_SCHEMA")})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	defer database.Close()
+
+	list, err := database.ListQuotations(ctx)
+	if err != nil {
+		t.Fatalf("list quotations: %v", err)
+	}
+	deleted := 0
+	for _, q := range list {
+		if !mockNumbers[q.QuoteNumber] {
+			continue
+		}
+		if !strings.HasPrefix(q.Subject, "{TEST}") {
+			t.Errorf("quotation %s matches the recorded mock numbers but its subject %q is not a {TEST} mock; refusing to touch it", q.QuoteNumber, q.Subject)
+			continue
+		}
+		if err := database.DeleteQuotation(ctx, q.ID); err != nil {
+			t.Fatalf("delete %s: %v", q.QuoteNumber, err)
+		}
+		t.Logf("deleted {TEST} quotation %s (id %d)", q.QuoteNumber, q.ID)
+		deleted++
+	}
+
+	remaining, err := database.ListQuotations(ctx)
+	if err != nil {
+		t.Fatalf("re-list quotations: %v", err)
+	}
+	for _, q := range remaining {
+		if mockNumbers[q.QuoteNumber] {
+			t.Errorf("quotation %s still present after deletion", q.QuoteNumber)
+		}
+	}
+	t.Logf("deleted %d of %d {TEST} quotations", deleted, len(mockNumbers))
 }
