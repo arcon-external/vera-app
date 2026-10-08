@@ -8,18 +8,12 @@ import (
 	"vera-app/backend/auth"
 )
 
-// prepareMixedStates and the tests below execute the real customer template
-// over one mixed document: the numbering, the rollup arithmetic and the
-// customer-visible split all come from the same path the export uses.
-func prepareMixedStates(t *testing.T) *Quotation {
-	t.Helper()
-	q := newTestQuotation()
-	q.SetAuthService(auth.StaffTestService())
-	if err := Startup(q, context.Background()); err != nil {
-		t.Fatalf("startup failed: %v", err)
-	}
-
-	err := q.Prepare(QuotationInput{
+// mockMixedInput is the mixed document every mock and template test renders:
+// a state-B package whose first part carries detail bullets, a plain line,
+// and a state-C package with a detailed priced part. The numbers are chosen
+// so every sell figure differs from every cost figure in every position.
+func mockMixedInput() QuotationInput {
+	return QuotationInput{
 		CustomerID: 2,
 		Items: []QuotationItemInput{
 			{ // state B: subs priced internally, main carries the values
@@ -66,8 +60,20 @@ func prepareMixedStates(t *testing.T) *Quotation {
 		PaymentTerm:   30,
 		LeadTime:      45,
 		Incoterm:      "FOB",
-	})
-	if err != nil {
+	}
+}
+
+// prepareMixedStates and the tests below execute the real customer template
+// over one mixed document: the numbering, the rollup arithmetic and the
+// customer-visible split all come from the same path the export uses.
+func prepareMixedStates(t *testing.T) *Quotation {
+	t.Helper()
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup failed: %v", err)
+	}
+	if err := q.Prepare(mockMixedInput()); err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
 	return q
