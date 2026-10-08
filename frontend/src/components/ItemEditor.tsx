@@ -396,7 +396,11 @@ function BulletsEditor({
   onChange: (index: number, value: string) => void;
 }) {
   return (
-    <div className="mt-2 space-y-1.5 border-l border-rule pl-3">
+    <div
+      className={
+        lines.length > 0 ? "mt-1.5 space-y-1.5 border-l border-rule pl-3" : "mt-1"
+      }
+    >
       {lines.map((line, lineIndex) => (
         <div key={lineIndex} className="flex items-center gap-2">
           <span aria-hidden="true" className="select-none text-ink-300">
@@ -439,6 +443,10 @@ function BulletsEditor({
 const cellClass =
   "w-full rounded-md border border-rule bg-white px-2.5 py-2 text-body text-ink-900 outline-hidden transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:bg-paper-subtle disabled:text-ink-500";
 
+/** Sub-item controls: one fixed height so a row reads as a single line. */
+const subCellClass =
+  "h-9 w-full rounded-md border border-rule bg-white px-2.5 text-caption text-ink-900 outline-hidden transition duration-150 ease-out-quart placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20 disabled:cursor-not-allowed disabled:bg-paper-subtle disabled:text-ink-500";
+
 const miniButtonClass =
   "inline-flex min-h-8 items-center gap-1 rounded-md px-2 py-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40";
 
@@ -459,6 +467,7 @@ function UoMSelect({
   onChange,
   ariaLabel,
   disabled,
+  dense,
   dataAttrs,
 }: {
   value: string;
@@ -466,6 +475,7 @@ function UoMSelect({
   onChange: (value: string) => void;
   ariaLabel: string;
   disabled?: boolean;
+  dense?: boolean;
   dataAttrs?: Record<string, string | number>;
 }) {
   const known = options.some((option) => option.value === value);
@@ -476,7 +486,7 @@ function UoMSelect({
       value={value}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
-      className={`${cellClass} cursor-pointer appearance-none bg-[length:10px] bg-[right_0.6rem_center] bg-no-repeat pr-7`}
+      className={`${dense ? subCellClass : cellClass} cursor-pointer appearance-none bg-[length:10px] bg-[right_0.6rem_center] bg-no-repeat pr-7`}
       style={uomChevronStyle}
     >
       {known ? null : <option value={value}>{value} (not recognised)</option>}
@@ -627,12 +637,42 @@ function ItemRow({
         ) : null}
       </div>
 
+      {hasSubItems && rollup ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:contents">
+          <MobileField label="UoM">
+            <div className="flex h-9 items-center text-body text-ink-500">Lot</div>
+          </MobileField>
+          <MobileField label="Qty">
+            <div className="flex h-9 items-center text-body tnum text-ink-500 lg:justify-end">
+              1
+            </div>
+          </MobileField>
+          <MobileField label="Line total (IDR)">
+            <div
+              className="flex h-9 items-center text-body font-semibold tnum text-ink-950 lg:justify-end"
+              title="The sum of the sub-items' sell prices, live as they change."
+            >
+              Rp{formatIdr(rollup.sell)}
+            </div>
+          </MobileField>
+          <MobileField label="Margin">
+            <div
+              className="flex h-9 items-center lg:justify-end"
+              title="Blended margin across the sub-items: total profit over total cost. Updates as the sub-items change."
+            >
+              <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
+                {rollup.cost > 0 ? blendedMarginLabel(rollup.margin) : "—"}
+              </span>
+            </div>
+          </MobileField>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:contents">
         <MobileField label="UoM">
           <UoMSelect
-            value={hasSubItems ? "Lot" : item.uom}
+            value={item.uom}
             options={uomOptions}
-            disabled={hasSubItems}
             ariaLabel={`Unit of measure for line ${index + 1}`}
             onChange={(value) => onChange(item.key, "uom", value)}
             dataAttrs={{ "data-grid-cell": "", "data-grid-row": index, "data-grid-col": 1 }}
@@ -648,13 +688,7 @@ function ItemRow({
             inputMode="numeric"
             aria-label={`Quantity for line ${index + 1}`}
             placeholder="1"
-            title={
-              hasSubItems
-                ? "The line totals its sub-items, so it is always quantity 1 (Lot)."
-                : undefined
-            }
-            value={hasSubItems ? "1" : item.qty}
-            disabled={hasSubItems}
+            value={item.qty}
             onChange={(event) =>
               onChange(item.key, "qty", event.target.value.replace(/\D/g, ""))
             }
@@ -662,30 +696,16 @@ function ItemRow({
           />
         </MobileField>
 
-        <MobileField label={hasSubItems ? "Line total (IDR)" : "Unit price (IDR)"}>
+        <MobileField label="Unit price (IDR)">
           <input
             type="text"
             data-grid-cell=""
             data-grid-row={index}
             data-grid-col={3}
             inputMode="numeric"
-            aria-label={
-              hasSubItems
-                ? `Line total for line ${index + 1}, the sum of its sub-items`
-                : `Unit price for line ${index + 1}`
-            }
+            aria-label={`Unit price for line ${index + 1}`}
             placeholder="0"
-            title={
-              hasSubItems
-                ? "The sum of the sub-items' sell prices."
-                : undefined
-            }
-            value={
-              hasSubItems
-                ? formatMoneyInput(String(rollup ? rollup.sell : 0))
-                : formatMoneyInput(item.unitPrice)
-            }
-            disabled={hasSubItems}
+            value={formatMoneyInput(item.unitPrice)}
             onChange={(event) =>
               onChange(item.key, "unitPrice", event.target.value.replace(/\D/g, ""))
             }
@@ -694,80 +714,69 @@ function ItemRow({
         </MobileField>
 
         <MobileField label="Margin">
-          {hasSubItems && rollup ? (
+          <div className="flex items-center gap-2.5 lg:flex-col lg:items-stretch lg:gap-1.5">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={item.marginEnabled}
+                aria-label={`Enable profit margin for line ${index + 1}`}
+                onClick={() =>
+                  onChange(item.key, "marginEnabled", !item.marginEnabled)
+                }
+                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                  item.marginEnabled
+                    ? "border-accent-700 bg-accent-600"
+                    : "border-rule-strong bg-paper-sunk"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                    item.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+              <div
+                className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
+                  item.marginEnabled
+                    ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                    : "border-rule bg-paper-subtle"
+                }`}
+              >
+                <input
+                  type="text"
+                  data-grid-cell=""
+                  data-grid-row={index}
+                  data-grid-col={4}
+                  inputMode="numeric"
+                  aria-label={`Profit margin percentage for line ${index + 1}`}
+                  value={item.marginPercent}
+                  disabled={!item.marginEnabled}
+                  onChange={(event) =>
+                    onChange(
+                      item.key,
+                      "marginPercent",
+                      Math.min(
+                        parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                        MAX_MARGIN_PERCENT
+                      ).toString()
+                    )
+                  }
+                  className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
+                />
+                <span className="ml-0.5 text-body text-ink-400">%</span>
+              </div>
+            </div>
             <div className="min-w-0 lg:px-0.5 lg:text-right">
               <div className="tnum text-caption text-ink-400">
-                {blendedMarginLabel(rollup.margin)}
+                {formatIdr(sellUnit)} <span className="text-ink-400">/ unit</span>
               </div>
               <div className="tnum text-small font-semibold text-ink-950">
-                {formatIdr(rollup.sell)}
+                {formatIdr(sellTotal)}
               </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2.5 lg:flex-col lg:items-stretch lg:gap-1.5">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={item.marginEnabled}
-                  aria-label={`Enable profit margin for line ${index + 1}`}
-                  onClick={() =>
-                    onChange(item.key, "marginEnabled", !item.marginEnabled)
-                  }
-                  className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
-                    item.marginEnabled
-                      ? "border-accent-700 bg-accent-600"
-                      : "border-rule-strong bg-paper-sunk"
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
-                      item.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
-                    }`}
-                  />
-                </button>
-                <div
-                  className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
-                    item.marginEnabled
-                      ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
-                      : "border-rule bg-paper-subtle"
-                  }`}
-                >
-                  <input
-                    type="text"
-                    data-grid-cell=""
-                    data-grid-row={index}
-                    data-grid-col={4}
-                    inputMode="numeric"
-                    aria-label={`Profit margin percentage for line ${index + 1}`}
-                    value={item.marginPercent}
-                    disabled={!item.marginEnabled}
-                    onChange={(event) =>
-                      onChange(
-                        item.key,
-                        "marginPercent",
-                        Math.min(
-                          parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                          MAX_MARGIN_PERCENT
-                        ).toString()
-                      )
-                    }
-                    className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
-                  />
-                  <span className="ml-0.5 text-body text-ink-400">%</span>
-                </div>
-              </div>
-              <div className="min-w-0 lg:px-0.5 lg:text-right">
-                <div className="tnum text-caption text-ink-400">
-                  {formatIdr(sellUnit)} <span className="text-ink-400">/ unit</span>
-                </div>
-                <div className="tnum text-small font-semibold text-ink-950">
-                  {formatIdr(sellTotal)}
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </MobileField>
       </div>
 
@@ -785,8 +794,8 @@ function ItemRow({
 
       {hasSubItems && showPanel ? (
         <div className="col-span-full rounded-lg bg-paper-subtle/70 p-3 ring-1 ring-rule/60">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <span className="text-micro font-medium uppercase tracking-[0.1em] text-ink-500">
+          <div className="-mx-3 -mt-3 mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-t-lg border-b border-rule/70 bg-white/70 px-3 py-3">
+            <span className="text-micro font-semibold uppercase tracking-[0.1em] text-ink-600">
               Sub-items — priced individually; the line totals their sum
             </span>
             <div
@@ -818,13 +827,13 @@ function ItemRow({
                   }`}
                 />
               </button>
-              <span className="text-caption text-ink-600">
+              <span className="text-caption text-ink-700">
                 Show sub-item prices to the customer
               </span>
             </div>
           </div>
 
-          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 pb-1 pl-1 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 pb-2 pl-1 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
             <span>Sub-item</span>
             <span className="text-right">Qty</span>
             <span>UoM</span>
@@ -935,7 +944,7 @@ function SubRow({
             placeholder="Sub-item description"
             value={sub.description}
             onChange={(event) => onPatch({ description: event.target.value })}
-            className={`${cellClass} text-caption`}
+            className={subCellClass}
           />
         </MobileField>
 
@@ -949,12 +958,13 @@ function SubRow({
             onChange={(event) =>
               onPatch({ qty: event.target.value.replace(/\D/g, "") })
             }
-            className={`${cellClass} text-right text-caption tnum`}
+            className={`${subCellClass} text-right tnum`}
           />
         </MobileField>
 
         <MobileField label="UoM">
           <UoMSelect
+            dense
             value={sub.uom}
             options={uomOptions}
             ariaLabel={`Unit of measure for ${label}`}
@@ -975,7 +985,7 @@ function SubRow({
             className={`${cellClass} text-right text-caption tnum`}
           />
           <div
-            className="tnum text-caption text-ink-400 lg:text-right"
+            className="tnum mt-0.5 text-caption text-ink-400 lg:text-right"
             title="Sell price per unit after this sub-item's margin."
           >
             → {formatIdr(sellUnit)}
@@ -983,7 +993,7 @@ function SubRow({
         </MobileField>
 
         <MobileField label="Margin">
-          <div className="flex items-center gap-2">
+          <div className="flex h-9 items-center gap-2">
             <button
               type="button"
               role="switch"
@@ -1004,7 +1014,7 @@ function SubRow({
               />
             </button>
             <div
-              className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
+              className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
                 sub.marginEnabled
                   ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
                   : "border-rule bg-paper-subtle"
@@ -1031,13 +1041,13 @@ function SubRow({
           </div>
         </MobileField>
 
-        <div className="flex items-center gap-1 lg:flex-col lg:items-stretch">
+        <div className="flex h-9 items-center gap-0.5">
           <button
             type="button"
             aria-label={`Move ${label} up`}
             disabled={!canMoveUp}
             onClick={() => onMove(-1)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 disabled:opacity-30 disabled:hover:bg-transparent lg:mx-auto"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75">
               <path d="M4 10l4-4 4 4" />
@@ -1048,7 +1058,7 @@ function SubRow({
             aria-label={`Move ${label} down`}
             disabled={!canMoveDown}
             onClick={() => onMove(1)}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 disabled:opacity-30 disabled:hover:bg-transparent lg:mx-auto"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.75">
               <path d="M4 6l4 4 4-4" />
@@ -1060,7 +1070,7 @@ function SubRow({
           type="button"
           aria-label={`Remove ${label}`}
           onClick={onRemove}
-          className="mx-auto flex h-7 w-7 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
+          className="mx-auto flex h-9 w-7 items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
         >
           <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M4 4l8 8M12 4l-8 8" />
@@ -1070,9 +1080,9 @@ function SubRow({
 
       <BulletsEditor
         lines={sub.bullets}
-        addLabel="Add detail line"
-        placeholder="Detail line — what this sub-item includes"
-        ariaLabel={(position) => `Detail line ${position} for ${label}`}
+        addLabel="Add sub-sub-item"
+        placeholder="Sub-sub-item — what this includes"
+        ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
         onAdd={onAddBullet}
         onRemove={onRemoveBullet}
         onChange={onBulletChange}
