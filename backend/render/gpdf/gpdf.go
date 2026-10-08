@@ -87,12 +87,14 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 }
 
 // engineItems flattens quotation lines into the engine's row model, splitting
-// each description back into its main text and its bullets.
+// each description back into its main text and its bullets. Package lines
+// carry their parts through as structured data; their descriptions hold no
+// bullets (validation refuses both at once).
 func engineItems(items []quotation.Item) []Item {
 	out := make([]Item, 0, len(items))
 	for _, it := range items {
 		main, subs := splitDescription(it.DisplayDesc)
-		out = append(out, Item{
+		row := Item{
 			No:        it.No,
 			DescMain:  main,
 			SubItems:  subs,
@@ -100,7 +102,23 @@ func engineItems(items []quotation.Item) []Item {
 			UoM:       it.UoM,
 			UnitPrice: it.UnitPrice,
 			Total:     it.Total,
-		})
+		}
+		if len(it.SubItems) > 0 {
+			pkg := &Package{ShowPrices: it.ShowSubPrices, Parts: make([]Part, 0, len(it.SubItems))}
+			for _, sub := range it.SubItems {
+				pkg.Parts = append(pkg.Parts, Part{
+					SubNo:     sub.SubNo,
+					Desc:      sub.Description,
+					Qty:       formatQty(sub.Qty),
+					UoM:       sub.UoM,
+					UnitPrice: sub.UnitPrice,
+					Total:     sub.Total,
+					Bullets:   sub.Bullets,
+				})
+			}
+			row.Package = pkg
+		}
+		out = append(out, row)
 	}
 	return out
 }

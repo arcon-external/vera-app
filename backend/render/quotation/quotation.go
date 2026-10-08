@@ -76,12 +76,33 @@ type Input struct {
 // Item is one quotation line as the quotation holds it. DisplayDesc is the HTML
 // formatDescription produced, bullets included; deciding how to lay that out is
 // the renderer's problem.
+//
+// SubItems and ShowSubPrices carry a modular package: the line's price is the
+// sum of its parts, and ShowSubPrices decides whether the customer copy prints
+// the parts with their prices (true) or as unpriced scope rows under a
+// full-value main row (false). An item with parts never carries description
+// bullets -- validation refuses both at once.
 type Item struct {
-	DisplayDesc string
+	DisplayDesc   string
+	UoM           string
+	UnitPrice     string
+	Total         string
+	SubItems      []SubItem
+	No            int
+	Qty           uint32
+	ShowSubPrices bool
+}
+
+// SubItem is one priced part of a package line, as both renderers see it.
+// Prices are the customer-facing display strings; Bullets are the part's
+// detail lines, plain and positioned by order alone.
+type SubItem struct {
+	SubNo       string
+	Description string
 	UoM         string
 	UnitPrice   string
 	Total       string
-	No          int
+	Bullets     []string
 	Qty         uint32
 }
 

@@ -311,10 +311,6 @@
 			position: relative;
 		}
 
-		.items-body-table tr.sub-row + tr.sub-row td {
-			border-top: 1px dotted #a9c0ee;
-		}
-
 		.items-body-table tr.sub-row td:nth-child(2)::before {
 			content: "";
 			position: absolute;

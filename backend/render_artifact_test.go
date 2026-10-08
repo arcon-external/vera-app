@@ -6,17 +6,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	"vera-app/backend/render"
 	chromedprenderer "vera-app/backend/render/chromedp"
 )
 
 // The mock harness generates a mixed three-state document (state B package, a
-// plain line, a state-C package, detail lines under both) through the REAL
+// plain line, a state-C package, detail bullets under parts) through the REAL
 // customer pipeline: Prepare prices it and the shipping template executes it.
-// The PDF is drawn by constructing the browser engine directly here -- the
-// same constructor the engine swap in backend/render names -- because the
-// export path's build() refuses sub-item documents until the native renderer
-// learns sub rows. This is a mock-generation tool, not a second selection
-// mechanism: nothing outside this file reaches the browser engine.
+// Both engines render it -- the browser engine and the native engine -- so the
+// two outputs can be compared side by side while the native sub-row drawing is
+// being fitted. The native render goes through render.Active, which is the
+// engine production actually exports with.
 //
 // Run with VERA_VISUAL_ARTIFACT_DIR set; the normal suite does nothing.
 func TestWriteSubItemRenderArtifact(t *testing.T) {
@@ -39,13 +39,22 @@ func TestWriteSubItemRenderArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderer input: %v", err)
 	}
-	pdf, err := chromedprenderer.New().Render(context.Background(), in)
+	browserPDF, err := chromedprenderer.New().Render(context.Background(), in)
 	if err != nil {
 		t.Fatalf("browser render: %v", err)
 	}
-	pdfPath := filepath.Join(dir, "mixed-states.pdf")
-	if err := os.WriteFile(pdfPath, pdf, 0o644); err != nil {
-		t.Fatalf("write %s: %v", pdfPath, err)
+	browserPath := filepath.Join(dir, "mixed-states-browser.pdf")
+	if err := os.WriteFile(browserPath, browserPDF, 0o644); err != nil {
+		t.Fatalf("write %s: %v", browserPath, err)
 	}
-	t.Logf("artifacts written to %s and %s", htmlPath, pdfPath)
+
+	nativePDF, err := render.Active.Render(context.Background(), in)
+	if err != nil {
+		t.Fatalf("native render: %v", err)
+	}
+	nativePath := filepath.Join(dir, "mixed-states-native.pdf")
+	if err := os.WriteFile(nativePath, nativePDF, 0o644); err != nil {
+		t.Fatalf("write %s: %v", nativePath, err)
+	}
+	t.Logf("artifacts: %s, %s, %s", htmlPath, browserPath, nativePath)
 }

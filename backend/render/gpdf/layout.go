@@ -144,6 +144,16 @@ const (
 	liMarginPx   = 3 // .desc-subitems li margin, collapses between siblings
 	subIndentPx  = 16
 
+	// Package rows, verbatim from the stylesheet's sub-item rules.
+	subRowPadPx       = 6  // tr.sub-row td padding
+	subRowIndentPx    = 30 // tr.sub-row td:nth-child(2) padding-left
+	subBulletIndentPx = 30 // tr.sub-row .desc-subitems margin-left
+	railLeftPx        = 18 // tr.sub-row td:nth-child(2)::before left
+	railWidthPx       = 2
+	subNumPx          = 10 // tr.sub-row td:nth-child(1) font-size
+	parentPadTopPx    = 12 // tr.sub-parent td padding: 12px 10px 7px
+	parentPadBotPx    = 7
+
 	radiusSmPx = 8
 	// qrCardPx is the verification QR card's box, padding and border included.
 	qrCardPx = 110
@@ -169,6 +179,11 @@ const (
 	colTableEdge  = "#C5D5FF"
 	colTableRule  = "#CFE0FF"
 	colZebra      = "#F6F9FF"
+	// The sub-item treatment: the lighter ink `tr.sub-row` fades to, the number
+	// cell's quieter grey, and the rail under which the parts hang.
+	colSubInk     = "#4A5470"
+	colSubNo      = "#5B6478"
+	colSubRail    = "#B7C6E2"
 	colTotalsBg   = "#F9FBFF"
 	colTotalsEdge = "#CEDBFF"
 	colTotalsInk  = "#2F3654"
@@ -370,6 +385,11 @@ type metrics struct {
 	footerTncH    float64
 	footerTotalsH float64
 	footerH       float64
+	// The trailer's three blocks, measured individually so the page assembler
+	// can fragment them across pages the way the browser's grid does.
+	footerCardsH float64
+	closingH     float64
+	verifyH      float64
 }
 
 // derive computes the horizontal measures and the vertical flow.
@@ -434,12 +454,14 @@ func (e *Engine) derive(in Input) metrics {
 	footerH := maxF(e.tncHeight(in, m.footerTncW), e.totalsHeight(rows))
 	m.footerTncH = footerH
 	m.footerTotalsH = footerH
-	m.footerH = maxF(m.footerTncH, m.footerTotalsH) +
+	m.footerCardsH = maxF(m.footerTncH, m.footerTotalsH)
+	m.closingH = float64(len(e.Wrap(in.Closing, px(bodyPx), m.innerW, false))) * px(bodyPx) * bodyLH
+	m.verifyH = verifyHeight(in)
+	m.footerH = m.footerCardsH +
 		// The grid's gap, then the closing paragraph's own top margin.
-		px(contentGapPx) + px(4) +
-		float64(len(e.Wrap(in.Closing, px(bodyPx), m.innerW, false)))*px(bodyPx)*bodyLH +
+		px(contentGapPx) + px(4) + m.closingH +
 		// The gap again, then the verification block's own top margin.
-		px(contentGapPx) + px(verifyGapPx) + verifyHeight(in)
+		px(contentGapPx) + px(verifyGapPx) + m.verifyH
 	return m
 }
 
@@ -453,10 +475,25 @@ func (e *Engine) derive(in Input) metrics {
 // see alignment_test.go for the rule applied to the types where it pays.
 type rowBlock struct {
 	item   Item
+	part   *Part
 	lines  []string
 	subs   []subLine
 	height float64
+	kind   rowKind
 }
+
+// rowKind selects how a row paints. A modular line contributes several blocks:
+// a state-C line is a merged title row followed by priced part rows, a state-B
+// line a full-value main row followed by merged scope rows. Plain lines
+// contribute exactly one main row, as they always have.
+type rowKind int
+
+const (
+	rowMain rowKind = iota
+	rowParentTitle
+	rowScope
+	rowPart
+)
 
 // subLine is one line of the item's bullet list. `first` marks the line that
 // starts a list item, because only that line gets a disc: a bullet that wraps
@@ -526,28 +563,62 @@ func (e *Engine) layout(in Input) []*page {
 		first += placed
 
 		if first >= len(rows) {
-			// The footer goes below the table, on this page if it fits and on a
-			// page of its own if it does not.
-			footTop := tableTop + used + px(contentGapPx)
+			// The trailer is three atomic blocks -- the cards grid, the closing
+			// paragraph, the verification block -- and each flows onto the next
+			// page on its own when it does not fit, the way the browser's grid
+			// fragments. A gap around a page break is truncated (grid row gaps
+			// do not render across breaks); a block's own top margin is not, so
+			// the closing keeps its 4px and the verification block its 18px
+			// when either opens a page.
 			ends := tableTop + used
-			if m.footerH > 0 && footTop+m.footerH > bottom {
-				finish(cur, ends)
-				pages = append(pages, cur)
-				cur = &page{}
-				e.drawContinuationChrome(cur, m)
-				footTop = m.cardY + px(1) + px(contentGapPx)
-				ends = footTop
-			}
 			if m.footerH > 0 {
-				e.drawFooter(cur, in, m, footTop)
-				// The content's bottom padding is real on a page that ends
-				// within the page box. On a page the table overflows it is not,
-				// because the rows have already spent it — which is why a page of
-				// rows closes its card on the last row and a page with the footer
-				// closes it a padding's worth lower.
-				ends = footTop + m.footerH + px(contentPadBot)
+				// The engine's row heights resolve to whole pixels the way the
+				// browser's do, but their remainders accumulate to a point or
+				// two across a page, and Chrome decides these fits with its own
+				// fractional geometry. A block that misses by less than the
+				// accumulated rounding must not flip to the next page, so the
+				// checks carry a tolerance of two pixels' worth.
+				fit := func(top, h float64) bool { return top+h <= bottom+px(2) }
+				contentTop := m.cardY + px(1)
+				newTrailerPage := func() {
+					finish(cur, ends)
+					pages = append(pages, cur)
+					cur = &page{}
+					e.drawContinuationChrome(cur, m)
+					ends = contentTop
+				}
+
+				// The cards, after the grid gap below the table.
+				top := ends + px(contentGapPx)
+				if !fit(top, m.footerCardsH) {
+					newTrailerPage()
+					top = ends
+				}
+				e.drawFooterCards(cur, in, m, top)
+				ends = top + m.footerCardsH
+
+				// The closing: gap then its own margin; on a fresh page the
+				// margin stands alone.
+				top = ends + px(contentGapPx) + px(4)
+				if !fit(top, m.closingH) {
+					newTrailerPage()
+					top = ends + px(4)
+				}
+				e.drawClosing(cur, in, m, top)
+				ends = top + m.closingH
+
+				// The verification block: gap then its own margin.
+				top = ends + px(contentGapPx) + px(verifyGapPx)
+				if !fit(top, m.verifyH) {
+					newTrailerPage()
+					top = ends + px(verifyGapPx)
+				}
+				e.drawVerify(cur, in, m, top)
+				ends = top + m.verifyH
 			}
-			finish(cur, ends)
+			// The content's bottom padding is real on a page that ends within
+			// the page box; a page of rows closes its card on the last row.
+			finish(cur, ends+px(contentPadBot))
 			pages = append(pages, cur)
 			break
 		}
@@ -574,14 +645,26 @@ const descLinePx = 15.4
 
 // measureRows lays out every row's description and derives its height from the
 // CSS box model: cell padding, one line box per wrapped line, the sub-item list's
-// top margin, and the li margins collapsing between siblings.
+// top margin, and the li margins collapsing between siblings. A modular line
+// contributes one block per drawn row -- parent or main, then one per part.
 func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 	// The cell box runs from one column boundary to the next, and its 1px
 	// collapsed border is drawn inside the leading edge, so the content box is
 	// narrower than the track by that border as well as by the padding.
 	descW := m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx)
 	subW := descW - px(subIndentPx)
+	// Sub rows swap the left padding for the deeper indent; a part's bullets
+	// sit another indent into that content box. Scope rows are merged across
+	// Description..Total, so their text runs the full remaining table width.
+	partW := m.colX[2] - m.colX[1] - px(1) - px(subRowIndentPx) - px(tdPadPx)
+	partBulletW := partW - px(subBulletIndentPx)
+	scopeW := m.colX[6] - m.colX[1] - px(1) - px(subRowIndentPx) - px(tdPadPx)
+	// The state-C parent title is merged too, but keeps the normal cell
+	// padding, so its text runs wider than a scope row's.
+	parentW := m.colX[6] - m.colX[1] - px(1) - 2*px(tdPadPx)
 	padY := 2 * px(tdPadPx)
+	subPadY := 2 * px(subRowPadPx)
+	parentPadY := px(parentPadTopPx) + px(parentPadBotPx)
 
 	out := make([]rowBlock, 0, len(in.Items))
 	for _, it := range in.Items {
@@ -592,38 +675,79 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 				subs = append(subs, subLine{text: ln, first: i == 0})
 			}
 		}
-		// The row's height is its content box plus the cell's padding on both
-		// sides plus both of its 1px collapsed borders. The border is inside the
-		// row rather than between rows, so it belongs in the height: dropping it
-		// takes a pixel off every row and the table ends up short of where the
-		// browser's does.
-		//
-		// The content is then resolved to a whole pixel, because the browser
-		// resolves the row's height in whole pixels: a row of two lines comes out
-		// 51px or 52px depending on where the 15.4px line box falls, and that
-		// pixel moves every row below it.
-		//
-		// The resolution floors, and that is the whole of the fix. A browser lays
-		// this table out in fractional pixels and snaps each row's bottom edge
-		// down to a whole pixel, so a row is the floor of its own content and
-		// never the round. Rounding up put every two-line row a pixel tall, and
-		// over the six rows of the reference document that was six pixels, two
-		// and a quarter points -- enough to push the sixth item onto page two
-		// and make the engine paginate a different document from the browser's.
-		// Flooring lands within one pixel of the browser on every row of it and
-		// the table ends up the same length.
-		content := float64(len(lines)) * descLinePx
-		if n := countItems(subs); n > 0 {
-			// The list's 6px top margin absorbs the first item's own 3px, so it
-			// stands once; then one 3px between each pair of items, and the last
-			// item's 3px bottom margin, which collapses with nothing.
-			content += 6 + 3*float64(n)
-			content += float64(len(subs)) * descLinePx
+
+		if it.Package == nil {
+			out = append(out, rowBlock{
+				item: it, kind: rowMain, lines: lines, subs: subs,
+				height: rowHeight(lines, subs, padY),
+			})
+			continue
 		}
-		h := math.Floor(content)*ptPerPx + padY + 2*px(1)
-		out = append(out, rowBlock{item: it, lines: lines, subs: subs, height: h})
+
+		if it.Package.ShowPrices {
+			// State C: a merged title row, then each part as a full priced
+			// row carrying its own bullets. The title wraps at the merged
+			// width -- the browser lays it across Description..Total, not
+			// inside the description column.
+			titleLines := e.Wrap(it.DescMain, px(bodyPx), parentW, false)
+			out = append(out, rowBlock{
+				item: it, kind: rowParentTitle, lines: titleLines,
+				height: rowHeight(titleLines, nil, parentPadY),
+			})
+			for i := range it.Package.Parts {
+				part := &it.Package.Parts[i]
+				plines := e.Wrap(part.Desc, px(bodyPx), partW, false)
+				var bullets []subLine
+				for _, b := range part.Bullets {
+					for j, ln := range e.Wrap(b, px(bodyPx), partBulletW, false) {
+						bullets = append(bullets, subLine{text: ln, first: j == 0})
+					}
+				}
+				out = append(out, rowBlock{
+					item: it, part: part, kind: rowPart, lines: plines, subs: bullets,
+					height: rowHeight(plines, bullets, subPadY),
+				})
+			}
+			continue
+		}
+
+		// State B: the full-value main row, then unpriced scope rows.
+		out = append(out, rowBlock{
+			item: it, kind: rowMain, lines: lines, subs: subs,
+			height: rowHeight(lines, subs, padY),
+		})
+		for i := range it.Package.Parts {
+			part := &it.Package.Parts[i]
+			plines := e.Wrap(part.Desc, px(bodyPx), scopeW, false)
+			var bullets []subLine
+			for _, b := range part.Bullets {
+				for j, ln := range e.Wrap(b, px(bodyPx), scopeW-px(subBulletIndentPx), false) {
+					bullets = append(bullets, subLine{text: ln, first: j == 0})
+				}
+			}
+			out = append(out, rowBlock{
+				item: it, part: part, kind: rowScope, lines: plines, subs: bullets,
+				height: rowHeight(plines, bullets, subPadY),
+			})
+		}
 	}
 	return out
+}
+
+// rowHeight derives one row's height from the CSS box model, the same way for
+// every row kind: content resolved to a whole pixel (the browser snaps each
+// row's height in whole pixels), plus the cell's vertical padding plus both of
+// its 1px collapsed borders.
+func rowHeight(lines []string, subs []subLine, padY float64) float64 {
+	content := float64(len(lines)) * descLinePx
+	if n := countItems(subs); n > 0 {
+		// The list's 6px top margin absorbs the first item's own 3px, so it
+		// stands once; then one 3px between each pair of items, and the last
+		// item's 3px bottom margin, which collapses with nothing.
+		content += 6 + 3*float64(n)
+		content += float64(len(subs)) * descLinePx
+	}
+	return math.Floor(content)*ptPerPx + padY + 2*px(1)
 }
 
 // The recipient card's internal rhythm, in points, measured from a browser

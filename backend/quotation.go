@@ -1090,18 +1090,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 // The choice itself lives in backend/render, in one line, and is a compile-time
 // edit rather than a setting. This function's whole job is to hand the renderer
 // a renderer-neutral view of the quotation and get bytes back.
-//
-// The refusal for priced sub-items is temporary and deliberate: the native
-// renderer cannot draw sub-item rows yet, and rather than export a document
-// whose sub rows silently vanish, the export fails with a message. The
-// in-browser paths (preview, and the browser renderer itself) are unaffected.
-// Remove this guard when the native renderer learns sub rows.
 func (q *Quotation) build() ([]byte, error) {
-	for _, item := range q.Data.Items {
-		if len(item.SubItems) > 0 {
-			return nil, fmt.Errorf("this quotation has priced sub-items, which the current export engine cannot draw yet; remove the sub-items or wait for the native renderer update")
-		}
-	}
 	in, err := q.renderInput()
 	if err != nil {
 		return nil, err
@@ -1137,14 +1126,41 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 	items := make([]quotation.Item, 0, len(q.Data.Items))
 	for _, it := range q.Data.Items {
+		parts := make([]quotation.SubItem, 0, len(it.SubItems))
+		for _, sub := range it.SubItems {
+			bullets := make([]string, 0, len(sub.SubSubItems))
+			for _, low := range sub.SubSubItems {
+				bullets = append(bullets, low.Description)
+			}
+			parts = append(parts, quotation.SubItem{
+				SubNo:       sub.SubNo,
+				Description: sub.Description,
+				Qty:         sub.Qty,
+				UoM:         sub.UoM,
+				UnitPrice:   sub.DisplayUnitPrice,
+				Total:       sub.DisplayTotal,
+				Bullets:     bullets,
+			})
+		}
 		items = append(items, quotation.Item{
-			No:          int(it.No),
-			DisplayDesc: string(it.DisplayDesc),
-			Qty:         it.Qty,
-			UoM:         it.UoM,
-			UnitPrice:   it.DisplayUnitPrice,
-			Total:       it.DisplayTotal,
+			No:            int(it.No),
+			DisplayDesc:   string(it.DisplayDesc),
+			Qty:           it.Qty,
+			UoM:           it.UoM,
+			UnitPrice:     it.DisplayUnitPrice,
+			Total:         it.DisplayTotal,
+			SubItems:      parts,
+			ShowSubPrices: it.ShowSubPrices,
 		})
+	}
+
+	// The template prints the PPN line only when a PPN was actually charged
+	// ({{if .PpnAmount}}), so a zero-tax zone must present an empty display
+	// amount to the renderers too -- passing "0" made the native engine draw
+	// a "PPN 11% Rp0" row the browser never prints.
+	displayPpn := ""
+	if q.Data.PpnAmount > 0 {
+		displayPpn = q.Data.DisplayPpnAmount
 	}
 
 	return quotation.Input{
@@ -1183,7 +1199,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 		DisplaySubTotal:   q.Data.DisplaySubTotal,
 		DisplayDiscount:   q.Data.DisplayDiscountAmount,
-		DisplayPpn:        q.Data.DisplayPpnAmount,
+		DisplayPpn:        displayPpn,
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,
 

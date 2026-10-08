@@ -36,6 +36,11 @@ import (
 const (
 	// bodyBaselineOffset is from a td's content top to the first baseline.
 	bodyBaselineOffset = 9.0
+	// subNumBaselineOffset is the same quantity for the sub rows' 10px number
+	// cell. The cell's line box, half-leading and ascent all scale with the
+	// font size, so it tracks the body value by 10/11 rather than needing a
+	// fresh measurement.
+	subNumBaselineOffset = 9.0 * 10.0 / 11.0
 	// h1BaselineOffset is from the top-lead's content top to the h1 baseline.
 	h1BaselineOffset = 19.5
 	// addrBaselineOffset is within one address line box; addrPitch is the step
@@ -666,7 +671,188 @@ func tableSides(p *page, m metrics, clip *clipRegion, top, h float64, colour str
 }
 
 // drawTableRow paints one body row's zebra fill, its cell rules and its text.
+// drawTableRow paints one laid-out row block: the full-value main row, a merged
+// package title row, an unpriced scope row, or a priced part row.
 func (e *Engine) drawTableRow(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
+	switch rb.kind {
+	case rowParentTitle:
+		e.drawMergedRow(p, m, clip, top, rb, isEven, parentPadTopPx, true)
+	case rowScope:
+		e.drawMergedRow(p, m, clip, top, rb, isEven, subRowPadPx, false)
+	case rowPart:
+		e.drawPartRow(p, m, clip, top, rb, isEven)
+	default:
+		e.drawMainRow(p, m, clip, top, rb, isEven)
+	}
+}
+
+// drawBullets paints a bullet list: the disc marker on each item's first line,
+// the text at textX, the 6px gap above the list and the 3px between items —
+// exactly the box model rowHeight mirrors. Shared by main rows (description
+// bullets), scope rows and part rows (their detail bullets).
+func (e *Engine) drawBullets(p *page, textX, dy float64, subs []subLine, color string) {
+	if len(subs) == 0 {
+		return
+	}
+	markerX := textX - bulletGap - bulletSize
+	dy += px(subGapPx)
+	for i, sl := range subs {
+		// The list's disc marker is drawn, not typed: `list-style: disc`
+		// renders as a shape the browser positions itself, and a bullet
+		// character in the text would be a glyph the document does not have.
+		// Only the line that opens a list item carries one.
+		if sl.first {
+			p.add(box{
+				x: markerX, y: dy - bulletCentre,
+				w: bulletSize, h: bulletSize,
+				fill: color, path: discPath(markerX+bulletSize/2, dy-bulletCentre+bulletSize/2, bulletSize),
+			})
+		}
+		p.add(run{
+			x: textX, baseline: dy, size: px(bodyPx),
+			text: sl.text, color: color,
+		})
+		// The 3px margin sits between list items, so it is added on the way
+		// into a new item rather than after every line.
+		if i > 0 && sl.first {
+			dy += px(liMarginPx)
+		}
+		dy += descLineH
+	}
+}
+
+// drawMergedRow paints a row whose Description..Total IDR is one cell: the
+// state-C package title, or a state-B scope row. Both keep the No. column
+// (scope rows carry the part's X.Y there); neither draws internal column rules.
+func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool, padTopPx float64, title bool) {
+	bodyH := rb.height - px(1)
+
+	if isEven {
+		p.add(box{
+			x: m.tableX + px(1), y: top,
+			w: m.tableW - 2*px(1), h: bodyH,
+			fill: colZebra, clip: clip,
+		})
+	}
+	tableSides(p, m, clip, top, bodyH, colTableRule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+
+	// The number cell keeps its size and its centred number. Scope rows carry
+	// the part number in the lighter sub-item treatment; the title row carries
+	// the item number in body ink.
+	if title {
+		num := itoa(rb.item.No)
+		p.add(run{
+			x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(num, px(bodyPx), false))/2,
+			baseline: top + px(padTopPx) + bodyBaselineOffset,
+			size:     px(bodyPx), text: num, color: e.ink,
+		})
+	} else {
+		e.drawSubNumber(p, m, top, padTopPx, rb.part.SubNo)
+		// The rail hangs from the row's padding box, exactly as the ::before
+		// pseudo-element does: full height, 2px, at its stylesheet offset.
+		p.add(box{
+			x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
+			w: px(railWidthPx), h: bodyH - px(1),
+			fill: colSubRail, clip: clip,
+		})
+	}
+
+	textColor := e.ink
+	indent := float64(tdPadPx)
+	if !title {
+		textColor = colSubInk
+		indent = subRowIndentPx
+	}
+	dx := m.colX[1] + px(1) + px(indent)
+	dy := top + px(padTopPx) + bodyBaselineOffset
+	for _, line := range rb.lines {
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: textColor})
+		dy += descLineH
+	}
+	// Scope rows carry their part's detail bullets inside the merged cell,
+	// one indent further in, in the same faded ink as the part text.
+	if !title {
+		e.drawBullets(p, dx+px(subBulletIndentPx), dy, rb.subs, colSubInk)
+	}
+}
+
+// drawSubNumber centres a sub row's X.Y number in the No. column, in the
+// smaller, lighter type the stylesheet gives `tr.sub-row td:first-child`.
+func (e *Engine) drawSubNumber(p *page, m metrics, top, padTopPx float64, number string) {
+	p.add(run{
+		x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(number, px(subNumPx), false))/2,
+		baseline: top + px(padTopPx) + subNumBaselineOffset,
+		size:     px(subNumPx), text: number, color: colSubNo,
+	})
+}
+
+// drawPartRow paints a state-C part: a full six-column row like a main row,
+// drawn one step lighter, with the description indented past the rail and the
+// part's detail bullets beneath it.
+func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
+	h := rb.height
+	bodyH := h - px(1)
+
+	if isEven {
+		for i := 0; i < 6; i++ {
+			p.add(box{
+				x: m.colX[i] + px(1), y: top,
+				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
+				fill: colZebra, clip: clip,
+			})
+		}
+	}
+	for i := 1; i < 6; i++ {
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
+	}
+	tableSides(p, m, clip, top, bodyH, colTableRule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+
+	e.drawSubNumber(p, m, top, subRowPadPx, rb.part.SubNo)
+
+	// The rail, full height of the padding box.
+	p.add(box{
+		x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
+		w: px(railWidthPx), h: bodyH - px(1),
+		fill: colSubRail, clip: clip,
+	})
+
+	// Description and bullets, both a step lighter and both indented past the
+	// rail; the bullets sit one more indent into the description's content box.
+	dx := m.colX[1] + px(1) + px(subRowIndentPx)
+	bulletX := dx + px(subBulletIndentPx)
+	dy := top + px(subRowPadPx) + bodyBaselineOffset
+	for _, line := range rb.lines {
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: colSubInk})
+		dy += descLineH
+	}
+	e.drawBullets(p, bulletX, dy, rb.subs, colSubInk)
+
+	centre := func(i int, text string) {
+		if text == "" {
+			return
+		}
+		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
+		cy := top + px(subRowPadPx) + bodyBaselineOffset
+		for _, line := range e.Wrap(text, px(bodyPx), trackW, false) {
+			p.add(run{
+				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), false))/2,
+				baseline: cy,
+				size:     px(bodyPx), text: line, color: colSubInk,
+			})
+			cy += descLineH
+		}
+	}
+	centre(2, rb.part.Qty)
+	centre(3, rb.part.UoM)
+	centre(4, rb.part.UnitPrice)
+	centre(5, rb.part.Total)
+}
+
+// drawMainRow paints one full-value row: an item's own row, and the state-B
+// package's main row, which carries the rolled-up values.
+func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
 	h := rb.height
 
 	// The closing rule is drawn inside this row rather than at its bottom edge,
@@ -704,38 +890,12 @@ func (e *Engine) drawTableRow(p *page, m metrics, clip *clipRegion, top float64,
 	// Description: wrapped main text, then the bullet list.
 	dx := m.colX[1] + px(tdPadPx)
 	subTextX := dx + px(subIndentPx)
-	subMarkerX := subTextX - bulletGap - bulletSize
 	dy := top + px(tdPadPx) + bodyBaselineOffset
 	for _, line := range rb.lines {
 		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.ink})
 		dy += descLineH
 	}
-	if len(rb.subs) > 0 {
-		dy += px(subGapPx)
-		for i, sl := range rb.subs {
-			// The list's disc marker is drawn, not typed: `list-style: disc`
-			// renders as a shape the browser positions itself, and a bullet
-			// character in the text would be a glyph the document does not have.
-			// Only the line that opens a list item carries one.
-			if sl.first {
-				p.add(box{
-					x: subMarkerX, y: dy - bulletCentre,
-					w: bulletSize, h: bulletSize,
-					fill: e.ink, path: discPath(subMarkerX+bulletSize/2, dy-bulletCentre+bulletSize/2, bulletSize),
-				})
-			}
-			p.add(run{
-				x: subTextX, baseline: dy, size: px(bodyPx),
-				text: sl.text, color: e.ink,
-			})
-			// The 3px margin sits between list items, so it is added on the way
-			// into a new item rather than after every line.
-			if i > 0 && sl.first {
-				dy += px(liMarginPx)
-			}
-			dy += descLineH
-		}
-	}
+	e.drawBullets(p, subTextX, dy, rb.subs, e.ink)
 
 	centre := func(i int, text string, bold bool) {
 		if text == "" {
@@ -765,9 +925,10 @@ func (e *Engine) drawTableRow(p *page, m metrics, clip *clipRegion, top float64,
 	centre(5, rb.item.Total, false)
 }
 
-// drawFooter paints the terms card, the totals card, the closing paragraph and
-// the verification block.
-func (e *Engine) drawFooter(p *page, in Input, m metrics, top float64) {
+// drawFooterCards paints the terms and totals cards, the first of the three
+// trailer blocks. Each block is placed independently by the page assembler so
+// the trailer can fragment across pages the way the browser's grid does.
+func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	tncW := m.footerTncW
 	totW := m.footerTotW
 	totX := m.innerX + tncW + px(footGapPx)
@@ -799,9 +960,32 @@ func (e *Engine) drawFooter(p *page, in Input, m metrics, top float64) {
 		x: totX, y: top, w: totW, h: m.footerTotalsH,
 		fill: colTotalsBg, stroke: colTotalsEdge, lw: px(1), radius: px(cardRadiusPx),
 	})
+	// The card is a grid of auto rows inside a box the sibling terms card
+	// stretches taller than their content, and `align-content: stretch` -- the
+	// grid default -- shares that surplus equally across the rows. Drawing at
+	// the natural pitch would bunch the lines at the top of a taller card; the
+	// browser spreads them, and the row pitch is what a reader sees.
 	ry := top + px(1) + px(footPadPx)
 	labelX := totX + px(1) + px(footPadPx)
 	valueX := totX + totW - px(1) - px(footPadPx)
+	innerH := m.footerCardsH - 2*px(1) - 2*px(footPadPx)
+	natural := make([]float64, len(rows))
+	naturalTotal := 0.0
+	for i, rw := range rows {
+		if rw.grand {
+			natural[i] = px(12) * bodyLH
+		} else {
+			natural[i] = px(bodyPx) * bodyLH
+		}
+		naturalTotal += natural[i]
+	}
+	if len(rows) > 1 {
+		naturalTotal += px(totalsGap) * float64(len(rows)-1)
+	}
+	stretch := 0.0
+	if len(rows) > 0 && innerH > naturalTotal {
+		stretch = (innerH - naturalTotal) / float64(len(rows))
+	}
 	for i, rw := range rows {
 		if i > 0 {
 			ry += px(totalsGap)
@@ -821,6 +1005,7 @@ func (e *Engine) drawFooter(p *page, in Input, m metrics, top float64) {
 			vw := e.Width(rw.value, px(12), true)
 			p.add(run{x: valueX - vw, baseline: ry + bodyBaselineOffset, size: px(12),
 				text: rw.value, bold: true, color: e.deep})
+			ry += natural[i] + stretch
 			continue
 		}
 		ink := colTotalsInk
@@ -832,27 +1017,24 @@ func (e *Engine) drawFooter(p *page, in Input, m metrics, top float64) {
 		vw := e.Width(rw.value, px(bodyPx), true)
 		p.add(run{x: valueX - vw, baseline: ry + bodyBaselineOffset, size: px(bodyPx),
 			text: rw.value, bold: true, color: ink})
-		ry += px(bodyPx) * bodyLH
+		ry += natural[i] + stretch
 	}
-	blockBottom := top + maxF(m.footerTncH, m.footerTotalsH)
+}
 
-	// The closing paragraph, centred across the content width.
-	//
-	// The footer, the closing and the verification block are three children of one
-	// grid, so the grid's 18px gap separates each pair of them. The closing also
-	// carries a 4px top margin, which stacks with the gap rather than replacing
-	// it: leaving the gap out puts the closing paragraph 18px too high and the
-	// verification block with it.
-	cy := blockBottom + px(contentGapPx) + px(4)
+// drawClosing paints the closing paragraph, centred across the content width,
+// with `top` as the position of its first line box. The block's own 4px top
+// margin is applied by the caller -- preserved when the paragraph opens a page,
+// because a margin at the top of a fragmentainer is not truncated; only the
+// grid gap around a page break is.
+func (e *Engine) drawClosing(p *page, in Input, m metrics, top float64) {
 	inner := m.innerW
+	cy := top
 	for _, line := range e.Wrap(in.Closing, px(bodyPx), inner, false) {
 		w := e.Width(line, px(bodyPx), false)
 		p.add(run{x: m.innerX + (inner-w)/2, baseline: cy + bodyBaselineOffset,
 			size: px(bodyPx), text: line, color: colClosing})
 		cy += px(bodyPx) * bodyLH
 	}
-
-	e.drawVerify(p, in, m, cy+px(contentGapPx)+px(verifyGapPx))
 }
 
 // totalRow is one line of the totals card.
