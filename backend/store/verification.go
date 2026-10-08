@@ -261,10 +261,11 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		SELECT ss.revision_sub_item_id, ss.description
 		FROM %s.quotation_revision_sub_sub_items ss
 		JOIN %s.quotation_revision_sub_items s ON s.id = ss.revision_sub_item_id
-		WHERE s.revision_id = (
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
 			SELECT id FROM %s.quotation_revisions
 			WHERE short_id = $1)
-		ORDER BY ss.revision_sub_item_id, ss.sub_sub_no`, schema, schema, schema),
+		ORDER BY ss.revision_sub_item_id, ss.sub_sub_no`, schema, schema, schema, schema),
 		normalized)
 	if err != nil {
 		return RevisionEvidence{}, fmt.Errorf("get revision sub-item details: %w", err)
