@@ -242,13 +242,26 @@
 			border-top: 0;
 		}
 
+		/* Every cell is a centred figure except the description, which flows
+		   from the top. Written as "all but the description" rather than a
+		   list of positions: the Disc. column only exists when some row
+		   carries a discount, which shifts every position after it. As a
+		   positional list, Total silently stopped being centred the moment
+		   per-row discounts arrived, and cell 6 became the discount instead. */
 		.items-body-table td {
 			padding: 10px;
 			border: 1px solid #cfe0ff;
-			vertical-align: top;
+			text-align: center;
+			/* A number reads against the row's middle, not its first prose
+			   line: in a row whose description wraps, a top-aligned figure
+			   floats beside the opening words. */
+			vertical-align: middle;
+			white-space: nowrap;
 		}
 
 		.items-body-table td:nth-child(2) {
+			text-align: left;
+			vertical-align: top;
 			white-space: normal;
 		}
 
@@ -346,19 +359,6 @@
 			margin-left: 30px;
 		}
 
-		.items-body-table td:nth-child(1),
-		.items-body-table td:nth-child(3),
-		.items-body-table td:nth-child(4),
-		.items-body-table td:nth-child(5),
-		.items-body-table td:nth-child(6) {
-			text-align: center;
-			white-space: nowrap;
-			/* A number reads against the row's middle, not its first prose
-			   line: in a row whose description wraps, a top-aligned figure
-			   floats beside the opening words. The description cell is not in
-			   this list and keeps flowing from the top. */
-			vertical-align: middle;
-		}
 
 		.footer {
 			display: grid;
