@@ -4,6 +4,26 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.8.2] - 2026-10-10
+
+### Fixed
+
+- **The exported PDF now shows the Disc. column, like the preview does.** Since
+  per-line discounts arrived, the quotation on screen and the verification
+  snapshot printed a **Disc.** column whenever any line carried a discount — but
+  the PDF the customer received did not. The price was correct, so no money was
+  wrong; what was missing was the column saying a discount had been applied at
+  all, and the pre-discount figure appeared nowhere on the customer's copy.
+  The native PDF engine has been taught the column, so the preview, the snapshot
+  and the PDF now print the same table. Quotations with no line discounts are
+  unchanged: six columns, exactly as before.
+
+### Changed
+
+- **Updated the front-end build and test tooling** to clear nine security
+  advisories raised against `vitest` and the copies of `vite`, `esbuild` and
+  `tinypool` it bundled. Nothing about the quotation itself changes.
+
 ## [0.8.1] - 2026-10-10
 
 ### Fixed
