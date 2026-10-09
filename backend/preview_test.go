@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -441,5 +442,45 @@ func TestRenderedQuotationHidesPackageInternals(t *testing.T) {
 		if strings.Contains(rendered, forbidden) {
 			t.Errorf("rendered package leaks internal value %q", forbidden)
 		}
+	}
+}
+
+// TestPreviewNoNilFieldsOnTheWire pins the JSON contract the desktop relies on:
+// a Go nil slice marshals to null, and null where the client expects an array
+// took the whole UI down (ReviewPanel read .length on it after Prepare). Every
+// repeated field must therefore arrive as [] rather than null, even when empty.
+func TestPreviewNoNilFieldsOnTheWire(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := q.Prepare(testPreviewInput()); err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+
+	internal, err := q.GetInternalBreakdown()
+	if err != nil {
+		t.Fatalf("GetInternalBreakdown failed: %v", err)
+	}
+	internalJSON, err := json.Marshal(internal)
+	if err != nil {
+		t.Fatalf("marshal internal breakdown: %v", err)
+	}
+	// Plain lines carry no sub-items; that is exactly the empty case.
+	if strings.Contains(string(internalJSON), `"SubItems":null`) {
+		t.Error(`internal breakdown serialized "SubItems":null; the desktop reads .length on it and the whole app blanks`)
+	}
+	if !strings.Contains(string(internalJSON), `"SubItems":[]`) {
+		t.Error(`internal breakdown did not serialize "SubItems":[] for a plain line`)
+	}
+
+	customer, err := q.GetCustomerPreview()
+	if err != nil {
+		t.Fatalf("GetCustomerPreview failed: %v", err)
+	}
+	customerJSON, err := json.Marshal(customer)
+	if err != nil {
+		t.Fatalf("marshal customer preview: %v", err)
+	}
+	if strings.Contains(string(customerJSON), `"Items":null`) {
+		t.Error(`customer preview serialized "Items":null`)
 	}
 }

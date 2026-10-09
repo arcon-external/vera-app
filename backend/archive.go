@@ -171,7 +171,7 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			subs = append(subs, ArchivedQuotationSubItem{
 				SubNo:                    sub.SubNo,
 				Description:              sub.Description,
-				Details:                  append([]string(nil), sub.Details...),
+				Details:                  append(make([]string, 0, len(sub.Details)), sub.Details...),
 				Qty:                      sub.Qty,
 				UoM:                      sub.UoM,
 				OriginalUnitPrice:        sub.OriginalUnitPrice,
@@ -260,7 +260,10 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		DisplayNett:                 detail.DisplayNett,
 		Items:                       items,
 		HTMLSnapshot:                detail.HTMLSnapshot,
-		AvailableRevisions:          detail.AvailableRevisions,
+		// Normalized for the same reason as SubItems above: a nil slice
+		// marshals to null, and the detail page reads .length on it.
+		AvailableRevisions: append(make([]int16, 0, len(detail.AvailableRevisions)),
+			detail.AvailableRevisions...),
 	}, nil
 }
 
