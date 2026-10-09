@@ -756,6 +756,12 @@ function ItemRow({
         <MobileField label="Margin">
           <div className="flex items-center gap-2.5 lg:flex-col lg:items-stretch lg:gap-1.5">
             <div className="flex items-center gap-2">
+              {/* Labelled in place, matching "Disc." below it. The column
+                  header names both controls, but two stacked toggle-and-%
+                  controls with no labels is how a drafter applies a margin to
+                  the discount field. Same width as "Disc." so the two
+                  toggles line up. */}
+              <span className="w-9 shrink-0 text-caption text-ink-400">Margin</span>
               <button
                 type="button"
                 role="switch"
@@ -943,7 +949,7 @@ function ItemRow({
             </div>
           </div>
 
-          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 border border-transparent px-2.5 pb-2 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_162px_56px_32px] gap-2 border border-transparent px-2.5 pb-2 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
             <span>Sub-item</span>
             <span>Qty</span>
             <span>UoM</span>
@@ -1051,7 +1057,7 @@ function SubRow({
 
   return (
     <div className="rounded-md border border-rule/70 bg-white px-2.5 py-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] lg:items-start">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_64px_88px_132px_162px_56px_32px] lg:items-start">
         <MobileField label="Sub-item">
           <input
             type="text"
@@ -1118,6 +1124,9 @@ function SubRow({
 
         <MobileField label="Margin">
           <div className="flex h-9 items-center gap-2">
+            {/* Labelled in place, matching "Disc." below it, and the same
+                width so the two toggles line up. */}
+            <span className="w-9 shrink-0 text-caption text-ink-400">Margin</span>
             <button
               type="button"
               role="switch"
@@ -1168,7 +1177,7 @@ function SubRow({
               the description at the app's own window width. */}
           <MobileField label="Discount">
             <div className="flex items-center gap-2">
-              <span className="shrink-0 text-caption text-ink-400">Disc.</span>
+              <span className="w-9 shrink-0 text-caption text-ink-400">Disc.</span>
               <button
                 type="button"
                 role="switch"
