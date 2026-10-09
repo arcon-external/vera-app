@@ -4,6 +4,42 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.8.0] - 2026-10-10
+
+### Fixed
+
+- **Preparing a quotation could turn the window blank.** On any quotation with a
+  line that had no sub-items — which is most of them — pressing **Prepare** made
+  the whole screen go white, taking the quotation you were working on with it.
+  Reloading was the only way back. Fixed, and the app can no longer go blank like
+  that: if a screen ever fails again it says what went wrong and offers to carry
+  on, instead of hiding everything.
+
+### Added
+
+- The internal panel now shows **PPN collected (not profit)** above the nett
+  figure, the way it already showed PPH22. PPN is money held for the state, so
+  it is shown leaving the total: **Grand total − PPN = Nett after Tax**. On a
+  goods quotation the totals and the nett no longer look unrelated.
+
+### Changed
+
+- **Line items are laid out on two lines.** The description gets the full width
+  of its own line, and quantity, unit, cost, margin, discount and the sell price
+  sit underneath with their labels always visible. The column headings along the
+  top are gone, so there is nothing to read across.
+- Long descriptions and scope lines **wrap instead of running off the edge**, so
+  what you typed is always fully readable.
+- When a line has description lines, they now sit **beside** the controls rather
+  than pushing them down the page.
+- Buttons and switches finally show a **pointer cursor**, so it is obvious what
+  can be clicked.
+- **The quotation-wide Discount has been removed from Quotation Details.**
+  Discounts are entered per line now, and a second one at the top silently
+  re-priced every line at once. Quotations made with one keep it.
+- A quotation without a whole-quotation discount no longer prints an empty
+  **Discount (0%) Rp0** row on the customer document.
+
 ## [0.7.1] - 2026-10-09
 
 ### Fixed
