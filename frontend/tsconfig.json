@@ -22,8 +22,12 @@
 		// The test suite lives beside the code it covers, so it is type-checked
 		// by the same tsc that checks the components. vitest/globals supplies
 		// describe/it/expect; without it `npm run build` fails on the tests.
+		// "node" is needed because notes.test.ts reads the changelog off disk --
+		// vitest 5 no longer pulls those types in on its own, and this list
+		// restricts globals to exactly what it names.
 		"types": [
-			"vitest/globals"
+			"vitest/globals",
+			"node"
 		],
 		"paths": {
 			"@backend/*": [
