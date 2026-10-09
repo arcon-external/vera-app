@@ -580,6 +580,11 @@ function ItemRow({
 
   // The six control cells live in one fragment: the description takes the
   // whole first line and the cells take the full-width grid below it.
+  // Description bullets sit beside the controls when the panel is open:
+  // bullets take a narrow left column and the six cells keep their single
+  // inline row on the right, with narrower columns. Otherwise the cells
+  // take the full-width grid.
+  const showSplit = !hasSubItems && showPanel;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -903,9 +908,32 @@ function ItemRow({
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
-        {controlCells}
-      </div>
+      {showSplit ? (
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[250px_minmax(0,1fr)]">
+          <div className="min-w-0 lg:pt-[18px]">
+            <BulletsEditor
+              lines={item.bullets}
+              addLabel="Add description line"
+              placeholder="Description line"
+              ariaLabel={(position) =>
+                `Description line ${position} for line ${index + 1}`
+              }
+              onAdd={() => onAddBullet(item.key)}
+              onRemove={(bulletIndex) => onRemoveBullet(item.key, bulletIndex)}
+              onChange={(bulletIndex, value) =>
+                onBulletChange(item.key, bulletIndex, value)
+              }
+            />
+          </div>
+          <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[64px_52px_116px_140px_140px_minmax(0,1fr)]">
+            {controlCells}
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
+          {controlCells}
+        </div>
+      )}
 
       {hasSubItems && showPanel ? (
         <div className="mt-3 rounded-lg bg-paper-subtle/70 p-3 ring-1 ring-rule/60">
@@ -1057,15 +1085,6 @@ function SubRow({
             onChange={(event) => onPatch({ description: event.target.value })}
             className={subCellClass}
           />
-          <BulletsEditor
-            lines={sub.bullets}
-            addLabel="Add sub-sub-item"
-            placeholder="Sub-sub-item — what this includes"
-            ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
-            onAdd={onAddBullet}
-            onRemove={onRemoveBullet}
-            onChange={onBulletChange}
-          />
         </div>
         <div className="flex shrink-0 items-start gap-0.5">
           <button
@@ -1103,7 +1122,19 @@ function SubRow({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 items-start gap-2 lg:grid-cols-[56px_80px_120px_162px_162px_minmax(0,1fr)]">
+      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[250px_minmax(0,1fr)]">
+        <div className="min-w-0 lg:pt-[18px]">
+            <BulletsEditor
+              lines={sub.bullets}
+              addLabel="Add sub-sub-item"
+              placeholder="Sub-sub-item — what this includes"
+              ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
+              onAdd={onAddBullet}
+              onRemove={onRemoveBullet}
+              onChange={onBulletChange}
+            />
+        </div>
+        <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[44px_68px_104px_124px_124px_minmax(0,1fr)]">
         <Captioned label="Qty">
           <input
             type="text"
@@ -1248,6 +1279,7 @@ function SubRow({
             Rp{formatIdr(sellUnit)} / unit
           </div>
         </Captioned>
+        </div>
       </div>
     </div>
   );
