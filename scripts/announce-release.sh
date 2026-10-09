@@ -205,7 +205,10 @@ if [ "$DRY_RUN" = true ]; then
   note "dry run: would upload ${#ASSETS[@]} files to gs://${BUCKET}/"
 else
   command -v gcloud >/dev/null || fail "gcloud is required to write the bucket"
-  for asset in "${ASSETS[@]}"; do
+  # The .sha256 sidecars go up too. They were downloaded in step 3 purely to
+  # verify the installers, but the release notes point staff at them as the way
+  # to check a download, and a note that links a 404 is worse than no note.
+  for asset in "${ASSETS[@]}" "${ASSETS[@]/%/.sha256}"; do
     gcloud storage cp "$WORKDIR/$asset" "gs://${BUCKET}/${asset}" \
       --project="$PROJECT" --quiet >/dev/null 2>&1 \
       || fail "could not upload $asset to gs://${BUCKET}/; VERA_APP_LATEST left at $LIVE_LATEST.
@@ -214,10 +217,10 @@ else
    docs/api-deploy.md. It can also be mirrored by hand from a machine
    with bucket write access, then this job re-run with --failed."
   done
-  note "uploaded ${#ASSETS[@]} files"
+  note "uploaded $(( ${#ASSETS[@]} * 2 )) files (installers and checksums)"
 fi
 
-for asset in "${ASSETS[@]}"; do
+for asset in "${ASSETS[@]}" "${ASSETS[@]/%/.sha256}"; do
   remote=$(gcloud storage ls "gs://${BUCKET}/${asset}" --project="$PROJECT" 2>/dev/null | grep -c . || true)
   [ "$remote" -ge 1 ] || fail "gs://${BUCKET}/${asset} is missing after upload"
   code=$(http_code "${BUCKET_BASE}/${asset}")
