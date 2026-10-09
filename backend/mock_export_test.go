@@ -209,11 +209,12 @@ func TestExportMockQuotation(t *testing.T) {
 // configured database -- the cleanup the export harness deliberately does not
 // do itself, because a proof QR that verifies needs its revision to exist.
 //
-// Gated exactly like the export (explicit opt-in plus the DSN), and doubly
-// strict about what it will touch: a candidate must match BOTH the recorded
-// mock numbers AND the {TEST} subject prefix. A real quotation can therefore
-// never be deleted by this test even if it somehow received one of those
-// numbers.
+// Gated exactly like the export (explicit opt-in plus the DSN). The {TEST}
+// subject prefix is the marker: the harness refuses to export anything
+// without it, so the prefix selects exactly the rows this tool exists for.
+// VERA_MOCK_NUMBERS (comma separated quote numbers) narrows the sweep to
+// named mocks; a named quotation whose subject fails the prefix check is
+// refused rather than deleted.
 func TestDeleteMockQuotations(t *testing.T) {
 	if os.Getenv("VERA_MOCK_CLEANUP") != "1" {
 		t.Skip("set VERA_MOCK_CLEANUP=1 (with VERA_POSTGRES_DSN) to delete the {TEST} mock quotations")
@@ -222,12 +223,14 @@ func TestDeleteMockQuotations(t *testing.T) {
 	if dsn == "" {
 		t.Fatal("VERA_POSTGRES_DSN is required")
 	}
-	mockNumbers := map[string]bool{
-		"1502260025": true,
-		"1502260026": true,
-		"1502260027": true,
-		"1502260029": true,
-		"1502260030": true,
+	var only map[string]bool
+	if raw := strings.TrimSpace(os.Getenv("VERA_MOCK_NUMBERS")); raw != "" {
+		only = make(map[string]bool)
+		for _, number := range strings.Split(raw, ",") {
+			if number = strings.TrimSpace(number); number != "" {
+				only[number] = true
+			}
+		}
 	}
 	ctx := context.Background()
 	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: os.Getenv("VERA_POSTGRES_SCHEMA")})
@@ -242,11 +245,14 @@ func TestDeleteMockQuotations(t *testing.T) {
 	}
 	deleted := 0
 	for _, q := range list {
-		if !mockNumbers[q.QuoteNumber] {
+		if only != nil && !only[q.QuoteNumber] {
+			continue
+		}
+		if only == nil && !strings.HasPrefix(q.Subject, "{TEST}") {
 			continue
 		}
 		if !strings.HasPrefix(q.Subject, "{TEST}") {
-			t.Errorf("quotation %s matches the recorded mock numbers but its subject %q is not a {TEST} mock; refusing to touch it", q.QuoteNumber, q.Subject)
+			t.Errorf("quotation %s was named for deletion but its subject %q is not a {TEST} mock; refusing to touch it", q.QuoteNumber, q.Subject)
 			continue
 		}
 		if err := database.DeleteQuotation(ctx, q.ID); err != nil {
@@ -261,9 +267,15 @@ func TestDeleteMockQuotations(t *testing.T) {
 		t.Fatalf("re-list quotations: %v", err)
 	}
 	for _, q := range remaining {
-		if mockNumbers[q.QuoteNumber] {
+		if only != nil {
+			if only[q.QuoteNumber] {
+				t.Errorf("quotation %s still present after deletion", q.QuoteNumber)
+			}
+			continue
+		}
+		if strings.HasPrefix(q.Subject, "{TEST}") {
 			t.Errorf("quotation %s still present after deletion", q.QuoteNumber)
 		}
 	}
-	t.Logf("deleted %d of %d {TEST} quotations", deleted, len(mockNumbers))
+	t.Logf("deleted %d {TEST} quotation(s)", deleted)
 }
