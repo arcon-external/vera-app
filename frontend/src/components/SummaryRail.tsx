@@ -172,7 +172,7 @@ export function SummaryRail({
             <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} />
           ) : null}
           <div className="flex items-baseline justify-between gap-4">
-            <span className="text-small text-internal-700">Nett after PPH22</span>
+            <span className="text-small text-internal-700">Nett after Tax</span>
             <span className="tnum text-body font-semibold text-internal-900">
               Rp{formatIdr(pricing.grandAfterTax)}
             </span>

@@ -578,6 +578,229 @@ function ItemRow({
   // showing an ugly number.
   const marginAmount = sellUnit - unitCost;
 
+  // The description bullets sit beside the controls when the panel is
+  // open: bullets take the left half and the six control cells compress
+  // into a two-column mini-grid on the right. Otherwise the cells take
+  // the full-width grid below. One fragment feeds both layouts.
+  const showSplit = !hasSubItems && showPanel;
+  const controlCells = hasSubItems && rollup ? (
+    <>
+      <Captioned label="UoM">
+        <div className="flex h-10 items-center text-body text-ink-500">Lot</div>
+      </Captioned>
+      <Captioned label="Qty">
+        <div className="flex h-10 items-center text-body tnum text-ink-500">
+          1
+        </div>
+      </Captioned>
+      <Captioned label="Unit cost">
+        <div className="flex h-10 items-center text-body text-ink-300">
+          —
+        </div>
+      </Captioned>
+      <Captioned label="Margin">
+        <div
+          className="flex h-10 items-center"
+          title="Overall margin across the sub-items: total profit over total cost. Updates as the sub-items change."
+        >
+          {rollup.cost > 0 ? (
+            <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
+              {blendedMarginLabel(rollup.margin)}
+            </span>
+          ) : (
+            <span className="text-caption text-ink-400">—</span>
+          )}
+        </div>
+      </Captioned>
+      <Captioned label="Discount">
+        <div className="flex h-10 items-center text-body text-ink-300">
+          —
+        </div>
+      </Captioned>
+      <Captioned label="Sells for">
+        <div
+          className="tnum text-body font-semibold text-ink-950"
+          title="The sum of the sub-items' sell prices, live as they change."
+        >
+          Rp{formatIdr(rollup.sell)}
+        </div>
+      </Captioned>
+    </>
+  ) : (
+    <>
+      <Captioned label="UoM">
+        <UoMSelect
+          value={item.uom}
+          options={uomOptions}
+          ariaLabel={`Unit of measure for line ${index + 1}`}
+          onChange={(value) => onChange(item.key, "uom", value)}
+          dataAttrs={{ "data-grid-cell": "", "data-grid-row": index, "data-grid-col": 1 }}
+        />
+      </Captioned>
+
+      <Captioned label="Qty">
+        <input
+          type="text"
+          data-grid-cell=""
+          data-grid-row={index}
+          data-grid-col={2}
+          inputMode="numeric"
+          aria-label={`Quantity for line ${index + 1}`}
+          placeholder="1"
+          value={item.qty}
+          onChange={(event) =>
+            onChange(item.key, "qty", event.target.value.replace(/\D/g, ""))
+          }
+          className={`${cellClass} text-right tnum`}
+        />
+      </Captioned>
+
+      <Captioned label="Unit cost">
+        <input
+          type="text"
+          data-grid-cell=""
+          data-grid-row={index}
+          data-grid-col={3}
+          inputMode="numeric"
+          aria-label={`Unit price for line ${index + 1}`}
+          placeholder="0"
+          value={formatMoneyInput(item.unitPrice)}
+          onChange={(event) =>
+            onChange(item.key, "unitPrice", event.target.value.replace(/\D/g, ""))
+          }
+          className={`${cellClass} text-right tnum`}
+        />
+      </Captioned>
+
+      <Captioned label="Margin">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={item.marginEnabled}
+            aria-label={`Enable profit margin for line ${index + 1}`}
+            onClick={() =>
+              onChange(item.key, "marginEnabled", !item.marginEnabled)
+            }
+            className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+              item.marginEnabled
+                ? "border-accent-700 bg-accent-600"
+                : "border-rule-strong bg-paper-sunk"
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                item.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+              }`}
+            />
+          </button>
+          <div
+            className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
+              item.marginEnabled
+                ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                : "border-rule bg-paper-subtle"
+            }`}
+          >
+            <input
+              type="text"
+              data-grid-cell=""
+              data-grid-row={index}
+              data-grid-col={4}
+              inputMode="numeric"
+              aria-label={`Profit margin percentage for line ${index + 1}`}
+              value={item.marginPercent}
+              disabled={!item.marginEnabled}
+              onChange={(event) =>
+                onChange(
+                  item.key,
+                  "marginPercent",
+                  Math.min(
+                    parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                    MAX_MARGIN_PERCENT
+                  ).toString()
+                )
+              }
+              className="min-w-0 flex-1 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
+            />
+            <span className="ml-0.5 shrink-0 text-body text-ink-400">%</span>
+          </div>
+        </div>
+    </Captioned>
+
+    <Captioned label="Discount">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={item.discountEnabled}
+          aria-label={`Enable a discount for line ${index + 1}`}
+          onClick={() =>
+            onChange(item.key, "discountEnabled", !item.discountEnabled)
+          }
+          className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+            item.discountEnabled
+              ? "border-accent-700 bg-accent-600"
+              : "border-rule-strong bg-paper-sunk"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+              item.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+            }`}
+          />
+        </button>
+        <div
+          className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
+            item.discountEnabled
+              ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+              : "border-rule bg-paper-subtle"
+          }`}
+        >
+          <input
+            type="text"
+            data-grid-cell=""
+            data-grid-row={index}
+            data-grid-col={5}
+            inputMode="numeric"
+            aria-label={`Discount percentage for line ${index + 1}`}
+            value={item.discountPercent}
+            disabled={!item.discountEnabled}
+            onChange={(event) =>
+              onChange(
+                item.key,
+                "discountPercent",
+                Math.min(
+                  parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                  MAX_DISCOUNT_PERCENT
+                ).toString()
+              )
+            }
+            className="min-w-0 flex-1 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
+          />
+          <span className="ml-0.5 shrink-0 text-body text-ink-400">%</span>
+        </div>
+      </div>
+
+    </Captioned>
+
+    <Captioned label="Sells for">
+      <div className="tnum text-body font-semibold text-ink-950">
+        Rp{formatIdr(sellTotal)}
+      </div>
+      <div className="tnum text-caption text-ink-400">
+        Rp{formatIdr(sellUnit)} / unit
+      </div>
+      {item.discountEnabled ? (
+        <div className="tnum text-caption text-accent-700">
+          was Rp{formatIdr(listUnit)} · −Rp{formatIdr(listUnit * qty - sellTotal)}
+        </div>
+      ) : null}
+    </Captioned>
+    </>
+  );
+
   return (
     <div className="animate-item-in px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50">
       <div className="flex items-start gap-3">
@@ -630,8 +853,12 @@ function ItemRow({
               type="button"
               onClick={() => onEnableSubItems(item.key)}
               title="Each sub-item is priced on its own; the line becomes their sum and always quantity 1."
-              className={miniButtonClass}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-accent-300 bg-accent-50 px-2.5 py-1.5 text-caption font-medium text-accent-800 transition-colors duration-150 hover:border-accent-500 hover:bg-accent-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
             >
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2.5" y="3" width="11" height="10" rx="1.5" />
+                <path d="M8 3v10" />
+              </svg>
               Split into sub-items
             </button>
           )}
@@ -649,21 +876,6 @@ function ItemRow({
           )}
         </div>
 
-        {!hasSubItems && showPanel ? (
-          <BulletsEditor
-            lines={item.bullets}
-            addLabel="Add description line"
-            placeholder="Description line"
-            ariaLabel={(position) =>
-              `Description line ${position} for line ${index + 1}`
-            }
-            onAdd={() => onAddBullet(item.key)}
-            onRemove={(bulletIndex) => onRemoveBullet(item.key, bulletIndex)}
-            onChange={(bulletIndex, value) =>
-              onBulletChange(item.key, bulletIndex, value)
-            }
-          />
-        ) : null}
       </div>
 
         <button
@@ -679,225 +891,32 @@ function ItemRow({
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
-      {hasSubItems && rollup ? (
-        <>
-          <Captioned label="UoM">
-            <div className="flex h-10 items-center text-body text-ink-500">Lot</div>
-          </Captioned>
-          <Captioned label="Qty">
-            <div className="flex h-10 items-center text-body tnum text-ink-500">
-              1
-            </div>
-          </Captioned>
-          <Captioned label="Unit cost">
-            <div className="flex h-10 items-center text-body text-ink-300">
-              —
-            </div>
-          </Captioned>
-          <Captioned label="Margin">
-            <div
-              className="flex h-10 items-center"
-              title="Overall margin across the sub-items: total profit over total cost. Updates as the sub-items change."
-            >
-              {rollup.cost > 0 ? (
-                <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
-                  {blendedMarginLabel(rollup.margin)}
-                </span>
-              ) : (
-                <span className="text-caption text-ink-400">—</span>
-              )}
-            </div>
-          </Captioned>
-          <Captioned label="Discount">
-            <div className="flex h-10 items-center text-body text-ink-300">
-              —
-            </div>
-          </Captioned>
-          <Captioned label="Sells for">
-            <div
-              className="tnum text-body font-semibold text-ink-950"
-              title="The sum of the sub-items' sell prices, live as they change."
-            >
-              Rp{formatIdr(rollup.sell)}
-            </div>
-          </Captioned>
-        </>
+      {showSplit ? (
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="min-w-0">
+            <BulletsEditor
+              lines={item.bullets}
+              addLabel="Add description line"
+              placeholder="Description line"
+              ariaLabel={(position) =>
+                `Description line ${position} for line ${index + 1}`
+              }
+              onAdd={() => onAddBullet(item.key)}
+              onRemove={(bulletIndex) => onRemoveBullet(item.key, bulletIndex)}
+              onChange={(bulletIndex, value) =>
+                onBulletChange(item.key, bulletIndex, value)
+              }
+            />
+          </div>
+          <div className="grid grid-cols-2 items-start gap-3">
+            {controlCells}
+          </div>
+        </div>
       ) : (
-        <>
-          <Captioned label="UoM">
-            <UoMSelect
-              value={item.uom}
-              options={uomOptions}
-              ariaLabel={`Unit of measure for line ${index + 1}`}
-              onChange={(value) => onChange(item.key, "uom", value)}
-              dataAttrs={{ "data-grid-cell": "", "data-grid-row": index, "data-grid-col": 1 }}
-            />
-          </Captioned>
-
-          <Captioned label="Qty">
-            <input
-              type="text"
-              data-grid-cell=""
-              data-grid-row={index}
-              data-grid-col={2}
-              inputMode="numeric"
-              aria-label={`Quantity for line ${index + 1}`}
-              placeholder="1"
-              value={item.qty}
-              onChange={(event) =>
-                onChange(item.key, "qty", event.target.value.replace(/\D/g, ""))
-              }
-              className={`${cellClass} text-right tnum`}
-            />
-          </Captioned>
-
-          <Captioned label="Unit cost">
-          <input
-            type="text"
-            data-grid-cell=""
-            data-grid-row={index}
-            data-grid-col={3}
-            inputMode="numeric"
-            aria-label={`Unit price for line ${index + 1}`}
-            placeholder="0"
-            value={formatMoneyInput(item.unitPrice)}
-            onChange={(event) =>
-              onChange(item.key, "unitPrice", event.target.value.replace(/\D/g, ""))
-            }
-            className={`${cellClass} text-right tnum`}
-          />
-          </Captioned>
-
-          <Captioned label="Margin">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={item.marginEnabled}
-              aria-label={`Enable profit margin for line ${index + 1}`}
-              onClick={() =>
-                onChange(item.key, "marginEnabled", !item.marginEnabled)
-              }
-              className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
-                item.marginEnabled
-                  ? "border-accent-700 bg-accent-600"
-                  : "border-rule-strong bg-paper-sunk"
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
-                  item.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
-                }`}
-              />
-            </button>
-            <div
-              className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
-                item.marginEnabled
-                  ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
-                  : "border-rule bg-paper-subtle"
-              }`}
-            >
-              <input
-                type="text"
-                data-grid-cell=""
-                data-grid-row={index}
-                data-grid-col={4}
-                inputMode="numeric"
-                aria-label={`Profit margin percentage for line ${index + 1}`}
-                value={item.marginPercent}
-                disabled={!item.marginEnabled}
-                onChange={(event) =>
-                  onChange(
-                    item.key,
-                    "marginPercent",
-                    Math.min(
-                      parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                      MAX_MARGIN_PERCENT
-                    ).toString()
-                  )
-                }
-                className="min-w-0 flex-1 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
-              />
-              <span className="ml-0.5 shrink-0 text-body text-ink-400">%</span>
-            </div>
-          </div>
-        </Captioned>
-
-        <Captioned label="Discount">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={item.discountEnabled}
-              aria-label={`Enable a discount for line ${index + 1}`}
-              onClick={() =>
-                onChange(item.key, "discountEnabled", !item.discountEnabled)
-              }
-              className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
-                item.discountEnabled
-                  ? "border-accent-700 bg-accent-600"
-                  : "border-rule-strong bg-paper-sunk"
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
-                  item.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
-                }`}
-              />
-            </button>
-            <div
-              className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
-                item.discountEnabled
-                  ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
-                  : "border-rule bg-paper-subtle"
-              }`}
-            >
-              <input
-                type="text"
-                data-grid-cell=""
-                data-grid-row={index}
-                data-grid-col={5}
-                inputMode="numeric"
-                aria-label={`Discount percentage for line ${index + 1}`}
-                value={item.discountPercent}
-                disabled={!item.discountEnabled}
-                onChange={(event) =>
-                  onChange(
-                    item.key,
-                    "discountPercent",
-                    Math.min(
-                      parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                      MAX_DISCOUNT_PERCENT
-                    ).toString()
-                  )
-                }
-                className="min-w-0 flex-1 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
-              />
-              <span className="ml-0.5 shrink-0 text-body text-ink-400">%</span>
-            </div>
-          </div>
-
-        </Captioned>
-
-        <Captioned label="Sells for">
-          <div className="tnum text-body font-semibold text-ink-950">
-            Rp{formatIdr(sellTotal)}
-          </div>
-          <div className="tnum text-caption text-ink-400">
-            Rp{formatIdr(sellUnit)} / unit
-          </div>
-          {item.discountEnabled ? (
-            <div className="tnum text-caption text-accent-700">
-              was Rp{formatIdr(listUnit)} · −Rp{formatIdr(listUnit * qty - sellTotal)}
-            </div>
-          ) : null}
-        </Captioned>
-        </>
+        <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
+          {controlCells}
+        </div>
       )}
-      </div>
 
       {hasSubItems && showPanel ? (
         <div className="mt-3 rounded-lg bg-paper-subtle/70 p-3 ring-1 ring-rule/60">
@@ -1049,15 +1068,6 @@ function SubRow({
             onChange={(event) => onPatch({ description: event.target.value })}
             className={subCellClass}
           />
-          <BulletsEditor
-            lines={sub.bullets}
-            addLabel="Add sub-sub-item"
-            placeholder="Sub-sub-item — what this includes"
-            ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
-            onAdd={onAddBullet}
-            onRemove={onRemoveBullet}
-            onChange={onBulletChange}
-          />
         </div>
         <div className="flex shrink-0 items-start gap-0.5">
           <button
@@ -1095,151 +1105,164 @@ function SubRow({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-2 items-start gap-2 lg:grid-cols-[56px_80px_120px_162px_162px_minmax(0,1fr)]">
-        <Captioned label="Qty">
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label={`Quantity for ${label}`}
-            placeholder="1"
-            value={sub.qty}
-            onChange={(event) =>
-              onPatch({ qty: event.target.value.replace(/\D/g, "") })
-            }
-            className={`${subCellClass} text-right tnum`}
-          />
-        </Captioned>
+      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="min-w-0">
+            <BulletsEditor
+              lines={sub.bullets}
+              addLabel="Add sub-sub-item"
+              placeholder="Sub-sub-item — what this includes"
+              ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
+              onAdd={onAddBullet}
+              onRemove={onRemoveBullet}
+              onChange={onBulletChange}
+            />
+        </div>
+        <div className="grid grid-cols-2 items-start gap-2">
+          <Captioned label="Qty">
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label={`Quantity for ${label}`}
+              placeholder="1"
+              value={sub.qty}
+              onChange={(event) =>
+                onPatch({ qty: event.target.value.replace(/\D/g, "") })
+              }
+              className={`${subCellClass} text-right tnum`}
+            />
+          </Captioned>
 
-        <Captioned label="UoM">
-          <UoMSelect
-            dense
-            value={sub.uom}
-            options={uomOptions}
-            ariaLabel={`Unit of measure for ${label}`}
-            onChange={(value) => onPatch({ uom: value })}
-          />
-        </Captioned>
+          <Captioned label="UoM">
+            <UoMSelect
+              dense
+              value={sub.uom}
+              options={uomOptions}
+              ariaLabel={`Unit of measure for ${label}`}
+              onChange={(value) => onPatch({ uom: value })}
+            />
+          </Captioned>
 
-        <Captioned label="Unit cost">
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label={`Unit cost for ${label}`}
-            placeholder="0"
-            value={formatMoneyInput(sub.unitCost)}
-            onChange={(event) =>
-              onPatch({ unitCost: event.target.value.replace(/\D/g, "") })
-            }
-            className={`${subCellClass} text-right tnum`}
-          />
-        </Captioned>
+          <Captioned label="Unit cost">
+            <input
+              type="text"
+              inputMode="numeric"
+              aria-label={`Unit cost for ${label}`}
+              placeholder="0"
+              value={formatMoneyInput(sub.unitCost)}
+              onChange={(event) =>
+                onPatch({ unitCost: event.target.value.replace(/\D/g, "") })
+              }
+              className={`${subCellClass} text-right tnum`}
+            />
+          </Captioned>
 
-        <Captioned label="Margin">
-          <div className="flex h-9 items-center gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={sub.marginEnabled}
-              aria-label={`Enable profit margin for ${label}`}
-              onClick={() => onPatch({ marginEnabled: !sub.marginEnabled })}
-              className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
-                sub.marginEnabled
-                  ? "border-accent-700 bg-accent-600"
-                  : "border-rule-strong bg-paper-sunk"
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
-                  sub.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+          <Captioned label="Margin">
+            <div className="flex h-9 items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sub.marginEnabled}
+                aria-label={`Enable profit margin for ${label}`}
+                onClick={() => onPatch({ marginEnabled: !sub.marginEnabled })}
+                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                  sub.marginEnabled
+                    ? "border-accent-700 bg-accent-600"
+                    : "border-rule-strong bg-paper-sunk"
                 }`}
-              />
-            </button>
-            <div
-              className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
-                sub.marginEnabled
-                  ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
-                  : "border-rule bg-paper-subtle"
-              }`}
-            >
-              <input
-                type="text"
-                inputMode="numeric"
-                aria-label={`Profit margin percentage for ${label}`}
-                value={sub.marginPercent}
-                disabled={!sub.marginEnabled}
-                onChange={(event) =>
-                  onPatch({
-                    marginPercent: Math.min(
-                      parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                      MAX_MARGIN_PERCENT
-                    ).toString(),
-                  })
-                }
-                className="min-w-0 flex-1 bg-transparent text-right text-caption tnum text-ink-900 outline-hidden disabled:text-ink-350"
-              />
-              <span className="ml-0.5 shrink-0 text-caption text-ink-400">%</span>
-            </div>
-          </div>
-        </Captioned>
-
-        <Captioned label="Discount">
-          <div className="flex h-9 items-center gap-2">
-            <button
-              type="button"
-              role="switch"
-              aria-checked={sub.discountEnabled}
-              aria-label={`Enable a discount for ${label}`}
-              onClick={() => onPatch({ discountEnabled: !sub.discountEnabled })}
-              className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
-                sub.discountEnabled
-                  ? "border-accent-700 bg-accent-600"
-                  : "border-rule-strong bg-paper-sunk"
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
-                  sub.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                    sub.marginEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+              <div
+                className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
+                  sub.marginEnabled
+                    ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                    : "border-rule bg-paper-subtle"
                 }`}
-              />
-            </button>
-            <div
-              className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
-                sub.discountEnabled
-                  ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
-                  : "border-rule bg-paper-subtle"
-              }`}
-            >
-              <input
-                type="text"
-                inputMode="numeric"
-                aria-label={`Discount percentage for ${label}`}
-                value={sub.discountPercent}
-                disabled={!sub.discountEnabled}
-                onChange={(event) =>
-                  onPatch({
-                    discountPercent: Math.min(
-                      parseIntOrZero(event.target.value.replace(/\D/g, "")),
-                      MAX_DISCOUNT_PERCENT
-                    ).toString(),
-                  })
-                }
-                className="min-w-0 flex-1 bg-transparent text-right text-caption tnum text-ink-900 outline-hidden disabled:text-ink-350"
-              />
-              <span className="ml-0.5 shrink-0 text-caption text-ink-400">%</span>
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={`Profit margin percentage for ${label}`}
+                  value={sub.marginPercent}
+                  disabled={!sub.marginEnabled}
+                  onChange={(event) =>
+                    onPatch({
+                      marginPercent: Math.min(
+                        parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                        MAX_MARGIN_PERCENT
+                      ).toString(),
+                    })
+                  }
+                  className="min-w-0 flex-1 bg-transparent text-right text-caption tnum text-ink-900 outline-hidden disabled:text-ink-350"
+                />
+                <span className="ml-0.5 shrink-0 text-caption text-ink-400">%</span>
+              </div>
             </div>
-          </div>
-        </Captioned>
+          </Captioned>
 
-        <Captioned label="Sells for">
-          <div className="tnum pt-0.5 text-caption font-semibold text-ink-950">
-            Rp{formatIdr(sellTotal)}
-          </div>
-          <div className="tnum text-caption text-ink-400">
-            Rp{formatIdr(sellUnit)} / unit
-          </div>
-        </Captioned>
+          <Captioned label="Discount">
+            <div className="flex h-9 items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sub.discountEnabled}
+                aria-label={`Enable a discount for ${label}`}
+                onClick={() => onPatch({ discountEnabled: !sub.discountEnabled })}
+                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                  sub.discountEnabled
+                    ? "border-accent-700 bg-accent-600"
+                    : "border-rule-strong bg-paper-sunk"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                    sub.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+              <div
+                className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
+                  sub.discountEnabled
+                    ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                    : "border-rule bg-paper-subtle"
+                }`}
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={`Discount percentage for ${label}`}
+                  value={sub.discountPercent}
+                  disabled={!sub.discountEnabled}
+                  onChange={(event) =>
+                    onPatch({
+                      discountPercent: Math.min(
+                        parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                        MAX_DISCOUNT_PERCENT
+                      ).toString(),
+                    })
+                  }
+                  className="min-w-0 flex-1 bg-transparent text-right text-caption tnum text-ink-900 outline-hidden disabled:text-ink-350"
+                />
+                <span className="ml-0.5 shrink-0 text-caption text-ink-400">%</span>
+              </div>
+            </div>
+          </Captioned>
+
+          <Captioned label="Sells for">
+            <div className="tnum pt-0.5 text-caption font-semibold text-ink-950">
+              Rp{formatIdr(sellTotal)}
+            </div>
+            <div className="tnum text-caption text-ink-400">
+              Rp{formatIdr(sellUnit)} / unit
+            </div>
+          </Captioned>
+        </div>
       </div>
     </div>
   );
