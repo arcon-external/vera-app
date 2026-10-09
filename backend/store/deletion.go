@@ -216,6 +216,16 @@ func (s *Store) DecideDeletion(ctx context.Context, requestID int64, deciderID i
 			request.UserID); err != nil {
 			return DeletionRequest{}, fmt.Errorf("revoke sessions: %w", err)
 		}
+		// Drafts are unexported work that only ever existed for this account.
+		// Deactivation is a soft delete, so the ON DELETE CASCADE from 019
+		// never fires here and the rows have to go explicitly -- inside the
+		// same transaction, so an approved deletion can never leave a
+		// recoverable copy of someone's unsaved quotations behind.
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			`DELETE FROM %s.quotation_drafts WHERE user_id = $1`, s.configSchema()),
+			request.UserID); err != nil {
+			return DeletionRequest{}, fmt.Errorf("delete drafts: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return DeletionRequest{}, fmt.Errorf("commit deletion decision: %w", err)

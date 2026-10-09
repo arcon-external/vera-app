@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -87,11 +89,18 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	rawInput := envelope
 	var quoteNumber string
 	var revision int16
+	var sourceDraftID int64
 	if nested, ok := envelope["input"].(map[string]any); ok {
 		rawInput = nested
 		quoteNumber, _ = envelope["quoteNumber"].(string)
 		if value, ok := envelope["revision"].(float64); ok {
 			revision = int16(value)
+		}
+		// The draft this export came from, if any. It is consumed only after
+		// the revision is safely stored, so a failed export always leaves the
+		// draft intact and nothing is lost to a part-finished request.
+		if value, ok := envelope["draftId"].(float64); ok {
+			sourceDraftID = int64(value)
 		}
 	}
 	input, err := decodeInput(rawInput)
@@ -165,6 +174,17 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	record, err := s.database.SaveRevision(context.Request().Context(), draft)
 	if err != nil {
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
+	}
+	// The draft has become a quotation, so it has nothing left to be. Scoped
+	// to the exporting user: a draft id that is not theirs is simply not found,
+	// and the export stands either way. Deliberately best-effort -- the
+	// quotation is already safely stored, and failing the whole request
+	// because a stale draft would not delete would be worse than leaving one.
+	if sourceDraftID > 0 {
+		if err := s.database.DeleteDraft(context.Request().Context(), sourceDraftID, requestUser(context).ID); err != nil &&
+			!errors.Is(err, store.ErrDraftNotFound) {
+			log.Printf("consume draft %d after export: %v", sourceDraftID, err)
+		}
 	}
 	return context.JSON(http.StatusCreated, apicontract.ExportResponse{
 		ID:           record.ID,

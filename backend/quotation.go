@@ -223,6 +223,12 @@ type Quotation struct {
 	Data               QuotationData
 	archiveRevision    uint16
 	prepared           bool
+	// activeDraftID is the draft the editor currently holds, 0 when the
+	// quotation is not a resumed draft. It is sent with the export so the
+	// server can consume the draft as part of the same request: a draft that
+	// has become a quotation has nothing left to be, and doing it there means
+	// a crash cannot leave a stale copy behind.
+	activeDraftID int64
 }
 
 // CompanyIdentity is the quotation-relevant slice of the company profile:
@@ -371,6 +377,22 @@ func (q *Quotation) SetRevisionContext(quoteNumber string, revision uint16) erro
 	q.Data.QuoteNumber = q.archiveQuoteNumber
 	q.Data.RevisionID = revision
 	return nil
+}
+
+// SetDraftContext records the draft the editor is working from, so a
+// successful export consumes it on the server. Zero clears it.
+func (q *Quotation) SetDraftContext(draftID int64) error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
+	q.activeDraftID = draftID
+	return nil
+}
+
+// ClearDraftContext forgets the active draft without touching the server,
+// for when the user navigates away or starts a new quotation.
+func (q *Quotation) ClearDraftContext() {
+	q.activeDraftID = 0
 }
 
 func (q *Quotation) ClearRevisionContext() {
@@ -951,10 +973,19 @@ func (q *Quotation) Export(defaultDir string) error {
 		payload["quoteNumber"] = q.archiveQuoteNumber
 		payload["revision"] = q.archiveRevision
 	}
+	// A resumed draft is consumed by the export itself. The server deletes it
+	// only after the revision is stored, so a failed export always leaves the
+	// draft intact.
+	if q.activeDraftID > 0 {
+		payload["draftId"] = q.activeDraftID
+	}
 	var exported apicontract.ExportResponse
 	if err := client.Post("/v1/quotations/export", payload, &exported); err != nil {
 		return err
 	}
+	// The draft is gone server-side now; forget it locally so a later export
+	// in the same session cannot try to consume it a second time.
+	q.activeDraftID = 0
 	if exported.QuoteNumber == "" {
 		return fmt.Errorf("export quotation: empty quote number from server")
 	}

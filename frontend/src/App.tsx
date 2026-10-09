@@ -6,12 +6,20 @@ import {
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
   ListCustomers,
+  ListDrafts,
+  GetDraft,
+  SaveDraft,
+  SetDraftContext,
+  ClearDraftContext,
   SetRevisionContext,
   ClearRevisionContext,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { AppShell } from "./components/AppShell";
 import { ArchivePage } from "./components/ArchivePage";
+import { DraftsPage } from "./components/DraftsPage";
+import { countDraftItems, parseDraftPayload, relativeSavedAt } from "./drafts";
+import type { DraftSummaryDTO } from "./drafts";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
@@ -273,7 +281,9 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
-  const [page, setPage] = useState<"create" | "archive" | "detail" | "users" | "clients" | "settings">("create");
+  const [page, setPage] = useState<
+    "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
+  >("create");
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -295,6 +305,13 @@ function App() {
   const [customerPreview, setCustomerPreview] = useState<CustomerPreview | null>(null);
   const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
   const [quotationHTML, setQuotationHTML] = useState<string | null>(null);
+  // The draft the editor is currently working from, 0 when this is not a
+  // resumed draft. Saved drafts are overwritten rather than duplicated, and
+  // the id travels with the export so the server can consume it.
+  const [activeDraftId, setActiveDraftId] = useState(0);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftCount, setDraftCount] = useState(0);
   const { pushToast } = useToast();
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -351,6 +368,11 @@ function App() {
     setDetails(DEFAULT_DETAILS);
     setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
+    // The editor is no longer a resumed draft, so the next export must not try
+    // to consume a draft that has nothing to do with this quotation.
+    setActiveDraftId(0);
+    setDraftSavedAt(null);
+    void ClearDraftContext().catch(() => undefined);
     clearPreview();
     setStatus({ type: "idle", message: "" });
   }, [clearPreview, customerOptions]);
@@ -417,6 +439,123 @@ function App() {
     setPage("create");
   }, [resetForm]);
 
+  // A draft count for the nav badge. Best-effort: a failure here must never
+  // block the page the user asked for.
+  const refreshDraftCount = useCallback(async () => {
+    try {
+      const rows = (await ListDrafts()) as DraftSummaryDTO[];
+      setDraftCount(rows?.length ?? 0);
+    } catch {
+      /* the badge is decoration; leave the last known count alone */
+    }
+  }, []);
+
+  // Once on sign-in, to give the badge a number. Re-run only when the Drafts
+  // tab is opened or the editor hands a draft over: refreshing on every page
+  // change would be a round trip the user cannot see the point of.
+  useEffect(() => {
+    if (!signedIn) {
+      setDraftCount(0);
+      return;
+    }
+    void refreshDraftCount();
+  }, [signedIn, refreshDraftCount]);
+
+  useEffect(() => {
+    if (signedIn && page === "drafts") void refreshDraftCount();
+  }, [signedIn, page, refreshDraftCount]);
+
+  const handleSaveDraft = useCallback(async () => {
+    setSavingDraft(true);
+    try {
+      const customerName =
+        customerOptions.find((option) => option.value === customerId)?.label ?? "";
+      const id = await SaveDraft(
+        new backend.SavedDraft({
+          Label: details.subject.trim(),
+          Subject: details.subject.trim(),
+          CustomerName: customerName,
+          Payload: JSON.stringify({ items, details, customerId }),
+          ID: activeDraftId,
+          ItemCount: countDraftItems(items),
+          CustomerID: customerId,
+        })
+      );
+      setActiveDraftId(id);
+      setDraftSavedAt(new Date().toISOString());
+      void SetDraftContext(id).catch(() => undefined);
+      setDraftCount((count) => (activeDraftId === 0 ? count + 1 : count));
+      pushToast(
+        "success",
+        activeDraftId === 0
+          ? "Draft saved. Find it under Drafts whenever you need it."
+          : "Draft updated."
+      );
+    } catch (error: unknown) {
+      pushToast(
+        "error",
+        getErrorMessage(error, "We couldn't save this draft. Try again.")
+      );
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [items, details, customerId, customerOptions, activeDraftId, pushToast]);
+
+  const handleOpenDraft = useCallback(
+    async (id: number) => {
+      try {
+        const draft = (await GetDraft(id)) as backend.DraftDTO;
+        const restored = parseDraftPayload(draft.Payload);
+        if (!restored) {
+          pushToast(
+            "error",
+            "This draft couldn't be read, so nothing was overwritten. Delete it and start again."
+          );
+          return;
+        }
+        void ClearRevisionContext().catch(() => undefined);
+        // Reissue the row keys from the restored list so the editor's React
+        // identity never collides with keys left over from another quotation.
+        // Sub-item ids only have to be unique within their own line, but the
+        // counter that hands out new ones is global -- so it has to start past
+        // every id already in use, not past the number of lines.
+        nextKey.current = restored.items.length;
+        nextSubId.current =
+          restored.items.reduce(
+            (highest, item) =>
+              Math.max(
+                highest,
+                ...item.subItems.map((sub) => sub.id)
+              ),
+            0
+          ) + 1;
+        setItems(restored.items);
+        setDetails(restored.details);
+        setCustomerId(
+          restored.customerId ||
+            draft.CustomerID ||
+            pickCustomerId(customerOptions, customerId)
+        );
+        setEditingQuote(null);
+        setActiveDraftId(draft.ID ?? id);
+        await SetDraftContext(id).catch(() => undefined);
+        setDraftSavedAt(draft.UpdatedAt ?? null);
+        clearPreview();
+        setStatus({ type: "idle", message: "" });
+        setPage("create");
+        pushToast("info", "Draft opened. Save again to update it.");
+      } catch (error: unknown) {
+        // Logged as well as shown: a swallowed reason here once hid a shape
+        // mismatch between the binding and the parser for a whole debugging
+        // session. The editor is untouched either way -- failing before
+        // setItems is the point.
+        console.error("open draft failed", error);
+        pushToast("error", "We couldn't open that draft. Try again.");
+      }
+    },
+    [clearPreview, customerId, customerOptions, pushToast]
+  );
+
   useEffect(
     () => () => {
       if (newConfirmTimer.current) clearTimeout(newConfirmTimer.current);
@@ -482,6 +621,11 @@ function App() {
           number: quotation.QuoteNumber,
           revision: quotation.RevisionNumber + 1,
         });
+        // A revision is never a draft: the saved draft that may exist for this
+        // editor is unrelated work and must not be consumed by the export.
+        setActiveDraftId(0);
+        setDraftSavedAt(null);
+        void ClearDraftContext().catch(() => undefined);
         clearPreview();
         setStatus({ type: "idle", message: "" });
         setPage("create");
@@ -966,10 +1110,17 @@ function App() {
     setStatus({ type: "loading", message: "Rendering PDF…" });
     try {
       // Device-local export default from Settings; blank means OS default.
+      const fromDraft = activeDraftId > 0;
       await Export(window.localStorage.getItem(EXPORT_DIR_KEY) ?? "");
       clearPreview();
       void ClearRevisionContext().catch(() => undefined);
+      void ClearDraftContext().catch(() => undefined);
       setEditingQuote(null);
+      // The server consumed the draft with the export. Locally it is gone too,
+      // and the badge comes down with it.
+      setActiveDraftId(0);
+      setDraftSavedAt(null);
+      if (fromDraft) setDraftCount((count) => Math.max(0, count - 1));
       setStatus({ type: "idle", message: "" });
       pushToast("success", "Quotation exported.");
     } catch (error: unknown) {
@@ -986,7 +1137,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [clearPreview, pushToast]);
+  }, [activeDraftId, clearPreview, pushToast]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
@@ -1112,7 +1263,9 @@ function App() {
       <AppShell
       page={page}
       onOpenEditor={() => setPage("create")}
+      onOpenDrafts={() => setPage("drafts")}
       onOpenArchive={() => setPage("archive")}
+      draftCount={draftCount}
       onOpenUsers={() => setPage("users")}
       onOpenClients={() => setPage("clients")}
       onOpenSettings={() => setPage("settings")}
@@ -1155,6 +1308,13 @@ function App() {
                     {String(editingQuote.revision).padStart(2, "0")}
                   </span>
                 </span>
+              ) : draftSavedAt ? (
+                <span className="truncate text-caption text-ink-500">
+                  Draft saved{" "}
+                  <span className="text-ink-400">
+                    {relativeSavedAt(draftSavedAt)} — save again to update it
+                  </span>
+                </span>
               ) : (
                 <span className="text-caption text-ink-500">
                   {ready
@@ -1170,6 +1330,24 @@ function App() {
                 disabled={loading}
               >
                 New
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleSaveDraft}
+                disabled={loading || savingDraft || !dirty}
+                title={
+                  dirty
+                    ? "Save this quotation to come back to it later"
+                    : "Nothing to save yet"
+                }
+                leading={
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M2.667 2.667h8.666L13.333 4.667V12a1.333 1.333 0 01-1.333 1.333H4A1.333 1.333 0 012.667 12V2.667z" />
+                    <path d="M5.333 2.667v3.333h5.333V2.667M5.333 13.333V9.333h5.333v4" />
+                  </svg>
+                }
+              >
+                {activeDraftId > 0 ? "Update draft" : "Save draft"}
               </Button>
               <Button
                 variant="secondary"
@@ -1282,6 +1460,13 @@ function App() {
             />
           ) : null}
         </div>
+      ) : null}
+
+      {page === "drafts" ? (
+        <DraftsPage
+          onOpenDraft={handleOpenDraft}
+          onNewQuotation={handleNewQuotation}
+        />
       ) : null}
 
       {page === "archive" ? (

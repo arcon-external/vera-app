@@ -506,6 +506,56 @@ export namespace backend {
 	        this.UserID = source["UserID"];
 	    }
 	}
+	export class DraftDTO {
+	    Payload: string;
+	    Subject: string;
+	    CustomerName: string;
+	    UpdatedAt: string;
+	    Label: string;
+	    ID: number;
+	    ItemCount: number;
+	    CustomerID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DraftDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Payload = source["Payload"];
+	        this.Subject = source["Subject"];
+	        this.CustomerName = source["CustomerName"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.Label = source["Label"];
+	        this.ID = source["ID"];
+	        this.ItemCount = source["ItemCount"];
+	        this.CustomerID = source["CustomerID"];
+	    }
+	}
+	export class DraftSummaryDTO {
+	    DisplayName: string;
+	    Label: string;
+	    Subject: string;
+	    CustomerName: string;
+	    UpdatedAt: string;
+	    ID: number;
+	    ItemCount: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DraftSummaryDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.DisplayName = source["DisplayName"];
+	        this.Label = source["Label"];
+	        this.Subject = source["Subject"];
+	        this.CustomerName = source["CustomerName"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.ID = source["ID"];
+	        this.ItemCount = source["ItemCount"];
+	    }
+	}
 	export class EmailChangeRequest {
 	    ProposedEmail: string;
 	    Status: string;
@@ -1017,6 +1067,30 @@ export namespace backend {
 	        this.SafetySnapshot = source["SafetySnapshot"];
 	        this.Quotations = source["Quotations"];
 	        this.Revisions = source["Revisions"];
+	    }
+	}
+	export class SavedDraft {
+	    Payload: string;
+	    Subject: string;
+	    CustomerName: string;
+	    Label: string;
+	    ID: number;
+	    ItemCount: number;
+	    CustomerID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedDraft(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Payload = source["Payload"];
+	        this.Subject = source["Subject"];
+	        this.CustomerName = source["CustomerName"];
+	        this.Label = source["Label"];
+	        this.ID = source["ID"];
+	        this.ItemCount = source["ItemCount"];
+	        this.CustomerID = source["CustomerID"];
 	    }
 	}
 	export class UpdateInfo {

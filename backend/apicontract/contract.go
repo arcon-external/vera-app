@@ -1,6 +1,9 @@
 package apicontract
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // This file defines the shared HTTP contract between veraserver and the
 // desktop client. Field names are stable API; the desktop code-generates or
@@ -37,6 +40,34 @@ type ExportResponse struct {
 type PeekNumberResponse struct {
 	Number string `json:"number"`
 	Warn   bool   `json:"warn"`
+}
+
+// DraftSummaryRow is one row of the drafts list. The payload is absent by
+// design: the list renders four columns and should not pull every saved
+// quotation's editor state over the wire to do it.
+type DraftSummaryRow struct {
+	Label        string `json:"label"`
+	Subject      string `json:"subject"`
+	CustomerName string `json:"customerName"`
+	UpdatedAt    string `json:"updatedAt"`
+	DisplayName  string `json:"displayName"`
+	ID           int64  `json:"id"`
+	ItemCount    int    `json:"itemCount"`
+}
+
+// DraftRow is one draft with its editor state. Payload stays raw JSON rather
+// than being typed here: a draft is unvalidated scratchpad state, so the
+// server has no business knowing the editor's shape.
+type DraftRow struct {
+	Label        string          `json:"label"`
+	Subject      string          `json:"subject"`
+	CustomerName string          `json:"customerName"`
+	UpdatedAt    string          `json:"updatedAt"`
+	Payload      json.RawMessage `json:"payload"`
+	CreatedAt    string          `json:"createdAt"`
+	ID           int64           `json:"id"`
+	ItemCount    int             `json:"itemCount"`
+	CustomerID   *int64          `json:"customerId"`
 }
 
 // QuotationSummaryRow is one archive row: always the latest revision.
