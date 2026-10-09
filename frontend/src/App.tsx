@@ -112,6 +112,8 @@ const DEFAULT_ITEM: EditorItem = {
   unitPrice: "",
   marginEnabled: false,
   marginPercent: "0",
+  discountEnabled: false,
+  discountPercent: "0",
   subItems: [],
   showSubPrices: false,
 };
@@ -587,6 +589,8 @@ function App() {
               unitCost: String(sub.OriginalUnitPrice),
               marginEnabled: sub.MarginEnabled,
               marginPercent: String(sub.MarginPercent),
+              discountEnabled: sub.DiscountEnabled ?? false,
+              discountPercent: String(sub.DiscountPercent ?? 0),
               bullets: [...(sub.Details ?? [])],
             }));
             return {
@@ -598,6 +602,10 @@ function App() {
               unitPrice: String(item.UnitPrice),
               marginEnabled: item.MarginEnabled,
               marginPercent: String(item.MarginPercent),
+              // An old revision has no per-row discount, which reads as "this
+              // row carries none" -- so there is no legacy editor mode.
+              discountEnabled: item.DiscountEnabled ?? false,
+              discountPercent: String(item.DiscountPercent ?? 0),
               subItems: subs,
               showSubPrices: item.ShowSubPrices ?? false,
             };
@@ -982,6 +990,8 @@ function App() {
             UnitPrice: Number.parseInt(item.unitPrice, 10) || 0,
             MarginEnabled: item.marginEnabled,
             MarginPercent: Number.parseInt(item.marginPercent, 10) || 0,
+            DiscountEnabled: item.discountEnabled,
+            DiscountPercent: Number.parseInt(item.discountPercent, 10) || 0,
             SubItems: [],
             ShowSubPrices: false,
           });
@@ -996,6 +1006,8 @@ function App() {
           UnitPrice: 0,
           MarginEnabled: false,
           MarginPercent: 0,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
           ShowSubPrices: item.showSubPrices,
           SubItems: item.subItems.map(
             (sub) =>
@@ -1006,6 +1018,8 @@ function App() {
                 UnitCost: Number.parseInt(sub.unitCost, 10) || 0,
                 MarginEnabled: sub.marginEnabled,
                 MarginPercent: Number.parseInt(sub.marginPercent, 10) || 0,
+                DiscountEnabled: sub.discountEnabled,
+                DiscountPercent: Number.parseInt(sub.discountPercent, 10) || 0,
                 SubSubItems: sub.bullets
                   .filter((line) => line.trim() !== "")
                   .map(

@@ -56,6 +56,10 @@ function restoreSubItem(raw: unknown, id: number): EditorSubItem {
     unitCost: asString(sub.unitCost),
     marginEnabled: asBoolean(sub.marginEnabled),
     marginPercent: asString(sub.marginPercent, "0"),
+    // A draft written before per-row discounts existed simply has none, which
+    // is what an off toggle shows.
+    discountEnabled: asBoolean(sub.discountEnabled),
+    discountPercent: asString(sub.discountPercent, "0"),
     bullets: asStringArray(sub.bullets),
   };
 }
@@ -72,6 +76,8 @@ function restoreItem(raw: unknown, key: number): EditorItem {
     unitPrice: asString(item.unitPrice),
     marginEnabled: asBoolean(item.marginEnabled),
     marginPercent: asString(item.marginPercent, "0"),
+    discountEnabled: asBoolean(item.discountEnabled),
+    discountPercent: asString(item.discountPercent, "0"),
     subItems: subs.map((sub, index) => restoreSubItem(sub, index + 1)),
     showSubPrices: asBoolean(item.showSubPrices),
   };

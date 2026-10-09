@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { GetQuotationRevision } from "@backend/backend/Quotation";
 import type { ArchivedQuotation } from "../archive";
 
+// signedIdr renders a profit figure that can be negative. A discount below
+// cost is a loss, and printing it as a positive number would be a lie the
+// reader has to notice for themselves.
+function signedIdr(value: number): string {
+  const text = formatIdr(Math.abs(value));
+  return `${value < 0 ? "−" : "+"}Rp${text}`;
+}
+
 function taxDetailLabel(quotation: ArchivedQuotation): string {
   if (quotation.ServiceCategory === "Construction") {
     return "Construction 1,75% PPh22";
@@ -11,6 +19,7 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
   }
   return quotation.TaxCategory || quotation.TaxZone;
 }
+import { formatIdr } from "../format";
 import { useToast } from "../toast";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
@@ -212,9 +221,15 @@ export function QuotationDetailPage({
                     <div className="tnum text-body font-medium text-ink-900">
                       Rp{item.DisplayMarginalizedUnit}
                     </div>
+                    {item.DiscountEnabled ? (
+                      <div className="tnum mt-0.5 text-caption text-accent-700">
+                        −{item.DiscountPercent}% off · was Rp
+                        {formatIdr(item.ListUnitPrice)}
+                      </div>
+                    ) : null}
                     <div className="tnum mt-0.5 text-caption text-internal-700">
                       {item.MarginEnabled
-                        ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
+                        ? `+${item.MarginPercent}% · ${signedIdr(item.MarginAmount)}`
                         : "No margin"}
                     </div>
                   </td>

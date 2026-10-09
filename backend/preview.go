@@ -95,6 +95,9 @@ type InternalPreviewItem struct {
 	MarginEnabled            bool
 	DiscountEnabled          bool
 	MarginBlendedApprox      bool
+	// ListUnitPrice is what the row would have been charged without its
+	// discount, so staff can see what came off. Internal only.
+	ListUnitPrice uint64
 }
 
 // InternalPreviewSubItem is one priced sub-item inside the internal
@@ -306,6 +309,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 			MarginAmount:             item.MarginAmount,
 			DiscountEnabled:          item.DiscountEnabled,
 			DiscountPercent:          item.DiscountPercent,
+			ListUnitPrice:            item.ListUnitPrice,
 			No:                       item.No,
 			Qty:                      item.Qty,
 		}

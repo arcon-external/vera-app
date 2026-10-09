@@ -26,6 +26,11 @@ export interface ArchivedQuotationSubItem {
   DisplayMarginalizedUnit: string;
   MarginalizedTotal: number;
   DisplayMarginalizedTotal: string;
+  /** The row's own discount. Zero on every revision exported before #274. */
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
+  ListUnitPrice: number;
+  DiscountAmount: number;
 }
 
 export interface ArchivedQuotationItem {
@@ -38,6 +43,11 @@ export interface ArchivedQuotationItem {
   MarginEnabled: boolean;
   MarginPercent: number;
   MarginAmount: number;
+  /** The row's own discount. Zero on every revision exported before #274. */
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
+  ListUnitPrice: number;
+  DiscountAmount: number;
   DisplayMarginAmount: string;
   OriginalTotal: number;
   DisplayOriginalTotal: string;

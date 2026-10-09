@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { CustomerPreview, InternalBreakdown } from "../preview";
+import { formatIdr } from "../format";
 import { Badge, Card, SectionHeading } from "./ui";
 
 interface ReviewPanelProps {
@@ -205,6 +206,12 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                       <td className="px-4 py-2.5 text-right">
                         <div className="tnum text-body font-medium text-ink-950">
                           Rp{item.DisplayMarginalizedUnit}
+                          {item.DiscountEnabled ? (
+                            <div className="tnum mt-0.5 text-caption text-accent-700">
+                              −{item.DiscountPercent}% off · was Rp
+                              {formatIdr(item.ListUnitPrice)}
+                            </div>
+                          ) : null}
                         </div>
                         <div className="tnum mt-0.5 text-caption text-internal-700">
                           {item.SubItems.length > 0
@@ -244,6 +251,11 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                         <td className="px-4 py-2 text-right">
                           <div className="tnum text-caption text-ink-700">
                             Rp{sub.DisplayMarginalizedUnit}
+                            {sub.DiscountEnabled ? (
+                              <div className="tnum mt-0.5 text-caption text-accent-700">
+                                −{sub.DiscountPercent}% off
+                              </div>
+                            ) : null}
                           </div>
                           <div className="tnum text-caption text-ink-400">
                             {sub.MarginEnabled

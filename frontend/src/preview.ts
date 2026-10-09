@@ -11,6 +11,9 @@ export interface CustomerPreviewItem {
   Total: number;
   MarginEnabled: boolean;
   MarginPercent: number;
+  /** The row's own discount, taken off the marginalised price. */
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
   MarginAmount: number;
   No: number;
   Qty: number;
@@ -54,6 +57,12 @@ export interface InternalPreviewSubItem {
   MarginalizedTotal: number;
   MarginEnabled: boolean;
   MarginPercent: number;
+  /** The row's own discount, taken off the marginalised price. */
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
+  /** The marginalised price before the discount: what the row would have
+   *  been without it. Internal only -- never printed on a customer document. */
+  ListUnitPrice: number;
   MarginAmount: number;
   DisplayOriginalUnitPrice: string;
   DisplayOriginalTotal: string;
@@ -83,6 +92,12 @@ export interface InternalPreviewItem {
   MarginBlendedApprox: boolean;
   MarginEnabled: boolean;
   MarginPercent: number;
+  /** The row's own discount, taken off the marginalised price. */
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
+  /** The marginalised price before the discount: what the row would have
+   *  been without it. Internal only -- never printed on a customer document. */
+  ListUnitPrice: number;
   MarginAmount: number;
   No: number;
   Qty: number;

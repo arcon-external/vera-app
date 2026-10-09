@@ -24,7 +24,7 @@ changes.
 | --- | --- |
 | `main.go` | Wails startup, Postgres open, binding registration |
 | `backend/quotation.go` | `Prepare`/`Export` flow, input + data models |
-| `backend/builder.go` | Per-item pricing, totals, markup math |
+| `backend/builder.go` | Per-item pricing, totals, markup + per-row discount math |
 | `backend/tax.go` | Tax zone/category → basis-point rates, tax + nett |
 | `backend/preview.go` | Customer/internal preview DTOs, template HTML preview |
 | `backend/archive.go` | Archive list/detail/revision Wails methods |
@@ -36,7 +36,7 @@ changes.
 | `frontend/src/App.tsx` | Application shell/state, page routing |
 | `frontend/src/components/` | UI components (shell, ledger, review, archive, detail) |
 | `frontend/src/tax.ts` | Tax options, rates, paste normalizers |
-| `frontend/src/format.ts` | IDR formatting + client-side margin math |
+| `frontend/src/format.ts` | IDR formatting + client-side margin and discount math |
 | `frontend/wailsjs/go/*` | Generated Wails bindings |
 | `.env.example` | Documented Postgres variable names (no secrets) |
 | `test-data/` | Local Excel fixtures (gitignored) |
@@ -197,6 +197,22 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   customer is given a lower price, so the cost side carries no discount at all:
   `OriginalGrand == OriginalSubtotal`, and profit loses the full discount. Both
   `buildPricing` (Go) and `computePricing` (SummaryRail) implement this and must agree.
+- **Per-row discount** (issue #274): each line and sub-item carries its own
+  `DiscountEnabled` + `DiscountPercent`, mirroring margin. Order is **margin first,
+  then discount** — the marginalised figure is the list price, and the discount
+  comes off it, so the printed list price always equals what staff see in the
+  editor. The cost side still does not move, so a row discounted below cost shows a
+  **negative** margin: `MarginAmount` is signed, and unsigned arithmetic would wrap
+  a loss round as a huge gain. The whole-quotation discount still applies on top,
+  to the summed subtotal. The customer document's `Disc.` column appears **only when
+  some row carries one** (`applyRowDiscountColumn`), so a column is never added to
+  every quotation to be empty on most of them.
+- **Adding a signed field to the canonical payload:** emit it only when non-zero,
+  exactly as `Subs` does. A revision with no per-row discount then produces
+  byte-identical canonical bytes to every revision signed before the field
+  existed, so every printed verification code keeps verifying. **Never bump
+  `CanonicalPrefix` for this** — that stops every code already printed from
+  verifying. `TestCanonicalOmitsAnAbsentRowDiscount` pins it.
 - **Numbering:** quote numbers are plain-digit `15CCYYNNNN` (no grouped display),
   allocated per (customer, issue-year) cycle starting at 1 every January; past 9999
   the sequence widens to 5 digits instead of wrapping, with a warn flag at 8000.
