@@ -47,13 +47,15 @@ type QuotationInput struct {
 // linkage is structural, because the only way to send one is inside a
 // sub-item.
 type QuotationSubItemInput struct {
-	Description   string
-	UoM           string
-	UnitCost      uint64
-	Qty           uint32
-	MarginPercent uint16
-	MarginEnabled bool
-	SubSubItems   []QuotationSubSubItemInput
+	Description     string
+	UoM             string
+	UnitCost        uint64
+	Qty             uint32
+	MarginPercent   uint16
+	DiscountPercent uint16
+	DiscountEnabled bool
+	MarginEnabled   bool
+	SubSubItems     []QuotationSubSubItemInput
 }
 
 // QuotationSubSubItemInput is one detail line beneath a priced sub-item. It
@@ -76,14 +78,16 @@ type QuotationItemInput struct {
 	// Pointer-bearing fields first: strings and the sub-item slice lead, so
 	// the collector's scan window is short and the struct stays at its 72-byte
 	// size floor (see struct_alignment_test.go).
-	Description   string
-	UoM           string
-	SubItems      []QuotationSubItemInput
-	UnitPrice     uint64
-	Qty           uint32
-	MarginPercent uint16
-	MarginEnabled bool
-	ShowSubPrices bool
+	Description     string
+	UoM             string
+	SubItems        []QuotationSubItemInput
+	UnitPrice       uint64
+	Qty             uint32
+	MarginPercent   uint16
+	DiscountPercent uint16
+	DiscountEnabled bool
+	MarginEnabled   bool
+	ShowSubPrices   bool
 }
 
 // QuotationSubItem is one priced part of a prepared package line, with the
@@ -93,20 +97,27 @@ type QuotationItemInput struct {
 // SubSubItems are the part's scope lines, numbered X.Y.Z; they carry no
 // pricing and contribute nothing to any total.
 type QuotationSubItem struct {
-	Description       string
-	SubNo             string
-	UoM               string
-	SubSubItems       []QuotationSubSubItem
-	DisplayUnitPrice  string
-	DisplayTotal      string
-	OriginalUnitPrice uint64
-	OriginalTotal     uint64
-	UnitPrice         uint64
-	Total             uint64
-	MarginAmount      uint64
-	MarginEnabled     bool
-	MarginPercent     uint16
-	Qty               uint32
+	Description         string
+	SubNo               string
+	UoM                 string
+	SubSubItems         []QuotationSubSubItem
+	DisplayUnitPrice    string
+	DisplayTotal        string
+	DisplayDiscount     string
+	DisplayListPrice    string
+	DisplayMarginAmount string
+	OriginalUnitPrice   uint64
+	OriginalTotal       uint64
+	UnitPrice           uint64
+	Total               uint64
+	ListUnitPrice       uint64
+	DiscountAmount      uint64
+	MarginAmount        int64
+	DiscountPercent     uint16
+	MarginPercent       uint16
+	DiscountEnabled     bool
+	MarginEnabled       bool
+	Qty                 uint32
 }
 
 // QuotationSubSubItem is one detail line beneath a priced sub-item. It has no
@@ -138,11 +149,18 @@ type QuotationItem struct {
 	SubItems                 []QuotationSubItem
 	OriginalUnitPrice        uint64
 	OriginalTotal            uint64
-	MarginAmount             uint64
+	MarginAmount             int64
 	UnitPrice                uint64
 	Total                    uint64
-	MarginEnabled            bool
+	ListUnitPrice            uint64
+	ListTotal                uint64
+	DiscountAmount           uint64
+	DisplayDiscount          string
+	DisplayListUnitPrice     string
 	MarginPercent            uint16
+	DiscountPercent          uint16
+	MarginEnabled            bool
+	DiscountEnabled          bool
 	ShowSubPrices            bool
 	No                       uint32
 	Qty                      uint32
@@ -152,7 +170,13 @@ type QuotationItem struct {
 // It combines static template assets (set once at startup by readTemplate)
 // with business data (set per-export by Prepare).
 type QuotationData struct {
-	HtmlTemplate              *template.Template
+	HtmlTemplate *template.Template
+	// ShowLineDiscounts adds the per-row discount column to the customer item
+	// table, and only when some row carries one. See applyRowDiscountColumn.
+	ShowLineDiscounts bool
+	// OtherColspan is the span of the merged description cell: 6 with the
+	// discount column, 5 without. Precomputed so the template states it once.
+	OtherColspan              int
 	DisplayDiscountAmount     string
 	TaxZone                   string
 	LogoBase64                string
@@ -613,6 +637,11 @@ func plausibleUoM(s string) bool {
 // its own, much lower, ceiling of 100.
 const MaxMarginPercent = 1000
 
+// MaxDiscountPercent is the ceiling on a per-row discount and on the
+// whole-quotation discount. 100% is a free line, which is a real thing to
+// quote, and nothing above it is a price rather than a discount.
+const MaxDiscountPercent = 100
+
 // validateSubItems checks one item's priced sub-items and returns them
 // normalized, ready for the builder.
 //
@@ -671,6 +700,9 @@ func validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemIn
 		}
 		if sub.MarginPercent > MaxMarginPercent {
 			return nil, fmt.Errorf("item %d sub-item %d: margin percent cannot be greater than %d", itemNo, j+1, MaxMarginPercent)
+		}
+		if sub.DiscountPercent > MaxDiscountPercent {
+			return nil, fmt.Errorf("item %d sub-item %d: discount percent cannot be greater than %d", itemNo, j+1, MaxDiscountPercent)
 		}
 		sub.Description = description
 		sub.UoM = uom
@@ -741,6 +773,9 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 		if item.MarginPercent > MaxMarginPercent {
 			return fmt.Errorf("item margin percent cannot be greater than %d", MaxMarginPercent)
+		}
+		if item.DiscountPercent > MaxDiscountPercent {
+			return fmt.Errorf("item discount percent cannot be greater than %d", MaxDiscountPercent)
 		}
 
 		normalized, err := validateSubItems(item, i+1)
@@ -840,6 +875,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 	items := buildItems(input.Items)
 	q.Data.Items = items
+	q.applyRowDiscountColumn(items)
 
 	date, validUntil := buildDates(input.Validity)
 	q.Data.Date = date
@@ -1034,6 +1070,39 @@ func (q *Quotation) context() context.Context {
 	return q.ctx
 }
 
+// applyRowDiscountColumn decides whether the customer document shows a
+// discount column at all.
+//
+// A column added to every quotation to accommodate the rows that mostly carry
+// no discount is worse than not showing it: it narrows the description on
+// every document ever printed in order to be empty on most of them. So it
+// appears only when some row actually has one.
+//
+// OtherColspan rides along because the item table merges Description through
+// the last column in five places. Computing the span once here beats repeating
+// the same conditional at each of them.
+func (q *Quotation) applyRowDiscountColumn(items []QuotationItem) {
+	shown := false
+	for _, item := range items {
+		if item.DiscountEnabled {
+			shown = true
+			break
+		}
+		for _, sub := range item.SubItems {
+			if sub.DiscountEnabled {
+				shown = true
+				break
+			}
+		}
+	}
+	q.Data.ShowLineDiscounts = shown
+	if shown {
+		q.Data.OtherColspan = 6
+	} else {
+		q.Data.OtherColspan = 5
+	}
+}
+
 func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath string) store.RevisionDraft {
 	items := make([]store.RevisionItem, 0, len(q.Data.Items))
 	for _, item := range q.Data.Items {
@@ -1047,17 +1116,20 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 				})
 			}
 			subItems = append(subItems, store.RevisionSubItem{
-				SubNo:         i + 1,
-				Description:   sub.Description,
-				Qty:           int64(sub.Qty),
-				UoM:           sub.UoM,
-				UnitCost:      int64(sub.OriginalUnitPrice),
-				UnitPrice:     int64(sub.UnitPrice),
-				MarginAmount:  int64(sub.MarginAmount),
-				Total:         int64(sub.Total),
-				MarginPercent: int16(sub.MarginPercent),
-				MarginEnabled: sub.MarginEnabled,
-				SubSubItems:   lows,
+				SubNo:           i + 1,
+				Description:     sub.Description,
+				Qty:             int64(sub.Qty),
+				UoM:             sub.UoM,
+				UnitCost:        int64(sub.OriginalUnitPrice),
+				UnitPrice:       int64(sub.UnitPrice),
+				MarginAmount:    sub.MarginAmount,
+				Total:           int64(sub.Total),
+				ListUnitPrice:   int64(sub.ListUnitPrice),
+				MarginPercent:   int16(sub.MarginPercent),
+				DiscountPercent: int16(sub.DiscountPercent),
+				MarginEnabled:   sub.MarginEnabled,
+				DiscountEnabled: sub.DiscountEnabled,
+				SubSubItems:     lows,
 			})
 		}
 		items = append(items, store.RevisionItem{
@@ -1068,11 +1140,14 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 			UnitPrice:             int64(item.OriginalUnitPrice),
 			MarginEnabled:         item.MarginEnabled,
 			MarginPercent:         int16(item.MarginPercent),
-			MarginAmount:          int64(item.MarginAmount),
+			MarginAmount:          item.MarginAmount,
 			OriginalTotal:         int64(item.OriginalTotal),
 			MarginalizedUnitPrice: int64(item.UnitPrice),
 			MarginalizedTotal:     int64(item.Total),
 			ShowSubPrices:         item.ShowSubPrices,
+			ListUnitPrice:         int64(item.ListUnitPrice),
+			DiscountPercent:       int16(item.DiscountPercent),
+			DiscountEnabled:       item.DiscountEnabled,
 			SubItems:              subItems,
 		})
 	}

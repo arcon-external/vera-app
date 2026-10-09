@@ -22,21 +22,23 @@ func SignableFromData(data QuotationData) SignableRevision {
 				details = append(details, detail.Description)
 			}
 			subs = append(subs, SignableSub{
-				Description: sub.Description,
-				Qty:         int64(sub.Qty),
-				UoM:         sub.UoM,
-				UnitPrice:   int64(sub.UnitPrice),
-				Total:       int64(sub.Total),
-				Details:     details,
+				Description:     sub.Description,
+				Qty:             int64(sub.Qty),
+				UoM:             sub.UoM,
+				UnitPrice:       int64(sub.UnitPrice),
+				Total:           int64(sub.Total),
+				DiscountPercent: int16(sub.DiscountPercent),
+				Details:         details,
 			})
 		}
 		items = append(items, SignableItem{
-			Description: item.Description,
-			Qty:         int64(item.Qty),
-			UoM:         item.UoM,
-			UnitPrice:   int64(item.UnitPrice),
-			Total:       int64(item.Total),
-			Subs:        subs,
+			Description:     item.Description,
+			Qty:             int64(item.Qty),
+			UoM:             item.UoM,
+			UnitPrice:       int64(item.UnitPrice),
+			Total:           int64(item.Total),
+			DiscountPercent: int16(item.DiscountPercent),
+			Subs:            subs,
 		})
 	}
 	return SignableRevision{
@@ -72,21 +74,23 @@ func SignableFromEvidence(evidence store.RevisionEvidence) SignableRevision {
 		var subs []SignableSub
 		for _, sub := range item.Subs {
 			subs = append(subs, SignableSub{
-				Description: sub.Description,
-				Qty:         sub.Qty,
-				UoM:         sub.UoM,
-				UnitPrice:   sub.UnitPrice,
-				Total:       sub.Total,
-				Details:     append([]string(nil), sub.Details...),
+				Description:     sub.Description,
+				Qty:             sub.Qty,
+				UoM:             sub.UoM,
+				UnitPrice:       sub.UnitPrice,
+				Total:           sub.Total,
+				DiscountPercent: sub.DiscountPercent,
+				Details:         append([]string(nil), sub.Details...),
 			})
 		}
 		items = append(items, SignableItem{
-			Description: item.Description,
-			Qty:         item.Qty,
-			UoM:         item.UoM,
-			UnitPrice:   item.UnitPrice,
-			Total:       item.Total,
-			Subs:        subs,
+			Description:     item.Description,
+			Qty:             item.Qty,
+			UoM:             item.UoM,
+			UnitPrice:       item.UnitPrice,
+			Total:           item.Total,
+			DiscountPercent: item.DiscountPercent,
+			Subs:            subs,
 		})
 	}
 	return SignableRevision{

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge, Card } from "./ui";
 import { ppnRateBps, servicesRateBps, taxRateLabel } from "../tax";
-import { applyMargin, formatIdr, parseIntOrZero } from "../format";
+import { applyDiscount, applyMargin, formatIdr, parseIntOrZero } from "../format";
 import { subItemsRollup } from "./ItemEditor";
 import type { EditorSubItem } from "./ItemEditor";
 
@@ -10,6 +10,8 @@ export interface PricedItem {
   unitPrice: string;
   marginEnabled: boolean;
   marginPercent: string;
+  discountEnabled: boolean;
+  discountPercent: string;
   /** Present when the line is a main item with priced sub-items. */
   subItems?: EditorSubItem[];
 }
@@ -43,19 +45,26 @@ export function computePricing(
       const rollup = subItemsRollup(subs);
       costSubtotal += rollup.cost;
       sellSubtotal += rollup.sell;
-      if (subs.some((sub) => sub.marginEnabled)) marginedLines += 1;
+      if (subs.some((sub) => sub.marginEnabled || sub.discountEnabled)) {
+        marginedLines += 1;
+      }
       continue;
     }
     const qty = parseIntOrZero(item.qty);
     const cost = parseIntOrZero(item.unitPrice);
-    const sellUnit = applyMargin(
-      cost,
-      parseIntOrZero(item.marginPercent),
-      item.marginEnabled
+    // Margin first, then this row's own discount -- the same order and the
+    // same truncation as buildItems in backend/builder.go. The
+    // whole-quotation discount below applies on top, to the summed subtotal.
+    const sellUnit = applyDiscount(
+      applyMargin(cost, parseIntOrZero(item.marginPercent), item.marginEnabled),
+      parseIntOrZero(item.discountPercent),
+      item.discountEnabled
     );
+    // The cost side carries no discount at all: giving the customer a lower
+    // price does not make our purchase cheaper (issue #270).
     costSubtotal += qty * cost;
     sellSubtotal += qty * sellUnit;
-    if (item.marginEnabled) marginedLines += 1;
+    if (item.marginEnabled || item.discountEnabled) marginedLines += 1;
   }
 
   // A discount is a price cut, so it moves only the sell side. Mirrors

@@ -2,10 +2,12 @@ import { useMemo, useRef, useState } from "react";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { Button } from "./ui";
 import {
+  applyDiscount,
   applyMargin,
   blendedMargin,
   formatIdr,
   formatMoneyInput,
+  MAX_DISCOUNT_PERCENT,
   MAX_MARGIN_PERCENT,
   parseIntOrZero,
 } from "../format";
@@ -19,6 +21,9 @@ export interface EditorSubItem {
   unitCost: string;
   marginEnabled: boolean;
   marginPercent: string;
+  /** The sub-item's own discount, exactly as the parent line's. */
+  discountEnabled: boolean;
+  discountPercent: string;
   /** Detail lines under the sub-item: plain text with no values of their own. */
   bullets: string[];
 }
@@ -36,6 +41,13 @@ export interface EditorItem {
   unitPrice: string;
   marginEnabled: boolean;
   marginPercent: string;
+  /**
+   * The row's own discount, taken off the marginalised price. Same shape as
+   * the margin above and for the same reason: a line that needs 15% off and a
+   * line that needs none are different lines.
+   */
+  discountEnabled: boolean;
+  discountPercent: string;
   /** The priced composition. Empty means a plain line. */
   subItems: EditorSubItem[];
   /**
@@ -56,16 +68,22 @@ export function newSubItem(id: number, description = ""): EditorSubItem {
     unitCost: "",
     marginEnabled: false,
     marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
     bullets: [],
   };
 }
 
 /** The sell price of one sub-item unit, mirroring the backend's truncation. */
 export function subItemSellUnit(sub: EditorSubItem): number {
-  return applyMargin(
-    parseIntOrZero(sub.unitCost),
-    parseIntOrZero(sub.marginPercent),
-    sub.marginEnabled
+  return applyDiscount(
+    applyMargin(
+      parseIntOrZero(sub.unitCost),
+      parseIntOrZero(sub.marginPercent),
+      sub.marginEnabled
+    ),
+    parseIntOrZero(sub.discountPercent),
+    sub.discountEnabled
   );
 }
 
@@ -273,7 +291,10 @@ export function ItemEditor({
         <span>UoM</span>
         <span>Qty</span>
         <span>Unit price (IDR)</span>
-        <span>Margin</span>
+        {/* This column carries both price-shaping controls, stacked: the
+            margin that sets the list price, and the row's own discount that
+            comes off it. Saying so beats a header naming only one of them. */}
+        <span>Margin / Disc.</span>
         <span />
       </div>
 
@@ -555,8 +576,13 @@ function ItemRow({
   const qty = parseIntOrZero(item.qty);
   const unitCost = parseIntOrZero(item.unitPrice);
   const marginPercent = parseIntOrZero(item.marginPercent);
-  const sellUnit = applyMargin(unitCost, marginPercent, item.marginEnabled);
+  // Margin first, then the row's own discount, matching backend/builder.go.
+  const listUnit = applyMargin(unitCost, marginPercent, item.marginEnabled);
+  const discountPercent = parseIntOrZero(item.discountPercent);
+  const sellUnit = applyDiscount(listUnit, discountPercent, item.discountEnabled);
   const sellTotal = sellUnit * qty;
+  // Signed: a discount below cost is a loss, and hiding that is worse than
+  // showing an ugly number.
   const marginAmount = sellUnit - unitCost;
 
   return (
@@ -615,7 +641,12 @@ function ItemRow({
               Split into sub-items
             </button>
           )}
-          {hasSubItems ? null : item.marginEnabled ? (
+          {hasSubItems ? null : item.discountEnabled ? (
+            <span className="tnum text-accent-700">
+              −{discountPercent}% · {marginAmount >= 0 ? "+" : "−"}
+              Rp{formatIdr(Math.abs(marginAmount))}/unit
+            </span>
+          ) : item.marginEnabled ? (
             <span className="tnum text-success-700">
               +{marginPercent}% · +Rp{formatIdr(marginAmount)}/unit
             </span>
@@ -786,6 +817,75 @@ function ItemRow({
               </div>
             </div>
           </div>
+
+          {/* The row's own discount, in the same cell as the margin rather
+              than a seventh column: at the app's 1024px window a new column
+              would squeeze the description to about a quarter of the table on
+              every quotation, most of which have no row discounts at all. */}
+          <div className="flex items-center gap-2">
+            {/* Labelled in place as well as by the column header: two stacked
+                toggle-and-% controls with no label is how a drafter applies a
+                discount to the wrong field. */}
+            <span className="w-9 shrink-0 text-caption text-ink-400">Disc.</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={item.discountEnabled}
+              aria-label={`Enable a discount for line ${index + 1}`}
+              onClick={() =>
+                onChange(item.key, "discountEnabled", !item.discountEnabled)
+              }
+              className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                item.discountEnabled
+                  ? "border-accent-700 bg-accent-600"
+                  : "border-rule-strong bg-paper-sunk"
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                  item.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                }`}
+              />
+            </button>
+            <div
+              className={`flex min-w-0 flex-1 items-center rounded-md border px-2.5 py-2 transition-colors duration-150 ${
+                item.discountEnabled
+                  ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                  : "border-rule bg-paper-subtle"
+              }`}
+            >
+              <input
+                type="text"
+                data-grid-cell=""
+                data-grid-row={index}
+                data-grid-col={5}
+                inputMode="numeric"
+                aria-label={`Discount percentage for line ${index + 1}`}
+                value={item.discountPercent}
+                disabled={!item.discountEnabled}
+                onChange={(event) =>
+                  onChange(
+                    item.key,
+                    "discountPercent",
+                    Math.min(
+                      parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                      MAX_DISCOUNT_PERCENT
+                    ).toString()
+                  )
+                }
+                className="w-9 bg-transparent text-right text-body tnum text-ink-900 outline-hidden disabled:text-ink-350"
+              />
+              <span className="ml-0.5 text-body text-ink-400">%</span>
+            </div>
+          </div>
+
+          {item.discountEnabled ? (
+            <div className="tnum text-caption text-ink-500 lg:px-0.5 lg:text-right">
+              was {formatIdr(listUnit)} · −
+              {formatIdr(listUnit * qty - sellTotal)}
+            </div>
+          ) : null}
         </MobileField>
       </div>
       ) : null}
@@ -942,6 +1042,11 @@ function SubRow({
 }) {
   const sellUnit = subItemSellUnit(sub);
   const marginPercent = parseIntOrZero(sub.marginPercent);
+  const listUnit = applyMargin(
+    parseIntOrZero(sub.unitCost),
+    marginPercent,
+    sub.marginEnabled
+  );
   const label = `sub-item ${subIndex + 1} of line ${index + 1}`;
 
   return (
@@ -1058,6 +1163,58 @@ function SubRow({
               <span className="ml-0.5 text-caption text-ink-400">%</span>
             </div>
           </div>
+          {/* The sub-item's own discount, stacked under its margin for the
+              same reason the parent line's is: a seventh column would squeeze
+              the description at the app's own window width. */}
+          <MobileField label="Discount">
+            <div className="flex items-center gap-2">
+              <span className="shrink-0 text-caption text-ink-400">Disc.</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sub.discountEnabled}
+                aria-label={`Enable a discount for ${label}`}
+                onClick={() => onPatch({ discountEnabled: !sub.discountEnabled })}
+                className={`relative inline-flex h-[22px] w-[40px] shrink-0 items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
+                  sub.discountEnabled
+                    ? "border-accent-700 bg-accent-600"
+                    : "border-rule-strong bg-paper-sunk"
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`h-[18px] w-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(60,52,34,0.25)] transition-transform duration-200 ease-out-quart ${
+                    sub.discountEnabled ? "translate-x-[18px]" : "translate-x-[2px]"
+                  }`}
+                />
+              </button>
+              <div
+                className={`flex h-9 min-w-0 flex-1 items-center rounded-md border px-2.5 transition-colors duration-150 ${
+                  sub.discountEnabled
+                    ? "border-rule bg-white focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
+                    : "border-rule bg-paper-subtle"
+                }`}
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={`Discount percentage for ${label}`}
+                  value={sub.discountPercent}
+                  disabled={!sub.discountEnabled}
+                  onChange={(event) =>
+                    onPatch({
+                      discountPercent: Math.min(
+                        parseIntOrZero(event.target.value.replace(/\D/g, "")),
+                        MAX_DISCOUNT_PERCENT
+                      ).toString(),
+                    })
+                  }
+                  className="w-9 bg-transparent text-right text-caption tnum text-ink-900 outline-hidden disabled:text-ink-350"
+                />
+                <span className="ml-0.5 text-caption text-ink-400">%</span>
+              </div>
+            </div>
+          </MobileField>
         </MobileField>
 
         <div className="flex h-9 items-center gap-0.5">

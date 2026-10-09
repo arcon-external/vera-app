@@ -27,6 +27,8 @@ type ArchivedQuotationItem struct {
 	DisplayOriginalTotal     string
 	Subs                     []ArchivedQuotationSubItem
 	MarginAmount             int64
+	DiscountAmount           int64
+	ListUnitPrice            int64
 	ItemNo                   int
 	OriginalTotal            int64
 	MarginalizedUnitPrice    int64
@@ -34,7 +36,9 @@ type ArchivedQuotationItem struct {
 	MarginalizedTotal        int64
 	Qty                      int64
 	MarginPercent            int16
+	DiscountPercent          int16
 	MarginEnabled            bool
+	DiscountEnabled          bool
 	ShowSubPrices            bool
 }
 
@@ -51,6 +55,8 @@ type ArchivedQuotationSubItem struct {
 	DisplayOriginalUnit      string
 	DisplayOriginalTotal     string
 	MarginAmount             int64
+	DiscountAmount           int64
+	ListUnitPrice            int64
 	SubNo                    int
 	OriginalUnitPrice        int64
 	OriginalTotal            int64
@@ -58,7 +64,9 @@ type ArchivedQuotationSubItem struct {
 	MarginalizedTotal        int64
 	Qty                      int64
 	MarginPercent            int16
+	DiscountPercent          int16
 	MarginEnabled            bool
+	DiscountEnabled          bool
 }
 
 type ArchivedQuotation struct {
@@ -169,6 +177,10 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 				OriginalUnitPrice:        sub.OriginalUnitPrice,
 				MarginEnabled:            sub.MarginEnabled,
 				MarginPercent:            sub.MarginPercent,
+				DiscountEnabled:          sub.DiscountEnabled,
+				DiscountPercent:          sub.DiscountPercent,
+				ListUnitPrice:            sub.ListUnitPrice,
+				DiscountAmount:           sub.DiscountAmount,
 				MarginAmount:             sub.MarginAmount,
 				OriginalTotal:            sub.OriginalTotal,
 				MarginalizedUnitPrice:    sub.MarginalizedUnitPrice,
@@ -191,6 +203,10 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			DisplayUnitPrice:         item.DisplayOriginalUnit,
 			MarginEnabled:            item.MarginEnabled,
 			MarginPercent:            item.MarginPercent,
+			DiscountEnabled:          item.DiscountEnabled,
+			DiscountPercent:          item.DiscountPercent,
+			ListUnitPrice:            item.ListUnitPrice,
+			DiscountAmount:           item.DiscountAmount,
 			MarginAmount:             item.MarginAmount,
 			DisplayMarginAmount:      item.DisplayMarginAmount,
 			OriginalTotal:            item.OriginalTotal,

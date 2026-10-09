@@ -22,7 +22,9 @@ type CustomerPreviewItem struct {
 	Total                    uint64
 	MarginEnabled            bool
 	MarginPercent            uint16
-	MarginAmount             uint64
+	MarginAmount             int64
+	DiscountEnabled          bool
+	DiscountPercent          uint16
 	No                       uint32
 	Qty                      uint32
 }
@@ -84,13 +86,18 @@ type InternalPreviewItem struct {
 	CostTotal                uint64
 	SellUnit                 uint64
 	CostUnit                 uint64
-	MarginAmount             uint64
+	MarginAmount             int64
 	MarginBlendedPercent     uint32
 	No                       uint32
 	Qty                      uint32
 	MarginPercent            uint16
+	DiscountPercent          uint16
 	MarginEnabled            bool
+	DiscountEnabled          bool
 	MarginBlendedApprox      bool
+	// ListUnitPrice is what the row would have been charged without its
+	// discount, so staff can see what came off. Internal only.
+	ListUnitPrice uint64
 }
 
 // InternalPreviewSubItem is one priced sub-item inside the internal
@@ -109,10 +116,14 @@ type InternalPreviewSubItem struct {
 	MarginPercent            uint16
 	OriginalUnitPrice        uint64
 	OriginalTotal            uint64
-	MarginAmount             uint64
+	MarginAmount             int64
 	MarginalizedUnitPrice    uint64
 	MarginalizedTotal        uint64
+	DiscountAmount           uint64
+	ListUnitPrice            uint64
+	DiscountPercent          uint16
 	MarginEnabled            bool
+	DiscountEnabled          bool
 }
 
 // blendedMarginPercent is total profit over total cost, in whole percent.
@@ -205,6 +216,8 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 			MarginEnabled:            it.MarginEnabled,
 			MarginPercent:            it.MarginPercent,
 			MarginAmount:             it.MarginAmount,
+			DiscountEnabled:          it.DiscountEnabled,
+			DiscountPercent:          it.DiscountPercent,
 			No:                       it.No,
 			Qty:                      it.Qty,
 		})
@@ -294,6 +307,9 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 			MarginEnabled:            item.MarginEnabled,
 			MarginPercent:            item.MarginPercent,
 			MarginAmount:             item.MarginAmount,
+			DiscountEnabled:          item.DiscountEnabled,
+			DiscountPercent:          item.DiscountPercent,
+			ListUnitPrice:            item.ListUnitPrice,
 			No:                       item.No,
 			Qty:                      item.Qty,
 		}
@@ -319,11 +335,15 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 					MarginAmount:             sub.MarginAmount,
 					MarginalizedUnitPrice:    sub.UnitPrice,
 					MarginalizedTotal:        sub.Total,
+					ListUnitPrice:            sub.ListUnitPrice,
+					DiscountAmount:           sub.DiscountAmount,
+					DiscountPercent:          sub.DiscountPercent,
+					DiscountEnabled:          sub.DiscountEnabled,
 					DisplayOriginalUnitPrice: formatRupiah(sub.OriginalUnitPrice),
 					DisplayOriginalTotal:     formatRupiah(originalTotal),
 					DisplayMarginalizedUnit:  formatRupiah(sub.UnitPrice),
 					DisplayMarginalizedTotal: formatRupiah(sub.Total),
-					DisplayMarginAmount:      formatRupiah(sub.MarginAmount),
+					DisplayMarginAmount:      formatSignedRupiah(sub.MarginAmount),
 				})
 				costTotal += originalTotal
 				sellTotal += sub.Total

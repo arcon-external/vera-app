@@ -27,6 +27,8 @@ export namespace backend {
 	    DisplayOriginalUnit: string;
 	    DisplayOriginalTotal: string;
 	    MarginAmount: number;
+	    DiscountAmount: number;
+	    ListUnitPrice: number;
 	    SubNo: number;
 	    OriginalUnitPrice: number;
 	    OriginalTotal: number;
@@ -34,7 +36,9 @@ export namespace backend {
 	    MarginalizedTotal: number;
 	    Qty: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationSubItem(source);
@@ -51,6 +55,8 @@ export namespace backend {
 	        this.DisplayOriginalUnit = source["DisplayOriginalUnit"];
 	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
 	        this.MarginAmount = source["MarginAmount"];
+	        this.DiscountAmount = source["DiscountAmount"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
 	        this.SubNo = source["SubNo"];
 	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
 	        this.OriginalTotal = source["OriginalTotal"];
@@ -58,7 +64,9 @@ export namespace backend {
 	        this.MarginalizedTotal = source["MarginalizedTotal"];
 	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	    }
 	}
 	export class ArchivedQuotationItem {
@@ -71,6 +79,8 @@ export namespace backend {
 	    DisplayOriginalTotal: string;
 	    Subs: ArchivedQuotationSubItem[];
 	    MarginAmount: number;
+	    DiscountAmount: number;
+	    ListUnitPrice: number;
 	    ItemNo: number;
 	    OriginalTotal: number;
 	    MarginalizedUnitPrice: number;
@@ -78,7 +88,9 @@ export namespace backend {
 	    MarginalizedTotal: number;
 	    Qty: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	    ShowSubPrices: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -96,6 +108,8 @@ export namespace backend {
 	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
 	        this.Subs = this.convertValues(source["Subs"], ArchivedQuotationSubItem);
 	        this.MarginAmount = source["MarginAmount"];
+	        this.DiscountAmount = source["DiscountAmount"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
 	        this.ItemNo = source["ItemNo"];
 	        this.OriginalTotal = source["OriginalTotal"];
 	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
@@ -103,7 +117,9 @@ export namespace backend {
 	        this.MarginalizedTotal = source["MarginalizedTotal"];
 	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
 	
@@ -372,6 +388,8 @@ export namespace backend {
 	    MarginEnabled: boolean;
 	    MarginPercent: number;
 	    MarginAmount: number;
+	    DiscountEnabled: boolean;
+	    DiscountPercent: number;
 	    No: number;
 	    Qty: number;
 	
@@ -395,6 +413,8 @@ export namespace backend {
 	        this.MarginEnabled = source["MarginEnabled"];
 	        this.MarginPercent = source["MarginPercent"];
 	        this.MarginAmount = source["MarginAmount"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	    }
@@ -629,7 +649,11 @@ export namespace backend {
 	    MarginAmount: number;
 	    MarginalizedUnitPrice: number;
 	    MarginalizedTotal: number;
+	    DiscountAmount: number;
+	    ListUnitPrice: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new InternalPreviewSubItem(source);
@@ -653,7 +677,11 @@ export namespace backend {
 	        this.MarginAmount = source["MarginAmount"];
 	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
 	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.DiscountAmount = source["DiscountAmount"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	    }
 	}
 	export class InternalPreviewItem {
@@ -678,8 +706,11 @@ export namespace backend {
 	    No: number;
 	    Qty: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	    MarginBlendedApprox: boolean;
+	    ListUnitPrice: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new InternalPreviewItem(source);
@@ -708,8 +739,11 @@ export namespace backend {
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.MarginBlendedApprox = source["MarginBlendedApprox"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -916,6 +950,8 @@ export namespace backend {
 	    UnitCost: number;
 	    Qty: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
+	    DiscountEnabled: boolean;
 	    MarginEnabled: boolean;
 	    SubSubItems: QuotationSubSubItemInput[];
 	
@@ -930,6 +966,8 @@ export namespace backend {
 	        this.UnitCost = source["UnitCost"];
 	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.MarginEnabled = source["MarginEnabled"];
 	        this.SubSubItems = this.convertValues(source["SubSubItems"], QuotationSubSubItemInput);
 	    }
@@ -959,6 +997,8 @@ export namespace backend {
 	    UnitPrice: number;
 	    Qty: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
+	    DiscountEnabled: boolean;
 	    MarginEnabled: boolean;
 	    ShowSubPrices: boolean;
 	
@@ -974,6 +1014,8 @@ export namespace backend {
 	        this.UnitPrice = source["UnitPrice"];
 	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.MarginEnabled = source["MarginEnabled"];
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
@@ -1177,8 +1219,12 @@ export namespace store {
 	    MarginAmount: number;
 	    Total: number;
 	    Qty: number;
+	    ListUnitPrice: number;
+	    DiscountAmount: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	    SubSubItems: RevisionSubSubItem[];
 	
 	    static createFrom(source: any = {}) {
@@ -1195,8 +1241,12 @@ export namespace store {
 	        this.MarginAmount = source["MarginAmount"];
 	        this.Total = source["Total"];
 	        this.Qty = source["Qty"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
+	        this.DiscountAmount = source["DiscountAmount"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.SubSubItems = this.convertValues(source["SubSubItems"], RevisionSubSubItem);
 	    }
 	
@@ -1228,8 +1278,12 @@ export namespace store {
 	    OriginalTotal: number;
 	    MarginalizedUnitPrice: number;
 	    MarginalizedTotal: number;
+	    ListUnitPrice: number;
+	    DiscountAmount: number;
 	    MarginPercent: number;
+	    DiscountPercent: number;
 	    MarginEnabled: boolean;
+	    DiscountEnabled: boolean;
 	    ShowSubPrices: boolean;
 	    SubItems: RevisionSubItem[];
 	
@@ -1248,8 +1302,12 @@ export namespace store {
 	        this.OriginalTotal = source["OriginalTotal"];
 	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
 	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.ListUnitPrice = source["ListUnitPrice"];
+	        this.DiscountAmount = source["DiscountAmount"];
 	        this.MarginPercent = source["MarginPercent"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	        this.SubItems = this.convertValues(source["SubItems"], RevisionSubItem);
 	    }

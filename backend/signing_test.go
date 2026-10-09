@@ -375,3 +375,72 @@ func TestCanonicalDigestChangesWithAnyField(t *testing.T) {
 		t.Error("digest unchanged after a sub detail mutation")
 	}
 }
+
+// TestCanonicalOmitsAnAbsentRowDiscount is the compatibility guarantee for
+// #274, and it is the same promise Subs already makes: a revision whose rows
+// carry no per-row discount must produce byte-identical canonical bytes to
+// every revision signed before the field existed, because every printed
+// verification code out there depends on it.
+//
+// If this ever fails, do NOT bump CanonicalPrefix to "fix" it -- that stops
+// every code already printed from verifying. Find what started emitting the
+// field instead.
+func TestCanonicalOmitsAnAbsentRowDiscount(t *testing.T) {
+	withoutDiscount := CanonicalRevision(SignableRevision{
+		QuoteNumber: "1502260001",
+		Items: []SignableItem{{
+			Description: "Control panel", UoM: "Lot", Qty: 2,
+			UnitPrice: 18000000, Total: 36000000,
+		}},
+	})
+	// Checked by the item-level field name, not "discount_percent": the
+	// whole-quotation discount has always been signed under that label, and
+	// this test is about the per-row addition only.
+	if strings.Contains(string(withoutDiscount), "item_1_discount_percent") {
+		t.Fatalf("a revision with no row discount emitted a per-row discount field:\n%s", withoutDiscount)
+	}
+	if !strings.Contains(string(withoutDiscount), "\ndiscount_percent: 0") {
+		t.Errorf("the whole-quotation discount field went missing -- this is about the per-row addition:\n%s",
+			withoutDiscount)
+	}
+	// And the shape is exactly what it was before the field existed: the five
+	// item values, nothing appended.
+	if !strings.Contains(string(withoutDiscount), "item_1: Control panel|2|Lot|18000000|36000000") {
+		t.Errorf("the item line changed shape:\n%s", withoutDiscount)
+	}
+}
+
+// TestCanonicalCoversAnAppliedRowDiscount is the other half: when a row does
+// carry a discount, its printed percentage is signed, because a customer
+// reading "15%" is reading content the signature has to cover.
+func TestCanonicalCoversAnAppliedRowDiscount(t *testing.T) {
+	canonical := CanonicalRevision(SignableRevision{
+		QuoteNumber: "1502260001",
+		Items: []SignableItem{{
+			Description: "Control panel", UoM: "Lot", Qty: 2,
+			UnitPrice: 15300000, Total: 30600000, DiscountPercent: 15,
+		}, {
+			Description: "Commissioning", UoM: "LS", Qty: 1,
+			UnitPrice: 3000000, Total: 3000000,
+		}},
+	})
+	got := string(canonical)
+	if !strings.Contains(got, "item_1_discount_percent: 15") {
+		t.Errorf("the discounted row's percentage is not signed:\n%s", got)
+	}
+	// The row with no discount emits nothing, so its bytes are unchanged.
+	if strings.Contains(got, "item_2_discount_percent") {
+		t.Errorf("an undiscounted row emitted a discount field:\n%s", got)
+	}
+	// Changing the printed percentage changes the signed bytes.
+	altered := CanonicalRevision(SignableRevision{
+		QuoteNumber: "1502260001",
+		Items: []SignableItem{{
+			Description: "Control panel", UoM: "Lot", Qty: 2,
+			UnitPrice: 15300000, Total: 30600000, DiscountPercent: 5,
+		}},
+	})
+	if string(altered) == got {
+		t.Error("changing a row's printed discount left the canonical bytes identical")
+	}
+}

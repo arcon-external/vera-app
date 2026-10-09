@@ -18,6 +18,20 @@ func applyMarkup(cost uint64, margin uint16) uint64 {
 	return cost + cost*uint64(margin)/100
 }
 
+// applyDiscount takes a percentage off an already-marginalised price.
+//
+// The order is margin first, then discount, and that order is the point: the
+// marginalised figure is the list price the customer would otherwise pay, and
+// the discount comes off it. Reversing the two would mean the printed list
+// price no longer matched the figure staff see in the editor, and a quotation
+// already issued would be quoted differently from how it was built.
+//
+// Truncates for the same reason applyMarkup does, and for the same reason the
+// frontend mirrors it: a discount of 33 on 100 is 33 off, not 33.33.
+func applyDiscount(price uint64, discount uint16) uint64 {
+	return price - price*uint64(discount)/100
+}
+
 type PricingSummary struct {
 	OriginalSubtotal          uint64
 	OriginalDiscount          uint64
@@ -42,16 +56,31 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 			itemInput.UoM,
 			itemInput.UnitPrice,
 		)
-		item.MarginEnabled = itemInput.MarginEnabled
-		item.MarginPercent = itemInput.MarginPercent
 		item.ShowSubPrices = itemInput.ShowSubPrices
-		if item.MarginEnabled {
-			item.UnitPrice = applyMarkup(item.OriginalUnitPrice, item.MarginPercent)
-			item.MarginAmount = item.UnitPrice - item.OriginalUnitPrice
-			item.Total = uint64(item.Qty) * item.UnitPrice
-			item.DisplayUnitPrice = formatRupiah(item.UnitPrice)
-			item.DisplayTotal = formatRupiah(item.Total)
-			item.DisplayMarginAmount = formatRupiah(item.MarginAmount)
+		// Margin first, then the row's own discount. newQuotationItem seeded
+		// the cost side; priceLine derives everything the sell side needs.
+		if itemInput.MarginEnabled || itemInput.DiscountEnabled {
+			priced := priceLine(item.OriginalUnitPrice, item.Qty,
+				itemInput.MarginPercent, itemInput.MarginEnabled,
+				itemInput.DiscountPercent, itemInput.DiscountEnabled)
+			item.ListUnitPrice = priced.ListUnitPrice
+			item.ListTotal = priced.ListTotal
+			item.UnitPrice = priced.UnitPrice
+			item.Total = priced.Total
+			item.DiscountAmount = priced.DiscountAmount
+			item.DisplayUnitPrice = priced.DisplayUnitPrice
+			item.DisplayTotal = priced.DisplayTotal
+			item.DisplayListUnitPrice = priced.DisplayListUnitPrice
+			item.DisplayDiscount = priced.DisplayDiscount
+			item.DisplayMarginAmount = priced.DisplayMarginAmount
+			item.MarginAmount = priced.MarginAmount
+			item.MarginEnabled = priced.MarginEnabled
+			item.MarginPercent = priced.MarginPercent
+			item.DiscountEnabled = priced.DiscountEnabled
+			item.DiscountPercent = priced.DiscountPercent
+		} else {
+			item.MarginEnabled = false
+			item.MarginPercent = itemInput.MarginPercent
 		}
 
 		item.No = uint32(key + 1)
@@ -62,21 +91,29 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 			// package once. MarginAmount keeps its per-unit meaning (sell
 			// minus cost of the one package unit); per-sub margins were
 			// applied inside buildSubItems, never to the summed cost.
-			var costSum, sellSum uint64
+			var costSum, sellSum, listSum, discountSum uint64
 			for _, sub := range item.SubItems {
 				costSum += sub.OriginalTotal
 				sellSum += sub.Total
+				listSum += sub.ListUnitPrice * uint64(sub.Qty)
+				discountSum += sub.DiscountAmount
 			}
 			item.OriginalUnitPrice = costSum
 			item.OriginalTotal = costSum
+			item.ListUnitPrice = listSum
+			item.ListTotal = listSum
 			item.UnitPrice = sellSum
 			item.Total = sellSum
-			item.MarginAmount = sellSum - costSum
+			item.DiscountAmount = discountSum
+			item.DiscountEnabled = discountSum > 0
+			item.MarginAmount = signedDifference(sellSum, costSum)
 			item.DisplayOriginalUnitPrice = formatRupiah(costSum)
 			item.DisplayOriginalTotal = formatRupiah(costSum)
 			item.DisplayUnitPrice = formatRupiah(sellSum)
 			item.DisplayTotal = formatRupiah(sellSum)
-			item.DisplayMarginAmount = formatRupiah(item.MarginAmount)
+			item.DisplayListUnitPrice = formatRupiah(listSum)
+			item.DisplayDiscount = formatRupiah(discountSum)
+			item.DisplayMarginAmount = formatSignedRupiah(item.MarginAmount)
 		}
 		items = append(items, item)
 	}
@@ -94,26 +131,38 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSubItem {
 	out := make([]QuotationSubItem, 0, len(subs))
 	for i, sub := range subs {
-		sellUnit := sub.UnitCost
+		listUnit := sub.UnitCost
 		if sub.MarginEnabled {
-			sellUnit = applyMarkup(sub.UnitCost, sub.MarginPercent)
+			listUnit = applyMarkup(sub.UnitCost, sub.MarginPercent)
 		}
+		sellUnit := listUnit
+		if sub.DiscountEnabled {
+			sellUnit = applyDiscount(listUnit, sub.DiscountPercent)
+		}
+		qty := uint64(sub.Qty)
 		item := QuotationSubItem{
 			Description:       sub.Description,
 			SubNo:             fmt.Sprintf("%d.%d", parentNo, i+1),
 			UoM:               sub.UoM,
 			SubSubItems:       buildSubSubItems(sub.SubSubItems),
 			OriginalUnitPrice: sub.UnitCost,
-			OriginalTotal:     uint64(sub.Qty) * sub.UnitCost,
+			OriginalTotal:     qty * sub.UnitCost,
+			ListUnitPrice:     listUnit,
 			UnitPrice:         sellUnit,
-			Total:             uint64(sub.Qty) * sellUnit,
+			Total:             qty * sellUnit,
+			DiscountAmount:    qty * (listUnit - sellUnit),
 			Qty:               sub.Qty,
 		}
-		item.MarginAmount = item.UnitPrice - item.OriginalUnitPrice
-		item.DisplayUnitPrice = formatRupiah(item.UnitPrice)
-		item.DisplayTotal = formatRupiah(item.Total)
+		item.MarginAmount = signedDifference(sellUnit, sub.UnitCost)
+		item.DisplayUnitPrice = formatRupiah(sellUnit)
+		item.DisplayTotal = formatRupiah(qty * sellUnit)
+		item.DisplayListPrice = formatRupiah(listUnit)
+		item.DisplayDiscount = formatRupiah(qty * (listUnit - sellUnit))
+		item.DisplayMarginAmount = formatSignedRupiah(item.MarginAmount)
 		item.MarginEnabled = sub.MarginEnabled
 		item.MarginPercent = sub.MarginPercent
+		item.DiscountEnabled = sub.DiscountEnabled
+		item.DiscountPercent = sub.DiscountPercent
 		out = append(out, item)
 	}
 	return out
@@ -208,6 +257,9 @@ func buildViews(subTotal, discountAmount, grandTotal uint64) (string, string, st
 	return formatRupiah(subTotal), formatRupiah(discountAmount), formatRupiah(grandTotal)
 }
 
+// newQuotationItem seeds an unpriced line: cost and sell are the same figure,
+// and the list price starts equal to the sell price so an undiscounted line
+// reads identically to a line whose discount happens to be zero.
 func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) QuotationItem {
 	total := uint64(qty) * unitPrice
 	return QuotationItem{
@@ -218,11 +270,56 @@ func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) Quo
 		DisplayOriginalTotal:     formatRupiah(total),
 		DisplayUnitPrice:         formatRupiah(unitPrice),
 		DisplayTotal:             formatRupiah(total),
-		DisplayMarginAmount:      formatRupiah(0),
+		DisplayMarginAmount:      formatSignedRupiah(0),
+		DisplayListUnitPrice:     formatRupiah(unitPrice),
+		DisplayDiscount:          formatRupiah(0),
 		OriginalUnitPrice:        unitPrice,
 		OriginalTotal:            total,
 		UnitPrice:                unitPrice,
 		Total:                    total,
+		ListUnitPrice:            unitPrice,
+		ListTotal:                total,
 		Qty:                      qty,
+	}
+}
+
+// priceLine applies a line's margin then its discount, in that order, and
+// records every figure the editor, the customer document and the internal
+// breakdown each need.
+//
+// The cost side never moves: what we pay suppliers does not change when the
+// customer is given a lower price. That is the same rule the whole-quotation
+// discount follows (issue #270), applied per row here.
+func priceLine(costUnit uint64, qty uint32, margin uint16, marginOn bool,
+	discount uint16, discountOn bool) QuotationItem {
+	sellUnit := costUnit
+	if marginOn {
+		sellUnit = applyMarkup(costUnit, margin)
+	}
+	finalUnit := sellUnit
+	if discountOn {
+		finalUnit = applyDiscount(sellUnit, discount)
+	}
+	return QuotationItem{
+		ListUnitPrice: sellUnit,
+		ListTotal:     uint64(qty) * sellUnit,
+		UnitPrice:     finalUnit,
+		Total:         uint64(qty) * finalUnit,
+		DiscountAmount: (uint64(qty) * sellUnit) -
+			(uint64(qty) * finalUnit),
+		DisplayUnitPrice:     formatRupiah(finalUnit),
+		DisplayTotal:         formatRupiah(uint64(qty) * finalUnit),
+		DisplayListUnitPrice: formatRupiah(sellUnit),
+		DisplayDiscount:      formatRupiah((uint64(qty) * sellUnit) - (uint64(qty) * finalUnit)),
+		// Per unit, like every other line: a plain line is sell-unit minus
+		// cost-unit, and a package is pinned to qty 1 so the two agree. Going
+		// through signedDifference is what lets a discount below cost show a
+		// loss instead of wrapping around as a huge uint64 gain.
+		MarginAmount:        signedDifference(finalUnit, costUnit),
+		DisplayMarginAmount: formatSignedRupiah(signedDifference(finalUnit, costUnit)),
+		DiscountEnabled:     discountOn,
+		DiscountPercent:     discount,
+		MarginEnabled:       marginOn,
+		MarginPercent:       margin,
 	}
 }

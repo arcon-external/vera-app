@@ -97,10 +97,14 @@ type QuotationItemRow struct {
 	MarginalizedUnitPrice    int64                 `json:"marginalizedUnitPrice"`
 	MarginalizedTotal        int64                 `json:"marginalizedTotal"`
 	MarginAmount             int64                 `json:"marginAmount"`
+	ListUnitPrice            int64                 `json:"listUnitPrice"`
+	DiscountAmount           int64                 `json:"discountAmount"`
 	ItemNo                   int                   `json:"itemNo"`
 	Qty                      int64                 `json:"qty"`
 	MarginPercent            int16                 `json:"marginPercent"`
+	DiscountPercent          int16                 `json:"discountPercent"`
 	MarginEnabled            bool                  `json:"marginEnabled"`
+	DiscountEnabled          bool                  `json:"discountEnabled"`
 	ShowSubPrices            bool                  `json:"showSubPrices"`
 }
 
@@ -121,10 +125,14 @@ type QuotationSubItemRow struct {
 	MarginalizedUnitPrice    int64    `json:"marginalizedUnitPrice"`
 	MarginalizedTotal        int64    `json:"marginalizedTotal"`
 	MarginAmount             int64    `json:"marginAmount"`
+	ListUnitPrice            int64    `json:"listUnitPrice"`
+	DiscountAmount           int64    `json:"discountAmount"`
 	SubNo                    int      `json:"subNo"`
 	Qty                      int64    `json:"qty"`
 	MarginPercent            int16    `json:"marginPercent"`
+	DiscountPercent          int16    `json:"discountPercent"`
 	MarginEnabled            bool     `json:"marginEnabled"`
+	DiscountEnabled          bool     `json:"discountEnabled"`
 }
 
 // QuotationDetail is one revision: internal economics plus the customer HTML

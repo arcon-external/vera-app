@@ -12,6 +12,15 @@
  */
 export const MAX_MARGIN_PERCENT = 1000;
 
+/**
+ * The ceiling on a per-row discount. 100% is a free line, which is a real
+ * thing to quote; above that it is a price rather than a discount. Mirrors
+ * MaxDiscountPercent in the backend, and shares the name rather than repeating
+ * the number -- a limit written down twice is a limit that eventually
+ * disagrees with itself.
+ */
+export const MAX_DISCOUNT_PERCENT = 100;
+
 /** Formats a numeric IDR amount using Indonesian thousands separators. */
 export function formatIdr(value: number): string {
   if (!Number.isFinite(value)) return "0";
@@ -40,6 +49,22 @@ export function formatMoneyInput(raw: string): string {
 export function applyMargin(cost: number, percent: number, enabled: boolean): number {
   if (!enabled) return cost;
   return cost + Math.trunc((cost * percent) / 100);
+}
+
+/**
+ * A row's own discount, taken off the already-marginalised price.
+ *
+ * Mirrors applyDiscount in backend/builder.go exactly, for the same reason
+ * applyMargin mirrors applyMarkup: the two must never disagree about a number
+ * the customer is quoted. Margin first, then discount, so the printed list
+ * price stays the figure staff see.
+ *
+ * The cost side is untouched by this. What we pay suppliers does not move when
+ * the customer is given a lower price -- see issue #270.
+ */
+export function applyDiscount(price: number, percent: number, enabled: boolean): number {
+  if (!enabled) return price;
+  return price - Math.trunc((price * percent) / 100);
 }
 
 /**
