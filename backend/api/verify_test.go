@@ -27,10 +27,10 @@ var testSigningSeed = func() []byte {
 	return seed
 }()
 
-// resetVerifySchema drops a test schema so reruns on a warm database behave
+// resetTestSchema drops a test schema so reruns on a warm database behave
 // exactly like a fresh one. Without it the second run of a test hits
 // "bootstrap is disabled: users already exist".
-func resetVerifySchema(t *testing.T, schema string) {
+func resetTestSchema(t *testing.T, schema string) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
 	pool, err := pgxpool.New(context.Background(), dsn)
@@ -112,7 +112,7 @@ func fetchVerifyPage(t *testing.T, server *Server, shortID string) (int, string)
 }
 
 func TestVerifyPageShowsVerifiedDocument(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_ok")
+	resetTestSchema(t, "vera_api_verify_ok")
 	server, token := testQuotationServer(t, "vera_api_verify_ok")
 	attachedTestSigner(t, server, "vera_api_verify_ok")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_ok")
@@ -134,7 +134,7 @@ func TestVerifyPageShowsVerifiedDocument(t *testing.T) {
 // TestVerifyPageNeverLeaksInternalValues is the body audit: the page may
 // show the six public fields and nothing from internal economics.
 func TestVerifyPageNeverLeaksInternalValues(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_leak")
+	resetTestSchema(t, "vera_api_verify_leak")
 	server, token := testQuotationServer(t, "vera_api_verify_leak")
 	attachedTestSigner(t, server, "vera_api_verify_leak")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_leak")
@@ -158,7 +158,7 @@ func TestVerifyPageNeverLeaksInternalValues(t *testing.T) {
 }
 
 func TestVerifyPageRejectsUnknownAndMalformed(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_missing")
+	resetTestSchema(t, "vera_api_verify_missing")
 	server, token := testQuotationServer(t, "vera_api_verify_missing")
 	attachedTestSigner(t, server, "vera_api_verify_missing")
 	exportForVerification(t, server, token, "vera_api_verify_missing")
@@ -198,7 +198,7 @@ func TestVerifyPageRejectsUnknownAndMalformed(t *testing.T) {
 }
 
 func TestVerifyPageDetectsStoredTampering(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_tamper")
+	resetTestSchema(t, "vera_api_verify_tamper")
 	server, token := testQuotationServer(t, "vera_api_verify_tamper")
 	database := openTestStore(t, "vera_api_verify_tamper")
 	attachedTestSigner(t, server, "vera_api_verify_tamper")
@@ -233,7 +233,7 @@ func TestVerifyPageDetectsStoredTampering(t *testing.T) {
 }
 
 func TestVerifyPageFlagsSupersededRevision(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_super")
+	resetTestSchema(t, "vera_api_verify_super")
 	server, token := testQuotationServer(t, "vera_api_verify_super")
 	attachedTestSigner(t, server, "vera_api_verify_super")
 
@@ -260,7 +260,7 @@ func TestVerifyPageFlagsSupersededRevision(t *testing.T) {
 }
 
 func TestVerifySubmitComparesPaperClaims(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_claims")
+	resetTestSchema(t, "vera_api_verify_claims")
 	server, token := testQuotationServer(t, "vera_api_verify_claims")
 	attachedTestSigner(t, server, "vera_api_verify_claims")
 	shortID, quoteNumber, quotationID := exportForVerification(t, server, token, "vera_api_verify_claims")
@@ -314,7 +314,7 @@ func TestVerifySubmitComparesPaperClaims(t *testing.T) {
 }
 
 func TestVerifyPageAcceptsPastedLink(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_link")
+	resetTestSchema(t, "vera_api_verify_link")
 	server, token := testQuotationServer(t, "vera_api_verify_link")
 	attachedTestSigner(t, server, "vera_api_verify_link")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_link")
@@ -330,7 +330,7 @@ func TestVerifyPageAcceptsPastedLink(t *testing.T) {
 }
 
 func TestVerifyPageSetsSecurityHeaders(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_headers")
+	resetTestSchema(t, "vera_api_verify_headers")
 	server, token := testQuotationServer(t, "vera_api_verify_headers")
 	attachedTestSigner(t, server, "vera_api_verify_headers")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_headers")
@@ -350,7 +350,7 @@ func TestVerifyPageSetsSecurityHeaders(t *testing.T) {
 }
 
 func TestVerifyPageRateLimits(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_rate")
+	resetTestSchema(t, "vera_api_verify_rate")
 	server, token := testQuotationServer(t, "vera_api_verify_rate")
 	attachedTestSigner(t, server, "vera_api_verify_rate")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_rate")
@@ -374,7 +374,7 @@ func TestVerifyPageRateLimits(t *testing.T) {
 }
 
 func TestVerifyUnavailableWithoutSigner(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_nosigner")
+	resetTestSchema(t, "vera_api_verify_nosigner")
 	server, token := testQuotationServer(t, "vera_api_verify_nosigner")
 	attachedTestSigner(t, server, "vera_api_verify_nosigner")
 
@@ -412,7 +412,7 @@ func TestVerifyPageShowsPpnWhenCharged(t *testing.T) {
 	}
 
 	t.Run("non-FTZ goods shows PPN", func(t *testing.T) {
-		resetVerifySchema(t, "vera_api_verify_ppn")
+		resetTestSchema(t, "vera_api_verify_ppn")
 		server, token := testQuotationServer(t, "vera_api_verify_ppn")
 		attachedTestSigner(t, server, "vera_api_verify_ppn")
 		code, body := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, nonFTZ())
@@ -431,7 +431,7 @@ func TestVerifyPageShowsPpnWhenCharged(t *testing.T) {
 	})
 
 	t.Run("FTZ goods omits PPN", func(t *testing.T) {
-		resetVerifySchema(t, "vera_api_verify_no_ppn")
+		resetTestSchema(t, "vera_api_verify_no_ppn")
 		server, token := testQuotationServer(t, "vera_api_verify_no_ppn")
 		attachedTestSigner(t, server, "vera_api_verify_no_ppn")
 		code, body := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, quotationInput())

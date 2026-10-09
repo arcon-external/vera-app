@@ -116,7 +116,7 @@ func TestVerifySetsHardeningHeaders(t *testing.T) {
 // rate-limit identity by inventing X-Forwarded-For entries: only the address
 // the platform appended is trusted.
 func TestForwardedHeaderCannotSpoofTheLimiter(t *testing.T) {
-	resetVerifySchema(t, "vera_api_verify_spoof")
+	resetTestSchema(t, "vera_api_verify_spoof")
 	server, token := testQuotationServer(t, "vera_api_verify_spoof")
 	attachedTestSigner(t, server, "vera_api_verify_spoof")
 	shortID, _, _ := exportForVerification(t, server, token, "vera_api_verify_spoof")

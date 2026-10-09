@@ -6,8 +6,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"vera-app/backend/store"
 )
+
+// resetAuthSchema drops a test schema so a rerun on a warm database behaves
+// exactly like a fresh one. The tests below bootstrap a user, which refuses
+// once one exists, so without this the second run of the suite fails with
+// "bootstrap is disabled: users already exist".
+func resetAuthSchema(t *testing.T, schema string) {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(),
+		strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")))
+	if err != nil {
+		t.Fatalf("connect for schema reset: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(),
+		`DROP SCHEMA IF EXISTS "`+strings.ReplaceAll(schema, `"`, `""`)+`" CASCADE`); err != nil {
+		t.Fatalf("reset schema %s: %v", schema, err)
+	}
+}
 
 func testStore(t *testing.T, schema string) *store.Store {
 	t.Helper()
@@ -15,6 +35,7 @@ func testStore(t *testing.T, schema string) *store.Store {
 	if dsn == "" {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run auth integration tests")
 	}
+	resetAuthSchema(t, schema)
 	database, err := store.Open(context.Background(), store.Config{DSN: dsn, Schema: schema})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)

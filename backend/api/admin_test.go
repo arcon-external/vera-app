@@ -24,6 +24,9 @@ func adminTestSetup(t *testing.T, schema string) (*Server, *store.Store, string)
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
 	}
 	ctx := context.Background()
+	// Warm-database reruns must behave like a fresh one: this setup
+	// bootstraps an admin, which fails if a previous run left one behind.
+	resetTestSchema(t, schema)
 	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)

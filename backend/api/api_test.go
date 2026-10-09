@@ -21,6 +21,8 @@ func testServer(t *testing.T, schema string) (*Server, context.Context) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
 	}
 	ctx := context.Background()
+	// See adminTestSetup: bootstrapping needs a schema with no users yet.
+	resetTestSchema(t, schema)
 	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)

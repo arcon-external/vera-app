@@ -17,7 +17,7 @@ import (
 // the store directly.
 func draftTestServer(t *testing.T, schema string) (*Server, string, string, *store.Store) {
 	t.Helper()
-	resetVerifySchema(t, schema)
+	resetTestSchema(t, schema)
 	server, ownerToken := testQuotationServer(t, schema)
 	database := openTestStore(t, schema)
 

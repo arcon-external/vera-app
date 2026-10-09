@@ -92,11 +92,7 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test")
 	resetTestSequences(t, database)
 	if pool, err := database.poolOrError(); err != nil {
 		t.Fatalf("pool: %v", err)
@@ -300,11 +296,7 @@ func TestPeekQuoteSequenceNeverConsumes(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_peek"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_peek")
 	resetTestSequences(t, database)
 
 	const customer, yy = 2, 26
@@ -332,11 +324,7 @@ func TestQuoteSequencesArePerCustomerPerYear(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_cycles"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_cycles")
 	resetTestSequences(t, database)
 
 	// Infineon at 0777 does not move Datalec: A,B,A allocates 1,1,2.
@@ -372,11 +360,7 @@ func TestQuoteSequenceOverflowWidensInsteadOfWrapping(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_overflow"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_overflow")
 	resetTestSequences(t, database)
 
 	pool, err := database.poolOrError()
@@ -408,11 +392,7 @@ func TestQuoteNumberCompositeUniqueness(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_uniq"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_uniq")
 
 	pool, err := database.poolOrError()
 	if err != nil {
