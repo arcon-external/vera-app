@@ -4,6 +4,31 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.8.1] - 2026-10-10
+
+### Fixed
+
+- **A line discounted below what we paid for it could not be exported.** The
+  quotation failed to save with a database error about
+  `quotation_revision_items_margin_amount_check`, and nothing reached the
+  archive. Such a line has a negative margin — that is the honest figure and the
+  one the editor shows — but the column still required a margin of zero or more.
+  It now accepts a loss, while still refusing a margin below what the line cost.
+- **The Total IDR column on the customer quotation was not aligned like the
+  figures around it.** Once a quotation had any per-row discount, the extra
+  Discount column pushed everything after it along, and Total IDR quietly
+  stopped being centred — it sat against the top-left of its cell while every
+  other number sat in the middle. Every number in the table is now centred the
+  same way, and only the description flows from the top.
+
+### Changed
+
+- The internal panel's PPN row reads **PPN collected**, without the
+  parenthetical — it already sits inside a box marked *Internal only*.
+- In Quotation Details, **Validity, Payment, Lead time and Incoterm now share
+  the full width** of their row, closing the gap the removed Discount field left
+  behind.
+
 ## [0.8.0] - 2026-10-10
 
 ### Fixed
