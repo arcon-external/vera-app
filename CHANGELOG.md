@@ -4,6 +4,43 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.5.0] - 2026-10-09
+
+### Added
+
+- **A line can now be a main item built from priced sub-items.** Split a line
+  and each sub-item carries its own quantity, unit, cost and margin; the main
+  item becomes their sum — always quantity 1 Lot — and its margin is shown as
+  the **overall margin** of the whole line. What used to be one lump price can
+  now be quoted the way the work is actually composed: the control panel, the
+  wiring, the commissioning, each priced on its own.
+- **Choose what the customer sees on an itemized line.** One switch picks
+  between the sub-items printing as their own priced rows under a title-only
+  main item, or the full price staying on the main item with the sub-items
+  listed as unbilled scope lines. The total is identical either way; only the
+  presentation changes.
+- **Sub-sub-items.** A sub-item can spell out what it includes with plain
+  detail lines beneath it — no numbers, just the words.
+- **Paste a block of sub-items from Excel.** One row per sub-item —
+  description, qty, UoM, unit cost, margin % — straight into the line.
+- Sub-item quotations carry the same verification code as every other
+  document: every printed part, down to the detail lines, is covered.
+- The line's overall margin is shown live as the sub-items change. A margin
+  that comes out to a round figure is shown as-is; anything else is rounded
+  and marked with **≈**.
+
+### Fixed
+
+- Exports of FTZ quotations no longer print a `PPN 11% Rp0` row that the
+  preview does not show.
+- On longer quotations, the closing sections — the totals cards, the closing
+  note and the verification block — now break across pages exactly like the
+  preview, instead of moving together and occasionally adding an extra page;
+  the totals card also spaces its rows to match the preview.
+- In table rows whose description wraps to a second line, the numbers beside
+  it (Qty., UoM., Unit price, Total) now sit vertically centered rather than
+  at the top of the row.
+
 ## [0.4.1] - 2026-10-07
 
 ### Added
