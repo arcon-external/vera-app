@@ -171,6 +171,17 @@ export function SummaryRail({
           {pricing.taxAmount > 0 ? (
             <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} />
           ) : null}
+          {/* PPN is collected for the state, so it has to be shown
+              leaving the figure the way PPH22 is -- otherwise the grand
+              total and the nett below it look unrelated on a goods
+              quotation. It comes off the customer total, not out of the
+              sale: the bridge is Grand total - PPN = Nett after Tax. */}
+          {pricing.ppnAmount > 0 ? (
+            <AmountRow
+              label="PPN collected (not profit)"
+              value={-pricing.ppnAmount}
+            />
+          ) : null}
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-small text-internal-700">Nett after Tax</span>
             <span className="tnum text-body font-semibold text-internal-900">
