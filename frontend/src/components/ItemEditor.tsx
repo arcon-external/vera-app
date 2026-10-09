@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { Button } from "./ui";
 import {
@@ -393,6 +393,52 @@ function Captioned({
 }
 
 /**
+ * A bullet input whose text wraps instead of scrolling away. It looks like a
+ * textarea and grows with its content, but the stored value stays a single
+ * line: pasted newlines become spaces and Enter blurs instead of inserting
+ * one, so bullets keep the shape the paste parsers and the customer copy
+ * expect.
+ */
+function WrappingLine({
+  value,
+  onChange,
+  ariaLabel,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  ariaLabel: string;
+  placeholder: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={value}
+      onChange={(event) =>
+        onChange(event.target.value.replace(/\r?\n/g, " "))
+      }
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+      }}
+      className="block min-w-0 flex-1 resize-none overflow-hidden rounded-md px-1.5 py-1 text-caption leading-[16px] text-ink-700 outline-hidden transition-colors duration-150 placeholder:text-ink-400 hover:bg-paper-subtle focus:bg-white focus:ring-2 focus:ring-accent-500/20"
+    />
+  );
+}
+
+/**
  * The bullet list editor shared by description bullets (plain lines) and
  * sub-item detail lines. The same controls, one meaning per context.
  */
@@ -420,17 +466,15 @@ function BulletsEditor({
       }
     >
       {lines.map((line, lineIndex) => (
-        <div key={lineIndex} className="flex items-center gap-2">
-          <span aria-hidden="true" className="select-none text-ink-300">
+        <div key={lineIndex} className="flex items-start gap-2">
+          <span aria-hidden="true" className="mt-1 select-none text-ink-300">
             —
           </span>
-          <input
-            type="text"
-            aria-label={ariaLabel(lineIndex + 1)}
+          <WrappingLine
+            ariaLabel={ariaLabel(lineIndex + 1)}
             placeholder={placeholder}
             value={line}
-            onChange={(event) => onChange(lineIndex, event.target.value)}
-            className="min-w-0 flex-1 rounded-md px-1.5 py-1 text-caption text-ink-700 outline-hidden transition-colors duration-150 placeholder:text-ink-400 hover:bg-paper-subtle focus:bg-white focus:ring-2 focus:ring-accent-500/20"
+            onChange={(value) => onChange(lineIndex, value)}
           />
           <button
             type="button"
@@ -878,21 +922,6 @@ function ItemRow({
           )}
         </div>
 
-        {!hasSubItems && showPanel ? (
-          <BulletsEditor
-            lines={item.bullets}
-            addLabel="Add description line"
-            placeholder="Description line"
-            ariaLabel={(position) =>
-              `Description line ${position} for line ${index + 1}`
-            }
-            onAdd={() => onAddBullet(item.key)}
-            onRemove={(bulletIndex) => onRemoveBullet(item.key, bulletIndex)}
-            onChange={(bulletIndex, value) =>
-              onBulletChange(item.key, bulletIndex, value)
-            }
-          />
-        ) : null}
       </div>
 
         <button
@@ -909,8 +938,8 @@ function ItemRow({
       </div>
 
       {showSplit ? (
-        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[250px_minmax(0,1fr)]">
-          <div className="min-w-0 lg:pt-[18px]">
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="min-w-0">
             <BulletsEditor
               lines={item.bullets}
               addLabel="Add description line"
@@ -925,7 +954,7 @@ function ItemRow({
               }
             />
           </div>
-          <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[64px_52px_116px_140px_140px_minmax(0,1fr)]">
+          <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[64px_52px_112px_128px_128px_minmax(0,1fr)]">
             {controlCells}
           </div>
         </div>
@@ -1122,8 +1151,8 @@ function SubRow({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[250px_minmax(0,1fr)]">
-        <div className="min-w-0 lg:pt-[18px]">
+      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="min-w-0">
             <BulletsEditor
               lines={sub.bullets}
               addLabel="Add sub-sub-item"
@@ -1134,7 +1163,7 @@ function SubRow({
               onChange={onBulletChange}
             />
         </div>
-        <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[44px_68px_104px_124px_124px_minmax(0,1fr)]">
+        <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[44px_68px_100px_120px_120px_minmax(0,1fr)]">
         <Captioned label="Qty">
           <input
             type="text"
