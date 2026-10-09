@@ -40,11 +40,7 @@ func TestSetUserEmailFlipsLoginIdentity(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_email_set"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_email_set")
 	userA, userB := emailTestUsers(t, database)
 
 	old, fresh, err := database.SetUserEmail(ctx, userA.ID, " email-new@example.com ")
@@ -82,11 +78,7 @@ func TestEmailChangeRequestFlow(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_email_flow"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_email_flow")
 	userA, userB := emailTestUsers(t, database)
 
 	first, err := database.RequestEmailChange(ctx, userA.ID, "email-new@example.com")
@@ -153,11 +145,7 @@ func TestEmailChangeRejectLeavesIdentity(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_email_reject"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_email_reject")
 	userA, userB := emailTestUsers(t, database)
 
 	request, err := database.RequestEmailChange(ctx, userA.ID, "email-new@example.com")

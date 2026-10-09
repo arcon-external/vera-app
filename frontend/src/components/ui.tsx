@@ -10,7 +10,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const base =
-  "inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-[transform,background-color,border-color,color,opacity] duration-150 ease-out-quart active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100";
+  "inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg font-medium transition-[transform,background-color,border-color,color,opacity] duration-150 ease-out-quart active:scale-[0.98] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100";
 
 const variants: Record<ButtonVariant, string> = {
   primary:

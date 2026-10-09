@@ -42,10 +42,7 @@ func draftTestStore(t *testing.T) *Store {
 	if dsn == "" {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
-	database, err := Open(context.Background(), Config{DSN: dsn, Schema: "vera_test_drafts"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
+	database := openTestSchema(t, "vera_test_drafts")
 	t.Cleanup(database.Close)
 	// A warm database from a previous run would collide on the user emails.
 	for _, email := range []string{"draft-a@example.com", "draft-b@example.com", "draft-admin@example.com"} {

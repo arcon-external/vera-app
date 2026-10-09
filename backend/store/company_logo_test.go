@@ -14,11 +14,7 @@ func TestCompanyLogoRoundTrip(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_company_logo"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_company_logo")
 
 	// A previous failed run may have left artwork behind; start clean.
 	if _, err := database.SetCompanyLogo(ctx, nil, ""); err != nil {
@@ -68,11 +64,7 @@ func TestCompanyLogoValidation(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_company_logo_invalid"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_company_logo_invalid")
 
 	small := []byte{1, 2, 3}
 	if _, err := database.SetCompanyLogo(ctx, small, "application/pdf"); err == nil {

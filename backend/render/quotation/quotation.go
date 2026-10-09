@@ -61,16 +61,21 @@ type Input struct {
 	DisplayGrandTotal string
 	DisplayDiscount   string
 	DisplaySubTotal   string
-	ServiceCategory   string
-	Incoterm          string
-	Items             []Item
-	LogoPNG           []byte
-	QRPNG             []byte
-	RevisionID        uint16
-	LeadTime          uint8
-	PaymentTerm       uint8
-	Validity          uint8
-	DiscountPercent   uint8
+	// DiscountAmount is the raw whole-quotation discount, so the renderer can
+	// omit the row entirely when there is none -- the same condition the HTML
+	// template applies. Discounts are entered per line now, and a quotation
+	// without one must not print "Discount (0%) Rp0".
+	DiscountAmount  uint64
+	ServiceCategory string
+	Incoterm        string
+	Items           []Item
+	LogoPNG         []byte
+	QRPNG           []byte
+	RevisionID      uint16
+	LeadTime        uint8
+	PaymentTerm     uint8
+	Validity        uint8
+	DiscountPercent uint8
 }
 
 // Item is one quotation line as the quotation holds it. DisplayDesc is the HTML

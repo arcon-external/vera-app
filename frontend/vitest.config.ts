@@ -10,10 +10,12 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    // Only the pure modules are under test. Nothing here needs a DOM: the UI is
-    // not automatable today and building that scaffolding is a bigger decision
-    // than wiring up a runner.
+    // Pure modules, plus components rendered to a string. Nothing here needs a
+    // DOM: renderToString runs in node, which is enough to catch a component
+    // that throws during render -- the failure that blanked the app after
+    // Prepare. Interaction still is not automatable; that needs a DOM runner
+    // and is a bigger decision than this suite.
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

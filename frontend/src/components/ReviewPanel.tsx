@@ -194,6 +194,10 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
               </thead>
               <tbody className="divide-y divide-rule">
                 {internal.Items.flatMap((item) => {
+                  // The API types these as arrays but a Go nil slice marshals
+                  // to null, so neither is trusted here: reading .length on
+                  // null threw and unmounted the whole app.
+                  const subItems = item.SubItems ?? [];
                   const rows: React.ReactNode[] = [
                     <tr key={item.No} className="align-top">
                       <td className="tnum px-4 py-2.5 text-ink-400">{item.No}</td>
@@ -214,7 +218,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                           ) : null}
                         </div>
                         <div className="tnum mt-0.5 text-caption text-internal-700">
-                          {item.SubItems.length > 0
+                          {subItems.length > 0
                             ? `${item.DisplayMarginBlended} overall margin`
                             : item.MarginEnabled
                               ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
@@ -229,15 +233,16 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                   // The composition prints beneath its main item: both sides
                   // per sub-item, so a reviewer sees exactly where the money
                   // sits without opening the document.
-                  for (const sub of item.SubItems) {
+                  for (const sub of subItems) {
+                      const details = sub.Details ?? [];
                     rows.push(
                       <tr key={`${item.No}-${sub.SubNo}`} className="align-top">
                         <td className="tnum px-4 py-2 text-ink-300">{sub.SubNo}</td>
                         <td className="whitespace-pre-wrap break-words px-4 py-2 text-caption leading-relaxed text-ink-600">
                           {sub.Description}
-                          {sub.Details.length > 0 ? (
+                          {details.length > 0 ? (
                             <ul className="mt-0.5 space-y-0.5">
-                              {sub.Details.map((detail, detailIndex) => (
+                              {details.map((detail, detailIndex) => (
                                 <li key={detailIndex} className="text-ink-400">
                                   — {detail}
                                 </li>

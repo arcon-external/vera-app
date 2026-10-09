@@ -313,6 +313,11 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 			No:                       item.No,
 			Qty:                      item.Qty,
 		}
+		// SubItems is set before the conditional below so a plain line marshals
+		// as [] and never as null. A nil slice becomes JSON null, and the
+		// review panel reads .length on this field -- null there threw and
+		// unmounted the whole app (white screen after Prepare).
+		view.SubItems = make([]InternalPreviewSubItem, 0)
 		if len(item.SubItems) > 0 {
 			subs := make([]InternalPreviewSubItem, 0, len(item.SubItems))
 			var costTotal, sellTotal uint64

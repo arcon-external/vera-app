@@ -205,10 +205,14 @@
 						<span>Sub Total</span>
 						<span>Rp{{.DisplaySubTotal}}</span>
 					</div>
-					<div class="line discount">
+					{{/* Discounts are entered per line now, so a quotation
+					     without one must not print an empty "Discount (0%) Rp0"
+					     row. The row survives only for revisions that carry a
+					     whole-quotation discount, which older ones still can. */}}
+					{{if .DiscountAmount}}<div class="line discount">
 						<span>Discount ({{.DiscountPercent}}%)</span>
 						<span>Rp{{.DisplayDiscountAmount}}</span>
-					</div>
+					</div>{{end}}
 					{{if .PpnAmount}}<div class="line ppn">
 						<span>PPN 11%</span>
 						<span>Rp{{.DisplayPpnAmount}}</span>

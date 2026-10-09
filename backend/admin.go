@@ -62,7 +62,7 @@ func (a *AdminAPI) ListUsers() ([]ManagedUser, error) {
 	if response.Users == nil {
 		response.Users = []ManagedUser{}
 	}
-	return response.Users, nil
+	return NonNilList(response.Users), nil
 }
 
 func (a *AdminAPI) CreateUser(email, displayName, role string) (ManagedUser, error) {
@@ -318,7 +318,7 @@ func (a *AdminAPI) ListClients() ([]ManagedClient, error) {
 	if response.Clients == nil {
 		response.Clients = []ManagedClient{}
 	}
-	return response.Clients, nil
+	return NonNilList(response.Clients), nil
 }
 
 // CreateClient adds a client. Code 0 allocates the next free code.

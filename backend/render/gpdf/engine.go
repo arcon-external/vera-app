@@ -71,6 +71,7 @@ type Input struct {
 	// wording it is replacing rather than reformat it a second time.
 	DisplaySubTotal   string
 	DisplayDiscount   string
+	DiscountAmount    uint64
 	DisplayPpn        string
 	DisplayGrandTotal string
 	DiscountPercent   string

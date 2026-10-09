@@ -30,11 +30,7 @@ func TestClientCRUD(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_clients"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_clients")
 	clientTestCleanup(t, database, 90, 91)
 
 	created, err := database.CreateClient(ctx, 90, "Test Client A", "Test Street 1")
@@ -129,11 +125,7 @@ func TestClientDeleteBlockedByQuotations(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_client_guard"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_client_guard")
 	clientTestCleanup(t, database, 92)
 
 	client, err := database.CreateClient(ctx, 92, "Guarded Client", "Guard Street")
@@ -172,11 +164,7 @@ func TestLegacyClientSeedPopulatesDirectory(t *testing.T) {
 		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
 	}
 	ctx := context.Background()
-	database, err := Open(ctx, Config{DSN: dsn, Schema: "vera_test_client_seed"})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestSchema(t, "vera_test_client_seed")
 
 	rows, err := database.ListClients(ctx)
 	if err != nil {

@@ -90,7 +90,7 @@ func TestCompanyLogoAdminRoundTrip(t *testing.T) {
 }
 
 func TestExportRendersUploadedLogo(t *testing.T) {
-	resetVerifySchema(t, "vera_api_company_logo_render")
+	resetTestSchema(t, "vera_api_company_logo_render")
 	server, token := testQuotationServer(t, "vera_api_company_logo_render")
 	database, err := store.Open(context.Background(), store.Config{
 		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
