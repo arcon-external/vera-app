@@ -178,7 +178,7 @@ export function SummaryRail({
               sale: the bridge is Grand total - PPN = Nett after Tax. */}
           {pricing.ppnAmount > 0 ? (
             <AmountRow
-              label="PPN collected (not profit)"
+              label="PPN collected"
               value={-pricing.ppnAmount}
             />
           ) : null}
