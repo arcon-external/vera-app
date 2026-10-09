@@ -4,6 +4,18 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.7.1] - 2026-10-09
+
+### Fixed
+
+- Opening an **older** quotation — one exported before per-row discounts
+  existed — could show a made-up negative discount amount in its detail view.
+  Nothing on screen was wrong; the figure was carried internally and would have
+  surfaced the moment anyone displayed it. A line with no discount of its own now
+  reports no discount money, whatever it was exported before the feature.
+
+Quotations already exported are otherwise untouched.
+
 ## [0.7.0] - 2026-10-09
 
 ### Added
