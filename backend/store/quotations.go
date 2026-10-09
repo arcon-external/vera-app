@@ -314,9 +314,8 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		); err != nil {
 			return QuotationRecord{}, fmt.Errorf("scan quotation item: %w", err)
 		}
-		// The discount's money is exact arithmetic on two stored figures, so
-		// it is derived rather than stored -- see migration 020.
-		item.DiscountAmount = item.ListUnitPrice*item.Qty - item.UnitPrice*item.Qty
+		item.DiscountAmount = rowDiscountAmount(item.DiscountEnabled, item.ListUnitPrice,
+			item.UnitPrice, item.Qty)
 		record.Items = append(record.Items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -365,7 +364,8 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		); err != nil {
 			return QuotationRecord{}, fmt.Errorf("scan quotation sub-item: %w", err)
 		}
-		sub.DiscountAmount = sub.ListUnitPrice*sub.Qty - sub.UnitPrice*sub.Qty
+		sub.DiscountAmount = rowDiscountAmount(sub.DiscountEnabled, sub.ListUnitPrice,
+			sub.UnitPrice, sub.Qty)
 		attached := false
 		for i := range record.Items {
 			if record.Items[i].ItemNo == itemNo {
@@ -814,6 +814,21 @@ func nextQuoteSequenceTx(ctx context.Context, tx pgx.Tx, schema string, customer
 		return 0, fmt.Errorf("allocate quote sequence: %w", err)
 	}
 	return sequence, nil
+}
+
+// rowDiscountAmount is the money a row's discount came off, derived rather
+// than stored (see migration 020) so there is only ever one copy of the truth.
+//
+// Gated on DiscountEnabled for a reason that is easy to miss: migration 020
+// added list_unit_price with DEFAULT 0, so every revision written before it
+// reads a list price of zero. Deriving unconditionally would turn those rows
+// into a negative discount -- 0 - unit -- a figure that never meant anything.
+// A row with no discount of its own has no discount money.
+func rowDiscountAmount(enabled bool, listUnit, unit int64, qty int64) int64 {
+	if !enabled {
+		return 0
+	}
+	return (listUnit - unit) * qty
 }
 
 func nilIfEmptyBytes(value []byte) []byte {
