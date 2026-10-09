@@ -1078,7 +1078,14 @@ func (e *Engine) totalsRows(in Input) []totalRow {
 	// would not catch it.
 	rows := []totalRow{
 		{label: "Sub Total", value: "Rp" + in.DisplaySubTotal},
-		{label: "Discount (" + in.DiscountPercent + "%)", value: "Rp" + in.DisplayDiscount, colour: colGreen},
+	}
+	// Conditional exactly as the template is: no discount, no row.
+	if in.DiscountAmount > 0 {
+		rows = append(rows, totalRow{
+			label:  "Discount (" + in.DiscountPercent + "%)",
+			value:  "Rp" + in.DisplayDiscount,
+			colour: colGreen,
+		})
 	}
 	if in.DisplayPpn != "" {
 		rows = append(rows, totalRow{label: "PPN 11%", value: "Rp" + in.DisplayPpn})

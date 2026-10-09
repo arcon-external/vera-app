@@ -1306,6 +1306,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 		DisplaySubTotal:   q.Data.DisplaySubTotal,
 		DisplayDiscount:   q.Data.DisplayDiscountAmount,
+		DiscountAmount:    q.Data.DiscountAmount,
 		DisplayPpn:        displayPpn,
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,

@@ -192,13 +192,6 @@ export function DetailsPanel({
             value={value.leadTime}
             onChange={(leadTime) => onChange({ leadTime })}
           />
-          <NumberField
-            label="Discount"
-            suffix="%"
-            max={100}
-            value={value.discountPercent}
-            onChange={(discountPercent) => onChange({ discountPercent })}
-          />
           <Field label="Incoterm">
             <Select
               value={value.incoterm}

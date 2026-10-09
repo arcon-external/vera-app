@@ -124,7 +124,10 @@ const DEFAULT_DETAILS: DetailsState = {
   validity: 30,
   paymentTerm: 90,
   leadTime: 60,
-  discountPercent: 5,
+  // No quotation-wide discount is offered any more: discounts are entered per
+  // line. The field stays in the payload so older drafts and revisions keep
+  // whatever value they were saved with.
+  discountPercent: 0,
   incoterm: "EXW",
   taxZone: "FTZ",
   taxType: "Goods",
@@ -1095,7 +1098,6 @@ function App() {
           validity: Number.parseInt(cols[2], 10) || 30,
           paymentTerm: Number.parseInt(cols[3], 10) || 90,
           leadTime: Number.parseInt(cols[4], 10) || 60,
-          discountPercent: Math.min(Number.parseInt(cols[5], 10) || 5, 100),
           incoterm: (cols[7] || "").trim() || "EXW",
         };
 
