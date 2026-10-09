@@ -134,6 +134,13 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// is parsed.
 	server.echo.GET("/v/:id", server.verifyPage)
 	server.echo.POST("/verify", server.verifySubmit, echoMiddleware.BodyLimit("4K"))
+	// Drafts are per-user and decided in SQL: these handlers only ever pass
+	// the caller's id, so there is no route by which one account reaches
+	// another's drafts, admins included.
+	server.echo.GET("/v1/drafts", server.listDrafts, server.requireSession)
+	server.echo.POST("/v1/drafts", server.saveDraft, server.requireSession)
+	server.echo.GET("/v1/drafts/:id", server.getDraft, server.requireSession)
+	server.echo.DELETE("/v1/drafts/:id", server.deleteDraft, server.requireSession)
 	server.echo.GET("/v1/clients", server.listClients, server.requireSession)
 	server.echo.POST("/v1/admin/clients", server.createClient, server.requireSession, server.requireAdmin)
 	server.echo.PATCH("/v1/admin/clients/:id", server.updateClient, server.requireSession, server.requireAdmin)

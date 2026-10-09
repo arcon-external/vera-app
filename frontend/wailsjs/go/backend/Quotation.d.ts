@@ -4,9 +4,13 @@ import {store} from '../models';
 import {backend} from '../models';
 import {auth} from '../models';
 
+export function ClearDraftContext():Promise<void>;
+
 export function ClearRevisionContext():Promise<void>;
 
 export function CustomerID():Promise<number>;
+
+export function DeleteDraft(arg1:number):Promise<void>;
 
 export function DeleteQuotation(arg1:number):Promise<void>;
 
@@ -15,6 +19,8 @@ export function DraftRevision(arg1:string,arg2:Array<number>,arg3:string):Promis
 export function Export(arg1:string):Promise<void>;
 
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
+
+export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
 
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
@@ -26,6 +32,8 @@ export function GetQuotationRevision(arg1:number,arg2:number):Promise<backend.Ar
 
 export function ListCustomers():Promise<Array<backend.ManagedClient>>;
 
+export function ListDrafts():Promise<Array<backend.DraftSummaryDTO>>;
+
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
 
 export function PickDirectory():Promise<string>;
@@ -34,7 +42,11 @@ export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 
 export function RefreshCompanyIdentity():Promise<void>;
 
+export function SaveDraft(arg1:backend.SavedDraft):Promise<number>;
+
 export function SetAuthService(arg1:auth.Service):Promise<void>;
+
+export function SetDraftContext(arg1:number):Promise<void>;
 
 export function SetQuoteNumber(arg1:string,arg2:number):Promise<void>;
 

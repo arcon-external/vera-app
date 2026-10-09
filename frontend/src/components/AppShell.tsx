@@ -5,12 +5,21 @@ import { VeraLogo } from "./VeraLogo";
 import type { SignedInUser } from "./LoginPage";
 
 interface AppShellProps {
-  page: "create" | "archive" | "detail" | "users" | "clients" | "settings";
+  page:
+    | "create"
+    | "drafts"
+    | "archive"
+    | "detail"
+    | "users"
+    | "clients"
+    | "settings";
   onOpenEditor: () => void;
+  onOpenDrafts: () => void;
   onOpenArchive: () => void;
   onOpenUsers?: () => void;
   onOpenClients?: () => void;
   onOpenSettings?: () => void;
+  draftCount?: number;
   showUsersTab?: boolean;
   showClientsTab?: boolean;
   companyName?: string;
@@ -20,8 +29,12 @@ interface AppShellProps {
   onSignOut?: () => void;
 }
 
+// Drafts sit next to the Editor because that is the relationship: a draft is
+// unfinished editor work, not a quotation. Before the Archive keeps work in
+// progress and work done in the order they happen.
 const tabs = [
   { id: "create", label: "Editor" },
+  { id: "drafts", label: "Drafts" },
   { id: "archive", label: "Archive" },
   { id: "clients", label: "Clients" },
   { id: "users", label: "Team" },
@@ -36,6 +49,7 @@ function initials(name: string): string {
 
 function isTabActive(tab: string, page: string): boolean {
   if (tab === "create") return page === "create";
+  if (tab === "drafts") return page === "drafts";
   if (tab === "archive") return page === "archive" || page === "detail";
   if (tab === "clients") return page === "clients";
   return page === "users";
@@ -44,10 +58,12 @@ function isTabActive(tab: string, page: string): boolean {
 export function AppShell({
   page,
   onOpenEditor,
+  onOpenDrafts,
   onOpenArchive,
   onOpenUsers,
   onOpenClients,
   onOpenSettings,
+  draftCount = 0,
   showUsersTab = false,
   showClientsTab = false,
   companyName = "PT Arcon Penta Persada",
@@ -66,7 +82,7 @@ export function AppShell({
             <span className="text-[17px] font-semibold tracking-[-0.03em] text-ink-950">
               Vera
             </span>
-            <span className="hidden text-caption text-ink-500 sm:inline">
+            <span className="hidden text-caption text-ink-500 xl:inline">
               Quotation Generator
             </span>
           </div>
@@ -83,30 +99,47 @@ export function AppShell({
                 const open =
                   tab.id === "create"
                     ? onOpenEditor
-                    : tab.id === "archive"
-                      ? onOpenArchive
-                      : tab.id === "clients"
-                        ? onOpenClients
-                        : onOpenUsers;
+                    : tab.id === "drafts"
+                      ? onOpenDrafts
+                      : tab.id === "archive"
+                        ? onOpenArchive
+                        : tab.id === "clients"
+                          ? onOpenClients
+                          : onOpenUsers;
+                // Only worth a badge when there is something to come back to,
+                // and only on an inactive tab: a count on the tab you are
+                // already looking at is noise.
+                const badge = tab.id === "drafts" && !active ? draftCount : 0;
                 return (
                   <button
                     key={tab.id}
                     type="button"
                     aria-current={active ? "page" : undefined}
                     onClick={open}
-                    className={`min-h-9 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                    className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg px-4 py-2.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
                       active
                         ? "bg-ink-900 text-white"
                         : "text-ink-500 hover:bg-paper-muted hover:text-ink-900"
                     }`}
                   >
                     {tab.label}
+                    {badge > 0 ? (
+                      <span
+                        className="tnum flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent-100 px-1 text-[11px] font-semibold leading-none text-accent-800"
+                        aria-label={`${badge} saved draft${badge === 1 ? "" : "s"}`}
+                      >
+                        {badge > 99 ? "99+" : badge}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
           </nav>
 
-          <span className="ml-auto hidden text-micro font-medium uppercase tracking-[0.16em] text-ink-500 lg:block">
+          {/* The company name must never wrap: at the desktop's own 1024px
+              there is room for it on one line, and a wrapped two-line block
+              is what pushed the header past its 64px. */}
+          <span className="ml-auto hidden max-w-[220px] truncate whitespace-nowrap text-micro font-medium uppercase tracking-[0.16em] text-ink-500 lg:block">
             {companyName}
           </span>
           {user ? (
