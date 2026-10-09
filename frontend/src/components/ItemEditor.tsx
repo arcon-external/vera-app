@@ -85,12 +85,16 @@ export function subItemsRollup(subItems: EditorSubItem[]): {
   return { cost, sell, margin: blendedMargin(cost, sell) };
 }
 
-/** Renders the blended margin exactly as the rule wants it: ≈ only when rounded. */
+/**
+ * Renders the line's overall margin exactly as the rule wants it: a whole
+ * percent as-is, anything else rounded half-up and prefixed with ≈. "Overall"
+ * because it is the margin of the summed money, not any single sub-item's.
+ */
 export function blendedMarginLabel(margin: {
   percent: number;
   approx: boolean;
 }): string {
-  return `${margin.approx ? "≈" : ""}${margin.percent}% blended`;
+  return `${margin.approx ? "≈" : ""}${margin.percent}% overall margin`;
 }
 
 interface ItemEditorProps {
@@ -657,8 +661,8 @@ function ItemRow({
           </MobileField>
           <MobileField label="Margin">
             <div
-              className="flex h-9 items-center lg:justify-end"
-              title="Blended margin across the sub-items: total profit over total cost. Updates as the sub-items change."
+              className="flex h-9 items-center"
+              title="Overall margin across the sub-items: total profit over total cost. Updates as the sub-items change."
             >
               {rollup.cost > 0 ? (
                 <span className="tnum whitespace-nowrap rounded-md border border-rule bg-white px-2 py-1 text-caption font-medium text-ink-700">
@@ -839,7 +843,7 @@ function ItemRow({
             </div>
           </div>
 
-          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 pb-2 pl-1 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 border border-transparent px-2.5 pb-2 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
             <span>Sub-item</span>
             <span className="text-right">Qty</span>
             <span>UoM</span>

@@ -210,7 +210,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                         </div>
                         <div className="tnum mt-0.5 text-caption text-internal-700">
                           {item.SubItems.length > 0
-                            ? `${item.DisplayMarginBlended} blended`
+                            ? `${item.DisplayMarginBlended} overall margin`
                             : item.MarginEnabled
                               ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
                               : "No margin"}

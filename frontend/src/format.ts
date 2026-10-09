@@ -43,7 +43,7 @@ export function applyMargin(cost: number, percent: number, enabled: boolean): nu
 }
 
 /**
- * The blended margin across priced sub-items: total profit over total cost.
+ * The overall margin across priced sub-items: total profit over total cost.
  *
  * The money is summed first and the division happens once -- the blend of the
  * rates is not the rate of the blend, and the backend divides the money. A
