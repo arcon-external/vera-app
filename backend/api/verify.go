@@ -53,8 +53,13 @@ type verifyFieldDiff struct {
 // cannot reach the page, which is the structural guarantee that internal
 // economics never leak through verification.
 type verifyView struct {
-	Issuer       string
-	Total        string
+	Issuer string
+	Total  string
+	// PPN is the tax the customer pays on top of the price. It is public: it is
+	// printed on the quotation, so a customer checking the document against our
+	// record needs to see the same figure. Empty when none was charged, and the
+	// template omits the row entirely then.
+	PPN          string
 	Detail       string
 	LookupID     string
 	QuoteNo      string
@@ -220,6 +225,9 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	view.Recipient = evidence.RecipientCompany
 	view.Issuer = evidence.IssuerName
 	view.Total = "Rp" + formatAmount(evidence.GrandTotal)
+	if evidence.PpnAmount > 0 {
+		view.PPN = "Rp" + formatAmount(evidence.PpnAmount)
+	}
 
 	// Theme and issuer display follow the live company profile; a stored
 	// empty issuer (legacy rows predate it) falls back to the profile name.

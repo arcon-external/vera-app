@@ -32,16 +32,16 @@ const (
 // Rate constants in basis points.
 const (
 	ppnRateBps               = 1100 // 11% PPN on non-FTZ goods (customer-facing)
-	servicesNonConstrRateBps = 200  // 2% withholding on services (internal only)
-	servicesConstrRateBps    = 175  // 1.75% final tax on construction (internal only)
+	servicesNonConstrRateBps = 200  // 2% PPh22 on non-construction services (internal only)
+	servicesConstrRateBps    = 175  // 1.75% PPh22 on construction services (internal only)
 )
 
 // taxLabels maps tax selections to human-readable labels.
 var taxLabels = map[string]string{
 	"GoodsFTZ":                "Goods - FTZ (0%)",
 	"GoodsNonFTZ":             "Goods - PPN 11%",
-	"ServicesNonConstruction": "Services - Non-construction 2% withholding",
-	"ServicesConstruction":    "Services - Construction 1.75% final",
+	"ServicesNonConstruction": "Services - Non-construction 2% PPh22",
+	"ServicesConstruction":    "Services - Construction 1.75% PPh22",
 }
 
 // resolveTax resolves a zone/type/category triple into two rates: ppnBps

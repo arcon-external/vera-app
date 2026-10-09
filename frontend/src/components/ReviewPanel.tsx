@@ -149,13 +149,11 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
           </TableFrame>
 
           <div className="mt-5 ml-auto max-w-md">
-            <SummaryRow label="Original subtotal" value={internal.DisplayOriginalSubtotal} />
+            {/* A discount cuts the price only, so there is no cost-side
+                discount: the cost subtotal IS the original grand total. One
+                row, or the same figure would print twice. */}
             <SummaryRow
-              label={`Discount ${customer.DiscountPercent}%`}
-              value={internal.DisplayOriginalDiscount}
-            />
-            <SummaryRow
-              label="Original grand total"
+              label="Cost total (undiscounted)"
               value={internal.DisplayOriginalGrand}
               strong
             />
@@ -167,7 +165,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
         <StageHeader
           step="02 — Internal breakdown"
           title="Margin and tax calculation"
-          description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation; services tax stays internal and is never allocated to individual lines."
+          description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation and is never profit; PPH22 stays internal and is never allocated to individual lines."
           badge={<Badge tone="internal">Internal only — never exported</Badge>}
         />
         <div className="p-5 lg:p-6">
@@ -277,10 +275,12 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                   label="Customer subtotal"
                   value={internal.DisplayMarginalizedSubtotal}
                 />
-                <SummaryRow
-                  label={`Discount ${customer.DiscountPercent}%`}
-                  value={internal.DisplayMarginalizedDiscount}
-                />
+                {internal.MarginalizedDiscount > 0 ? (
+                  <SummaryRow
+                    label={`Discount ${customer.DiscountPercent}% (on the price)`}
+                    value={`−${internal.DisplayMarginalizedDiscount}`}
+                  />
+                ) : null}
                 <SummaryRow
                   label="Grand total before tax"
                   value={internal.DisplayMarginalizedGrand}
@@ -312,13 +312,10 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
               </p>
               <div className="mt-2">
                 <SummaryRow
-                  label="Original grand total"
+                  label="Cost total (undiscounted)"
                   value={internal.DisplayOriginalGrand}
                 />
-                <SummaryRow
-                  label="Profit before tax"
-                  value={internal.DisplayProfit}
-                />
+                <SummaryRow label="Profit before PPH22" value={internal.DisplayProfit} />
               </div>
               <div className="mt-3 rounded-lg bg-success-700 px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-4">
@@ -330,8 +327,8 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                   </span>
                 </div>
                 <p className="mt-1 text-caption text-success-100">
-                  Customer grand total minus original grand total, less
-                  services tax
+                  Sell total after discount minus cost, less PPH22. PPN is
+                  collected for the state and is not profit.
                 </p>
               </div>
             </div>

@@ -287,7 +287,7 @@ export function DetailsPanel({
               </div>
               <p className="mt-2 text-caption text-ink-500">
                 {value.taxType === "Services"
-                  ? "Services tax stays internal — never on the quotation."
+                  ? "PPH22 stays internal — never on the quotation."
                   : value.taxZone === "NonFTZ"
                     ? "Goods PPN 11% is added to the quotation after discount."
                     : "FTZ goods carry no tax."}
@@ -304,10 +304,8 @@ export function DetailsPanel({
                     ...SERVICE_CATEGORY_OPTIONS.map((option) => ({
                       value: option.value,
                       label: `${option.label} — ${
-                        option.value === "Construction"
-                          ? "1,75% final"
-                          : "2% withholding"
-                      }`,
+                        option.value === "Construction" ? "1,75%" : "2%"
+                      } PPh22`,
                     })),
                   ]}
                   onChange={(next) => onChange({ serviceCategory: String(next) })}

@@ -109,8 +109,9 @@ func TestPrepareTaxValidation(t *testing.T) {
 }
 
 func TestPrepareMarginDiscountTaxChain(t *testing.T) {
-	// Cost 100.000, margin 20% -> sell 120.000; discount 10% -> grand
-	// 108.000; NonFTZ 2% -> tax 2.160, nett 105.840.
+	// Cost 100.000, margin 20% -> sell 120.000; discount 10% cuts only the
+	// price -> grand 108.000; NonFTZ 2% services tax 2.160 -> after-tax 105.840.
+	// Nett reads that after-tax grand against the undiscounted cost: 5.840.
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
@@ -146,8 +147,8 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	if q.Data.MarginalizedGrandAfterTax != 105840 {
 		t.Errorf("MarginalizedGrandAfterTax = %d; want 105840", q.Data.MarginalizedGrandAfterTax)
 	}
-	if q.Data.NettProfit != 15840 {
-		t.Errorf("NettProfit = %d; want 15840", q.Data.NettProfit)
+	if q.Data.NettProfit != 5840 {
+		t.Errorf("NettProfit = %d; want 5840 (105.840 - 100.000)", q.Data.NettProfit)
 	}
 }
 

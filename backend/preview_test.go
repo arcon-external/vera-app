@@ -74,23 +74,26 @@ func TestGetInternalBreakdown(t *testing.T) {
 	if bd.SellSubtotal != 300000 {
 		t.Errorf("SellSubtotal = %d; want 300000", bd.SellSubtotal)
 	}
-	if bd.DiscountCost != 25000 {
-		t.Errorf("DiscountCost = %d; want 25000", bd.DiscountCost)
+	// No cost-side discount, so the cost grand is the cost subtotal.
+	if bd.DiscountCost != 0 {
+		t.Errorf("DiscountCost = %d; want 0", bd.DiscountCost)
 	}
-	if bd.CostGrand != 225000 {
-		t.Errorf("CostGrand = %d; want 225000", bd.CostGrand)
+	if bd.CostGrand != 250000 {
+		t.Errorf("CostGrand = %d; want 250000", bd.CostGrand)
 	}
 	if bd.GrandTotal != 270000 {
 		t.Errorf("GrandTotal = %d; want 270000", bd.GrandTotal)
 	}
-	if bd.ProfitAmount != 45000 {
-		t.Errorf("ProfitAmount = %d; want 45000 (270000-225000)", bd.ProfitAmount)
+	if bd.ProfitAmount != 20000 {
+		t.Errorf("ProfitAmount = %d; want 20000 (270000-250000)", bd.ProfitAmount)
 	}
 	if bd.TaxAmount != 5400 {
 		t.Errorf("TaxAmount = %d; want 5400", bd.TaxAmount)
 	}
-	if bd.NettProfit != 39600 {
-		t.Errorf("NettProfit = %d; want 39600", bd.NettProfit)
+	// Nett reads the after-tax grand (270.000 - 5.400), not the customer
+	// total, so nothing collected for the state lands in it.
+	if bd.NettProfit != 14600 {
+		t.Errorf("NettProfit = %d; want 14600", bd.NettProfit)
 	}
 	if len(bd.Items) != 2 {
 		t.Fatalf("breakdown items = %d; want 2", len(bd.Items))
@@ -322,7 +325,9 @@ func TestRenderedQuotationPPN(t *testing.T) {
 		if !strings.Contains(rendered, "299.700") {
 			t.Error("non-FTZ goods quotation missing PPN-inclusive grand 299.700")
 		}
-		for _, forbidden := range []string{"Nett", "Margin", "Profit", "Internal", "withholding", "final"} {
+		// PPh22 is the internal service rate. It must never print: the customer
+		// sees the price and, for non-FTZ goods, PPN -- nothing else.
+		for _, forbidden := range []string{"Nett", "Margin", "Profit", "Internal", "withholding", "final", "PPh22", "PPH22"} {
 			if strings.Contains(rendered, forbidden) {
 				t.Errorf("rendered quotation leaks internal concept %q", forbidden)
 			}

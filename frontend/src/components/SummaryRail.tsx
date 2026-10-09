@@ -58,8 +58,11 @@ export function computePricing(
     if (item.marginEnabled) marginedLines += 1;
   }
 
-  const originalDiscount = Math.trunc((costSubtotal * discountPercent) / 100);
-  const originalGrand = costSubtotal - originalDiscount;
+  // A discount is a price cut, so it moves only the sell side. Mirrors
+  // buildPricing in backend/builder.go; the two must never disagree about a
+  // number the customer is quoted.
+  const originalDiscount = 0;
+  const originalGrand = costSubtotal;
   const sellDiscount = Math.trunc((sellSubtotal * discountPercent) / 100);
   const sellGrand = sellSubtotal - sellDiscount;
 
@@ -68,6 +71,9 @@ export function computePricing(
   const customerGrand = sellGrand + ppnAmount;
   const servicesBps = servicesRateBps(taxType, serviceCategory);
   const servicesTax = Math.trunc((sellGrand * servicesBps) / 10000);
+  // The after-tax figure and both profits read the sell grand, never the
+  // customer total, so PPN collected for the state cannot land in them.
+  const grandAfterTax = sellGrand - servicesTax;
 
   return {
     costSubtotal,
@@ -80,9 +86,9 @@ export function computePricing(
     ppnAmount,
     customerGrand,
     taxAmount: servicesTax,
-    grandAfterTax: customerGrand - servicesTax,
-    netProfit: customerGrand - originalGrand - servicesTax,
-    profitBeforeTax: customerGrand - originalGrand,
+    grandAfterTax,
+    netProfit: grandAfterTax - originalGrand,
+    profitBeforeTax: sellGrand - originalGrand,
     marginedLines,
     ppnBps,
     rateBps: servicesBps,
@@ -154,10 +160,10 @@ export function SummaryRail({
         </div>
         <div className="mt-3 space-y-2">
           {pricing.taxAmount > 0 ? (
-            <AmountRow label="Services tax (internal)" value={-pricing.taxAmount} />
+            <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} />
           ) : null}
           <div className="flex items-baseline justify-between gap-4">
-            <span className="text-small text-internal-700">Nett after tax</span>
+            <span className="text-small text-internal-700">Nett after PPH22</span>
             <span className="tnum text-body font-semibold text-internal-900">
               Rp{formatIdr(pricing.grandAfterTax)}
             </span>
