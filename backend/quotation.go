@@ -1246,6 +1246,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 				UoM:         sub.UoM,
 				UnitPrice:   sub.DisplayUnitPrice,
 				Total:       sub.DisplayTotal,
+				Disc:        discountCell(sub.DiscountEnabled, sub.DiscountPercent),
 				Bullets:     bullets,
 			})
 		}
@@ -1256,6 +1257,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			UoM:           it.UoM,
 			UnitPrice:     it.DisplayUnitPrice,
 			Total:         it.DisplayTotal,
+			Disc:          discountCell(it.DiscountEnabled, it.DiscountPercent),
 			SubItems:      parts,
 			ShowSubPrices: it.ShowSubPrices,
 		})
@@ -1311,8 +1313,22 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,
 
+		ShowLineDiscounts: q.Data.ShowLineDiscounts,
+
 		VerificationCode: q.Data.VerifyShortID,
 	}, nil
+}
+
+// discountCell is the Disc. column's text for one row. It reproduces the
+// template's {{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}
+// exactly, so the HTML preview, the stored snapshot and the PDF print the same
+// string for the same row. Deciding it once beats two renderers formatting a
+// percentage their own way.
+func discountCell(enabled bool, percent uint16) string {
+	if !enabled {
+		return "—"
+	}
+	return strconv.Itoa(int(percent)) + "%"
 }
 
 // decodeDataURL turns an embedded data URL or bare base64 payload into bytes.

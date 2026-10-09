@@ -74,6 +74,8 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 
 		Items: engineItems(in.Items),
 
+		ShowLineDiscounts: in.ShowLineDiscounts,
+
 		DisplaySubTotal:   in.DisplaySubTotal,
 		DisplayDiscount:   in.DisplayDiscount,
 		DiscountAmount:    in.DiscountAmount,
@@ -103,6 +105,7 @@ func engineItems(items []quotation.Item) []Item {
 			UoM:       it.UoM,
 			UnitPrice: it.UnitPrice,
 			Total:     it.Total,
+			Disc:      it.Disc,
 		}
 		if len(it.SubItems) > 0 {
 			pkg := &Package{ShowPrices: it.ShowSubPrices, Parts: make([]Part, 0, len(it.SubItems))}
@@ -114,6 +117,7 @@ func engineItems(items []quotation.Item) []Item {
 					UoM:       sub.UoM,
 					UnitPrice: sub.UnitPrice,
 					Total:     sub.Total,
+					Disc:      sub.Disc,
 					Bullets:   sub.Bullets,
 				})
 			}

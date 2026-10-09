@@ -75,6 +75,9 @@ type Input struct {
 	DisplayPpn        string
 	DisplayGrandTotal string
 	DiscountPercent   string
+	// ShowLineDiscounts adds a seventh column to the item table. It matches the
+	// template's own switch, so the preview and the PDF print the same columns.
+	ShowLineDiscounts bool
 
 	Closing             string
 	VerificationCaption string
@@ -91,9 +94,12 @@ type Item struct {
 	UoM       string
 	UnitPrice string
 	Total     string
-	SubItems  []string
-	Package   *Package
-	No        int
+	// Disc is this row's own discount as it prints ("10%" or "—"), already
+	// formatted by the application so both renderers show the same string.
+	Disc     string
+	SubItems []string
+	Package  *Package
+	No       int
 }
 
 // Package is a modular line's composition. ShowPrices picks the customer
@@ -114,7 +120,9 @@ type Part struct {
 	UoM       string
 	UnitPrice string
 	Total     string
-	Bullets   []string
+	// Disc is the part's own discount, on the same terms as Item.Disc.
+	Disc    string
+	Bullets []string
 }
 
 // Engine renders one document. It is not safe for concurrent use; make one per

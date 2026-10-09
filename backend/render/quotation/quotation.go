@@ -61,6 +61,11 @@ type Input struct {
 	DisplayGrandTotal string
 	DisplayDiscount   string
 	DisplaySubTotal   string
+	// ShowLineDiscounts adds the item table's Disc. column, set by
+	// applyRowDiscountColumn only when some row carries a discount. Both
+	// renderers decide their column set from this, so the preview, the stored
+	// snapshot and the PDF always print the same columns.
+	ShowLineDiscounts bool
 	// DiscountAmount is the raw whole-quotation discount, so the renderer can
 	// omit the row entirely when there is none -- the same condition the HTML
 	// template applies. Discounts are entered per line now, and a quotation
@@ -88,10 +93,14 @@ type Input struct {
 // full-value main row (false). An item with parts never carries description
 // bullets -- validation refuses both at once.
 type Item struct {
-	DisplayDesc   string
-	UoM           string
-	UnitPrice     string
-	Total         string
+	DisplayDesc string
+	UoM         string
+	UnitPrice   string
+	Total       string
+	// Disc is this row's own discount, preformatted ("10%", or "—" when the row
+	// carries none), exactly as UnitPrice and Total are. Rendering it is the
+	// renderer's problem; deciding what it says is not.
+	Disc          string
 	SubItems      []SubItem
 	No            int
 	Qty           uint32
@@ -107,8 +116,10 @@ type SubItem struct {
 	UoM         string
 	UnitPrice   string
 	Total       string
-	Bullets     []string
-	Qty         uint32
+	// Disc is the part's own discount, on the same terms as Item.Disc.
+	Disc    string
+	Bullets []string
+	Qty     uint32
 }
 
 // Theme is the four-column brand palette. The quotation and portal sets are

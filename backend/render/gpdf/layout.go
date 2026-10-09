@@ -308,9 +308,19 @@ const (
 // fraction of a point that does not accumulate visibly down the table.
 const descLineH = 15.5 * ptPerPx
 
-// colFrac are the table's column widths as fractions, matching the colgroup.
-// The colgroup is 7/43/8/8/17/17 percent.
-var colFrac = [6]float64{0.07, 0.43, 0.08, 0.08, 0.17, 0.17}
+// colLayout says which track each logical cell of the item table occupies.
+//
+// The table has six tracks, or seven when some row carries a per-row discount:
+// the template adds a Disc. column, and only then, so a column is not added to
+// every quotation to sit empty on most of them (see applyRowDiscountColumn).
+// Both layouts put No. in 0 and Description in 1, which is what lets the merged
+// package rows share the code.
+//
+// disc is -1 when the column is absent. last is the index of the table's right
+// edge, and is also the track count.
+type colLayout struct {
+	no, desc, qty, uom, unit, disc, total, last int
+}
 
 // colOffsetsPx are the table's column boundaries, in whole CSS pixels from the
 // table's left edge.
@@ -330,17 +340,62 @@ var colFrac = [6]float64{0.07, 0.43, 0.08, 0.08, 0.17, 0.17}
 // the cell borders land where its borders land.
 var colOffsetsPx = [7]int{0, 45, 323, 374, 426, 535, 646}
 
-// columnEdges returns the table's column boundaries in points.
-func columnEdges(tableX, tableW float64) [7]float64 {
-	var out [7]float64
-	for i, off := range colOffsetsPx {
-		out[i] = tableX + float64(off)*ptPerPx
+// colOffsetsDiscPx are the same boundaries for the seven-column table, where the
+// colgroup is 7/36/8/8/17/7/17 percent.
+//
+// Measured the same way, by laying the template's own table out at the same 646px
+// and reading each cell's offsetLeft: 0, 45, 277, 329, 381, 490 and 535. Worth
+// noting what they show -- the description gives up exactly the 45px the new
+// column takes, so Unit Price, Disc. and Total land where a reader expects them,
+// and Total's own edges (535, 646) are unchanged from the six-column grid.
+var colOffsetsDiscPx = [8]int{0, 45, 277, 329, 381, 490, 535, 646}
+
+// columnEdges returns the table's column boundaries in points for one layout.
+func columnEdges(tableX, tableW float64, cols colLayout) [8]float64 {
+	var out [8]float64
+	if cols.disc >= 0 {
+		for i, off := range colOffsetsDiscPx {
+			out[i] = tableX + float64(off)*ptPerPx
+		}
+	} else {
+		for i, off := range colOffsetsPx {
+			out[i] = tableX + float64(off)*ptPerPx
+		}
 	}
 	// The table's own right edge is its width rather than the last offset, so a
 	// width that does not divide into a whole number of pixels still ends where
 	// the browser's does.
-	out[6] = tableX + tableW
+	out[cols.last] = tableX + tableW
 	return out
+}
+
+// HeadLabels returns the item table's header cells for a column layout. It is
+// exported so the application's tests can hold the engine and the HTML template
+// to the same columns: the engine drew six while the template printed seven for
+// a whole release, and nothing compared them.
+func HeadLabels(showLineDiscounts bool) []string {
+	return itemHeadLabels(layoutFor(showLineDiscounts))
+}
+
+// itemHeadLabels are the header row's cells, in track order. Kept beside the
+// layout because the two must agree: a label list that drifts out of step with
+// the tracks puts every heading over the wrong column.
+func itemHeadLabels(cols colLayout) []string {
+	labels := []string{"No.", "Description", "Qty.", "UoM", "Unit Price IDR"}
+	if cols.disc >= 0 {
+		labels = append(labels, "Disc.")
+	}
+	return append(labels, "Total IDR")
+}
+
+// layoutFor picks the item table's column layout. The flag is the application's,
+// the same one the template reads, so the preview and the PDF cannot disagree
+// about how many columns the table has.
+func layoutFor(showDisc bool) colLayout {
+	if showDisc {
+		return colLayout{no: 0, desc: 1, qty: 2, uom: 3, unit: 4, disc: 5, total: 6, last: 7}
+	}
+	return colLayout{no: 0, desc: 1, qty: 2, uom: 3, unit: 4, disc: -1, total: 5, last: 6}
 }
 
 // metrics holds the derived point-valued measures the composition shares.
@@ -355,7 +410,8 @@ type metrics struct {
 	// Horizontal rhythm of the page interior.
 	innerX float64
 	innerW float64
-	colX   [7]float64
+	colX   [8]float64
+	cols   colLayout
 	tableX float64
 	tableW float64
 
@@ -410,7 +466,8 @@ func (e *Engine) derive(in Input) metrics {
 	m.innerW = m.cardW - 2*px(1) - 2*px(contentPadPx)
 	m.tableX = m.innerX
 	m.tableW = m.innerW
-	m.colX = columnEdges(m.tableX, m.tableW)
+	m.cols = layoutFor(in.ShowLineDiscounts)
+	m.colX = columnEdges(m.tableX, m.tableW, m.cols)
 
 	// Top-lead band: whichever is taller, the text block or the logo.
 	textBottom := m.cardY + px(1) + px(ribbonH) + px(leadPadYTop) +
@@ -651,17 +708,17 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 	// The cell box runs from one column boundary to the next, and its 1px
 	// collapsed border is drawn inside the leading edge, so the content box is
 	// narrower than the track by that border as well as by the padding.
-	descW := m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx)
+	descW := m.colX[m.cols.qty] - m.colX[m.cols.desc] - px(1) - 2*px(tdPadPx)
 	subW := descW - px(subIndentPx)
 	// Sub rows swap the left padding for the deeper indent; a part's bullets
 	// sit another indent into that content box. Scope rows are merged across
 	// Description..Total, so their text runs the full remaining table width.
-	partW := m.colX[2] - m.colX[1] - px(1) - px(subRowIndentPx) - px(tdPadPx)
+	partW := m.colX[m.cols.qty] - m.colX[m.cols.desc] - px(1) - px(subRowIndentPx) - px(tdPadPx)
 	partBulletW := partW - px(subBulletIndentPx)
-	scopeW := m.colX[6] - m.colX[1] - px(1) - px(subRowIndentPx) - px(tdPadPx)
+	scopeW := m.colX[m.cols.last] - m.colX[m.cols.desc] - px(1) - px(subRowIndentPx) - px(tdPadPx)
 	// The state-C parent title is merged too, but keeps the normal cell
 	// padding, so its text runs wider than a scope row's.
-	parentW := m.colX[6] - m.colX[1] - px(1) - 2*px(tdPadPx)
+	parentW := m.colX[m.cols.last] - m.colX[m.cols.desc] - px(1) - 2*px(tdPadPx)
 	padY := 2 * px(tdPadPx)
 	subPadY := 2 * px(subRowPadPx)
 	parentPadY := px(parentPadTopPx) + px(parentPadBotPx)
