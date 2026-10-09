@@ -4,6 +4,39 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.7.0] - 2026-10-09
+
+### Added
+
+- **A discount can now sit on a single line.** Use **Disc.** next to the margin
+  on any line, and on any sub-item of a split line, and that row alone is
+  discounted. A line that needs 15% off and a line that needs none are now
+  different lines, instead of the discount having to be spread across the whole
+  quotation or the price quietly back-solved so the total came out right.
+- The line shows what the discount came off — **was 120.000 · −12.000** — so the
+  customer-facing price is never a mystery.
+- Sub-items discount independently of the line they belong to.
+- The quotation keeps its own discount as well, applied on top as before.
+
+### Changed
+
+- The margin column now reads **Margin / Disc.** and carries both controls,
+  stacked. A new column would have squeezed the description at the app's own
+  window width.
+- A line discounted below what you paid for it now shows a **negative margin**.
+  That is a real answer and it was previously either hidden or, worse, shown as a
+  large positive number.
+
+### Fixed
+
+- The customer quotation grows a **Disc.** column **only when a row actually
+  uses one**, so the description is not narrowed on every document in order to
+  leave the column empty on most of them. Rows without a discount show a dash.
+
+Quotations already exported keep their figures. Reopening one to edit it brings
+in no per-row discount, which reads as "no row has a discount", and exporting
+that edit follows all the current rules. Nothing stored is rewritten.
+
 ## [0.6.0] - 2026-10-09
 
 ### Added
