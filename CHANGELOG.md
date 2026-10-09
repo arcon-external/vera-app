@@ -4,6 +4,38 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.5.1] - 2026-10-09
+
+### Fixed
+
+- **Our own profit figure was wrong on any quotation with a discount.** Two
+  mistakes were adding up in the same direction. A discount was being taken off
+  what we pay suppliers as well as off the price we charge — but giving a
+  customer a lower price does not make our purchase cheaper, so profit was
+  being flattered by the discount. And the 11% PPN we charge on non-FTZ goods
+  was being counted as earnings, when it is collected for the state and handed
+  straight back. Both are corrected. Quoted customer totals do not change: the
+  discount, the PPN and the grand total all still come off the price exactly as
+  before. Only the internal view moves.
+- The review screen no longer prints the same cost figure twice under two
+  different names, and the dead cost-side discount row is gone rather than
+  showing zero.
+
+### Changed
+
+- The two service tax rates are now labelled **2% PPh22** and **1.75% PPh22**
+  everywhere, replacing "2% withholding" and "1.75% final". Same rates, the name
+  staff actually use on the paperwork.
+
+### Added
+
+- The public verification page now shows **the PPN the customer was charged**,
+  under the grand total, so the figures on the page match the figures printed
+  on the quotation. The line appears only when PPN was charged.
+
+Quotations already exported keep the figures stored with them. Only new
+quotations use the corrected profit.
+
 ## [0.5.0] - 2026-10-09
 
 ### Added
