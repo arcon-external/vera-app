@@ -387,12 +387,17 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 7. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
    `-nsis` installers (amd64 + arm64) and macOS DMG, all version-stamped
    with sha256 sidecars, attached as
-   `Vera-<version>-windows-amd64-installer.exe`,
-   `Vera-<version>-windows-arm64-installer.exe`, and
-   `Vera-<version>-macos-universal.dmg`. Those names are a contract
-   with the updater — never rename by hand. Staff download links must
-   point at the public `vera-downloads-508411` bucket mirror, never at
-   GitHub release assets (the private repo 404s anyone without access).
+   `Vera-v<version>-windows-amd64-installer.exe`,
+   `Vera-v<version>-windows-arm64-installer.exe`, and
+   `Vera-v<version>-macos-universal.dmg`. The `v` appears **inside** the
+   filename as well as in the tag: tag `v0.5.1` → `Vera-v0.5.1-…`. Each
+   has a `.sha256` sidecar beside it. Those names are a contract with the
+   updater — never rename by hand, and copy them out of
+   `gh release view <tag> --json assets` rather than typing them, or the
+   Download section of the release notes will link a 404 (this happened at
+   v0.5.1). Staff download links must point at the public
+   `vera-downloads-508411` bucket mirror, never at GitHub release assets
+   (the private repo 404s anyone without access).
 8. **The `Announce to the updater` job does the mirroring and the updater
    variables for you.** It runs last, gated on all three installer jobs, and is
    the only thing that makes an installed desktop offer the new version. Watch
