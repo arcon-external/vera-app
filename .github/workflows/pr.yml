@@ -132,3 +132,11 @@ jobs:
 
       - name: Type-check and build
         run: npm --prefix frontend run build
+
+      # The pure logic in the React layer is executable and was silently
+      # untested: the draft payload parser, the release-notes parser and the
+      # live pricing that duplicates the backend. This is a required check, so
+      # a change to one of those cannot pass review on the strength of the Go
+      # suite alone.
+      - name: Frontend tests
+        run: npm --prefix frontend test

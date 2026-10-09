@@ -101,7 +101,12 @@ npm --prefix frontend run build   # strict TypeScript validation
 
 ## 7. Test Commands
 
-Current tests are Go tests (backend packages). There is no frontend test runner.
+Go tests cover the backend. The frontend's **pure** modules — the draft payload
+parser, the release-notes parser, `tax.ts` normalizers, `format.ts` and
+`computePricing` — are covered by **Vitest**: `npm --prefix frontend test`.
+Vitest shares Vite's transform and resolver, so a test is checked the same way
+`vite build` checks the code it imports. There are no component or DOM tests;
+anything needing a browser is driven by hand.
 
 ```bash
 go test ./...                                # all packages
@@ -160,6 +165,9 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - Tailwind is the primary styling path; use the tokens in
   `frontend/tailwind.config.cjs` (colors, type scale, shadows, easing).
 - Keep `frontend/src/index.css` minimal and global-only.
+- Tests live in `src/` beside the module they cover, named `<module>.test.ts`,
+  and run with `npm --prefix frontend test`. A test is not shipped without the
+  runner to execute it.
 - **Tailwind is v3.1: there is no numeric `min-h-*` / `line-clamp-*` utility.**
   Use the `minHeight` scale defined in `tailwind.config.cjs`, `py` for height, or
   arbitrary values (`min-h-[42px]`). Verify any new utility actually appears in
@@ -340,7 +348,12 @@ gofmt -l .                        # must print nothing
 go vet ./...                      # must pass
 go test -race ./...               # must pass
 npm --prefix frontend run build   # TypeScript + production bundle
+npm --prefix frontend test        # Vitest: the frontend's pure modules
 ```
+
+`npm run build` type-checks the test files too (tsconfig pulls in
+`vitest/globals`), so a test that stops compiling fails the build rather than
+lying in the suite.
 
 If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
