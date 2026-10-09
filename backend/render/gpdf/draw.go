@@ -634,7 +634,7 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 	// not one rule across the lot. The two outer runs are the table's own border
 	// colour and the five inner ones too, because on this row the cell borders are
 	// only on the right.
-	for i := 0; i < 6; i++ {
+	for i := 0; i < m.cols.last; i++ {
 		x := m.colX[i]
 		if i > 0 {
 			x += px(1)
@@ -642,15 +642,16 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 		p.add(box{x: x, y: top, w: m.colX[i+1] - x, h: px(1), fill: colTableEdge, clip: clip})
 	}
 	// Column separators. Every cell carries `border-right` and the last one has
-	// none, so there are five of them, at the first five boundaries.
-	for i := 1; i < 6; i++ {
+	// none, so there is one fewer than there are columns, at the leading edges
+	// of every column but the first.
+	for i := 1; i < m.cols.last; i++ {
 		p.add(box{x: m.colX[i], y: top, w: px(1), h: h, fill: colTableRule, clip: clip})
 	}
 	// The header's outer edges are the table's border, not a cell's: the cells
 	// carry `border-right` and the last one has none, so nothing of theirs reaches
 	// the outside of the row.
 	tableSides(p, m, clip, top, h, colTableEdge)
-	labels := [6]string{"No.", "Description", "Qty.", "UoM", "Unit Price IDR", "Total IDR"}
+	labels := itemHeadLabels(m.cols)
 	for i, lbl := range labels {
 		p.add(run{
 			x:        m.colX[i] + (m.colX[i+1]-m.colX[i]-e.Width(lbl, px(10), true))/2,
@@ -815,7 +816,7 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	bodyH := h - px(1)
 
 	if isEven {
-		for i := 0; i < 6; i++ {
+		for i := 0; i < m.cols.last; i++ {
 			p.add(box{
 				x: m.colX[i] + px(1), y: top,
 				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
@@ -823,7 +824,7 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			})
 		}
 	}
-	for i := 1; i < 6; i++ {
+	for i := 1; i < m.cols.last; i++ {
 		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
 	}
 	tableSides(p, m, clip, top, bodyH, colTableRule)
@@ -865,10 +866,28 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			cy += descLineH
 		}
 	}
-	centre(2, rb.part.Qty)
-	centre(3, rb.part.UoM)
-	centre(4, rb.part.UnitPrice)
-	centre(5, rb.part.Total)
+	// The discount cell is right-aligned, unlike every other number in the row:
+	// the stylesheet gives `.disc` no text-align of its own, and the column
+	// reads as a column of percentages against its right edge. It is also the
+	// only cell the stylesheet colours independently.
+	discCell := func(text string) {
+		if m.cols.disc < 0 || text == "" {
+			return
+		}
+		i := m.cols.disc
+		x := m.colX[i+1] - px(1) - px(tdPadPx) - e.Width(text, px(bodyPx), false)
+		p.add(run{
+			x:        x,
+			baseline: centeredBlockTop(top, bodyH, px(subRowPadPx), 1) + bodyBaselineOffset,
+			size:     px(bodyPx), text: text,
+			color: colSubNo,
+		})
+	}
+	centre(m.cols.qty, rb.part.Qty)
+	centre(m.cols.uom, rb.part.UoM)
+	centre(m.cols.unit, rb.part.UnitPrice)
+	discCell(rb.part.Disc)
+	centre(m.cols.total, rb.part.Total)
 }
 
 // drawMainRow paints one full-value row: an item's own row, and the state-B
@@ -884,7 +903,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	// separates, and no later fill can reach it.
 	bodyH := h - px(1)
 	if isEven {
-		for i := 0; i < 6; i++ {
+		for i := 0; i < m.cols.last; i++ {
 			p.add(box{
 				x: m.colX[i] + px(1), y: top,
 				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
@@ -893,7 +912,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 		}
 	}
 	// Cell rules.
-	for i := 1; i < 6; i++ {
+	for i := 1; i < m.cols.last; i++ {
 		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
 	}
 	tableSides(p, m, clip, top, bodyH, colTableRule)
@@ -941,12 +960,28 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 			cy += descLineH
 		}
 	}
-	centre(2, rb.item.Qty)
-	centre(3, rb.item.UoM)
-	centre(4, rb.item.UnitPrice)
+	// See drawPartRow: the discount column is right-aligned and drawn in the
+	// muted ink, unlike every other number in the row.
+	discCell := func(text string) {
+		if m.cols.disc < 0 || text == "" {
+			return
+		}
+		i := m.cols.disc
+		x := m.colX[i+1] - px(1) - px(tdPadPx) - e.Width(text, px(bodyPx), false)
+		p.add(run{
+			x:        x,
+			baseline: centeredBlockTop(top, bodyH, px(tdPadPx), 1) + bodyBaselineOffset,
+			size:     px(bodyPx), text: text,
+			color: colSubNo,
+		})
+	}
+	centre(m.cols.qty, rb.item.Qty)
+	centre(m.cols.uom, rb.item.UoM)
+	centre(m.cols.unit, rb.item.UnitPrice)
+	discCell(rb.item.Disc)
 	// The Total column is centred but not bold: the stylesheet gives every
 	// numeric cell the same treatment and only the header row carries a weight.
-	centre(5, rb.item.Total)
+	centre(m.cols.total, rb.item.Total)
 }
 
 // drawFooterCards paints the terms and totals cards, the first of the three

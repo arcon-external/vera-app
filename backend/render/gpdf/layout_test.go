@@ -51,19 +51,52 @@ func assertNear(t *testing.T, what string, got, want, tol float64) {
 // a different column than a straightforward truncation does, and a pixel in the
 // middle of a centred numeric column moves the number by half of one.
 func TestColumnEdgesOnWholePixels(t *testing.T) {
-	got := columnEdges(56.25, 484.5)
-	want := [7]float64{56.25, 90.0, 298.5, 336.75, 375.75, 457.5, 540.75}
-	names := []string{"table left", "No.", "Description", "Qty", "UoM", "Unit price", "table right"}
+	// Both grids, because the table has two and only the column list differs:
+	// the six-column default, and the seven-column one a per-row discount adds.
+	// The expected values are the measured pixel offsets scaled by ptPerPx and
+	// shifted to the table's left edge.
+	cases := []struct {
+		name  string
+		cols  colLayout
+		want  []float64
+		names []string
+	}{
+		{
+			name:  "six columns",
+			cols:  layoutFor(false),
+			want:  []float64{56.25, 90.0, 298.5, 336.75, 375.75, 457.5, 540.75},
+			names: []string{"table left", "No.", "Description", "Qty", "UoM", "Unit price", "table right"},
+		},
+		{
+			name: "seven columns, with a per-row discount",
+			cols: layoutFor(true),
+			// The description gives up exactly the 45px the new column takes, so
+			// Total's own edges (457.5, 540.75) are unchanged between the grids.
+			want: []float64{56.25, 90.0, 264.0, 303.0, 342.0, 423.75, 457.5, 540.75},
+			names: []string{
+				"table left", "No.", "Description", "Qty", "UoM", "Unit price", "Disc.", "table right",
+			},
+		},
+	}
 
-	for i := range got {
-		tol := ptPerPx // one CSS pixel
-		switch {
-		case i == 0 || i == len(got)-1:
-			tol = 0.001 // the table's own edges are exact
-		case names[i] == "Description":
-			tol = 0.01 // decides where the wrapping cell breaks
-		}
-		assertNear(t, names[i], got[i], want[i], tol)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := columnEdges(56.25, 484.5, tc.cols)
+			if got[tc.cols.last] != got[len(tc.want)-1] {
+				t.Fatalf("columnEdges wrote the right edge to index %d, not last (%d)",
+					len(tc.want)-1, tc.cols.last)
+			}
+			for i := range tc.want {
+				tol := ptPerPx // one CSS pixel
+				switch {
+				case i == 0 || i == len(tc.want)-1:
+					tol = 0.001 // the table's own edges are exact
+				case tc.names[i] == "Description":
+					tol = 0.01 // decides where the wrapping cell breaks
+				}
+				assertNear(t, tc.names[i], got[i], tc.want[i], tol)
+			}
+		})
 	}
 }
 
