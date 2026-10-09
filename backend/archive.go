@@ -25,11 +25,36 @@ type ArchivedQuotationItem struct {
 	DisplayMarginalizedUnit  string
 	DisplayUnitPrice         string
 	DisplayOriginalTotal     string
+	Subs                     []ArchivedQuotationSubItem
 	MarginAmount             int64
 	ItemNo                   int
 	OriginalTotal            int64
 	MarginalizedUnitPrice    int64
 	UnitPrice                int64
+	MarginalizedTotal        int64
+	Qty                      int64
+	MarginPercent            int16
+	MarginEnabled            bool
+	ShowSubPrices            bool
+}
+
+// ArchivedQuotationSubItem is one sub-item of an itemized line as the
+// archive returns it: both sides, so reopening a quotation restores the
+// composition exactly as it was issued.
+type ArchivedQuotationSubItem struct {
+	DisplayMarginAmount      string
+	Description              string
+	Details                  []string
+	DisplayMarginalizedTotal string
+	UoM                      string
+	DisplayMarginalizedUnit  string
+	DisplayOriginalUnit      string
+	DisplayOriginalTotal     string
+	MarginAmount             int64
+	SubNo                    int
+	OriginalUnitPrice        int64
+	OriginalTotal            int64
+	MarginalizedUnitPrice    int64
 	MarginalizedTotal        int64
 	Qty                      int64
 	MarginPercent            int16
@@ -133,7 +158,31 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 	}
 	items := make([]ArchivedQuotationItem, 0, len(detail.Items))
 	for _, item := range detail.Items {
+		subs := make([]ArchivedQuotationSubItem, 0, len(item.Subs))
+		for _, sub := range item.Subs {
+			subs = append(subs, ArchivedQuotationSubItem{
+				SubNo:                    sub.SubNo,
+				Description:              sub.Description,
+				Details:                  append([]string(nil), sub.Details...),
+				Qty:                      sub.Qty,
+				UoM:                      sub.UoM,
+				OriginalUnitPrice:        sub.OriginalUnitPrice,
+				MarginEnabled:            sub.MarginEnabled,
+				MarginPercent:            sub.MarginPercent,
+				MarginAmount:             sub.MarginAmount,
+				OriginalTotal:            sub.OriginalTotal,
+				MarginalizedUnitPrice:    sub.MarginalizedUnitPrice,
+				MarginalizedTotal:        sub.MarginalizedTotal,
+				DisplayOriginalUnit:      sub.DisplayOriginalUnit,
+				DisplayOriginalTotal:     sub.DisplayOriginalTotal,
+				DisplayMarginalizedUnit:  sub.DisplayMarginalizedUnit,
+				DisplayMarginalizedTotal: sub.DisplayMarginalizedTotal,
+				DisplayMarginAmount:      sub.DisplayMarginAmount,
+			})
+		}
 		items = append(items, ArchivedQuotationItem{
+			ShowSubPrices:            item.ShowSubPrices,
+			Subs:                     subs,
 			ItemNo:                   item.ItemNo,
 			Description:              item.Description,
 			Qty:                      item.Qty,

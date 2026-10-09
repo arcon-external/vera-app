@@ -272,8 +272,68 @@
 			white-space: pre-wrap;
 		}
 
-		.items-body-table tbody tr:nth-child(even) {
+		/* ── Sub-item rows ──────────────────────────────────────────────────
+		   A line can be a modular package: the parent row plus one row per
+		   priced sub-item, numbered X.Y in the No. column.
+
+		   Banding switches from per-row to per-ITEM: every item is one
+		   <tbody>, so a package and its subs always share a band and the
+		   parent can never be split from its first sub by colour. With no
+		   sub-items anywhere (one row per item) this equals the old
+		   row-parity rule exactly.
+
+		   The hierarchy is carried by demotion, not weight: the parent keeps
+		   the template's ordinary ink, and everything beneath it is one step
+		   lighter. The subtitled rail (2px, a quiet gray-blue) hangs from the
+		   parent band down through the sub rows, drawn from group geometry,
+		   and never runs through the parent's own text. */
+		.items-body-table tbody.item:nth-of-type(even) td {
 			background: #f6f9ff;
+		}
+
+		.items-body-table tr.sub-parent td {
+			/* Uniform padding, like every other cell: the 12/7 asymmetry made
+			   the title sit low in its band. */
+			padding: 10px;
+		}
+
+		.items-body-table tr.sub-row td {
+			padding: 6px 10px;
+			color: #4a5470;
+		}
+
+		.items-body-table tr.sub-row td:nth-child(1) {
+			color: #5b6478;
+			font-size: 10px;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.items-body-table tr.sub-row td:nth-child(2) {
+			padding-left: 30px;
+			position: relative;
+		}
+
+		.items-body-table tr.sub-row td:nth-child(2)::before {
+			content: "";
+			position: absolute;
+			left: 18px;
+			top: 0;
+			bottom: 0;
+			width: 2px;
+			background: #b7c6e2;
+		}
+
+		/* ── Sub-sub-items ──────────────────────────────────────────────────
+		   One part's detail lines render as bullets INSIDE their sub row's
+		   description, in the same list grammar the template has always used
+		   for scope text -- no separate rows, no No. cell of their own. Each
+		   bullet keeps its X.Y.Z address as a muted prefix, so the hierarchy
+		   stays referenceable from prose without shouting. */
+		/* the rail hangs at 18px inside the sub's description cell; the bullet
+		   list's stock 16px indent would put its discs on top of the rail, so
+		   sub-row bullets sit one step deeper and clear it */
+		.items-body-table tr.sub-row .desc-subitems {
+			margin-left: 30px;
 		}
 
 		.items-body-table td:nth-child(1),
@@ -283,6 +343,11 @@
 		.items-body-table td:nth-child(6) {
 			text-align: center;
 			white-space: nowrap;
+			/* A number reads against the row's middle, not its first prose
+			   line: in a row whose description wraps, a top-aligned figure
+			   floats beside the opening words. The description cell is not in
+			   this list and keeps flowing from the top. */
+			vertical-align: middle;
 		}
 
 		.footer {

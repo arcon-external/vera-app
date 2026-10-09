@@ -25,6 +25,35 @@ type RevisionItem struct {
 	MarginalizedTotal     int64
 	MarginPercent         int16
 	MarginEnabled         bool
+	ShowSubPrices         bool
+	SubItems              []RevisionSubItem
+}
+
+// RevisionSubItem is one priced part of a package line, stored as part of the
+// immutable revision snapshot. The parent line's stored price is already the
+// sum of these; the sub rows carry the composition.
+//
+// SubItems are the part's detail lines, description-only: they have no
+// standalone values, so the table holds nothing to sum.
+type RevisionSubItem struct {
+	SubNo         int
+	Description   string
+	UoM           string
+	UnitCost      int64
+	UnitPrice     int64
+	MarginAmount  int64
+	Total         int64
+	Qty           int64
+	MarginPercent int16
+	MarginEnabled bool
+	SubSubItems   []RevisionSubSubItem
+}
+
+// RevisionSubSubItem is one detail line beneath a stored sub-item. Description
+// only and numbered within its parent; there is nothing here to price.
+type RevisionSubSubItem struct {
+	SubSubNo    int
+	Description string
 }
 
 type RevisionTotals struct {
@@ -243,7 +272,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT item_no, description, qty, uom, unit_price, margin_enabled,
 		       margin_percent, margin_amount, original_total,
-		       marginalized_unit_price, marginalized_total
+		       marginalized_unit_price, marginalized_total, show_sub_prices
 		FROM %s.quotation_revision_items
 		WHERE revision_id = (
 			SELECT r.id FROM %s.quotation_revisions r
@@ -269,6 +298,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 			&item.OriginalTotal,
 			&item.MarginalizedUnitPrice,
 			&item.MarginalizedTotal,
+			&item.ShowSubPrices,
 		); err != nil {
 			return QuotationRecord{}, fmt.Errorf("scan quotation item: %w", err)
 		}
@@ -276,6 +306,113 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	}
 	if err := rows.Err(); err != nil {
 		return QuotationRecord{}, fmt.Errorf("iterate quotation items: %w", err)
+	}
+
+	// Sub-item rows come back joined to their parent item's number. The sub
+	// rows key to the storage row (revision item identity), but items within
+	// one revision are unique by number, so attachment here goes by number.
+	subRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT ri.item_no, s.sub_no, s.description, s.qty, s.uom, s.unit_cost,
+		       s.margin_enabled, s.margin_percent, s.unit_price, s.margin_amount, s.total
+		FROM %s.quotation_revision_sub_items s
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
+			SELECT r.id FROM %s.quotation_revisions r
+			WHERE r.quotation_id = $1 AND ($2::SMALLINT IS NULL OR r.revision_number = $2)
+			ORDER BY r.revision_number DESC LIMIT 1
+		)
+		ORDER BY ri.item_no, s.sub_no`, schema, schema, schema), quotationID, revision)
+	if err != nil {
+		return QuotationRecord{}, fmt.Errorf("get quotation sub-items: %w", err)
+	}
+	defer subRows.Close()
+	for subRows.Next() {
+		var (
+			itemNo int
+			sub    RevisionSubItem
+		)
+		if err := subRows.Scan(
+			&itemNo,
+			&sub.SubNo,
+			&sub.Description,
+			&sub.Qty,
+			&sub.UoM,
+			&sub.UnitCost,
+			&sub.MarginEnabled,
+			&sub.MarginPercent,
+			&sub.UnitPrice,
+			&sub.MarginAmount,
+			&sub.Total,
+		); err != nil {
+			return QuotationRecord{}, fmt.Errorf("scan quotation sub-item: %w", err)
+		}
+		attached := false
+		for i := range record.Items {
+			if record.Items[i].ItemNo == itemNo {
+				record.Items[i].SubItems = append(record.Items[i].SubItems, sub)
+				attached = true
+				break
+			}
+		}
+		if !attached {
+			return QuotationRecord{}, fmt.Errorf("quotation sub-item %d.%d has no parent item", itemNo, sub.SubNo)
+		}
+	}
+	if err := subRows.Err(); err != nil {
+		return QuotationRecord{}, fmt.Errorf("iterate quotation sub-items: %w", err)
+	}
+
+	// Detail lines walk up through both levels: sub-sub-items key to a
+	// sub-item row, which keys to an item row, so the join returns the two
+	// parent numbers the record's in-memory tree hangs off.
+	detailRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT ri.item_no, s.sub_no, ss.sub_sub_no, ss.description
+		FROM %s.quotation_revision_sub_sub_items ss
+		JOIN %s.quotation_revision_sub_items s ON s.id = ss.revision_sub_item_id
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
+			SELECT r.id FROM %s.quotation_revisions r
+			WHERE r.quotation_id = $1 AND ($2::SMALLINT IS NULL OR r.revision_number = $2)
+			ORDER BY r.revision_number DESC LIMIT 1
+		)
+		ORDER BY ri.item_no, s.sub_no, ss.sub_sub_no`, schema, schema, schema, schema), quotationID, revision)
+	if err != nil {
+		return QuotationRecord{}, fmt.Errorf("get quotation sub-item details: %w", err)
+	}
+	defer detailRows.Close()
+	for detailRows.Next() {
+		var (
+			itemNo, subNo int
+			low           RevisionSubSubItem
+		)
+		if err := detailRows.Scan(
+			&itemNo,
+			&subNo,
+			&low.SubSubNo,
+			&low.Description,
+		); err != nil {
+			return QuotationRecord{}, fmt.Errorf("scan quotation sub-item detail: %w", err)
+		}
+		attached := false
+		for i := range record.Items {
+			if record.Items[i].ItemNo != itemNo {
+				continue
+			}
+			for j := range record.Items[i].SubItems {
+				if record.Items[i].SubItems[j].SubNo == subNo {
+					record.Items[i].SubItems[j].SubSubItems = append(record.Items[i].SubItems[j].SubSubItems, low)
+					attached = true
+					break
+				}
+			}
+			break
+		}
+		if !attached {
+			return QuotationRecord{}, fmt.Errorf("quotation detail %d.%d.%d has no parent sub-item", itemNo, subNo, low.SubSubNo)
+		}
+	}
+	if err := detailRows.Err(); err != nil {
+		return QuotationRecord{}, fmt.Errorf("iterate quotation sub-item details: %w", err)
 	}
 
 	revisionRows, err := pool.Query(ctx, fmt.Sprintf(`
@@ -379,12 +516,16 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 	}
 
 	for _, item := range draft.Items {
-		if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		var itemID int64
+		// RETURNING id: sub-item rows key to the storage row, not the item
+		// number, so the snapshot of one revision's composition hangs off the
+		// same identity the totals hang off.
+		if err := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO %s.quotation_revision_items (
 				revision_id, item_no, description, qty, uom, unit_price,
 				margin_enabled, margin_percent, margin_amount, original_total,
-				marginalized_unit_price, marginalized_total
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, schema),
+				marginalized_unit_price, marginalized_total, show_sub_prices
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, schema),
 			revisionID,
 			item.ItemNo,
 			item.Description,
@@ -397,8 +538,45 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			item.OriginalTotal,
 			item.MarginalizedUnitPrice,
 			item.MarginalizedTotal,
-		); err != nil {
+			item.ShowSubPrices,
+		).Scan(&itemID); err != nil {
 			return QuotationRecord{}, fmt.Errorf("insert quotation revision item %d: %w", item.ItemNo, err)
+		}
+
+		for _, sub := range item.SubItems {
+			var subID int64
+			if err := tx.QueryRow(ctx, fmt.Sprintf(`
+				INSERT INTO %s.quotation_revision_sub_items (
+					revision_item_id, sub_no, description, qty, uom, unit_cost,
+					margin_enabled, margin_percent, unit_price, margin_amount, total
+				) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, schema),
+				itemID,
+				sub.SubNo,
+				sub.Description,
+				sub.Qty,
+				sub.UoM,
+				sub.UnitCost,
+				sub.MarginEnabled,
+				sub.MarginPercent,
+				sub.UnitPrice,
+				sub.MarginAmount,
+				sub.Total,
+			).Scan(&subID); err != nil {
+				return QuotationRecord{}, fmt.Errorf("insert quotation revision item %d sub-item %d: %w", item.ItemNo, sub.SubNo, err)
+			}
+
+			for _, low := range sub.SubSubItems {
+				if _, err := tx.Exec(ctx, fmt.Sprintf(`
+					INSERT INTO %s.quotation_revision_sub_sub_items (
+						revision_sub_item_id, sub_sub_no, description
+					) VALUES ($1,$2,$3)`, schema),
+					subID,
+					low.SubSubNo,
+					low.Description,
+				); err != nil {
+					return QuotationRecord{}, fmt.Errorf("insert quotation revision item %d sub-item %d detail %d: %w", item.ItemNo, sub.SubNo, low.SubSubNo, err)
+				}
+			}
 		}
 	}
 

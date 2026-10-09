@@ -1,6 +1,9 @@
 package backend
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // applyMarkup adds a percentage margin to a unit cost.
 //
@@ -41,6 +44,7 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 		)
 		item.MarginEnabled = itemInput.MarginEnabled
 		item.MarginPercent = itemInput.MarginPercent
+		item.ShowSubPrices = itemInput.ShowSubPrices
 		if item.MarginEnabled {
 			item.UnitPrice = applyMarkup(item.OriginalUnitPrice, item.MarginPercent)
 			item.MarginAmount = item.UnitPrice - item.OriginalUnitPrice
@@ -51,10 +55,78 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 		}
 
 		item.No = uint32(key + 1)
+		if len(itemInput.SubItems) > 0 {
+			item.SubItems = buildSubItems(item.No, itemInput.SubItems)
+			// The parent is a package rollup: its cost and price are the sums
+			// of its parts. Qty 1 by validation, so the totals below carry the
+			// package once. MarginAmount keeps its per-unit meaning (sell
+			// minus cost of the one package unit); per-sub margins were
+			// applied inside buildSubItems, never to the summed cost.
+			var costSum, sellSum uint64
+			for _, sub := range item.SubItems {
+				costSum += sub.OriginalTotal
+				sellSum += sub.Total
+			}
+			item.OriginalUnitPrice = costSum
+			item.OriginalTotal = costSum
+			item.UnitPrice = sellSum
+			item.Total = sellSum
+			item.MarginAmount = sellSum - costSum
+			item.DisplayOriginalUnitPrice = formatRupiah(costSum)
+			item.DisplayOriginalTotal = formatRupiah(costSum)
+			item.DisplayUnitPrice = formatRupiah(sellSum)
+			item.DisplayTotal = formatRupiah(sellSum)
+			item.DisplayMarginAmount = formatRupiah(item.MarginAmount)
+		}
 		items = append(items, item)
 	}
 
 	return items
+}
+
+// buildSubItems prices one part of a package on its own, exactly as a
+// stand-alone line would be priced: the margin is applied per sub-item unit,
+// so truncation happens at the same places it would on a single line, and the
+// package total is the exact sum of the priced parts.
+//
+// Sub-sub-items attach numbering only: they carry no values, so they sum to
+// nothing and leave every total untouched.
+func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSubItem {
+	out := make([]QuotationSubItem, 0, len(subs))
+	for i, sub := range subs {
+		sellUnit := sub.UnitCost
+		if sub.MarginEnabled {
+			sellUnit = applyMarkup(sub.UnitCost, sub.MarginPercent)
+		}
+		item := QuotationSubItem{
+			Description:       sub.Description,
+			SubNo:             fmt.Sprintf("%d.%d", parentNo, i+1),
+			UoM:               sub.UoM,
+			SubSubItems:       buildSubSubItems(sub.SubSubItems),
+			OriginalUnitPrice: sub.UnitCost,
+			OriginalTotal:     uint64(sub.Qty) * sub.UnitCost,
+			UnitPrice:         sellUnit,
+			Total:             uint64(sub.Qty) * sellUnit,
+			Qty:               sub.Qty,
+		}
+		item.MarginAmount = item.UnitPrice - item.OriginalUnitPrice
+		item.DisplayUnitPrice = formatRupiah(item.UnitPrice)
+		item.DisplayTotal = formatRupiah(item.Total)
+		item.MarginEnabled = sub.MarginEnabled
+		item.MarginPercent = sub.MarginPercent
+		out = append(out, item)
+	}
+	return out
+}
+
+// buildSubSubItems carries one part's detail lines through. They are plain
+// bullets below their sub row -- no numbering, nothing priced.
+func buildSubSubItems(lows []QuotationSubSubItemInput) []QuotationSubSubItem {
+	out := make([]QuotationSubSubItem, 0, len(lows))
+	for _, low := range lows {
+		out = append(out, QuotationSubSubItem{Description: low.Description})
+	}
+	return out
 }
 
 func buildDates(validity uint8) (string, string) {

@@ -316,6 +316,32 @@ func (s *Server) attachDocumentEndpoint(context echo.Context) error {
 func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationDetail {
 	items := make([]apicontract.QuotationItemRow, 0, len(record.Items))
 	for _, item := range record.Items {
+		subs := make([]apicontract.QuotationSubItemRow, 0, len(item.SubItems))
+		for _, sub := range item.SubItems {
+			details := make([]string, 0, len(sub.SubSubItems))
+			for _, detail := range sub.SubSubItems {
+				details = append(details, detail.Description)
+			}
+			subs = append(subs, apicontract.QuotationSubItemRow{
+				SubNo:                    sub.SubNo,
+				Description:              sub.Description,
+				Details:                  details,
+				Qty:                      sub.Qty,
+				UoM:                      sub.UoM,
+				OriginalUnitPrice:        sub.UnitCost,
+				MarginEnabled:            sub.MarginEnabled,
+				MarginPercent:            sub.MarginPercent,
+				MarginAmount:             sub.MarginAmount,
+				OriginalTotal:            sub.Qty * sub.UnitCost,
+				MarginalizedUnitPrice:    sub.UnitPrice,
+				MarginalizedTotal:        sub.Total,
+				DisplayOriginalUnit:      formatAmount(sub.UnitCost),
+				DisplayOriginalTotal:     formatAmount(sub.Qty * sub.UnitCost),
+				DisplayMarginalizedUnit:  formatAmount(sub.UnitPrice),
+				DisplayMarginalizedTotal: formatAmount(sub.Total),
+				DisplayMarginAmount:      formatAmount(sub.MarginAmount),
+			})
+		}
 		items = append(items, apicontract.QuotationItemRow{
 			ItemNo:                   item.ItemNo,
 			Description:              item.Description,
@@ -328,6 +354,8 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 			OriginalTotal:            item.OriginalTotal,
 			MarginalizedUnitPrice:    item.MarginalizedUnitPrice,
 			MarginalizedTotal:        item.MarginalizedTotal,
+			ShowSubPrices:            item.ShowSubPrices,
+			Subs:                     subs,
 			DisplayOriginalUnit:      formatAmount(item.UnitPrice),
 			DisplayOriginalTotal:     formatAmount(item.OriginalTotal),
 			DisplayMarginalizedUnit:  formatAmount(item.MarginalizedUnitPrice),

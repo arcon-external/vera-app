@@ -53,22 +53,47 @@ type QuotationSummaryRow struct {
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.
 type QuotationItemRow struct {
-	DisplayOriginalUnit      string `json:"displayOriginalUnit"`
-	Description              string `json:"description"`
-	DisplayMarginAmount      string `json:"displayMarginAmount"`
-	UoM                      string `json:"uom"`
-	DisplayMarginalizedTotal string `json:"displayMarginalizedTotal"`
-	DisplayMarginalizedUnit  string `json:"displayMarginalizedUnit"`
-	DisplayOriginalTotal     string `json:"displayOriginalTotal"`
-	OriginalUnitPrice        int64  `json:"originalUnitPrice"`
-	OriginalTotal            int64  `json:"originalTotal"`
-	MarginalizedUnitPrice    int64  `json:"marginalizedUnitPrice"`
-	MarginalizedTotal        int64  `json:"marginalizedTotal"`
-	MarginAmount             int64  `json:"marginAmount"`
-	ItemNo                   int    `json:"itemNo"`
-	Qty                      int64  `json:"qty"`
-	MarginPercent            int16  `json:"marginPercent"`
-	MarginEnabled            bool   `json:"marginEnabled"`
+	DisplayOriginalUnit      string                `json:"displayOriginalUnit"`
+	Description              string                `json:"description"`
+	DisplayMarginAmount      string                `json:"displayMarginAmount"`
+	UoM                      string                `json:"uom"`
+	DisplayMarginalizedTotal string                `json:"displayMarginalizedTotal"`
+	DisplayMarginalizedUnit  string                `json:"displayMarginalizedUnit"`
+	DisplayOriginalTotal     string                `json:"displayOriginalTotal"`
+	Subs                     []QuotationSubItemRow `json:"subs"`
+	OriginalUnitPrice        int64                 `json:"originalUnitPrice"`
+	OriginalTotal            int64                 `json:"originalTotal"`
+	MarginalizedUnitPrice    int64                 `json:"marginalizedUnitPrice"`
+	MarginalizedTotal        int64                 `json:"marginalizedTotal"`
+	MarginAmount             int64                 `json:"marginAmount"`
+	ItemNo                   int                   `json:"itemNo"`
+	Qty                      int64                 `json:"qty"`
+	MarginPercent            int16                 `json:"marginPercent"`
+	MarginEnabled            bool                  `json:"marginEnabled"`
+	ShowSubPrices            bool                  `json:"showSubPrices"`
+}
+
+// QuotationSubItemRow is one sub-item of an itemized line: both sides, so the
+// editor and the archive detail can show what the document chose to print and
+// what it earned.
+type QuotationSubItemRow struct {
+	Description              string   `json:"description"`
+	Details                  []string `json:"details"`
+	UoM                      string   `json:"uom"`
+	DisplayOriginalUnit      string   `json:"displayOriginalUnit"`
+	DisplayOriginalTotal     string   `json:"displayOriginalTotal"`
+	DisplayMarginalizedUnit  string   `json:"displayMarginalizedUnit"`
+	DisplayMarginalizedTotal string   `json:"displayMarginalizedTotal"`
+	DisplayMarginAmount      string   `json:"displayMarginAmount"`
+	OriginalUnitPrice        int64    `json:"originalUnitPrice"`
+	OriginalTotal            int64    `json:"originalTotal"`
+	MarginalizedUnitPrice    int64    `json:"marginalizedUnitPrice"`
+	MarginalizedTotal        int64    `json:"marginalizedTotal"`
+	MarginAmount             int64    `json:"marginAmount"`
+	SubNo                    int      `json:"subNo"`
+	Qty                      int64    `json:"qty"`
+	MarginPercent            int16    `json:"marginPercent"`
+	MarginEnabled            bool     `json:"marginEnabled"`
 }
 
 // QuotationDetail is one revision: internal economics plus the customer HTML

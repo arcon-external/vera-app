@@ -42,10 +42,18 @@ func TestQuotationInputStaysInTheSmallerSizeClass(t *testing.T) {
 }
 
 func TestQuotationItemInputStaysInTheSmallerSizeClass(t *testing.T) {
+	// The sub-item fields (a slice and a flag, #255) grew the struct from
+	// 56 to 72 bytes legitimately: the struct now describes a modular
+	// line, not only a flat one. 72 is its size floor with the slice
+	// leading -- the aligned field order at the type says so -- so the
+	// budget pins 72 and a future field added in a padding position
+	// fails here rather than slipping past the analyzer.
 	got := unsafe.Sizeof(QuotationItemInput{})
-	if class := classOf(got); class != 48 {
-		t.Errorf("QuotationItemInput is %d bytes, landing in size class %d; the reordering put it in class 48. "+
-			"A field was added in a position that costs 16 bytes per line item, and a large quotation has "+
-			"hundreds of those.", got, class)
+	if got != 72 {
+		t.Errorf("QuotationItemInput is %d bytes, want 72; the field order is no longer at its size floor "+
+			"(pointer-bearing fields must lead; a field added in a padding position costs every line item).", got)
+	}
+	if class := classOf(got); class != 80 {
+		t.Errorf("QuotationItemInput lands in size class %d, want 80.", class)
 	}
 }

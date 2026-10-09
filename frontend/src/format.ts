@@ -41,3 +41,26 @@ export function applyMargin(cost: number, percent: number, enabled: boolean): nu
   if (!enabled) return cost;
   return cost + Math.trunc((cost * percent) / 100);
 }
+
+/**
+ * The overall margin across priced sub-items: total profit over total cost.
+ *
+ * The money is summed first and the division happens once -- the blend of the
+ * rates is not the rate of the blend, and the backend divides the money. A
+ * whole percentage is shown as-is; anything else is rounded half-up and
+ * flagged so the caller can prefix "≈".
+ *
+ * This mirrors the backend's internal breakdown; both sides use integer math
+ * so they cannot disagree about which percentages are whole.
+ */
+export function blendedMargin(
+  totalCost: number,
+  totalSell: number
+): { percent: number; approx: boolean } {
+  if (totalCost <= 0) return { percent: 0, approx: false };
+  const numerator = (totalSell - totalCost) * 100;
+  const approx = numerator % totalCost !== 0;
+  // Half-up on non-negative values: floor((2a + b) / 2b).
+  const percent = Math.floor((2 * numerator + totalCost) / (2 * totalCost));
+  return { percent, approx };
+}

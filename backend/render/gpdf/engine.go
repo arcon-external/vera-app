@@ -81,7 +81,9 @@ type Input struct {
 	QRPNG               []byte
 }
 
-// Item is one table row.
+// Item is one table row. SubItems are the legacy description bullets parsed
+// back out of DisplayDesc; Package, when non-nil, is a modular line whose rows
+// are drawn from its parts instead.
 type Item struct {
 	DescMain  string
 	Qty       string
@@ -89,7 +91,29 @@ type Item struct {
 	UnitPrice string
 	Total     string
 	SubItems  []string
+	Package   *Package
 	No        int
+}
+
+// Package is a modular line's composition. ShowPrices picks the customer
+// presentation: true prints a title-only parent row followed by priced part
+// rows (state C); false prints the full-value main row followed by unpriced
+// scope rows (state B).
+type Package struct {
+	Parts      []Part
+	ShowPrices bool
+}
+
+// Part is one priced component of a package: its own number, description,
+// quantity, unit, display prices, and its detail bullets.
+type Part struct {
+	SubNo     string
+	Desc      string
+	Qty       string
+	UoM       string
+	UnitPrice string
+	Total     string
+	Bullets   []string
 }
 
 // Engine renders one document. It is not safe for concurrent use; make one per

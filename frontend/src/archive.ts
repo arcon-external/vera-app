@@ -9,6 +9,25 @@ export interface ArchivedQuotationSummary {
   DisplayGrand: string;
 }
 
+export interface ArchivedQuotationSubItem {
+  SubNo: number;
+  Description: string;
+  Details: string[];
+  Qty: number;
+  UoM: string;
+  OriginalUnitPrice: number;
+  DisplayOriginalUnit: string;
+  DisplayOriginalTotal: string;
+  MarginEnabled: boolean;
+  MarginPercent: number;
+  MarginAmount: number;
+  DisplayMarginAmount: string;
+  MarginalizedUnitPrice: number;
+  DisplayMarginalizedUnit: string;
+  MarginalizedTotal: number;
+  DisplayMarginalizedTotal: string;
+}
+
 export interface ArchivedQuotationItem {
   ItemNo: number;
   Description: string;
@@ -26,6 +45,8 @@ export interface ArchivedQuotationItem {
   DisplayMarginalizedUnit: string;
   MarginalizedTotal: number;
   DisplayMarginalizedTotal: string;
+  Subs: ArchivedQuotationSubItem[];
+  ShowSubPrices: boolean;
 }
 
 export interface ArchivedQuotation extends ArchivedQuotationSummary {

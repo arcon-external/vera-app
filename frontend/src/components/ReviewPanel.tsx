@@ -194,30 +194,75 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                 </tr>
               </thead>
               <tbody className="divide-y divide-rule">
-                {internal.Items.map((item) => (
-                  <tr key={item.No} className="align-top">
-                    <td className="tnum px-4 py-2.5 text-ink-400">{item.No}</td>
-                    <td className="whitespace-pre-wrap break-words px-4 py-2.5 text-body leading-relaxed text-ink-700">
-                      {item.Description}
-                    </td>
-                    <td className="px-4 py-2.5 text-center text-body tnum text-ink-700">
-                      {item.Qty}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div className="tnum text-body font-medium text-ink-950">
-                        Rp{item.DisplayMarginalizedUnit}
-                      </div>
-                      <div className="tnum mt-0.5 text-caption text-internal-700">
-                        {item.MarginEnabled
-                          ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
-                          : "No margin"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Amount value={item.DisplayMarginalizedTotal} />
-                    </td>
-                  </tr>
-                ))}
+                {internal.Items.flatMap((item) => {
+                  const rows: React.ReactNode[] = [
+                    <tr key={item.No} className="align-top">
+                      <td className="tnum px-4 py-2.5 text-ink-400">{item.No}</td>
+                      <td className="whitespace-pre-wrap break-words px-4 py-2.5 text-body leading-relaxed text-ink-700">
+                        {item.Description}
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-body tnum text-ink-700">
+                        {item.Qty}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="tnum text-body font-medium text-ink-950">
+                          Rp{item.DisplayMarginalizedUnit}
+                        </div>
+                        <div className="tnum mt-0.5 text-caption text-internal-700">
+                          {item.SubItems.length > 0
+                            ? `${item.DisplayMarginBlended} overall margin`
+                            : item.MarginEnabled
+                              ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
+                              : "No margin"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <Amount value={item.DisplayMarginalizedTotal} />
+                      </td>
+                    </tr>,
+                  ];
+                  // The composition prints beneath its main item: both sides
+                  // per sub-item, so a reviewer sees exactly where the money
+                  // sits without opening the document.
+                  for (const sub of item.SubItems) {
+                    rows.push(
+                      <tr key={`${item.No}-${sub.SubNo}`} className="align-top">
+                        <td className="tnum px-4 py-2 text-ink-300">{sub.SubNo}</td>
+                        <td className="whitespace-pre-wrap break-words px-4 py-2 text-caption leading-relaxed text-ink-600">
+                          {sub.Description}
+                          {sub.Details.length > 0 ? (
+                            <ul className="mt-0.5 space-y-0.5">
+                              {sub.Details.map((detail, detailIndex) => (
+                                <li key={detailIndex} className="text-ink-400">
+                                  — {detail}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-2 text-center text-caption tnum text-ink-500">
+                          {sub.Qty} {sub.UoM}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <div className="tnum text-caption text-ink-700">
+                            Rp{sub.DisplayMarginalizedUnit}
+                          </div>
+                          <div className="tnum text-caption text-ink-400">
+                            {sub.MarginEnabled
+                              ? `+${sub.MarginPercent}%`
+                              : "cost"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <span className="tnum text-caption text-ink-700">
+                            Rp{sub.DisplayMarginalizedTotal}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  return rows;
+                })}
               </tbody>
             </table>
           </TableFrame>

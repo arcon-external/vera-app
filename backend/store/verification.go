@@ -122,6 +122,22 @@ type EvidenceItem struct {
 	Qty         int64
 	UnitPrice   int64
 	Total       int64
+	// Subs is the item's printed composition when it is a main item with
+	// sub-items. Empty for every revision written before sub-items existed,
+	// which is what keeps their canonical bytes -- and their signatures --
+	// identical.
+	Subs []EvidenceSub
+}
+
+// EvidenceSub is one printed sub-item row: the customer-visible side only.
+// Details are its scope lines, description-only and printed beneath it.
+type EvidenceSub struct {
+	Description string
+	UoM         string
+	Qty         int64
+	UnitPrice   int64
+	Total       int64
+	Details     []string
 }
 
 // GetRevisionEvidenceByShortID resolves a verification handle to its
@@ -165,9 +181,8 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		return RevisionEvidence{}, fmt.Errorf("revision not found")
 	}
 
-	var items int
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
-		SELECT i.description, i.qty, i.uom,
+		SELECT i.item_no, i.description, i.qty, i.uom,
 		       i.marginalized_unit_price, i.marginalized_total
 		FROM %s.quotation_revision_items i
 		WHERE i.revision_id = (
@@ -179,19 +194,102 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		return RevisionEvidence{}, fmt.Errorf("get revision items: %w", err)
 	}
 	defer rows.Close()
+	itemNos := make([]int, 0, len(evidence.Items))
 	for rows.Next() {
-		var item EvidenceItem
-		if err := rows.Scan(&item.Description, &item.Qty, &item.UoM,
+		var (
+			itemNo int
+			item   EvidenceItem
+		)
+		if err := rows.Scan(&itemNo, &item.Description, &item.Qty, &item.UoM,
 			&item.UnitPrice, &item.Total); err != nil {
 			return RevisionEvidence{}, fmt.Errorf("scan revision item: %w", err)
 		}
+		itemNos = append(itemNos, itemNo)
 		evidence.Items = append(evidence.Items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return RevisionEvidence{}, fmt.Errorf("iterate revision items: %w", err)
 	}
-	items = len(evidence.Items)
-	evidence.ItemCount = items
+
+	// Sub-item rows attach to their parent item by number, the same key the
+	// quotations read uses. A revision written before sub-items existed simply
+	// returns none, and its canonical payload is unchanged.
+	subRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT s.id, ri.item_no, s.description, s.qty, s.uom, s.unit_price, s.total
+		FROM %s.quotation_revision_sub_items s
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE short_id = $1)
+		ORDER BY ri.item_no, s.sub_no`, schema, schema, schema),
+		normalized)
+	if err != nil {
+		return RevisionEvidence{}, fmt.Errorf("get revision sub-items: %w", err)
+	}
+	defer subRows.Close()
+	subAt := make(map[int64][2]int)
+	for subRows.Next() {
+		var (
+			subID  int64
+			itemNo int
+			sub    EvidenceSub
+		)
+		if err := subRows.Scan(&subID, &itemNo, &sub.Description, &sub.Qty, &sub.UoM,
+			&sub.UnitPrice, &sub.Total); err != nil {
+			return RevisionEvidence{}, fmt.Errorf("scan revision sub-item: %w", err)
+		}
+		attached := false
+		for i, no := range itemNos {
+			if no == itemNo {
+				subAt[subID] = [2]int{i, len(evidence.Items[i].Subs)}
+				evidence.Items[i].Subs = append(evidence.Items[i].Subs, sub)
+				attached = true
+				break
+			}
+		}
+		if !attached {
+			return RevisionEvidence{}, fmt.Errorf("revision sub-item %d has no parent item", itemNo)
+		}
+	}
+	if err := subRows.Err(); err != nil {
+		return RevisionEvidence{}, fmt.Errorf("iterate revision sub-items: %w", err)
+	}
+
+	// Detail lines print beneath their sub in both display states, so they
+	// are signed content and round-trip through evidence the same way.
+	detailRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT ss.revision_sub_item_id, ss.description
+		FROM %s.quotation_revision_sub_sub_items ss
+		JOIN %s.quotation_revision_sub_items s ON s.id = ss.revision_sub_item_id
+		JOIN %s.quotation_revision_items ri ON ri.id = s.revision_item_id
+		WHERE ri.revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE short_id = $1)
+		ORDER BY ss.revision_sub_item_id, ss.sub_sub_no`, schema, schema, schema, schema),
+		normalized)
+	if err != nil {
+		return RevisionEvidence{}, fmt.Errorf("get revision sub-item details: %w", err)
+	}
+	defer detailRows.Close()
+	for detailRows.Next() {
+		var (
+			subID  int64
+			detail string
+		)
+		if err := detailRows.Scan(&subID, &detail); err != nil {
+			return RevisionEvidence{}, fmt.Errorf("scan revision sub-item detail: %w", err)
+		}
+		at, ok := subAt[subID]
+		if !ok {
+			return RevisionEvidence{}, fmt.Errorf("revision sub-item detail for unknown sub %d", subID)
+		}
+		sub := &evidence.Items[at[0]].Subs[at[1]]
+		sub.Details = append(sub.Details, detail)
+	}
+	if err := detailRows.Err(); err != nil {
+		return RevisionEvidence{}, fmt.Errorf("iterate revision sub-item details: %w", err)
+	}
+	evidence.ItemCount = len(evidence.Items)
 	return evidence, nil
 }
 

@@ -22,10 +22,6 @@ export function Export(arg1) {
   return window['go']['backend']['Quotation']['Export'](arg1);
 }
 
-export function PickDirectory() {
-  return window['go']['backend']['Quotation']['PickDirectory']();
-}
-
 export function GetCustomerPreview() {
   return window['go']['backend']['Quotation']['GetCustomerPreview']();
 }
@@ -52,6 +48,10 @@ export function ListCustomers() {
 
 export function ListQuotations() {
   return window['go']['backend']['Quotation']['ListQuotations']();
+}
+
+export function PickDirectory() {
+  return window['go']['backend']['Quotation']['PickDirectory']();
 }
 
 export function Prepare(arg1) {

@@ -3,6 +3,8 @@
 import {backend} from '../models';
 import {context} from '../models';
 
+export function ClearCompanyLogo():Promise<void>;
+
 export function CreateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
 
 export function CreateUser(arg1:string,arg2:string,arg3:string):Promise<backend.ManagedUser>;
@@ -16,8 +18,6 @@ export function DeleteClient(arg1:number):Promise<string>;
 export function DeleteUser(arg1:number):Promise<string>;
 
 export function DownloadBackup():Promise<string>;
-
-export function ClearCompanyLogo():Promise<void>;
 
 export function GetCompanyLogo():Promise<backend.CompanyLogo>;
 
@@ -35,6 +35,8 @@ export function ListUsers():Promise<Array<backend.ManagedUser>>;
 
 export function RestoreBackup():Promise<backend.RestoreResult>;
 
+export function SetCompanyLogo(arg1:string,arg2:string):Promise<void>;
+
 export function SetContext(arg1:context.Context):Promise<void>;
 
 export function SetUserActive(arg1:number,arg2:boolean):Promise<void>;
@@ -42,8 +44,6 @@ export function SetUserActive(arg1:number,arg2:boolean):Promise<void>;
 export function SetUserEmail(arg1:number,arg2:string):Promise<backend.EmailChangeResult>;
 
 export function SetUserRole(arg1:number,arg2:string):Promise<void>;
-
-export function SetCompanyLogo(arg1:string,arg2:string):Promise<void>;
 
 export function UpdateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
 

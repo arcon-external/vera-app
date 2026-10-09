@@ -38,19 +38,94 @@ type QuotationInput struct {
 	Validity        uint8
 }
 
-// QuotationItemInput is a single line item from the frontend.
-// No is assigned by the backend. UnitPrice is in raw IDR.
-type QuotationItemInput struct {
+// QuotationSubItemInput is one priced part of a modular line item. Sub-items
+// carry their own cost, quantity and margin; the parent line's price is the
+// sum of theirs, so a parent with sub-items never prices itself.
+//
+// SubSubItems are its scope lines -- description-only detail stating what the
+// part includes. They have no standalone values and no life of their own: the
+// linkage is structural, because the only way to send one is inside a
+// sub-item.
+type QuotationSubItemInput struct {
 	Description   string
 	UoM           string
+	UnitCost      uint64
+	Qty           uint32
+	MarginPercent uint16
+	MarginEnabled bool
+	SubSubItems   []QuotationSubSubItemInput
+}
+
+// QuotationSubSubItemInput is one detail line beneath a priced sub-item. It
+// has no standalone values -- no quantity, no cost, no margin -- it is linked
+// to the sub-item it sits under and numbers as X.Y.Z.
+type QuotationSubSubItemInput struct {
+	Description string
+}
+
+// QuotationItemInput is a single line item from the frontend.
+// No is assigned by the backend. UnitPrice is in raw IDR.
+//
+// SubItems turns the line into a modular package: each sub-item is priced on
+// its own and the parent becomes the rollup (Qty 1, UoM Lot, price = Σ subs).
+// ShowSubPrices chooses the customer view -- true prints each sub as a priced
+// row beneath a title-only parent (state C), false keeps the parent as the
+// full-value row and prints the subs as unpriced scope rows (state B). Either
+// way the pricing is identical; only what the customer sees differs.
+type QuotationItemInput struct {
+	// Pointer-bearing fields first: strings and the sub-item slice lead, so
+	// the collector's scan window is short and the struct stays at its 72-byte
+	// size floor (see struct_alignment_test.go).
+	Description   string
+	UoM           string
+	SubItems      []QuotationSubItemInput
 	UnitPrice     uint64
 	Qty           uint32
 	MarginPercent uint16
 	MarginEnabled bool
+	ShowSubPrices bool
+}
+
+// QuotationSubItem is one priced part of a prepared package line, with the
+// display strings the customer template renders. The margin fields describe
+// how the part was priced; nothing renders them into customer output.
+//
+// SubSubItems are the part's scope lines, numbered X.Y.Z; they carry no
+// pricing and contribute nothing to any total.
+type QuotationSubItem struct {
+	Description       string
+	SubNo             string
+	UoM               string
+	SubSubItems       []QuotationSubSubItem
+	DisplayUnitPrice  string
+	DisplayTotal      string
+	OriginalUnitPrice uint64
+	OriginalTotal     uint64
+	UnitPrice         uint64
+	Total             uint64
+	MarginAmount      uint64
+	MarginEnabled     bool
+	MarginPercent     uint16
+	Qty               uint32
+}
+
+// QuotationSubSubItem is one detail line beneath a priced sub-item. It has no
+// values of its own and no printed label: it is a plain bullet under its sub,
+// identified by position alone (storage keeps the ordering).
+type QuotationSubSubItem struct {
+	Description string
 }
 
 // QuotationItem is a prepared line item with computed display fields
 // ready for template rendering.
+//
+// SubItems is populated only for modular lines; the template renders them as
+// their own rows beneath the parent, priced (state C) or as plain scope rows
+// (state B) depending on ShowSubPrices.
+//
+// Field order is chosen for memory layout: every string and the slice lead,
+// word-sized numerics follow, and the flags and counts close. See
+// struct_alignment_test.go.
 type QuotationItem struct {
 	Description              string
 	DisplayDesc              template.HTML
@@ -60,6 +135,7 @@ type QuotationItem struct {
 	DisplayUnitPrice         string
 	DisplayTotal             string
 	DisplayMarginAmount      string
+	SubItems                 []QuotationSubItem
 	OriginalUnitPrice        uint64
 	OriginalTotal            uint64
 	MarginAmount             uint64
@@ -67,6 +143,7 @@ type QuotationItem struct {
 	Total                    uint64
 	MarginEnabled            bool
 	MarginPercent            uint16
+	ShowSubPrices            bool
 	No                       uint32
 	Qty                      uint32
 }
@@ -514,6 +591,92 @@ func plausibleUoM(s string) bool {
 // its own, much lower, ceiling of 100.
 const MaxMarginPercent = 1000
 
+// validateSubItems checks one item's priced sub-items and returns them
+// normalized, ready for the builder.
+//
+// A line with sub-items is a package: the parent stops being a priceable row
+// and becomes the rollup of its parts. That is why the parent's quantity and
+// unit are pinned to 1 and Lot (the parent's price IS the sum, so a second lot
+// would double-count), why the parent's own margin is refused (the parts carry
+// the margin now), and why description bullets are refused (the sub rows
+// replace them; keeping both would print the scope twice). ShowSubPrices with
+// no sub-items is a contradiction and is refused rather than ignored, because a
+// flag the code silently drops today is a bug it ships tomorrow.
+func validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemInput, error) {
+	if len(item.SubItems) == 0 {
+		if item.ShowSubPrices {
+			return nil, fmt.Errorf("item %d: sub-item breakdown requested but no sub-items given", itemNo)
+		}
+		return nil, nil
+	}
+
+	// 1 exactly, so the parent contributes its price once; Lot, because a
+	// package is quoted as a lot. Case-insensitive so "lot" from a paste
+	// still climbs the same path if the editor ever sends it that way.
+	if item.Qty != 1 {
+		return nil, fmt.Errorf("item %d: a line with sub-items must have quantity 1 (the package is the rollup of its parts)", itemNo)
+	}
+	if !strings.EqualFold(strings.TrimSpace(item.UoM), "lot") {
+		return nil, fmt.Errorf("item %d: a line with sub-items must use the unit Lot", itemNo)
+	}
+	if item.MarginEnabled {
+		return nil, fmt.Errorf("item %d: a line with sub-items takes its margin per sub-item; clear the line margin", itemNo)
+	}
+	for _, line := range strings.Split(item.Description, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "- ") {
+			return nil, fmt.Errorf("item %d: bullet lines in the description duplicate the sub-items beneath; move the scope into sub-items", itemNo)
+		}
+	}
+
+	normalized := make([]QuotationSubItemInput, 0, len(item.SubItems))
+	for j, sub := range item.SubItems {
+		description := strings.TrimSpace(sub.Description)
+		if description == "" {
+			return nil, fmt.Errorf("item %d sub-item %d: description is required", itemNo, j+1)
+		}
+		if strings.ContainsAny(description, "\n\r") {
+			return nil, fmt.Errorf("item %d sub-item %d: description must be a single line", itemNo, j+1)
+		}
+		if sub.Qty == 0 {
+			return nil, fmt.Errorf("item %d sub-item %d: quantity must be greater than zero", itemNo, j+1)
+		}
+		uom := strings.TrimSpace(sub.UoM)
+		if uom == "" {
+			return nil, fmt.Errorf("item %d sub-item %d: unit of measure is required", itemNo, j+1)
+		}
+		if !plausibleUoM(uom) {
+			return nil, fmt.Errorf("item %d sub-item %d: unit of measure %q is not a unit", itemNo, j+1, sub.UoM)
+		}
+		if sub.MarginPercent > MaxMarginPercent {
+			return nil, fmt.Errorf("item %d sub-item %d: margin percent cannot be greater than %d", itemNo, j+1, MaxMarginPercent)
+		}
+		sub.Description = description
+		sub.UoM = uom
+
+		// Sub-sub-items spell out what one priced part includes. They carry
+		// no values of their own -- no quantity, no cost, no margin -- and
+		// exist only through their parent sub-item, which is also why the
+		// structure itself (a field on the sub) enforces the linkage: there
+		// is no way to send one that is not attached to a sub.
+		normalizedSubSubs := make([]QuotationSubSubItemInput, 0, len(sub.SubSubItems))
+		for k, low := range sub.SubSubItems {
+			lowDescription := strings.TrimSpace(low.Description)
+			if lowDescription == "" {
+				return nil, fmt.Errorf("item %d sub-item %d detail %d: description is required", itemNo, j+1, k+1)
+			}
+			if strings.ContainsAny(lowDescription, "\n\r") {
+				return nil, fmt.Errorf("item %d sub-item %d detail %d: description must be a single line", itemNo, j+1, k+1)
+			}
+			normalizedSubSubs = append(normalizedSubSubs, QuotationSubSubItemInput{
+				Description: lowDescription,
+			})
+		}
+		sub.SubSubItems = normalizedSubSubs
+		normalized = append(normalized, sub)
+	}
+	return normalized, nil
+}
+
 // Prepare validates user input and populates the QuotationData business fields.
 // It does not generate the quote number — that is deferred to Export to avoid
 // consuming a sequence number if the user never saves. Returns an error
@@ -556,6 +719,17 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 		if item.MarginPercent > MaxMarginPercent {
 			return fmt.Errorf("item margin percent cannot be greater than %d", MaxMarginPercent)
+		}
+
+		normalized, err := validateSubItems(item, i+1)
+		if err != nil {
+			return err
+		}
+		input.Items[i].SubItems = normalized
+		if len(normalized) > 0 {
+			// A package is quoted as a Lot by definition; canonicalize instead
+			// of letting "lot", "LOT" or "Lot " reach the customer document.
+			input.Items[i].UoM = "Lot"
 		}
 	}
 
@@ -832,6 +1006,29 @@ func (q *Quotation) context() context.Context {
 func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath string) store.RevisionDraft {
 	items := make([]store.RevisionItem, 0, len(q.Data.Items))
 	for _, item := range q.Data.Items {
+		subItems := make([]store.RevisionSubItem, 0, len(item.SubItems))
+		for i, sub := range item.SubItems {
+			lows := make([]store.RevisionSubSubItem, 0, len(sub.SubSubItems))
+			for k, low := range sub.SubSubItems {
+				lows = append(lows, store.RevisionSubSubItem{
+					SubSubNo:    k + 1,
+					Description: low.Description,
+				})
+			}
+			subItems = append(subItems, store.RevisionSubItem{
+				SubNo:         i + 1,
+				Description:   sub.Description,
+				Qty:           int64(sub.Qty),
+				UoM:           sub.UoM,
+				UnitCost:      int64(sub.OriginalUnitPrice),
+				UnitPrice:     int64(sub.UnitPrice),
+				MarginAmount:  int64(sub.MarginAmount),
+				Total:         int64(sub.Total),
+				MarginPercent: int16(sub.MarginPercent),
+				MarginEnabled: sub.MarginEnabled,
+				SubSubItems:   lows,
+			})
+		}
 		items = append(items, store.RevisionItem{
 			ItemNo:                int(item.No),
 			Description:           item.Description,
@@ -844,6 +1041,8 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 			OriginalTotal:         int64(item.OriginalTotal),
 			MarginalizedUnitPrice: int64(item.UnitPrice),
 			MarginalizedTotal:     int64(item.Total),
+			ShowSubPrices:         item.ShowSubPrices,
+			SubItems:              subItems,
 		})
 	}
 
@@ -928,14 +1127,41 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 	items := make([]quotation.Item, 0, len(q.Data.Items))
 	for _, it := range q.Data.Items {
+		parts := make([]quotation.SubItem, 0, len(it.SubItems))
+		for _, sub := range it.SubItems {
+			bullets := make([]string, 0, len(sub.SubSubItems))
+			for _, low := range sub.SubSubItems {
+				bullets = append(bullets, low.Description)
+			}
+			parts = append(parts, quotation.SubItem{
+				SubNo:       sub.SubNo,
+				Description: sub.Description,
+				Qty:         sub.Qty,
+				UoM:         sub.UoM,
+				UnitPrice:   sub.DisplayUnitPrice,
+				Total:       sub.DisplayTotal,
+				Bullets:     bullets,
+			})
+		}
 		items = append(items, quotation.Item{
-			No:          int(it.No),
-			DisplayDesc: string(it.DisplayDesc),
-			Qty:         it.Qty,
-			UoM:         it.UoM,
-			UnitPrice:   it.DisplayUnitPrice,
-			Total:       it.DisplayTotal,
+			No:            int(it.No),
+			DisplayDesc:   string(it.DisplayDesc),
+			Qty:           it.Qty,
+			UoM:           it.UoM,
+			UnitPrice:     it.DisplayUnitPrice,
+			Total:         it.DisplayTotal,
+			SubItems:      parts,
+			ShowSubPrices: it.ShowSubPrices,
 		})
+	}
+
+	// The template prints the PPN line only when a PPN was actually charged
+	// ({{if .PpnAmount}}), so a zero-tax zone must present an empty display
+	// amount to the renderers too -- passing "0" made the native engine draw
+	// a "PPN 11% Rp0" row the browser never prints.
+	displayPpn := ""
+	if q.Data.PpnAmount > 0 {
+		displayPpn = q.Data.DisplayPpnAmount
 	}
 
 	return quotation.Input{
@@ -974,7 +1200,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 		DisplaySubTotal:   q.Data.DisplaySubTotal,
 		DisplayDiscount:   q.Data.DisplayDiscountAmount,
-		DisplayPpn:        q.Data.DisplayPpnAmount,
+		DisplayPpn:        displayPpn,
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,
 

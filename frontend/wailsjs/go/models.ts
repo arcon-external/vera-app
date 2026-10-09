@@ -17,23 +17,69 @@ export namespace auth {
 
 export namespace backend {
 	
-	export class ArchivedQuotationItem {
-	    ItemNo: number;
-	    Description: string;
-	    Qty: number;
-	    UoM: string;
-	    UnitPrice: number;
-	    DisplayUnitPrice: string;
-	    MarginEnabled: boolean;
-	    MarginPercent: number;
-	    MarginAmount: number;
+	export class ArchivedQuotationSubItem {
 	    DisplayMarginAmount: string;
-	    OriginalTotal: number;
-	    DisplayOriginalTotal: string;
-	    MarginalizedUnitPrice: number;
-	    DisplayMarginalizedUnit: string;
-	    MarginalizedTotal: number;
+	    Description: string;
+	    Details: string[];
 	    DisplayMarginalizedTotal: string;
+	    UoM: string;
+	    DisplayMarginalizedUnit: string;
+	    DisplayOriginalUnit: string;
+	    DisplayOriginalTotal: string;
+	    MarginAmount: number;
+	    SubNo: number;
+	    OriginalUnitPrice: number;
+	    OriginalTotal: number;
+	    MarginalizedUnitPrice: number;
+	    MarginalizedTotal: number;
+	    Qty: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ArchivedQuotationSubItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
+	        this.Description = source["Description"];
+	        this.Details = source["Details"];
+	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	        this.UoM = source["UoM"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
+	        this.DisplayOriginalUnit = source["DisplayOriginalUnit"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.MarginAmount = source["MarginAmount"];
+	        this.SubNo = source["SubNo"];
+	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	    }
+	}
+	export class ArchivedQuotationItem {
+	    DisplayMarginAmount: string;
+	    Description: string;
+	    DisplayMarginalizedTotal: string;
+	    UoM: string;
+	    DisplayMarginalizedUnit: string;
+	    DisplayUnitPrice: string;
+	    DisplayOriginalTotal: string;
+	    Subs: ArchivedQuotationSubItem[];
+	    MarginAmount: number;
+	    ItemNo: number;
+	    OriginalTotal: number;
+	    MarginalizedUnitPrice: number;
+	    UnitPrice: number;
+	    MarginalizedTotal: number;
+	    Qty: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    ShowSubPrices: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationItem(source);
@@ -41,73 +87,93 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ItemNo = source["ItemNo"];
-	        this.Description = source["Description"];
-	        this.Qty = source["Qty"];
-	        this.UoM = source["UoM"];
-	        this.UnitPrice = source["UnitPrice"];
-	        this.DisplayUnitPrice = source["DisplayUnitPrice"];
-	        this.MarginEnabled = source["MarginEnabled"];
-	        this.MarginPercent = source["MarginPercent"];
-	        this.MarginAmount = source["MarginAmount"];
 	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
-	        this.OriginalTotal = source["OriginalTotal"];
-	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
-	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
-	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
-	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.Description = source["Description"];
 	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	        this.UoM = source["UoM"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
+	        this.DisplayUnitPrice = source["DisplayUnitPrice"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.Subs = this.convertValues(source["Subs"], ArchivedQuotationSubItem);
+	        this.MarginAmount = source["MarginAmount"];
+	        this.ItemNo = source["ItemNo"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.UnitPrice = source["UnitPrice"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class ArchivedQuotation {
-	    ID: number;
-	    QuoteNumber: string;
-	    RevisionNumber: number;
-	    CustomerName: string;
-	    Subject: string;
-	    CreatedAt: string;
-	    GrandTotal: number;
-	    DisplayGrand: string;
-	    CustomerCode: number;
-	    CustomerAddress: string;
+	    DisplayPpn: string;
+	    DisplayOriginalGrand: string;
+	    DisplayOriginalDiscount: string;
 	    RecipientName: string;
 	    RecipientAddress: string;
 	    Incoterm: string;
-	    ValidityDays: number;
-	    PaymentTermDays: number;
-	    LeadTimeDays: number;
-	    DiscountPercent: number;
+	    HTMLSnapshot: string;
+	    DisplayNett: string;
+	    DisplayProfit: string;
+	    DisplayMarginalizedAfterTax: string;
 	    TaxZone: string;
 	    TaxCategory: string;
 	    TaxType: string;
 	    ServiceCategory: string;
-	    TaxRateBps: number;
-	    OriginalSubtotal: number;
-	    OriginalDiscount: number;
+	    DisplayTax: string;
+	    DisplayMarginalizedGrand: string;
+	    DisplayMarginalizedDiscount: string;
+	    DisplayMarginalizedSubtotal: string;
+	    DisplayOriginalSubtotal: string;
+	    CustomerAddress: string;
+	    Items: ArchivedQuotationItem[];
+	    AvailableRevisions: number[];
+	    QuoteNumber: string;
+	    CustomerName: string;
+	    Subject: string;
+	    CreatedAt: string;
+	    DisplayGrand: string;
+	    ID: number;
+	    GrandTotal: number;
+	    RevisionNumber: number;
 	    OriginalGrand: number;
+	    OriginalSubtotal: number;
+	    MarginalizedAfterTax: number;
+	    PpnAmount: number;
+	    NettProfit: number;
 	    MarginalizedSubtotal: number;
 	    MarginalizedDiscount: number;
-	    MarginalizedGrand: number;
-	    PpnAmount: number;
-	    CustomerGrandTotal: number;
-	    DisplayPpn: string;
-	    TaxAmount: number;
-	    MarginalizedAfterTax: number;
 	    ProfitAmount: number;
-	    NettProfit: number;
-	    DisplayOriginalSubtotal: string;
-	    DisplayOriginalDiscount: string;
-	    DisplayOriginalGrand: string;
-	    DisplayMarginalizedSubtotal: string;
-	    DisplayMarginalizedDiscount: string;
-	    DisplayMarginalizedGrand: string;
-	    DisplayTax: string;
-	    DisplayMarginalizedAfterTax: string;
-	    DisplayProfit: string;
-	    DisplayNett: string;
-	    Items: ArchivedQuotationItem[];
-	    HTMLSnapshot: string;
-	    AvailableRevisions: number[];
+	    OriginalDiscount: number;
+	    TaxAmount: number;
+	    MarginalizedGrand: number;
+	    CustomerGrandTotal: number;
+	    CustomerCode: number;
+	    LeadTimeDays: number;
+	    PaymentTermDays: number;
+	    DiscountPercent: number;
+	    ValidityDays: number;
+	    TaxRateBps: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotation(source);
@@ -115,54 +181,54 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
-	        this.QuoteNumber = source["QuoteNumber"];
-	        this.RevisionNumber = source["RevisionNumber"];
-	        this.CustomerName = source["CustomerName"];
-	        this.Subject = source["Subject"];
-	        this.CreatedAt = source["CreatedAt"];
-	        this.GrandTotal = source["GrandTotal"];
-	        this.DisplayGrand = source["DisplayGrand"];
-	        this.CustomerCode = source["CustomerCode"];
-	        this.CustomerAddress = source["CustomerAddress"];
+	        this.DisplayPpn = source["DisplayPpn"];
+	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
+	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
 	        this.RecipientName = source["RecipientName"];
 	        this.RecipientAddress = source["RecipientAddress"];
 	        this.Incoterm = source["Incoterm"];
-	        this.ValidityDays = source["ValidityDays"];
-	        this.PaymentTermDays = source["PaymentTermDays"];
-	        this.LeadTimeDays = source["LeadTimeDays"];
-	        this.DiscountPercent = source["DiscountPercent"];
+	        this.HTMLSnapshot = source["HTMLSnapshot"];
+	        this.DisplayNett = source["DisplayNett"];
+	        this.DisplayProfit = source["DisplayProfit"];
+	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
-	        this.TaxRateBps = source["TaxRateBps"];
-	        this.OriginalSubtotal = source["OriginalSubtotal"];
-	        this.OriginalDiscount = source["OriginalDiscount"];
+	        this.DisplayTax = source["DisplayTax"];
+	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
+	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
+	        this.DisplayMarginalizedSubtotal = source["DisplayMarginalizedSubtotal"];
+	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
+	        this.CustomerAddress = source["CustomerAddress"];
+	        this.Items = this.convertValues(source["Items"], ArchivedQuotationItem);
+	        this.AvailableRevisions = source["AvailableRevisions"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.Subject = source["Subject"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.DisplayGrand = source["DisplayGrand"];
+	        this.ID = source["ID"];
+	        this.GrandTotal = source["GrandTotal"];
+	        this.RevisionNumber = source["RevisionNumber"];
 	        this.OriginalGrand = source["OriginalGrand"];
+	        this.OriginalSubtotal = source["OriginalSubtotal"];
+	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
+	        this.PpnAmount = source["PpnAmount"];
+	        this.NettProfit = source["NettProfit"];
 	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
 	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
-	        this.MarginalizedGrand = source["MarginalizedGrand"];
-	        this.PpnAmount = source["PpnAmount"];
-	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
-	        this.DisplayPpn = source["DisplayPpn"];
-	        this.TaxAmount = source["TaxAmount"];
-	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
 	        this.ProfitAmount = source["ProfitAmount"];
-	        this.NettProfit = source["NettProfit"];
-	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
-	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
-	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
-	        this.DisplayMarginalizedSubtotal = source["DisplayMarginalizedSubtotal"];
-	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
-	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
-	        this.DisplayTax = source["DisplayTax"];
-	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
-	        this.DisplayProfit = source["DisplayProfit"];
-	        this.DisplayNett = source["DisplayNett"];
-	        this.Items = this.convertValues(source["Items"], ArchivedQuotationItem);
-	        this.HTMLSnapshot = source["HTMLSnapshot"];
-	        this.AvailableRevisions = source["AvailableRevisions"];
+	        this.OriginalDiscount = source["OriginalDiscount"];
+	        this.TaxAmount = source["TaxAmount"];
+	        this.MarginalizedGrand = source["MarginalizedGrand"];
+	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
+	        this.CustomerCode = source["CustomerCode"];
+	        this.LeadTimeDays = source["LeadTimeDays"];
+	        this.PaymentTermDays = source["PaymentTermDays"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.ValidityDays = source["ValidityDays"];
+	        this.TaxRateBps = source["TaxRateBps"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -184,15 +250,16 @@ export namespace backend {
 		}
 	}
 	
+	
 	export class ArchivedQuotationSummary {
-	    ID: number;
 	    QuoteNumber: string;
-	    RevisionNumber: number;
 	    CustomerName: string;
 	    Subject: string;
 	    CreatedAt: string;
-	    GrandTotal: number;
 	    DisplayGrand: string;
+	    ID: number;
+	    GrandTotal: number;
+	    RevisionNumber: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationSummary(source);
@@ -200,25 +267,25 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
 	        this.QuoteNumber = source["QuoteNumber"];
-	        this.RevisionNumber = source["RevisionNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Subject = source["Subject"];
 	        this.CreatedAt = source["CreatedAt"];
-	        this.GrandTotal = source["GrandTotal"];
 	        this.DisplayGrand = source["DisplayGrand"];
+	        this.ID = source["ID"];
+	        this.GrandTotal = source["GrandTotal"];
+	        this.RevisionNumber = source["RevisionNumber"];
 	    }
 	}
 	export class AuthUserDTO {
-	    ID: number;
 	    Email: string;
 	    DisplayName: string;
 	    Role: string;
-	    IsActive: boolean;
-	    MustChangePassword: boolean;
 	    LastLoginAt: string;
 	    AvatarURL: string;
+	    ID: number;
+	    IsActive: boolean;
+	    MustChangePassword: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new AuthUserDTO(source);
@@ -226,74 +293,14 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
 	        this.Email = source["Email"];
 	        this.DisplayName = source["DisplayName"];
 	        this.Role = source["Role"];
-	        this.IsActive = source["IsActive"];
-	        this.MustChangePassword = source["MustChangePassword"];
 	        this.LastLoginAt = source["LastLoginAt"];
 	        this.AvatarURL = source["AvatarURL"];
-	    }
-	}
-	export class UpdateInfo {
-	    Current: string;
-	    Latest: string;
-	    UpdateAvailable: boolean;
-	    Required: boolean;
-	    NotesURL: string;
-	    DownloadURL: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new UpdateInfo(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Current = source["Current"];
-	        this.Latest = source["Latest"];
-	        this.UpdateAvailable = source["UpdateAvailable"];
-	        this.Required = source["Required"];
-	        this.NotesURL = source["NotesURL"];
-	        this.DownloadURL = source["DownloadURL"];
-	    }
-	}
-	export class CompanyProfile {
-	    LegalName: string;
-	    Address: string;
-	    Phone: string;
-	    Email: string;
-	    TaxID: string;
-	    HasLogo: boolean;
-	    ThemeQDeep: string;
-	    ThemeQAccent: string;
-	    ThemeQSoft: string;
-	    ThemeQInk: string;
-	    ThemePDeep: string;
-	    ThemePAccent: string;
-	    ThemePSoft: string;
-	    ThemePInk: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new CompanyProfile(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.LegalName = source["LegalName"];
-	        this.Address = source["Address"];
-	        this.Phone = source["Phone"];
-	        this.Email = source["Email"];
-	        this.TaxID = source["TaxID"];
-	        this.HasLogo = source["HasLogo"];
-	        this.ThemeQDeep = source["ThemeQDeep"];
-	        this.ThemeQAccent = source["ThemeQAccent"];
-	        this.ThemeQSoft = source["ThemeQSoft"];
-	        this.ThemeQInk = source["ThemeQInk"];
-	        this.ThemePDeep = source["ThemePDeep"];
-	        this.ThemePAccent = source["ThemePAccent"];
-	        this.ThemePSoft = source["ThemePSoft"];
-	        this.ThemePInk = source["ThemePInk"];
+	        this.ID = source["ID"];
+	        this.IsActive = source["IsActive"];
+	        this.MustChangePassword = source["MustChangePassword"];
 	    }
 	}
 	export class CompanyLogo {
@@ -310,6 +317,44 @@ export namespace backend {
 	        this.LogoBase64 = source["LogoBase64"];
 	        this.LogoMime = source["LogoMime"];
 	        this.BuiltIn = source["BuiltIn"];
+	    }
+	}
+	export class CompanyProfile {
+	    ThemeQDeep: string;
+	    ThemePSoft: string;
+	    Phone: string;
+	    Email: string;
+	    TaxID: string;
+	    ThemePInk: string;
+	    ThemeQSoft: string;
+	    LegalName: string;
+	    Address: string;
+	    ThemeQInk: string;
+	    ThemePDeep: string;
+	    ThemePAccent: string;
+	    ThemeQAccent: string;
+	    HasLogo: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompanyProfile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ThemeQDeep = source["ThemeQDeep"];
+	        this.ThemePSoft = source["ThemePSoft"];
+	        this.Phone = source["Phone"];
+	        this.Email = source["Email"];
+	        this.TaxID = source["TaxID"];
+	        this.ThemePInk = source["ThemePInk"];
+	        this.ThemeQSoft = source["ThemeQSoft"];
+	        this.LegalName = source["LegalName"];
+	        this.Address = source["Address"];
+	        this.ThemeQInk = source["ThemeQInk"];
+	        this.ThemePDeep = source["ThemePDeep"];
+	        this.ThemePAccent = source["ThemePAccent"];
+	        this.ThemeQAccent = source["ThemeQAccent"];
+	        this.HasLogo = source["HasLogo"];
 	    }
 	}
 	export class CustomerPreviewItem {
@@ -355,30 +400,30 @@ export namespace backend {
 	    }
 	}
 	export class CustomerPreview {
-	    Items: CustomerPreviewItem[];
+	    Incoterm: string;
 	    Subject: string;
 	    RecipientName: string;
 	    RecipientCompany: string;
 	    RecipientAddress: string;
 	    QuoteNumber: string;
-	    RevisionID: number;
 	    Date: string;
 	    ValidUntil: string;
-	    Incoterm: string;
+	    DisplayPpnAmount: string;
 	    DisplaySubTotal: string;
 	    DisplayDiscountAmount: string;
 	    DisplayGrandTotal: string;
-	    DisplayPpnAmount: string;
+	    Items: CustomerPreviewItem[];
 	    SubTotal: number;
+	    OriginalGrandTotal: number;
 	    DiscountAmount: number;
 	    GrandTotal: number;
 	    PpnAmount: number;
 	    OriginalSubTotal: number;
 	    OriginalDiscountAmount: number;
-	    OriginalGrandTotal: number;
+	    NettProfit: number;
 	    MarginalizedGrandAfterTax: number;
 	    ProfitAmount: number;
-	    NettProfit: number;
+	    RevisionID: number;
 	    DiscountPercent: number;
 	    Validity: number;
 	    PaymentTerm: number;
@@ -390,30 +435,30 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Items = this.convertValues(source["Items"], CustomerPreviewItem);
+	        this.Incoterm = source["Incoterm"];
 	        this.Subject = source["Subject"];
 	        this.RecipientName = source["RecipientName"];
 	        this.RecipientCompany = source["RecipientCompany"];
 	        this.RecipientAddress = source["RecipientAddress"];
 	        this.QuoteNumber = source["QuoteNumber"];
-	        this.RevisionID = source["RevisionID"];
 	        this.Date = source["Date"];
 	        this.ValidUntil = source["ValidUntil"];
-	        this.Incoterm = source["Incoterm"];
+	        this.DisplayPpnAmount = source["DisplayPpnAmount"];
 	        this.DisplaySubTotal = source["DisplaySubTotal"];
 	        this.DisplayDiscountAmount = source["DisplayDiscountAmount"];
 	        this.DisplayGrandTotal = source["DisplayGrandTotal"];
-	        this.DisplayPpnAmount = source["DisplayPpnAmount"];
+	        this.Items = this.convertValues(source["Items"], CustomerPreviewItem);
 	        this.SubTotal = source["SubTotal"];
+	        this.OriginalGrandTotal = source["OriginalGrandTotal"];
 	        this.DiscountAmount = source["DiscountAmount"];
 	        this.GrandTotal = source["GrandTotal"];
 	        this.PpnAmount = source["PpnAmount"];
 	        this.OriginalSubTotal = source["OriginalSubTotal"];
 	        this.OriginalDiscountAmount = source["OriginalDiscountAmount"];
-	        this.OriginalGrandTotal = source["OriginalGrandTotal"];
+	        this.NettProfit = source["NettProfit"];
 	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
 	        this.ProfitAmount = source["ProfitAmount"];
-	        this.NettProfit = source["NettProfit"];
+	        this.RevisionID = source["RevisionID"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
@@ -440,12 +485,12 @@ export namespace backend {
 	}
 	
 	export class DeletionRequest {
-	    ID: number;
-	    UserID: number;
 	    Email: string;
 	    DisplayName: string;
 	    Status: string;
 	    RequestedAt: string;
+	    ID: number;
+	    UserID: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeletionRequest(source);
@@ -453,19 +498,19 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
-	        this.UserID = source["UserID"];
 	        this.Email = source["Email"];
 	        this.DisplayName = source["DisplayName"];
 	        this.Status = source["Status"];
 	        this.RequestedAt = source["RequestedAt"];
+	        this.ID = source["ID"];
+	        this.UserID = source["UserID"];
 	    }
 	}
 	export class EmailChangeRequest {
-	    ID: number;
 	    ProposedEmail: string;
 	    Status: string;
 	    RequestedAt: string;
+	    ID: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new EmailChangeRequest(source);
@@ -473,10 +518,10 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
 	        this.ProposedEmail = source["ProposedEmail"];
 	        this.Status = source["Status"];
 	        this.RequestedAt = source["RequestedAt"];
+	        this.ID = source["ID"];
 	    }
 	}
 	export class EmailChangeResult {
@@ -494,13 +539,13 @@ export namespace backend {
 	    }
 	}
 	export class EmailChangeRow {
-	    ID: number;
-	    UserID: number;
 	    Email: string;
 	    DisplayName: string;
 	    ProposedEmail: string;
 	    Status: string;
 	    RequestedAt: string;
+	    ID: number;
+	    UserID: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new EmailChangeRow(source);
@@ -508,35 +553,83 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
-	        this.UserID = source["UserID"];
 	        this.Email = source["Email"];
 	        this.DisplayName = source["DisplayName"];
 	        this.ProposedEmail = source["ProposedEmail"];
 	        this.Status = source["Status"];
 	        this.RequestedAt = source["RequestedAt"];
+	        this.ID = source["ID"];
+	        this.UserID = source["UserID"];
+	    }
+	}
+	export class InternalPreviewSubItem {
+	    Description: string;
+	    DisplayOriginalUnitPrice: string;
+	    DisplayMarginAmount: string;
+	    DisplayMarginalizedTotal: string;
+	    DisplayMarginalizedUnit: string;
+	    DisplayOriginalTotal: string;
+	    SubNo: string;
+	    UoM: string;
+	    Details: string[];
+	    Qty: number;
+	    MarginPercent: number;
+	    OriginalUnitPrice: number;
+	    OriginalTotal: number;
+	    MarginAmount: number;
+	    MarginalizedUnitPrice: number;
+	    MarginalizedTotal: number;
+	    MarginEnabled: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new InternalPreviewSubItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Description = source["Description"];
+	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
+	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
+	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.SubNo = source["SubNo"];
+	        this.UoM = source["UoM"];
+	        this.Details = source["Details"];
+	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.MarginAmount = source["MarginAmount"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.MarginEnabled = source["MarginEnabled"];
 	    }
 	}
 	export class InternalPreviewItem {
+	    DisplayOriginalUnitPrice: string;
+	    DisplayMarginAmount: string;
+	    DisplayMarginalizedTotal: string;
+	    DisplayMarginBlended: string;
+	    DisplayMarginalizedUnit: string;
 	    Description: string;
-	    CostUnit: number;
-	    SellUnit: number;
-	    CostTotal: number;
+	    DisplayOriginalTotal: string;
+	    SubItems: InternalPreviewSubItem[];
 	    SellTotal: number;
-	    OriginalUnitPrice: number;
-	    OriginalTotal: number;
 	    MarginalizedUnitPrice: number;
 	    MarginalizedTotal: number;
-	    DisplayOriginalUnitPrice: string;
-	    DisplayOriginalTotal: string;
-	    DisplayMarginalizedUnit: string;
-	    DisplayMarginalizedTotal: string;
-	    DisplayMarginAmount: string;
-	    MarginEnabled: boolean;
-	    MarginPercent: number;
+	    OriginalTotal: number;
+	    OriginalUnitPrice: number;
+	    CostTotal: number;
+	    SellUnit: number;
+	    CostUnit: number;
 	    MarginAmount: number;
+	    MarginBlendedPercent: number;
 	    No: number;
 	    Qty: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    MarginBlendedApprox: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new InternalPreviewItem(source);
@@ -544,33 +637,55 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
+	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
+	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
+	        this.DisplayMarginBlended = source["DisplayMarginBlended"];
+	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
 	        this.Description = source["Description"];
-	        this.CostUnit = source["CostUnit"];
-	        this.SellUnit = source["SellUnit"];
-	        this.CostTotal = source["CostTotal"];
+	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
+	        this.SubItems = this.convertValues(source["SubItems"], InternalPreviewSubItem);
 	        this.SellTotal = source["SellTotal"];
-	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
-	        this.OriginalTotal = source["OriginalTotal"];
 	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
 	        this.MarginalizedTotal = source["MarginalizedTotal"];
-	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
-	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
-	        this.DisplayMarginalizedUnit = source["DisplayMarginalizedUnit"];
-	        this.DisplayMarginalizedTotal = source["DisplayMarginalizedTotal"];
-	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
-	        this.MarginEnabled = source["MarginEnabled"];
-	        this.MarginPercent = source["MarginPercent"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
+	        this.CostTotal = source["CostTotal"];
+	        this.SellUnit = source["SellUnit"];
+	        this.CostUnit = source["CostUnit"];
 	        this.MarginAmount = source["MarginAmount"];
+	        this.MarginBlendedPercent = source["MarginBlendedPercent"];
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.MarginBlendedApprox = source["MarginBlendedApprox"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class InternalBreakdown {
-	    Items: InternalPreviewItem[];
-	    TaxLabel: string;
+	    DisplayMarginalizedGrand: string;
+	    DisplayNett: string;
 	    TaxType: string;
 	    ServiceCategory: string;
-	    PpnAmount: number;
+	    DisplayMarginalizedAfterTax: string;
 	    DisplayPpn: string;
 	    DisplayCost: string;
 	    DisplaySell: string;
@@ -580,32 +695,32 @@ export namespace backend {
 	    DisplayGrand: string;
 	    DisplayProfit: string;
 	    DisplayTax: string;
-	    DisplayNett: string;
+	    DisplayMarginalizedDiscount: string;
 	    DisplayOriginalSubtotal: string;
 	    DisplayOriginalDiscount: string;
 	    DisplayOriginalGrand: string;
+	    TaxLabel: string;
 	    DisplayMarginalizedSubtotal: string;
-	    DisplayMarginalizedDiscount: string;
-	    DisplayMarginalizedGrand: string;
-	    DisplayMarginalizedAfterTax: string;
-	    CostSubtotal: number;
+	    Items: InternalPreviewItem[];
+	    NettProfit: number;
+	    TaxAmount: number;
 	    SellSubtotal: number;
-	    DiscountCost: number;
-	    DiscountSell: number;
+	    MarginalizedGrandAfterTax: number;
+	    PpnAmount: number;
 	    CostGrand: number;
 	    GrandTotal: number;
 	    ProfitAmount: number;
-	    TaxAmount: number;
-	    NettProfit: number;
-	    TaxRateBps: number;
-	    DiscountPercent: number;
+	    CostSubtotal: number;
+	    DiscountSell: number;
+	    DiscountCost: number;
+	    MarginalizedGrand: number;
 	    OriginalSubtotal: number;
 	    OriginalDiscount: number;
 	    OriginalGrand: number;
 	    MarginalizedSubtotal: number;
 	    MarginalizedDiscount: number;
-	    MarginalizedGrand: number;
-	    MarginalizedGrandAfterTax: number;
+	    TaxRateBps: number;
+	    DiscountPercent: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new InternalBreakdown(source);
@@ -613,11 +728,11 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Items = this.convertValues(source["Items"], InternalPreviewItem);
-	        this.TaxLabel = source["TaxLabel"];
+	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
+	        this.DisplayNett = source["DisplayNett"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
-	        this.PpnAmount = source["PpnAmount"];
+	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
 	        this.DisplayPpn = source["DisplayPpn"];
 	        this.DisplayCost = source["DisplayCost"];
 	        this.DisplaySell = source["DisplaySell"];
@@ -627,32 +742,32 @@ export namespace backend {
 	        this.DisplayGrand = source["DisplayGrand"];
 	        this.DisplayProfit = source["DisplayProfit"];
 	        this.DisplayTax = source["DisplayTax"];
-	        this.DisplayNett = source["DisplayNett"];
+	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
 	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
 	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
 	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
+	        this.TaxLabel = source["TaxLabel"];
 	        this.DisplayMarginalizedSubtotal = source["DisplayMarginalizedSubtotal"];
-	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
-	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
-	        this.DisplayMarginalizedAfterTax = source["DisplayMarginalizedAfterTax"];
-	        this.CostSubtotal = source["CostSubtotal"];
+	        this.Items = this.convertValues(source["Items"], InternalPreviewItem);
+	        this.NettProfit = source["NettProfit"];
+	        this.TaxAmount = source["TaxAmount"];
 	        this.SellSubtotal = source["SellSubtotal"];
-	        this.DiscountCost = source["DiscountCost"];
-	        this.DiscountSell = source["DiscountSell"];
+	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
+	        this.PpnAmount = source["PpnAmount"];
 	        this.CostGrand = source["CostGrand"];
 	        this.GrandTotal = source["GrandTotal"];
 	        this.ProfitAmount = source["ProfitAmount"];
-	        this.TaxAmount = source["TaxAmount"];
-	        this.NettProfit = source["NettProfit"];
-	        this.TaxRateBps = source["TaxRateBps"];
-	        this.DiscountPercent = source["DiscountPercent"];
+	        this.CostSubtotal = source["CostSubtotal"];
+	        this.DiscountSell = source["DiscountSell"];
+	        this.DiscountCost = source["DiscountCost"];
+	        this.MarginalizedGrand = source["MarginalizedGrand"];
 	        this.OriginalSubtotal = source["OriginalSubtotal"];
 	        this.OriginalDiscount = source["OriginalDiscount"];
 	        this.OriginalGrand = source["OriginalGrand"];
 	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
 	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
-	        this.MarginalizedGrand = source["MarginalizedGrand"];
-	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
+	        this.TaxRateBps = source["TaxRateBps"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -674,12 +789,13 @@ export namespace backend {
 		}
 	}
 	
+	
 	export class ManagedClient {
-	    ID: number;
-	    Code: number;
 	    Name: string;
 	    PrimaryAddress: string;
+	    ID: number;
 	    QuotationCount: number;
+	    Code: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new ManagedClient(source);
@@ -687,21 +803,21 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
-	        this.Code = source["Code"];
 	        this.Name = source["Name"];
 	        this.PrimaryAddress = source["PrimaryAddress"];
+	        this.ID = source["ID"];
 	        this.QuotationCount = source["QuotationCount"];
+	        this.Code = source["Code"];
 	    }
 	}
 	export class ManagedUser {
-	    ID: number;
 	    Email: string;
 	    DisplayName: string;
 	    Role: string;
+	    LastLoginAt: string;
+	    ID: number;
 	    IsActive: boolean;
 	    MustChangePassword: boolean;
-	    LastLoginAt: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ManagedUser(source);
@@ -709,18 +825,18 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
 	        this.Email = source["Email"];
 	        this.DisplayName = source["DisplayName"];
 	        this.Role = source["Role"];
+	        this.LastLoginAt = source["LastLoginAt"];
+	        this.ID = source["ID"];
 	        this.IsActive = source["IsActive"];
 	        this.MustChangePassword = source["MustChangePassword"];
-	        this.LastLoginAt = source["LastLoginAt"];
 	    }
 	}
 	export class OwnDeletionRequest {
-	    ID: number;
 	    Status: string;
+	    ID: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new OwnDeletionRequest(source);
@@ -728,17 +844,73 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ID = source["ID"];
 	        this.Status = source["Status"];
+	        this.ID = source["ID"];
 	    }
+	}
+	export class QuotationSubSubItemInput {
+	    Description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new QuotationSubSubItemInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Description = source["Description"];
+	    }
+	}
+	export class QuotationSubItemInput {
+	    Description: string;
+	    UoM: string;
+	    UnitCost: number;
+	    Qty: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    SubSubItems: QuotationSubSubItemInput[];
+	
+	    static createFrom(source: any = {}) {
+	        return new QuotationSubItemInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Description = source["Description"];
+	        this.UoM = source["UoM"];
+	        this.UnitCost = source["UnitCost"];
+	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.SubSubItems = this.convertValues(source["SubSubItems"], QuotationSubSubItemInput);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class QuotationItemInput {
 	    Description: string;
-	    Qty: number;
 	    UoM: string;
+	    SubItems: QuotationSubItemInput[];
 	    UnitPrice: number;
-	    MarginEnabled: boolean;
+	    Qty: number;
 	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    ShowSubPrices: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QuotationItemInput(source);
@@ -747,47 +919,13 @@ export namespace backend {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
-	        this.Qty = source["Qty"];
 	        this.UoM = source["UoM"];
+	        this.SubItems = this.convertValues(source["SubItems"], QuotationSubItemInput);
 	        this.UnitPrice = source["UnitPrice"];
-	        this.MarginEnabled = source["MarginEnabled"];
+	        this.Qty = source["Qty"];
 	        this.MarginPercent = source["MarginPercent"];
-	    }
-	}
-	export class QuotationInput {
-	    Items: QuotationItemInput[];
-	    Subject: string;
-	    RecipientName: string;
-	    DiscountPercent: number;
-	    TaxZone: string;
-	    TaxCategory: string;
-	    TaxType: string;
-	    ServiceCategory: string;
-	    Validity: number;
-	    PaymentTerm: number;
-	    LeadTime: number;
-	    CustomerID: number;
-	    Incoterm: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new QuotationInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Items = this.convertValues(source["Items"], QuotationItemInput);
-	        this.Subject = source["Subject"];
-	        this.RecipientName = source["RecipientName"];
-	        this.DiscountPercent = source["DiscountPercent"];
-	        this.TaxZone = source["TaxZone"];
-	        this.TaxCategory = source["TaxCategory"];
-	        this.TaxType = source["TaxType"];
-	        this.ServiceCategory = source["ServiceCategory"];
-	        this.Validity = source["Validity"];
-	        this.PaymentTerm = source["PaymentTerm"];
-	        this.LeadTime = source["LeadTime"];
-	        this.CustomerID = source["CustomerID"];
-	        this.Incoterm = source["Incoterm"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -808,6 +946,62 @@ export namespace backend {
 		    return a;
 		}
 	}
+	export class QuotationInput {
+	    Incoterm: string;
+	    Subject: string;
+	    RecipientName: string;
+	    TaxZone: string;
+	    TaxCategory: string;
+	    TaxType: string;
+	    ServiceCategory: string;
+	    Items: QuotationItemInput[];
+	    DiscountPercent: number;
+	    PaymentTerm: number;
+	    LeadTime: number;
+	    CustomerID: number;
+	    Validity: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new QuotationInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Incoterm = source["Incoterm"];
+	        this.Subject = source["Subject"];
+	        this.RecipientName = source["RecipientName"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxCategory = source["TaxCategory"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
+	        this.Items = this.convertValues(source["Items"], QuotationItemInput);
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.PaymentTerm = source["PaymentTerm"];
+	        this.LeadTime = source["LeadTime"];
+	        this.CustomerID = source["CustomerID"];
+	        this.Validity = source["Validity"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 	
 	export class RestoreResult {
 	    SafetySnapshot: string;
@@ -823,6 +1017,28 @@ export namespace backend {
 	        this.SafetySnapshot = source["SafetySnapshot"];
 	        this.Quotations = source["Quotations"];
 	        this.Revisions = source["Revisions"];
+	    }
+	}
+	export class UpdateInfo {
+	    Current: string;
+	    Latest: string;
+	    NotesURL: string;
+	    DownloadURL: string;
+	    UpdateAvailable: boolean;
+	    Required: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Current = source["Current"];
+	        this.Latest = source["Latest"];
+	        this.NotesURL = source["NotesURL"];
+	        this.DownloadURL = source["DownloadURL"];
+	        this.UpdateAvailable = source["UpdateAvailable"];
+	        this.Required = source["Required"];
 	    }
 	}
 
@@ -864,104 +1080,50 @@ export namespace store {
 	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
 	    }
 	}
-	export class RevisionItem {
-	    ItemNo: number;
+	export class RevisionSubSubItem {
+	    SubSubNo: number;
 	    Description: string;
-	    Qty: number;
-	    UoM: string;
-	    UnitPrice: number;
-	    MarginEnabled: boolean;
-	    MarginPercent: number;
-	    MarginAmount: number;
-	    OriginalTotal: number;
-	    MarginalizedUnitPrice: number;
-	    MarginalizedTotal: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new RevisionItem(source);
+	        return new RevisionSubSubItem(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ItemNo = source["ItemNo"];
+	        this.SubSubNo = source["SubSubNo"];
 	        this.Description = source["Description"];
-	        this.Qty = source["Qty"];
-	        this.UoM = source["UoM"];
-	        this.UnitPrice = source["UnitPrice"];
-	        this.MarginEnabled = source["MarginEnabled"];
-	        this.MarginPercent = source["MarginPercent"];
-	        this.MarginAmount = source["MarginAmount"];
-	        this.OriginalTotal = source["OriginalTotal"];
-	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
-	        this.MarginalizedTotal = source["MarginalizedTotal"];
 	    }
 	}
-	export class RevisionDraft {
-	    QuoteNumber: string;
-	    CustomerCode: number;
-	    CustomerName: string;
-	    CustomerAddress: string;
-	    RevisionNumber: number;
-	    RecipientName: string;
-	    RecipientAddress: string;
-	    Subject: string;
-	    Incoterm: string;
-	    ValidityDays: number;
-	    PaymentTermDays: number;
-	    LeadTimeDays: number;
-	    DiscountPercent: number;
-	    TaxZone: string;
-	    TaxCategory: string;
-	    TaxType: string;
-	    ServiceCategory: string;
-	    TaxRateBps: number;
-	    Items: RevisionItem[];
-	    Totals: RevisionTotals;
-	    HTMLSnapshot: string;
-	    PDFData: number[];
-	    PDFPath: string;
-	    DocumentHash: string;
-	    Signature: string;
-	    SigKeyID: string;
-	    CanonicalSHA256: string;
-	    IssuerName: string;
-	    QuotationUUID: string;
+	export class RevisionSubItem {
+	    SubNo: number;
+	    Description: string;
+	    UoM: string;
+	    UnitCost: number;
+	    UnitPrice: number;
+	    MarginAmount: number;
+	    Total: number;
+	    Qty: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    SubSubItems: RevisionSubSubItem[];
 	
 	    static createFrom(source: any = {}) {
-	        return new RevisionDraft(source);
+	        return new RevisionSubItem(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.QuoteNumber = source["QuoteNumber"];
-	        this.CustomerCode = source["CustomerCode"];
-	        this.CustomerName = source["CustomerName"];
-	        this.CustomerAddress = source["CustomerAddress"];
-	        this.RevisionNumber = source["RevisionNumber"];
-	        this.RecipientName = source["RecipientName"];
-	        this.RecipientAddress = source["RecipientAddress"];
-	        this.Subject = source["Subject"];
-	        this.Incoterm = source["Incoterm"];
-	        this.ValidityDays = source["ValidityDays"];
-	        this.PaymentTermDays = source["PaymentTermDays"];
-	        this.LeadTimeDays = source["LeadTimeDays"];
-	        this.DiscountPercent = source["DiscountPercent"];
-	        this.TaxZone = source["TaxZone"];
-	        this.TaxCategory = source["TaxCategory"];
-	        this.TaxType = source["TaxType"];
-	        this.ServiceCategory = source["ServiceCategory"];
-	        this.TaxRateBps = source["TaxRateBps"];
-	        this.Items = this.convertValues(source["Items"], RevisionItem);
-	        this.Totals = this.convertValues(source["Totals"], RevisionTotals);
-	        this.HTMLSnapshot = source["HTMLSnapshot"];
-	        this.PDFData = source["PDFData"];
-	        this.PDFPath = source["PDFPath"];
-	        this.DocumentHash = source["DocumentHash"];
-	        this.Signature = source["Signature"];
-	        this.SigKeyID = source["SigKeyID"];
-	        this.CanonicalSHA256 = source["CanonicalSHA256"];
-	        this.IssuerName = source["IssuerName"];
-	        this.QuotationUUID = source["QuotationUUID"];
+	        this.SubNo = source["SubNo"];
+	        this.Description = source["Description"];
+	        this.UoM = source["UoM"];
+	        this.UnitCost = source["UnitCost"];
+	        this.UnitPrice = source["UnitPrice"];
+	        this.MarginAmount = source["MarginAmount"];
+	        this.Total = source["Total"];
+	        this.Qty = source["Qty"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.SubSubItems = this.convertValues(source["SubSubItems"], RevisionSubSubItem);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -982,6 +1144,148 @@ export namespace store {
 		    return a;
 		}
 	}
+	export class RevisionItem {
+	    Description: string;
+	    UoM: string;
+	    ItemNo: number;
+	    Qty: number;
+	    UnitPrice: number;
+	    MarginAmount: number;
+	    OriginalTotal: number;
+	    MarginalizedUnitPrice: number;
+	    MarginalizedTotal: number;
+	    MarginPercent: number;
+	    MarginEnabled: boolean;
+	    ShowSubPrices: boolean;
+	    SubItems: RevisionSubItem[];
+	
+	    static createFrom(source: any = {}) {
+	        return new RevisionItem(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Description = source["Description"];
+	        this.UoM = source["UoM"];
+	        this.ItemNo = source["ItemNo"];
+	        this.Qty = source["Qty"];
+	        this.UnitPrice = source["UnitPrice"];
+	        this.MarginAmount = source["MarginAmount"];
+	        this.OriginalTotal = source["OriginalTotal"];
+	        this.MarginalizedUnitPrice = source["MarginalizedUnitPrice"];
+	        this.MarginalizedTotal = source["MarginalizedTotal"];
+	        this.MarginPercent = source["MarginPercent"];
+	        this.MarginEnabled = source["MarginEnabled"];
+	        this.ShowSubPrices = source["ShowSubPrices"];
+	        this.SubItems = this.convertValues(source["SubItems"], RevisionSubItem);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class RevisionDraft {
+	    TaxCategory: string;
+	    PDFPath: string;
+	    CustomerName: string;
+	    CustomerAddress: string;
+	    QuotationUUID: string;
+	    RecipientName: string;
+	    RecipientAddress: string;
+	    Subject: string;
+	    Incoterm: string;
+	    IssuerName: string;
+	    CanonicalSHA256: string;
+	    SigKeyID: string;
+	    Signature: string;
+	    TaxZone: string;
+	    DocumentHash: string;
+	    ServiceCategory: string;
+	    QuoteNumber: string;
+	    HTMLSnapshot: string;
+	    TaxType: string;
+	    Items: RevisionItem[];
+	    PDFData: number[];
+	    Totals: RevisionTotals;
+	    TaxRateBps: number;
+	    CustomerCode: number;
+	    DiscountPercent: number;
+	    LeadTimeDays: number;
+	    PaymentTermDays: number;
+	    ValidityDays: number;
+	    RevisionNumber: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new RevisionDraft(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.TaxCategory = source["TaxCategory"];
+	        this.PDFPath = source["PDFPath"];
+	        this.CustomerName = source["CustomerName"];
+	        this.CustomerAddress = source["CustomerAddress"];
+	        this.QuotationUUID = source["QuotationUUID"];
+	        this.RecipientName = source["RecipientName"];
+	        this.RecipientAddress = source["RecipientAddress"];
+	        this.Subject = source["Subject"];
+	        this.Incoterm = source["Incoterm"];
+	        this.IssuerName = source["IssuerName"];
+	        this.CanonicalSHA256 = source["CanonicalSHA256"];
+	        this.SigKeyID = source["SigKeyID"];
+	        this.Signature = source["Signature"];
+	        this.TaxZone = source["TaxZone"];
+	        this.DocumentHash = source["DocumentHash"];
+	        this.ServiceCategory = source["ServiceCategory"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.HTMLSnapshot = source["HTMLSnapshot"];
+	        this.TaxType = source["TaxType"];
+	        this.Items = this.convertValues(source["Items"], RevisionItem);
+	        this.PDFData = source["PDFData"];
+	        this.Totals = this.convertValues(source["Totals"], RevisionTotals);
+	        this.TaxRateBps = source["TaxRateBps"];
+	        this.CustomerCode = source["CustomerCode"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.LeadTimeDays = source["LeadTimeDays"];
+	        this.PaymentTermDays = source["PaymentTermDays"];
+	        this.ValidityDays = source["ValidityDays"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 	
 	
 	export class Store {
