@@ -938,7 +938,7 @@ function ItemRow({
       </div>
 
       {showSplit ? (
-        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[290px_minmax(0,1fr)]">
           <div className="min-w-0">
             <BulletsEditor
               lines={item.bullets}
@@ -954,7 +954,7 @@ function ItemRow({
               }
             />
           </div>
-          <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[64px_52px_112px_128px_128px_minmax(0,1fr)]">
+          <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]">
             {controlCells}
           </div>
         </div>
@@ -1151,7 +1151,7 @@ function SubRow({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[280px_minmax(0,1fr)]">
+      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[290px_minmax(0,1fr)]">
         <div className="min-w-0">
             <BulletsEditor
               lines={sub.bullets}
@@ -1163,7 +1163,7 @@ function SubRow({
               onChange={onBulletChange}
             />
         </div>
-        <div className="grid grid-cols-2 items-start gap-2 lg:grid-cols-[44px_68px_100px_120px_120px_minmax(0,1fr)]">
+        <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]">
         <Captioned label="Qty">
           <input
             type="text"
