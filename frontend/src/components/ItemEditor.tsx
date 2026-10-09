@@ -271,8 +271,8 @@ export function ItemEditor({
       <div className="hidden grid-cols-[minmax(0,1fr)_72px_68px_126px_184px_36px] gap-3 border-b border-rule bg-paper-subtle px-4 py-2.5 text-micro font-medium uppercase tracking-[0.1em] text-ink-500 lg:grid">
         <span>Description</span>
         <span>UoM</span>
-        <span className="text-right">Qty</span>
-        <span className="text-right">Unit price (IDR)</span>
+        <span>Qty</span>
+        <span>Unit price (IDR)</span>
         <span>Margin</span>
         <span />
       </div>
@@ -845,9 +845,9 @@ function ItemRow({
 
           <div className="hidden grid-cols-[minmax(0,1fr)_64px_88px_132px_150px_56px_32px] gap-2 border border-transparent px-2.5 pb-2 text-micro font-medium uppercase tracking-[0.1em] text-ink-400 lg:grid">
             <span>Sub-item</span>
-            <span className="text-right">Qty</span>
+            <span>Qty</span>
             <span>UoM</span>
-            <span className="text-right">Unit cost (IDR)</span>
+            <span>Unit cost (IDR)</span>
             <span>Margin</span>
             <span />
             <span />
