@@ -19,6 +19,12 @@
 		"isolatedModules": true,
 		"noEmit": true,
 		"jsx": "react-jsx",
+		// The test suite lives beside the code it covers, so it is type-checked
+		// by the same tsc that checks the components. vitest/globals supplies
+		// describe/it/expect; without it `npm run build` fails on the tests.
+		"types": [
+			"vitest/globals"
+		],
 		"paths": {
 			"@backend/*": [
 				"./wailsjs/go/*"
