@@ -55,7 +55,17 @@ type SignableItem struct {
 	Qty         int64
 	UnitPrice   int64
 	Total       int64
-	Subs        []SignableSub
+	// DiscountPercent is the row's own discount. UnitPrice and Total above are
+	// already the post-discount figures, so a discount that changes the money
+	// is covered without this field; this covers the printed percentage
+	// itself, which is content the customer reads.
+	//
+	// Emitted only when non-zero, exactly like Subs: a revision whose rows
+	// carry no per-row discount produces byte-identical canonical bytes to
+	// every revision signed before this field existed, so every printed
+	// verification code keeps verifying. Never bump CanonicalPrefix for this.
+	DiscountPercent int16
+	Subs            []SignableSub
 }
 
 // SignableSub is one printed sub-item row: what the customer sees, never the
@@ -65,12 +75,13 @@ type SignableItem struct {
 // deliberately not covered here: it selects which of these signed values
 // print, it never changes a value.
 type SignableSub struct {
-	Description string
-	UoM         string
-	Qty         int64
-	UnitPrice   int64
-	Total       int64
-	Details     []string
+	Description     string
+	UoM             string
+	Qty             int64
+	UnitPrice       int64
+	Total           int64
+	DiscountPercent int16
+	Details         []string
 }
 
 // CanonicalRevision renders the byte string the signature covers:
@@ -100,6 +111,13 @@ func CanonicalRevision(revision SignableRevision) []byte {
 			strconv.FormatInt(item.UnitPrice, 10),
 			strconv.FormatInt(item.Total, 10),
 		}, "|"))
+		// Zero means the row carried no discount of its own, which is every
+		// row of every revision signed before #274. Emitting nothing then is
+		// what keeps those signatures byte-identical.
+		if item.DiscountPercent > 0 {
+			writeField(&b, fmt.Sprintf("item_%d_discount_percent", i+1),
+				strconv.Itoa(int(item.DiscountPercent)))
+		}
 		if len(item.Subs) == 0 {
 			continue
 		}
@@ -112,6 +130,10 @@ func CanonicalRevision(revision SignableRevision) []byte {
 				strconv.FormatInt(sub.UnitPrice, 10),
 				strconv.FormatInt(sub.Total, 10),
 			}, "|"))
+			if sub.DiscountPercent > 0 {
+				writeField(&b, fmt.Sprintf("item_%d_sub_%d_discount_percent", i+1, j+1),
+					strconv.Itoa(int(sub.DiscountPercent)))
+			}
 			for k, detail := range sub.Details {
 				writeField(&b, fmt.Sprintf("item_%d_sub_%d_detail_%d", i+1, j+1, k+1), detail)
 			}

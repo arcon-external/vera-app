@@ -42,15 +42,23 @@ func TestQuotationInputStaysInTheSmallerSizeClass(t *testing.T) {
 }
 
 func TestQuotationItemInputStaysInTheSmallerSizeClass(t *testing.T) {
-	// The sub-item fields (a slice and a flag, #255) grew the struct from
-	// 56 to 72 bytes legitimately: the struct now describes a modular
-	// line, not only a flat one. 72 is its size floor with the slice
-	// leading -- the aligned field order at the type says so -- so the
-	// budget pins 72 and a future field added in a padding position
-	// fails here rather than slipping past the analyzer.
+	// The budget has moved twice, and each time for content rather than for
+	// padding:
+	//
+	//   56 -> 72  sub-items: a slice and a flag (#255). The struct now
+	//                describes a modular line, not only a flat one.
+	//   72 -> 80  a per-row discount: a uint16 and a bool (#274).
+	//
+	// 80 is the floor for the present field set, not a slip. The content is
+	// 16+16+24+8+4+2+2+3 = 75 bytes, which rounds to 80 at any field order,
+	// and even packing all three independent booleans into a single flag byte
+	// still lands on 80 (73 content bytes). So this number cannot go back to
+	// 72 without dropping a feature, and the test's real job is unchanged:
+	// catch the next field being added in a *padding* position, where it
+	// would cost 8 or 16 bytes for nothing.
 	got := unsafe.Sizeof(QuotationItemInput{})
-	if got != 72 {
-		t.Errorf("QuotationItemInput is %d bytes, want 72; the field order is no longer at its size floor "+
+	if got != 80 {
+		t.Errorf("QuotationItemInput is %d bytes, want 80; the field order is no longer at its size floor "+
 			"(pointer-bearing fields must lead; a field added in a padding position costs every line item).", got)
 	}
 	if class := classOf(got); class != 80 {

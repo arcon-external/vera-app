@@ -313,6 +313,16 @@
 			position: relative;
 		}
 
+		/* The per-row discount column. Tabular figures so a column of
+		   percentages lines up, and muted so it reads as an annotation on the
+		   price beside it rather than as a price of its own. */
+		.items-body-table td.disc {
+			text-align: right;
+			font-variant-numeric: tabular-nums;
+			color: #5b6478;
+			white-space: nowrap;
+		}
+
 		.items-body-table tr.sub-row td:nth-child(2)::before {
 			content: "";
 			position: absolute;

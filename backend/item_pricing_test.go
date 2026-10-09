@@ -121,3 +121,119 @@ func TestPrepareRejectsItemMarginOverCeiling(t *testing.T) {
 		t.Fatalf("expected error for item margin > %d but got nil", MaxMarginPercent)
 	}
 }
+
+// TestRowDiscountFollowsTheConfirmedFlow pins the three rules #274 landed:
+// the discount comes off the marginalised price, the cost side never moves,
+// and the line's margin is read after the discount so a discount below cost
+// shows a loss instead of wrapping round as a huge uint64 gain.
+func TestRowDiscountFollowsTheConfirmedFlow(t *testing.T) {
+	cases := []struct {
+		name           string
+		cost           uint64
+		qty            uint32
+		margin         uint16
+		discount       uint16
+		wantListUnit   uint64
+		wantUnit       uint64
+		wantTotal      uint64
+		wantDiscAmount uint64
+		wantMargin     int64
+	}{
+		{
+			// 100.000 cost, 20% margin -> 120.000 list, 10% off -> 108.000.
+			// Profit per unit is +8.000, not the +20.000 the margin alone
+			// would have suggested.
+			name: "margin then discount, cost untouched", cost: 100000, qty: 2,
+			margin: 20, discount: 10,
+			wantListUnit: 120000, wantUnit: 108000, wantTotal: 216000,
+			wantDiscAmount: 24000, wantMargin: 8000,
+		},
+		{
+			// No margin: the list price IS the cost, so the discount is taken
+			// straight off it and profit follows.
+			name: "discount with no margin", cost: 100000, qty: 1,
+			discount:     10,
+			wantListUnit: 100000, wantUnit: 90000, wantTotal: 90000,
+			wantDiscAmount: 10000, wantMargin: -10000,
+		},
+		{
+			// A discount that exceeds the margin: the line is below cost.
+			// That is a real answer and has to survive as a negative number.
+			name: "discount below cost shows a loss", cost: 100000, qty: 1,
+			margin: 10, discount: 30,
+			wantListUnit: 110000, wantUnit: 77000, wantTotal: 77000,
+			wantDiscAmount: 33000, wantMargin: -23000,
+		},
+		{
+			// A 100% discount is a free line: legal, and the loss is the cost.
+			name: "a hundred percent discount is a free line", cost: 50000, qty: 4,
+			discount:     100,
+			wantListUnit: 50000, wantUnit: 0, wantTotal: 0,
+			wantDiscAmount: 200000, wantMargin: -50000,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items := buildItems([]QuotationItemInput{{
+				Description:     "Line",
+				Qty:             tc.qty,
+				UoM:             "Lot",
+				UnitPrice:       tc.cost,
+				MarginEnabled:   tc.margin > 0,
+				MarginPercent:   tc.margin,
+				DiscountEnabled: true,
+				DiscountPercent: tc.discount,
+			}})
+			if len(items) != 1 {
+				t.Fatalf("buildItems returned %d items; want 1", len(items))
+			}
+			item := items[0]
+			if item.ListUnitPrice != tc.wantListUnit {
+				t.Errorf("list unit = %d; want %d", item.ListUnitPrice, tc.wantListUnit)
+			}
+			if item.UnitPrice != tc.wantUnit {
+				t.Errorf("discounted unit = %d; want %d", item.UnitPrice, tc.wantUnit)
+			}
+			if item.Total != tc.wantTotal {
+				t.Errorf("line total = %d; want %d", item.Total, tc.wantTotal)
+			}
+			if item.DiscountAmount != tc.wantDiscAmount {
+				t.Errorf("discount amount = %d; want %d", item.DiscountAmount, tc.wantDiscAmount)
+			}
+			// The whole point of #270 applied per row: the cost side does not
+			// move when the customer's price does.
+			if item.OriginalUnitPrice != tc.cost || item.OriginalTotal != tc.cost*uint64(tc.qty) {
+				t.Errorf("cost side = %d/%d; want %d/%d -- a discount is not a cost cut",
+					item.OriginalUnitPrice, item.OriginalTotal, tc.cost, tc.cost*uint64(tc.qty))
+			}
+			if item.MarginAmount != tc.wantMargin {
+				t.Errorf("margin = %d; want %d (read after the discount)", item.MarginAmount, tc.wantMargin)
+			}
+		})
+	}
+}
+
+// TestUndiscountedLineIsUnchanged is the regression guard for the common case:
+// a quotation with no row discounts has to price byte-for-byte as it did
+// before this feature existed.
+func TestUndiscountedLineIsUnchanged(t *testing.T) {
+	items := buildItems([]QuotationItemInput{{
+		Description: "Control panel", Qty: 2, UoM: "Lot", UnitPrice: 15000000,
+		MarginEnabled: true, MarginPercent: 20,
+	}})
+	item := items[0]
+	if item.UnitPrice != 18000000 || item.Total != 36000000 {
+		t.Errorf("priced %d/%d; want 18000000/36000000", item.UnitPrice, item.Total)
+	}
+	if item.ListUnitPrice != item.UnitPrice {
+		t.Errorf("list price %d differs from the sell price %d on an undiscounted line",
+			item.ListUnitPrice, item.UnitPrice)
+	}
+	if item.DiscountAmount != 0 || item.DiscountEnabled {
+		t.Errorf("an undiscounted line carries discount %d (enabled=%v); want none",
+			item.DiscountAmount, item.DiscountEnabled)
+	}
+	if item.DisplayDiscount != "0" {
+		t.Errorf("display discount = %q; want \"0\"", item.DisplayDiscount)
+	}
+}
