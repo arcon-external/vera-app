@@ -4,6 +4,38 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.6.0] - 2026-10-09
+
+### Added
+
+- **You can save a quotation before it's finished.** Use **Save draft** in the
+  editor and the work is kept — a client called with a partial item list, a
+  quote waiting on a supplier's price, a line abandoned to take a phone call.
+  Find it under the new **Drafts** tab, reopen it to carry on, or delete it.
+  The tab shows how many you have, so you know something is waiting.
+- Drafts are **yours alone**. Nobody else — including an administrator — can
+  see, open or delete a draft that isn't theirs.
+- A draft is **not a quotation**: it has no quotation number, it is not
+  signed, and it cannot be checked online. Exporting it turns it into a real
+  quotation, and the draft then disappears on its own — there is nothing left
+  for it to be.
+- Saving is deliberately forgiving. A quotation that isn't finished enough to
+  price still saves, because refusing to save is the one thing a draft must
+  never do. **Prepare** still checks everything properly when you export.
+- Drafts disappear if your account is deleted.
+
+### Changed
+
+- **What's New now reads like release notes.** Bold, italics, code and links
+  render, a bullet that was written across several lines in the source reads
+  as one bullet, and the dismiss button stays put instead of sitting at the
+  bottom of a long read.
+- The navigation gained a fifth tab. At the app's own window width the header
+  was wrapping onto two lines, so the small "Quotation Generator" tagline now
+  waits until there is room for it.
+
+Quotations already exported are untouched by all of this.
+
 ## [0.5.1] - 2026-10-09
 
 ### Fixed
