@@ -329,6 +329,36 @@ For multiple commits per issue, each commit references the issue number.
 > the same owner; `arcon-external/vera-app` and a personal-owner repo cannot exchange
 > issues. File in the right repo the first time.
 
+### After every merge to main
+
+A merge is not finished until Dependabot has been checked. Do this before
+picking up the next issue:
+
+```bash
+gh api "repos/arcon-external/vera-app/dependabot/alerts?state=open" \
+  --jq '.[] | "\(.security_advisory.severity)\t\(.dependency.package.name)\t\(.security_vulnerability.first_patched_version.identifier)"'
+```
+
+If anything is open, fix it immediately and release a patch (Section 13):
+
+1. File one issue for the batch and branch as usual.
+2. Upgrade the flagged packages to at least `first_patched_version`, preferring
+   the smallest bump that clears every alert. An alert nested under a direct
+   dependency is usually cleared by moving that dependency, not the transient
+   one: `vitest@2` carried its own `vite@5`, `esbuild@0.21` and `tinypool@1`,
+   and nothing short of a vitest major removed them.
+3. Refresh `frontend/package.json.md5` (`md5 -q frontend/package.json >
+   frontend/package.json.md5`) — it is tracked, and CI treats it as the
+   install fingerprint.
+4. Run every gate (Section 12) and release a PATCH: a dependency bump is not a
+   feature.
+
+Most alerts here are dev-only (`vite`, `vitest`, `esbuild`, `tinypool`), which
+is why the patch may carry no user-visible change — that is still a release.
+The point is that the alert list is read rather than assumed, because a
+transitive dependency silently pinning an old copy is exactly the thing nobody
+notices until it is exploitable in a shipped artifact.
+
 ### Closing issues
 
 Close the issue only after:
@@ -374,6 +404,7 @@ or confused scope step runs the full suite rather than skipping it.
 
 - After a batch of related features.
 - After a significant bug fix.
+- **After fixing Dependabot alerts** (see Section 11) — always a PATCH.
 - When the user requests a release.
 
 ### Release naming
