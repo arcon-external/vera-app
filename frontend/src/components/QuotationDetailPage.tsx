@@ -3,9 +3,11 @@ import { GetQuotationRevision } from "@backend/backend/Quotation";
 import type { ArchivedQuotation } from "../archive";
 
 function taxDetailLabel(quotation: ArchivedQuotation): string {
-  if (quotation.ServiceCategory === "Construction") return "Construction 1,75% final";
+  if (quotation.ServiceCategory === "Construction") {
+    return "Construction 1,75% PPh22";
+  }
   if (quotation.ServiceCategory === "NonConstruction") {
-    return "Non-construction 2% withholding";
+    return "Non-construction 2% PPh22";
   }
   return quotation.TaxCategory || quotation.TaxZone;
 }
@@ -231,12 +233,12 @@ export function QuotationDetailPage({
               Original baseline
             </p>
             <dl className="mt-2.5 divide-y divide-rule">
-              <DetailRow label="Original subtotal" value={quotation.DisplayOriginalSubtotal} />
+              {/* No cost-side discount: the cost subtotal is the grand total,
+                  so showing both would print the same figure twice. */}
               <DetailRow
-                label={`Discount ${quotation.DiscountPercent}%`}
-                value={quotation.DisplayOriginalDiscount}
+                label="Cost total (undiscounted)"
+                value={quotation.DisplayOriginalGrand}
               />
-              <DetailRow label="Original grand total" value={quotation.DisplayOriginalGrand} />
             </dl>
           </div>
           <div className="rounded-lg border border-rule bg-white p-4">
@@ -248,10 +250,12 @@ export function QuotationDetailPage({
                 label="Customer subtotal"
                 value={quotation.DisplayMarginalizedSubtotal}
               />
-              <DetailRow
-                label={`Discount ${quotation.DiscountPercent}%`}
-                value={quotation.DisplayMarginalizedDiscount}
-              />
+              {quotation.MarginalizedDiscount > 0 ? (
+                <DetailRow
+                  label={`Discount ${quotation.DiscountPercent}% (on the price)`}
+                  value={`−${quotation.DisplayMarginalizedDiscount}`}
+                />
+              ) : null}
               <DetailRow
                 label="Grand total before tax"
                 value={quotation.DisplayMarginalizedGrand}

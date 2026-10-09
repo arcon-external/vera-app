@@ -71,8 +71,10 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 	if pricing.OriginalSubtotal != 250000 {
 		t.Errorf("original subtotal = %d; want 250000", pricing.OriginalSubtotal)
 	}
-	if pricing.OriginalDiscount != 25000 || pricing.OriginalGrand != 225000 {
-		t.Errorf("original discount/grand = %d/%d; want 25000/225000", pricing.OriginalDiscount, pricing.OriginalGrand)
+	// The cost side carries no discount: a price cut to the customer does not
+	// move what we pay suppliers, so original grand is the cost subtotal.
+	if pricing.OriginalDiscount != 0 || pricing.OriginalGrand != 250000 {
+		t.Errorf("original discount/grand = %d/%d; want 0/250000", pricing.OriginalDiscount, pricing.OriginalGrand)
 	}
 	if pricing.MarginalizedSubtotal != 290000 {
 		t.Errorf("marginalized subtotal = %d; want 290000", pricing.MarginalizedSubtotal)
@@ -83,11 +85,12 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 	if pricing.TaxAmount != 5220 || pricing.MarginalizedGrandAfterTax != 255780 {
 		t.Errorf("tax/after-tax grand = %d/%d; want 5220/255780", pricing.TaxAmount, pricing.MarginalizedGrandAfterTax)
 	}
-	if pricing.ProfitAmount != 36000 {
-		t.Errorf("profit amount = %d; want 36000", pricing.ProfitAmount)
+	// Profit 261.000 - 250.000; nett takes the services tax off first.
+	if pricing.ProfitAmount != 11000 {
+		t.Errorf("profit amount = %d; want 11000", pricing.ProfitAmount)
 	}
-	if pricing.NettProfit != 30780 {
-		t.Errorf("nett profit = %d; want 30780", pricing.NettProfit)
+	if pricing.NettProfit != 5780 {
+		t.Errorf("nett profit = %d; want 5780", pricing.NettProfit)
 	}
 }
 

@@ -397,3 +397,55 @@ func firstLineOf(body string) string {
 	}
 	return strings.TrimSpace(body)
 }
+
+// TestVerifyPageShowsPpnWhenCharged covers the tax the customer actually pays.
+// PPN is printed on the quotation, so the verification page must show the same
+// figure -- and must omit the row entirely when no PPN was charged, exactly as
+// the quotation omits its own PPN line.
+func TestVerifyPageShowsPpnWhenCharged(t *testing.T) {
+	nonFTZ := func() map[string]any {
+		input := quotationInput()
+		input["TaxZone"] = "NonFTZ"
+		input["TaxType"] = "Goods"
+		input["DiscountPercent"] = 0
+		return input
+	}
+
+	t.Run("non-FTZ goods shows PPN", func(t *testing.T) {
+		resetVerifySchema(t, "vera_api_verify_ppn")
+		server, token := testQuotationServer(t, "vera_api_verify_ppn")
+		attachedTestSigner(t, server, "vera_api_verify_ppn")
+		code, body := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, nonFTZ())
+		if code != http.StatusCreated {
+			t.Fatalf("export = %d; want 201 (%v)", code, body)
+		}
+		shortID, _ := body["shortId"].(string)
+
+		pageCode, page := fetchVerifyPage(t, server, shortID)
+		if pageCode != http.StatusOK {
+			t.Fatalf("verify page = %d; want 200", pageCode)
+		}
+		if !strings.Contains(page, "of which PPN 11%") {
+			t.Error("verification page omits the PPN line on a non-FTZ goods quotation")
+		}
+	})
+
+	t.Run("FTZ goods omits PPN", func(t *testing.T) {
+		resetVerifySchema(t, "vera_api_verify_no_ppn")
+		server, token := testQuotationServer(t, "vera_api_verify_no_ppn")
+		attachedTestSigner(t, server, "vera_api_verify_no_ppn")
+		code, body := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, quotationInput())
+		if code != http.StatusCreated {
+			t.Fatalf("export = %d; want 201 (%v)", code, body)
+		}
+		shortID, _ := body["shortId"].(string)
+
+		pageCode, page := fetchVerifyPage(t, server, shortID)
+		if pageCode != http.StatusOK {
+			t.Fatalf("verify page = %d; want 200", pageCode)
+		}
+		if strings.Contains(page, "of which PPN 11%") {
+			t.Error("verification page shows a PPN line on an FTZ quotation that was charged none")
+		}
+	})
+}

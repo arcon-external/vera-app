@@ -158,12 +158,21 @@ func buildPricing(items []QuotationItem, discountPercent uint8, ppnBps, services
 		marginalizedSubtotal += item.Total
 	}
 
-	originalDiscount := originalSubtotal * uint64(discountPercent) / 100
-	originalGrand := originalSubtotal - originalDiscount
+	// A discount is a price cut, not a cost cut: what we pay suppliers does not
+	// move when the customer is given a lower price. So the cost side carries no
+	// discount at all, and original grand equals the cost subtotal.
+	//
+	// Both sides used to be discounted by the same percentage, which left profit
+	// scaled by (1 - discount) instead of losing the discount. See issue #270.
+	originalDiscount := uint64(0)
+	originalGrand := originalSubtotal
 	marginalizedDiscount := marginalizedSubtotal * uint64(discountPercent) / 100
 	marginalizedGrand := marginalizedSubtotal - marginalizedDiscount
 	// PPN applies to the sell grand after discount (non-FTZ goods only) and
-	// is part of the customer document. Services tax stays internal.
+	// is part of the customer document. It is collected on top of the price and
+	// passed to the state, so it is never profit: both figures below read the
+	// pre-PPN sell grand, which is why PPN cannot leak into them. Services tax
+	// stays internal and does come out of nett.
 	ppnAmount := calcTax(marginalizedGrand, ppnBps)
 	customerGrand := marginalizedGrand + ppnAmount
 	servicesTax := calcTax(marginalizedGrand, servicesBps)
@@ -178,10 +187,13 @@ func buildPricing(items []QuotationItem, discountPercent uint8, ppnBps, services
 		MarginalizedGrand:         marginalizedGrand,
 		TaxAmount:                 servicesTax,
 		MarginalizedGrandAfterTax: marginalizedGrandAfterTax,
-		ProfitAmount:              signedDifference(marginalizedGrand, originalGrand),
-		NettProfit:                int64(customerGrand) - int64(originalGrand) - int64(servicesTax),
-		PpnAmount:                 ppnAmount,
-		CustomerGrandTotal:        customerGrand,
+		// Profit and nett both start from the sell grand after discount, never
+		// the customer total, so the PPN the customer paid is excluded. They
+		// differ only by the services tax that comes out of nett.
+		ProfitAmount:       signedDifference(marginalizedGrand, originalGrand),
+		NettProfit:         int64(marginalizedGrandAfterTax) - int64(originalGrand),
+		PpnAmount:          ppnAmount,
+		CustomerGrandTotal: customerGrand,
 	}
 }
 

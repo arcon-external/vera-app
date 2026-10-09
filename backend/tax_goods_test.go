@@ -50,7 +50,10 @@ func TestResolveTaxMatrix(t *testing.T) {
 
 func TestPrepareGoodsPPN(t *testing.T) {
 	// Cost 100.000, no margin, no discount, NonFTZ goods:
-	// PPN 11.000, customer grand 111.000, nett 11.000.
+	// PPN 11.000, customer grand 111.000, nett 0.
+	//
+	// Nett is zero because the item sells at cost and the 11.000 of PPN on top
+	// is collected for the state: it never becomes our profit.
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
@@ -76,15 +79,16 @@ func TestPrepareGoodsPPN(t *testing.T) {
 	if q.Data.GrandTotal != 111000 {
 		t.Errorf("GrandTotal = %d; want 111000", q.Data.GrandTotal)
 	}
-	if q.Data.NettProfit != 11000 {
-		t.Errorf("NettProfit = %d; want 11000", q.Data.NettProfit)
+	if q.Data.NettProfit != 0 {
+		t.Errorf("NettProfit = %d; want 0 (PPN is collected, not earned)", q.Data.NettProfit)
 	}
 }
 
 func TestPrepareGoodsPPNAfterDiscount(t *testing.T) {
-	// Cost 100.000, no margin, discount 10% (applies symmetrically to cost
-	// and sell): sell grand 90.000, PPN 9.900, customer 99.900;
-	// nett 99.900 - 90.000 = 9.900 (the collected PPN).
+	// Cost 100.000, no margin, discount 10%: the discount cuts only the price,
+	// so sell grand is 90.000 against a cost of 100.000. PPN 9.900 goes on top
+	// for the customer (99.900) and is removed again before profit, so the item
+	// is a loss of 10.000.
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
@@ -111,8 +115,8 @@ func TestPrepareGoodsPPNAfterDiscount(t *testing.T) {
 	if q.Data.GrandTotal != 99900 {
 		t.Errorf("GrandTotal = %d; want 99900", q.Data.GrandTotal)
 	}
-	if q.Data.NettProfit != 9900 {
-		t.Errorf("NettProfit = %d; want 9900", q.Data.NettProfit)
+	if q.Data.NettProfit != -10000 {
+		t.Errorf("NettProfit = %d; want -10000 (90.000 sell - 100.000 cost)", q.Data.NettProfit)
 	}
 }
 
@@ -137,5 +141,70 @@ func TestLegacyCategoryCompat(t *testing.T) {
 			t.Errorf("legacyTaxCategoryToNew(%q) = (%q, %q, %v); want (%q, %q, %v)",
 				tc.legacy, taxType, category, ok, tc.wantType, tc.wantCategory, tc.wantOK)
 		}
+	}
+}
+
+// TestProfitFollowsConfirmedTaxFlow pins the company's confirmed flow on one
+// example per case: cost 10.000, a 10% discount and no margin, so the price
+// becomes 9.000 and the cost stays 10.000.
+//
+//   - PPN is charged on top of the price for non-FTZ goods and is never
+//     profit: the customer pays 9.990 and our profit is 9.000 - 10.000.
+//   - FTZ goods carry no tax at all, so the customer pays 9.000 and the loss
+//     is the same 1.000.
+//   - Services carry a PPh22 withholding instead: the customer pays 9.000,
+//     2% comes off internally, and the loss is 1.180.
+//
+// The discount cutting only the price is what makes the goods cases a loss
+// rather than break-even; that is the point of the test.
+func TestProfitFollowsConfirmedTaxFlow(t *testing.T) {
+	cases := []struct {
+		name            string
+		taxZone         string
+		taxType         string
+		serviceCategory string
+		wantPpn         uint64
+		wantCustomer    uint64
+		wantNett        int64
+	}{
+		{"goods non-FTZ pays PPN on top", TaxZoneNonFTZ, TaxTypeGoods, "", 990, 9990, -1000},
+		{"goods FTZ pays no tax", TaxZoneFTZ, TaxTypeGoods, "", 0, 9000, -1000},
+		{"services withhold PPh22", TaxZoneNonFTZ, TaxTypeServices, ServiceCategoryNonConstruction, 0, 9000, -1180},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := newTestQuotation()
+			q.SetAuthService(auth.StaffTestService())
+			if err := q.Prepare(QuotationInput{
+				Items:           []QuotationItemInput{{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 10000}},
+				Subject:         "Test",
+				RecipientName:   "Test",
+				Validity:        30,
+				PaymentTerm:     30,
+				LeadTime:        30,
+				CustomerID:      2,
+				Incoterm:        "EXW",
+				DiscountPercent: 10,
+				TaxZone:         tc.taxZone,
+				TaxType:         tc.taxType,
+				ServiceCategory: tc.serviceCategory,
+			}); err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			if q.Data.PpnAmount != tc.wantPpn {
+				t.Errorf("PpnAmount = %d; want %d", q.Data.PpnAmount, tc.wantPpn)
+			}
+			if q.Data.GrandTotal != tc.wantCustomer {
+				t.Errorf("customer grand total = %d; want %d", q.Data.GrandTotal, tc.wantCustomer)
+			}
+			if q.Data.NettProfit != tc.wantNett {
+				t.Errorf("NettProfit = %d; want %d", q.Data.NettProfit, tc.wantNett)
+			}
+			// The cost side never carries the discount.
+			if q.Data.OriginalDiscountAmount != 0 || q.Data.OriginalGrandTotal != 10000 {
+				t.Errorf("cost side = %d discount / %d grand; want 0/10000",
+					q.Data.OriginalDiscountAmount, q.Data.OriginalGrandTotal)
+			}
+		})
 	}
 }

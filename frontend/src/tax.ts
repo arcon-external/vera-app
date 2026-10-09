@@ -105,10 +105,6 @@ export function taxRateLabel(zone: string, taxType: string, serviceCategory: str
   const ppn = ppnRateBps(zone, taxType);
   if (ppn > 0) return `PPN ${formatBps(ppn)}`;
   const services = servicesRateBps(taxType, serviceCategory);
-  if (services > 0) {
-    const kind =
-      serviceCategory === "Construction" ? "final" : "withholding";
-    return `${formatBps(services)} ${kind}`;
-  }
+  if (services > 0) return `${formatBps(services)} PPh22`;
   return "0%";
 }

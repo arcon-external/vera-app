@@ -178,16 +178,25 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 
 - **Per-item margin:** each line has an independent `MarginEnabled` + `MarginPercent`.
   `MarginalizedUnit = UnitCost + UnitCost * margin% / 100`, then multiply by quantity.
-- **Tax is internal only:** calculated once on the marginalized grand total
-  (`Tax = Grand * bps / 10000`), never allocated per line.
-- **Nett profit** = marginalized grand after tax − original grand total (signed).
-- **The customer PDF/template shows only marginalized prices before tax.** Margin
-  percentage, tax, and nett profit must never appear in the customer output. There is
-  a test asserting this (`TestRenderedQuotationHidesInternalValues`) — keep it green.
+- **Two taxes, never the same treatment** (issue #270):
+  - **PPN** (11%, non-FTZ goods only) is charged **on top of the price**. The customer
+    pays `SellGrand + PPN`; it is collected for the state and is **never profit**.
+    It prints on the customer quotation and on the verification page.
+  - **PPH22** (2% non-construction, 1.75% construction, services only, any zone) is
+    **internal**: calculated once on the sell grand after discount
+    (`Tax = Grand * bps / 10000`), never allocated per line, never printed.
+- **Nett profit** = sell grand after discount − PPH22 − cost (signed). It must never be
+  computed from the customer total, or the PPN we collected counts as our profit.
+- **The customer PDF/template shows marginalized prices, plus PPN when charged.**
+  Margin percentage, PPH22, and nett profit must never appear in the customer output.
+  There is a test asserting this (`TestRenderedQuotationHidesInternalValues`) — keep it
+  green.
 - **Revisions are immutable:** first export is revision `00`; each edit creates the
   next revision. Never mutate a stored revision.
-- **Discount** applies to the sell side; cost-side discount is shown for internal
-  transparency only.
+- **A discount cuts the price only.** What we pay suppliers does not move when the
+  customer is given a lower price, so the cost side carries no discount at all:
+  `OriginalGrand == OriginalSubtotal`, and profit loses the full discount. Both
+  `buildPricing` (Go) and `computePricing` (SummaryRail) implement this and must agree.
 - **Numbering:** quote numbers are plain-digit `15CCYYNNNN` (no grouped display),
   allocated per (customer, issue-year) cycle starting at 1 every January; past 9999
   the sequence widens to 5 digits instead of wrapping, with a warn flag at 8000.

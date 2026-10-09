@@ -196,6 +196,7 @@
 				<div class="field"><dt>Issue date</dt><dd>{{.IssueDate}}</dd></div>
 				<div class="field"><dt>Issued to</dt><dd>{{.Recipient}}</dd></div>
 				<div class="field wide"><dt>Grand total (as issued)</dt><dd class="amount">{{.Total}}</dd></div>
+				{{if .PPN}}<div class="field wide"><dt>of which PPN 11%</dt><dd class="amount">{{.PPN}}</dd></div>{{end}}
 			</dl>
 			{{end}}
 

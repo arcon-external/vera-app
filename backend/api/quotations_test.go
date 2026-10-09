@@ -112,9 +112,10 @@ func TestPrepareEndpointPricesQuotation(t *testing.T) {
 	if customer["GrandTotal"] != 261000.0 {
 		t.Errorf("customer grand = %v; want 261000", customer["GrandTotal"])
 	}
-	// Cost: 2x100000 + 1x50000 = 250000; discount 10% -> 225000; FTZ nett profit 36000.
-	if internal["NettProfit"] != 36000.0 {
-		t.Errorf("nett profit = %v; want 36000", internal["NettProfit"])
+	// A discount cuts the price only: the cost side is undiscounted at
+	// 2x100000 + 1x50000 = 250000, so the FTZ nett profit is 261000 - 250000.
+	if internal["NettProfit"] != 11000.0 {
+		t.Errorf("nett profit = %v; want 11000", internal["NettProfit"])
 	}
 }
 
