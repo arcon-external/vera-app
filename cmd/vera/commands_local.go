@@ -129,8 +129,8 @@ func inputReference() string {
   leadTimeDays      60 by default.
   taxZone           FTZ (default) or NonFTZ.
   taxType           Goods (default) or Services.
-  serviceCategory   services only, and only then: SupplyOnly, SupplyInstall,
-                    SupplyInstallConstruction.
+  serviceCategory   services only, and only then: NonConstruction (2% PPH22) or
+                    Construction (1.75%). Any other value is refused.
   discountPercent   whole-quotation discount. Retired from the editor in favour
                     of per-row discounts; still accepted for older payloads.
   items[]           at least one line.
