@@ -5,6 +5,16 @@ name: Desktop release
 # builds are for internal/MDM distribution; signing is timed to the first
 # external user. Asset names are a contract with the updater — see the
 # updater plan — so the rename steps below are load-bearing, not cosmetic.
+#
+# Nothing here caches, deliberately. A tag ref can only read caches created for
+# that same tag, and a tag is built once, so a cache saved here is unreadable by
+# the next tag and by every pull request. Observed on the v0.9.1 run: every job
+# reported "Cache is not found" for both Go and npm, and then saved anyway --
+# roughly 2.4 GB per release of entries nothing can ever restore, against a 10 GB
+# repository budget. That eviction pressure is what was clearing out the Linux
+# cache that makes pull requests fast (see pr.yml), so the tag builds now pay
+# their own compile instead. They are rare; a few minutes here is cheaper than a
+# cold six-minute gate on every PR.
 on:
   push:
     tags: ["v*"]
@@ -27,17 +37,17 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # Uncacheable from a tag ref; see the note at the top of this file.
+          cache: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # Uncacheable from a tag ref; see the note at the top of this file.
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
       - name: Install NSIS
         # windows-latest does not ship makensis; without it `wails build
@@ -83,17 +93,17 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # Uncacheable from a tag ref; see the note at the top of this file.
+          cache: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # Uncacheable from a tag ref; see the note at the top of this file.
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
 
       - name: Install NSIS
         # Same as the amd64 job: the runner has no makensis, and the choco
@@ -132,18 +142,18 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # Uncacheable from a tag ref; see the note at the top of this file.
+          cache: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          # Uncacheable from a tag ref; see the note at the top of this file.
 
       - name: Install Wails CLI and create-dmg
         run: |
-          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
           brew install create-dmg
 
       - name: Install frontend dependencies
@@ -185,7 +195,8 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # Uncacheable from a tag ref; see the note at the top of this file.
+          cache: false
 
       - name: Resolve the version stamp
         id: stamp
