@@ -287,7 +287,7 @@ and never a float. Anything else invites a rounding bug into a pricing system.
 | `leadTimeDays` | `60` by default. |
 | `taxZone` | `FTZ` (default) or `NonFTZ`. |
 | `taxType` | `Goods` (default) or `Services`. |
-| `serviceCategory` | Services only: `SupplyOnly`, `SupplyInstall`, `SupplyInstallConstruction`. Sending one with `Goods` is an error, so it is dropped rather than passed on. |
+| `serviceCategory` | Services only: `NonConstruction` (2% PPH22) or `Construction` (1.75%). Sending one with `Goods` is an error, so it is dropped rather than passed on. |
 | `discountPercent` | Whole-quotation discount. Retired from the editor in favour of per-row discounts; still accepted so older payloads load. |
 | `items[]` | At least one line. |
 
@@ -308,6 +308,12 @@ Per item:
 `details` belongs to a **priced part**. A line with no `subItems` has nowhere to
 put scope lines, so it is refused rather than printed with the text missing.
 
+`serviceCategory` is not the older `taxCategory` field, and it does not take the
+older `SupplyOnly` / `SupplyInstall` / `SupplyInstallConstruction` names. Those
+still exist so that revisions issued before the tax model changed keep reading
+correctly, and they are read through `taxCategory` — a different field that the
+CLI does not write. Sending one as `serviceCategory` is refused.
+
 ### Rules the server enforces
 
 You do not have to re-check these — the CLI passes the server's own messages
@@ -324,7 +330,8 @@ through unchanged — but knowing them makes an input file predictable:
   it is collected for the state and is never profit.
 - **PPH22** (2% non-construction, 1.75% construction, services only, any zone) is
   internal. It is calculated once on the sell grand after discount, is never
-  allocated per line, and is never printed.
+  allocated per line, and is never printed. Which rate applies is chosen by
+  `serviceCategory` above, and those are the only two values it accepts.
 
 ### Reading the file
 

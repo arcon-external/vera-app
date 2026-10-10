@@ -27,6 +27,12 @@ func TestResolveTaxMatrix(t *testing.T) {
 		{"services without category rejected", TaxZoneNonFTZ, TaxTypeServices, "", 0, 0, true},
 		{"goods with category rejected", TaxZoneNonFTZ, TaxTypeGoods, ServiceCategoryConstruction, 0, 0, true},
 		{"unknown service category rejected", TaxZoneFTZ, TaxTypeServices, "Bogus", 0, 0, true},
+		// The retired TaxCategory vocabulary, passed through the field that does
+		// not use it. The CLI documented these as serviceCategory values and sent
+		// callers here, where they are refused -- so this is the trap, named.
+		{"retired SupplyOnly rejected", TaxZoneNonFTZ, TaxTypeServices, TaxCategorySupplyOnly, 0, 0, true},
+		{"retired SupplyInstall rejected", TaxZoneNonFTZ, TaxTypeServices, TaxCategorySupplyInstall, 0, 0, true},
+		{"retired SupplyInstallConstruction rejected", TaxZoneNonFTZ, TaxTypeServices, TaxCategorySupplyInstallConstruction, 0, 0, true},
 	}
 
 	for _, tc := range cases {
