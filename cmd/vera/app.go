@@ -160,6 +160,12 @@ func exitCodeFor(err error) int {
 		return exitNotFound
 	case status == 400 || status == 422:
 		return exitValidation
+	case status == 429:
+		// Rate limited. It lands with the server failures rather than on its
+		// own code because the right response is the same as for a 503 -- wait
+		// and try again -- and a script that treats "the server refused for now"
+		// and "the server is broken" identically is behaving correctly.
+		return exitServer
 	case status >= 500:
 		return exitServer
 	}

@@ -168,7 +168,7 @@ warnings.
 | `3` | Not signed in, or not allowed to do this. |
 | `4` | The thing you named does not exist. |
 | `5` | The server refused the input (validation). |
-| `6` | The server or the network failed. |
+| `6` | The server or the network failed, or asked you to slow down (HTTP 429). Retrying later is the right response to both. |
 
 These are part of the interface. A script branches on them instead of matching
 English:

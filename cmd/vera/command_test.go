@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -270,5 +272,27 @@ func TestQuietSuppressesHumanOutput(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("--quiet printed %q; want nothing on success", stdout)
+	}
+}
+
+// TestRateLimitedMapsToTheRetryLaterCode pins the handling of the 429 the login
+// limiter now returns. Without it the status falls through to the generic code
+// and a script cannot tell "wait and retry" from "this went wrong".
+func TestRateLimitedMapsToTheRetryLaterCode(t *testing.T) {
+	isolate(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":"too many sign-in attempts; try again shortly"}`))
+	}))
+	defer server.Close()
+
+	code, _, stderr := runCLI(t, "updates", "check", "--api", server.URL)
+	if code != exitServer {
+		t.Errorf("exit = %d; want %d for a 429", code, exitServer)
+	}
+	// The server's own words must survive to the user, not a generic message.
+	if !strings.Contains(stderr, "too many sign-in attempts") {
+		t.Errorf("stderr = %q; want the server's message", stderr)
 	}
 }
