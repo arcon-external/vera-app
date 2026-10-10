@@ -193,7 +193,14 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 ## 9. Wails Integration Rules
 
 - Frontend-callable methods must be exported on bound structs.
-- If method signatures change, regenerate and verify `frontend/wailsjs/go/*`.
+- If method signatures change, regenerate `frontend/wailsjs/go/*` with
+  `wails generate module` and commit it. This is enforced rather than asked for:
+  `bindings_test.go` in the root package fails when a bound method is absent
+  from the generated file, or when the generated file names a method Go no
+  longer has. It went stale once (#294 added `ExportTo` and `RenderPDF` without
+  regenerating, and nothing noticed) and that is what the test exists to stop.
+  It needs no Wails CLI — the generated files are text and the Go side is
+  reflection.
 - Keep `Startup` initialization safe for both runtime and tests.
 - `main.go` opens Postgres before `wails.Run`; startup must fail clearly when the
   database is misconfigured.
