@@ -807,10 +807,14 @@ rather than swallowed.
 ## The installation
 
 ```bash
-vera version        # this build's version
+vera version        # this build's version, and which PDF engine it carries
 vera updates check  # what the server says the current release is
 vera changelog      # the release notes the server serves
 ```
+
+`version` prints the engine beside the number — `v0.9.1 (gpdf)` or `v0.9.1
+(chromedp)` — because the same version can be built either way. When a document
+comes out wrong, which one you are holding is the first thing worth knowing.
 
 `updates check` uses the same public endpoint the desktop's update banner reads,
 so it needs no session.

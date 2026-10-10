@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build chromedp && !windows
 
 // Comparing the two renderers on the same quotation.
 //

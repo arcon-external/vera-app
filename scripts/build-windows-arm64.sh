@@ -15,7 +15,7 @@ export VERSION="${VERSION:-$(git describe --tags --always)}"
 source ./scripts/stamp-version.sh
 
 echo -e "Building the Windows ARM64 installer for $VERSION..."
-wails build --clean --platform windows/arm64 -nsis -ldflags "$LDFLAGS"
+wails_build --clean --platform windows/arm64 -nsis -ldflags "$LDFLAGS"
 
 echo -e "Renaming to the release asset convention..."
 shopt -s nullglob

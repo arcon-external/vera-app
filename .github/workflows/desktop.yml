@@ -64,6 +64,13 @@ jobs:
       - name: Build installer
         env:
           VERSION: ${{ github.ref_name }}
+          # Empty means the native engine. Set the repository variable to
+          # chromedp to ship the browser engine instead -- the one to reach for
+          # when the HTML/CSS template has changed and the native layout has not
+          # caught up. A repository variable rather than a commit so a release
+          # can be turned around without touching the tree:
+          #   gh variable set VERA_RENDER_ENGINE --body chromedp
+          VERA_RENDER_ENGINE: ${{ vars.VERA_RENDER_ENGINE }}
         run: ./scripts/build-windows.sh
 
       - name: Checksum and upload
@@ -120,6 +127,13 @@ jobs:
       - name: Build installer
         env:
           VERSION: ${{ github.ref_name }}
+          # Empty means the native engine. Set the repository variable to
+          # chromedp to ship the browser engine instead -- the one to reach for
+          # when the HTML/CSS template has changed and the native layout has not
+          # caught up. A repository variable rather than a commit so a release
+          # can be turned around without touching the tree:
+          #   gh variable set VERA_RENDER_ENGINE --body chromedp
+          VERA_RENDER_ENGINE: ${{ vars.VERA_RENDER_ENGINE }}
         run: ./scripts/build-windows-arm64.sh
 
       - name: Checksum and upload
@@ -165,6 +179,13 @@ jobs:
       - name: Build disk image
         env:
           VERSION: ${{ github.ref_name }}
+          # Empty means the native engine. Set the repository variable to
+          # chromedp to ship the browser engine instead -- the one to reach for
+          # when the HTML/CSS template has changed and the native layout has not
+          # caught up. A repository variable rather than a commit so a release
+          # can be turned around without touching the tree:
+          #   gh variable set VERA_RENDER_ENGINE --body chromedp
+          VERA_RENDER_ENGINE: ${{ vars.VERA_RENDER_ENGINE }}
         run: ./scripts/build-macos.sh
 
       - name: Checksum and upload
@@ -217,9 +238,20 @@ jobs:
       - name: Build every target
         env:
           LDFLAGS: ${{ steps.stamp.outputs.ldflags }}
+          # The same engine choice the installers get, so a release cannot ship
+          # a desktop and a CLI that render the same document differently.
+          VERA_RENDER_ENGINE: ${{ vars.VERA_RENDER_ENGINE }}
         run: |
           set -euo pipefail
           VERSION="${{ github.ref_name }}"
+          # Empty means the native engine; see scripts/stamp-version.sh.
+          TAGS=()
+          if [ "$VERA_RENDER_ENGINE" = "chromedp" ]; then
+            TAGS=(-tags chromedp)
+            echo "building with the browser renderer"
+          else
+            echo "building with the native renderer"
+          fi
           mkdir -p build/cli
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             os="${target%/*}"
@@ -228,7 +260,7 @@ jobs:
             [ "$os" = "windows" ] && name="${name}.exe"
             echo "building $name"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-              go build -trimpath -ldflags "$LDFLAGS" -o "build/cli/$name" ./cmd/vera
+              go build -trimpath -ldflags "$LDFLAGS" "${TAGS[@]}" -o "build/cli/$name" ./cmd/vera
           done
           ls -l build/cli
 

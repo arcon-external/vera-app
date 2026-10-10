@@ -4,6 +4,7 @@ import (
 	"flag"
 
 	"vera-app/backend"
+	"vera-app/backend/render"
 )
 
 // appCommands are about the installation itself rather than the data: which
@@ -30,10 +31,17 @@ func versionCommand() *command {
 			if err := a.requireArgs(0, "no arguments"); err != nil {
 				return err
 			}
-			if err := a.emitJSON(map[string]any{"version": backend.AppVersion}); err != nil {
+			// The renderer is reported alongside the version because the two
+			// move independently: the same version number can be built with
+			// either engine, and "which one is in this binary?" is the first
+			// question when a document comes out wrong.
+			if err := a.emitJSON(map[string]any{
+				"version":  backend.AppVersion,
+				"renderer": render.Active.Name(),
+			}); err != nil {
 				return err
 			}
-			a.line("%s", backend.AppVersion)
+			a.line("%s (%s)", backend.AppVersion, render.Active.Name())
 			return nil
 		},
 	}

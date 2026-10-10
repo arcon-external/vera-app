@@ -1,3 +1,5 @@
+//go:build chromedp
+
 package backend
 
 import (

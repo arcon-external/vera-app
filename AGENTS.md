@@ -80,6 +80,7 @@ npm --prefix frontend run dev
 ```bash
 # The CLI. Links no cgo -- rendering is pure Go -- so it cross-compiles anywhere.
 go build -o vera ./cmd/vera
+go build -tags chromedp -o vera ./cmd/vera   # the browser engine instead
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o vera ./cmd/vera
 
 # Frontend type-check + production bundle (also the TypeScript gate)
@@ -117,6 +118,7 @@ anything needing a browser is driven by hand.
 
 ```bash
 go test ./...                                # all packages
+go test -tags chromedp ./...                 # the browser engine (needs Chrome to render)
 go test ./backend                            # quotation/pricing/tax/archive units
 go test ./cmd/vera                           # CLI dispatch, input model, verify parser
 go test -race ./...                          # race detector
@@ -540,6 +542,36 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 - **Single pricing pipeline:** `Prepare` validates, computes per-item prices, then
   derives original/marginalized/tax/nett totals. Both preview and PDF read from the
   same computed `QuotationData`.
+- **Two PDF engines, one document, selected by a build tag.** The HTML/CSS
+  template in `backend/template/` is the source of truth for how a quotation
+  looks; both engines render it.
+
+  | build | `render.Active` | chromedp dependency |
+  | --- | --- | --- |
+  | `go build` | gpdf (native, no browser) | **absent** |
+  | `go build -tags chromedp` | chromedp (headless Chrome) | present |
+
+  Reach for chromedp when the template has changed and the native layout has not
+  caught up — it renders the template exactly as written, and it is the oracle
+  every claim about gpdf's fidelity was measured against. `gpdf` is compiled in
+  both modes on purpose: `backend/render_equivalence_test.go` needs both engines
+  present to compare them, and that comparison is what says whether a template
+  change and the native layout still agree.
+
+  Selecting it for a **release** needs no commit:
+
+  ```bash
+  gh variable set VERA_RENDER_ENGINE --body chromedp   # then re-run the tag build
+  gh variable delete VERA_RENDER_ENGINE                # back to native
+  ```
+
+  Locally: `go build -tags chromedp ./cmd/vera`, or `VERA_RENDER_ENGINE=chromedp`
+  before any `scripts/build-*.sh`. `vera version` reports which engine a binary
+  carries, because the same version number can be built either way.
+
+  A rendering test under `-tags chromedp` skips without a browser — see
+  `render.RequireUsable`. Do not add an environment variable that selects the
+  engine at runtime: a compile-time choice is the point.
 - **Split presentation:** `GetCustomerPreview` is separated from
   `GetInternalBreakdown` (never exported). The customer view carries the
   document plus the cost side the review panel renders — but **never margin,

@@ -17,6 +17,7 @@ import (
 	"vera-app/backend"
 	"vera-app/backend/api"
 	"vera-app/backend/auth"
+	"vera-app/backend/render"
 	"vera-app/backend/store"
 )
 
@@ -141,6 +142,8 @@ func decodeJSON(t *testing.T, stdout string) map[string]any {
 }
 
 func TestEndToEndThroughTheCLI(t *testing.T) {
+	// The export step renders through whichever engine the build selected.
+	render.RequireUsable(t)
 	url := e2eServer(t)
 	dir := isolate(t)
 	// isolate() points VERA_API_URL at a closed port so no unit test can reach

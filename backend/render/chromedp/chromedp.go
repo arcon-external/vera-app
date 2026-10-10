@@ -1,3 +1,5 @@
+//go:build chromedp
+
 // Package chromedp renders a quotation by driving a headless Chrome: the
 // executed HTML template becomes the document, and Chrome prints it to PDF.
 //

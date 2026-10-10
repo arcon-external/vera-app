@@ -9,15 +9,20 @@ import (
 	"time"
 
 	"vera-app/backend/auth"
+	"vera-app/backend/render"
 )
 
 func TestGeneratePDF(t *testing.T) {
 	if testing.Short() {
 		// Kept so a fast local loop is still possible; CI runs it. The old
 		// reason here -- a Chrome sandbox -- stopped applying at v0.4.0, when
-		// the active renderer became native Go.
+		// the default renderer became native Go. A build that selects the
+		// browser engine does still need one, which is what the next line
+		// covers.
 		t.Skip("skipping the end-to-end export test in short mode")
 	}
+	// Renders through whichever engine the build selected.
+	render.RequireUsable(t)
 	ctx := context.Background()
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
