@@ -22,7 +22,7 @@ import (
 //
 // Set VERA_RUN_CHROME_TESTS=1 to opt in on a machine that has Chrome, matching
 // the convention the renderer-comparison tests already use.
-func RequireUsable(t *testing.T) {
+func RequireUsable(t testing.TB) {
 	t.Helper()
 	if Active.Name() != "chromedp" {
 		return
