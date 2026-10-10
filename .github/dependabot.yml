@@ -66,3 +66,16 @@ updates:
       - development
     commit-message:
       prefix: "chore"
+    ignore:
+      # @types/node 26 does not compile here, and it cannot: it uses TypeScript
+      # syntax that TypeScript 4.8 (pinned in frontend/package.json) rejects
+      # outright -- node_modules/@types/node/ffi.d.ts fails with TS1139 and
+      # TS1005 before any of our own code is looked at. Dependabot's first
+      # attempt at this (PR #312) went red on both gates.
+      #
+      # Ignoring the major keeps a permanently-failing PR out of the queue
+      # without pretending the dependency is fine. Delete this block when
+      # TypeScript moves to 5.x; see the tracking issue.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
