@@ -273,11 +273,9 @@ func (s *Server) detailEndpoint(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation not found"})
 	}
-	hasPDF, err := s.database.HasDocumentPDF(context.Request().Context(), id, record.RevisionNumber)
-	if err != nil {
-		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "check quotation document"})
-	}
-	return context.JSON(http.StatusOK, mapDetail(record, hasPDF))
+	// The record already knows: GetQuotation scans pdf_data and pdf_path, so
+	// asking the database again was a second round trip for a fact in hand.
+	return context.JSON(http.StatusOK, mapDetail(record, record.HasDocument))
 }
 
 func (s *Server) revisionsEndpoint(context echo.Context) error {
@@ -285,13 +283,13 @@ func (s *Server) revisionsEndpoint(context echo.Context) error {
 	if err != nil || id < 1 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
 	}
-	record, err := s.database.GetQuotation(context.Request().Context(), id, nil)
+	// Deliberately not GetQuotation. That selects html_snapshot and pdf_data,
+	// so this endpoint used to pull the whole document out of Postgres -- the
+	// largest column in the database -- to return a list of int16. The narrow
+	// query is served by UNIQUE (quotation_id, revision_number).
+	revisions, err := s.database.ListRevisionNumbers(context.Request().Context(), id)
 	if err != nil {
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation not found"})
-	}
-	revisions := record.AvailableRevisions
-	if revisions == nil {
-		revisions = []int16{}
 	}
 	return context.JSON(http.StatusOK, map[string]any{"revisions": revisions})
 }

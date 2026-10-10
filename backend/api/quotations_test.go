@@ -426,6 +426,18 @@ func TestAttachDocumentAfterExport(t *testing.T) {
 	id, _ := exported["id"].(float64)
 	quotePath := "/v1/quotations/" + strconv.Itoa(int(id))
 
+	// The detail endpoint answers the same question the attach response does,
+	// and now answers it from the record GetQuotation already scanned rather
+	// than a second query. Both halves are asserted, so the two cannot quietly
+	// disagree about whether a document is attached.
+	code, before := doJSON(t, server, http.MethodGet, quotePath, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail before attach = %d; want 200", code)
+	}
+	if before["hasPdf"] != false {
+		t.Errorf("detail before attach = %v; want hasPdf false", before["hasPdf"])
+	}
+
 	pdf := base64.StdEncoding.EncodeToString([]byte("%PDF-1.4 drill"))
 	code, attached := doJSON(t, server, http.MethodPut, quotePath+"/revisions/0/document", token,
 		map[string]any{"pdfBase64": pdf, "pdfPath": "/tmp/drill.pdf"})
@@ -434,6 +446,14 @@ func TestAttachDocumentAfterExport(t *testing.T) {
 	}
 	if attached["hasPdf"] != true {
 		t.Errorf("attach response = %v; want hasPdf true", attached)
+	}
+
+	code, after := doJSON(t, server, http.MethodGet, quotePath, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("detail after attach = %d; want 200", code)
+	}
+	if after["hasPdf"] != true {
+		t.Errorf("detail after attach = %v; want hasPdf true", after["hasPdf"])
 	}
 }
 

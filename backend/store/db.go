@@ -17,7 +17,14 @@ type Store struct {
 // Open connects to Postgres, verifies the connection, and applies all pending
 // migrations before returning a usable store.
 func Open(ctx context.Context, config Config) (*Store, error) {
-	pool, err := pgxpool.New(ctx, config.DSN)
+	poolConfig, err := pgxpool.ParseConfig(config.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse Postgres DSN: %w", err)
+	}
+	if config.Tracer != nil {
+		poolConfig.ConnConfig.Tracer = config.Tracer
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create Postgres pool: %w", err)
 	}
