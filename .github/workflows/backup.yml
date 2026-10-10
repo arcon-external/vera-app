@@ -13,6 +13,9 @@ permissions:
 jobs:
   dump:
     name: Dump Neon to bucket
+    # A production dump over the network is the slowest thing here and the one
+    # least able to tolerate a silent hang at 02:00, when nobody is watching.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - name: Authenticate to Google Cloud
