@@ -1,0 +1,331 @@
+{
+  "cases": [
+    {
+      "name": "margin then the row's own discount, cost side untouched",
+      "why": "the printed list price must equal what staff saw in the editor (issue #274)",
+      "lines": [
+        {
+          "cost": 100000,
+          "qty": 2,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": true,
+          "discountPercent": 10
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 200000,
+        "customerGrand": 216000,
+        "grandAfterTax": 216000,
+        "netProfit": 16000,
+        "ppnAmount": 0,
+        "profitBeforeTax": 16000,
+        "sellDiscount": 0,
+        "sellGrand": 216000,
+        "sellSubtotal": 216000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "a row discounted below cost earns a negative margin",
+      "why": "the margin is signed; unsigned arithmetic would wrap a loss into a huge gain",
+      "lines": [
+        {
+          "cost": 100000,
+          "qty": 1,
+          "marginEnabled": false,
+          "marginPercent": 0,
+          "discountEnabled": true,
+          "discountPercent": 50
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 100000,
+        "customerGrand": 50000,
+        "grandAfterTax": 50000,
+        "netProfit": -50000,
+        "ppnAmount": 0,
+        "profitBeforeTax": -50000,
+        "sellDiscount": 0,
+        "sellGrand": 50000,
+        "sellSubtotal": 50000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "the whole-quotation discount applies to the summed subtotal, on top of row discounts",
+      "why": "order matters: rows first, then the quotation (issue #274)",
+      "lines": [
+        {
+          "cost": 100000,
+          "qty": 1,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": true,
+          "discountPercent": 10
+        },
+        {
+          "cost": 50000,
+          "qty": 2,
+          "marginEnabled": false,
+          "marginPercent": 0,
+          "discountEnabled": false,
+          "discountPercent": 0
+        }
+      ],
+      "overallDiscountPercent": 5,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 200000,
+        "customerGrand": 197600,
+        "grandAfterTax": 197600,
+        "netProfit": -2400,
+        "ppnAmount": 0,
+        "profitBeforeTax": -2400,
+        "sellDiscount": 10400,
+        "sellGrand": 197600,
+        "sellSubtotal": 208000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "PPN is charged on top of the price for non-FTZ goods",
+      "why": "the customer pays it; it is collected for the state and is never profit (issue #270)",
+      "lines": [
+        {
+          "cost": 1000000,
+          "qty": 1,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": false,
+          "discountPercent": 0
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "NonFTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 1000000,
+        "customerGrand": 1332000,
+        "grandAfterTax": 1200000,
+        "netProfit": 200000,
+        "ppnAmount": 132000,
+        "profitBeforeTax": 200000,
+        "sellDiscount": 0,
+        "sellGrand": 1200000,
+        "sellSubtotal": 1200000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "PPH22 is withheld on services, and is internal",
+      "why": "it is never printed, and nett profit is computed from the sell grand, not the customer total",
+      "lines": [
+        {
+          "cost": 1000000,
+          "qty": 1,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": false,
+          "discountPercent": 0
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Services",
+      "serviceCategory": "NonConstruction",
+      "want": {
+        "costSubtotal": 1000000,
+        "customerGrand": 1200000,
+        "grandAfterTax": 1176000,
+        "netProfit": 176000,
+        "ppnAmount": 0,
+        "profitBeforeTax": 200000,
+        "sellDiscount": 0,
+        "sellGrand": 1200000,
+        "sellSubtotal": 1200000,
+        "taxAmount": 24000
+      }
+    },
+    {
+      "name": "FTZ goods carry no PPN and no PPH22, so nett equals the profit",
+      "why": "the baseline: nothing withheld, nothing added",
+      "lines": [
+        {
+          "cost": 1000000,
+          "qty": 1,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": false,
+          "discountPercent": 0
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 1000000,
+        "customerGrand": 1200000,
+        "grandAfterTax": 1200000,
+        "netProfit": 200000,
+        "ppnAmount": 0,
+        "profitBeforeTax": 200000,
+        "sellDiscount": 0,
+        "sellGrand": 1200000,
+        "sellSubtotal": 1200000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "truncation lands in the same place on both sides",
+      "why": "333 x 1.5 = 499.5, and both implementations truncate rather than round",
+      "lines": [
+        {
+          "cost": 333,
+          "qty": 1,
+          "marginEnabled": true,
+          "marginPercent": 50,
+          "discountEnabled": true,
+          "discountPercent": 33
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 333,
+        "customerGrand": 335,
+        "grandAfterTax": 335,
+        "netProfit": 2,
+        "ppnAmount": 0,
+        "profitBeforeTax": 2,
+        "sellDiscount": 0,
+        "sellGrand": 335,
+        "sellSubtotal": 335,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "a split line prices through its parts, not itself",
+      "why": "the line's total is the rollup of its sub-items and it is always quantity 1",
+      "lines": [
+        {
+          "cost": 0,
+          "qty": 1,
+          "marginEnabled": false,
+          "marginPercent": 0,
+          "discountEnabled": false,
+          "discountPercent": 0,
+          "subItems": [
+            {
+              "cost": 8500000,
+              "qty": 2,
+              "marginEnabled": true,
+              "marginPercent": 20,
+              "discountEnabled": false,
+              "discountPercent": 0
+            },
+            {
+              "cost": 1200000,
+              "qty": 1,
+              "marginEnabled": false,
+              "marginPercent": 0,
+              "discountEnabled": true,
+              "discountPercent": 10
+            }
+          ]
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 18200000,
+        "customerGrand": 21480000,
+        "grandAfterTax": 21480000,
+        "netProfit": 3280000,
+        "ppnAmount": 0,
+        "profitBeforeTax": 3280000,
+        "sellDiscount": 0,
+        "sellGrand": 21480000,
+        "sellSubtotal": 21480000,
+        "taxAmount": 0
+      }
+    },
+    {
+      "name": "a hundred percent discount is a free line, not a clamp",
+      "why": "100 is the ceiling, and the line must reach it rather than being refused",
+      "lines": [
+        {
+          "cost": 50000,
+          "qty": 4,
+          "marginEnabled": false,
+          "marginPercent": 0,
+          "discountEnabled": true,
+          "discountPercent": 100
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 200000,
+        "sellSubtotal": 0,
+        "sellDiscount": 0,
+        "sellGrand": 0,
+        "ppnAmount": 0,
+        "customerGrand": 0,
+        "taxAmount": 0,
+        "grandAfterTax": 0,
+        "profitBeforeTax": -200000,
+        "netProfit": -200000
+      }
+    },
+    {
+      "name": "a quotation with no discounts prices as it did before discounts existed",
+      "why": "the regression guard: the common case must be untouched by the per-row discount feature",
+      "lines": [
+        {
+          "cost": 15000000,
+          "qty": 2,
+          "marginEnabled": true,
+          "marginPercent": 20,
+          "discountEnabled": false,
+          "discountPercent": 0
+        }
+      ],
+      "overallDiscountPercent": 0,
+      "taxZone": "FTZ",
+      "taxType": "Goods",
+      "serviceCategory": "",
+      "want": {
+        "costSubtotal": 30000000,
+        "sellSubtotal": 36000000,
+        "sellDiscount": 0,
+        "sellGrand": 36000000,
+        "ppnAmount": 0,
+        "customerGrand": 36000000,
+        "taxAmount": 0,
+        "grandAfterTax": 36000000,
+        "profitBeforeTax": 6000000,
+        "netProfit": 6000000
+      }
+    }
+  ],
+  "note": "Shared pricing cases. Read by backend/pricing_fixture_test.go AND frontend/src/pricing.test.ts, so a rule change on either side fails against a shared expectation instead of a private one. The expected numbers were derived from buildPricing, which is canonical: the server does the pricing that reaches a customer."
+}
