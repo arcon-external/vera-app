@@ -83,7 +83,7 @@ jobs:
         # rollback fallback keeps working; this replaced build.yml, which
         # built the identical image a second time (#261).
         if: steps.ready.outputs.ready == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
