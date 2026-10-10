@@ -25,6 +25,7 @@ permissions:
 jobs:
   windows:
     name: Windows installer
+    timeout-minutes: 30
     runs-on: windows-latest
     defaults:
       run:
@@ -81,6 +82,7 @@ jobs:
     # Native ARM64 build: cross-compiling the WebView2 CGO layer from an
     # amd64 runner is unsupported, so this rides the windows-11-arm runner
     # with the same steps as the amd64 job.
+    timeout-minutes: 30
     runs-on: windows-11-arm
     defaults:
       run:
@@ -133,6 +135,7 @@ jobs:
 
   macos:
     name: macOS disk image
+    timeout-minutes: 30
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -177,6 +180,7 @@ jobs:
 
   cli:
     name: vera CLI
+    timeout-minutes: 20
     # One Linux runner builds every target: the CLI imports the application but
     # links no cgo (backend/render is pure Go, and Wails' pkg/runtime is too), so
     # cross-compilation needs nothing the runner lacks. Checked before this job
@@ -265,6 +269,7 @@ jobs:
 
   announce:
     name: Announce to the updater
+    timeout-minutes: 20
     # Last, and only once all three installers are on the release. The updater
     # learns about releases from six VERA_APP_* variables on the vera-api Cloud
     # Run service and nothing else announces anything -- not the tag, not the

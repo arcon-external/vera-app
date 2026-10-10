@@ -1,0 +1,68 @@
+version: 2
+
+# Keeps dependencies and base images fresh, so a pin only moves on purpose.
+#
+# The run logs already carry the warning this addresses: docker/*@v3 and @v6
+# target the deprecated Node 20, and nothing was watching. Before this file
+# existed the repository had no version updates at all — Dependabot *alerts*
+# work independently of it (AGENTS.md §11 reads them after every merge), so
+# security problems surfaced, but nothing proposed an upgrade before a problem
+# became one.
+#
+# All four ecosystems, not just the actions:
+#
+#   github-actions  the pins in .github/workflows/*.yml
+#   docker          Dockerfile.veraserver's builder and runtime images
+#   gomod           go.mod — AGENTS.md §16 names x/crypto, pgx/v5 and echo as the
+#                   areas most often flagged, and alerts alone means waiting for
+#                   a problem to exist before it is fixed
+#   npm             frontend/package.json — the vitest@2 -> vitest@5 migration in
+#                   §11 was alert-driven; this is what would have caught it early
+#
+# One thing this cannot see: the postgres:18-alpine service container in pr.yml
+# is a workflow input, not a Dockerfile, so the docker ecosystem does not track
+# it. Bumping that stays manual.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - development
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - development
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - development
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - development
+    commit-message:
+      prefix: "chore"

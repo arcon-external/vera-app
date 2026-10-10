@@ -3,15 +3,46 @@ name: Deploy to Cloud Run
 on:
   push:
     branches: [main]
+    # A merge that touches only prose does not change the image, so it does not
+    # deserve four minutes and a Cloud Run revision.
+    #
+    # The list is explicit and CHANGELOG.md is deliberately absent. It is copied
+    # to backend/api/changelog.md, which is go:embed-ed and served to the app as
+    # What's New, so skipping a changelog-only merge would leave every installed
+    # copy showing stale release notes. A blanket '**.md' would do exactly that
+    # -- see AGENTS.md §13.
+    paths-ignore:
+      - "README.md"
+      - "AGENTS.md"
+      - "docs/**"
+      - "doc/**"
+  # So a redeploy does not need an empty commit. Path filters do not apply to a
+  # manual dispatch, which is what makes this the escape hatch for the case
+  # above: if a doc-only merge ever does need to ship, run it by hand.
+  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
   id-token: write
 
+# Serialise deploys rather than cancelling them.
+#
+# Two merges close together otherwise run two Cloud Run deploys at once, and the
+# live revision becomes whichever build finishes last rather than the newest
+# commit. cancel-in-progress is false on purpose: a deploy is not a PR run, and
+# aborting one mid-apply leaves the service on a half-rolled revision with no
+# signal that it happened.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Build, push, deploy
+    # Docker build, Artifact Registry push, Cloud Run rollout, then up to five
+    # minutes of health polling.
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Check deploy readiness
