@@ -362,8 +362,11 @@ If anything is open, fix it immediately and release a patch (Section 13):
    one: `vitest@2` carried its own `vite@5`, `esbuild@0.21` and `tinypool@1`,
    and nothing short of a vitest major removed them.
 3. Refresh `frontend/package.json.md5` (`md5 -q frontend/package.json >
-   frontend/package.json.md5`) — it is tracked, and CI treats it as the
-   install fingerprint.
+   frontend/package.json.md5`). It is tracked and must match
+   `frontend/package.json`, but it is a **Wails artifact rather than a CI
+   fingerprint**: nothing in `.github/` or `scripts/` reads it, so a stale copy
+   fails nothing and the step is hygiene, not a gate. `wails build` rewrites it,
+   which is how it drifts.
 4. Run every gate (Section 12) and release a PATCH: a dependency bump is not a
    feature.
 
@@ -458,29 +461,39 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    git tag -a v0.2.0 -m "v0.2.0: description"
    git push origin v0.2.0
    ```
-7. Pushing the tag triggers `.github/workflows/desktop.yml`: Windows
-   `-nsis` installers (amd64 + arm64) and macOS DMG, all version-stamped
-   with sha256 sidecars, attached as
-   `Vera-v<version>-windows-amd64-installer.exe`,
-   `Vera-v<version>-windows-arm64-installer.exe`, and
-   `Vera-v<version>-macos-universal.dmg`. The `v` appears **inside** the
-   filename as well as in the tag: tag `v0.5.1` → `Vera-v0.5.1-…`. Each
-   has a `.sha256` sidecar beside it. Those names are a contract with the
-   updater — never rename by hand, and copy them out of
-   `gh release view <tag> --json assets` rather than typing them, or the
-   Download section of the release notes will link a 404 (this happened at
-   v0.5.1). Staff download links must point at the public
-   `vera-downloads-508411` bucket mirror, never at GitHub release assets
-   (the private repo 404s anyone without access).
+7. Pushing the tag triggers `.github/workflows/desktop.yml`, which builds
+   **nine** artifacts, each with a `.sha256` sidecar:
+
+   | Artifact | Job |
+   |---|---|
+   | `Vera-v<version>-windows-amd64-installer.exe` | `windows` |
+   | `Vera-v<version>-windows-arm64-installer.exe` | `windows-arm64` |
+   | `Vera-v<version>-macos-universal.dmg` | `macos` |
+   | `Vera-CLI-v<version>-{linux,darwin}-{amd64,arm64}` | `cli` |
+   | `Vera-CLI-v<version>-windows-{amd64,arm64}.exe` | `cli` |
+
+   All are version-stamped. The `v` appears **inside** the filename as well as
+   in the tag: tag `v0.5.1` → `Vera-v0.5.1-…`. The three installer names are a
+   contract with the updater — never rename by hand — and **every** name must
+   be copied out of `gh release view <tag> --json assets` rather than typed, or
+   the Download section will link a 404 (this happened at v0.5.1). Staff
+   download links must point at the public `vera-downloads-508411` bucket
+   mirror, never at GitHub release assets (the private repo 404s anyone without
+   access).
+
+   The `cli` job fails the release if a binary does not carry the tag, so a
+   mis-stamped build cannot be published.
 8. **The `Announce to the updater` job does the mirroring and the updater
    variables for you.** It runs last, gated on all three installer jobs, and is
    the only thing that makes an installed desktop offer the new version. Watch
    for it to go green — it is not cosmetic:
 
-   - mirrors the three installers to `gs://vera-downloads-508411/`, after
-     verifying each release asset against its `.sha256` sidecar. Staff cannot
-     reach GitHub release assets (the repo is private), so a release that is not
-     mirrored is a release nobody can download;
+   - mirrors every artifact in `scripts/announce-release.sh`'s `ASSETS` array —
+     the three installers and the six CLI binaries — to
+     `gs://vera-downloads-508411/`, after verifying each against its `.sha256`
+     sidecar. The array is the contract: a binary missing from it is a binary
+     staff cannot download, because they cannot reach GitHub release assets (the
+     repo is private);
    - proves each public URL serves before anything is announced, so the app is
      never told to offer a 404;
    - sets the six `VERA_APP_*` variables on `vera-api`, carrying
@@ -512,8 +525,8 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    ```
    It must print the tag you just pushed. If it prints anything older, the
    announce job failed; read its log before doing anything else.
-10. Add a Download section to the release notes with all three filenames plus one
-    install line each, and these prerequisites:
+10. Add a Download section to the release notes listing the installers **and the
+    six CLI binaries**, with one install line each, and these prerequisites:
    - Windows: SmartScreen will warn on unsigned builds — expected until signing.
      A Chrome installation is no longer required for exporting quotations; the
      native renderer replaced it in v0.4.0.
