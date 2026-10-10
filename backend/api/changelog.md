@@ -4,6 +4,19 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.9.1] - 2026-10-10
+
+### Fixed
+
+- **A prepared quotation no longer carries our own figures in the part of it
+  meant for the customer.** The data the app builds when you prepare a quotation
+  held three of ours alongside the customer's — the margin a line earned, the tax
+  we withhold, and the nett profit. **Nothing displayed them and nothing does
+  now, so you will see no change at all.** It is fixed so that a screen added
+  later cannot pick one up by accident and put a number that is ours alone in
+  front of a customer. The figures themselves are unchanged and still where they
+  belong, on the internal breakdown beside the customer's copy.
+
 ## [0.9.0] - 2026-10-10
 
 ### Added
