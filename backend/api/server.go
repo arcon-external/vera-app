@@ -26,8 +26,15 @@ type Server struct {
 	templates     *backend.Quotation
 	signer        *backend.Signer
 	verifyLimiter *ipRateLimiter
-	backupDir     string
-	dsn           string
+	// loginLimiter bounds sign-in attempts per address.
+	//
+	// It exists because the limiter in backend/auth keys on the email in the
+	// request body -- a value the caller chooses. That protects a specific
+	// account, but it cannot bound the endpoint: a flood of distinct addresses
+	// passes straight through it, and each one costs a database round trip.
+	loginLimiter *ipRateLimiter
+	backupDir    string
+	dsn          string
 }
 
 // SetSigner attaches the revision signer. Without it, exports store unsigned
@@ -71,7 +78,8 @@ func (s *Server) backupDirOrDefault() string {
 // tests that never touch snapshot rendering.
 func NewServer(database *store.Store, service *auth.Service, templates *backend.Quotation) *Server {
 	server := &Server{echo: echo.New(), database: database, service: service, templates: templates,
-		verifyLimiter: newIPRateLimiter(30, time.Minute)}
+		verifyLimiter: newIPRateLimiter(30, time.Minute),
+		loginLimiter:  newIPRateLimiter(loginAttemptsPerMinute, time.Minute)}
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
 	server.echo.Renderer = &verifyRenderer{}
@@ -161,7 +169,27 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+// loginAttemptsPerMinute is deliberately generous.
+//
+// An office signs in from one address, and a tight limit here would lock out
+// colleagues because one of them mistyped a password twice. Sixty a minute is
+// far above what a real office does and far below what a script needs, so the
+// trade lands where it should: no legitimate traffic is ever refused, and the
+// unthrottled flood is gone.
+//
+// It is an attempt limit rather than a failure limit because that is what bounds
+// the database work, which is the thing worth bounding -- every attempt costs a
+// GetUserByEmail round trip. It is checked before the body is read, so a flood
+// is refused as cheaply as possible.
+const loginAttemptsPerMinute = 60
+
 func (s *Server) login(context echo.Context) error {
+	if !s.loginLimiter.allow(clientIP(context)) {
+		return context.JSON(http.StatusTooManyRequests, map[string]string{
+			"error": "too many sign-in attempts; try again shortly",
+		})
+	}
+
 	var request loginRequest
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
