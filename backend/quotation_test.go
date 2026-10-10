@@ -13,7 +13,10 @@ import (
 
 func TestGeneratePDF(t *testing.T) {
 	if testing.Short() {
-		t.Skip("needs a Chrome sandbox; run without -short locally")
+		// Kept so a fast local loop is still possible; CI runs it. The old
+		// reason here -- a Chrome sandbox -- stopped applying at v0.4.0, when
+		// the active renderer became native Go.
+		t.Skip("skipping the end-to-end export test in short mode")
 	}
 	ctx := context.Background()
 	q := newTestQuotation()
