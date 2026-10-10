@@ -1,3 +1,8 @@
+// The customer's view of a quotation: the prices that print on their document,
+// plus the cost figures the review panel's "before margin" table shows beside
+// it. What a line *earned* is not here -- that is InternalPreviewItem, which is
+// where the panel reads it from. The Go side is pinned by
+// TestCustomerPreviewCarriesNoInternalEconomics.
 export interface CustomerPreviewItem {
   Description: string;
   UoM: string;
@@ -9,12 +14,9 @@ export interface CustomerPreviewItem {
   OriginalTotal: number;
   UnitPrice: number;
   Total: number;
-  MarginEnabled: boolean;
-  MarginPercent: number;
   /** The row's own discount, taken off the marginalised price. */
   DiscountEnabled: boolean;
   DiscountPercent: number;
-  MarginAmount: number;
   No: number;
   Qty: number;
 }
@@ -39,9 +41,6 @@ export interface CustomerPreview {
   OriginalSubTotal: number;
   OriginalDiscountAmount: number;
   OriginalGrandTotal: number;
-  MarginalizedGrandAfterTax: number;
-  ProfitAmount: number;
-  NettProfit: number;
   DiscountPercent: number;
 }
 

@@ -385,9 +385,6 @@ export namespace backend {
 	    OriginalTotal: number;
 	    UnitPrice: number;
 	    Total: number;
-	    MarginEnabled: boolean;
-	    MarginPercent: number;
-	    MarginAmount: number;
 	    DiscountEnabled: boolean;
 	    DiscountPercent: number;
 	    No: number;
@@ -410,9 +407,6 @@ export namespace backend {
 	        this.OriginalTotal = source["OriginalTotal"];
 	        this.UnitPrice = source["UnitPrice"];
 	        this.Total = source["Total"];
-	        this.MarginEnabled = source["MarginEnabled"];
-	        this.MarginPercent = source["MarginPercent"];
-	        this.MarginAmount = source["MarginAmount"];
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.No = source["No"];
@@ -440,9 +434,6 @@ export namespace backend {
 	    PpnAmount: number;
 	    OriginalSubTotal: number;
 	    OriginalDiscountAmount: number;
-	    NettProfit: number;
-	    MarginalizedGrandAfterTax: number;
-	    ProfitAmount: number;
 	    RevisionID: number;
 	    DiscountPercent: number;
 	    Validity: number;
@@ -475,9 +466,6 @@ export namespace backend {
 	        this.PpnAmount = source["PpnAmount"];
 	        this.OriginalSubTotal = source["OriginalSubTotal"];
 	        this.OriginalDiscountAmount = source["OriginalDiscountAmount"];
-	        this.NettProfit = source["NettProfit"];
-	        this.MarginalizedGrandAfterTax = source["MarginalizedGrandAfterTax"];
-	        this.ProfitAmount = source["ProfitAmount"];
 	        this.RevisionID = source["RevisionID"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.Validity = source["Validity"];

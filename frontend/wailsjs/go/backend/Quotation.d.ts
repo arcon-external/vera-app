@@ -18,6 +18,8 @@ export function DraftRevision(arg1:string,arg2:Array<number>,arg3:string):Promis
 
 export function Export(arg1:string):Promise<void>;
 
+export function ExportTo(arg1:string):Promise<void>;
+
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 
 export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
@@ -41,6 +43,8 @@ export function PickDirectory():Promise<string>;
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 
 export function RefreshCompanyIdentity():Promise<void>;
+
+export function RenderPDF():Promise<Array<number>>;
 
 export function SaveDraft(arg1:backend.SavedDraft):Promise<number>;
 

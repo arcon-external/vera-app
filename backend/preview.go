@@ -6,8 +6,11 @@ import (
 	"html/template"
 )
 
-// CustomerPreviewItem mirrors QuotationItem but only carries the
-// customer-facing sell prices that also appear in the exported PDF.
+// CustomerPreviewItem is one line of the customer's document, plus the cost
+// figures the review screen's "before margin" table shows for it.
+//
+// Like CustomerPreview, it carries no margin: the amount a line earned is on
+// InternalPreviewItem, which is where the panel reads it from.
 type CustomerPreviewItem struct {
 	Description              string
 	DisplayDesc              template.HTML
@@ -20,46 +23,51 @@ type CustomerPreviewItem struct {
 	OriginalTotal            uint64
 	UnitPrice                uint64
 	Total                    uint64
-	MarginEnabled            bool
-	MarginPercent            uint16
-	MarginAmount             int64
 	DiscountEnabled          bool
 	DiscountPercent          uint16
 	No                       uint32
 	Qty                      uint32
 }
 
-// CustomerPreview is the exact customer-facing quotation: sell prices only.
-// It must never contain margin, tax, or nett figures.
+// CustomerPreview is the quotation as the customer sees it, plus the cost side
+// the review screen shows beside it.
+//
+// The cost side is here on purpose: ReviewPanel renders its "before margin"
+// table from Items, and those figures are what staff check the margin against.
+// What must never appear here is the internal economics -- what a line earned,
+// the PPH22 withheld, the nett profit. Those belong to InternalBreakdown, which
+// is where the one caller that wants them reads them from.
+//
+// This struct has been wrong before. It was written in #28 with none of those
+// figures, and #48 added three nett totals to it as collateral while adding the
+// cost side. Nothing read them for a month, because a comment describing a
+// boundary is not a boundary. TestCustomerPreviewCarriesNoInternalEconomics is.
 type CustomerPreview struct {
-	Incoterm                  string
-	Subject                   string
-	RecipientName             string
-	RecipientCompany          string
-	RecipientAddress          string
-	QuoteNumber               string
-	Date                      string
-	ValidUntil                string
-	DisplayPpnAmount          string
-	DisplaySubTotal           string
-	DisplayDiscountAmount     string
-	DisplayGrandTotal         string
-	Items                     []CustomerPreviewItem
-	SubTotal                  uint64
-	OriginalGrandTotal        uint64
-	DiscountAmount            uint64
-	GrandTotal                uint64
-	PpnAmount                 uint64
-	OriginalSubTotal          uint64
-	OriginalDiscountAmount    uint64
-	NettProfit                int64
-	MarginalizedGrandAfterTax uint64
-	ProfitAmount              int64
-	RevisionID                uint16
-	DiscountPercent           uint8
-	Validity                  uint8
-	PaymentTerm               uint8
-	LeadTime                  uint8
+	Incoterm               string
+	Subject                string
+	RecipientName          string
+	RecipientCompany       string
+	RecipientAddress       string
+	QuoteNumber            string
+	Date                   string
+	ValidUntil             string
+	DisplayPpnAmount       string
+	DisplaySubTotal        string
+	DisplayDiscountAmount  string
+	DisplayGrandTotal      string
+	Items                  []CustomerPreviewItem
+	SubTotal               uint64
+	OriginalGrandTotal     uint64
+	DiscountAmount         uint64
+	GrandTotal             uint64
+	PpnAmount              uint64
+	OriginalSubTotal       uint64
+	OriginalDiscountAmount uint64
+	RevisionID             uint16
+	DiscountPercent        uint8
+	Validity               uint8
+	PaymentTerm            uint8
+	LeadTime               uint8
 }
 
 // InternalPreviewItem shows the cost vs sell economics of one line.
@@ -213,9 +221,6 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 			OriginalTotal:            it.OriginalTotal,
 			UnitPrice:                it.UnitPrice,
 			Total:                    it.Total,
-			MarginEnabled:            it.MarginEnabled,
-			MarginPercent:            it.MarginPercent,
-			MarginAmount:             it.MarginAmount,
 			DiscountEnabled:          it.DiscountEnabled,
 			DiscountPercent:          it.DiscountPercent,
 			No:                       it.No,
@@ -224,34 +229,31 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 	}
 
 	return CustomerPreview{
-		Items:                     items,
-		Subject:                   q.Data.Subject,
-		RecipientName:             q.Data.RecipientName,
-		RecipientCompany:          q.Data.RecipientCompany,
-		RecipientAddress:          q.Data.RecipientAddress,
-		QuoteNumber:               q.Data.QuoteNumber,
-		RevisionID:                q.Data.RevisionID,
-		Date:                      q.Data.Date,
-		ValidUntil:                q.Data.ValidUntil,
-		Incoterm:                  q.Data.Incoterm,
-		DisplaySubTotal:           q.Data.DisplaySubTotal,
-		DisplayDiscountAmount:     q.Data.DisplayDiscountAmount,
-		DisplayGrandTotal:         q.Data.DisplayGrandTotal,
-		DisplayPpnAmount:          q.Data.DisplayPpnAmount,
-		SubTotal:                  q.Data.SubTotal,
-		DiscountAmount:            q.Data.DiscountAmount,
-		GrandTotal:                q.Data.GrandTotal,
-		PpnAmount:                 q.Data.PpnAmount,
-		OriginalSubTotal:          q.Data.OriginalSubTotal,
-		OriginalDiscountAmount:    q.Data.OriginalDiscountAmount,
-		OriginalGrandTotal:        q.Data.OriginalGrandTotal,
-		MarginalizedGrandAfterTax: q.Data.MarginalizedGrandAfterTax,
-		ProfitAmount:              q.Data.ProfitAmount,
-		NettProfit:                q.Data.NettProfit,
-		DiscountPercent:           q.Data.DiscountPercent,
-		Validity:                  q.Data.Validity,
-		PaymentTerm:               q.Data.PaymentTerm,
-		LeadTime:                  q.Data.LeadTime,
+		Items:                  items,
+		Subject:                q.Data.Subject,
+		RecipientName:          q.Data.RecipientName,
+		RecipientCompany:       q.Data.RecipientCompany,
+		RecipientAddress:       q.Data.RecipientAddress,
+		QuoteNumber:            q.Data.QuoteNumber,
+		RevisionID:             q.Data.RevisionID,
+		Date:                   q.Data.Date,
+		ValidUntil:             q.Data.ValidUntil,
+		Incoterm:               q.Data.Incoterm,
+		DisplaySubTotal:        q.Data.DisplaySubTotal,
+		DisplayDiscountAmount:  q.Data.DisplayDiscountAmount,
+		DisplayGrandTotal:      q.Data.DisplayGrandTotal,
+		DisplayPpnAmount:       q.Data.DisplayPpnAmount,
+		SubTotal:               q.Data.SubTotal,
+		DiscountAmount:         q.Data.DiscountAmount,
+		GrandTotal:             q.Data.GrandTotal,
+		PpnAmount:              q.Data.PpnAmount,
+		OriginalSubTotal:       q.Data.OriginalSubTotal,
+		OriginalDiscountAmount: q.Data.OriginalDiscountAmount,
+		OriginalGrandTotal:     q.Data.OriginalGrandTotal,
+		DiscountPercent:        q.Data.DiscountPercent,
+		Validity:               q.Data.Validity,
+		PaymentTerm:            q.Data.PaymentTerm,
+		LeadTime:               q.Data.LeadTime,
 	}, nil
 }
 

@@ -506,7 +506,13 @@ vera quotations preview --input quotation.json
 ```
 
 The server's own `Prepare`, so this is what its renderer would see. Both views
-are returned: `customer` (safe to show) and `internal` (never exported).
+are returned:
+
+- `customer` — the document the customer receives, plus the cost side the review
+  panel shows beside it (its "before margin" table). It carries **no margin,
+  no PPH22 and no profit**: those are the operator's alone.
+- `internal` — the operator's economics: what each line earned, the PPH22
+  withheld, and the nett profit. This is the view that must never be exported.
 
 ### `vera quotations render`
 

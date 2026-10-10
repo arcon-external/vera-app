@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -482,5 +483,72 @@ func TestPreviewNoNilFieldsOnTheWire(t *testing.T) {
 	}
 	if strings.Contains(string(customerJSON), `"Items":null`) {
 		t.Error(`customer preview serialized "Items":null`)
+	}
+}
+
+// internalEconomics are the field names that describe what a quotation earns the
+// company: per-line margin, the PPH22 withheld, and the nett profit.
+//
+// The list is spelled out rather than derived from InternalBreakdown, because
+// the two structs legitimately share names -- GrandTotal, Items, DiscountPercent
+// are all customer-facing. Only these belong to the operator alone.
+var internalEconomics = []string{
+	// What a line earned.
+	"MarginAmount", "MarginPercent", "MarginEnabled",
+	"DisplayMarginAmount", "DisplayMarginBlended", "MarginBlendedPercent",
+	// What the state withholds, and what is left.
+	"TaxAmount", "DisplayTax", "TaxRateBps", "TaxLabel",
+	"ProfitAmount", "NettProfit", "DisplayProfit", "DisplayNett",
+	"MarginalizedSubtotal", "MarginalizedDiscount", "MarginalizedGrand",
+	"MarginalizedGrandAfterTax",
+}
+
+// TestCustomerPreviewCarriesNoInternalEconomics pins the boundary between the
+// customer-facing view and the operator's.
+//
+// CustomerPreview was written in #28 as "sell prices only", with the internal
+// economics deliberately on InternalBreakdown instead. #48 then added three nett
+// totals to it as collateral, while adding the cost side the review screen
+// needed, and nothing read them for a month. A boundary described only by a
+// comment is not a boundary; this is the enforcement.
+//
+// PPN is deliberately absent from the list above. It is charged on top and
+// printed on the customer's quotation, so PpnAmount is customer-facing, while
+// TaxAmount (PPH22) is not. That distinction is the whole point of the rule.
+func TestCustomerPreviewCarriesNoInternalEconomics(t *testing.T) {
+	for _, target := range []any{CustomerPreview{}, CustomerPreviewItem{}} {
+		typ := reflect.TypeOf(target)
+		for _, name := range internalEconomics {
+			if _, carried := typ.FieldByName(name); carried {
+				t.Errorf("%s carries %s, which describes what the company earns. "+
+					"It belongs on InternalBreakdown/InternalPreviewItem, where the "+
+					"review panel reads it from.", typ.Name(), name)
+			}
+		}
+	}
+}
+
+// TestCustomerPreviewKeepsTheCostSide is the other half of the same rule, and
+// guards against over-correcting.
+//
+// ReviewPanel renders its "Unit before margin / Total before margin" table from
+// CustomerPreview.Items, so these figures have a live consumer. Removing them to
+// make the struct look purer would blank a table staff check the margin against.
+func TestCustomerPreviewKeepsTheCostSide(t *testing.T) {
+	item := reflect.TypeOf(CustomerPreviewItem{})
+	for _, name := range []string{
+		"Description", "No", "Qty", "UoM", "DisplayOriginalUnitPrice", "DisplayOriginalTotal",
+	} {
+		if _, carried := item.FieldByName(name); !carried {
+			t.Errorf("CustomerPreviewItem lost %s; ReviewPanel renders its before-margin "+
+				"table from it, so this removes a figure staff rely on rather than "+
+				"tightening a boundary", name)
+		}
+	}
+	preview := reflect.TypeOf(CustomerPreview{})
+	for _, name := range []string{"Items", "DisplaySubTotal", "DisplayGrandTotal", "DiscountPercent"} {
+		if _, carried := preview.FieldByName(name); !carried {
+			t.Errorf("CustomerPreview lost %s, which the review panel renders", name)
+		}
 	}
 }
