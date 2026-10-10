@@ -73,6 +73,14 @@ func (s *Server) saveDraft(context echo.Context) error {
 	if request.ItemCount < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid item count"})
 	}
+	// The client reference is a CODE, which the quote-number format fixes at two
+	// digits, so anything outside that is not a client however it got here.
+	// Checking it here answers with the message a user can act on; letting it
+	// reach the store instead fails to encode a smallint and reports a 500.
+	if request.CustomerID != nil && (*request.CustomerID < 1 || *request.CustomerID > 99) {
+		return context.JSON(http.StatusBadRequest, map[string]string{
+			"error": "That client is no longer in the directory. Pick another one and save again."})
+	}
 
 	ctx := context.Request().Context()
 	var draft store.Draft

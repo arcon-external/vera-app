@@ -211,12 +211,49 @@ func TestDraftsStoreUnvalidatedState(t *testing.T) {
 	}
 }
 
+// TestDraftAcceptsAClientByCode pins what a draft's client reference means.
+//
+// The value is the client's CODE -- the same number the editor's dropdown holds
+// and the same one Prepare resolves through GetCustomerByCode. It used to be
+// checked against customers.id, so a client whose code and id did not coincide
+// was refused with "that client is no longer in the directory" while it sat in
+// the dropdown in front of the user.
+//
+// The seeded directory carries codes 2..6 against ids 1..5, so its last code is
+// exactly that case: valid as a code, absent as an id. This test fails against
+// the id lookup, which is the point of it.
+func TestDraftAcceptsAClientByCode(t *testing.T) {
+	ctx := context.Background()
+	database := draftTestStore(t)
+	owner := draftTestUser(t, database, "draft-a@example.com")
+
+	const schema = "vera_test_drafts"
+	var code int64
+	if err := database.pool.QueryRow(ctx, `
+		SELECT c.customer_code FROM `+schema+`.customers c
+		WHERE NOT EXISTS (
+			SELECT 1 FROM `+schema+`.customers d WHERE d.id = c.customer_code
+		)
+		ORDER BY c.customer_code DESC LIMIT 1`).Scan(&code); err != nil {
+		t.Fatalf("no seeded client whose code is not also a row id: %v", err)
+	}
+
+	if _, err := database.CreateDraft(ctx, owner.ID, "", "", "By code",
+		int64Pointer(code), 0, json.RawMessage(`{}`)); err != nil {
+		t.Fatalf("a draft for client code %d must save; got %v", code, err)
+	}
+}
+
 func TestDraftRejectsUnknownClient(t *testing.T) {
 	ctx := context.Background()
 	database := draftTestStore(t)
 	owner := draftTestUser(t, database, "draft-a@example.com")
 
-	if _, err := database.CreateDraft(ctx, owner.ID, "", "", "Ghost", int64Pointer(987654),
+	// A code with the shape the directory uses (1-99) that no client holds. The
+	// column is a SMALLINT, so an obviously-impossible number like 987654 fails
+	// to encode before the check is reached and the test would pass for the
+	// wrong reason.
+	if _, err := database.CreateDraft(ctx, owner.ID, "", "", "Ghost", int64Pointer(99),
 		0, json.RawMessage(`{}`)); !errors.Is(err, ErrDraftCustomerUnknown) {
 		t.Fatalf("create draft with unknown client = %v; want ErrDraftCustomerUnknown", err)
 	}
