@@ -330,7 +330,10 @@
 		   percentages lines up, and muted so it reads as an annotation on the
 		   price beside it rather than as a price of its own. */
 		.items-body-table td.disc {
-			text-align: right;
+			/* Centred like every other numeric cell. It was briefly
+			   right-aligned, as a column of percentages reads well against its
+			   right edge -- but a table where one number sits differently from
+			   the rest reads as a mistake, and it is one column of many. */
 			font-variant-numeric: tabular-nums;
 			color: #5b6478;
 			white-space: nowrap;

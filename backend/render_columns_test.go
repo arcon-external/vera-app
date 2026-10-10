@@ -119,6 +119,18 @@ func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
 						i+1, fromTemplate[i], fromEngine[i])
 				}
 			}
+
+			// And the engine has to survive producing the document, not just
+			// describe it. Rendering the column set is where a missing column's
+			// track index gets used: the discount cell's text is "—" on a row
+			// that carries none, which is not empty, so a renderer that trusts
+			// "there is always a track" indexes off the end of the layout and
+			// takes the export down. Asserting the columns alone would not
+			// notice; this is the difference between the two renderers agreeing
+			// on paper and agreeing in the file.
+			if _, err := q.build(); err != nil {
+				t.Fatalf("the engine could not render this quotation: %v", err)
+			}
 		})
 	}
 }

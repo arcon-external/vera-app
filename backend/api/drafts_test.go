@@ -252,13 +252,17 @@ func TestDraftsStoreUnvalidatedInput(t *testing.T) {
 	}
 }
 
-// TestDraftRejectsUnknownClient guards a dangling reference: the editor
-// resolves the client by id, so a draft must not pin one that is gone.
+// TestDraftRejectsUnknownClient guards a dangling reference: the editor holds
+// the client's CODE (not its row id -- see requireClient), so a draft must not
+// pin a code that no client answers to.
 func TestDraftRejectsUnknownClient(t *testing.T) {
 	server, token, _, _ := draftTestServer(t, "vera_api_drafts_client")
 
 	body := draftSaveBody(`{"v":1}`, 1)
-	body["customerId"] = 987654
+	// 99 has the shape of a client code and is not one. An out-of-range number
+	// like 987654 fails to encode before the check is reached, so the test would
+	// pass without exercising the lookup at all.
+	body["customerId"] = 99
 	code, response := doJSON(t, server, http.MethodPost, "/v1/drafts", token, body)
 	if code != http.StatusBadRequest {
 		t.Fatalf("save with an unknown client = %d; want 400 (%v)", code, response)

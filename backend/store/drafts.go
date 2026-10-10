@@ -235,20 +235,29 @@ func (s *Store) DeleteUserDrafts(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// requireClient confirms a client id exists before it is stored on a draft.
-func (s *Store) requireClient(ctx context.Context, customerID int64) error {
+// requireClient confirms a draft's client reference names a client.
+//
+// The value is the client's CODE, not its row id. It is the same number the
+// editor's dropdown holds and the same one Prepare resolves through
+// GetCustomerByCode, and the two must agree. Checking it against customers.id
+// instead rejected a client whose code and id did not coincide -- telling the
+// user their client was "no longer in the directory" while it sat in the
+// dropdown in front of them -- and, worse, silently accepted a code that
+// happened to match some other client's id, storing a reference to a client
+// nobody chose.
+func (s *Store) requireClient(ctx context.Context, customerCode int64) error {
 	pool, err := s.poolOrError()
 	if err != nil {
 		return err
 	}
 	var exists bool
 	if err := pool.QueryRow(ctx, fmt.Sprintf(
-		"SELECT EXISTS (SELECT 1 FROM %s.customers WHERE id = $1)", s.configSchema()),
-		customerID).Scan(&exists); err != nil {
-		return fmt.Errorf("check client %d: %w", customerID, err)
+		"SELECT EXISTS (SELECT 1 FROM %s.customers WHERE customer_code = $1)", s.configSchema()),
+		customerCode).Scan(&exists); err != nil {
+		return fmt.Errorf("check client %d: %w", customerCode, err)
 	}
 	if !exists {
-		return fmt.Errorf("%w: client %d", ErrDraftCustomerUnknown, customerID)
+		return fmt.Errorf("%w: client %d", ErrDraftCustomerUnknown, customerCode)
 	}
 	return nil
 }

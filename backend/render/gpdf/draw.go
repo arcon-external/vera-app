@@ -850,8 +850,17 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	}
 	e.drawBullets(p, bulletX, dy, rb.subs, colSubInk)
 
-	centre := func(i int, text string) {
-		if text == "" {
+	// One renderer for every numeric cell in the row: each is centred in its
+	// track, wrapped if it is wider than the track, and centred vertically in
+	// the row. Only the ink differs, and only for the discount column, which the
+	// stylesheet colours on its own. Sharing the geometry is what keeps that
+	// column aligned with the numbers beside it -- drawing it separately is how
+	// it came to sit differently from all of them.
+	cell := func(i int, text, colour string) {
+		// i < 0 means the column is not in this layout at all: the discount
+		// column's text is "—" on a row that carries none, which is not empty,
+		// so without this the call indexes colX[-1] and takes the export down.
+		if i < 0 || text == "" {
 			return
 		}
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
@@ -861,33 +870,16 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			p.add(run{
 				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), false))/2,
 				baseline: cy,
-				size:     px(bodyPx), text: line, color: colSubInk,
+				size:     px(bodyPx), text: line, color: colour,
 			})
 			cy += descLineH
 		}
 	}
-	// The discount cell is right-aligned, unlike every other number in the row:
-	// the stylesheet gives `.disc` no text-align of its own, and the column
-	// reads as a column of percentages against its right edge. It is also the
-	// only cell the stylesheet colours independently.
-	discCell := func(text string) {
-		if m.cols.disc < 0 || text == "" {
-			return
-		}
-		i := m.cols.disc
-		x := m.colX[i+1] - px(1) - px(tdPadPx) - e.Width(text, px(bodyPx), false)
-		p.add(run{
-			x:        x,
-			baseline: centeredBlockTop(top, bodyH, px(subRowPadPx), 1) + bodyBaselineOffset,
-			size:     px(bodyPx), text: text,
-			color: colSubNo,
-		})
-	}
-	centre(m.cols.qty, rb.part.Qty)
-	centre(m.cols.uom, rb.part.UoM)
-	centre(m.cols.unit, rb.part.UnitPrice)
-	discCell(rb.part.Disc)
-	centre(m.cols.total, rb.part.Total)
+	cell(m.cols.qty, rb.part.Qty, colSubInk)
+	cell(m.cols.uom, rb.part.UoM, colSubInk)
+	cell(m.cols.unit, rb.part.UnitPrice, colSubInk)
+	cell(m.cols.disc, rb.part.Disc, colSubNo)
+	cell(m.cols.total, rb.part.Total, colSubInk)
 }
 
 // drawMainRow paints one full-value row: an item's own row, and the state-B
@@ -937,17 +929,19 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	}
 	e.drawBullets(p, subTextX, dy, rb.subs, e.ink)
 
-	centre := func(i int, text string) {
-		if text == "" {
+	// One renderer for every numeric cell in the row: each is centred in its
+	// track, wrapped if it is wider than the track, and centred vertically in
+	// the row. Only the ink differs, and only for the discount column, which the
+	// stylesheet colours on its own. Sharing the geometry is what keeps that
+	// column aligned with the numbers beside it -- drawing it separately is how
+	// it came to sit differently from all of them.
+	cell := func(i int, text, colour string) {
+		// i < 0 means the column is not in this layout at all: the discount
+		// column's text is "—" on a row that carries none, which is not empty,
+		// so without this the call indexes colX[-1] and takes the export down.
+		if i < 0 || text == "" {
 			return
 		}
-		// A cell is as wide as its track, so a value too long for it wraps and
-		// centres on each line rather than running into the next column. The
-		// stylesheet gives every cell `white-space: normal`, so this is what the
-		// browser does; a long unit or an unusually large figure is the case it
-		// matters for. The block is centred in the row like every numeric cell:
-		// a figure floats beside the opening words of a wrapped description
-		// otherwise.
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
 		lines := e.Wrap(text, px(bodyPx), trackW, false)
 		cy := centeredBlockTop(top, bodyH, px(tdPadPx), float64(len(lines))) + bodyBaselineOffset
@@ -955,33 +949,18 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 			p.add(run{
 				x:        m.colX[i] + px(1) + px(tdPadPx) + (trackW-e.Width(line, px(bodyPx), false))/2,
 				baseline: cy,
-				size:     px(bodyPx), text: line, color: e.ink,
+				size:     px(bodyPx), text: line, color: colour,
 			})
 			cy += descLineH
 		}
 	}
-	// See drawPartRow: the discount column is right-aligned and drawn in the
-	// muted ink, unlike every other number in the row.
-	discCell := func(text string) {
-		if m.cols.disc < 0 || text == "" {
-			return
-		}
-		i := m.cols.disc
-		x := m.colX[i+1] - px(1) - px(tdPadPx) - e.Width(text, px(bodyPx), false)
-		p.add(run{
-			x:        x,
-			baseline: centeredBlockTop(top, bodyH, px(tdPadPx), 1) + bodyBaselineOffset,
-			size:     px(bodyPx), text: text,
-			color: colSubNo,
-		})
-	}
-	centre(m.cols.qty, rb.item.Qty)
-	centre(m.cols.uom, rb.item.UoM)
-	centre(m.cols.unit, rb.item.UnitPrice)
-	discCell(rb.item.Disc)
+	cell(m.cols.qty, rb.item.Qty, e.ink)
+	cell(m.cols.uom, rb.item.UoM, e.ink)
+	cell(m.cols.unit, rb.item.UnitPrice, e.ink)
+	cell(m.cols.disc, rb.item.Disc, colSubNo)
 	// The Total column is centred but not bold: the stylesheet gives every
 	// numeric cell the same treatment and only the header row carries a weight.
-	centre(m.cols.total, rb.item.Total)
+	cell(m.cols.total, rb.item.Total, e.ink)
 }
 
 // drawFooterCards paints the terms and totals cards, the first of the three
