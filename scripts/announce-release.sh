@@ -1,5 +1,5 @@
 #!/bin/bash
-# Announce a release: mirror its installers to the public bucket and point the
+# Announce a release: mirror its artifacts (desktop installers and the CLI) to
 # desktop updater at it.
 #
 # The updater learns about releases from six VERA_APP_* variables on the vera-api
@@ -78,10 +78,22 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # The three names are a contract with the updater, written by desktop.yml from
 # the tag. Never assembled differently here -- if these ever change, they change
 # in both places or the app links 404.
+# The desktop installers, and the CLI beside them.
+#
+# The CLI is in this list on purpose: staff cannot reach GitHub release assets
+# (the repo is private), so a binary that is not mirrored is a binary nobody can
+# download. Listing it here means a release whose CLI failed to build stops the
+# announcement rather than shipping a documented download link that 404s.
 ASSETS=(
   "Vera-${VERSION}-windows-amd64-installer.exe"
   "Vera-${VERSION}-windows-arm64-installer.exe"
   "Vera-${VERSION}-macos-universal.dmg"
+  "Vera-CLI-${VERSION}-linux-amd64"
+  "Vera-CLI-${VERSION}-linux-arm64"
+  "Vera-CLI-${VERSION}-darwin-amd64"
+  "Vera-CLI-${VERSION}-darwin-arm64"
+  "Vera-CLI-${VERSION}-windows-amd64.exe"
+  "Vera-CLI-${VERSION}-windows-arm64.exe"
 )
 BUCKET_BASE="https://storage.googleapis.com/${BUCKET}"
 
@@ -162,7 +174,7 @@ fi
 note "min_supported carried forward from live: $LIVE_MIN"
 
 # ---------------------------------------------------------------------------
-step "2/6  check the release carries all three installers"
+step "2/6  check the release carries every artifact"
 # The download URLs below point at these files. Announcing a release whose
 # assets are still building would hand staff a 404 on first click.
 # ---------------------------------------------------------------------------

@@ -23,6 +23,9 @@ changes.
 | Path | Purpose |
 | --- | --- |
 | `main.go` | Wails startup, Postgres open, binding registration |
+| `cmd/vera/` | The `vera` CLI: every feature as a command, plus local validate/render |
+| `cmd/veraserver/` | The API server binary |
+| `docs/cli.md` | The CLI guide: every command, the input format, exit codes |
 | `backend/quotation.go` | `Prepare`/`Export` flow, input + data models |
 | `backend/builder.go` | Per-item pricing, totals, markup + per-row discount math |
 | `backend/tax.go` | Tax zone/category → basis-point rates, tax + nett |
@@ -75,6 +78,10 @@ npm --prefix frontend run dev
 ## 5. Build Commands
 
 ```bash
+# The CLI. Links no cgo -- rendering is pure Go -- so it cross-compiles anywhere.
+go build -o vera ./cmd/vera
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o vera ./cmd/vera
+
 # Frontend type-check + production bundle (also the TypeScript gate)
 npm --prefix frontend run build
 
@@ -111,9 +118,16 @@ anything needing a browser is driven by hand.
 ```bash
 go test ./...                                # all packages
 go test ./backend                            # quotation/pricing/tax/archive units
+go test ./cmd/vera                           # CLI dispatch, input model, verify parser
 go test -race ./...                          # race detector
 go test ./backend -run '^TestBuildPricing' -v
 ```
+
+`cmd/vera`'s end-to-end test (`TestEndToEndThroughTheCLI`) drives the whole CLI
+in-process against a real `veraserver` and a throwaway schema: login → clients →
+validate → export (a real PDF and a signed revision) → verify → archive → drafts
+→ logout. It skips without `VERA_POSTGRES_TEST_DSN`, like the other integration
+tests, and it drops the schema it uses — point it only at a throwaway database.
 
 The Postgres repository test is skipped unless a test DSN is supplied. Use a
 throwaway database/schema, never the production one:

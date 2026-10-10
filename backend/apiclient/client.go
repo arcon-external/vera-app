@@ -3,11 +3,13 @@ package apiclient
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,11 +24,52 @@ type Client struct {
 	baseURL        string
 }
 
+// StatusError is a response the server refused: anything outside 2xx, and the
+// 401 that ends a session.
+//
+// It carries the status code because callers want different things from it. The
+// desktop shows Message and nothing else. The CLI maps the code to an exit
+// status, so a script can branch on "not found" without matching English.
+type StatusError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *StatusError) Error() string { return e.Message }
+
+// MarshalJSON keeps the shape a plain message. The desktop reads `message` off
+// whatever Wails hands it (see getErrorMessage in App.tsx), and a typed error
+// must not arrive there as an object it cannot read.
+func (e *StatusError) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Message string `json:"message"`
+	}{Message: e.Message})
+}
+
+// StatusOf reports the HTTP status behind an error, or 0 when the error did not
+// come from a response at all (an unreachable server, a malformed URL).
+func StatusOf(err error) int {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.StatusCode
+	}
+	return 0
+}
+
 // BaseURL reports the API address this client talks to. The verification
 // portal is served by the same service, so documents printed by this client
 // link back to it.
 func (c *Client) BaseURL() string {
 	return strings.TrimRight(c.baseURL, "/")
+}
+
+// SetTimeout bounds each request. The desktop keeps the 30s default; the CLI
+// lets the caller choose, because a bulk export and a status check want
+// different patience.
+func (c *Client) SetTimeout(d time.Duration) {
+	if d > 0 {
+		c.http.Timeout = d
+	}
 }
 
 // New builds a client for a base URL like https://vera.example.com.
@@ -71,13 +114,13 @@ func (c *Client) do(method, path string, body any, out any) error {
 		if c.OnUnauthorized != nil {
 			c.OnUnauthorized()
 		}
-		return fmt.Errorf("%s", apiError(response, "signed out; sign in again"))
+		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "signed out; sign in again")}
 	}
 	if response.StatusCode == http.StatusNoContent {
 		return nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("%s", apiError(response, "server request failed"))
+		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
 	}
 	if out == nil {
 		return nil
@@ -89,11 +132,62 @@ func (c *Client) do(method, path string, body any, out any) error {
 }
 
 func apiError(response *http.Response, fallback string) string {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+	if err != nil {
+		return fallback
+	}
+	return apiErrorBody(body, fallback)
+}
+
+// PostForm sends an application/x-www-form-urlencoded body and returns the raw
+// response body.
+//
+// The public verification portal is the one endpoint that is neither JSON in nor
+// JSON out: it takes the same form a browser would submit and answers with the
+// page it renders. Keeping that shape here means the CLI and any test go through
+// the identical path a customer does, rate limiter included.
+func (c *Client) PostForm(path string, form map[string]string) (string, error) {
+	values := url.Values{}
+	for key, value := range form {
+		values.Set(key, value)
+	}
+	request, err := http.NewRequest(http.MethodPost, c.baseURL+path, strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("build form request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if token := c.token(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("reach the quotation server: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read server response: %w", err)
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		if c.OnUnauthorized != nil {
+			c.OnUnauthorized()
+		}
+		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "signed out; sign in again")}
+	}
+	// 404 is a real answer from the portal -- "no document matches that code" --
+	// and its page still has to be read, so only 5xx counts as a failure here.
+	if response.StatusCode >= 500 {
+		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "server request failed")}
+	}
+	return string(body), nil
+}
+
+// apiErrorBody is apiError for a body already read.
+func apiErrorBody(body []byte, fallback string) string {
 	var problem struct {
 		Error string `json:"error"`
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<10))
-	if err != nil || json.Unmarshal(body, &problem) != nil || problem.Error == "" {
+	if json.Unmarshal(body, &problem) != nil || problem.Error == "" {
 		return fallback
 	}
 	if len(problem.Error) > 200 {
@@ -164,10 +258,10 @@ func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) 
 		if c.OnUnauthorized != nil {
 			c.OnUnauthorized()
 		}
-		return fmt.Errorf("signed out; sign in again")
+		return &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("%s", apiError(response, "server request failed"))
+		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
 	}
 	if out == nil {
 		return nil
@@ -197,10 +291,10 @@ func (c *Client) Download(path, defaultName string) (filename string, data []byt
 		if c.OnUnauthorized != nil {
 			c.OnUnauthorized()
 		}
-		return "", nil, fmt.Errorf("signed out; sign in again")
+		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("%s", apiError(response, "server request failed"))
+		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, 512<<20))
 	if err != nil {

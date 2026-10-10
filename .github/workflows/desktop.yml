@@ -165,6 +165,93 @@ jobs:
             Vera-${{ github.ref_name }}-macos-universal.dmg.sha256 \
             --clobber
 
+  cli:
+    name: vera CLI
+    # One Linux runner builds every target: the CLI imports the application but
+    # links no cgo (backend/render is pure Go, and Wails' pkg/runtime is too), so
+    # cross-compilation needs nothing the runner lacks. Checked before this job
+    # existed -- all six targets build with CGO_ENABLED=0, and the amd64 binary
+    # runs and reports its version.
+    #
+    # Six plain binaries rather than a macOS universal: making one needs lipo,
+    # which is not on a Linux runner, and a CLI user picking their own
+    # architecture is ordinary (`uname -m`).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve the version stamp
+        id: stamp
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # stamp-version.sh is the one place that decides what a version means,
+          # and it fails loudly when wails.json and the tag disagree. It exports
+          # LDFLAGS into its own process, so the value is re-derived here rather
+          # than copied by hand -- two spellings of a version is how they drift.
+          ./scripts/stamp-version.sh
+          echo "ldflags=-X vera-app/backend.AppVersion=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build every target
+        env:
+          LDFLAGS: ${{ steps.stamp.outputs.ldflags }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          mkdir -p build/cli
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="Vera-CLI-${VERSION}-${os}-${arch}"
+            [ "$os" = "windows" ] && name="${name}.exe"
+            echo "building $name"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+              go build -trimpath -ldflags "$LDFLAGS" -o "build/cli/$name" ./cmd/vera
+          done
+          ls -l build/cli
+
+      - name: Prove the binaries carry this release's version
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          # Running every binary is impossible on one runner, but ldflags writes
+          # the version into the file as a plain string, so searching for it
+          # catches the real failure: a build that was stamped with something
+          # else, or not stamped at all.
+          for binary in build/cli/*; do
+            if ! grep -qaF "$VERSION" "$binary"; then
+              echo "::error::$binary does not carry $VERSION; it was not stamped"
+              exit 1
+            fi
+          done
+          # And one of them actually runs here, so "it built" is not the only
+          # thing being asserted.
+          amd64="build/cli/Vera-CLI-${VERSION}-linux-amd64"
+          reported=$("$amd64" version)
+          if [ "$reported" != "$VERSION" ]; then
+            echo "::error::vera version reported '$reported', want '$VERSION'"
+            exit 1
+          fi
+          echo "all six binaries carry $VERSION, and linux-amd64 runs"
+
+      - name: Checksum and upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd build/cli
+          for binary in *; do
+            sha256sum "$binary" > "$binary.sha256"
+          done
+          gh release upload "${{ github.ref_name }}" ./* --clobber
+
   announce:
     name: Announce to the updater
     # Last, and only once all three installers are on the release. The updater
@@ -173,7 +260,7 @@ jobs:
     # GitHub Release. v0.4.0 shipped without this step existing and the app went
     # on offering v0.3.5 until a user reported it, so the step is now automatic
     # and fails loudly rather than being remembered.
-    needs: [windows, windows-arm64, macos]
+    needs: [windows, windows-arm64, macos, cli]
     runs-on: ubuntu-latest
     # Least privilege for this job: read the release assets, mint a WIF token.
     permissions:
