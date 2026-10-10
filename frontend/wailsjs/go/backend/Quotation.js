@@ -30,6 +30,10 @@ export function Export(arg1) {
   return window['go']['backend']['Quotation']['Export'](arg1);
 }
 
+export function ExportTo(arg1) {
+  return window['go']['backend']['Quotation']['ExportTo'](arg1);
+}
+
 export function GetCustomerPreview() {
   return window['go']['backend']['Quotation']['GetCustomerPreview']();
 }
@@ -76,6 +80,10 @@ export function Prepare(arg1) {
 
 export function RefreshCompanyIdentity() {
   return window['go']['backend']['Quotation']['RefreshCompanyIdentity']();
+}
+
+export function RenderPDF() {
+  return window['go']['backend']['Quotation']['RenderPDF']();
 }
 
 export function SaveDraft(arg1) {

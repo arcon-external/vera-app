@@ -527,8 +527,15 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 - **Single pricing pipeline:** `Prepare` validates, computes per-item prices, then
   derives original/marginalized/tax/nett totals. Both preview and PDF read from the
   same computed `QuotationData`.
-- **Split presentation:** `GetCustomerPreview` (safe to show) is separated from
-  `GetInternalBreakdown` (never exported). Keep the boundary explicit.
+- **Split presentation:** `GetCustomerPreview` is separated from
+  `GetInternalBreakdown` (never exported). The customer view carries the
+  document plus the cost side the review panel renders — but **never margin,
+  PPH22 or profit**: `TestCustomerPreviewCarriesNoInternalEconomics` fails if
+  any of those names reappear on `CustomerPreview` or `CustomerPreviewItem`.
+  They were added once as collateral in #48 and nothing read them for a month,
+  so the rule is enforced by a test rather than by a comment. PPN is the
+  deliberate exception: it is charged on top and printed, so it is customer-
+  facing while PPH22 is not.
 - **Normalized persistence:** customers, quotations, immutable revisions, revision
   items, revision totals, and rendered documents. Referential integrity via foreign
   keys; money as `BIGINT`; rates as basis points.
