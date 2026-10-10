@@ -68,8 +68,10 @@ export function computePricing(
   }
 
   // A discount is a price cut, so it moves only the sell side. Mirrors
-  // buildPricing in backend/builder.go; the two must never disagree about a
-  // number the customer is quoted.
+  // buildPricing in backend/builder.go, and the two must never disagree about a
+  // number the customer is quoted -- which is enforced rather than hoped for:
+  // backend/testdata/pricing_cases.json is read by this file's test and by
+  // backend's, so a rule change on either side breaks the other.
   const originalDiscount = 0;
   const originalGrand = costSubtotal;
   const sellDiscount = Math.trunc((sellSubtotal * discountPercent) / 100);

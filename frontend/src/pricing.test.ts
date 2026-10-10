@@ -1,32 +1,79 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { computePricing } from "./components/SummaryRail";
 import type { PricedItem } from "./components/SummaryRail";
+import type { EditorSubItem } from "./components/ItemEditor";
 import { applyDiscount, applyMargin, MAX_DISCOUNT_PERCENT } from "./format";
 
 // The live summary rail duplicates the backend's pricing in TypeScript so the
-// editor can show totals before Prepare runs. Two implementations of one rule
-// is the setup for drift, and drift here is a number the customer is quoted --
-// so these cases are the ones Go asserts in TestRowDiscountFollowsTheConfirmedFlow
-// and TestProfitFollowsTheConfirmedFlow, restated for the client. If one side
-// changes a rule, the other side fails here rather than quietly disagreeing.
+// editor can show totals before Prepare runs. Two implementations of one rule is
+// the setup for drift, and drift here is a number the customer is quoted.
+//
+// This file used to claim it would catch that -- "these cases are the ones Go
+// asserts ... If one side changes a rule, the other side fails here rather than
+// quietly disagreeing." It would not. Both sides asserted their own literals, so
+// a Go change failed the Go test, someone updated the Go literal, and this file
+// carried on passing with the old number.
+//
+// So the shared cases now come from a fixture that backend's
+// pricing_fixture_test.go reads too. The expectation lives in exactly one place,
+// which is what makes the claim true rather than aspirational.
 
-function line(
-  cost: number,
-  qty: number,
-  margin: number,
-  discount: number,
-  discountOn = false
-): PricedItem {
+interface FixtureLine {
+  cost: number;
+  qty: number;
+  marginEnabled: boolean;
+  marginPercent: number;
+  discountEnabled: boolean;
+  discountPercent: number;
+  subItems?: FixtureLine[];
+}
+
+interface FixtureCase {
+  name: string;
+  why: string;
+  lines: FixtureLine[];
+  overallDiscountPercent: number;
+  taxZone: string;
+  taxType: string;
+  serviceCategory: string;
+  want: Record<string, number>;
+}
+
+// Resolved from this module rather than from the working directory, so the test
+// behaves the same however it is invoked.
+const fixturePath = fileURLToPath(
+  new URL("../../backend/testdata/pricing_cases.json", import.meta.url)
+);
+const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: FixtureCase[] };
+
+function toSubItem(line: FixtureLine, index: number): EditorSubItem {
   return {
-    qty: String(qty),
-    unitPrice: String(cost),
-    marginEnabled: margin > 0,
-    marginPercent: String(margin),
-    discountEnabled: discountOn,
-    discountPercent: String(discount),
+    id: index,
+    description: `part ${index}`,
+    qty: String(line.qty),
+    uom: "Pc",
+    unitCost: String(line.cost),
+    marginEnabled: line.marginEnabled,
+    marginPercent: String(line.marginPercent),
+    discountEnabled: line.discountEnabled,
+    discountPercent: String(line.discountPercent),
+    bullets: [],
   };
 }
 
-const FTZ = { taxZone: "FTZ", taxType: "Goods", serviceCategory: "" };
+function toPricedItem(line: FixtureLine): PricedItem {
+  return {
+    qty: String(line.qty),
+    unitPrice: String(line.cost),
+    marginEnabled: line.marginEnabled,
+    marginPercent: String(line.marginPercent),
+    discountEnabled: line.discountEnabled,
+    discountPercent: String(line.discountPercent),
+    subItems: line.subItems?.map(toSubItem),
+  };
+}
 
 describe("applyDiscount", () => {
   it("is off until it is switched on", () => {
@@ -41,74 +88,37 @@ describe("applyDiscount", () => {
   });
 });
 
-describe("computePricing mirrors the backend", () => {
-  it("margin then row discount, with the cost side untouched", () => {
-    // cost 100.000 x 2, margin 20% -> 120.000 list, row discount 10% -> 108.000.
-    const p = computePricing([line(100000, 2, 20, 10, true)], 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    expect(p.sellSubtotal).toBe(216000);
-    expect(p.costSubtotal).toBe(200000);
-    expect(p.sellGrand).toBe(216000);
-    // Profit reads the sell grand, never the customer total, and the cost side
-    // is not discounted -- the rule from issue #270.
-    expect(p.netProfit).toBe(16000);
+describe("computePricing matches the shared fixture", () => {
+  it("the fixture is not empty", () => {
+    // A fixture that failed to load would make every case below vanish rather
+    // than fail, which is the quietest possible way to lose this coverage.
+    expect(fixture.cases.length).toBeGreaterThan(0);
   });
 
-  it("discount with no margin", () => {
-    const p = computePricing([line(100000, 1, 0, 10, true)], 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    expect(p.sellSubtotal).toBe(90000);
-    expect(p.netProfit).toBe(-10000);
-  });
+  for (const testCase of fixture.cases) {
+    it(testCase.name, () => {
+      const priced = computePricing(
+        testCase.lines.map(toPricedItem),
+        testCase.overallDiscountPercent,
+        testCase.taxZone,
+        testCase.taxType,
+        testCase.serviceCategory
+      );
 
-  it("discount below cost is a loss, not a clamp and not a wrap", () => {
-    const p = computePricing([line(100000, 1, 10, 30, true)], 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    // 110.000 list, 30% off -> 77.000, against a 100.000 cost.
-    expect(p.sellSubtotal).toBe(77000);
-    expect(p.netProfit).toBe(-23000);
-  });
-
-  it("a hundred percent discount is a free line", () => {
-    const p = computePricing([line(50000, 4, 0, 100, true)], 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    expect(p.sellSubtotal).toBe(0);
-    expect(p.netProfit).toBe(-200000);
-  });
-
-  it("the whole-quotation discount applies on top of the per-row one", () => {
-    const items = [line(100000, 2, 20, 10, true)];
-    const withoutOverall = computePricing(items, 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    const withOverall = computePricing(items, 5, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    // 216.000 less 5% = 205.200, against an undiscounted 200.000 cost.
-    expect(withOverall.sellGrand).toBe(205200);
-    expect(withOverall.sellDiscount).toBe(10800);
-    expect(withOverall.netProfit).toBe(5200);
-    expect(withOverall.sellSubtotal).toBe(withoutOverall.sellSubtotal);
-  });
-
-  it("an undiscounted quotation is unchanged by this feature", () => {
-    // The regression guard: a quotation with no row discounts has to price
-    // exactly as it did before per-row discounts existed.
-    const p = computePricing([line(15000000, 2, 20, 0)], 0, FTZ.taxZone, FTZ.taxType, FTZ.serviceCategory);
-    expect(p.sellSubtotal).toBe(36000000);
-    expect(p.sellGrand).toBe(36000000);
-    expect(p.netProfit).toBe(6000000);
-  });
-
-  it("excludes PPN from both profits", () => {
-    // 11% PPN on non-FTZ goods is collected for the state. It is on the
-    // customer total and on neither profit figure.
-    const p = computePricing([line(100000, 1, 0, 0)], 0, "NonFTZ", "Goods", "");
-    expect(p.ppnAmount).toBe(11000);
-    expect(p.customerGrand).toBe(111000);
-    expect(p.netProfit).toBe(0);
-    expect(p.profitBeforeTax).toBe(0);
-  });
-
-  it("takes PPH22 out of nett only", () => {
-    const p = computePricing([line(100000, 1, 0, 0)], 0, "NonFTZ", "Services", "NonConstruction");
-    expect(p.taxAmount).toBe(2000);
-    expect(p.profitBeforeTax).toBe(0);
-    expect(p.netProfit).toBe(-2000);
-    expect(p.grandAfterTax).toBe(98000);
-  });
+      // Compared field by field against the same expectation Go asserts, so a
+      // rule change on either side breaks whichever side no longer matches.
+      for (const [field, want] of Object.entries(testCase.want)) {
+        const got = (priced as unknown as Record<string, number>)[field];
+        if (got === undefined) {
+          throw new Error(
+            `the fixture asserts ${field}, which computePricing does not return; ` +
+              `the assertion is not real until it does`
+          );
+        }
+        expect(got, `${testCase.why} (${field})`).toBe(want);
+      }
+    });
+  }
 });
 
 describe("MAX_DISCOUNT_PERCENT", () => {
