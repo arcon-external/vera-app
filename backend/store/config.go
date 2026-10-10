@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 )
 
 const defaultSchema = "vera"
@@ -17,6 +19,12 @@ var schemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 type Config struct {
 	DSN    string
 	Schema string
+	// Tracer, when set, observes every statement the store runs. It is nil in
+	// production and exists so a test can assert what a path does -- and does not
+	// -- ask the database for. That is otherwise invisible, which is how an
+	// endpoint that fetched a whole PDF to return a list of integers went
+	// unnoticed for as long as it did.
+	Tracer pgx.QueryTracer
 }
 
 // LoadConfig reads the primary VERA_POSTGRES_DSN setting, falling back to the

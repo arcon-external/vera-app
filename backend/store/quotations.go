@@ -125,20 +125,28 @@ type QuotationSummary struct {
 }
 
 type QuotationRecord struct {
-	UUID               string
-	ServiceCategory    string
-	PDFPath            string
-	CustomerAddress    string
-	RecipientName      string
-	RecipientAddress   string
-	Incoterm           string
-	CanonicalSHA256    string
-	SigKeyID           string
-	Signature          string
-	ShortID            string
-	TaxZone            string
-	TaxCategory        string
-	HTMLSnapshot       string
+	UUID             string
+	ServiceCategory  string
+	PDFPath          string
+	CustomerAddress  string
+	RecipientName    string
+	RecipientAddress string
+	Incoterm         string
+	CanonicalSHA256  string
+	SigKeyID         string
+	Signature        string
+	ShortID          string
+	TaxZone          string
+	TaxCategory      string
+	HTMLSnapshot     string
+	// HasDocument reports whether the revision has a stored document: PDF bytes
+	// or a path. It is scanned from the same expression the separate
+	// HasDocumentPDF query used, so the answer is identical -- including for an
+	// empty-but-not-null pdf_data, which that check counted as present and
+	// len(PDFData) > 0 would not. The point of carrying it is that GetQuotation
+	// already selects both columns, so asking again was a round trip for a fact
+	// already in hand.
+	HasDocument        bool
 	TaxType            string
 	AvailableRevisions []int16
 	Items              []RevisionItem
@@ -209,7 +217,9 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       r.subject, r.incoterm, r.validity_days, r.payment_term_days,
 		       r.lead_time_days, r.discount_percent, r.tax_zone, r.tax_category,
 		       r.tax_rate_bps, r.tax_type, r.service_category, r.created_at,
-		       d.html_snapshot, d.pdf_data, COALESCE(d.pdf_path, ''),
+		       d.html_snapshot, d.pdf_data,
+		       (d.pdf_data IS NOT NULL OR d.pdf_path IS NOT NULL) AS has_document,
+		       COALESCE(d.pdf_path, ''),
 		       t.original_subtotal, t.original_discount, t.original_grand_total,
 		       t.marginalized_subtotal, t.marginalized_discount,
 		       t.marginalized_grand_total, t.tax_amount,
@@ -258,6 +268,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.CreatedAt,
 		&record.HTMLSnapshot,
 		&record.PDFData,
+		&record.HasDocument,
 		&record.PDFPath,
 		&record.Totals.OriginalSubtotal,
 		&record.Totals.OriginalDiscount,
@@ -435,26 +446,51 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		return QuotationRecord{}, fmt.Errorf("iterate quotation sub-item details: %w", err)
 	}
 
-	revisionRows, err := pool.Query(ctx, fmt.Sprintf(`
-		SELECT revision_number FROM %s.quotation_revisions
-		WHERE quotation_id = $1
-		ORDER BY revision_number DESC`, schema), quotationID)
+	revisions, err := s.ListRevisionNumbers(ctx, quotationID)
 	if err != nil {
-		return QuotationRecord{}, fmt.Errorf("list quotation revisions: %w", err)
+		return QuotationRecord{}, err
 	}
-	defer revisionRows.Close()
-	for revisionRows.Next() {
-		var revisionNumber int16
-		if err := revisionRows.Scan(&revisionNumber); err != nil {
-			return QuotationRecord{}, fmt.Errorf("scan quotation revision: %w", err)
-		}
-		record.AvailableRevisions = append(record.AvailableRevisions, revisionNumber)
-	}
-	if err := revisionRows.Err(); err != nil {
-		return QuotationRecord{}, fmt.Errorf("iterate quotation revisions: %w", err)
-	}
+	record.AvailableRevisions = revisions
 
 	return record, nil
+}
+
+// ListRevisionNumbers returns a quotation's revision numbers, newest first.
+//
+// Split out of GetQuotation because the revisions endpoint needs this and
+// nothing else. It used to call GetQuotation, which selects html_snapshot and
+// pdf_data -- so every click pulled the whole document out of Postgres to return
+// a handful of int16s, and PDFs are the largest column in the database. The
+// UNIQUE (quotation_id, revision_number) index already serves this.
+//
+// The result is never nil, so a caller can serialise it without a nil check
+// turning into a JSON null on the wire.
+func (s *Store) ListRevisionNumbers(ctx context.Context, quotationID int64) ([]int16, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT revision_number FROM %s.quotation_revisions
+		WHERE quotation_id = $1
+		ORDER BY revision_number DESC`, s.configSchema()), quotationID)
+	if err != nil {
+		return nil, fmt.Errorf("list quotation revisions: %w", err)
+	}
+	defer rows.Close()
+
+	revisions := []int16{}
+	for rows.Next() {
+		var revisionNumber int16
+		if err := rows.Scan(&revisionNumber); err != nil {
+			return nil, fmt.Errorf("scan quotation revision: %w", err)
+		}
+		revisions = append(revisions, revisionNumber)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate quotation revisions: %w", err)
+	}
+	return revisions, nil
 }
 
 func (s *Store) DeleteQuotation(ctx context.Context, quotationID int64) error {
@@ -870,23 +906,4 @@ func (s *Store) AttachDocument(ctx context.Context, quotationID int64, revision 
 		return fmt.Errorf("quotation %d revision %d not found", quotationID, revision)
 	}
 	return nil
-}
-
-// HasDocumentPDF reports whether a revision already has PDF bytes or a path.
-func (s *Store) HasDocumentPDF(ctx context.Context, quotationID int64, revision int16) (bool, error) {
-	pool, err := s.poolOrError()
-	if err != nil {
-		return false, err
-	}
-	var hasPDF bool
-	err = pool.QueryRow(ctx, fmt.Sprintf(`
-		SELECT d.pdf_data IS NOT NULL OR d.pdf_path IS NOT NULL
-		FROM %s.quotation_documents d
-		JOIN %s.quotation_revisions r ON r.id = d.revision_id
-		WHERE r.quotation_id = $1 AND r.revision_number = $2`, s.configSchema(), s.configSchema()),
-		quotationID, revision).Scan(&hasPDF)
-	if err != nil {
-		return false, fmt.Errorf("check quotation document: %w", err)
-	}
-	return hasPDF, nil
 }
