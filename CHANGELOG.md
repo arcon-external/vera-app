@@ -4,6 +4,24 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.8.3] - 2026-10-10
+
+### Fixed
+
+- **Saving a draft no longer says the client has gone when it has not.** The
+  message *"That client is no longer in the directory"* could appear while the
+  client sat in the dropdown in front of you, on any client whose number did not
+  happen to match a different client's internal row id. Drafts now pin the
+  client you actually chose. A client that really has been removed is still
+  refused, and now with the same clear message rather than a generic failure.
+- **The Disc. column sits with the numbers around it.** It was aligned to the
+  right while every other figure in the table is centred, which read as a
+  mistake in an otherwise even table.
+- **Exporting a quotation with no per-line discount could fail outright.** A
+  quotation whose lines carry no discount at all — the common case — could stop
+  the export dead. Fixed, and the test that should have caught it now renders
+  the PDF rather than only describing it.
+
 ## [0.8.2] - 2026-10-10
 
 ### Fixed
