@@ -175,6 +175,18 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go test -race ./...
 
+      - name: Prove the export test actually ran
+        # A green tick cannot distinguish a test that ran from one that skipped,
+        # and go test exits 0 either way -- which is how -short hid this test for
+        # two minor versions without anyone noticing. So the fact is asserted
+        # rather than inferred: re-run just this test, verbosely, and fail unless
+        # it reports a pass.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          go test ./backend -run TestGeneratePDF -count=1 -v \
+            | grep -q -- "--- PASS: TestGeneratePDF"
+          echo "TestGeneratePDF ran and passed."
+
       - name: Save the Go caches
         # main only, and only when the primary key missed.
         #
