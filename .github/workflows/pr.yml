@@ -113,7 +113,7 @@ jobs:
         # And it is saved from one place. See the save step at the bottom.
         id: go-cache
         if: steps.scope.outputs.needs_go != 'false'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cache/go-build
@@ -206,7 +206,7 @@ jobs:
           github.ref == 'refs/heads/main' &&
           steps.scope.outputs.needs_go != 'false' &&
           steps.go-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
           path: |
