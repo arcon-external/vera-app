@@ -13,7 +13,7 @@ export VERSION="${VERSION:-$(git describe --tags --always)}"
 source ./scripts/stamp-version.sh
 
 echo -e "Building the macOS app for $VERSION..."
-wails build --clean --platform darwin/universal -ldflags "$LDFLAGS"
+wails_build --clean --platform darwin/universal -ldflags "$LDFLAGS"
 
 APP="$(ls -d build/bin/*.app | head -1)"
 echo -e "Wrapping $APP in a DMG..."

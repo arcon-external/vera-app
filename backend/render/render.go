@@ -1,27 +1,40 @@
 // Package render holds the application's choice of PDF renderer and nothing else.
 //
-// There are two renderers. chromedp drives a headless Chrome over the HTML
-// template and is the one the application has always used. gpdf lays the same
-// document out in Go and needs no browser. They are peers: two implementations
-// of one job, not a new engine and an old fallback.
+// There are two renderers, and which one a binary carries is decided by a build
+// tag rather than by editing this file.
+//
+//   - gpdf lays the document out in Go and needs no browser. It is the default.
+//   - chromedp drives a headless Chrome over the same HTML/CSS template. It is
+//     the engine to reach for when the template has changed and the native layout
+//     has not caught up yet, and it is the oracle every claim about gpdf's
+//     fidelity was measured against.
 //
 // ── THE ENGINE LINE ────────────────────────────────────────────────────────
 //
-// Everything below is the switch, and it is three lines: the two imports and
-// Active. Both renderers are always compiled in, so the one you are not using
-// costs nothing at runtime and nothing to restore later.
+//	build                    Active     chromedp dependency
+//	go build                 gpdf       absent
+//	go build -tags chromedp  chromedp   present
 //
-// To export with the native engine, name gpdf in the import block instead of
-// chromedp and set Active to gpdf.New(). To go back, do the reverse.
+// The choice is two files, each behind its tag: engine_gpdf.go and
+// engine_chromedp.go. Exactly one is compiled, so the engine you are not using
+// costs nothing -- not a runtime branch, and not the dependency either. That is
+// the point: chromedp brings a browser-automation stack with it, and a build that
+// cannot use it should not carry it.
 //
-// Go will not let you leave the unused renderer imported, which is deliberate:
-// a swap that compiles is a swap you can finish, and the compiler is the only
-// thing standing between "I meant to change the engine" and a build that fails
-// halfway through with a confusing message.
+// The HTML/CSS template stays the source of truth for how the document looks
+// either way. It is the fastest place to revise a layout, and the intended
+// workflow is to change it there, render with chromedp to see the real thing, and
+// let gpdf follow.
 //
-// It is a compile-time change. There is no environment variable, no setting,
-// and no way for a running application or a staff member to reach the renderer
-// that is not named here.
+// gpdf is compiled in both modes, deliberately. The equivalence test that checks
+// the two engines against each other needs both present, and that test is the
+// thing that tells you whether a template change and the native layout still
+// agree -- which is exactly the question being asked when the browser engine is
+// in use.
+//
+// It is a compile-time choice. There is no environment variable, no setting, and
+// no way for a running application or a staff member to reach the renderer that
+// is not compiled in.
 //
 // Do not add a third mechanism. An environment variable would put both engines
 // within reach of a misconfigured launch, and this file's whole purpose is that
@@ -30,14 +43,11 @@
 
 package render
 
-import (
-	"vera-app/backend/render/gpdf"
-)
+import "vera-app/backend/render/quotation"
 
-// Active is the renderer every export goes through.
-//
-// gpdf.New()     -- the native engine, and what this now uses.
-//
-//	chromedp.New() -- the browser, and what this always used. Reach for this if
-//	                  a native render ever comes out wrong on a real document.
-var Active = gpdf.New()
+// Renderer is the interface both engines satisfy. Active is declared in
+// engine_gpdf.go and engine_chromedp.go, whichever the build selected.
+type Renderer interface {
+	quotation.Renderer
+	quotation.Named
+}

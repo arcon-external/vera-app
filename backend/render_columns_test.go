@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"vera-app/backend/render"
 
 	"vera-app/backend/auth"
 	gpdfrender "vera-app/backend/render/gpdf"
@@ -42,6 +43,8 @@ func templateHeadLabels(t *testing.T, html string) []string {
 // This needs no browser. It renders the real template and asks the engine what
 // it would print, which is exactly the pair that drifted.
 func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
+	// Renders through whichever engine the build selected.
+	render.RequireUsable(t)
 	templates := &Quotation{}
 	if err := Startup(templates, context.Background()); err != nil {
 		t.Fatalf("load templates: %v", err)
