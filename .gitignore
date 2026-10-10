@@ -27,6 +27,10 @@ frontend/dist/
 frontend/build/
 frontend/.eslintcache
 frontend/.stylelintcache
+# tsc emits this for a composite project, and tsconfig.node.json is one. Created
+# by `frontend/node_modules/.bin/tsc -p frontend/tsconfig.node.json`; build
+# output, not source.
+*.tsbuildinfo
 
 # --- Tailwind / Vite / PostCSS ---
 # If you use Vite (standard with Wails v2+), ignore its cache
