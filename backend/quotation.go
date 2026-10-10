@@ -970,15 +970,9 @@ func (q *Quotation) exportFilename() string {
 // preventing wasted sequence increments on cancellation. defaultDir is the
 // caller's preferred starting folder (the Settings export default); blank
 // or missing folders fall back to the OS default silently.
+// Export opens the desktop's save dialog and writes the quotation where the
+// user chose. The dialog is the only part of exporting that needs a window.
 func (q *Quotation) Export(defaultDir string) error {
-	if err := q.requireUser(q.ctx); err != nil {
-		return err
-	}
-	client, err := api()
-	if err != nil {
-		return err
-	}
-
 	options := runtime.SaveDialogOptions{
 		Title:           "Save Quotation",
 		DefaultFilename: q.exportFilename(),
@@ -994,9 +988,26 @@ func (q *Quotation) Export(defaultDir string) error {
 	if err != nil {
 		return fmt.Errorf("open save dialog: %w", err)
 	}
-
 	if filePath == "" {
 		return fmt.Errorf("user cancelled")
+	}
+	return q.ExportTo(filePath)
+}
+
+// ExportTo runs one export against a path the caller already chose: ask the
+// server for a number and store the signed revision, render the document here,
+// write it, and attach it to the revision it belongs to.
+//
+// Split out of Export so the CLI drives the identical sequence with --out in
+// place of a dialog. One implementation is what stops the document a script
+// produces from drifting from the one the desktop produces.
+func (q *Quotation) ExportTo(filePath string) error {
+	if err := q.requireUser(q.ctx); err != nil {
+		return err
+	}
+	client, err := api()
+	if err != nil {
+		return err
 	}
 
 	validatedPath, err := validateSavePath(filePath)
@@ -1061,6 +1072,16 @@ func (q *Quotation) Export(defaultDir string) error {
 	}
 
 	return nil
+}
+
+// RenderPDF renders the prepared quotation as a PDF without storing anything.
+//
+// Export does this in the middle of its work; the CLI needs it on its own for
+// `vera quotations render`, and for tests that want the document without a
+// revision attached to it. Rendering is pure Go, so this needs no browser and no
+// display.
+func (q *Quotation) RenderPDF() ([]byte, error) {
+	return q.build()
 }
 
 func (q *Quotation) context() context.Context {

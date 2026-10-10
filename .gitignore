@@ -8,6 +8,8 @@
 build/bin/
 # If you use wails build -package, ignore the installers
 build/dist/
+# `go build -o vera ./cmd/vera`, and `go build ./cmd/vera/`, both land here
+/vera
 
 # --- Go / Testing ---
 *.test

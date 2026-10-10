@@ -4,6 +4,47 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.9.0] - 2026-10-10
+
+### Added
+
+- **A `vera` command-line tool, covering every feature.** Quotations, clients,
+  drafts, the company record, staff accounts, approval requests and backups are
+  all reachable from a terminal now. It talks to the same server the desktop does
+  and renders the same PDF, so a quotation produced by a script is identical to
+  one produced by clicking Export. `docs/cli.md` is the full guide.
+
+- **`vera quotations export` files a quotation in one line.** It allocates the
+  quote number, stores the signed revision, renders the customer's PDF and
+  attaches it — the same sequence the desktop runs, with `--out` in place of the
+  save dialog. A script can therefore file a real, verifiable quotation.
+
+- **`vera quotations validate` and `vera quotations render`** price a quotation
+  and produce its PDF without filing anything or consuming a quote number, which
+  is the quick way to check a document before it is issued.
+
+- **`vera verify` checks a printed document the way a customer would**, through
+  the public verification page, and reports *valid*, *superseded*, *mismatch* and
+  *not found* as separate results — so a script can tell an altered document from
+  an out-of-date one without reading English.
+
+- **Every command takes `--json`,** with documented exit codes (0 success,
+  2 misuse, 3 signed out, 4 not found, 5 refused, 6 server). Automation branches
+  on what happened rather than on the wording of a message.
+
+- **`vera schema`** prints a worked quotation input file that runs as-is, with the
+  field reference beside it.
+
+- **`vera` is downloadable beside the desktop installers**, for Windows, macOS and
+  Linux, with checksums. The download table is in `docs/cli.md`.
+
+### Changed
+
+- **The command-line tool keeps its sign-in token in
+  `~/.config/vera/session.json`**, readable only by you, rather than the operating
+  system's keyring — a server has no keyring. `VERA_TOKEN` overrides it entirely
+  for automation that should not write one at all.
+
 ## [0.8.3] - 2026-10-10
 
 ### Fixed
