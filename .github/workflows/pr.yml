@@ -1,21 +1,40 @@
-name: PR gates
+name: Gates
 
+# Runs on pull requests AND on main.
+#
+# The main trigger is not just post-merge validation: it is what makes the PR
+# runs fast. GitHub scopes caches per ref, and a pull request can only read its
+# own ref's caches and the default branch's. With nothing ever running on main,
+# there was no default-branch Go cache to inherit, so every PR compiled the
+# entire race-instrumented dependency graph from scratch -- about 4.5 of the
+# 6 minutes the job took.
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 # Interleaved pushes to one PR otherwise run the full race suite in parallel
 # with the run the previous push started. Only the latest commit can merge, so
 # superseded runs are cancelled rather than finishing out of spite. Keyed by
 # PR number: different PRs never cancel each other.
+#
+# A push to main has no PR number, so the group falls back to the ref -- without
+# it every main run would share the group "gates-" and cancel the others. And a
+# main run is never cancelled: the cache is saved at the end of it, so cancelling
+# one throws away the very thing that makes the next PR fast, on top of the only
+# run that validates what just shipped.
 concurrency:
-  group: pr-gates-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: gates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:
     name: Go gates
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest. The runner image is part of the setup-go cache
+    # key, so the migration to Ubuntu 26 (beginning 2026-10-19) would cold-start
+    # every job on the day it rolls out. Here the durability fix is the speed fix.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:18-alpine
@@ -50,6 +69,17 @@ jobs:
         id: scope
         continue-on-error: true
         run: |
+          # A push to main always runs the full suite. There is no merge base to
+          # diff against, and main is the branch every PR inherits its cache
+          # from, so it has to be seeded with the whole thing rather than a
+          # subset. This used to happen by accident -- the empty base made git
+          # fail, and continue-on-error hid it -- which is not a behaviour worth
+          # depending on.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request: running the full suite"
+            echo "needs_go=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           base="${{ github.event.pull_request.base.sha }}"
           files="$(git diff --no-renames --name-only "$base"...HEAD)"
           echo "changed files:"; printf '%s\n' "$files"
@@ -64,6 +94,29 @@ jobs:
           fi
           echo "Go suite runs: $needs_go"
           echo "needs_go=$needs_go" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go caches
+        # Explicit, rather than setup-go's built-in cache, for two reasons.
+        #
+        # It has restore-keys. setup-go v6 calls
+        # cache.restoreCache(cachePaths, primaryKey) with no third argument, so
+        # its key -- which hashes go.sum -- is an exact match only. Any
+        # dependency bump therefore compiled the world from scratch, which made
+        # Dependabot's PRs the slowest ones in the repo. Go's build cache is
+        # content-addressed, so a nearest-match restore is exactly right:
+        # unchanged packages are reused and only genuinely-changed ones rebuild.
+        #
+        # And it is saved from one place. See the save step at the bottom.
+        id: go-cache
+        if: steps.scope.outputs.needs_go != 'false'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
 
       - name: Set up Node
         if: steps.scope.outputs.needs_go != 'false'
@@ -86,7 +139,10 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          # The cache steps above own this now. Leaving it on would save a
+          # second copy on every ref, which is how the repo reached 11.3 GB
+          # against a 10 GB budget and started evicting the entries PRs need.
+          cache: false
 
       - name: gofmt check
         if: steps.scope.outputs.needs_go != 'false'
@@ -113,9 +169,31 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go test -race -short ./...
 
+      - name: Save the Go caches
+        # main only, and only when the primary key missed.
+        #
+        # main only: a cache saved under a pull request's ref is readable by that
+        # PR and nothing else, so saving there spends the budget on entries no
+        # other run can use. Every PR reads main's instead.
+        #
+        # The cache-hit guard: actions/cache/restore reports a hit only on an
+        # exact primary-key match, so a restore-key match still saves here while
+        # an exact hit skips -- which is what avoids the duplicate-key error
+        # actions/cache/save raises when the key already exists.
+        if: >-
+          github.ref == 'refs/heads/main' &&
+          steps.scope.outputs.needs_go != 'false' &&
+          steps.go-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+
   frontend:
     name: Frontend build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
