@@ -57,7 +57,7 @@ jobs:
       VERA_POSTGRES_TEST_DSN: postgres://vera:secret@localhost:55432/quotes?sslmode=disable
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history: the scope step below diffs the PR against its merge
           # base, which needs the base commit to be present locally.
@@ -219,7 +219,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Node
         uses: actions/setup-node@v4
