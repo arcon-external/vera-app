@@ -11,6 +11,8 @@ import (
 	"github.com/gpdf-dev/gpdf/document/render"
 	"github.com/gpdf-dev/gpdf/pdf"
 	"github.com/gpdf-dev/gpdf/pdf/font"
+
+	"vera-app/backend/theme"
 )
 
 // Page geometry, in points.
@@ -126,23 +128,26 @@ type Part struct {
 }
 
 // Engine renders one document. It is not safe for concurrent use; make one per
-// render. It owns no global state beyond the parsed font tables, which are
-// immutable after construction.
+// render, or derive per-render copies with WithTheme (the lazy renderer does
+// this). It owns no global state beyond the parsed font tables and the parsed
+// shapers, whose maps are written only during parsing and read-only
+// afterwards, so a shallow copy shares them safely.
 type Engine struct {
 	regular      *font.TrueTypeFont
 	bold         *font.TrueTypeFont
 	regularShape *shaper
 	boldShape    *shaper
-	deep         string
-	accent       string
-	soft         string
-	ink          string
-	regularData  []byte
-	boldData     []byte
+	// pal is the document's whole colour set, resolved from the brand by
+	// SetTheme. Every paint reads a role from it; no literal remains in
+	// this package (see backend/theme for the derivation).
+	pal         theme.Palette
+	regularData []byte
+	boldData    []byte
 }
 
-// Theme carries the four quotable brand colours.
-type Theme struct{ Deep, Accent, Soft, Ink string }
+// Theme is the four quotable brand colours. It aliases theme.Theme so the
+// engine and the stylesheet resolve through the same type.
+type Theme = theme.Theme
 
 // NewEngine loads the two faces the engine embeds. They are the same Inter
 // programs the stylesheet loads for the browser path, so the two renderers agree
@@ -177,16 +182,17 @@ func NewEngine(fonts fs.FS, regularName, boldName string) (*Engine, error) {
 		regular: rm, bold: bm,
 		regularData: rd, boldData: bd,
 		regularShape: parseShaper(rd), boldShape: parseShaper(bd),
-		deep:   colDeep,
-		accent: colAccent,
-		soft:   colSoft,
-		ink:    colInk,
+		pal: theme.DefaultTheme().Resolve(),
 	}
 	return e, nil
 }
 
 // Render lays out and writes the document.
 func (e *Engine) Render(in Input) ([]byte, error) {
+	gradSent, clipSent, err := chooseSentinels(e.pal)
+	if err != nil {
+		return nil, err
+	}
 	pages := e.layout(in)
 
 	var buf bytes.Buffer
@@ -231,7 +237,7 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 		if err := r.BeginPage(document.Size{Width: PageW, Height: PageH}); err != nil {
 			return nil, err
 		}
-		grads, err := e.drawPage(r, pg)
+		grads, err := e.drawPage(r, pg, gradSent, clipSent)
 		if err != nil {
 			return nil, err
 		}
@@ -248,13 +254,13 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 	data := buf.Bytes()
 
 	// Clips before gradients: each pass finds its own fills by sentinel colour,
-	// and the two sentinels are distinct precisely so they cannot consume one
-	// another's.
+	// and the two sentinels are chosen disjoint precisely so they cannot
+	// consume one another's.
 	for i, clips := range perPageClip {
 		if len(clips) == 0 {
 			continue
 		}
-		if data, err = injectClippedFills(data, clips, i); err != nil {
+		if data, err = injectClippedFills(data, clips, i, clipSent); err != nil {
 			return nil, fmt.Errorf("page %d clips: %w", i+1, err)
 		}
 	}
@@ -262,7 +268,7 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 		if len(grads) == 0 {
 			continue
 		}
-		if data, err = injectGradients(data, grads, i); err != nil {
+		if data, err = injectGradients(data, grads, i, gradSent); err != nil {
 			return nil, fmt.Errorf("page %d gradient: %w", i+1, err)
 		}
 	}
@@ -312,19 +318,36 @@ func pngSize(b []byte) (int, int) {
 	return cfg.Width, cfg.Height
 }
 
-// SetTheme applies a brand palette. Empty fields keep their stylesheet default,
-// which is what an unset theme column means.
+// SetTheme applies a brand palette. Empty fields fall back to their default
+// per field (see theme), so setting an empty Theme after a full one resolves
+// to the defaults rather than keeping the previous values. The four colours
+// resolve to the full role set on the way in, so every paint follows a
+// rebrand.
+//
+// Prefer WithTheme for per-render work: it copies instead of mutating, so
+// concurrent renders do not race.
 func (e *Engine) SetTheme(t Theme) {
-	if t.Deep != "" {
-		e.deep = t.Deep
-	}
-	if t.Accent != "" {
-		e.accent = t.Accent
-	}
-	if t.Soft != "" {
-		e.soft = t.Soft
-	}
-	if t.Ink != "" {
-		e.ink = t.Ink
-	}
+	e.pal = theme.Theme{
+		Deep:   t.Deep,
+		Accent: t.Accent,
+		Soft:   t.Soft,
+		Ink:    t.Ink,
+	}.Resolve()
+}
+
+// WithTheme returns a copy of the engine carrying the resolved palette for t.
+// The copy shares the parsed font tables and shapers, whose maps are written
+// only during parsing and read-only afterwards, so sharing them across
+// goroutines is safe; the palette itself is a value, so each copy paints with
+// its own theme. The receiver is untouched, which is what lets the shared
+// lazy engine serve concurrent exports.
+func (e *Engine) WithTheme(t Theme) *Engine {
+	c := *e
+	c.pal = theme.Theme{
+		Deep:   t.Deep,
+		Accent: t.Accent,
+		Soft:   t.Soft,
+		Ink:    t.Ink,
+	}.Resolve()
+	return &c
 }

@@ -39,7 +39,11 @@ type lazy struct {
 // Name implements quotation.Named.
 func (*lazy) Name() string { return "gpdf" }
 
-// Render loads the engine on first use, then renders.
+// Render loads the engine on first use, then renders a per-render copy.
+//
+// The shared engine is never mutated: WithTheme copies it with the request's
+// palette, so concurrent exports do not race on the theme. The copy shares
+// the parsed fonts and shapers, which are read-only after construction.
 func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 	l.once.Do(func() {
 		l.eng, l.err = NewEngine(in.Fonts, "assets/inter-medium.ttf", "assets/inter-bold.ttf")
@@ -48,14 +52,14 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		return nil, fmt.Errorf("load render engine: %w", l.err)
 	}
 
-	l.eng.SetTheme(Theme{
+	eng := l.eng.WithTheme(Theme{
 		Deep:   in.Theme.Deep,
 		Accent: in.Theme.Accent,
 		Soft:   in.Theme.Soft,
 		Ink:    in.Theme.Ink,
 	})
 
-	return l.eng.Render(Input{
+	return eng.Render(Input{
 		CompanyName:    in.CompanyName,
 		CompanyAddress: splitLines(in.CompanyAddress),
 		LogoPNG:        in.LogoPNG,

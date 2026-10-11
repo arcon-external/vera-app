@@ -85,12 +85,12 @@ const (
 )
 
 // drawPage emits one page's primitives in paint order.
-func (e *Engine) drawPage(r *render.PDFRenderer, pg *page) ([]gradient, error) {
+func (e *Engine) drawPage(r *render.PDFRenderer, pg *page, gradSent, clipSent [3]uint8) ([]gradient, error) {
 	var grads []gradient
 	for _, p := range pg.prims {
 		switch v := p.(type) {
 		case box:
-			g, err := e.drawBox(r, v)
+			g, err := e.drawBox(r, v, gradSent, clipSent)
 			if err != nil {
 				return nil, err
 			}
@@ -111,21 +111,21 @@ func (e *Engine) drawPage(r *render.PDFRenderer, pg *page) ([]gradient, error) {
 }
 
 // drawBox paints one box, returning a pending gradient if it carries one.
-func (e *Engine) drawBox(r *render.PDFRenderer, b box) (*gradient, error) {
+func (e *Engine) drawBox(r *render.PDFRenderer, b box, gradSent, clipSent [3]uint8) (*gradient, error) {
 	fill := colorOf(b.fill)
 	stroke := colorOf(b.stroke)
 
-	// The clip sentinel must differ from the gradient sentinel: each
-	// post-process locates its own fills by colour and would otherwise consume
-	// the other's.
+	// A clipped or gradient rect is drawn with its per-render sentinel (see
+	// sentinel.go): the post-pass locates its own fills by that colour, and
+	// the chooser guarantees it collides with no palette role.
 	clipped := b.clip != nil
 	if clipped {
-		fill = rgbOf(clipSentinelR, clipSentinelG, clipSentinelB)
+		fill = rgbOf(clipSent[0], clipSent[1], clipSent[2])
 	}
 
 	var g *gradient
 	if b.gradient != nil {
-		fill = rgbOf(gradientSentinelR, gradientSentinelG, gradientSentinelB)
+		fill = rgbOf(gradSent[0], gradSent[1], gradSent[2])
 		g = &gradient{
 			x0: b.x, y0: b.y, w: b.w, h: b.h,
 			c0: b.gradient.c0, c1: b.gradient.c1, pageH: PageH,
@@ -332,7 +332,9 @@ func (e *Engine) drawPageChrome(p *page, in Input, m metrics) {
 // drawContinuationChrome resets a page that carries only more rows.
 func (e *Engine) drawContinuationChrome(p *page, m metrics) {}
 
-// cardFor is the page card and its border as display-list entries.
+// cardFor is the page card and its border as display-list entries. It is a
+// method because the card paints in the paper and edge roles, which live on
+// the engine's resolved palette.
 //
 // The card is returned rather than drawn because its height depends on where the
 // page's content ends, which is only known once the content has been placed, and
@@ -342,22 +344,22 @@ func (e *Engine) drawContinuationChrome(p *page, m metrics) {}
 // height, and the padding that would otherwise fill the rest of the page is
 // discarded at the break. A fixed-height card leaves a strip of empty border
 // under every page that does not fill, which on the second page of a short
-// quotation is most of the page.
-// fragments a block's border box across pages, so the first fragment fills the
-// page and only the last is content-height. Reproducing that is what keeps the
-// left and right rules continuous down a multi-page quotation.
-func cardFor(p *page, m metrics, bottom float64) []any {
+// quotation is most of the page. The browser fragments a block's border box
+// across pages, so the first fragment fills the page and only the last is
+// content-height. Reproducing that is what keeps the left and right rules
+// continuous down a multi-page quotation.
+func (e *Engine) cardFor(p *page, m metrics, bottom float64) []any {
 	h := bottom - m.cardY
 	// Border rules are drawn as thin rects on the edges rather than as a stroked
 	// rectangle, matching what the browser emits: a collapsed table border is
 	// half a pixel wide on each side, and four explicit rules make that visible
 	// in the corners.
 	return []any{
-		box{x: m.cardX, y: m.cardY, w: m.cardW, h: h, fill: colPaper},
-		box{x: m.cardX, y: m.cardY, w: m.cardW, h: px(1), fill: colPageEdge},
-		box{x: m.cardX, y: bottom - px(1), w: m.cardW, h: px(1), fill: colPageEdge},
-		box{x: m.cardX, y: m.cardY, w: px(1), h: h, fill: colPageEdge},
-		box{x: m.cardX + m.cardW - px(1), y: m.cardY, w: px(1), h: h, fill: colPageEdge},
+		box{x: m.cardX, y: m.cardY, w: m.cardW, h: h, fill: e.pal.Paper},
+		box{x: m.cardX, y: m.cardY, w: m.cardW, h: px(1), fill: e.pal.Edge},
+		box{x: m.cardX, y: bottom - px(1), w: m.cardW, h: px(1), fill: e.pal.Edge},
+		box{x: m.cardX, y: m.cardY, w: px(1), h: h, fill: e.pal.Edge},
+		box{x: m.cardX + m.cardW - px(1), y: m.cardY, w: px(1), h: h, fill: e.pal.Edge},
 	}
 }
 
@@ -370,7 +372,7 @@ func (e *Engine) drawRibbon(p *page, m metrics) {
 	p.add(box{
 		x: m.cardX + px(1), y: m.cardY + px(1),
 		w: m.cardW - 2*px(1), h: px(ribbonH),
-		gradient: &ramp{c0: e.deep, c1: e.accent},
+		gradient: &ramp{c0: e.pal.Deep, c1: e.pal.Accent},
 	})
 }
 
@@ -388,7 +390,7 @@ func (e *Engine) drawBrand(p *page, in Input, m metrics) {
 	for _, line := range e.Wrap(in.CompanyName, px(h1SizePx), h1W, false) {
 		p.add(run{
 			x: m.innerX, baseline: by,
-			size: px(h1SizePx), text: line, bold: true, color: e.accent,
+			size: px(h1SizePx), text: line, bold: true, color: e.pal.Accent,
 		})
 		by += px(h1SizePx) * 1.05
 	}
@@ -402,7 +404,7 @@ func (e *Engine) drawBrand(p *page, in Input, m metrics) {
 		p.add(run{
 			x:        m.innerX,
 			baseline: top + leadAddrFirstBaseline + float64(i)*addrPitch,
-			size:     px(leadPSizePx), text: line, color: colLead,
+			size:     px(leadPSizePx), text: line, color: e.pal.Secondary,
 		})
 	}
 	if len(in.LogoPNG) > 0 {
@@ -428,7 +430,7 @@ func (e *Engine) drawBrand(p *page, in Input, m metrics) {
 	}
 	p.add(box{
 		x: m.cardX + px(1), y: band + px(leadPadYBot),
-		w: m.cardW - 2*px(1), h: px(1), fill: colLeadRule,
+		w: m.cardW - 2*px(1), h: px(1), fill: e.pal.Rule,
 	})
 }
 
@@ -448,7 +450,7 @@ func (e *Engine) drawEyebrow(p *page, m metrics) {
 	p.add(run{
 		x: m.innerX, baseline: top + eyebrowBaselineOffset,
 		size: px(eyebrowPx), text: "QUOTATION", bold: true,
-		color: e.deep, tracking: px(eyebrowTrack * eyebrowPx),
+		color: e.pal.Deep, tracking: px(eyebrowTrack * eyebrowPx),
 	})
 	// The rule starts one gap after the letterspaced label and runs to the
 	// content's right edge, which is what `flex: 1` on the ::after does. It sits
@@ -463,7 +465,7 @@ func (e *Engine) drawEyebrow(p *page, m metrics) {
 	ruleX := m.innerX + eyebrowLabelW + px(12)
 	p.add(box{
 		x: ruleX, y: top + (eyebrowLineBox-px(1))/2,
-		w: m.innerX + m.innerW - ruleX, h: px(1), fill: colEyebrowBar,
+		w: m.innerX + m.innerW - ruleX, h: px(1), fill: e.pal.Edge,
 	})
 }
 
@@ -478,21 +480,21 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 	// Recipient card.
 	p.add(box{
 		x: m.innerX, y: top, w: leftW, h: h,
-		fill: colCardBg, stroke: colCardEdge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
 	ix := m.innerX + px(1) + px(cardPadX)
 	// The card's baselines step by the constants infoHeight is built from, so the
 	// card is exactly as tall as it draws itself.
 	by := top + px(1) + px(cardPadY) + cardPadTop
-	p.add(run{x: ix, baseline: by, size: px(12), text: "Quotation to", bold: true, color: e.accent})
+	p.add(run{x: ix, baseline: by, size: px(12), text: "Quotation to", bold: true, color: e.pal.Accent})
 	by += cardH3ToName
-	p.add(run{x: ix, baseline: by, size: px(13), text: in.RecipientName, bold: true, color: e.deep})
+	p.add(run{x: ix, baseline: by, size: px(13), text: in.RecipientName, bold: true, color: e.pal.Deep})
 	by += cardNameToCpy
-	p.add(run{x: ix, baseline: by, size: px(bodyPx), text: in.RecipientCompany, bold: true, color: e.ink})
+	p.add(run{x: ix, baseline: by, size: px(bodyPx), text: in.RecipientCompany, bold: true, color: e.pal.Ink})
 	by += cardCpyToAddr
 	// The template emits the "Address:" label unconditionally, so it appears
 	// whether or not there is an address to put under it.
-	p.add(run{x: ix, baseline: by, size: px(bodyPx), text: "Address:", bold: true, color: e.ink})
+	p.add(run{x: ix, baseline: by, size: px(bodyPx), text: "Address:", bold: true, color: e.pal.Ink})
 	// The address steps one line box from the label, not by `cardAfterAddr`.
 	// That constant is how far the *last* baseline sits above the content's
 	// bottom edge, which is a different distance entirely — three-quarters of a
@@ -502,7 +504,7 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 		by += addrLineBox
 		for _, line := range e.Wrap(in.RecipientAddress, px(bodyPx),
 			leftW-2*px(1)-2*px(cardPadX), false) {
-			p.add(run{x: ix, baseline: by, size: px(bodyPx), text: line, color: e.ink})
+			p.add(run{x: ix, baseline: by, size: px(bodyPx), text: line, color: e.pal.Ink})
 			by += addrLineBox
 		}
 	}
@@ -518,7 +520,7 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 	metaH := e.metaHeight(in, m)
 	p.add(box{
 		x: rightX, y: top, w: rightW, h: metaH,
-		fill: colMetaBg, stroke: colMetaEdge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
 	mx := rightX + px(1) + px(metaPadX)
 	my := top + px(1) + px(metaPadY)
@@ -535,12 +537,12 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 		if len(lines) == 0 {
 			lines = []string{""}
 		}
-		p.add(run{x: mx, baseline: my + bodyBaselineOffset, size: px(bodyPx), text: kv[0], bold: true, color: e.deep})
+		p.add(run{x: mx, baseline: my + bodyBaselineOffset, size: px(bodyPx), text: kv[0], bold: true, color: e.pal.Deep})
 		// dd is right-aligned; measure back from the value column's right edge.
 		for j, line := range lines {
 			vw := e.Width(line, px(bodyPx), true)
 			p.add(run{x: valueX - vw, baseline: my + float64(j)*metaLineBox + bodyBaselineOffset,
-				size: px(bodyPx), text: line, bold: true, color: colMetaInk})
+				size: px(bodyPx), text: line, bold: true, color: e.pal.Emphasis})
 		}
 		my += float64(len(lines)) * metaLineBox
 		if i < len(rows)-1 {
@@ -560,8 +562,8 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 	if d := h - metaH - metaStackGap; d > 0 {
 		p.add(box{
 			x: rightX, y: top + metaH + metaStackGap, w: rightW, h: d,
-			stroke: colMetaEdge, lw: px(1), radius: px(cardRadiusPx),
-			gradient: &ramp{c0: colDecor0, c1: colDecor1},
+			stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
+			gradient: &ramp{c0: e.pal.Decor0, c1: e.pal.Decor1},
 		})
 	}
 }
@@ -584,11 +586,11 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 	// The strip's own 1px border, drawn as a rounded outline around the fills.
 	p.add(box{
 		x: m.innerX, y: m.subjectY, w: m.innerW, h: m.subjectH,
-		fill: colSubjectBg, stroke: colSubjectEdg, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
-	p.add(box{x: m.innerX + px(1), y: y, w: lblW, h: h, fill: e.deep, clip: clip})
+	p.add(box{x: m.innerX + px(1), y: y, w: lblW, h: h, fill: e.pal.Deep, clip: clip})
 	p.add(box{x: m.innerX + px(1) + lblW, y: y, w: m.innerW - 2*px(1) - lblW, h: h,
-		fill: colSubjectBg, clip: clip})
+		fill: e.pal.Surface, clip: clip})
 
 	// The strip is `display: flex; align-items: center`, so both the label and
 	// the value are centred on the strip's middle line rather than sitting on the
@@ -601,7 +603,7 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 	p.add(run{
 		x:        m.innerX + px(1) + (lblW-e.Width(lbl, px(bodyPx), true))/2,
 		baseline: midY + centerBaselineOffset,
-		size:     px(bodyPx), text: lbl, bold: true, color: colPaper,
+		size:     px(bodyPx), text: lbl, bold: true, color: e.pal.Paper,
 	})
 	valX := m.innerX + px(1) + lblW + px(cardPadX)
 	valW := subjectValueW(m)
@@ -615,7 +617,7 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 		p.add(run{
 			x:        valX,
 			baseline: top + float64(i)*px(bodyPx)*bodyLH,
-			size:     px(bodyPx), text: line, bold: true, color: colSubjectInk,
+			size:     px(bodyPx), text: line, bold: true, color: e.pal.Emphasis,
 		})
 	}
 }
@@ -628,7 +630,7 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64) {
 	h := headRowH
 
-	p.add(box{x: m.tableX, y: top, w: m.tableW, h: h, fill: e.deep, clip: clip})
+	p.add(box{x: m.tableX, y: top, w: m.tableW, h: h, fill: e.pal.Deep, clip: clip})
 	// The table's top edge. It is the header table's own border, and a collapsed
 	// border is drawn per cell: a run of border between each pair of cell edges,
 	// not one rule across the lot. The two outer runs are the table's own border
@@ -639,28 +641,28 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 		if i > 0 {
 			x += px(1)
 		}
-		p.add(box{x: x, y: top, w: m.colX[i+1] - x, h: px(1), fill: colTableEdge, clip: clip})
+		p.add(box{x: x, y: top, w: m.colX[i+1] - x, h: px(1), fill: e.pal.Edge, clip: clip})
 	}
 	// Column separators. Every cell carries `border-right` and the last one has
 	// none, so there is one fewer than there are columns, at the leading edges
 	// of every column but the first.
 	for i := 1; i < m.cols.last; i++ {
-		p.add(box{x: m.colX[i], y: top, w: px(1), h: h, fill: colTableRule, clip: clip})
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: h, fill: e.pal.Rule, clip: clip})
 	}
 	// The header's outer edges are the table's border, not a cell's: the cells
 	// carry `border-right` and the last one has none, so nothing of theirs reaches
 	// the outside of the row.
-	tableSides(p, m, clip, top, h, colTableEdge)
+	tableSides(p, m, clip, top, h, e.pal.Edge)
 	labels := itemHeadLabels(m.cols)
 	for i, lbl := range labels {
 		p.add(run{
 			x:        m.colX[i] + (m.colX[i+1]-m.colX[i]-e.Width(lbl, px(10), true))/2,
 			baseline: top + headBaselineOffset,
-			size:     px(10), text: lbl, bold: true, color: colPaper,
+			size:     px(10), text: lbl, bold: true, color: e.pal.Paper,
 		})
 	}
 	// The rule that closes the header row.
-	p.add(box{x: m.tableX, y: top + h, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+	p.add(box{x: m.tableX, y: top + h, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
 }
 
 // tableSides paints the table's left and right edges for one band of its height.
@@ -732,15 +734,15 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 		p.add(box{
 			x: m.tableX + px(1), y: top,
 			w: m.tableW - 2*px(1), h: bodyH,
-			fill: colZebra, clip: clip,
+			fill: e.pal.Surface, clip: clip,
 		})
 	}
-	tableSides(p, m, clip, top, bodyH, colTableRule)
-	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
 	// The No. cell's right edge, which is the merged cell's own left border in
 	// the browser -- every cell is bordered, so the boundary is there on the
 	// title and on every scope row, exactly as it is on a full row.
-	p.add(box{x: m.colX[1], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
+	p.add(box{x: m.colX[1], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
 
 	// The number cell keeps its size and its centred number. Scope rows carry
 	// the part number in the lighter sub-item treatment; the title row carries
@@ -750,7 +752,7 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 		p.add(run{
 			x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(num, px(bodyPx), false))/2,
 			baseline: centeredBlockTop(top, bodyH, px(padTopPx), 1) + bodyBaselineOffset,
-			size:     px(bodyPx), text: num, color: e.ink,
+			size:     px(bodyPx), text: num, color: e.pal.Ink,
 		})
 	} else {
 		e.drawSubNumber(p, m, top, bodyH, px(padTopPx), rb.part.SubNo)
@@ -759,14 +761,14 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 		p.add(box{
 			x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
 			w: px(railWidthPx), h: bodyH - px(1),
-			fill: colSubRail, clip: clip,
+			fill: e.pal.Rail, clip: clip,
 		})
 	}
 
-	textColor := e.ink
+	textColor := e.pal.Ink
 	indent := float64(tdPadPx)
 	if !title {
-		textColor = colSubInk
+		textColor = e.pal.SubInk
 		indent = subRowIndentPx
 	}
 	dx := m.colX[1] + px(1) + px(indent)
@@ -778,7 +780,7 @@ func (e *Engine) drawMergedRow(p *page, m metrics, clip *clipRegion, top float64
 	// Scope rows carry their part's detail bullets inside the merged cell,
 	// one indent further in, in the same faded ink as the part text.
 	if !title {
-		e.drawBullets(p, dx+px(subBulletIndentPx), dy, rb.subs, colSubInk)
+		e.drawBullets(p, dx+px(subBulletIndentPx), dy, rb.subs, e.pal.SubInk)
 	}
 }
 
@@ -804,7 +806,7 @@ func (e *Engine) drawSubNumber(p *page, m metrics, top, bodyH, padY float64, num
 	p.add(run{
 		x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(number, px(subNumPx), false))/2,
 		baseline: centeredBlockTop(top, bodyH, padY, 1) + subNumBaselineOffset,
-		size:     px(subNumPx), text: number, color: colSubNo,
+		size:     px(subNumPx), text: number, color: e.pal.SubNo,
 	})
 }
 
@@ -820,15 +822,15 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			p.add(box{
 				x: m.colX[i] + px(1), y: top,
 				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
-				fill: colZebra, clip: clip,
+				fill: e.pal.Surface, clip: clip,
 			})
 		}
 	}
 	for i := 1; i < m.cols.last; i++ {
-		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
 	}
-	tableSides(p, m, clip, top, bodyH, colTableRule)
-	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
 
 	e.drawSubNumber(p, m, top, bodyH, px(subRowPadPx), rb.part.SubNo)
 
@@ -836,7 +838,7 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	p.add(box{
 		x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
 		w: px(railWidthPx), h: bodyH - px(1),
-		fill: colSubRail, clip: clip,
+		fill: e.pal.Rail, clip: clip,
 	})
 
 	// Description and bullets, both a step lighter and both indented past the
@@ -845,10 +847,10 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	bulletX := dx + px(subBulletIndentPx)
 	dy := top + px(subRowPadPx) + bodyBaselineOffset
 	for _, line := range rb.lines {
-		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: colSubInk})
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.pal.SubInk})
 		dy += descLineH
 	}
-	e.drawBullets(p, bulletX, dy, rb.subs, colSubInk)
+	e.drawBullets(p, bulletX, dy, rb.subs, e.pal.SubInk)
 
 	// One renderer for every numeric cell in the row: each is centred in its
 	// track, wrapped if it is wider than the track, and centred vertically in
@@ -875,11 +877,11 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 			cy += descLineH
 		}
 	}
-	cell(m.cols.qty, rb.part.Qty, colSubInk)
-	cell(m.cols.uom, rb.part.UoM, colSubInk)
-	cell(m.cols.unit, rb.part.UnitPrice, colSubInk)
-	cell(m.cols.disc, rb.part.Disc, colSubNo)
-	cell(m.cols.total, rb.part.Total, colSubInk)
+	cell(m.cols.qty, rb.part.Qty, e.pal.SubInk)
+	cell(m.cols.uom, rb.part.UoM, e.pal.SubInk)
+	cell(m.cols.unit, rb.part.UnitPrice, e.pal.SubInk)
+	cell(m.cols.disc, rb.part.Disc, e.pal.SubNo)
+	cell(m.cols.total, rb.part.Total, e.pal.SubInk)
 }
 
 // drawMainRow paints one full-value row: an item's own row, and the state-B
@@ -899,16 +901,16 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 			p.add(box{
 				x: m.colX[i] + px(1), y: top,
 				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
-				fill: colZebra, clip: clip,
+				fill: e.pal.Surface, clip: clip,
 			})
 		}
 	}
 	// Cell rules.
 	for i := 1; i < m.cols.last; i++ {
-		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: colTableRule, clip: clip})
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
 	}
-	tableSides(p, m, clip, top, bodyH, colTableRule)
-	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: colTableRule, clip: clip})
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
 
 	// The row number, quantity, unit and both money columns are centred in
 	// their cells; only the description is left-aligned.
@@ -916,7 +918,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	p.add(run{
 		x:        m.colX[0] + (m.colX[1]-m.colX[0]-e.Width(num, px(bodyPx), false))/2,
 		baseline: centeredBlockTop(top, bodyH, px(tdPadPx), 1) + bodyBaselineOffset,
-		size:     px(bodyPx), text: num, color: e.ink,
+		size:     px(bodyPx), text: num, color: e.pal.Ink,
 	})
 
 	// Description: wrapped main text, then the bullet list.
@@ -924,10 +926,10 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	subTextX := dx + px(subIndentPx)
 	dy := top + px(tdPadPx) + bodyBaselineOffset
 	for _, line := range rb.lines {
-		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.ink})
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.pal.Ink})
 		dy += descLineH
 	}
-	e.drawBullets(p, subTextX, dy, rb.subs, e.ink)
+	e.drawBullets(p, subTextX, dy, rb.subs, e.pal.Ink)
 
 	// One renderer for every numeric cell in the row: each is centred in its
 	// track, wrapped if it is wider than the track, and centred vertically in
@@ -954,13 +956,13 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 			cy += descLineH
 		}
 	}
-	cell(m.cols.qty, rb.item.Qty, e.ink)
-	cell(m.cols.uom, rb.item.UoM, e.ink)
-	cell(m.cols.unit, rb.item.UnitPrice, e.ink)
-	cell(m.cols.disc, rb.item.Disc, colSubNo)
+	cell(m.cols.qty, rb.item.Qty, e.pal.Ink)
+	cell(m.cols.uom, rb.item.UoM, e.pal.Ink)
+	cell(m.cols.unit, rb.item.UnitPrice, e.pal.Ink)
+	cell(m.cols.disc, rb.item.Disc, e.pal.SubNo)
 	// The Total column is centred but not bold: the stylesheet gives every
 	// numeric cell the same treatment and only the header row carries a weight.
-	cell(m.cols.total, rb.item.Total, e.ink)
+	cell(m.cols.total, rb.item.Total, e.pal.Ink)
 }
 
 // drawFooterCards paints the terms and totals cards, the first of the three
@@ -975,17 +977,17 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	// Terms and conditions.
 	p.add(box{
 		x: m.innerX, y: top, w: tncW, h: m.footerTncH,
-		fill: e.soft, stroke: colCardEdge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Soft, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
 	tnx := m.innerX + px(1) + px(footPadPx)
 	ty := top + px(1) + px(footPadPx)
 	p.add(run{x: tnx, baseline: ty + addrBaselineOffset,
-		size: px(12), text: "Terms and Conditions", bold: true, color: e.deep})
+		size: px(12), text: "Terms and Conditions", bold: true, color: e.pal.Deep})
 	ty += px(12)*bodyLH + px(tncMarginH3)
 	for i, term := range in.Terms {
 		for _, line := range e.Wrap(term, px(bodyPx), tncW-2*px(1)-2*px(footPadPx), false) {
 			p.add(run{x: tnx, baseline: ty + bodyBaselineOffset, size: px(bodyPx),
-				text: line, color: e.ink})
+				text: line, color: e.pal.Ink})
 			ty += px(bodyPx) * bodyLH
 		}
 		if i < len(in.Terms)-1 {
@@ -996,7 +998,7 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	// Totals.
 	p.add(box{
 		x: totX, y: top, w: totW, h: m.footerTotalsH,
-		fill: colTotalsBg, stroke: colTotalsEdge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
 	// The card is a grid of auto rows inside a box the sibling terms card
 	// stretches taller than their content, and `align-content: stretch` -- the
@@ -1035,18 +1037,18 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 			// than the card's text, edge to edge across the padding.
 			p.add(box{
 				x: totX + px(1) + px(footPadPx), y: ry,
-				w: totW - 2*(px(1)+px(footPadPx)), h: px(2), fill: e.deep,
+				w: totW - 2*(px(1)+px(footPadPx)), h: px(2), fill: e.pal.Deep,
 			})
 			ry += px(2) + px(grandPadTop)
 			p.add(run{x: labelX, baseline: ry + bodyBaselineOffset, size: px(12),
-				text: rw.label, bold: true, color: e.deep})
+				text: rw.label, bold: true, color: e.pal.Deep})
 			vw := e.Width(rw.value, px(12), true)
 			p.add(run{x: valueX - vw, baseline: ry + bodyBaselineOffset, size: px(12),
-				text: rw.value, bold: true, color: e.deep})
+				text: rw.value, bold: true, color: e.pal.Deep})
 			ry += natural[i] + stretch
 			continue
 		}
-		ink := colTotalsInk
+		ink := e.pal.Emphasis
 		if rw.colour != "" {
 			ink = rw.colour
 		}
@@ -1070,7 +1072,7 @@ func (e *Engine) drawClosing(p *page, in Input, m metrics, top float64) {
 	for _, line := range e.Wrap(in.Closing, px(bodyPx), inner, false) {
 		w := e.Width(line, px(bodyPx), false)
 		p.add(run{x: m.innerX + (inner-w)/2, baseline: cy + bodyBaselineOffset,
-			size: px(bodyPx), text: line, color: colClosing})
+			size: px(bodyPx), text: line, color: e.pal.Secondary})
 		cy += px(bodyPx) * bodyLH
 	}
 }
@@ -1098,7 +1100,7 @@ func (e *Engine) totalsRows(in Input) []totalRow {
 		rows = append(rows, totalRow{
 			label:  "Discount (" + in.DiscountPercent + "%)",
 			value:  "Rp" + in.DisplayDiscount,
-			colour: colGreen,
+			colour: e.pal.Green,
 		})
 	}
 	if in.DisplayPpn != "" {
@@ -1118,17 +1120,17 @@ func (e *Engine) drawVerify(p *page, in Input, m metrics, top float64) {
 		rx = m.innerX + m.innerW
 		p.add(run{x: rx - e.Width(in.CompanyName, px(11), true),
 			baseline: top + bodyBaselineOffset, size: px(11),
-			text: in.CompanyName, bold: true, color: e.accent})
+			text: in.CompanyName, bold: true, color: e.pal.Accent})
 		note := "Verification code is added when you export"
 		p.add(box{
 			x: rx - e.Width(note, px(10), false) - 2*px(cardPadX) - 2*px(1),
 			y: top - px(9), w: e.Width(note, px(10), false) + 2*px(cardPadX) + 2*px(1),
 			h:    px(10)*1.5 + 2*px(10) + 2*px(1),
-			fill: colCardBg, stroke: colMetaEdge, lw: px(1), radius: px(radiusSmPx),
+			fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(radiusSmPx),
 		})
 		p.add(run{x: rx - px(cardPadX) - px(1) - e.Width(note, px(10), false),
 			baseline: top + px(10) + bodyBaselineOffset, size: px(10),
-			text: note, color: colMuted})
+			text: note, color: e.pal.Muted})
 		return
 	}
 
@@ -1141,7 +1143,7 @@ func (e *Engine) drawVerify(p *page, in Input, m metrics, top float64) {
 	qrX := rx - card
 	p.add(box{
 		x: qrX, y: top, w: card, h: card,
-		fill: colPaper, stroke: colMetaEdge, lw: px(1), radius: px(radiusSmPx),
+		fill: e.pal.Paper, stroke: e.pal.Edge, lw: px(1), radius: px(radiusSmPx),
 	})
 	p.add(picture{x: qrX + px(1) + px(4), y: top + px(1) + px(4),
 		w: img, h: img, data: in.QRPNG})
@@ -1178,17 +1180,17 @@ func (e *Engine) drawVerify(p *page, in Input, m metrics, top float64) {
 	for i, line := range nameLines {
 		p.add(run{x: cx - e.Width(line, px(11), true),
 			baseline: nameTop + float64(i)*px(11)*1.5,
-			size:     px(11), text: line, bold: true, color: e.accent})
+			size:     px(11), text: line, bold: true, color: e.pal.Accent})
 	}
 	p.add(run{x: cx - e.Width("Scan to verify this quotation", px(10), false),
 		baseline: last - px(14.97), size: px(10),
-		text: "Scan to verify this quotation", color: colVerifyInk})
+		text: "Scan to verify this quotation", color: e.pal.Secondary})
 	code := "or enter code " + in.VerificationCode
 	for i, line := range e.Wrap(code, px(9), captionW, false) {
 		_ = i
 		p.add(run{x: cx - e.WidthTracked(line, px(9), false, px(0.02*9)),
 			baseline: last, size: px(9),
-			text: line, color: colMuted, tracking: px(0.02 * 9)})
+			text: line, color: e.pal.Muted, tracking: px(0.02 * 9)})
 	}
 }
 

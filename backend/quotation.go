@@ -18,6 +18,7 @@ import (
 	"vera-app/backend/render"
 	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
+	"vera-app/backend/theme"
 )
 
 // QuotationInput is the data contract between the frontend and the backend.
@@ -176,21 +177,27 @@ type QuotationData struct {
 	ShowLineDiscounts bool
 	// OtherColspan is the span of the merged description cell: 6 with the
 	// discount column, 5 without. Precomputed so the template states it once.
-	OtherColspan              int
-	DisplayDiscountAmount     string
-	TaxZone                   string
-	LogoBase64                string
-	SignatureBase64           string
-	FontRegularBase64         string
-	FontBoldBase64            string
-	Date                      string
-	ValidUntil                string
-	CompanyName               string
-	Incoterm                  string
-	ThemeQDeep                string
-	ThemeQAccent              string
-	ThemeQSoft                string
-	ThemeQInk                 string
+	OtherColspan          int
+	DisplayDiscountAmount string
+	TaxZone               string
+	LogoBase64            string
+	SignatureBase64       string
+	FontRegularBase64     string
+	FontBoldBase64        string
+	Date                  string
+	ValidUntil            string
+	CompanyName           string
+	Incoterm              string
+	ThemeQDeep            string
+	ThemeQAccent          string
+	ThemeQSoft            string
+	ThemeQInk             string
+	// Palette is the theme resolved to every colour the document paints
+	// with: the four bases above plus each derived role. It is refreshed
+	// wherever the bases are set (readTemplate at startup, refreshCustomCSS
+	// after Prepare) so the stylesheet always executes against the current
+	// brand. See backend/theme for the derivation.
+	Palette                   theme.Palette
 	RecipientName             string
 	RecipientCompany          string
 	RecipientAddress          string
@@ -523,18 +530,32 @@ func NewQuotationForRequest(database *store.Store, user store.AuthUser, template
 }
 
 // refreshCustomCSS re-executes the parsed stylesheet against the current
-// data so theme values set by Prepare reach the CSS. A nil parsed template
-// (tests that never ran Startup) leaves the CSS untouched.
+// data so theme values set by Prepare reach the CSS. The palette resolves
+// first, so the executed stylesheet always carries the current brand's full
+// role set, not just its four bases. A nil parsed template (tests that never
+// ran Startup) leaves the CSS untouched.
 func (q *Quotation) refreshCustomCSS() error {
 	if q.cssTemplate == nil {
 		return nil
 	}
+	q.resolvePalette()
 	var cssBuf strings.Builder
 	if err := q.cssTemplate.Execute(&cssBuf, q.Data); err != nil {
 		return fmt.Errorf("execute css template: %w", err)
 	}
 	q.Data.CustomCSS = template.CSS(cssBuf.String())
 	return nil
+}
+
+// resolvePalette derives the document's full colour set from the four stored
+// brand values. Empty or malformed values fall back per field (see theme).
+func (q *Quotation) resolvePalette() {
+	q.Data.Palette = theme.Theme{
+		Deep:   q.Data.ThemeQDeep,
+		Accent: q.Data.ThemeQAccent,
+		Soft:   q.Data.ThemeQSoft,
+		Ink:    q.Data.ThemeQInk,
+	}.Resolve()
 }
 
 // DraftRevision builds the immutable archive draft for prepared data. The
