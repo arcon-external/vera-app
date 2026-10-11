@@ -280,12 +280,21 @@ jobs:
           done
           # And one of them actually runs here, so "it built" is not the only
           # thing being asserted.
+          #
+          # Read through --json rather than the human line. `vera version` prints
+          # the PDF engine beside the number -- "v0.9.2 (gpdf)" -- because the
+          # same version can be built with either engine, and this check compared
+          # the whole line, so adding that broke the v0.9.2 release's CLI job.
+          # --json is the CLI's stable contract; the display line is not.
           amd64="build/cli/Vera-CLI-${VERSION}-linux-amd64"
-          reported=$("$amd64" version)
+          reported=$("$amd64" version --json | jq -r .version)
           if [ "$reported" != "$VERSION" ]; then
             echo "::error::vera version reported '$reported', want '$VERSION'"
             exit 1
           fi
+          # The engine is worth printing for the release log, since a release can
+          # ship either one and nothing else records which.
+          echo "engine: $("$amd64" version --json | jq -r .renderer)"
           echo "all six binaries carry $VERSION, and linux-amd64 runs"
 
       - name: Checksum and upload
