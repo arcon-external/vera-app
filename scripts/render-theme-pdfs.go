@@ -1,10 +1,29 @@
 // Command render-theme-pdfs renders one quotation PDF with a chosen brand
 // theme for the pixel-delta harness (scripts/pixel-delta.py).
 //
-// It uses only the stable gpdf API (NewEngine, SetTheme, Render) so the same
-// file runs on the first-iteration commit and on the current tree: checking
-// out the old commit in a worktree and running the same command there is how
-// the "default moved versus the first iteration" number is produced.
+// It uses only the stable gpdf API (NewEngine, SetTheme, Render) with a
+// four-field Theme, which is unchanged across main, the first-iteration
+// commit 70d3089 and the current tree, so the same file compiles and runs on
+// all three: checking out an old commit in a worktree and running the same
+// command there is how the "before" PDF is produced. (Verified: this file
+// builds and renders on main, on 70d3089 and on the branch.)
+//
+// Reproducing the criterion-4 number from the repository root (run each
+// render from the root of its own tree, since the engine loads
+// backend/assets relative to the working directory):
+//
+//	git worktree add /tmp/vera-first 70d3089
+//	(cd /tmp/vera-first && go run scripts/render-theme-pdfs.go --out /tmp/first_default.pdf)
+//	go run scripts/render-theme-pdfs.go --out /tmp/cur_default.pdf
+//	python3 scripts/pixel-delta.py /tmp/first_default.pdf /tmp/cur_default.pdf
+//
+// Expected: 0 changed pixels on every channel (the current default renders
+// byte-identically to the first iteration). An accent swap shows how much of
+// the document a rebrand now reaches:
+//
+//	(cd /tmp/vera-first && go run scripts/render-theme-pdfs.go --out /tmp/first_accent.pdf --accent '#C2410C')
+//	go run scripts/render-theme-pdfs.go --out /tmp/cur_accent.pdf --accent '#C2410C'
+//	python3 scripts/pixel-delta.py /tmp/first_accent.pdf /tmp/cur_accent.pdf
 //
 // Usage from the repository root:
 //

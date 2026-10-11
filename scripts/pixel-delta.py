@@ -9,17 +9,18 @@ for an accent swap the harness shows how much of the document a rebrand now
 reaches.
 
 Dependencies (pip, no apt needed):
-    Python 3.8+, pymupdf, Pillow, numpy
-    pip install pymupdf Pillow numpy
+    Python 3.8+, pymupdf, numpy
+    pip install pymupdf numpy
 
 Usage:
     python3 scripts/pixel-delta.py old.pdf new.pdf [--dpi 150]
 
-Output explains itself: per-channel share of changed pixels, the maximum
-delta, pixels at delta >= 8, and changed-pixel counts per vertical third of
-the page (top/middle/bottom), which is the "across all thirds" figure.
-Exit status is 0 on success regardless of the delta; this is a measurement,
-not a gate.
+Output explains itself: first one line per page with the per-channel changed
+counts, maxima and pixels at delta >= 8 plus that page's vertical thirds,
+then the whole-document totals in the same form and the changed-pixel counts
+per vertical third of the page (top/middle/bottom), which is the "across all
+thirds" figure. Exit status is 0 on success regardless of the delta; this is
+a measurement, not a gate.
 """
 import sys
 
@@ -45,7 +46,24 @@ def main():
     if len(old_pages) != len(new_pages):
         print(f"page count differs: {ns.old} has {len(old_pages)}, {ns.new} has {len(new_pages)}")
     import numpy as np
+    names = ["R", "G", "B"]
     total_pixels = 0
+    # Per-page deltas first, as the docstring promises: one line per page.
+    for i, ((w0, h0, s0), (w1, h1, s1)) in enumerate(zip(old_pages, new_pages)):
+        if w0 != w1 or h0 != h1:
+            print(f"page {i+1}: size differs ({w0}x{h0} vs {w1}x{h1}); skipping that page")
+            continue
+        a0 = np.frombuffer(s0, dtype=np.uint8).reshape(h0, w0, 3).astype(np.int16)
+        a1 = np.frombuffer(s1, dtype=np.uint8).reshape(h1, w1, 3).astype(np.int16)
+        d = np.abs(a0 - a1)
+        cells = []
+        for ch in range(3):
+            plane = d[:, :, ch]
+            cells.append(f"{names[ch]} {int((plane > 0).sum())} px, max {int(plane.max()) if plane.size else 0}, {int((plane >= 8).sum())} at >=8")
+        diff = d.max(axis=2) > 0
+        h = diff.shape[0]
+        thirds = [int(diff[h*k//3:h*(k+1)//3, :].sum()) for k in range(3)]
+        print(f"page {i+1} ({w0}x{h0}): " + " | ".join(cells) + f" | thirds {thirds[0]}/{thirds[1]}/{thirds[2]}")
     for ch in range(3):
         changed = 0
         ge8 = 0
@@ -63,9 +81,6 @@ def main():
             if m > maxd:
                 maxd = m
             total_pixels += d.size if ch == 0 else 0
-        chname = "RBG"[ch] if ch < 3 else str(ch)
-        # channel order in pixmap samples is RGB
-        names = ["R", "G", "B"]
         pct = 100.0 * changed / total_pixels if total_pixels else 0
         print(f"{names[ch]}: {changed} px changed ({pct:.1f}%), max delta {maxd}, {ge8} px at delta >= 8")
     # vertical thirds across all pages (any channel changed)

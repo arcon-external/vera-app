@@ -49,7 +49,9 @@ var clipCandidates = [][3]uint8{
 
 // chooseSentinels picks a gradient and a clip sentinel free of the palette.
 // It returns an error when every candidate collides, which Render surfaces
-// instead of silently corrupting the document.
+// instead of silently corrupting the document. The error names every painted
+// role and its value, so an admin reading the log can see exactly which of
+// their brand colours collided.
 func chooseSentinels(pal theme.Palette) ([3]uint8, [3]uint8, error) {
 	used := paletteColours(pal)
 	var grad [3]uint8
@@ -62,7 +64,7 @@ func chooseSentinels(pal theme.Palette) ([3]uint8, [3]uint8, error) {
 		}
 	}
 	if !foundGrad {
-		return grad, [3]uint8{}, fmt.Errorf("gpdf: no free gradient sentinel colour: palette collides with all %d candidates", len(gradientCandidates))
+		return grad, [3]uint8{}, fmt.Errorf("gpdf: no free gradient sentinel colour: palette collides with all %d candidates (%s)", len(gradientCandidates), describePalette(pal))
 	}
 	used[sentinelKey(grad)] = true
 	for _, c := range clipCandidates {
@@ -70,26 +72,56 @@ func chooseSentinels(pal theme.Palette) ([3]uint8, [3]uint8, error) {
 			return grad, c, nil
 		}
 	}
-	return grad, [3]uint8{}, fmt.Errorf("gpdf: no free clip sentinel colour: palette collides with all %d candidates", len(clipCandidates))
+	return grad, [3]uint8{}, fmt.Errorf("gpdf: no free clip sentinel colour: palette collides with all %d candidates (%s)", len(clipCandidates), describePalette(pal))
+}
+
+// paletteRole names one painted role: the role name an admin recognises from
+// the theme, with the resolved value that actually collided.
+type paletteRole struct {
+	name  string
+	value string
+}
+
+// paletteRoles lists every colour the document can paint with, in a fixed
+// order, so both the collision set and the error text read from one list.
+func paletteRoles(pal theme.Palette) []paletteRole {
+	return []paletteRole{
+		{"Deep", pal.Deep}, {"Accent", pal.Accent}, {"Soft", pal.Soft}, {"Ink", pal.Ink},
+		{"Surface", pal.Surface}, {"Edge", pal.Edge}, {"Rule", pal.Rule},
+		{"Secondary", pal.Secondary}, {"Emphasis", pal.Emphasis},
+		{"SubInk", pal.SubInk}, {"SubNo", pal.SubNo}, {"Muted", pal.Muted},
+		{"Rail", pal.Rail}, {"Decor0", pal.Decor0}, {"Decor1", pal.Decor1},
+		{"Page0", pal.Page0}, {"Page1", pal.Page1},
+		{"Paper", pal.Paper}, {"Green", pal.Green},
+	}
+}
+
+// describePalette renders every painted role as "Name #VALUE" pairs for the
+// exhaustion error, so the log names the colliding colours instead of only
+// counting the candidates they hit.
+func describePalette(pal theme.Palette) string {
+	roles := paletteRoles(pal)
+	parts := make([]string, 0, len(roles))
+	for _, r := range roles {
+		if r.value == "" {
+			continue
+		}
+		parts = append(parts, r.name+" "+strings.ToUpper(r.value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // paletteColours returns every colour the document can paint with, keyed by
 // uppercase hex without a leading hash, so a candidate matches regardless of
 // the case the palette carries (Ink's default is lowercase).
 func paletteColours(pal theme.Palette) map[string]bool {
-	roles := []string{
-		pal.Deep, pal.Accent, pal.Soft, pal.Ink,
-		pal.Surface, pal.Edge, pal.Rule,
-		pal.Secondary, pal.Emphasis, pal.SubInk, pal.SubNo, pal.Muted,
-		pal.Rail, pal.Decor0, pal.Decor1, pal.Page0, pal.Page1,
-		pal.Paper, pal.Green,
-	}
+	roles := paletteRoles(pal)
 	out := make(map[string]bool, len(roles))
 	for _, r := range roles {
-		if r == "" {
+		if r.value == "" {
 			continue
 		}
-		out[strings.ToUpper(strings.TrimPrefix(r, "#"))] = true
+		out[strings.ToUpper(strings.TrimPrefix(r.value, "#"))] = true
 	}
 	return out
 }

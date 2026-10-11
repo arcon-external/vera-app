@@ -32,6 +32,22 @@
 //     different formula, so a custom brand keeps its hue while gaining
 //     visibility. A near-black Soft already contrasts strongly and is
 //     untouched.
+//     The floor is best-effort, not a guarantee: it mixes soft toward the
+//     accent, so when the accent itself is too light to contrast 1.25:1
+//     against paper (a white accent, say) no mix toward it can reach the
+//     floor and the mix saturates at the accent (t = 1). Making the floor
+//     hold there would mean darkening toward a neutral the brand did not
+//     choose, so instead the limitation is documented and pinned by
+//     TestLightAccentSaturatesAtAccent. A degenerate accent is an admin
+//     misconfiguration; it resolves deterministically rather than inventing
+//     ink.
+//     Edges and rules also keep a minimum separation from each other (8
+//     units per channel, the delta at which two weights stop rasterizing as
+//     one colour): for a near-white Soft both roles would otherwise saturate
+//     at the same first passing value and the outline/hairline hierarchy
+//     would disappear, so Rule keeps widening past the floor point until it
+//     reads as a second weight. The default pair sits at 10, above the
+//     minimum, so the default is untouched.
 //   - A text tone holds the deep colour's hue at a fixed saturation and
 //     lightness. The document's slates are one hue family at several depths,
 //     so each role fixes (S, L) and takes H from deep: re-hue deep and every
@@ -109,10 +125,13 @@ func DefaultTheme() Theme {
 //	          fills (#F8FAFF #F8FBFF #F7FAFF #F9FBFF #F6F9FF), max Δ2
 //	Edge      mixFloor(Soft, Accent, 0.075, floor 1.25)
 //	          #C9D8FE  every component outline (#C6D4FF #C9D9FF #CCD9FF
-//	          #CAD8FF #C5D5FF #CEDBFF), max Δ5
-//	Rule      mixFloor(Soft, Accent, 0.015, floor 1.25)
+//	          #CAD8FF #C5D5FF #CEDBFF), max Δ5. Best-effort: saturates at
+//	          the accent when the accent cannot supply the floor.
+//	Rule      mixFloorSeparate(Soft, Accent, 0.015, floor 1.25, ≥8 from Edge)
 //	          #D3E2FF  hairline dividers (lead rule #D8E2FF, table rules
-//	          #CFE0FF), max Δ5
+//	          #CFE0FF), max Δ5. The separation keeps Rule a second weight
+//	          when a near-white Soft would otherwise saturate both roles at
+//	          the same value.
 //	Secondary deep hue, S 0.26, L 0.315  #3B3F65  second-paragraph text
 //	          (lead #3A4466, verify caption #3A4466, closing #364066), max Δ5
 //	Emphasis  deep hue, S 0.30, L 0.245  #2C2F51  strong values (meta
@@ -213,6 +232,7 @@ func (t Theme) Resolve() Palette {
 	soft := fallback(t.Soft, DefaultSoft)
 	ink := fallback(t.Ink, DefaultInk)
 	emphasis := hslTone(deep, 0.30, 0.245)
+	edge := mixFloor(soft, accent, 0.075)
 	return Palette{
 		Deep:   deep,
 		Accent: accent,
@@ -220,8 +240,8 @@ func (t Theme) Resolve() Palette {
 		Ink:    ink,
 
 		Surface:   mix(soft, "#FFFFFF", 0.82),
-		Edge:      mixFloor(soft, accent, 0.075),
-		Rule:      mixFloor(soft, accent, 0.015),
+		Edge:      edge,
+		Rule:      mixFloorSeparate(soft, accent, 0.015, edge),
 		Secondary: hslTone(deep, 0.26, 0.315),
 		Emphasis:  emphasis,
 		SubInk:    hslTone(deep, 0.18, 0.37),
@@ -415,12 +435,25 @@ func formatHex(r, g, b uint8) string {
 // default document resolves exactly as before; a near-white Soft would
 // otherwise fade to 1.12/1.02, so those deepen toward the accent until the
 // floor holds. A near-black Soft already contrasts strongly and is untouched.
+//
+// The floor binds only when the accent can supply it: mixFloor interpolates
+// soft toward the accent, so an accent too light to reach 1.25:1 against
+// paper makes the floor unreachable and the mix saturates at the accent.
+// That is the documented degenerate state, not a second formula.
 const edgeContrastFloor = 1.25
+
+// ruleSeparation is the minimum per-channel distance between Rule and Edge.
+// The pixel harness (scripts/pixel-delta.py) treats a delta of 8 as a changed
+// pixel, so 8 is where two weights stop rasterizing as one colour. The
+// default pair sits at 10 (#C9D8FE vs #D3E2FF), above the minimum, so the
+// default resolves exactly as before.
+const ruleSeparation = 8
 
 // mixFloor mixes soft toward accent starting at t0, widening the ratio until
 // the result contrasts against paper at the floor. The default brand already
 // passes, so it returns mix(soft, accent, t0) byte-identically; a pale brand
-// returns a deeper mix in the same hue family.
+// returns a deeper mix in the same hue family. When the accent itself cannot
+// supply the floor, no ratio passes and the mix saturates at the accent.
 func mixFloor(soft, accent string, t0 float64) string {
 	for t := t0; t < 1; t += 0.01 {
 		if c := mix(soft, accent, t); contrastAgainstPaper(c) >= edgeContrastFloor {
@@ -428,6 +461,49 @@ func mixFloor(soft, accent string, t0 float64) string {
 		}
 	}
 	return mix(soft, accent, 1)
+}
+
+// mixFloorSeparate mixes soft toward accent like mixFloor, and additionally
+// keeps Rule a readable second weight below Edge: for a near-white soft both
+// roles would otherwise saturate at the same first passing value and the
+// outline/hairline hierarchy would disappear, so Rule keeps widening past
+// the floor point until it differs from Edge by ruleSeparation. When the
+// accent is darker than the soft, widening only deepens, so the floor still
+// holds for every candidate past it; when the accent is lighter, widening
+// leaves the floor behind and the mix saturates at the accent instead (see
+// TestLightAccentSaturatesAtAccent). The default pair already differs by 10
+// at t0, so the default returns mix(soft, accent, t0) byte-identically. When
+// even the accent cannot supply the floor, both roles saturate at the accent
+// together.
+func mixFloorSeparate(soft, accent string, t0 float64, avoid string) string {
+	for t := t0; t < 1; t += 0.01 {
+		if c := mix(soft, accent, t); contrastAgainstPaper(c) >= edgeContrastFloor && channelSpread(c, avoid) >= ruleSeparation {
+			return c
+		}
+	}
+	return mix(soft, accent, 1)
+}
+
+// channelSpread reports the largest per-channel distance between two
+// validated colours, in channel units.
+func channelSpread(a, b string) int {
+	ar, ag, ab := channels(a)
+	br, bg, bb := channels(b)
+	spread := channelDiff(ar, br)
+	if d := channelDiff(ag, bg); d > spread {
+		spread = d
+	}
+	if d := channelDiff(ab, bb); d > spread {
+		spread = d
+	}
+	return spread
+}
+
+func channelDiff(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
 }
 
 // contrastAgainstPaper reports the WCAG contrast of hex against paper white.

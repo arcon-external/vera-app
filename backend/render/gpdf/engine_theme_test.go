@@ -71,6 +71,103 @@ func TestNonDefaultThemeChangesNativePDF(t *testing.T) {
 	}
 }
 
+// TestAccentSwapRecoloursOnlyTheAccentFamily renders the same quotation with
+// two accents and asserts the accent family moved while the rest did not.
+// TestAccentMovesDerivedRoles proves the palette partition; this proves the
+// document follows it: every accent-family paint (Accent itself, Edge, Rule,
+// the decoration end) changes, and every other role paints byte-identical
+// counts of the same colour in both layouts.
+func TestAccentSwapRecoloursOnlyTheAccentFamily(t *testing.T) {
+	base := testEngine(t)
+	in := sampleInput()
+	// A wrapping recipient address makes the recipient card taller than the
+	// metadata card, which paints the decoration gradient: without it Decor1
+	// appears nowhere and the test could not see it move.
+	in.RecipientAddress = "Jl.Boulevard Raya Blok A5 No. 8, Panakkukang, Makassar, Sulawesi Selatan, Indonesia 90231, Gedung Annex Lantai 4 Ruang 401"
+	before := theme.DefaultTheme().Resolve()
+	afterTheme := Theme{Deep: theme.DefaultDeep, Accent: "#C2410C", Soft: theme.DefaultSoft, Ink: theme.DefaultInk}
+	after := afterTheme.Resolve()
+
+	beforeCounts := paintCounts(base.layout(in))
+	afterCounts := paintCounts(base.WithTheme(afterTheme).layout(in))
+
+	moved := map[string]string{"Accent": "", "Edge": "", "Rule": "", "Decor1": ""}
+	for role := range moved {
+		var b, a string
+		switch role {
+		case "Accent":
+			b, a = before.Accent, after.Accent
+		case "Edge":
+			b, a = before.Edge, after.Edge
+		case "Rule":
+			b, a = before.Rule, after.Rule
+		default:
+			b, a = before.Decor1, after.Decor1
+		}
+		if b == a {
+			t.Errorf("precondition: %s did not move with the accent (%s)", role, b)
+			continue
+		}
+		b, a = strings.ToUpper(b), strings.ToUpper(a)
+		if beforeCounts[b] == 0 {
+			t.Errorf("%s = %s paints nowhere in the default layout; the test cannot see it move", role, b)
+		}
+		if afterCounts[b] != 0 {
+			t.Errorf("%s = %s still paints %d time(s) with accent %s; the family did not move",
+				role, b, afterCounts[b], afterTheme.Accent)
+		}
+		if afterCounts[a] == 0 {
+			t.Errorf("%s = %s paints nowhere with accent %s; the recolour did not land", role, a, afterTheme.Accent)
+		}
+		if beforeCounts[a] != 0 {
+			t.Errorf("%s = %s already paints %d time(s) in the default layout; move/stay is ambiguous",
+				role, a, beforeCounts[a])
+		}
+	}
+
+	stayed := []string{
+		before.Surface, before.Secondary, before.Emphasis,
+		before.SubInk, before.SubNo, before.Muted, before.Rail,
+		before.Decor0, before.Page0, before.Page1,
+		before.Deep, before.Soft, before.Ink, before.Paper, before.Green,
+	}
+	for _, s := range stayed {
+		s = strings.ToUpper(s)
+		if beforeCounts[s] != afterCounts[s] {
+			t.Errorf("non-accent colour %s paints %d time(s) by default but %d with accent %s; only the accent family may move",
+				s, beforeCounts[s], afterCounts[s], afterTheme.Accent)
+		}
+	}
+}
+
+// paintCounts tallies every colour the layout paints: box fills and strokes,
+// gradient ramp stops and text-run colours, upper-cased so Ink's lowercase
+// default counts with the rest.
+func paintCounts(pages []*page) map[string]int {
+	out := map[string]int{}
+	add := func(c string) {
+		if c != "" {
+			out[strings.ToUpper(c)]++
+		}
+	}
+	for _, pg := range pages {
+		for _, p := range pg.prims {
+			switch v := p.(type) {
+			case box:
+				add(v.fill)
+				add(v.stroke)
+				if v.gradient != nil {
+					add(v.gradient.c0)
+					add(v.gradient.c1)
+				}
+			case run:
+				add(v.color)
+			}
+		}
+	}
+	return out
+}
+
 // TestConcurrentRendersWithDifferentThemes exercises the B4 fix: two renders
 // with different themes run concurrently on copies of one engine. Under
 // -race a shared mutation (the old lazy SetTheme path) fails here; the
@@ -168,11 +265,13 @@ func TestCollidingSoftChoosesAFreeSentinel(t *testing.T) {
 }
 
 // TestSentinelExhaustionFailsLoudly proves the chooser errors instead of
-// silently corrupting when every candidate collides.
+// silently corrupting when every candidate collides, and that the error names
+// the colliding palette roles with their values, so an admin reading the log
+// can see which of their brand colours is at fault.
 func TestSentinelExhaustionFailsLoudly(t *testing.T) {
 	pal := theme.Palette{
 		Deep: "FF00FF", Accent: "00FFFF", Soft: "7FFF00", Ink: "FF7F00",
-		Surface: "010203", Edge: "02FF01", Rule: "FF0202", Secondary: "0202FF",
+		Surface: "FEFDFC", Edge: "02FF01", Rule: "FF0202", Secondary: "0202FF",
 		Emphasis: "FF00FF", SubInk: "00FFFF", SubNo: "7FFF00", Muted: "FF7F00",
 		Rail: "010203", Decor0: "02FF01", Decor1: "FF0202", Page0: "0202FF",
 		Page1: "FF00FF", Paper: "00FFFF", Green: "7FFF00",
@@ -188,7 +287,33 @@ func TestSentinelExhaustionFailsLoudly(t *testing.T) {
 			*s = "#" + *s
 		}
 	}
-	if _, _, err := chooseSentinels(pal); err == nil {
-		t.Error("chooser with every candidate colliding returned no error; want a loud failure")
+	_, _, err := chooseSentinels(pal)
+	if err == nil {
+		t.Fatal("chooser with every candidate colliding returned no error; want a loud failure")
+	}
+	if !strings.Contains(err.Error(), "gradient sentinel") {
+		t.Errorf("expected the gradient exhaustion error, got %q", err)
+	}
+	for _, want := range []string{"Deep #FF00FF", "Accent #00FFFF", "Surface #FEFDFC"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("gradient exhaustion error %q does not name %q; it must say which colours collided", err, want)
+		}
+	}
+
+	// The clip side carries the same contract: exhaust only the clip
+	// candidates and the error must still name the roles.
+	def := theme.DefaultTheme().Resolve()
+	def.Deep, def.Accent, def.Soft, def.Ink = "#010203", "#02FF01", "#FF0202", "#0202FF"
+	_, _, err = chooseSentinels(def)
+	if err == nil {
+		t.Fatal("chooser with every clip candidate colliding returned no error; want a loud failure")
+	}
+	if !strings.Contains(err.Error(), "clip sentinel") {
+		t.Errorf("expected the clip exhaustion error, got %q", err)
+	}
+	for _, want := range []string{"Deep #010203", "Accent #02FF01", "Soft #FF0202", "Ink #0202FF"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("clip exhaustion error %q does not name %q; it must say which colours collided", err, want)
+		}
 	}
 }

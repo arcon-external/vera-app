@@ -128,7 +128,83 @@ func TestEdgeAndRuleContrastFloor(t *testing.T) {
 	}
 }
 
-// TestGreyBrandYieldsNeutralTextFamily proves a monochrome brand does not park
+// TestRuleKeepsSeparationFromEdge proves the outline/hairline hierarchy
+// survives a near-white Soft. mixFloor starts both roles at their t0 and
+// returns the first ratio reaching the floor, so without the separation both
+// would saturate at the same first passing value (#E0E5FD for white) and read
+// as one weight. Rule therefore keeps widening past the floor point until it
+// differs from Edge by ruleSeparation (8 units per channel, the delta at
+// which two weights stop rasterizing as one colour).
+func TestRuleKeepsSeparationFromEdge(t *testing.T) {
+	const floor = 1.25
+	for _, soft := range []string{"#FFFFFF", "#FEFEFE", "#F7F2EC"} {
+		pal := Theme{Deep: DefaultDeep, Accent: DefaultAccent, Soft: soft, Ink: DefaultInk}.Resolve()
+		if pal.Edge == pal.Rule {
+			t.Errorf("soft %s: Edge and Rule both %s; the hierarchy collapsed", soft, pal.Edge)
+		}
+		er, eg, eb := channels(strings.ToUpper(pal.Edge))
+		rr, rg, rb := channels(strings.ToUpper(pal.Rule))
+		if s := maxInt3(absDiff(er, rr), absDiff(eg, rg), absDiff(eb, rb)); s < 8 {
+			t.Errorf("soft %s: Edge %s and Rule %s differ by %d; want separation >= 8",
+				soft, pal.Edge, pal.Rule, s)
+		}
+		for _, tc := range []struct{ role, value string }{
+			{"Edge", pal.Edge}, {"Rule", pal.Rule},
+		} {
+			if c := contrastAgainstPaper(tc.value); c < floor {
+				t.Errorf("soft %s %s = %s contrasts %.3f; floor is %.2f",
+					soft, tc.role, tc.value, c, floor)
+			}
+		}
+	}
+	// Pin the white-soft pair exactly, so a formula change shows as a moved
+	// value rather than a silently shifted hierarchy.
+	white := Theme{Deep: DefaultDeep, Accent: DefaultAccent, Soft: "#FFFFFF", Ink: DefaultInk}.Resolve()
+	if white.Edge != "#E0E5FD" || white.Rule != "#D7DEFD" {
+		t.Errorf("white-soft Edge/Rule = %s/%s; want #E0E5FD/#D7DEFD", white.Edge, white.Rule)
+	}
+	// The default must not have moved: the separation sits below its delta.
+	def := DefaultTheme().Resolve()
+	if def.Edge != "#C9D8FE" || def.Rule != "#D3E2FF" {
+		t.Errorf("default Edge/Rule moved to %s/%s; want #C9D8FE/#D3E2FF", def.Edge, def.Rule)
+	}
+}
+
+// TestLightAccentSaturatesAtAccent pins the contrast floor's precise
+// limitation: the floor mixes soft toward the accent, so when the accent
+// itself is too light to reach 1.25:1 against paper, no mix toward it can get
+// there and the roles saturate at the accent instead.
+//
+// This test chose the doc fix over a real one deliberately: making the floor
+// hold for a white accent would mean darkening toward a neutral the brand did
+// not choose, and any such second formula risks moving the default. A
+// near-white accent is an admin misconfiguration; it now resolves
+// deterministically (the accent itself) and is documented in the package
+// comment rather than inventing ink.
+func TestLightAccentSaturatesAtAccent(t *testing.T) {
+	// White on white: the whole segment sits below the floor, so both roles
+	// saturate at the accent.
+	ww := Theme{Deep: DefaultDeep, Accent: "#FFFFFF", Soft: "#FFFFFF", Ink: DefaultInk}.Resolve()
+	if ww.Edge != "#FFFFFF" || ww.Rule != "#FFFFFF" {
+		t.Errorf("white-soft/white-accent Edge/Rule = %s/%s; want both #FFFFFF (saturated at the accent)",
+			ww.Edge, ww.Rule)
+	}
+	// Default soft with a white accent: the soft still carries the floor at
+	// t0, so Edge holds it — but Rule's separation keeps widening into the
+	// sub-floor lightening segment and saturates at the accent. Rule can
+	// therefore sit below the floor; the floor is best-effort, not absolute.
+	dw := Theme{Deep: DefaultDeep, Accent: "#FFFFFF", Soft: DefaultSoft, Ink: DefaultInk}.Resolve()
+	if dw.Edge != "#D9E6FF" {
+		t.Errorf("default-soft/white-accent Edge = %s; want #D9E6FF (floor met at t0 via the soft)", dw.Edge)
+	}
+	if dw.Rule != "#FFFFFF" {
+		t.Errorf("default-soft/white-accent Rule = %s; want #FFFFFF (separation exhausted the segment)", dw.Rule)
+	}
+	if c := contrastAgainstPaper(dw.Rule); c >= 1.25 {
+		t.Errorf("precondition: white-accent Rule %s contrasts %.3f; the test needs it below the floor", dw.Rule, c)
+	}
+}
+
 // the text family on red. A grey deep has no meaningful hue, so the tones
 // must come out near-achromatic; the default saturated brand must resolve
 // exactly as before.
