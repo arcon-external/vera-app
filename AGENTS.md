@@ -3,6 +3,9 @@
 Operational guide for coding agents working in `vera-app`. Read this before making
 changes.
 
+**Work is orchestrated — see Section 12 before starting an issue.** It governs how
+the rest of this guide is applied.
+
 ---
 
 ## 1. Project Snapshot
@@ -129,8 +132,13 @@ go test ./backend -run '^TestBuildPricing' -v
 `cmd/vera`'s end-to-end test (`TestEndToEndThroughTheCLI`) drives the whole CLI
 in-process against a real `veraserver` and a throwaway schema: login → clients →
 validate → export (a real PDF and a signed revision) → verify → archive → drafts
-→ logout. It skips without `VERA_POSTGRES_TEST_DSN`, like the other integration
-tests, and it drops the schema it uses — point it only at a throwaway database.
+→ logout. It skips without `VERA_POSTGRES_TEST_DSN`, and it drops the schema it
+uses — point it only at a throwaway database. `backend/store` skips the same
+way, but `backend/api` does not fully skip: the tests that call `resetTestSchema`
+directly (`drafts_test.go`, `verify_test.go`, `verify_hardening_test.go`,
+`verify_theme_test.go`, and the render test in `company_logo_test.go`) fail to
+connect instead, so the `./...` gates need the DSN pointed at a throwaway
+database to pass.
 
 The Postgres repository test is skipped unless a test DSN is supplied. Use a
 throwaway database/schema, never the production one:
@@ -347,23 +355,44 @@ For multiple commits per issue, each commit references the issue number.
 7. Pick the next issue and repeat.
 
 > **No auto-deploy.** `vera-app` is a desktop application: merging to `main` does not
-> deploy anything. Build a release locally when needed (Section 13).
+> deploy anything. Build a release locally when needed (Section 14).
 
 > **Cross-repo transfer is not available.** GitHub only allows issue transfer within
 > the same owner; `arcon-external/vera-app` and a personal-owner repo cannot exchange
 > issues. File in the right repo the first time.
 
-### After every merge to main
+### Dependabot — before and after every PR
 
-A merge is not finished until Dependabot has been checked. Do this before
-picking up the next issue:
+Dependabot is read **twice for every pull request, and both reads are mandatory**.
+The command is the same each time:
 
 ```bash
 gh api "repos/arcon-external/vera-app/dependabot/alerts?state=open" \
   --jq '.[] | "\(.security_advisory.severity)\t\(.dependency.package.name)\t\(.security_vulnerability.first_patched_version.identifier)"'
 ```
 
-If anything is open, fix it immediately and release a patch (Section 13):
+**Before opening the PR.** Run the command and put **what it printed** in the PR
+body — the alert lines themselves, or the literal `Dependabot: 0 open` when it
+printed nothing. Then decide explicitly what this PR does about the result:
+
+- **Nothing open:** that line is the whole record.
+- **Something open:** either fix it in this PR, or say in the PR body why it is out of
+  scope and file it as its own issue. An alert that is seen and silently left is the
+  failure this rule exists to prevent.
+
+**After the merge.** Run it again and record the result as a **comment on the issue
+you just closed**. A merge is not finished until this is done — the comment is what
+makes the read visible afterwards, which a merge otherwise has no place for.
+
+> **This is a norm, not a guard, and it says so deliberately.** Nothing in CI fails
+> when these reads are skipped, and the PR-body line is typed by whoever opens the PR.
+> By §12.5's own standard — a guard is not a guard until it is proven to fail — this
+> check cannot fail. The real fix is a workflow step that queries the API and can go
+> red: that is issue #348. Until it lands, the check rests on a reviewer reading the
+> output in the PR body, which is exactly why the output goes there rather than a
+> summary of it.
+
+**When something is open**, fix it immediately and release a patch (Section 14):
 
 1. File one issue for the batch and branch as usual.
 2. Upgrade the flagged packages to at least `first_patched_version`, preferring
@@ -377,7 +406,7 @@ If anything is open, fix it immediately and release a patch (Section 13):
    fingerprint**: nothing in `.github/` or `scripts/` reads it, so a stale copy
    fails nothing and the step is hygiene, not a gate. `wails build` rewrites it,
    which is how it drifts.
-4. Run every gate (Section 12) and release a PATCH: a dependency bump is not a
+4. Run every gate (Section 13) and release a PATCH: a dependency bump is not a
    feature.
 
 Most alerts here are dev-only (`vite`, `vitest`, `esbuild`, `tinypool`), which
@@ -391,12 +420,207 @@ notices until it is exploitable in a shipped artifact.
 Close the issue only after:
 
 1. The PR is squash-merged to `main` (the `Resolves #NNN` body auto-closes it).
-2. All gates pass (Section 12).
+2. All gates pass (Section 13).
 3. The issue's success criteria are met.
 
 ---
 
-## 12. Testing Gates
+## 12. The Orchestrated Workflow
+
+Work on an issue is run by an **orchestrator** — the assistant — directing four
+subordinate roles. The orchestrator plans, decides and verifies; the subordinates
+do their role and stop. No issue is started without a plan and none is merged
+without validation.
+
+### 12.1 The roles
+
+| Role | Model | Job |
+| --- | --- | --- |
+| **Worker** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Writes code, writes and runs tests. |
+| **Explorer** | `opencode-go/deepseek-v4.1-flash#high` | Crawls files and reports. Read-only: it never edits. |
+| **Advisor** | `opencode-go/deepseek-v4.1-flash#max` | Advises on what to do next. It advises; it never decides. |
+| **Judge** | `opencode-go/glm-5.3-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+
+Model references are exact (`provider/model#variant`) and are looked up with the
+models tool rather than guessed — a variant that does not exist fails silently at
+dispatch. The Judge is deliberately a **different model family** from the Advisor:
+two reviewers from one family share one family's blind spots.
+
+Every brief carries five things: the context, the top-level plan, the exact
+instructions, the frozen interfaces, and the success criteria. It also carries the
+rule that the worker **stops the moment the criteria are checked** — pass or fail —
+and reports everything: every command, every failure, every dead end, and anything
+surprising it did not fix. A worker that hides a dead end has failed its brief.
+
+A report missing any of its required parts is **not accepted**. Re-brief that worker
+with the gap named rather than filling it in from the diff — the diff shows what
+changed, never what was tried and abandoned, and the abandoned attempt is often the
+most useful thing in the report.
+
+### 12.2 The loop
+
+```
+Explorer (only when the code is not already mapped)
+      |
+Orchestrator: decide the design, freeze the interfaces, write the todolist
+      |
+Worker waves  -->  Advisor (if a design decision)  -->  Judge
+   ^                               |
+   +--------- NOT PASS ------------+
+                                   |
+                                 PASS
+                                   |
+              Orchestrator's second validation -> ship
+```
+
+- **On PASS** the orchestrator re-validates everything personally and then decides
+  whether to iterate again. The verdict is a gate, not a decision.
+- **On NOT PASS** the findings become the next worker wave. Iterate until the
+  result is genuinely good, not until the reviews stop complaining.
+- A verdict resting on a claim that turns out to be false is not a verdict. If the
+  orchestrator finds a defect after a PASS, fix it, re-verify, and say so.
+- **A finding can be refuted, but only with evidence.** When the orchestrator judges a
+  NOT PASS finding unfounded, it does not argue in prose: it reproduces the finding,
+  shows the measurement that contradicts it, and records both in the report. A refuted
+  finding is written down, not dropped — the next run may see what this one missed.
+
+A **wave** is one dispatch round: the workers sent out together, and the reports that
+come back. A wave ends when every worker in it has reported, not when the first one
+does.
+
+### 12.3 The todolist, and the tool that does not exist
+
+**OpenCode V2 has no todo tool.** Its built-in catalog is `read`, `glob`, `grep`,
+`edit`, `write`, `patch`, `shell`, `webfetch`, `websearch`, `question`, `skill`,
+`subagent`, `execute`, the `opencode` namespace — session utilities, worktrees, and
+a `models` lookup — and the `browser` namespace. Nothing in it tracks tasks. Checked
+against <https://opencode.ai/v2/docs/tools/>, the migration guide at
+<https://opencode.ai/v2/docs/migrate-v1/> (which lists every field V2 drops), and a
+live session catalog; all three agree. Note that the tools page does not list the
+`models` lookup even though the namespace exposes it — which is why §12.1 can name
+it, and why reading that page alone is not enough. Do not go looking for a todo tool.
+
+The todolist is therefore maintained **by hand, in two places, both mandatory**:
+
+1. **The issue's first comment** (Section 11) is the canonical plan, and the
+   orchestrator **updates it as work proceeds**. It carries the task breakdown, the
+   wave each task belongs to, the files each task owns, and the current status. A
+   plan written once and never touched is not a plan.
+2. **The orchestrator's own messages** carry the live list at every wave boundary,
+   so the state is visible without opening GitHub.
+
+One artifact, one name: throughout this section the plan is **the plan comment** — the
+issue's first comment, updated in place. "Todolist" and "the live list" mean the same
+thing.
+
+A task is **one file and its test** — or, when a change genuinely needs two files that
+cannot be separated, **a closed set of files owned by one worker and no other**. The
+rule exists so that no two workers own the same file, not so that a worker may never
+touch two.
+
+**Scope changes mid-flight are normal, and they are recorded rather than absorbed.**
+When something is added or removed while a wave is running:
+
+1. Amend the issue body's Scope section **and** the plan comment. A change that lives
+   only in a chat message is lost by the next run.
+2. Decide whether the running wave can take it. If it touches a file a worker already
+   owns, it waits for the next wave; if it is independent, it joins the current one.
+3. Say in the report that the scope changed, and what it did to the plan. A silent
+   scope change is how a "pure move" issue grows an unchecked bug fix. This happened
+   during #338: a change to the customer document arrived mid-flight and was queued
+   behind the running issue instead of being absorbed into it.
+
+### 12.4 Parallelism has a condition, not an aspiration
+
+Workers run concurrently **only** when both of these hold:
+
+1. **Each owns a disjoint set of files.** Two workers editing one file collide, and
+   a worker that removes a line another depends on breaks it silently until a
+   type-check happens to catch it.
+2. **The interfaces between those files are frozen**, and stated verbatim in every
+   brief — prop names, signatures, exported types. A worker cannot verify against an
+   interface that does not exist yet.
+
+Otherwise, serialize. **The ceiling on parallelism is set by how well the work is
+factored, not by how small the tasks are.** A 1,500-line component with shared
+state cannot be split arbitrarily; the way to earn parallelism is to **extract the
+files first, then dispatch**. In #338 that pressure produced `company.ts`,
+`TabBar`, `ThemeColorField` and the panels — which is exactly what the two issues
+after it needed. Decomposition is the orchestrator's hardest job, not the
+dispatching.
+
+While workers run in parallel:
+
+- **Nobody commits.** The orchestrator commits; concurrent `git add` on one working
+  tree is a race.
+- **Nobody runs anything that writes shared output.** `npm --prefix frontend run
+  build` writes `frontend/dist`, which `backend/**` embeds.
+- **Nobody edits a file another worker owns.** If a task needs a change in someone
+  else's file, it waits for the next wave.
+
+### 12.5 Verification rules — the ones that caught real defects
+
+- **A guard is not a guard until it is proven to fail.** Break it, show it naming
+  what it caught, restore it. A test that cannot fail proves nothing.
+- **Every claim of "clean" or "passes" names its command and its exit code.**
+- **A piped exit code is not an exit code.** `cmd | head -3; echo $?` reports
+  **`head`'s** status, not `cmd`'s. Redirect to a file, then read `$?`. This exact
+  mistake produced a false "tsc clean" during #338 while the type-check was failing
+  with five errors.
+- **A type-check and a test check different things.** A runtime guard compares
+  values; only `tsc` compares a declaration against the value it describes. Both
+  have to actually run.
+- **Markup parity is proven, not eyeballed.** Render a verbatim copy of the old code
+  and compare the full output strings; per-control byte-equality in isolation cannot
+  see a changed container.
+- **State plainly what is not verified.** "No visual regression" is false if the
+  page composition changed. If the assembled page was never rendered in a browser,
+  the pull request says so.
+- **While a change is uncommitted, `git diff` cannot show a correction made inside new
+  content.** A file that does not exist on `HEAD` produces no `-`/`+` pair for the
+  lines that changed, so "the diff shows no such edit" is not evidence that the edit
+  did not happen. Read the file. A reviewer reported a fix as having "left no artifact"
+  for exactly this reason during #347.
+
+### 12.6 How the loop scales
+
+| Change | Minimum |
+| --- | --- |
+| Behaviour, or anything staff see | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
+| Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7) |
+| Comments, docs, formatting only | One Worker, the gates (Section 13), and orchestrator validation |
+
+The floor is never zero: **a Worker writes the change and the orchestrator validates
+it.** Skipping the Judge is a decision the orchestrator states out loud, with its
+reason.
+
+**The orchestrator runs the gates — not the workers.** A worker runs only its own
+tests. The full set (Section 13) runs after the last wave, on a tree nothing else is
+writing to, because the build gates write shared output that a concurrent wave would
+corrupt. Every exit code is read directly (Section 12.5).
+
+> **§12 is a norm, not machinery — the same honesty §11 applies to its Dependabot
+> reads.** Nothing in CI checks that a Judge ran, that a guard was proven to fail, or
+> that a worker stopped when its criteria were met. What enforces it is the
+> orchestrator's second validation and the written record in the issue — which is why
+> the record is mandatory.
+
+### 12.7 What the orchestrator reports
+
+1. What shipped, with the numbers.
+2. What the loop caught that the first pass did not — findings, not process.
+3. What is **not** verified.
+4. An honest verdict on the workflow itself: what worked, what cost more than it
+   saved, and what the next run should do differently.
+5. The Dependabot read — before the PR and after the merge (Section 11). Both, not
+   one.
+
+The report goes on the **issue**, because the written record is what §12.6 says does
+the enforcing; the reply to the user carries the same thing in short form.
+
+---
+
+## 13. Testing Gates
 
 Every commit must pass all gates before push:
 
@@ -425,7 +649,7 @@ or confused scope step runs the full suite rather than skipping it.
 
 ---
 
-## 13. Release Process
+## 14. Release Process
 
 ### When to release
 
@@ -545,7 +769,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
 ---
 
-## 14. Architecture Principles
+## 15. Architecture Principles
 
 - **Single pricing pipeline:** `Prepare` validates, computes per-item prices, then
   derives original/marginalized/tax/nett totals. Both preview and PDF read from the
@@ -597,7 +821,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 - **Fail clearly:** startup errors name the missing configuration/operation, never
   print credentials.
 
-## 15. Environment & Secrets
+## 16. Environment & Secrets
 
 | Variable | Purpose |
 | --- | --- |
@@ -610,7 +834,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 `.env` is gitignored. Never commit a real password, paste one into an issue, or print
 one in logs.
 
-## 16. Known Gotchas
+## 17. Known Gotchas
 
 - **Tailwind 3.1** lacks numeric `min-h-*` and `line-clamp-*`; see Section 8.
 - `test-data/` is gitignored: fixture changes are on-disk only and never land via PR.
@@ -625,7 +849,7 @@ one in logs.
   directly. Mirror new installers there at release time; the backups bucket
   stays private.
 
-## 17. Cursor / Copilot Rules Status
+## 18. Cursor / Copilot Rules Status
 
 Checked paths:
 

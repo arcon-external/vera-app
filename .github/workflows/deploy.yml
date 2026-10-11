@@ -10,7 +10,7 @@ on:
     # to backend/api/changelog.md, which is go:embed-ed and served to the app as
     # What's New, so skipping a changelog-only merge would leave every installed
     # copy showing stale release notes. A blanket '**.md' would do exactly that
-    # -- see AGENTS.md §13.
+    # -- see AGENTS.md §14.
     paths-ignore:
       - "README.md"
       - "AGENTS.md"
