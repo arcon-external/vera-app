@@ -31,6 +31,11 @@ const sizes: Record<ButtonSize, string> = {
   md: "min-h-10 px-4 py-3 text-small",
 };
 
+/** The class for a standard text input in the settings forms. Shared so the
+ *  panels and the page cannot drift apart. */
+export const fieldClass =
+  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
+
 export function Button({
   variant = "secondary",
   size = "md",
