@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChangePassword, LogoutEverywhere, MyEmailChangeRequests, RequestDeletion, RequestEmailChange, UpdateProfile } from "@backend/backend/AuthAPI";
 import { backend } from "@backend/models";
 import {
@@ -26,8 +26,20 @@ import {
   type BindingMap,
 } from "../shortcuts";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
+import {
+  EMPTY_THEME,
+  extrasFromProfile,
+  formFromProfile,
+  profilePayload,
+  themeFromProfile,
+} from "../company";
+import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company";
 import { useToast } from "../toast";
-import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
+import { CompanyThemePanel } from "./CompanyThemePanel";
+import { TabBar, tabId, tabPanelId } from "./TabBar";
+import type { TabItem } from "./TabBar";
+import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 import type { SignedInUser } from "./LoginPage";
 
 function errorMessage(err: unknown, fallback: string): string {
@@ -38,9 +50,6 @@ function errorMessage(err: unknown, fallback: string): string {
 // save dialog opens in. localStorage, never the server — a client-machine
 // path is meaningless anywhere else, and exports must work offline.
 export const EXPORT_DIR_KEY = "vera-export-dir";
-
-const fieldClass =
-  "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
 export function SettingsPage({
   isAdmin,
@@ -79,31 +88,12 @@ export function SettingsPage({
         </p>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="inline-flex rounded-lg border border-rule bg-paper-muted p-0.5"
-      >
-        {tabs.map((tab) => {
-            const selected = section === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => setSection(tab.id)}
-                className={`min-h-8 rounded-md px-4 py-1.5 text-small font-medium transition-colors duration-150 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
-                  selected
-                    ? "bg-white text-ink-950 shadow-card"
-                    : "text-ink-500 hover:text-ink-800"
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+      <TabBar
+        items={tabs.map((tab) => ({ id: tab.id, label: tab.label }))}
+        active={section}
+        onSelect={(id) => setSection(id as "general" | "company" | "backups" | "keyboard")}
+        label="Settings sections"
+      />
 
       {section === "company" && isAdmin ? (
         <CompanyProfileCard onSaved={onCompanyChanged} />
@@ -462,72 +452,14 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
   );
 }
 
-type CompanyForm = {
-  legalName: string;
-  address: string;
-};
-
-// Stored-but-unedited profile values. Phone, email, and tax ID print
-// nowhere, so they have no inputs — but they still round-trip verbatim so
-// saving never wipes them.
-type StoredCompanyExtras = {
-  phone: string;
-  email: string;
-  taxId: string;
-};
-
-type CompanyTheme = {
-  qDeep: string;
-  qAccent: string;
-  qSoft: string;
-  qInk: string;
-  pDeep: string;
-  pAccent: string;
-  pSoft: string;
-  pInk: string;
-};
-
-const EMPTY_THEME: CompanyTheme = {
-  qDeep: "",
-  qAccent: "",
-  qSoft: "",
-  qInk: "",
-  pDeep: "",
-  pAccent: "",
-  pSoft: "",
-  pInk: "",
-};
-
-// Baked defaults mirror the migration seeds: shown when the stored value is
-// empty, so the picker never renders an invalid color.
-const DEFAULT_THEME: CompanyTheme = {
-  qDeep: "#1A237E",
-  qAccent: "#284AF3",
-  qSoft: "#D6E4FF",
-  qInk: "#1a1a1a",
-  pDeep: "#1A237E",
-  pAccent: "#284AF3",
-  pSoft: "#D6E4FF",
-  pInk: "#1a1a1a",
-};
-
-const THEME_FIELDS: {
-  key: keyof CompanyTheme;
-  section: string;
-  label: string;
-  hint: string;
-}[] = [
-  { key: "qDeep", section: "Quotation", label: "Deep", hint: "Headings, table headers, subject label, buttons, top ribbon on quotations" },
-  { key: "qAccent", section: "Quotation", label: "Accent", hint: "Company name, links and highlights on quotations" },
-  { key: "qSoft", section: "Quotation", label: "Soft", hint: "Card and section backgrounds on quotations" },
-  { key: "qInk", section: "Quotation", label: "Ink", hint: "Body text on quotations" },
-  { key: "pDeep", section: "Portal", label: "Deep", hint: "Ribbon, headings, buttons and eyebrow on the verification page" },
-  { key: "pAccent", section: "Portal", label: "Accent", hint: "Issuer name, links and button hover on the verification page" },
-  { key: "pSoft", section: "Portal", label: "Soft", hint: "Lookup panel, page gradient, field dividers and sheet outline on the verification page" },
-  { key: "pInk", section: "Portal", label: "Ink", hint: "Body text on the verification page" },
+const COMPANY_TABS: TabItem[] = [
+  { id: "general", label: "General" },
+  { id: "quotation", label: "Quotation" },
+  { id: "portal", label: "Portal" },
 ];
 
-function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
+export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
+  const [companyTab, setCompanyTab] = useState<"general" | "quotation" | "portal">("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
@@ -541,7 +473,6 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [hasLogo, setHasLogo] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const [logoMeta, setLogoMeta] = useState<string | null>(null);
-  const logoFileRef = useRef<HTMLInputElement>(null);
   const { pushToast } = useToast();
 
   const loadLogo = useCallback(async () => {
@@ -579,25 +510,9 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     setError("");
     try {
       const profile = (await GetCompanyProfile()) as backend.CompanyProfile;
-      setForm({
-        legalName: profile.LegalName ?? "",
-        address: profile.Address ?? "",
-      });
-      setExtras({
-        phone: profile.Phone ?? "",
-        email: profile.Email ?? "",
-        taxId: profile.TaxID ?? "",
-      });
-      setTheme({
-        qDeep: profile.ThemeQDeep ?? "",
-        qAccent: profile.ThemeQAccent ?? "",
-        qSoft: profile.ThemeQSoft ?? "",
-        qInk: profile.ThemeQInk ?? "",
-        pDeep: profile.ThemePDeep ?? "",
-        pAccent: profile.ThemePAccent ?? "",
-        pSoft: profile.ThemePSoft ?? "",
-        pInk: profile.ThemePInk ?? "",
-      });
+      setForm(formFromProfile(profile));
+      setExtras(extrasFromProfile(profile));
+      setTheme(themeFromProfile(profile));
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't load the company profile.");
       setError(message);
@@ -679,45 +594,17 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (loading) return;
     if (busy) return;
     setBusy(true);
     setError("");
     try {
-      const updated = (await UpdateCompanyProfile({
-        LegalName: form.legalName.trim(),
-        Address: form.address.trim(),
-        Phone: extras.phone,
-        Email: extras.email,
-        TaxID: extras.taxId,
-        HasLogo: hasLogo,
-        ThemeQDeep: theme.qDeep.trim(),
-        ThemeQAccent: theme.qAccent.trim(),
-        ThemeQSoft: theme.qSoft.trim(),
-        ThemeQInk: theme.qInk.trim(),
-        ThemePDeep: theme.pDeep.trim(),
-        ThemePAccent: theme.pAccent.trim(),
-        ThemePSoft: theme.pSoft.trim(),
-        ThemePInk: theme.pInk.trim(),
-      })) as backend.CompanyProfile;
-      setForm({
-        legalName: updated.LegalName ?? "",
-        address: updated.Address ?? "",
-      });
-      setExtras({
-        phone: updated.Phone ?? "",
-        email: updated.Email ?? "",
-        taxId: updated.TaxID ?? "",
-      });
-      setTheme({
-        qDeep: updated.ThemeQDeep ?? "",
-        qAccent: updated.ThemeQAccent ?? "",
-        qSoft: updated.ThemeQSoft ?? "",
-        qInk: updated.ThemeQInk ?? "",
-        pDeep: updated.ThemePDeep ?? "",
-        pAccent: updated.ThemePAccent ?? "",
-        pSoft: updated.ThemePSoft ?? "",
-        pInk: updated.ThemePInk ?? "",
-      });
+      const updated = (await UpdateCompanyProfile(
+        profilePayload({ form, extras, theme, hasLogo })
+      )) as backend.CompanyProfile;
+      setForm(formFromProfile(updated));
+      setExtras(extrasFromProfile(updated));
+      setTheme(themeFromProfile(updated));
       pushToast("success", "Company profile saved.");
       try {
         await RefreshCompanyIdentity();
@@ -735,18 +622,20 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
-  const set = (field: keyof CompanyForm) => (event: React.ChangeEvent<HTMLInputElement>) =>
-    setForm((current) => ({ ...current, [field]: event.target.value }));
+  const companyTabs = (
+    <TabBar
+      items={COMPANY_TABS}
+      active={companyTab}
+      onSelect={(id) => setCompanyTab(id as "general" | "quotation" | "portal")}
+      label="Company sections"
+      idPrefix="company"
+    />
+  );
 
-  if (loading) {
-    return (
-      <Card className="p-5">
-        <SectionHeading title="Company profile" />
-        <div className="h-48 animate-pulse rounded-xl bg-paper-muted" aria-label="Loading company profile" />
-      </Card>
-    );
-  }
-
+  // One <form> for both states: the panel swaps the skeleton for the live
+  // inputs without remounting, so focus survives the load. Save stays
+  // disabled until load() fills the record — a full-replace save has nothing
+  // to send yet. (State ownership: see company.ts.)
   return (
     <form onSubmit={save}>
       {error ? (
@@ -754,146 +643,42 @@ function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
           <StatusBanner tone="danger">{error}</StatusBanner>
         </div>
       ) : null}
-      <div className="grid items-stretch gap-6 lg:grid-cols-2">
-        <Card className="p-5">
-          <SectionHeading title="Company profile" />
-          <div className="grid gap-4">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-caption font-medium text-ink-600">Legal name</span>
-            <input
-              type="text"
-              required
-              maxLength={160}
-              value={form.legalName}
-              onChange={set("legalName")}
-              placeholder="PT Arcon Penta Persada"
-              className={fieldClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-caption font-medium text-ink-600">Address</span>
-            <input
-              type="text"
-              value={form.address}
-              onChange={set("address")}
-              placeholder="Street, city, province"
-              className={fieldClass}
-            />
-          </label>
-          <div>
-            <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "Saving…" : "Save company profile"}
-            </Button>
-          </div>
-          </div>
-          <p className="mt-3 text-caption leading-relaxed text-ink-400">
-            Only admins see this section. The quotation header prints this name
-            and address on every new quotation.
-          </p>
-        </Card>
-          {(["Quotation", "Portal"] as const).map((section) => (
-            <Card key={section} className="p-5">
-              <SectionHeading title={`${section} colors`} />
-              <div className="grid grid-cols-2 gap-3">
-                {THEME_FIELDS.filter((field) => field.section === section).map((field) => {
-                  const value = theme[field.key].trim() || DEFAULT_THEME[field.key];
-                  const setThemeValue = (next: string) =>
-                    setTheme((current) => ({ ...current, [field.key]: next }));
-                  return (
-                    <label
-                      key={field.key}
-                      className="flex flex-col gap-1.5"
-                      title={`${field.label}: ${field.hint}`}
-                    >
-                      <span className="text-caption font-medium text-ink-600">
-                        {field.label}
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <input
-                          type="color"
-                          value={/^#[0-9a-fA-F]{6}$/.test(value) ? value : DEFAULT_THEME[field.key]}
-                          onChange={(event) => setThemeValue(event.target.value)}
-                          aria-label={`${section} ${field.label} color picker`}
-                          className="h-9 w-10 shrink-0 cursor-pointer rounded-md border border-rule bg-white p-1"
-                        />
-                        <input
-                          type="text"
-                          value={theme[field.key]}
-                          onChange={(event) => setThemeValue(event.target.value)}
-                          placeholder={DEFAULT_THEME[field.key]}
-                          spellCheck={false}
-                          autoComplete="off"
-                          aria-label={`${section} ${field.label} hex value`}
-                          className={`${fieldClass} font-mono`}
-                        />
-                      </span>
-                      <span className="text-caption leading-snug text-ink-400">{field.hint}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </Card>
-          ))}
-      <Card className="flex h-full flex-col p-5">
-        <SectionHeading title="Logo" />
-        <div className="flex flex-1 flex-col justify-center gap-4 sm:flex-row sm:items-start">
-          <span className="flex h-28 w-44 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-rule bg-white p-2" aria-hidden="true">
-            {logoPreview ? (
-              <img src={logoPreview} alt="" className="h-full w-full object-contain" />
-            ) : (
-              <span className="px-2 text-center text-caption text-ink-400">Built-in logo</span>
-            )}
-          </span>
-          <div className="grid flex-1 content-start gap-2">
-            <p className="max-w-xl text-body text-ink-600">
-              {hasLogo
-                ? "Custom logo prints on new quotations and previews."
-                : "Built-in logo prints on new quotations and previews."}
-            </p>
-            <p className="text-caption text-ink-500">
-              Shows in the quotation header.
-              {logoMeta ? <span className="tnum"> {logoMeta}</span> : null}
-            </p>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => logoFileRef.current?.click()}
-                disabled={logoBusy}
-              >
-                {logoBusy ? "Uploading…" : hasLogo ? "Replace logo" : "Upload logo"}
-              </Button>
-              <input
-                ref={logoFileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                className="sr-only"
-                tabIndex={-1}
-                aria-hidden="true"
-                disabled={logoBusy}
-                onChange={(event) => {
-                  void pickLogo(event.target.files?.[0]);
-                  event.target.value = "";
-                }}
-              />
-              {hasLogo ? (
-                <button
-                  type="button"
-                  onClick={() => void removeLogo()}
-                  disabled={logoBusy}
-                  className="text-caption text-ink-400 hover:text-danger-600 hover:underline disabled:opacity-50"
-                >
-                  Remove
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-        <p className="mt-3 text-caption leading-relaxed text-ink-400">
-          PNG, JPEG, GIF, or WebP under 512KB. Past revisions keep whatever printed.
-        </p>
-      </Card>
-    </div>
+      {companyTabs}
+      <div
+        role="tabpanel"
+        id={tabPanelId("company", companyTab)}
+        aria-labelledby={tabId("company", companyTab)}
+        className="mt-6"
+      >
+        {loading ? (
+          <Card className="p-5">
+            <SectionHeading title="Company profile" />
+            <div className="h-48 animate-pulse rounded-xl bg-paper-muted" aria-label="Loading company profile" />
+          </Card>
+        ) : companyTab === "general" ? (
+          <CompanyGeneralPanel
+            form={form}
+            onFieldChange={(field, value) => setForm((current) => ({ ...current, [field]: value }))}
+            logoPreview={logoPreview}
+            hasLogo={hasLogo}
+            logoBusy={logoBusy}
+            logoMeta={logoMeta}
+            onPickLogo={pickLogo}
+            onRemoveLogo={removeLogo}
+          />
+        ) : (
+          <CompanyThemePanel
+            section={companyTab === "quotation" ? "Quotation" : "Portal"}
+            theme={theme}
+            onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+          />
+        )}
+      </div>
+      <div className="mt-6">
+        <Button type="submit" variant="primary" disabled={loading || busy}>
+          {busy ? "Saving…" : "Save company profile"}
+        </Button>
+      </div>
     </form>
   );
 }
