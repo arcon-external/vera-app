@@ -13,7 +13,7 @@ version: 2
 #
 #   github-actions  the pins in .github/workflows/*.yml
 #   docker          Dockerfile.veraserver's builder and runtime images
-#   gomod           go.mod — AGENTS.md §16 names x/crypto, pgx/v5 and echo as the
+#   gomod           go.mod — AGENTS.md §17 names x/crypto, pgx/v5 and echo as the
 #                   areas most often flagged, and alerts alone means waiting for
 #                   a problem to exist before it is fixed
 #   npm             frontend/package.json — the vitest@2 -> vitest@5 migration in
