@@ -15,16 +15,20 @@
 			--deep-blue: {{.Portal.Deep}};
 			--accent-blue: {{.Portal.Accent}};
 			--ink: {{.Portal.Ink}};
-			--paper: #ffffff;
+			--paper: {{.Portal.Paper}};
 			/* Brand tints, derived per request from the portal palette
 			   (backend/theme): the sheet outline and section rules, muted
-			   copy, the lookup panel, and the page gradient. The status set
-			   below is fixed and semantic — a rebrand must never restyle a
-			   verdict, so those values stay literal. */
+			   copy, field labels and values, the lookup panel, and the page
+			   gradient. The status set below is fixed and semantic — a
+			   rebrand must never restyle a verdict, so those values stay
+			   literal. */
 			--edge: {{.Portal.Edge}};
 			--rule: {{.Portal.Edge}};
 			--muted: {{.Portal.Secondary}};
 			--section: {{.Portal.Section}};
+			--field-rule: {{.Portal.FieldRule}};
+			--label: {{.Portal.Label}};
+			--strong: {{.Portal.Strong}};
 			--page-0: {{.Portal.Page0}};
 			--page-1: {{.Portal.Page1}};
 			--ok: #1B7F3B;
@@ -107,16 +111,16 @@
 		.verdict-unavailable h1, .verdict-unavailable .mark { color: var(--neutral); }
 
 		.fields { margin-top: 18px; display: grid; grid-template-columns: 1fr; gap: 12px; }
-		.field { border-top: 1px solid #e6ecfb; padding-top: 10px; }
+		.field { border-top: 1px solid var(--field-rule); padding-top: 10px; }
 		.field dt {
 			font-size: 11px;
 			font-weight: 700;
 			letter-spacing: 0.1em;
 			text-transform: uppercase;
-			color: #7a85a3;
+			color: var(--label);
 			margin-bottom: 3px;
 		}
-		.field dd { font-size: 16px; font-weight: 600; color: #26304d; overflow-wrap: anywhere; }
+		.field dd { font-size: 16px; font-weight: 600; color: var(--strong); overflow-wrap: anywhere; }
 		.field dd.amount { font-size: 19px; font-weight: 700; color: var(--deep-blue); font-variant-numeric: tabular-nums; }
 		.field.wide { grid-column: 1 / -1; }
 
@@ -129,18 +133,18 @@
 			margin-bottom: 10px;
 			background: var(--paper);
 		}
-		.diff-label { font-weight: 700; color: #26304d; margin-bottom: 8px; }
+		.diff-label { font-weight: 700; color: var(--strong); margin-bottom: 8px; }
 		.diff-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
-		.diff-row .k { color: #7a85a3; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: block; }
+		.diff-row .k { color: var(--label); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; display: block; }
 		.diff-row .claimed { color: var(--bad); font-weight: 700; }
-		.diff-row .record { color: #26304d; font-weight: 700; }
+		.diff-row .record { color: var(--strong); font-weight: 700; }
 		.diff-meaning { margin-top: 8px; font-size: 13px; color: var(--muted); }
 
 		.lookup { margin-top: 0; }
 		.lookup h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--deep-blue); margin-bottom: 6px; }
 		.lookup p { font-size: 14px; color: var(--muted); margin-bottom: 14px; }
 		.lookup form { display: grid; gap: 14px; }
-		.lookup label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #7a85a3; display: block; margin-bottom: 6px; }
+		.lookup label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--label); display: block; margin-bottom: 6px; }
 		.lookup input {
 			width: 100%;
 			/* 16px keeps mobile browsers from zooming on focus. */
@@ -172,7 +176,7 @@
 			appearance: none;
 		}
 		.lookup button:hover { background: var(--accent-blue); }
-		.foot { margin-top: 22px; font-size: 12px; color: #7a85a3; text-align: center; }
+		.foot { margin-top: 22px; font-size: 12px; color: var(--label); text-align: center; }
 
 		/* Wider screens get the roomier desktop rhythm. */
 		@media (min-width: 600px) {

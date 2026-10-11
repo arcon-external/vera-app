@@ -39,9 +39,10 @@ import (
 	"strings"
 )
 
-// clipSentinel is the fill colour standing in for "this rectangle needs
-// clipping". It must differ from the gradient sentinel, because each post-process
-// pass locates its own fills by colour and would otherwise consume the other's.
+// clipSentinelR/G/B are the historic fixed stand-in, kept as the first
+// candidate in sentinel.go so the default render is byte-identical. They are
+// no longer used directly: Render chooses a per-render sentinel free of the
+// palette (see sentinel.go).
 const (
 	clipSentinelR = 0x01
 	clipSentinelG = 0x02
@@ -123,7 +124,9 @@ func roundedOutline(c clipRegion, pageH float64) string {
 
 // injectClippedFills rewrites page `page`'s content stream, replacing every
 // clip-sentinel fill with a genuinely clipped one, and rebuilds the xref.
-func injectClippedFills(doc []byte, clips []clippedFill, page int) ([]byte, error) {
+//
+// sent is the per-render sentinel chosen by chooseSentinels.
+func injectClippedFills(doc []byte, clips []clippedFill, page int, sent [3]uint8) ([]byte, error) {
 	if len(clips) == 0 {
 		return doc, nil
 	}
@@ -144,7 +147,7 @@ func injectClippedFills(doc []byte, clips []clippedFill, page int) ([]byte, erro
 		return nil, err
 	}
 	for _, c := range clips {
-		if content, err = swapSentinelForClippedRect(content, c); err != nil {
+		if content, err = swapSentinelForClippedRect(content, c, sent); err != nil {
 			return nil, err
 		}
 	}
@@ -164,10 +167,10 @@ func injectClippedFills(doc []byte, clips []clippedFill, page int) ([]byte, erro
 // Each pass rewrites the FIRST remaining sentinel, so a page with a hundred
 // clipped cells is handled by calling this a hundred times; already-rewritten
 // blocks no longer contain the sentinel colour, so they are skipped.
-func swapSentinelForClippedRect(content []byte, c clippedFill) ([]byte, error) {
-	sr := float64(clipSentinelR) / 255
-	sg := float64(clipSentinelG) / 255
-	sb := float64(clipSentinelB) / 255
+func swapSentinelForClippedRect(content []byte, c clippedFill, sent [3]uint8) ([]byte, error) {
+	sr := float64(sent[0]) / 255
+	sg := float64(sent[1]) / 255
+	sb := float64(sent[2]) / 255
 
 	head := sentinelFillEnd(content, 0, sr, sg, sb)
 	if head < 0 {

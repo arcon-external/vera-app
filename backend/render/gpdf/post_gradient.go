@@ -34,9 +34,11 @@ import (
 	"strings"
 )
 
-// gradientSentinel* is the fill colour a gradient rect is drawn with before
-// injection. It lies outside the template's palette, so a sentinel match cannot
-// collide with a real fill.
+// gradientSentinelR/G/B are the historic fixed stand-in, kept as the first
+// candidate in sentinel.go so the default render is byte-identical. They are
+// no longer used directly: Render chooses a per-render sentinel free of the
+// palette (see sentinel.go), because no fixed colour is outside a derived
+// continuum.
 const (
 	gradientSentinelR = 0xFE
 	gradientSentinelG = 0xFD
@@ -74,7 +76,11 @@ var (
 // page and each page's content stream is a separate object. Object numbers are
 // re-derived on every call from the current xref, so calling this once per page
 // in sequence allocates fresh pattern objects each time and never collides.
-func injectGradients(doc []byte, grads []gradient, page int) ([]byte, error) {
+//
+// sent is the per-render sentinel chosen by chooseSentinels: the fill to find.
+// Passing it in (rather than reading a constant) is what keeps a colliding
+// palette role from being mistaken for a gradient rect.
+func injectGradients(doc []byte, grads []gradient, page int, sent [3]uint8) ([]byte, error) {
 	if len(grads) == 0 {
 		return doc, nil
 	}
@@ -114,7 +120,7 @@ func injectGradients(doc []byte, grads []gradient, page int) ([]byte, error) {
 	// because each one otherwise finds the first sentinel again.
 	cursor := 0
 	for i := range grads {
-		if content, err = swapSentinelForPattern(content, cursor, &grads[i]); err != nil {
+		if content, err = swapSentinelForPattern(content, cursor, &grads[i], sent); err != nil {
 			return nil, err
 		}
 		cursor = grads[i].from
@@ -135,7 +141,7 @@ func injectGradients(doc []byte, grads []gradient, page int) ([]byte, error) {
 //
 // Matching the sentinel colour as part of that string means a mismatch is a
 // hard error rather than a silent corruption of some other fill.
-func swapSentinelForPattern(content []byte, from int, g *gradient) ([]byte, error) {
+func swapSentinelForPattern(content []byte, from int, g *gradient, sent [3]uint8) ([]byte, error) {
 	// A pattern is not a colour space. The lowercase "cs" sets the FILL colour
 	// space to /Pattern and the lowercase "scn" then selects the fill pattern,
 	// so both must be lowercase: "CS"/"SCN" are the stroke pair and do not
@@ -150,9 +156,9 @@ func swapSentinelForPattern(content []byte, from int, g *gradient) ([]byte, erro
 	//
 	// gpdf also prints floats at full precision where gopdf trims them, so the
 	// coordinates are matched numerically rather than as formatted strings.
-	sentinelR := float64(gradientSentinelR) / 255
-	sentinelG := float64(gradientSentinelG) / 255
-	sentinelB := float64(gradientSentinelB) / 255
+	sentinelR := float64(sent[0]) / 255
+	sentinelG := float64(sent[1]) / 255
+	sentinelB := float64(sent[2]) / 255
 
 	// Search from wherever the previous gradient left off. Always starting from
 	// zero makes every pass rewrite the first sentinel it can find, so the second

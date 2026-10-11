@@ -24,10 +24,21 @@
 //   - A border or decoration is the soft colour shaded toward the accent:
 //     outlines lean into the brand's vivid colour rather than sitting in a
 //     fixed blue.
+//   - Edges and rules carry a contrast floor against paper white (1.25:1).
+//     The default Edge (1.42) and Rule (1.30) sit above it, so the default
+//     document is byte-identical; a near-white Soft would otherwise fade to
+//     1.12/1.02, so those deepen toward the accent until the floor holds.
+//     The floor is checked by widening the mix ratio, never by jumping to a
+//     different formula, so a custom brand keeps its hue while gaining
+//     visibility. A near-black Soft already contrasts strongly and is
+//     untouched.
 //   - A text tone holds the deep colour's hue at a fixed saturation and
 //     lightness. The document's slates are one hue family at several depths,
 //     so each role fixes (S, L) and takes H from deep: re-hue deep and every
-//     tone follows.
+//     tone follows. When the base is near-achromatic (saturation below
+//     0.15), the role's saturation scales down proportionally, so a grey
+//     brand yields a neutral text family instead of parking every tone on
+//     red (H 0). Saturated brands sit above the threshold and are unchanged.
 //   - Paper white and the discount green are fixed, not derived. White is the
 //     absence of ink and green is a semantic colour (a discount reads as
 //     good), so neither may move with the brand. They live here as named
@@ -91,16 +102,17 @@ func DefaultTheme() Theme {
 // Palette is the quotation document's full colour set: the four bases plus
 // every derived role.
 //
-// Role table: role → formula → default value → the literals it replaced.
-// Deltas are per channel against the farthest literal; the full table with
-// every literal is in the worker report for issue #335.
+// Role table: role → formula → default value → every literal it replaced.
+// Deltas are per channel against the farthest literal.
 //
 //	Surface   mix(Soft, white, 0.82)      #F8FAFF  meta/card/subject/totals
-//	          fills + zebra (#F8FAFF #F8FBFF #F7FAFF #F9FBFF #F6F9FF), max Δ2
-//	Edge      mix(Soft, Accent, 0.075)    #C9D8FE  every component outline
-//	          (#C6D4FF #C9D9FF #CCD9FF #CAD8FF #C5D5FF #CEDBFF), max Δ5
-//	Rule      mix(Soft, Accent, 0.015)    #D3E2FF  hairline dividers (lead
-//	          rule #D8E2FF, table rules #CFE0FF), max Δ5
+//	          fills (#F8FAFF #F8FBFF #F7FAFF #F9FBFF #F6F9FF), max Δ2
+//	Edge      mixFloor(Soft, Accent, 0.075, floor 1.25)
+//	          #C9D8FE  every component outline (#C6D4FF #C9D9FF #CCD9FF
+//	          #CAD8FF #C5D5FF #CEDBFF), max Δ5
+//	Rule      mixFloor(Soft, Accent, 0.015, floor 1.25)
+//	          #D3E2FF  hairline dividers (lead rule #D8E2FF, table rules
+//	          #CFE0FF), max Δ5
 //	Secondary deep hue, S 0.26, L 0.315  #3B3F65  second-paragraph text
 //	          (lead #3A4466, verify caption #3A4466, closing #364066), max Δ5
 //	Emphasis  deep hue, S 0.30, L 0.245  #2C2F51  strong values (meta
@@ -152,12 +164,20 @@ type Palette struct {
 // verdict look like a "valid" one, so the status set is not derived from
 // anything here. Everything else brand-facing is:
 //
-//	Edge      mix(Soft, Accent, 0.075)      sheet outline + section rules
-//	Secondary deep hue, S 0.26, L 0.315    muted copy
-//	Page0     mix(Soft, white, 0.72)        page gradient start
-//	Page1     mix(Soft, white, 0.47)        page gradient end
+//	Edge      mixFloor(Soft, Accent, 0.075, floor 1.25)
+//	          sheet outline + section rules (#C9D8FE family, max Δ5)
+//	Secondary deep hue, S 0.26, L 0.315    muted copy (#3B3F65, max Δ5)
+//	Page0     mix(Soft, white, 0.72)        page gradient start (#F4F7FF)
+//	Page1     mix(Soft, white, 0.47)        page gradient end (#E9F1FF, max Δ1)
 //	Section   mix(Soft, white, 0.55)        the lookup panel's background —
-//	          the role ThemePSoft was added for and never wired to
+//	          the role ThemePSoft was added for and never wired to (#EDF3FF)
+//	Paper     fixed #FFFFFF                 sheet + inputs (was #ffffff)
+//	FieldRule mix(Soft, white, 0.40)        field dividers (was #E6ECFB,
+//	          max Δ4)
+//	Label     deep hue, S 0.15, L 0.56      field labels + footnotes
+//	          (was #7A85A3, max Δ4)
+//	Strong    deep hue, S 0.31, L 0.235     field values + diff records
+//	          (was #26304D, max Δ3)
 //	Focus     accent as an rgba() fragment  the lookup field's focus ring
 //	Shadow    deep as an rgba() fragment    the sheet's drop shadow
 //
@@ -167,7 +187,6 @@ type Palette struct {
 type PortalPalette struct {
 	Deep   string
 	Accent string
-	Soft   string
 	Ink    string
 
 	Edge      string
@@ -175,6 +194,10 @@ type PortalPalette struct {
 	Page0     string
 	Page1     string
 	Section   string
+	Paper     string
+	FieldRule string
+	Label     string
+	Strong    string
 
 	Focus  template.CSS
 	Shadow template.CSS
@@ -197,8 +220,8 @@ func (t Theme) Resolve() Palette {
 		Ink:    ink,
 
 		Surface:   mix(soft, "#FFFFFF", 0.82),
-		Edge:      mix(soft, accent, 0.075),
-		Rule:      mix(soft, accent, 0.015),
+		Edge:      mixFloor(soft, accent, 0.075),
+		Rule:      mixFloor(soft, accent, 0.015),
 		Secondary: hslTone(deep, 0.26, 0.315),
 		Emphasis:  emphasis,
 		SubInk:    hslTone(deep, 0.18, 0.37),
@@ -227,14 +250,17 @@ func (t Theme) ResolvePortal() PortalPalette {
 	return PortalPalette{
 		Deep:   deep,
 		Accent: accent,
-		Soft:   soft,
 		Ink:    ink,
 
-		Edge:      mix(soft, accent, 0.075),
+		Edge:      mixFloor(soft, accent, 0.075),
 		Secondary: hslTone(deep, 0.26, 0.315),
 		Page0:     mix(soft, "#FFFFFF", 0.72),
 		Page1:     mix(soft, "#FFFFFF", 0.47),
 		Section:   mix(soft, "#FFFFFF", 0.55),
+		Paper:     Paper,
+		FieldRule: mix(soft, "#FFFFFF", 0.40),
+		Label:     hslTone(deep, 0.15, 0.56),
+		Strong:    hslTone(deep, 0.31, 0.235),
 
 		Focus:  template.CSS(formatRGBA(ar, ag, ab, 0.28)),
 		Shadow: template.CSS(formatRGBA(dr, dg, db, 0.08)),
@@ -301,12 +327,17 @@ func mix(a, b string, t float64) string {
 // hslTone returns the colour at hue H of the given base with saturation s
 // and lightness l. Text tones are one hue family at several depths, so each
 // role fixes (s, l) and takes H from the brand's deep colour: re-hue deep
-// and every tone follows. A near-achromatic deep has no meaningful hue;
-// those roles then sit on red (H 0), which is documented here rather than
-// hidden behind a fallback colour.
+// and every tone follows. When the base is near-achromatic (saturation below
+// 0.15) the role's saturation scales down proportionally, so a grey brand
+// yields a neutral text family instead of parking every tone on red (H 0).
+// Saturated brands sit above the threshold and resolve exactly as before.
 func hslTone(base string, s, l float64) string {
 	r, g, b := channels(base)
-	h, _, _ := rgbToHSL(r, g, b)
+	h, bs, _ := rgbToHSL(r, g, b)
+	const achromaticThreshold = 0.15
+	if bs < achromaticThreshold {
+		s = s * bs / achromaticThreshold
+	}
 	return hslToRGB(h, s, l)
 }
 
@@ -377,6 +408,50 @@ func formatHex(r, g, b uint8) string {
 		digits[g>>4], digits[g&0x0F],
 		digits[b>>4], digits[b&0x0F],
 	})
+}
+
+// edgeContrastFloor is the minimum WCAG contrast of an edge or rule against
+// paper white. The default Edge (1.42) and Rule (1.30) sit above it, so the
+// default document resolves exactly as before; a near-white Soft would
+// otherwise fade to 1.12/1.02, so those deepen toward the accent until the
+// floor holds. A near-black Soft already contrasts strongly and is untouched.
+const edgeContrastFloor = 1.25
+
+// mixFloor mixes soft toward accent starting at t0, widening the ratio until
+// the result contrasts against paper at the floor. The default brand already
+// passes, so it returns mix(soft, accent, t0) byte-identically; a pale brand
+// returns a deeper mix in the same hue family.
+func mixFloor(soft, accent string, t0 float64) string {
+	for t := t0; t < 1; t += 0.01 {
+		if c := mix(soft, accent, t); contrastAgainstPaper(c) >= edgeContrastFloor {
+			return c
+		}
+	}
+	return mix(soft, accent, 1)
+}
+
+// contrastAgainstPaper reports the WCAG contrast of hex against paper white.
+func contrastAgainstPaper(hex string) float64 {
+	r, g, b := channels(hex)
+	pr, pg, pb := channels(Paper)
+	la := relativeLuminance(r, g, b)
+	lb := relativeLuminance(pr, pg, pb)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// relativeLuminance follows WCAG 2.1: linearised sRGB weighted by eye.
+func relativeLuminance(r, g, b uint8) float64 {
+	linear := func(c uint8) float64 {
+		v := float64(c) / 255
+		if v <= 0.03928 {
+			return v / 12.92
+		}
+		return math.Pow((v+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
 }
 
 func formatRGBA(r, g, b uint8, a float64) string {

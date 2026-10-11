@@ -33,6 +33,7 @@ changes.
 | `backend/archive.go` | Archive list/detail/revision Wails methods |
 | `backend/format.go` | Rupiah + description formatting |
 | `backend/template.go` | Embedded template/asset loading |
+| `backend/theme/` | Brand theme: four bases → derived role palette for both renderers + portal |
 | `backend/store/` | Postgres config, migrations, repositories |
 | `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template |
 | `backend/template/css/template-fixed.css` | PDF/preview styles |

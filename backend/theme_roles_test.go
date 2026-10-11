@@ -62,3 +62,31 @@ func TestStylesheetHasNoColourLiterals(t *testing.T) {
 		t.Errorf("stylesheet contains colour literal %s; resolve it through a :root variable", m)
 	}
 }
+
+// TestStylesheetVarsResolve proves every var(--x) the stylesheet uses is
+// defined in its :root block. A typo makes the declaration invalid at
+// computed-value time — the fill silently becomes transparent, with no failure
+// anywhere — so the reference set must be a subset of the definition set.
+func TestStylesheetVarsResolve(t *testing.T) {
+	raw, err := os.ReadFile("template/css/template-fixed.css")
+	if err != nil {
+		t.Fatalf("read stylesheet: %v", err)
+	}
+	s := string(raw)
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`--[a-zA-Z0-9-]+:`).FindAllString(s, -1) {
+		defined[strings.TrimSuffix(m, ":")] = true
+	}
+	used := map[string]bool{}
+	for _, m := range regexp.MustCompile(`var\(\s*(--[a-zA-Z0-9-]+)`).FindAllStringSubmatch(s, -1) {
+		used[m[1]] = true
+	}
+	for name := range used {
+		if !defined[name] {
+			t.Errorf("stylesheet uses var(%s) which is never defined in :root", name)
+		}
+	}
+	if len(used) == 0 {
+		t.Error("stylesheet uses no var(); the extraction is broken")
+	}
+}

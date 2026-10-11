@@ -85,12 +85,12 @@ const (
 )
 
 // drawPage emits one page's primitives in paint order.
-func (e *Engine) drawPage(r *render.PDFRenderer, pg *page) ([]gradient, error) {
+func (e *Engine) drawPage(r *render.PDFRenderer, pg *page, gradSent, clipSent [3]uint8) ([]gradient, error) {
 	var grads []gradient
 	for _, p := range pg.prims {
 		switch v := p.(type) {
 		case box:
-			g, err := e.drawBox(r, v)
+			g, err := e.drawBox(r, v, gradSent, clipSent)
 			if err != nil {
 				return nil, err
 			}
@@ -111,21 +111,21 @@ func (e *Engine) drawPage(r *render.PDFRenderer, pg *page) ([]gradient, error) {
 }
 
 // drawBox paints one box, returning a pending gradient if it carries one.
-func (e *Engine) drawBox(r *render.PDFRenderer, b box) (*gradient, error) {
+func (e *Engine) drawBox(r *render.PDFRenderer, b box, gradSent, clipSent [3]uint8) (*gradient, error) {
 	fill := colorOf(b.fill)
 	stroke := colorOf(b.stroke)
 
-	// The clip sentinel must differ from the gradient sentinel: each
-	// post-process locates its own fills by colour and would otherwise consume
-	// the other's.
+	// A clipped or gradient rect is drawn with its per-render sentinel (see
+	// sentinel.go): the post-pass locates its own fills by that colour, and
+	// the chooser guarantees it collides with no palette role.
 	clipped := b.clip != nil
 	if clipped {
-		fill = rgbOf(clipSentinelR, clipSentinelG, clipSentinelB)
+		fill = rgbOf(clipSent[0], clipSent[1], clipSent[2])
 	}
 
 	var g *gradient
 	if b.gradient != nil {
-		fill = rgbOf(gradientSentinelR, gradientSentinelG, gradientSentinelB)
+		fill = rgbOf(gradSent[0], gradSent[1], gradSent[2])
 		g = &gradient{
 			x0: b.x, y0: b.y, w: b.w, h: b.h,
 			c0: b.gradient.c0, c1: b.gradient.c1, pageH: PageH,
@@ -332,7 +332,9 @@ func (e *Engine) drawPageChrome(p *page, in Input, m metrics) {
 // drawContinuationChrome resets a page that carries only more rows.
 func (e *Engine) drawContinuationChrome(p *page, m metrics) {}
 
-// cardFor is the page card and its border as display-list entries.
+// cardFor is the page card and its border as display-list entries. It is a
+// method because the card paints in the paper and edge roles, which live on
+// the engine's resolved palette.
 //
 // The card is returned rather than drawn because its height depends on where the
 // page's content ends, which is only known once the content has been placed, and
@@ -342,13 +344,10 @@ func (e *Engine) drawContinuationChrome(p *page, m metrics) {}
 // height, and the padding that would otherwise fill the rest of the page is
 // discarded at the break. A fixed-height card leaves a strip of empty border
 // under every page that does not fill, which on the second page of a short
-// quotation is most of the page.
-// fragments a block's border box across pages, so the first fragment fills the
-// page and only the last is content-height. Reproducing that is what keeps the
-// left and right rules continuous down a multi-page quotation.
-// cardFor is the page card and its border as display-list entries. It is a
-// method because the card paints in the page and edge roles, which live on
-// the engine's resolved palette.
+// quotation is most of the page. The browser fragments a block's border box
+// across pages, so the first fragment fills the page and only the last is
+// content-height. Reproducing that is what keeps the left and right rules
+// continuous down a multi-page quotation.
 func (e *Engine) cardFor(p *page, m metrics, bottom float64) []any {
 	h := bottom - m.cardY
 	// Border rules are drawn as thin rects on the edges rather than as a stroked

@@ -523,7 +523,7 @@ const THEME_FIELDS: {
   { key: "qInk", section: "Quotation", label: "Ink", hint: "Body text on quotations" },
   { key: "pDeep", section: "Portal", label: "Deep", hint: "Ribbon, headings, buttons and eyebrow on the verification page" },
   { key: "pAccent", section: "Portal", label: "Accent", hint: "Issuer name, links and button hover on the verification page" },
-  { key: "pSoft", section: "Portal", label: "Soft", hint: "Reserved section backgrounds on the verification page" },
+  { key: "pSoft", section: "Portal", label: "Soft", hint: "Lookup panel, page gradient, field dividers and sheet outline on the verification page" },
   { key: "pInk", section: "Portal", label: "Ink", hint: "Body text on the verification page" },
 ];
 
