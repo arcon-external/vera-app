@@ -4,6 +4,26 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.9.2] - 2026-10-11
+
+### Fixed
+
+- **A services quotation built from the `vera` command line is no longer
+  rejected.** The tool's own reference listed the wrong values for a quotation's
+  service category, so following it produced *"services require a category"* on
+  the first attempt. It now names the values the server accepts, and a test keeps
+  the two from drifting apart again.
+
+### Security
+
+- **Sign-in is now limited per network address, not only per account.** The lock
+  that follows five failed attempts was keyed on the address typed into the form
+  — a value the sender chooses — so it protected one account but left the
+  endpoint itself unthrottled, and a flood of different addresses cost a database
+  lookup each. **Nothing changes in normal use:** five failed attempts still lock
+  an account for a minute, and the new limit is sixty attempts a minute from one
+  address, which an office signing in together will never reach.
+
 ## [0.9.1] - 2026-10-10
 
 ### Fixed
