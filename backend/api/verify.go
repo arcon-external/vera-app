@@ -18,6 +18,7 @@ import (
 
 	"vera-app/backend"
 	"vera-app/backend/store"
+	"vera-app/backend/theme"
 )
 
 //go:embed verify_template.html
@@ -59,21 +60,23 @@ type verifyView struct {
 	// printed on the quotation, so a customer checking the document against our
 	// record needs to see the same figure. Empty when none was charged, and the
 	// template omits the row entirely then.
-	PPN          string
-	Detail       string
-	LookupID     string
-	QuoteNo      string
-	Revision     string
-	Headline     string
-	IssueDate    string
-	Verdict      string
-	Recipient    string
-	ThemePInk    string
-	ThemePSoft   string
-	ThemePDeep   string
-	ThemePAccent string
-	Diffs        []verifyFieldDiff
-	AnyClaim     bool
+	PPN       string
+	Detail    string
+	LookupID  string
+	QuoteNo   string
+	Revision  string
+	Headline  string
+	IssueDate string
+	Verdict   string
+	Recipient string
+	// Portal is the verification page's brand set, resolved from the live
+	// company profile. The status colours (valid/superseded/mismatch/
+	// not-found) are deliberately not part of it: they are fixed literals in
+	// the template so a brand colour can never restyle a verdict. See
+	// backend/theme for the derivation.
+	Portal   theme.PortalPalette
+	Diffs    []verifyFieldDiff
+	AnyClaim bool
 }
 
 func (v verifyView) IsVerified() bool   { return v.Verdict == verdictValid }
@@ -180,6 +183,13 @@ func (s *Server) renderVerify(context echo.Context, status int, view verifyView)
 	if view.Detail == "" {
 		view.Detail = defaultDetail
 	}
+	// Every path renders through here, including the ones that never touched
+	// a profile (unknown handles, rate limits). A zero Portal would emit
+	// empty brand variables and drop the page's borders, so those resolve to
+	// the default brand instead of rendering broken.
+	if view.Portal.Deep == "" {
+		view.Portal = theme.DefaultTheme().ResolvePortal()
+	}
 	context.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	context.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	context.Response().Header().Set("X-Frame-Options", "DENY")
@@ -203,7 +213,12 @@ func (r *verifyRenderer) Render(w io.Writer, name string, data interface{}, cont
 // claims carries paper-side values the requester typed (empty when unknown).
 // A nil claims map means "no comparison requested".
 func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claims map[string]string) verifyView {
-	view := verifyView{Verdict: verdictNotFound, LookupID: strings.TrimSpace(lookupID), AnyClaim: len(claims) > 0}
+	view := verifyView{
+		Verdict:  verdictNotFound,
+		LookupID: strings.TrimSpace(lookupID),
+		AnyClaim: len(claims) > 0,
+		Portal:   theme.DefaultTheme().ResolvePortal(),
+	}
 
 	normalized := normalizeLookupID(lookupID)
 	if normalized == "" {
@@ -233,10 +248,12 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	// empty issuer (legacy rows predate it) falls back to the profile name.
 	// Either way the values shown are program data, never hardcoded text.
 	if profile, err := s.database.GetCompanyProfile(requestContext); err == nil {
-		view.ThemePDeep = profile.ThemePDeep
-		view.ThemePAccent = profile.ThemePAccent
-		view.ThemePSoft = profile.ThemePSoft
-		view.ThemePInk = profile.ThemePInk
+		view.Portal = theme.Theme{
+			Deep:   profile.ThemePDeep,
+			Accent: profile.ThemePAccent,
+			Soft:   profile.ThemePSoft,
+			Ink:    profile.ThemePInk,
+		}.ResolvePortal()
 		if view.Issuer == "" {
 			view.Issuer = profile.LegalName
 		}

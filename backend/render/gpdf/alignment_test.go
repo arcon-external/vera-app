@@ -80,6 +80,13 @@ func TestHotTypesArePointerFirst(t *testing.T) {
 // What the reorder did buy here is the pointer prefix, which
 // TestHotTypesArePointerFirst covers. The two are different axes and conflating
 // them would make this test look like it is guarding something it is not.
+//
+// Engine's budget is 384, not 144: since issue #335 it carries the resolved
+// theme.Palette (nineteen colour strings) by value instead of four base
+// strings. That is 240 bytes more on a value allocated once per render,
+// against a ~55KB document — and the alternative (a pointer) would only move
+// the same bytes to the heap while adding an allocation and a nil to guard.
+// The budget records the size; it does not forbid growing it for a reason.
 func TestHotTypeSizes(t *testing.T) {
 	for _, tc := range []struct {
 		value any
@@ -87,7 +94,7 @@ func TestHotTypeSizes(t *testing.T) {
 	}{
 		{box{}, 104}, {run{}, 72}, {picture{}, 56}, {clippedFill{}, 72},
 		{gradient{}, 88}, {glyphRun{}, 40}, {totalRow{}, 56},
-		{Face{}, 104}, {Engine{}, 144}, {lazy{}, 40},
+		{Face{}, 104}, {Engine{}, 384}, {lazy{}, 40},
 	} {
 		typ := reflect.TypeOf(tc.value)
 		if got := typ.Size(); got > tc.want {

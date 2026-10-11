@@ -12,13 +12,21 @@
 	<style>
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		:root {
-			--deep-blue: {{if .ThemePDeep}}{{.ThemePDeep}}{{else}}#1A237E{{end}};
-			--accent-blue: {{if .ThemePAccent}}{{.ThemePAccent}}{{else}}#284AF3{{end}};
-			--soft-blue: {{if .ThemePSoft}}{{.ThemePSoft}}{{else}}#D6E4FF{{end}};
-			--rule: #c9d9ff;
-			--ink: {{if .ThemePInk}}{{.ThemePInk}}{{else}}#1a1a1a{{end}};
-			--muted: #3a4466;
+			--deep-blue: {{.Portal.Deep}};
+			--accent-blue: {{.Portal.Accent}};
+			--ink: {{.Portal.Ink}};
 			--paper: #ffffff;
+			/* Brand tints, derived per request from the portal palette
+			   (backend/theme): the sheet outline and section rules, muted
+			   copy, the lookup panel, and the page gradient. The status set
+			   below is fixed and semantic — a rebrand must never restyle a
+			   verdict, so those values stay literal. */
+			--edge: {{.Portal.Edge}};
+			--rule: {{.Portal.Edge}};
+			--muted: {{.Portal.Secondary}};
+			--section: {{.Portal.Section}};
+			--page-0: {{.Portal.Page0}};
+			--page-1: {{.Portal.Page1}};
 			--ok: #1B7F3B;
 			--ok-bg: #eef8f1;
 			--warn: #9A6100;
@@ -35,7 +43,7 @@
 			font-size: 16px;
 			line-height: 1.55;
 			color: var(--ink);
-			background: linear-gradient(165deg, #ffffff 0%, #f4f7ff 65%, #eaf0ff 100%);
+			background: linear-gradient(165deg, var(--paper) 0%, var(--page-0) 65%, var(--page-1) 100%);
 			min-height: 100vh;
 			padding: max(14px, env(safe-area-inset-top)) 12px
 				max(28px, env(safe-area-inset-bottom));
@@ -45,13 +53,17 @@
 			max-width: 720px;
 			margin: 0 auto;
 			background: var(--paper);
-			border: 1px solid #c6d4ff;
+			border: 1px solid var(--edge);
 			border-radius: 14px;
 			overflow: hidden;
-			box-shadow: 0 18px 44px rgba(26, 35, 126, 0.08);
+			box-shadow: 0 18px 44px {{.Portal.Shadow}};
 		}
 		.ribbon { height: 8px; background: linear-gradient(90deg, var(--deep-blue) 0%, var(--accent-blue) 100%); }
 	.sheet + .sheet { margin-top: 18px; }
+	/* The lookup panel carries the portal soft colour: this is the role
+	   ThemePSoft was added for. It tints the panel without touching the
+	   verdict above it, whose backgrounds stay semantic. */
+	.sheet-section { background: var(--section); }
 		.inner { padding: 20px 16px 26px; }
 		.eyebrow {
 			display: flex;
@@ -115,7 +127,7 @@
 			border-radius: 10px;
 			padding: 12px 14px;
 			margin-bottom: 10px;
-			background: #fff;
+			background: var(--paper);
 		}
 		.diff-label { font-weight: 700; color: #26304d; margin-bottom: 8px; }
 		.diff-row { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; }
@@ -137,11 +149,11 @@
 			border: 1px solid var(--rule);
 			border-radius: 10px;
 			color: var(--ink);
-			background: #fff;
+			background: var(--paper);
 			-webkit-appearance: none;
 			appearance: none;
 		}
-		.lookup input:focus { outline: 2px solid rgba(40, 74, 243, 0.28); border-color: var(--accent-blue); }
+		.lookup input:focus { outline: 2px solid {{.Portal.Focus}}; border-color: var(--accent-blue); }
 		.lookup .row { display: grid; grid-template-columns: 1fr; gap: 14px; }
 		.lookup button {
 			margin-top: 2px;
@@ -149,7 +161,7 @@
 			/* 48px tall: comfortably above the 44px touch-target floor. */
 			min-height: 48px;
 			background: var(--deep-blue);
-			color: #fff;
+			color: var(--paper);
 			border: 0;
 			border-radius: 10px;
 			padding: 13px 20px;
@@ -222,7 +234,7 @@
 	</div>
 </div>
 
-<div class="sheet">
+<div class="sheet sheet-section">
 	<div class="inner">
 		<div class="lookup">
 			<h2>Check another document</h2>

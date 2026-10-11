@@ -159,43 +159,10 @@ const (
 	qrCardPx = 110
 )
 
-// Palette, verbatim from the stylesheet.
-const (
-	colInk        = "#1A1A1A"
-	colDeep       = "#1A237E"
-	colAccent     = "#284AF3"
-	colSoft       = "#D6E4FF"
-	colGreen      = "#228B22"
-	colPageEdge   = "#C6D4FF"
-	colLeadRule   = "#D8E2FF"
-	colEyebrowBar = "#C9D9FF"
-	colCardEdge   = "#CCD9FF"
-	colCardBg     = "#F8FBFF"
-	colMetaBg     = "#F8FAFF"
-	colMetaEdge   = "#C9D9FF"
-	colSubjectBg  = "#F7FAFF"
-	colSubjectInk = "#26304D"
-	colSubjectEdg = "#CAD8FF"
-	colTableEdge  = "#C5D5FF"
-	colTableRule  = "#CFE0FF"
-	colZebra      = "#F6F9FF"
-	// The sub-item treatment: the lighter ink `tr.sub-row` fades to, the number
-	// cell's quieter grey, and the rail under which the parts hang.
-	colSubInk     = "#4A5470"
-	colSubNo      = "#5B6478"
-	colSubRail    = "#B7C6E2"
-	colTotalsBg   = "#F9FBFF"
-	colTotalsEdge = "#CEDBFF"
-	colTotalsInk  = "#2F3654"
-	colClosing    = "#364066"
-	colMuted      = "#8A93B2"
-	colVerifyInk  = "#3A4466"
-	colPaper      = "#FFFFFF"
-	colLead       = "#3A4466"
-	colMetaInk    = "#2F3654"
-	colDecor0     = "#DCE8FF"
-	colDecor1     = "#C9DCFF"
-)
+// Colours live in backend/theme, not here. The palette used to be a block of
+// literals beside this one, duplicating the stylesheet; now the engine holds
+// one resolved theme.Palette (see engine.go) and every paint reads a role
+// from it, so the two renderers cannot drift apart again.
 
 // headRowH is the items header row's height in points.
 //
@@ -591,7 +558,7 @@ func (e *Engine) layout(in Input) []*page {
 	// added last and moved to the front of the display list.
 	finish := func(p *page, bottom float64) {
 		p.bottom = bottom
-		p.prims = append(cardFor(p, m, bottom), p.prims...)
+		p.prims = append(e.cardFor(p, m, bottom), p.prims...)
 	}
 
 	tableTop := m.tableTop

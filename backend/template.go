@@ -86,6 +86,9 @@ func readTemplate(q *Quotation) error {
 	}
 
 	var cssBuf strings.Builder
+	// The bases are whatever Prepare or the zero value left; resolving here
+	// executes the startup stylesheet against the default palette.
+	q.resolvePalette()
 	if err := cssTmpl.Execute(&cssBuf, q.Data); err != nil {
 		return fmt.Errorf("execute css template: %w", err)
 	}

@@ -11,6 +11,8 @@ import (
 	"github.com/gpdf-dev/gpdf/document/render"
 	"github.com/gpdf-dev/gpdf/pdf"
 	"github.com/gpdf-dev/gpdf/pdf/font"
+
+	"vera-app/backend/theme"
 )
 
 // Page geometry, in points.
@@ -133,12 +135,12 @@ type Engine struct {
 	bold         *font.TrueTypeFont
 	regularShape *shaper
 	boldShape    *shaper
-	deep         string
-	accent       string
-	soft         string
-	ink          string
-	regularData  []byte
-	boldData     []byte
+	// pal is the document's whole colour set, resolved from the brand by
+	// SetTheme. Every paint reads a role from it; no literal remains in
+	// this package (see backend/theme for the derivation).
+	pal         theme.Palette
+	regularData []byte
+	boldData    []byte
 }
 
 // Theme carries the four quotable brand colours.
@@ -177,10 +179,7 @@ func NewEngine(fonts fs.FS, regularName, boldName string) (*Engine, error) {
 		regular: rm, bold: bm,
 		regularData: rd, boldData: bd,
 		regularShape: parseShaper(rd), boldShape: parseShaper(bd),
-		deep:   colDeep,
-		accent: colAccent,
-		soft:   colSoft,
-		ink:    colInk,
+		pal: theme.DefaultTheme().Resolve(),
 	}
 	return e, nil
 }
@@ -313,18 +312,13 @@ func pngSize(b []byte) (int, int) {
 }
 
 // SetTheme applies a brand palette. Empty fields keep their stylesheet default,
-// which is what an unset theme column means.
+// which is what an unset theme column means. The four colours resolve to the
+// full role set on the way in, so every paint follows a rebrand.
 func (e *Engine) SetTheme(t Theme) {
-	if t.Deep != "" {
-		e.deep = t.Deep
-	}
-	if t.Accent != "" {
-		e.accent = t.Accent
-	}
-	if t.Soft != "" {
-		e.soft = t.Soft
-	}
-	if t.Ink != "" {
-		e.ink = t.Ink
-	}
+	e.pal = theme.Theme{
+		Deep:   t.Deep,
+		Accent: t.Accent,
+		Soft:   t.Soft,
+		Ink:    t.Ink,
+	}.Resolve()
 }

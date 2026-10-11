@@ -23,13 +23,30 @@
 			margin: 1.3cm;
 		}
 
+		/* Brand variables, generated per quotation from backend/theme: the four
+		   stored colours plus each derived role. Nothing below names a colour
+		   directly; every paint resolves through these, so a rebrand reaches
+		   the whole document and both renderers read the same values. */
 		:root {
-			--ink: {{if .ThemeQInk}}{{.ThemeQInk}}{{else}}#1a1a1a{{end}};
-			--deep-blue: {{if .ThemeQDeep}}{{.ThemeQDeep}}{{else}}#1A237E{{end}};
-			--accent-blue: {{if .ThemeQAccent}}{{.ThemeQAccent}}{{else}}#284AF3{{end}};
-			--soft-blue: {{if .ThemeQSoft}}{{.ThemeQSoft}}{{else}}#D6E4FF{{end}};
-			--paper: #ffffff;
-			--green: #228B22;
+			--ink: {{.Palette.Ink}};
+			--deep-blue: {{.Palette.Deep}};
+			--accent-blue: {{.Palette.Accent}};
+			--soft-blue: {{.Palette.Soft}};
+			--paper: {{.Palette.Paper}};
+			--green: {{.Palette.Green}};
+			--surface: {{.Palette.Surface}};
+			--edge: {{.Palette.Edge}};
+			--rule: {{.Palette.Rule}};
+			--secondary: {{.Palette.Secondary}};
+			--emphasis: {{.Palette.Emphasis}};
+			--sub-ink: {{.Palette.SubInk}};
+			--sub-no: {{.Palette.SubNo}};
+			--muted: {{.Palette.Muted}};
+			--rail: {{.Palette.Rail}};
+			--decor-0: {{.Palette.Decor0}};
+			--decor-1: {{.Palette.Decor1}};
+			--page-0: {{.Palette.Page0}};
+			--page-1: {{.Palette.Page1}};
 		}
 
 		body {
@@ -37,7 +54,7 @@
 			font-size: 11px;
 			line-height: 1.45;
 			color: var(--ink);
-			background: linear-gradient(165deg, #ffffff 0%, #f4f7ff 65%, #eaf0ff 100%);
+			background: linear-gradient(165deg, var(--paper) 0%, var(--page-0) 65%, var(--page-1) 100%);
 			-webkit-print-color-adjust: exact;
 			print-color-adjust: exact;
 		}
@@ -46,7 +63,7 @@
 			max-width: 900px;
 			margin: 0 auto;
 			background: var(--paper);
-			border: 1px solid #c6d4ff;
+			border: 1px solid var(--edge);
 			overflow: hidden;
 		}
 
@@ -60,7 +77,7 @@
 			justify-content: space-between;
 			align-items: flex-start;
 			padding: 16px 24px 14px;
-			border-bottom: 1px solid #d8e2ff;
+			border-bottom: 1px solid var(--rule);
 			gap: 16px;
 		}
 
@@ -75,7 +92,7 @@
 		.top-brand p {
 			font-size: 12px;
 			font-weight: 400;
-			color: #3a4466;
+			color: var(--secondary);
 			max-width: 380px;
 		}
 
@@ -100,7 +117,7 @@
 			content: "";
 			flex: 1;
 			height: 1px;
-			background: #c9d9ff;
+			background: var(--edge);
 		}
 
 		.quote-meta {
@@ -108,9 +125,9 @@
 			grid-template-columns: auto auto;
 			gap: 8px 14px;
 			padding: 14px 16px;
-			border: 1px solid #c9d9ff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
-			background: #f8faff;
+			background: var(--surface);
 			min-width: 240px;
 			height: fit-content;
 		}
@@ -123,7 +140,7 @@
 		.quote-meta dd {
 			text-align: right;
 			font-weight: 700;
-			color: #2f3654;
+			color: var(--emphasis);
 		}
 
 		.content {
@@ -148,16 +165,16 @@
 
 		.meta-decor {
 			flex: 1;
-			border: 1px solid #c9d9ff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
-			background: linear-gradient(145deg, #dce8ff 0%, #c9dcff 100%);
+			background: linear-gradient(145deg, var(--decor-0) 0%, var(--decor-1) 100%);
 		}
 
 		.card {
-			border: 1px solid #ccd9ff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
 			padding: 12px 14px;
-			background: #f8fbff;
+			background: var(--surface);
 		}
 
 		.card h3 {
@@ -181,14 +198,14 @@
 		.subject {
 			display: grid;
 			grid-template-columns: 110px 1fr;
-			border: 1px solid #cad8ff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
 			overflow: hidden;
 		}
 
 		.subject .label {
 			background: var(--deep-blue);
-			color: #fff;
+			color: var(--paper);
 			font-weight: 700;
 			padding: 12px;
 			display: flex;
@@ -199,9 +216,9 @@
 
 		.subject .value {
 			padding: 12px 14px;
-			background: #f7faff;
+			background: var(--surface);
 			font-weight: 700;
-			color: #26304d;
+			color: var(--emphasis);
 		}
 
 		.items-wrap {
@@ -217,17 +234,17 @@
 		}
 
 		.items-head-table {
-			border: 1px solid #c5d5ff;
+			border: 1px solid var(--edge);
 			border-bottom: 0;
 			background: var(--deep-blue);
-			color: #fff;
+			color: var(--paper);
 			font-size: 10px;
 			font-weight: 700;
 		}
 
 		.items-head-table th {
 			padding: 10px;
-			border-right: 1px solid #cfe0ff;
+			border-right: 1px solid var(--rule);
 			text-align: center;
 			vertical-align: middle;
 			height: 48px;
@@ -238,7 +255,7 @@
 		}
 
 		.items-body-table {
-			border: 1px solid #c5d5ff;
+			border: 1px solid var(--edge);
 			border-top: 0;
 		}
 
@@ -250,7 +267,7 @@
 		   per-row discounts arrived, and cell 6 became the discount instead. */
 		.items-body-table td {
 			padding: 10px;
-			border: 1px solid #cfe0ff;
+			border: 1px solid var(--rule);
 			text-align: center;
 			/* A number reads against the row's middle, not its first prose
 			   line: in a row whose description wraps, a top-aligned figure
@@ -301,7 +318,7 @@
 		   parent band down through the sub rows, drawn from group geometry,
 		   and never runs through the parent's own text. */
 		.items-body-table tbody.item:nth-of-type(even) td {
-			background: #f6f9ff;
+			background: var(--surface);
 		}
 
 		.items-body-table tr.sub-parent td {
@@ -312,11 +329,11 @@
 
 		.items-body-table tr.sub-row td {
 			padding: 6px 10px;
-			color: #4a5470;
+			color: var(--sub-ink);
 		}
 
 		.items-body-table tr.sub-row td:nth-child(1) {
-			color: #5b6478;
+			color: var(--sub-no);
 			font-size: 10px;
 			font-variant-numeric: tabular-nums;
 		}
@@ -335,7 +352,7 @@
 			   right edge -- but a table where one number sits differently from
 			   the rest reads as a mistake, and it is one column of many. */
 			font-variant-numeric: tabular-nums;
-			color: #5b6478;
+			color: var(--sub-no);
 			white-space: nowrap;
 		}
 
@@ -346,7 +363,7 @@
 			top: 0;
 			bottom: 0;
 			width: 2px;
-			background: #b7c6e2;
+			background: var(--rail);
 		}
 
 		/* ── Sub-sub-items ──────────────────────────────────────────────────
@@ -370,7 +387,7 @@
 		}
 
 		.tnc {
-			border: 1px solid #ccd9ff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
 			padding: 14px;
 			background: var(--soft-blue);
@@ -388,10 +405,10 @@
 		}
 
 		.totals {
-			border: 1px solid #cedbff;
+			border: 1px solid var(--edge);
 			border-radius: 10px;
 			padding: 14px;
-			background: #f9fbff;
+			background: var(--surface);
 			display: grid;
 			gap: 8px;
 		}
@@ -417,7 +434,7 @@
 		.closing {
 			margin-top: 4px;
 			text-align: center;
-			color: #364066;
+			color: var(--secondary);
 		}
 
 		.verify-pending {
@@ -426,7 +443,7 @@
 			justify-content: flex-end;
 			align-items: center;
 			gap: 14px;
-			color: #8a93b2;
+			color: var(--muted);
 		}
 
 		.verify-pending strong {
@@ -436,10 +453,10 @@
 
 		.verify-pending span {
 			font-size: 10px;
-			border: 1px dashed #c9d9ff;
+			border: 1px dashed var(--edge);
 			border-radius: 8px;
 			padding: 10px 14px;
-			background: #f8fbff;
+			background: var(--surface);
 		}
 
 		.verify {
@@ -454,7 +471,7 @@
 			text-align: right;
 			font-size: 10px;
 			line-height: 1.5;
-			color: #3a4466;
+			color: var(--secondary);
 			padding-bottom: 2px;
 		}
 
@@ -468,7 +485,7 @@
 		.verify-code {
 			display: block;
 			font-size: 9px;
-			color: #8a93b2;
+			color: var(--muted);
 			letter-spacing: 0.02em;
 		}
 
@@ -476,9 +493,9 @@
 			width: 110px;
 			height: 110px;
 			padding: 4px;
-			border: 1px solid #c9d9ff;
+			border: 1px solid var(--edge);
 			border-radius: 8px;
-			background: #fff;
+			background: var(--paper);
 		}
 
 		.verify-qr img {
@@ -489,13 +506,13 @@
 
 		@media print {
 			body {
-				background: #fff;
+				background: var(--paper);
 			}
 
 			.page {
 				max-width: none;
 				margin: 0;
-				border: 1px solid #c6d4ff;
+				border: 1px solid var(--edge);
 				overflow: visible;
 			}
 
