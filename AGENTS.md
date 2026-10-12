@@ -690,23 +690,24 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    prefix — Wails convention) and commit it.
 4. Verify the stamp: `VERSION=vX.Y.Z scripts/stamp-version.sh` must print OK
    (it fails loudly if Go ldflags and installer metadata disagree).
-5. Push `main` **before** creating the release, and create the release with
-   an explicit `--target`. `gh release create` tags the *remote* default
-   branch head when the tag does not exist — if the version-bump commit is
-   still local, the tag lands on the commit without the bump, the desktop
-   build fails its own stamp check, and the tag has to be force-moved by
-   hand (this produced the first v0.4.1 failure). Push first, then:
+5. Push `main`, then create the release — **the release must exist before the
+   workflow runs**, because every artifact job uploads into it: a missing
+   release fails all of them (v0.10.1 lost a full cycle to `release not
+   found`). `gh release create` creates the tag as well, so there is no
+   separate tag step and no window in which a job can run without a release.
+   Pin `--target` explicitly: `gh release create` tags the *remote* default
+   branch head when the tag does not exist, and if the version-bump commit is
+   still local the tag lands on the commit without the bump, the desktop
+   build fails its own stamp check, and the tag has to be force-moved by hand
+   (this produced the first v0.4.1 failure). Push first, then:
    ```bash
    git push origin main
    gh release create v0.2.0 --target "$(git rev-parse HEAD)" \
      --title "v0.2.0 — Title" --notes "changelog"
    ```
-6. Create and push an annotated tag:
-   ```bash
-   git tag -a v0.2.0 -m "v0.2.0: description"
-   git push origin v0.2.0
-   ```
-7. Pushing the tag triggers `.github/workflows/desktop.yml`, which builds
+   The tag this creates is lightweight, and it exists before `desktop.yml`
+   starts — that is the point of this order.
+6. The tag the release created triggers `.github/workflows/desktop.yml`, which builds
    **nine** artifacts, each with a `.sha256` sidecar:
 
    | Artifact | Job |
@@ -728,10 +729,11 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
    The `cli` job fails the release if a binary does not carry the tag, so a
    mis-stamped build cannot be published.
-8. **The `Announce to the updater` job does the mirroring and the updater
+7. **The `Announce to the updater` job does the mirroring and the updater
    variables for you.** It runs last, gated on all three installer jobs, and is
-   the only thing that makes an installed desktop offer the new version. Watch
-   for it to go green — it is not cosmetic:
+   the only thing that makes an installed desktop offer the new version. A
+   failure in any of the three installer jobs means it never runs, and the
+   updater is never told. Watch for it to go green — it is not cosmetic:
 
    - mirrors every artifact in `scripts/announce-release.sh`'s `ASSETS` array —
      the three installers and the six CLI binaries — to
@@ -756,6 +758,9 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    gh run rerun --repo arcon-external/vera-app --failed    # or re-run the job
    ```
 
+   `gh run rerun --failed` recovers a *skipped* announce job once its `needs`
+   succeed (verified at v0.10.1), so it does not need a full re-run.
+
    To do it outside CI, the script is the whole sequence and takes `--dry-run`,
    which runs every check and changes nothing:
    ```bash
@@ -763,14 +768,14 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    scripts/announce-release.sh --version v0.4.0
    ```
 
-9. **Confirm the app can see the release** — the check that was missing when
+8. **Confirm the app can see the release** — the check that was missing when
    v0.4.0 shipped invisible:
    ```bash
    curl -s https://api.arconpentapersada.co.id/v1/app/latest | grep -o '"latest": "[^"]*"'
    ```
-   It must print the tag you just pushed. If it prints anything older, the
+   It must print the tag the release created. If it prints anything older, the
    announce job failed; read its log before doing anything else.
-10. Add a Download section to the release notes listing the installers **and the
+9. Add a Download section to the release notes listing the installers **and the
     six CLI binaries**, with one install line each, and these prerequisites:
    - Windows: SmartScreen will warn on unsigned builds — expected until signing.
      A Chrome installation is no longer required for exporting quotations; the
