@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"time"
 
+	cdpcore "github.com/chromedp/cdproto/cdp"
 	cdp "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
@@ -28,6 +29,9 @@ import (
 // slow to lay out, but not indefinitely: a wedged browser should fail the
 // export rather than hang the application with the file dialog still open.
 const printTimeout = 30 * time.Second
+
+// boolPtr adapts a bool literal to the *bool fields of PrintToPDFParams.
+func boolPtr(b bool) *bool { return &b }
 
 type renderer struct{}
 
@@ -59,23 +63,32 @@ func (r renderer) Render(ctx context.Context, in quotation.Input) ([]byte, error
 	defer cancelTimeout()
 
 	var buf []byte
-	err := chromedp.Run(
+	err := chromedp.Do(
 		ctx,
 		chromedp.Navigate("about:blank"),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			tree, err := cdp.GetFrameTree().Do(ctx)
+		func(ctx context.Context, t *chromedp.Target) (chromedp.Void, error) {
+			tree, err := cdpcore.Call(ctx, t, cdp.GetFrameTree, cdpcore.Empty{})
 			if err != nil {
-				return err
+				return chromedp.Void{}, err
 			}
 
-			return cdp.SetDocumentContent(tree.Frame.ID, in.HTML).Do(ctx)
-		}),
-		chromedp.WaitVisible(`table`, chromedp.ByQuery),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			printData, _, err := cdp.PrintToPDF().WithPrintBackground(true).WithDisplayHeaderFooter(false).WithPaperWidth(8.27).WithPaperHeight(11.69).Do(ctx)
-			buf = printData
-			return err
-		}),
+			_, err = cdpcore.Call(ctx, t, cdp.SetDocumentContent, cdp.SetDocumentContentParams{
+				FrameID: tree.FrameTree.Frame.ID,
+				HTML:    in.HTML,
+			})
+			return chromedp.Void{}, err
+		},
+		chromedp.WaitVisible(chromedp.CSS("table")),
+		func(ctx context.Context, t *chromedp.Target) (chromedp.Void, error) {
+			res, err := cdpcore.Call(ctx, t, cdp.PrintToPDF, cdp.PrintToPDFParams{
+				PrintBackground:     boolPtr(true),
+				DisplayHeaderFooter: boolPtr(false),
+				PaperWidth:          8.27,
+				PaperHeight:         11.69,
+			})
+			buf = res.Data
+			return chromedp.Void{}, err
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("render quotation pdf: %w", err)
