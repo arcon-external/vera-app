@@ -137,12 +137,27 @@ const (
 	// decoration's height is taken, so a wrong value here moves the decor rather
 	// than the card.
 	metaStackGap = 12 * ptPerPx
-	bodyPx       = 11.0
-	bodyLH       = 1.45
-	descLH       = 1.4
-	subGapPx     = 6 // .desc-subitems margin-top
-	liMarginPx   = 3 // .desc-subitems li margin, collapses between siblings
-	subIndentPx  = 16
+	// totalsStackGap is `.totals-stack`'s gap, in points: the same 12px the
+	// metadata stack uses, because the two stacks are the same shape. It stands
+	// between the totals card and its decoration, and it is subtracted before
+	// the decoration's height is taken, for the same reason.
+	totalsStackGap = 12 * ptPerPx
+	// totalsDecorFloor is `.totals-decor`'s border-box floor, in points: the
+	// empty decoration still carries its 1px top and bottom borders under
+	// `box-sizing: border-box`, so the stack is never shorter than the card
+	// plus the gap plus these 2px. The metadata stack has the same floor and
+	// its native formula omits it -- a pre-existing 2px drift there, left for
+	// a follow-up -- but the totals row counts it: in the 4-row state the card
+	// plus the gap already exceeds the terms card, so the row is decided by
+	// the stack and omitting the floor puts the closing 2px high while the
+	// browser paints a 2px sliver under the card.
+	totalsDecorFloor = 2 * ptPerPx
+	bodyPx           = 11.0
+	bodyLH           = 1.45
+	descLH           = 1.4
+	subGapPx         = 6 // .desc-subitems margin-top
+	liMarginPx       = 3 // .desc-subitems li margin, collapses between siblings
+	subIndentPx      = 16
 
 	// Package rows, verbatim from the stylesheet's sub-item rules.
 	subRowPadPx       = 6  // tr.sub-row td padding
@@ -407,7 +422,11 @@ type metrics struct {
 	footerTotW    float64
 	footerTncH    float64
 	footerTotalsH float64
-	footerH       float64
+	// footerTotalsDecorH is the decoration below the totals card: whatever the
+	// footer row leaves over after the card and the stack gap. It is not drawn
+	// when it is not positive, exactly like the metadata decoration.
+	footerTotalsDecorH float64
+	footerH            float64
 	// The trailer's three blocks, measured individually so the page assembler
 	// can fragment them across pages the way the browser's grid does.
 	footerCardsH float64
@@ -471,14 +490,32 @@ func (e *Engine) derive(in Input) metrics {
 	m.footerTncW = (m.innerW - px(footGapPx)) * 1.2 / 2.0
 	m.footerTotW = (m.innerW - px(footGapPx)) * 0.8 / 2.0
 	rows := e.totalsRows(in)
-	// The footer is a grid of two cards, and a grid stretches every track to the
-	// height of the tallest. Measuring each card against its own content leaves
-	// the shorter one short, which puts a visible step along the bottom edge
-	// between two boxes the stylesheet puts side by side.
-	footerH := maxF(e.tncHeight(in, m.footerTncW), e.totalsHeight(rows))
-	m.footerTncH = footerH
-	m.footerTotalsH = footerH
-	m.footerCardsH = maxF(m.footerTncH, m.footerTotalsH)
+	// The footer is a grid of two tracks, and a grid stretches every track to
+	// the height of the tallest. Measuring each card against its own content
+	// leaves the shorter one short, which puts a visible step along the bottom
+	// edge between two boxes the stylesheet puts side by side -- so the terms
+	// card keeps the row height, exactly as the browser stretches it.
+	//
+	// The totals column is a stack, not a card: the card itself hugs its own
+	// rows (`height: fit-content`) and the decoration below it flexes into the
+	// leftover. Only the row height is shared, so the page assembler still
+	// fragments against the same footerCardsH it always has; the card is the
+	// content height and the decor is what remains after the card and the
+	// stack gap.
+	//
+	// The row counts the whole stack -- card plus gap plus the decoration's
+	// border-box floor -- mirroring infoHeight, which counts its card plus its
+	// gap (`maxF(recv, metaHeight + metaStackGap)`). Counting only the taller
+	// card repeated the bug that stack fixed: in the 4-row state (PPN plus a
+	// whole-quotation discount) the card plus the gap already exceeds the
+	// terms card, so the browser's row grows past it while the native row
+	// stayed, and the closing sat 12px apart between the two renderers.
+	tncH := e.tncHeight(in, m.footerTncW)
+	stackH := e.totalsHeight(rows) + totalsStackGap + totalsDecorFloor
+	m.footerCardsH = maxF(tncH, stackH)
+	m.footerTncH = m.footerCardsH
+	m.footerTotalsH = e.totalsHeight(rows)
+	m.footerTotalsDecorH = m.footerCardsH - m.footerTotalsH - totalsStackGap
 	m.closingH = float64(len(e.Wrap(in.Closing, px(bodyPx), m.innerW, false))) * px(bodyPx) * bodyLH
 	m.verifyH = verifyHeight(in)
 	m.footerH = m.footerCardsH +

@@ -995,37 +995,18 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 		}
 	}
 
-	// Totals.
+	// Totals card: it hugs its own rows (`height: fit-content`), and the rows
+	// draw at their natural pitch. The card used to be stretched to the footer
+	// row with the surplus shared across the rows (`align-content: stretch`),
+	// which spread two rows across a four-row-tall card whenever no PPN row
+	// printed; the stack's decoration takes the leftover now instead.
 	p.add(box{
 		x: totX, y: top, w: totW, h: m.footerTotalsH,
 		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
 	})
-	// The card is a grid of auto rows inside a box the sibling terms card
-	// stretches taller than their content, and `align-content: stretch` -- the
-	// grid default -- shares that surplus equally across the rows. Drawing at
-	// the natural pitch would bunch the lines at the top of a taller card; the
-	// browser spreads them, and the row pitch is what a reader sees.
 	ry := top + px(1) + px(footPadPx)
 	labelX := totX + px(1) + px(footPadPx)
 	valueX := totX + totW - px(1) - px(footPadPx)
-	innerH := m.footerCardsH - 2*px(1) - 2*px(footPadPx)
-	natural := make([]float64, len(rows))
-	naturalTotal := 0.0
-	for i, rw := range rows {
-		if rw.grand {
-			natural[i] = px(12) * bodyLH
-		} else {
-			natural[i] = px(bodyPx) * bodyLH
-		}
-		naturalTotal += natural[i]
-	}
-	if len(rows) > 1 {
-		naturalTotal += px(totalsGap) * float64(len(rows)-1)
-	}
-	stretch := 0.0
-	if len(rows) > 0 && innerH > naturalTotal {
-		stretch = (innerH - naturalTotal) / float64(len(rows))
-	}
 	for i, rw := range rows {
 		if i > 0 {
 			ry += px(totalsGap)
@@ -1045,7 +1026,7 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 			vw := e.Width(rw.value, px(12), true)
 			p.add(run{x: valueX - vw, baseline: ry + bodyBaselineOffset, size: px(12),
 				text: rw.value, bold: true, color: e.pal.Deep})
-			ry += natural[i] + stretch
+			ry += px(12) * bodyLH
 			continue
 		}
 		ink := e.pal.Emphasis
@@ -1057,7 +1038,23 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 		vw := e.Width(rw.value, px(bodyPx), true)
 		p.add(run{x: valueX - vw, baseline: ry + bodyBaselineOffset, size: px(bodyPx),
 			text: rw.value, bold: true, color: ink})
-		ry += natural[i] + stretch
+		ry += px(bodyPx) * bodyLH
+	}
+
+	// The decoration takes whatever the footer row is taller than the totals
+	// card and the gap between them. `totals-stack` is a flex column whose last
+	// child flexes, and the stack is as tall as the grid row, which is as tall
+	// as the taller of the two tracks -- so the leftover is exactly that
+	// difference.
+	//
+	// The height is a height, not a position: adding `top` to it here would draw
+	// a box as tall as the whole row and let it run down over the closing.
+	if d := m.footerTotalsDecorH; d > 0 {
+		p.add(box{
+			x: totX, y: top + m.footerTotalsH + totalsStackGap, w: totW, h: d,
+			stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
+			gradient: &ramp{c0: e.pal.Decor0, c1: e.pal.Decor1},
+		})
 	}
 }
 
