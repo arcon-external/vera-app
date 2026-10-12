@@ -200,27 +200,30 @@
 					<p>4. Incoterms: {{.Incoterm}}</p>
 				</div>
 
-				<div class="totals">
-					<div class="line">
-						<span>Sub Total</span>
-						<span>Rp{{.DisplaySubTotal}}</span>
+				<div class="totals-stack">
+					<div class="totals">
+						<div class="line">
+							<span>Sub Total</span>
+							<span>Rp{{.DisplaySubTotal}}</span>
+						</div>
+						{{/* Discounts are entered per line now, so a quotation
+						     without one must not print an empty "Discount (0%) Rp0"
+						     row. The row survives only for revisions that carry a
+						     whole-quotation discount, which older ones still can. */}}
+						{{if .DiscountAmount}}<div class="line discount">
+							<span>Discount ({{.DiscountPercent}}%)</span>
+							<span>Rp{{.DisplayDiscountAmount}}</span>
+						</div>{{end}}
+						{{if .PpnAmount}}<div class="line ppn">
+							<span>PPN 11%</span>
+							<span>Rp{{.DisplayPpnAmount}}</span>
+						</div>{{end}}
+						<div class="line grand">
+							<span>Grand Total</span>
+							<span>Rp{{.DisplayGrandTotal}}</span>
+						</div>
 					</div>
-					{{/* Discounts are entered per line now, so a quotation
-					     without one must not print an empty "Discount (0%) Rp0"
-					     row. The row survives only for revisions that carry a
-					     whole-quotation discount, which older ones still can. */}}
-					{{if .DiscountAmount}}<div class="line discount">
-						<span>Discount ({{.DiscountPercent}}%)</span>
-						<span>Rp{{.DisplayDiscountAmount}}</span>
-					</div>{{end}}
-					{{if .PpnAmount}}<div class="line ppn">
-						<span>PPN 11%</span>
-						<span>Rp{{.DisplayPpnAmount}}</span>
-					</div>{{end}}
-					<div class="line grand">
-						<span>Grand Total</span>
-						<span>Rp{{.DisplayGrandTotal}}</span>
-					</div>
+					<div class="totals-decor" aria-hidden="true"></div>
 				</div>
 			</section>
 
