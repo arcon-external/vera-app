@@ -133,12 +133,10 @@ go test ./backend -run '^TestBuildPricing' -v
 in-process against a real `veraserver` and a throwaway schema: login → clients →
 validate → export (a real PDF and a signed revision) → verify → archive → drafts
 → logout. It skips without `VERA_POSTGRES_TEST_DSN`, and it drops the schema it
-uses — point it only at a throwaway database. `backend/store` skips the same
-way, but `backend/api` does not fully skip: the tests that call `resetTestSchema`
-directly (`drafts_test.go`, `verify_test.go`, `verify_hardening_test.go`,
-`verify_theme_test.go`, and the render test in `company_logo_test.go`) fail to
-connect instead, so the `./...` gates need the DSN pointed at a throwaway
-database to pass.
+uses — point it only at a throwaway database. `backend/store` and `backend/api`
+skip the same way (`resetTestSchema` carries the empty-DSN guard the other
+helpers have), so a bare `go test -race ./...` passes with no database — and
+the DSN is what makes the integration paths actually run.
 
 The Postgres repository test is skipped unless a test DSN is supplied. Use a
 throwaway database/schema, never the production one:
