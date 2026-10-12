@@ -444,16 +444,20 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode-go/muse-spark-1.3-contributor#high` | Writes code, writes and runs tests. |
-| **Explorer** | `opencode-go/deepseek-v4.1-flash#high` | Crawls files and reports. Read-only: it never edits. |
+| **Worker** | `opencode-go/step-5-preview-free#high`, fallback `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Explorer** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Crawls files and reports. Read-only: it never edits. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
 | **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
-dispatch. The Judge is deliberately a **different model family** from the Advisor:
+dispatch. A role with no variant suffix names the provider's **default** variant —
+the bare model ID, because `#default` is not a variant that exists.
+The Worker and the Explorer each name a **fallback**, used when the primary times
+out or errors at dispatch; a dispatch that falls back says so in its report.
+The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek. What it costs is stated plainly: the Judge now shares a family with the orchestrator and the Explorer, and the Advisor shares one with the Worker. If a future run shows correlated misses between a reviewer and its family-mate, re-deal the families rather than defending the table.
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek. What it costs is stated plainly: the Judge shares a family with the orchestrator, and the Advisor shares one with the Worker's fallback (the primary Worker and the Explorer are trial models). If a future run shows correlated misses between a reviewer and its family-mate, re-deal the families rather than defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
