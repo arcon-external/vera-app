@@ -4,12 +4,17 @@ import (
 	"strconv"
 
 	"vera-app/backend/apicontract"
+	"vera-app/backend/currency"
 )
 
 type ArchivedQuotationSummary struct {
-	QuoteNumber    string
-	CustomerName   string
-	Subject        string
+	QuoteNumber  string
+	CustomerName string
+	Subject      string
+	// Currency is the code the latest revision was issued in. The archive
+	// page resolves per-row entries from it so rows render in their
+	// revision currency, not the live profile one (issue #336 Wave B).
+	Currency       string
 	CreatedAt      string
 	DisplayGrand   string
 	ID             int64
@@ -84,6 +89,9 @@ type ArchivedQuotation struct {
 	TaxCategory                 string
 	TaxType                     string
 	ServiceCategory             string
+	// Currency lives on the embedded summary (one field, not two: the
+	// bindings generator flattens the embedding, so a second declaration
+	// here would emit a duplicate identifier in models.ts).
 	DisplayTax                  string
 	DisplayMarginalizedGrand    string
 	DisplayMarginalizedDiscount string
@@ -135,6 +143,7 @@ func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
 			RevisionNumber: row.RevisionNumber,
 			CustomerName:   row.CustomerName,
 			Subject:        row.Subject,
+			Currency:       row.Currency,
 			CreatedAt:      row.CreatedAt,
 			GrandTotal:     row.GrandTotal,
 			DisplayGrand:   row.DisplayGrand,
@@ -224,9 +233,14 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			RevisionNumber: detail.Revision,
 			CustomerName:   detail.CustomerName,
 			Subject:        detail.Subject,
-			CreatedAt:      "",
-			GrandTotal:     detail.GrandTotal,
-			DisplayGrand:   detail.DisplayMarginalizedGrand,
+			// Normalised, so a revision that predates the column reads as
+			// the default it was signed as rather than an empty string.
+			// The editor blocks loading this under a live profile with a
+			// different code, rather than reinterpreting the integers.
+			Currency:     currency.Normalize(detail.Currency),
+			CreatedAt:    "",
+			GrandTotal:   detail.GrandTotal,
+			DisplayGrand: detail.DisplayMarginalizedGrand,
 		},
 		RecipientName:               detail.RecipientName,
 		Incoterm:                    detail.Incoterm,

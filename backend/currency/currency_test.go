@@ -40,10 +40,15 @@ func TestCatalogueIsComplete(t *testing.T) {
 	}
 }
 
-// The exponents are ISO 4217 minor units, verified rather than assumed: only
-// IDR, JPY, KRW and VND carry 0; the rest carry 2. A wrong exponent stores a
-// factor of a hundred into every figure.
-func TestCatalogueExponentsMatchISO4217(t *testing.T) {
+// The exponents are the application's display contract, verified rather
+// than assumed: only IDR, JPY, KRW and VND carry 0; the rest carry 2. A
+// wrong exponent stores a factor of a hundred into every figure.
+//
+// IDR deliberately deviates from ISO 4217 here, which assigns it minor unit
+// 2 (the sen): sen are defunct and every stored integer is whole rupiah, so
+// the catalogue pins 0. Do not "fix" this to 2 — that would divide every
+// displayed figure by 100.
+func TestCatalogueExponentsMatchTheApplicationContract(t *testing.T) {
 	for code, want := range map[string]int{
 		"IDR": 0, "JPY": 0, "KRW": 0, "VND": 0,
 		"USD": 2, "EUR": 2, "SGD": 2, "MYR": 2, "CNY": 2, "HKD": 2,
@@ -55,9 +60,17 @@ func TestCatalogueExponentsMatchISO4217(t *testing.T) {
 			continue
 		}
 		if info.Exponent != want {
-			t.Errorf("code %s exponent = %d; want ISO 4217 minor units %d",
+			t.Errorf("code %s exponent = %d; want the application-contract exponent %d",
 				code, info.Exponent, want)
 		}
+	}
+	// IDR at 0 is the deliberate ISO 4217 carve-out (sen defunct, whole
+	// rupiah stored): changing it to 2 silently divides every figure by 100.
+	if info, ok := Lookup("IDR"); !ok {
+		t.Errorf("code IDR has no entry")
+	} else if info.Exponent != 0 {
+		t.Errorf("code IDR exponent = %d; want 0 (whole rupiah stored, sen defunct — not ISO 4217 minor unit 2)",
+			info.Exponent)
 	}
 }
 

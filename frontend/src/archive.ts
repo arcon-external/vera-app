@@ -1,12 +1,38 @@
+import type { CurrencyInfo } from "./format";
+
 export interface ArchivedQuotationSummary {
   ID: number;
   QuoteNumber: string;
   RevisionNumber: number;
   CustomerName: string;
   Subject: string;
+  /** The code the latest revision was issued in (server-normalised). */
+  Currency: string;
   CreatedAt: string;
   GrandTotal: number;
   DisplayGrand: string;
+}
+
+/**
+ * Resolves a revision's currency code to its catalogue entry for display.
+ * The archive/detail pages fetch the catalogue over GetCurrencyCatalogue();
+ * the code comes from the revision, the fallback is the live profile entry
+ * the caller passed. A missing or unknown code (a catalogue that has not
+ * loaded yet -- the server normalises codes, so unknown means unreachable,
+ * not a third currency) renders in the live currency rather than breaking
+ * the row. Matching is case-insensitive, mirroring Go's Lookup.
+ */
+export function resolveCurrencyEntry(
+  catalogue: readonly CurrencyInfo[] | null | undefined,
+  code: string | null | undefined,
+  fallback: CurrencyInfo
+): CurrencyInfo {
+  const want = (code ?? "").trim().toUpperCase();
+  if (want !== "") {
+    const found = catalogue?.find((entry) => entry.code === want);
+    if (found) return found;
+  }
+  return fallback;
 }
 
 export interface ArchivedQuotationSubItem {
@@ -65,6 +91,9 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   RecipientName: string;
   RecipientAddress: string;
   Incoterm: string;
+  /** The code the revision was issued in. Editing under a live profile with a
+   * different code is blocked rather than reinterpreting the stored amounts. */
+  Currency: string;
   ValidityDays: number;
   PaymentTermDays: number;
   LeadTimeDays: number;

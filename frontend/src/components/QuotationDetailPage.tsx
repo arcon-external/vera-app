@@ -1,13 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { GetQuotationRevision } from "@backend/backend/Quotation";
+import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotation } from "../archive";
+import { resolveCurrencyEntry } from "../archive";
+import {
+  decorateMoney,
+  formatMoney,
+  type CurrencyInfo,
+} from "../format";
 
-// signedIdr renders a profit figure that can be negative. A discount below
+// The IDR entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the prop default only -- the live
+// entry always arrives from the caller -- not a catalogue mirror.
+const IDR_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
+
+// signedMoney renders a profit figure that can be negative. A discount below
 // cost is a loss, and printing it as a positive number would be a lie the
-// reader has to notice for themselves.
-function signedIdr(value: number): string {
-  const text = formatIdr(Math.abs(value));
-  return `${value < 0 ? "−" : "+"}Rp${text}`;
+// reader has to notice for themselves. The sign stays outside the decorated
+// figure (today's "−Rp" order), so IDR renders byte-identically.
+function signedMoney(currency: CurrencyInfo, value: number): string {
+  const text = formatMoney(currency, Math.abs(value));
+  return `${value < 0 ? "−" : "+"}${text}`;
 }
 
 function taxDetailLabel(quotation: ArchivedQuotation): string {
@@ -19,7 +40,6 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
   }
   return quotation.TaxCategory || quotation.TaxZone;
 }
-import { formatIdr } from "../format";
 import { useToast } from "../toast";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
@@ -33,6 +53,11 @@ interface QuotationDetailPageProps {
   revision: number;
   onBack: () => void;
   onEdit: (quotation: ArchivedQuotation) => void;
+  /** The live profile entry: the initial render's currency only. Once the
+   * revision loads, every figure renders in its REVISION currency
+   * (quotation.Currency) resolved below; the live entry is then just the
+   * fallback for an unresolvable code. */
+  currency?: CurrencyInfo;
 }
 
 export function QuotationDetailPage({
@@ -40,12 +65,31 @@ export function QuotationDetailPage({
   revision,
   onBack,
   onEdit,
+  currency = IDR_ENTRY,
 }: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [activeRevision, setActiveRevision] = useState(revision);
   const { pushToast } = useToast();
+  // The catalogue, fetched like App.tsx fetches it: the revision code
+  // resolves to its entry once loaded. Null until then -- figures fall back
+  // to the live entry rather than rendering nothing.
+  const [catalogue, setCatalogue] = useState<CurrencyInfo[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const entries = (await GetCurrencyCatalogue()) as CurrencyInfo[];
+        if (active) setCatalogue(entries);
+      } catch {
+        if (active) setCatalogue(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Reset to the revision requested by the archive when the target changes.
   // Clearing the loaded record makes a different quotation show the skeleton
@@ -96,6 +140,10 @@ export function QuotationDetailPage({
           : `Revision ${padRevision(value)}`,
     }));
   }, [quotation?.AvailableRevisions, activeRevision]);
+
+  // The REVISION currency once loaded; the live entry before that and for
+  // any code the catalogue cannot resolve.
+  const entry = resolveCurrencyEntry(catalogue, quotation?.Currency, currency);
 
   if (loading) {
     return (
@@ -219,22 +267,22 @@ export function QuotationDetailPage({
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="tnum text-body font-medium text-ink-900">
-                      Rp{item.DisplayMarginalizedUnit}
+                      {decorateMoney(entry, item.DisplayMarginalizedUnit)}
                     </div>
                     {item.DiscountEnabled ? (
                       <div className="tnum mt-0.5 text-caption text-accent-700">
-                        −{item.DiscountPercent}% off · was Rp
-                        {formatIdr(item.ListUnitPrice)}
+                        −{item.DiscountPercent}% off · was{" "}
+                        {formatMoney(entry, item.ListUnitPrice)}
                       </div>
                     ) : null}
                     <div className="tnum mt-0.5 text-caption text-internal-700">
                       {item.MarginEnabled
-                        ? `+${item.MarginPercent}% · ${signedIdr(item.MarginAmount)}`
+                        ? `+${item.MarginPercent}% · ${signedMoney(entry, item.MarginAmount)}`
                         : "No margin"}
                     </div>
                   </td>
                   <td className="tnum px-4 py-2.5 text-right text-body text-ink-900">
-                    Rp{item.DisplayMarginalizedTotal}
+                    {decorateMoney(entry, item.DisplayMarginalizedTotal)}
                   </td>
                 </tr>
               ))}
@@ -253,6 +301,7 @@ export function QuotationDetailPage({
               <DetailRow
                 label="Cost total (undiscounted)"
                 value={quotation.DisplayOriginalGrand}
+                currency={entry}
               />
             </dl>
           </div>
@@ -264,34 +313,40 @@ export function QuotationDetailPage({
               <DetailRow
                 label="Customer subtotal"
                 value={quotation.DisplayMarginalizedSubtotal}
+                currency={entry}
               />
               {quotation.MarginalizedDiscount > 0 ? (
                 <DetailRow
                   label={`Discount ${quotation.DiscountPercent}% (on the price)`}
                   value={`−${quotation.DisplayMarginalizedDiscount}`}
+                  currency={entry}
                 />
               ) : null}
               <DetailRow
                 label="Grand total before tax"
                 value={quotation.DisplayMarginalizedGrand}
+                currency={entry}
               />
               {quotation.PpnAmount > 0 ? (
                 <DetailRow
                   label="PPN 11% (on the quotation)"
                   value={`+${quotation.DisplayPpn}`}
+                  currency={entry}
                 />
               ) : null}
               {quotation.TaxAmount > 0 ? (
                 <DetailRow
                   label={`Services tax, internal — ${taxDetailLabel(quotation)}`}
                   value={quotation.DisplayTax}
+                  currency={entry}
                 />
               ) : null}
               <DetailRow
                 label="Grand total after tax"
                 value={quotation.DisplayMarginalizedAfterTax}
+                currency={entry}
               />
-              <DetailRow label="Nett profit" value={quotation.DisplayNett} strong />
+              <DetailRow label="Nett profit" value={quotation.DisplayNett} currency={entry} strong />
             </dl>
           </div>
         </div>
@@ -323,10 +378,12 @@ export function QuotationDetailPage({
 function DetailRow({
   label,
   value,
+  currency,
   strong = false,
 }: {
   label: string;
   value: string;
+  currency: CurrencyInfo;
   strong?: boolean;
 }) {
   return (
@@ -337,7 +394,7 @@ function DetailRow({
           strong ? "font-semibold text-ink-950" : "text-ink-900"
         }`}
       >
-        Rp{value}
+        {decorateMoney(currency, value)}
       </dd>
     </div>
   );

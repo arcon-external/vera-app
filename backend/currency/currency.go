@@ -28,9 +28,12 @@
 //     India (1,00,000). The formatter groups uniformly; implementing one
 //     currency's irregular grouping is not worth the second code path.
 //   - AED renders as the Latin code "AED", not the Arabic-script symbol,
-//     so totals stay inside the typeface the documents embed.
+//     so totals stay inside the typeface the documents embed. Its leading
+//     symbol is spaced ("AED 15,000.00"), the one exception to flush
+//     leading symbols: "AED15,000.00" misreads as a single token.
 //   - Symbols after the amount (EUR, VND) are separated by one space;
-//     symbols before it sit flush, matching the Rp the documents print today.
+//     symbols before it sit flush, matching the Rp the documents print today,
+//     except AED above.
 package currency
 
 import (
@@ -54,11 +57,17 @@ type Info struct {
 	// Symbol is the home-convention mark printed with totals.
 	Symbol string
 	// SymbolAfter reports whether the symbol follows the amount (EUR, VND).
-	// Otherwise it leads, flush against the digits.
+	// Otherwise it leads.
 	SymbolAfter bool
+	// SymbolSpaced reports whether one space separates the symbol from the
+	// amount: true for the trailing symbols (EUR, VND) and for leading AED,
+	// false for every other entry, whose leading symbol sits flush against
+	// the digits, matching the Rp the documents print today.
+	SymbolSpaced bool
 	// GroupSep separates thousands groups; DecimalSep opens the fraction.
 	// The two always differ within an entry.
-	GroupSep   string
+	GroupSep string
+	// DecimalSep opens the fraction.
 	DecimalSep string
 }
 
@@ -67,7 +76,7 @@ type Info struct {
 var catalogue = map[string]Info{
 	"IDR": {Code: "IDR", Exponent: 0, Symbol: "Rp", GroupSep: ".", DecimalSep: ","},
 	"USD": {Code: "USD", Exponent: 2, Symbol: "$", GroupSep: ",", DecimalSep: "."},
-	"EUR": {Code: "EUR", Exponent: 2, Symbol: "€", SymbolAfter: true, GroupSep: ".", DecimalSep: ","},
+	"EUR": {Code: "EUR", Exponent: 2, Symbol: "€", SymbolAfter: true, SymbolSpaced: true, GroupSep: ".", DecimalSep: ","},
 	"SGD": {Code: "SGD", Exponent: 2, Symbol: "S$", GroupSep: ",", DecimalSep: "."},
 	"MYR": {Code: "MYR", Exponent: 2, Symbol: "RM", GroupSep: ",", DecimalSep: "."},
 	"JPY": {Code: "JPY", Exponent: 0, Symbol: "¥", GroupSep: ",", DecimalSep: "."},
@@ -77,10 +86,10 @@ var catalogue = map[string]Info{
 	"GBP": {Code: "GBP", Exponent: 2, Symbol: "£", GroupSep: ",", DecimalSep: "."},
 	"THB": {Code: "THB", Exponent: 2, Symbol: "฿", GroupSep: ",", DecimalSep: "."},
 	"PHP": {Code: "PHP", Exponent: 2, Symbol: "₱", GroupSep: ",", DecimalSep: "."},
-	"VND": {Code: "VND", Exponent: 0, Symbol: "₫", SymbolAfter: true, GroupSep: ".", DecimalSep: ","},
+	"VND": {Code: "VND", Exponent: 0, Symbol: "₫", SymbolAfter: true, SymbolSpaced: true, GroupSep: ".", DecimalSep: ","},
 	"KRW": {Code: "KRW", Exponent: 0, Symbol: "₩", GroupSep: ",", DecimalSep: "."},
 	"INR": {Code: "INR", Exponent: 2, Symbol: "₹", GroupSep: ",", DecimalSep: "."},
-	"AED": {Code: "AED", Exponent: 2, Symbol: "AED", GroupSep: ",", DecimalSep: "."},
+	"AED": {Code: "AED", Exponent: 2, Symbol: "AED", SymbolSpaced: true, GroupSep: ",", DecimalSep: "."},
 }
 
 // Codes lists every supported code in sorted order, for error messages and
@@ -174,15 +183,22 @@ func FormatSignedAmount(code string, minor int64) string {
 }
 
 // Affixes returns the symbol's placement around a bare formatted amount:
-// a leading symbol sits flush ("$15,000.00", "Rp15.000.000"), a trailing
-// one is spaced ("1.234,56 €"). Exactly one of the two is non-empty.
+// a leading symbol sits flush ("$15,000.00", "Rp15.000.000") unless the
+// entry is spaced ("AED 15,000.00"), and a trailing one is spaced
+// ("1.234,56 €"). Exactly one of the two is non-empty.
 func Affixes(code string) (prefix, suffix string) {
 	info, ok := Lookup(code)
 	if !ok {
 		info = catalogue[DefaultCode]
 	}
 	if info.SymbolAfter {
-		return "", " " + info.Symbol
+		if info.SymbolSpaced {
+			return "", " " + info.Symbol
+		}
+		return "", info.Symbol
+	}
+	if info.SymbolSpaced {
+		return info.Symbol + " ", ""
 	}
 	return info.Symbol, ""
 }
@@ -278,4 +294,51 @@ func ParseMinor(code, text string) (int64, error) {
 		minor = -minor
 	}
 	return minor, nil
+}
+
+// CurrencyInfo is the bridge shape served over the Wails bindings by
+// AdminAPI.GetCurrencyCatalogue: everything the settings picker and the
+// TypeScript formatter need, with no hardcoded mirror on that side. The
+// JSON names are the frozen cross-wave contract (issue #336 Wave B);
+// the Go field names stay PascalCase per Go convention.
+type CurrencyInfo struct {
+	// Code is the ISO 4217 alphabetic code, always three ASCII capitals.
+	Code string `json:"code"`
+	// Exponent is the minor units per major (10^Exponent minor = 1 major).
+	Exponent int `json:"exponent"`
+	// Symbol is the home-convention mark printed with totals.
+	Symbol string `json:"symbol"`
+	// Position is "before" when the symbol leads, "after" when it trails.
+	Position string `json:"position"`
+	// GroupSep separates thousands groups.
+	GroupSep string `json:"groupSep"`
+	// DecimalSep opens the fraction.
+	DecimalSep string `json:"decimalSep"`
+	// SymbolSpaced reports whether one space separates the symbol from the
+	// amount: true for EUR-after, VND-after and AED-before, false otherwise.
+	SymbolSpaced bool `json:"symbolSpaced"`
+}
+
+// Catalogue returns every entry in Codes() order, each carrying all seven
+// bridge fields. The order is deterministic so the picker is stable.
+func Catalogue() []CurrencyInfo {
+	codes := Codes()
+	out := make([]CurrencyInfo, 0, len(codes))
+	for _, code := range codes {
+		info := catalogue[code]
+		position := "before"
+		if info.SymbolAfter {
+			position = "after"
+		}
+		out = append(out, CurrencyInfo{
+			Code:         info.Code,
+			Exponent:     info.Exponent,
+			Symbol:       info.Symbol,
+			Position:     position,
+			GroupSep:     info.GroupSep,
+			DecimalSep:   info.DecimalSep,
+			SymbolSpaced: info.SymbolSpaced,
+		})
+	}
+	return out
 }

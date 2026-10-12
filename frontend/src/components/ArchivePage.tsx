@@ -1,21 +1,61 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DeleteQuotation, ListQuotations } from "@backend/backend/Quotation";
+import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotationSummary } from "../archive";
+import { resolveCurrencyEntry } from "../archive";
+import type { CurrencyInfo } from "../format";
+import { decorateMoney } from "../format";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { useToast } from "../toast";
 import { Badge, Button, Card } from "./ui";
 
+// The IDR entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the prop default only -- the live
+// entry always arrives from the caller -- not a catalogue mirror.
+const IDR_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
+
 interface ArchivePageProps {
   onNewQuotation: () => void;
   onOpenQuotation: (id: number, revision: number) => void;
+  /** The live profile entry: fallback while the catalogue loads and for
+   * rows whose code it cannot resolve. Each row renders in its own
+   * REVISION currency (row.Currency), never this one, once resolved. */
+  currency?: CurrencyInfo;
 }
 
-export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProps) {
+export function ArchivePage({ onNewQuotation, onOpenQuotation, currency = IDR_ENTRY }: ArchivePageProps) {
   const [rows, setRows] = useState<ArchivedQuotationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The catalogue, fetched like App.tsx fetches it: row codes resolve to
+  // entries here, so each row renders in its revision currency. Null until
+  // loaded (or when the binding fails) -- rows then fall back to the live
+  // entry rather than rendering nothing.
+  const [catalogue, setCatalogue] = useState<CurrencyInfo[] | null>(null);
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const entries = (await GetCurrencyCatalogue()) as CurrencyInfo[];
+        if (active) setCatalogue(entries);
+      } catch {
+        if (active) setCatalogue(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
   const listRef = useRef<HTMLDivElement>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const { pushToast } = useToast();
@@ -215,7 +255,7 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation }: ArchivePageProp
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-right align-middle text-body font-medium tnum text-ink-950">
-                      Rp{row.DisplayGrand}
+                      {decorateMoney(resolveCurrencyEntry(catalogue, row.Currency, currency), row.DisplayGrand)}
                     </td>
                     <td className="px-5 py-3 text-right align-middle">
                       {confirmingId === row.ID ? (

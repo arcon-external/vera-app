@@ -42,6 +42,10 @@ export function GetCompanyProfile() {
   return window['go']['backend']['AdminAPI']['GetCompanyProfile']();
 }
 
+export function GetCurrencyCatalogue() {
+  return window['go']['backend']['AdminAPI']['GetCurrencyCatalogue']();
+}
+
 export function IssuePasswordReset(arg1) {
   return window['go']['backend']['AdminAPI']['IssuePasswordReset'](arg1);
 }

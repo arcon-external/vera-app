@@ -17,6 +17,7 @@ import (
 
 	"vera-app/backend"
 	"vera-app/backend/apicontract"
+	"vera-app/backend/currency"
 	"vera-app/backend/store"
 )
 
@@ -241,18 +242,27 @@ func (s *Server) listEndpoint(context echo.Context) error {
 	}
 	summaries := make([]apicontract.QuotationSummaryRow, 0, len(rows))
 	for _, row := range rows {
-		summaries = append(summaries, apicontract.QuotationSummaryRow{
-			ID:             row.ID,
-			QuoteNumber:    row.QuoteNumber,
-			RevisionNumber: row.RevisionNumber,
-			CustomerName:   row.CustomerName,
-			Subject:        row.Subject,
-			CreatedAt:      row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			GrandTotal:     row.GrandTotal,
-			DisplayGrand:   formatMoney(row.Currency, row.GrandTotal),
-		})
+		summaries = append(summaries, mapSummaryRow(row))
 	}
 	return context.JSON(http.StatusOK, map[string]any{"quotations": summaries})
+}
+
+// mapSummaryRow renders one archive row. The currency travels with the money
+// it describes: a mixed-currency archive is unreadable without it, and the
+// code is normalised so a row that predates the column reads as the default
+// rather than an empty string beside an IDR-formatted figure.
+func mapSummaryRow(row store.QuotationSummary) apicontract.QuotationSummaryRow {
+	return apicontract.QuotationSummaryRow{
+		ID:             row.ID,
+		QuoteNumber:    row.QuoteNumber,
+		RevisionNumber: row.RevisionNumber,
+		CustomerName:   row.CustomerName,
+		Subject:        row.Subject,
+		Currency:       currency.Normalize(row.Currency),
+		CreatedAt:      row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		GrandTotal:     row.GrandTotal,
+		DisplayGrand:   formatMoney(row.Currency, row.GrandTotal),
+	}
 }
 
 func (s *Server) detailEndpoint(context echo.Context) error {
@@ -397,6 +407,7 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		AvailableRevisions:          record.AvailableRevisions,
 		CustomerName:                record.CustomerName,
 		Subject:                     record.Subject,
+		Currency:                    currency.Normalize(record.Currency),
 		RecipientName:               record.RecipientName,
 		Incoterm:                    record.Incoterm,
 		DiscountPercent:             record.DiscountPercent,

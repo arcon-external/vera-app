@@ -5,12 +5,57 @@ import {
   applyDiscount,
   applyMargin,
   blendedMargin,
-  formatIdr,
+  formatMoney,
   formatMoneyInput,
   MAX_DISCOUNT_PERCENT,
   MAX_MARGIN_PERCENT,
   parseIntOrZero,
+  parseMoneyInput,
+  type CurrencyInfo,
 } from "../format";
+
+// The IDR entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the prop default only -- the live
+// entry always arrives from the caller -- not a catalogue mirror.
+const IDR_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
+
+/**
+ * Parses one money keystroke into the stored minor-unit digit string, using
+ * the live profile currency's own separators and exponent.
+ *
+ * Pure digit typing stays in minor-unit digits (the stored semantic
+ * computePricing parses with parseIntOrZero): routing it through
+ * parseMoneyInput's major-unit semantics would 100x every keystroke --
+ * typing "5" would store 500 instead of 5. Text carrying the entry's
+ * separators or symbol is half-typed major-unit input ("15.5"), pasted
+ * grouping ("15,000") or fed-back formatted output ("$1,500.00"), parsed
+ * with major-unit semantics so it displays correctly. Unparseable
+ * separator text falls back to its digits (the old strip behaviour) rather
+ * than zeroing what the user typed; text with no digits at all stores ""
+ * so a half-typed field renders empty, never a silently wrong number.
+ */
+export function parseMoneyKeystroke(entry: CurrencyInfo, raw: string): string {
+  if (raw === "") return "";
+  const text = raw.replace(/\u00a0/g, " ");
+  const carriesMoneyMark =
+    text.includes(entry.decimalSep) ||
+    text.includes(entry.groupSep) ||
+    (entry.symbol !== "" && text.includes(entry.symbol));
+  if (!carriesMoneyMark) return raw.replace(/[^0-9]/g, "");
+  const digits = raw.replace(/[^0-9]/g, "");
+  if (digits === "") return "";
+  const parsed = parseMoneyInput(entry, raw);
+  if (parsed === 0 && digits.replace(/0/g, "") !== "") return digits;
+  return String(parsed);
+}
 
 /** One priced sub-item of a main item. */
 export interface EditorSubItem {
@@ -117,6 +162,9 @@ export function blendedMarginLabel(margin: {
 
 interface ItemEditorProps {
   items: EditorItem[];
+  /** The live profile currency: money inputs display and parse in it. Qty
+   * and percent fields are counts, not money, and stay digit-stripped. */
+  currency?: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   onAddItem: () => void;
   onRemoveItem: (key: number) => void;
@@ -161,6 +209,7 @@ interface ItemEditorProps {
 
 export function ItemEditor({
   items,
+  currency = IDR_ENTRY,
   uomOptions,
   onAddItem,
   onRemoveItem,
@@ -298,6 +347,7 @@ export function ItemEditor({
             item={item}
             index={index}
             canRemove={items.length > 1}
+            currency={currency}
             uomOptions={uomOptions}
             showPanel={
               expanded[item.key] ??
@@ -565,6 +615,7 @@ function ItemRow({
   item,
   index,
   canRemove,
+  currency,
   uomOptions,
   showPanel,
   onTogglePanel,
@@ -588,6 +639,7 @@ function ItemRow({
   item: EditorItem;
   index: number;
   canRemove: boolean;
+  currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   showPanel: boolean;
   onTogglePanel: () => void;
@@ -668,7 +720,7 @@ function ItemRow({
           className="tnum text-body font-semibold text-ink-950"
           title="The sum of the sub-items' sell prices, live as they change."
         >
-          Rp{formatIdr(rollup.sell)}
+          {formatMoney(currency, rollup.sell)}
         </div>
       </Captioned>
     </>
@@ -685,6 +737,8 @@ function ItemRow({
       </Captioned>
 
       <Captioned label="Qty">
+        {/* Counts, not money: digit-strip is correct here. parseMoneyInput
+            has major-unit semantics and would 100x the figure ("2" -> 200). */}
         <input
           type="text"
           data-grid-cell=""
@@ -710,15 +764,18 @@ function ItemRow({
           inputMode="numeric"
           aria-label={`Unit price for line ${index + 1}`}
           placeholder="0"
-          value={formatMoneyInput(item.unitPrice)}
+          value={formatMoneyInput(currency, item.unitPrice)}
           onChange={(event) =>
-            onChange(item.key, "unitPrice", event.target.value.replace(/\D/g, ""))
+            onChange(item.key, "unitPrice", parseMoneyKeystroke(currency, event.target.value))
           }
           className={`${cellClass} text-right tnum`}
         />
       </Captioned>
 
       <Captioned label="Margin">
+        {/* Percents, not money: digit-strip is correct here too --
+            parseMoneyInput(USD, "15") is 1500, which would clamp every
+            percent to its ceiling. */}
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -833,14 +890,14 @@ function ItemRow({
 
     <Captioned label="Sells for">
       <div className="tnum text-body font-semibold text-ink-950">
-        Rp{formatIdr(sellTotal)}
+        {formatMoney(currency, sellTotal)}
       </div>
       <div className="tnum text-caption text-ink-400">
-        Rp{formatIdr(sellUnit)} / unit
+        {formatMoney(currency, sellUnit)} / unit
       </div>
       {item.discountEnabled ? (
         <div className="tnum text-caption text-accent-700">
-          was Rp{formatIdr(listUnit)} · −Rp{formatIdr(listUnit * qty - sellTotal)}
+          was {formatMoney(currency, listUnit)} · −{formatMoney(currency, listUnit * qty - sellTotal)}
         </div>
       ) : null}
     </Captioned>
@@ -911,11 +968,11 @@ function ItemRow({
           {hasSubItems ? null : item.discountEnabled ? (
             <span className="tnum text-accent-700">
               −{discountPercent}% · {marginAmount >= 0 ? "+" : "−"}
-              Rp{formatIdr(Math.abs(marginAmount))}/unit
+              {formatMoney(currency, Math.abs(marginAmount))}/unit
             </span>
           ) : item.marginEnabled ? (
             <span className="tnum text-success-700">
-              +{marginPercent}% · +Rp{formatIdr(marginAmount)}/unit
+              +{marginPercent}% · +{formatMoney(currency, marginAmount)}/unit
             </span>
           ) : (
             <span className="text-ink-400">No margin</span>
@@ -1014,6 +1071,7 @@ function ItemRow({
                 index={index}
                 canMoveUp={subIndex > 0}
                 canMoveDown={subIndex < item.subItems.length - 1}
+                currency={currency}
                 uomOptions={uomOptions}
                 onPatch={(patch) => onPatchSubRow(item.key, sub.id, patch)}
                 onRemove={() => onRemoveSubRow(item.key, sub.id)}
@@ -1071,6 +1129,7 @@ function SubRow({
   index,
   canMoveUp,
   canMoveDown,
+  currency,
   uomOptions,
   onPatch,
   onRemove,
@@ -1084,6 +1143,7 @@ function SubRow({
   index: number;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   onPatch: (patch: Partial<EditorSubItem>) => void;
   onRemove: () => void;
@@ -1165,6 +1225,7 @@ function SubRow({
         </div>
         <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]">
         <Captioned label="Qty">
+          {/* Counts, not money: digit-strip stays (see the main row). */}
           <input
             type="text"
             inputMode="numeric"
@@ -1194,9 +1255,9 @@ function SubRow({
             inputMode="numeric"
             aria-label={`Unit cost for ${label}`}
             placeholder="0"
-            value={formatMoneyInput(sub.unitCost)}
+            value={formatMoneyInput(currency, sub.unitCost)}
             onChange={(event) =>
-              onPatch({ unitCost: event.target.value.replace(/\D/g, "") })
+              onPatch({ unitCost: parseMoneyKeystroke(currency, event.target.value) })
             }
             className={`${subCellClass} text-right tnum`}
           />
@@ -1302,10 +1363,10 @@ function SubRow({
 
         <Captioned label="Sells for">
           <div className="tnum pt-0.5 text-caption font-semibold text-ink-950">
-            Rp{formatIdr(sellTotal)}
+            {formatMoney(currency, sellTotal)}
           </div>
           <div className="tnum text-caption text-ink-400">
-            Rp{formatIdr(sellUnit)} / unit
+            {formatMoney(currency, sellUnit)} / unit
           </div>
         </Captioned>
         </div>

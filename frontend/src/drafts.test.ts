@@ -1,4 +1,9 @@
 import { parseDraftPayload, countDraftItems, relativeSavedAt } from "./drafts";
+import {
+  DEFAULT_CURRENCY_CODE,
+  currencyEditBlockMessage,
+  normalizeCurrencyCode,
+} from "./drafts";
 import type { DetailsState } from "./components/DetailsPanel";
 import type { EditorItem } from "./components/ItemEditor";
 
@@ -265,5 +270,81 @@ describe("relativeSavedAt", () => {
     );
     expect(relativeSavedAt("not a date")).toBe("");
     expect(relativeSavedAt("")).toBe("");
+  });
+});
+describe("currencyEditBlockMessage", () => {
+  it("lets a matching currency through on both paths", () => {
+    expect(
+      currencyEditBlockMessage("IDR", "IDR", { kind: "draft", name: "Roof" })
+    ).toBeNull();
+    expect(
+      currencyEditBlockMessage("usd", "USD", {
+        kind: "revision",
+        quoteNumber: "1502250007",
+        revision: 3,
+      })
+    ).toBeNull();
+  });
+
+  it("blocks a mismatched draft naming both currencies", () => {
+    const message = currencyEditBlockMessage("IDR", "USD", {
+      kind: "draft",
+      name: "Roof works",
+    });
+    expect(message).not.toBeNull();
+    // Both codes, so the reader knows which stored currency contradicts
+    // which live one -- and raw codes only, never a formatted figure.
+    expect(message!).toContain("IDR");
+    expect(message!).toContain("USD");
+    expect(message!).toContain("Roof works");
+    expect(message!).toContain("cannot be opened");
+    expect(message!).toContain("Switch the company currency back to IDR");
+  });
+
+  it("blocks a mismatched revision naming both currencies", () => {
+    const message = currencyEditBlockMessage("USD", "IDR", {
+      kind: "revision",
+      quoteNumber: "1502250007",
+      revision: 3,
+    });
+    expect(message).not.toBeNull();
+    expect(message!).toContain("USD");
+    expect(message!).toContain("IDR");
+    expect(message!).toContain("1502250007");
+    expect(message!).toContain("03");
+    expect(message!).toContain("cannot be edited");
+    expect(message!).toContain("Switch the company currency back to USD");
+  });
+
+  it("reads a missing code as the default rather than blocking", () => {
+    // A draft or revision that predates the currency column carries nothing;
+    // that is the default it was written in, not a mismatch.
+    expect(
+      currencyEditBlockMessage("", "IDR", { kind: "draft", name: "" })
+    ).toBeNull();
+    expect(
+      currencyEditBlockMessage(undefined, "IDR", {
+        kind: "revision",
+        quoteNumber: "1502250007",
+        revision: 0,
+      })
+    ).toBeNull();
+    expect(DEFAULT_CURRENCY_CODE).toBe("IDR");
+  });
+
+  it("normalises case and whitespace before comparing", () => {
+    expect(
+      currencyEditBlockMessage(" usd ", "USD", { kind: "draft", name: "x" })
+    ).toBeNull();
+    expect(normalizeCurrencyCode(" idr")).toBe("IDR");
+    expect(normalizeCurrencyCode(undefined)).toBe("IDR");
+  });
+
+  it("names an unnamed draft without leaving a blank", () => {
+    const message = currencyEditBlockMessage("IDR", "USD", {
+      kind: "draft",
+      name: "   ",
+    });
+    expect(message!).toContain("This draft was saved in IDR");
   });
 });

@@ -171,7 +171,7 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - Check every returned error; wrap with context: `fmt.Errorf("context: %w", err)`.
 - Validate inputs before expensive operations or file writes.
 - `os.WriteFile` uses explicit mode (`0o644` unless required otherwise).
-- Use `uint64`/`int64` IDR amounts; never float for money. Multiply before divide.
+- Use `uint64`/`int64` minor-unit amounts in the company currency; never float for money. Multiply before divide.
   Signed results (profit/loss) use `int64`.
 
 ### React / TypeScript
@@ -181,7 +181,7 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - Keep TypeScript strict-mode compatible (`frontend/tsconfig.json`).
 - Explicit types for component props and public utility APIs.
 - Components/files `PascalCase`; functions/variables `camelCase`.
-- All IDR amounts render with `tabular-nums` and `whitespace-nowrap`.
+- All money amounts render with `tabular-nums` and `whitespace-nowrap`.
 
 ### Styling
 
@@ -826,7 +826,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
   facing while PPH22 is not.
 - **Normalized persistence:** customers, quotations, immutable revisions, revision
   items, revision totals, and rendered documents. Referential integrity via foreign
-  keys; money as `BIGINT`; rates as basis points.
+  keys; money as `BIGINT` minor units of the company currency; rates as basis points.
 - **Config through environment only:** no secrets in source, logs, or errors; DSNs
   are redacted before logging.
 - **Fail clearly:** startup errors name the missing configuration/operation, never

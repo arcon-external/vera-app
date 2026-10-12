@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"vera-app/backend/currency"
+
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -260,6 +262,17 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		return CompanyProfile{}, err
 	}
 	return updated, nil
+}
+
+// GetCurrencyCatalogue returns the shipped currency catalogue for the
+// settings currency picker. It reads the compiled-in catalogue directly
+// instead of proxying veraserver like its neighbours: the catalogue is
+// identical on both sides (the server validates against the same package),
+// so a network round-trip would only add failure modes to static data. It
+// lives on AdminAPI because the Company settings section that owns the
+// picker already talks to this binding, and no new bound object is needed.
+func (a *AdminAPI) GetCurrencyCatalogue() []currency.CurrencyInfo {
+	return currency.Catalogue()
 }
 
 // CompanyLogo is the effective artwork with its MIME type for preview

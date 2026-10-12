@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"vera-app/backend/currency"
 )
 
 // ErrDraftNotFound is returned when a draft does not exist, or does not belong
@@ -31,9 +33,14 @@ type Draft struct {
 	Label        string
 	Subject      string
 	CustomerName string
-	ID           int64
-	CustomerID   *int64
-	ItemCount    int
+	// Currency is the ISO 4217 code the amounts were written in, stamped from
+	// the live company profile at creation. It never moves afterwards: an
+	// update under a new company currency must not relabel old integers, and
+	// the editor blocks opening a draft whose code differs from the live one.
+	Currency   string
+	ID         int64
+	CustomerID *int64
+	ItemCount  int
 }
 
 // DraftSummary is one row of the drafts list. The payload is deliberately
@@ -48,6 +55,22 @@ type DraftSummary struct {
 	ItemCount    int
 }
 
+// checkDraftCurrency validates a draft's currency the way checkCurrency
+// validates the company's: against the shipped catalogue, naming the field,
+// so a rejected save says what to fix. Empty writes as the default, exactly
+// like the company profile, so callers that predate the column keep working.
+func checkDraftCurrency(currencyCode string) (string, error) {
+	code := strings.ToUpper(strings.TrimSpace(currencyCode))
+	if code == "" {
+		code = currency.DefaultCode
+	}
+	if _, ok := currency.Lookup(code); !ok {
+		return "", fmt.Errorf("draft currency %q is not supported (want one of: %s)",
+			currencyCode, strings.Join(currency.Codes(), ", "))
+	}
+	return code, nil
+}
+
 // CreateDraft stores editor state as a new draft owned by userID.
 func (s *Store) CreateDraft(
 	ctx context.Context,
@@ -55,6 +78,7 @@ func (s *Store) CreateDraft(
 	label, subject, customerName string,
 	customerID *int64,
 	itemCount int,
+	currencyCode string,
 	payload json.RawMessage,
 ) (Draft, error) {
 	pool, err := s.poolOrError()
@@ -66,6 +90,10 @@ func (s *Store) CreateDraft(
 	}
 	if itemCount < 0 {
 		return Draft{}, fmt.Errorf("draft item count cannot be negative")
+	}
+	code, err := checkDraftCurrency(currencyCode)
+	if err != nil {
+		return Draft{}, err
 	}
 	// The customer reference is display-only, but a draft must not outlive a
 	// pointer to a client row that is gone: the editor resolves the client by
@@ -79,13 +107,13 @@ func (s *Store) CreateDraft(
 	var draft Draft
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.quotation_drafts
-		       (user_id, label, subject, customer_name, customer_id, item_count, payload)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		       (user_id, label, subject, customer_name, customer_id, item_count, currency, payload)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, label, subject, customer_name, customer_id, item_count,
-		          payload, created_at, updated_at`, s.configSchema()),
-		userID, label, subject, customerName, customerID, itemCount, payload).
+		          currency, payload, created_at, updated_at`, s.configSchema()),
+		userID, label, subject, customerName, customerID, itemCount, code, payload).
 		Scan(&draft.ID, &draft.Label, &draft.Subject, &draft.CustomerName,
-			&draft.CustomerID, &draft.ItemCount, &draft.Payload,
+			&draft.CustomerID, &draft.ItemCount, &draft.Currency, &draft.Payload,
 			&draft.CreatedAt, &draft.UpdatedAt)
 	if err != nil {
 		return Draft{}, fmt.Errorf("create draft: %w", err)
@@ -123,16 +151,19 @@ func (s *Store) UpdateDraft(
 	var draft Draft
 	// user_id is in the WHERE clause, not just the SET list: ownership is the
 	// access model, and it has to be enforced by the row that is written.
+	// currency is deliberately absent from the SET list: it is the
+	// denomination the amounts were written in, stamped at creation, and an
+	// update under a new company currency must not relabel old integers.
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.quotation_drafts
 		SET label = $3, subject = $4, customer_name = $5, customer_id = $6,
 		    item_count = $7, payload = $8, updated_at = NOW()
 		WHERE id = $1 AND user_id = $2
 		RETURNING id, label, subject, customer_name, customer_id, item_count,
-		          payload, created_at, updated_at`, s.configSchema()),
+		          currency, payload, created_at, updated_at`, s.configSchema()),
 		draftID, userID, label, subject, customerName, customerID, itemCount, payload).
 		Scan(&draft.ID, &draft.Label, &draft.Subject, &draft.CustomerName,
-			&draft.CustomerID, &draft.ItemCount, &draft.Payload,
+			&draft.CustomerID, &draft.ItemCount, &draft.Currency, &draft.Payload,
 			&draft.CreatedAt, &draft.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Draft{}, ErrDraftNotFound
@@ -183,11 +214,11 @@ func (s *Store) GetDraft(ctx context.Context, draftID, userID int64) (Draft, err
 	var draft Draft
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT id, label, subject, customer_name, customer_id, item_count,
-		       payload, created_at, updated_at
+		       currency, payload, created_at, updated_at
 		FROM %s.quotation_drafts
 		WHERE id = $1 AND user_id = $2`, s.configSchema()),
 		draftID, userID).Scan(&draft.ID, &draft.Label, &draft.Subject,
-		&draft.CustomerName, &draft.CustomerID, &draft.ItemCount, &draft.Payload,
+		&draft.CustomerName, &draft.CustomerID, &draft.ItemCount, &draft.Currency, &draft.Payload,
 		&draft.CreatedAt, &draft.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Draft{}, ErrDraftNotFound

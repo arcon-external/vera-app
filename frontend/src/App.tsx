@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Prepare,
   Export,
@@ -18,7 +18,14 @@ import { backend } from "@backend/models";
 import { AppShell } from "./components/AppShell";
 import { ArchivePage } from "./components/ArchivePage";
 import { DraftsPage } from "./components/DraftsPage";
-import { countDraftItems, parseDraftPayload, relativeSavedAt } from "./drafts";
+import {
+  countDraftItems,
+  parseDraftPayload,
+  relativeSavedAt,
+  DEFAULT_CURRENCY_CODE,
+  currencyEditBlockMessage,
+  normalizeCurrencyCode,
+} from "./drafts";
 import type { DraftSummaryDTO } from "./drafts";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
@@ -28,7 +35,8 @@ import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SummaryRail } from "./components/SummaryRail";
 import { Button, SectionHeading, StatusBanner } from "./components/ui";
-import { MAX_MARGIN_PERCENT } from "./format";
+import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
+import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import type { ArchivedQuotation } from "./archive";
 import {
@@ -47,6 +55,7 @@ import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
 import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
@@ -176,6 +185,51 @@ function parseRow(row: string): string[] {
   }
   cols.push(current);
   return cols;
+}
+
+// The IDR catalogue entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the offline fallback only: the live
+// entry always comes from GetCurrencyCatalogue() when the binding answers,
+// so a catalogue change on the Go side reaches every path except a browser
+// with no Wails runtime. A single-entry fallback is not a catalogue mirror
+// (the forbidden second list of exponents); it is loadCompany's keep-default
+// rule for the one code every stored integer was written in.
+const IDR_FALLBACK_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
+
+/**
+ * Parses one pasted money cell into the stored minor-unit digit string,
+ * using the live profile currency's own separators and exponent.
+ *
+ * Empty stays empty so untouched cells never read as zero. A successful
+ * parse stores minor units, so a USD "$1,500" stores 150000 rather than the
+ * 1500 ($15.00, 100x off) the old strip-non-digits path stored. Anything
+ * else stores "": the field renders empty instead of a silently wrong
+ * number. In particular a genuine zero still stores "0", while garbage
+ * ("abc") and a figure from another convention (IDR grouping under a USD
+ * profile) are refused rather than converted, because there is no rate to
+ * convert with. Never stores a wrong number for a non-empty paste.
+ */
+export function parsePasteMoneyCell(entry: CurrencyInfo, cell: string | undefined): string {
+  const text = (cell ?? "").trim();
+  if (text === "") return "";
+  const minor = parseMoneyInput(entry, text);
+  if (minor !== 0) return String(minor);
+  let rest = text;
+  if (entry.symbol !== "") rest = rest.split(entry.symbol).join("");
+  rest = rest.replace(/\s/g, "");
+  if (entry.groupSep !== "") rest = rest.split(entry.groupSep).join("");
+  if (entry.decimalSep !== "") rest = rest.split(entry.decimalSep).join("");
+  if (rest.startsWith("-") || rest.startsWith("+")) rest = rest.slice(1);
+  if (/^0+$/.test(rest)) return "0";
+  return "";
 }
 
 // normalizeUoM turns a pasted cell into a unit of measure, or into the default
@@ -321,6 +375,15 @@ function App() {
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
+  // The live company currency: the denomination fresh input is written in,
+  // and what a stored draft or revision is compared against before it may be
+  // opened for editing.
+  const [companyCurrency, setCompanyCurrency] = useState(DEFAULT_CURRENCY_CODE);
+  // The shipped catalogue for resolving the code above to a full entry. Null
+  // until the binding answers (or when it throws in plain-browser dev); every
+  // consumer below reads liveEntry, never this, so the fallback stays in one
+  // place.
+  const [currencyCatalogue, setCurrencyCatalogue] = useState<CurrencyInfo[] | null>(null);
 
   const signedIn = user !== null;
 
@@ -335,6 +398,7 @@ function App() {
     try {
       const profile = (await GetCompany()) as backend.CompanyProfile;
       if (profile?.LegalName?.trim()) setCompanyName(profile.LegalName.trim());
+      setCompanyCurrency(normalizeCurrencyCode(profile?.Currency));
     } catch {
       // Offline or plain-browser dev: keep the default.
     }
@@ -342,8 +406,45 @@ function App() {
 
   useEffect(() => {
     if (signedIn) void loadCompany();
-    else setCompanyName(DEFAULT_COMPANY_NAME);
+    else {
+      setCompanyName(DEFAULT_COMPANY_NAME);
+      setCompanyCurrency(DEFAULT_CURRENCY_CODE);
+    }
   }, [signedIn, loadCompany]);
+
+  // The catalogue is static, so one fetch per launch is enough. It rides its
+  // own try/catch rather than loadCompany's: a catalogue failure must not
+  // clear the company name, and the IDR fallback below keeps every consumer
+  // rendering while offline.
+  useEffect(() => {
+    let active = true;
+    if (!signedIn) {
+      setCurrencyCatalogue(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const catalogue = (await GetCurrencyCatalogue()) as CurrencyInfo[];
+        if (active) setCurrencyCatalogue(catalogue);
+      } catch {
+        if (active) setCurrencyCatalogue(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [signedIn]);
+
+  // The live profile currency, resolved once from the catalogue by the
+  // normalized profile code, defaulting to the IDR fallback. Editor
+  // components (ReviewPanel, SummaryRail, ItemEditor) render this; the
+  // archive/detail call sites below receive it as their fallback entry only
+  // -- both pages resolve each revision's own currency in-page once loaded.
+  const liveEntry: CurrencyInfo = useMemo(() => {
+    const code = normalizeCurrencyCode(companyCurrency);
+    const found = currencyCatalogue?.find((entry) => entry.code === code);
+    return found ?? IDR_FALLBACK_ENTRY;
+  }, [currencyCatalogue, companyCurrency]);
 
   // Restore the keychain session on startup; otherwise show the login page.
   // The try/catch also covers plain-browser dev, where the Wails runtime
@@ -510,6 +611,17 @@ function App() {
     async (id: number) => {
       try {
         const draft = (await GetDraft(id)) as backend.DraftDTO;
+        // A draft is integers in the currency it was saved in. Opening it
+        // under a different company currency would silently reinterpret
+        // every amount, so the edit is blocked before the editor is touched.
+        const blocked = currencyEditBlockMessage(draft.Currency, companyCurrency, {
+          kind: "draft",
+          name: draft.Label || draft.Subject,
+        });
+        if (blocked) {
+          pushToast("error", blocked);
+          return;
+        }
         const restored = parseDraftPayload(draft.Payload);
         if (!restored) {
           pushToast(
@@ -558,7 +670,7 @@ function App() {
         pushToast("error", "We couldn't open that draft. Try again.");
       }
     },
-    [clearPreview, customerId, customerOptions, pushToast]
+    [clearPreview, companyCurrency, customerId, customerOptions, pushToast]
   );
 
   useEffect(
@@ -575,6 +687,19 @@ function App() {
 
   const handleEditQuotation = useCallback(
     async (quotation: ArchivedQuotation) => {
+      // A revision is integers in the currency it was issued in. Editing it
+      // under a different company currency would silently reinterpret every
+      // amount onto the next revision, so the edit is blocked before the
+      // editor is touched.
+      const blocked = currencyEditBlockMessage(quotation.Currency, companyCurrency, {
+        kind: "revision",
+        quoteNumber: quotation.QuoteNumber,
+        revision: quotation.RevisionNumber,
+      });
+      if (blocked) {
+        pushToast("error", blocked);
+        return;
+      }
       try {
         await SetRevisionContext(
           quotation.QuoteNumber,
@@ -650,7 +775,7 @@ function App() {
         pushToast("error", "We couldn't start editing this quotation. Try again.");
       }
     },
-    [clearPreview, pushToast]
+    [clearPreview, companyCurrency, pushToast]
   );
 
   // Any input edit invalidates the review: the user must re-Prepare.
@@ -905,7 +1030,7 @@ function App() {
             description: (cols[0] || "").trim(),
             qty: (cols[1] || "").trim() || "1",
             uom: normalizeUoM(cols[2] || ""),
-            unitCost: (cols[3] || "").replace(/\D/g, "").trim(),
+            unitCost: parsePasteMoneyCell(liveEntry, cols[3]),
             marginPercent: margin.toString(),
             marginEnabled: margin > 0,
           };
@@ -920,7 +1045,7 @@ function App() {
         )
       );
     },
-    []
+    [liveEntry]
   );
 
   const handlePaste = useCallback(
@@ -950,7 +1075,7 @@ function App() {
             bullets,
             uom: normalizeUoM(cols[1] || ""),
             qty: (cols[2] || "").trim() || "1",
-            unitPrice: (cols[3] || "").replace(/\D/g, "").trim(),
+            unitPrice: parsePasteMoneyCell(liveEntry, cols[3]),
             marginPercent: margin.toString(),
             marginEnabled: margin > 0,
           };
@@ -971,7 +1096,7 @@ function App() {
         ];
       });
     },
-    []
+    [liveEntry]
   );
 
   const handlePrepare = useCallback(async () => {
@@ -1435,6 +1560,7 @@ function App() {
                 />
                 <ItemEditor
                   items={items}
+                  currency={liveEntry}
                   uomOptions={UOM_OPTIONS}
                   onAddItem={handleAddItem}
                   onRemoveItem={handleRemoveItem}
@@ -1460,6 +1586,7 @@ function App() {
             <div className="xl:sticky xl:top-[80px] xl:self-start">
               <SummaryRail
                 items={items}
+                currency={liveEntry}
                 discountPercent={details.discountPercent}
                 taxZone={details.taxZone}
                 taxType={details.taxType}
@@ -1471,6 +1598,7 @@ function App() {
           {ready ? (
             <ReviewPanel
               customer={customerPreview}
+              currency={liveEntry}
               internal={breakdown}
               quotationHTML={quotationHTML}
             />
@@ -1486,15 +1614,26 @@ function App() {
       ) : null}
 
       {page === "archive" ? (
+        // The currency prop is the initial-render fallback only: ArchivePage
+        // fetches the catalogue itself and resolves each row's REVISION
+        // currency in-page (row.Currency, filled by the server and plumbed
+        // through archive.go). The live entry covers the window before the
+        // catalogue loads, never a row's steady state.
         <ArchivePage
+          currency={liveEntry}
           onNewQuotation={handleNewQuotation}
           onOpenQuotation={handleOpenQuotation}
         />
       ) : null}
 
       {page === "detail" && selectedQuotation !== null ? (
+        // Same fallback shape as ArchivePage: QuotationDetailPage fetches the
+        // catalogue itself and resolves the revision's own currency
+        // (quotation.Currency) in-page once GetQuotationRevision returns. The
+        // live entry is only the initial render's currency until then.
         <QuotationDetailPage
           quotationID={selectedQuotation.id}
+          currency={liveEntry}
           revision={selectedQuotation.revision}
           onBack={() => setPage("archive")}
           onEdit={handleEditQuotation}

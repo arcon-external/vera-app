@@ -24,6 +24,61 @@ export type LoadedDraft = backend.DraftDTO;
 /** One row of the drafts list. */
 export type DraftSummaryDTO = backend.DraftSummaryDTO;
 
+/**
+ * The currency every amount stored before per-draft currencies existed was
+ * written in. The drafts column defaults to it, and the revision evidence
+ * does too, so a missing or blank code reads as this rather than as nothing.
+ */
+export const DEFAULT_CURRENCY_CODE = "IDR";
+
+/** Upper-cased, trimmed, and defaulted: the code a stored value means. */
+export function normalizeCurrencyCode(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_CURRENCY_CODE;
+  const code = value.trim().toUpperCase();
+  return code === "" ? DEFAULT_CURRENCY_CODE : code;
+}
+
+/**
+ * What is being opened for edit. A draft names itself by its label; a
+ * revision by its number and revision, so the block message can say which
+ * stored currency contradicts the live one.
+ */
+export type EditCurrencySource =
+  | { kind: "draft"; name: string }
+  | { kind: "revision"; quoteNumber: string; revision: number };
+
+/**
+ * Blocks opening stored integers under a different company currency.
+ *
+ * Returns the message to show when the stored currency differs from the live
+ * profile currency, or null when the edit may proceed. The message names both
+ * codes and the remedy (switch the profile back); it never converts and never
+ * relabels, because there is no FX rate to convert with and a silent 100x
+ * reinterpretation is a money-integrity failure.
+ */
+export function currencyEditBlockMessage(
+  storedCurrency: unknown,
+  liveCurrency: unknown,
+  source: EditCurrencySource
+): string | null {
+  const stored = normalizeCurrencyCode(storedCurrency);
+  const live = normalizeCurrencyCode(liveCurrency);
+  if (stored === live) return null;
+  const remedy = `Switch the company currency back to ${stored} to edit it.`;
+  if (source.kind === "draft") {
+    const name = source.name.trim() === "" ? "This draft" : `Draft "${source.name.trim()}"`;
+    return (
+      `${name} was saved in ${stored}, but the company currency is now ${live}. ` +
+      `Its amounts would be reinterpreted, so it cannot be opened for editing. ${remedy}`
+    );
+  }
+  const revision = `Revision ${String(source.revision).padStart(2, "0")} of quotation ${source.quoteNumber}`;
+  return (
+    `${revision} was issued in ${stored}, but the company currency is now ${live}. ` +
+    `Its amounts would be reinterpreted, so it cannot be edited. ${remedy}`
+  );
+}
+
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }

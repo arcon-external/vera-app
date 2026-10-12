@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"vera-app/backend"
+	"vera-app/backend/currency"
 	"vera-app/backend/store"
 	"vera-app/backend/theme"
 )
@@ -112,8 +113,11 @@ func sanitizeLookupInput(raw string) string {
 	return trimmed
 }
 
-// sanitizeClaim bounds a comparison field and normalizes the numeric ones to
-// digits. Returning "" means "nothing to compare", never "compare empty".
+// sanitizeClaim bounds a comparison field. The quotation number normalizes to
+// digits; the amount keeps its separators so the comparison can parse it in
+// the revision's currency (a USD "15,000.00" must not lose its decimal point
+// before parsing). Returning "" means "nothing to compare", never
+// "compare empty".
 func sanitizeClaim(field, raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -130,7 +134,7 @@ func sanitizeClaim(field, raw string) string {
 		if len(trimmed) > maxClaimAmount {
 			return ""
 		}
-		return onlyDigits(trimmed)
+		return trimmed
 	default:
 		return ""
 	}
@@ -343,9 +347,7 @@ func compareClaims(claims map[string]string, evidence store.RevisionEvidence) []
 		})
 	}
 	if claimed, ok := claims["amount"]; ok && strings.TrimSpace(claimed) != "" {
-		digits := onlyDigits(claimed)
-		recordNumber := strconv.FormatInt(evidence.GrandTotal, 10)
-		matches := digits != "" && digits == recordNumber
+		matches := claimAmountMatches(evidence.Currency, claimed, evidence.GrandTotal)
 		diffs = append(diffs, verifyFieldDiff{
 			Label: "Grand total", Claimed: formatClaimAmount(evidence.Currency, claimed), Record: moneyWithSymbol(evidence.Currency, evidence.GrandTotal),
 			Matches: matches,
@@ -353,6 +355,19 @@ func compareClaims(claims map[string]string, evidence store.RevisionEvidence) []
 		})
 	}
 	return diffs
+}
+
+// claimAmountMatches parses the typed claim in the revision's currency and
+// compares minor units against the record. A claim the parser refuses (a
+// pasted symbol, stray text) falls back to the digit comparison IDR always
+// used, so existing behaviour for such input is unchanged.
+func claimAmountMatches(code, claimed string, record int64) bool {
+	if parsed, err := currency.ParseMinor(code, claimed); err == nil {
+		return parsed == record
+	}
+	digits := onlyDigits(claimed)
+	recordNumber := strconv.FormatInt(record, 10)
+	return digits != "" && digits == recordNumber
 }
 
 func onlyDigits(value string) string {
@@ -366,6 +381,11 @@ func onlyDigits(value string) string {
 }
 
 func formatClaimAmount(code, value string) string {
+	// The catalogue echo: a parsed claim formats exactly as the document
+	// prints it ("15,000" in USD echoes "$15,000.00", not "$150.00").
+	if parsed, err := currency.ParseMinor(code, value); err == nil {
+		return moneyWithSymbol(code, parsed)
+	}
 	digits := onlyDigits(value)
 	if digits == "" {
 		return strings.TrimSpace(value)

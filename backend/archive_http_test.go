@@ -125,6 +125,49 @@ func TestGetQuotationMapsDetail(t *testing.T) {
 	}
 }
 
+// TestGetQuotationCarriesCurrency pins the revision side of the B4 contract
+// at the desktop mapping: the code the server emits for the revision reaches
+// the archived quotation the editor compares against the live profile before
+// it may be opened for editing.
+func TestGetQuotationCarriesCurrency(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(writer).Encode(apicontract.QuotationDetail{
+			ID: 6, QuoteNumber: "15020006", Revision: 2, Currency: "USD",
+			AvailableRevisions: []int16{2, 1, 0},
+		})
+	})
+
+	q := newTestQuotation()
+	detail, err := q.GetQuotationRevision(6, 2)
+	if err != nil {
+		t.Fatalf("GetQuotationRevision failed: %v", err)
+	}
+	if detail.Currency != "USD" {
+		t.Errorf("revision currency = %q; want USD", detail.Currency)
+	}
+}
+
+// TestGetQuotationWithoutCurrencyReadsDefault covers a revision that predates
+// the column: the server normalises to the default it was signed as, and the
+// mapping keeps that rather than an empty string beside IDR figures.
+func TestGetQuotationWithoutCurrencyReadsDefault(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(writer).Encode(apicontract.QuotationDetail{
+			ID: 7, QuoteNumber: "15020007", Revision: 0,
+			AvailableRevisions: []int16{0},
+		})
+	})
+
+	q := newTestQuotation()
+	detail, err := q.GetQuotationRevision(7, 0)
+	if err != nil {
+		t.Fatalf("GetQuotationRevision failed: %v", err)
+	}
+	if detail.Currency != "IDR" {
+		t.Errorf("revision currency = %q; want the IDR default", detail.Currency)
+	}
+}
+
 func TestDeleteSurfacesServerDenial(t *testing.T) {
 	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusForbidden)

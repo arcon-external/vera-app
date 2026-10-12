@@ -1,13 +1,17 @@
 import { useRef } from "react";
 import type { JSX } from "react";
 import type { CompanyForm } from "../company";
+import { normalizeCurrencyCode } from "../drafts";
+import type { CurrencyInfo } from "../format";
 import { Button, Card, SectionHeading, fieldClass } from "./ui";
 
 // Presentational slice of the company form: the parent (CompanyProfileCard)
 // owns all state and the whole-record save; see profilePayload in
 // frontend/src/company.ts for why a slice must never save on its own.
 // This panel holds no state — the file-input ref below is a DOM detail,
-// not state.
+// not state. The currency catalogue is fetched by the parent for the same
+// reason: a fetch here would give this slice loading state, and a slice
+// with loading state is a slice that eventually saves on its own.
 export function CompanyGeneralPanel(props: {
   /** The two edited profile fields. The parent owns this state. */
   form: CompanyForm;
@@ -26,9 +30,19 @@ export function CompanyGeneralPanel(props: {
   /** The file chosen in the hidden picker. The parent validates and uploads it. */
   onPickLogo: (file: File | undefined) => void;
   onRemoveLogo: () => void;
+  /** The stored company currency code, verbatim from StoredCompanyExtras.
+   *  Displayed normalized (a never-set profile stores "", which reads IDR). */
+  currency: string;
+  /** The shipped catalogue from GetCurrencyCatalogue, or null while loading.
+   *  A null catalogue disables the picker but still shows the current code. */
+  catalogue: CurrencyInfo[] | null;
+  /** Called with the picked code. The parent writes it into extras, and the
+   *  existing whole-record save round-trips it via profilePayload. */
+  onCurrencyChange: (code: string) => void;
 }): JSX.Element {
-  const { form, onFieldChange, logoPreview, hasLogo, logoBusy, logoMeta, onPickLogo, onRemoveLogo } = props;
+  const { form, onFieldChange, logoPreview, hasLogo, logoBusy, logoMeta, onPickLogo, onRemoveLogo, currency, catalogue, onCurrencyChange } = props;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const displayCode = normalizeCurrencyCode(currency);
   return (
     <div className="grid items-stretch gap-6 lg:grid-cols-2">
       <Card className="p-5">
@@ -56,13 +70,34 @@ export function CompanyGeneralPanel(props: {
               className={fieldClass}
             />
           </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-caption font-medium text-ink-600">Company currency</span>
+            <select
+              value={displayCode}
+              disabled={catalogue === null}
+              onChange={(event) => onCurrencyChange(event.target.value)}
+              className={fieldClass}
+              aria-label="Company currency"
+            >
+              {catalogue === null ? (
+                <option value={displayCode}>{displayCode}</option>
+              ) : (
+                catalogue.map((entry) => (
+                  <option key={entry.code} value={entry.code}>
+                    {entry.code} — {entry.symbol}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
           {/* No save button here by design: the page keeps a single shared
               footer so the record can be saved from any of the three sub-tabs.
               A sub-tab that cannot save is a dead end. */}
         </div>
         <p className="mt-3 text-caption leading-relaxed text-ink-400">
           Only admins see this section. The quotation header prints this name
-          and address on every new quotation.
+          and address on every new quotation. Amounts on new quotations print
+          in the company currency; past revisions keep whatever printed.
         </p>
       </Card>
       <Card className="flex h-full flex-col p-5">

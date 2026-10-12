@@ -30,6 +30,7 @@ import (
 	"github.com/skip2/go-qrcode"
 	"html/template"
 
+	"vera-app/backend/currency"
 	chromedprender "vera-app/backend/render/chromedp"
 	gpdfrender "vera-app/backend/render/gpdf"
 	"vera-app/backend/render/quotation"
@@ -103,6 +104,22 @@ func TestRenderersAgreeOnQuotationNumber(t *testing.T) {
 		if text := pdfText(t, pdf); !strings.Contains(text, in.QuoteNumber) {
 			t.Errorf("%s render does not print the quotation number %s", tc.name, in.QuoteNumber)
 		}
+	}
+}
+
+// TestEquivalenceFixtureCarriesCurrency pins that the hand-built equivalence
+// document carries its currency on both paths to the renderers: the template
+// HTML (the browser's whole input) and the seam's Currency field (what the
+// native renderer prints its headers and totals card from). It needs no
+// browser, unlike the agreement tests above.
+func TestEquivalenceFixtureCarriesCurrency(t *testing.T) {
+	in := equivalenceQuotation(t)
+	if in.Currency != "IDR" {
+		t.Errorf("seam currency = %q; want IDR", in.Currency)
+	}
+	if !strings.Contains(in.HTML, "Unit Price IDR") {
+		t.Errorf("fixture HTML does not carry an IDR unit-price header; " +
+			"the browser would render a different document than the native renderer")
 	}
 }
 
@@ -467,6 +484,13 @@ func quotationDataFromEngineInput(t *testing.T, q *Quotation, logo, qrPNG []byte
 	d.LeadTime = 60
 	d.DiscountPercent = 5
 	d.Incoterm = "FOB"
+
+	// The hand-built document carries its currency like Prepare would set
+	// it: an empty Currency renders "<th>Unit Price </th>" in the browser
+	// while gpdf normalises empty to IDR, so the two renderers would receive
+	// two different documents while asserting they agree.
+	d.Currency = currency.Normalize("IDR")
+	d.CurrencyPrefix, d.CurrencySuffix = currency.Affixes(d.Currency)
 
 	d.DisplaySubTotal = "732.939.750"
 	d.DisplayDiscountAmount = "36.646.987"

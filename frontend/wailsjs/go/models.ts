@@ -167,6 +167,7 @@ export namespace backend {
 	    QuoteNumber: string;
 	    CustomerName: string;
 	    Subject: string;
+	    Currency: string;
 	    CreatedAt: string;
 	    DisplayGrand: string;
 	    ID: number;
@@ -222,6 +223,7 @@ export namespace backend {
 	        this.QuoteNumber = source["QuoteNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Subject = source["Subject"];
+	        this.Currency = source["Currency"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.DisplayGrand = source["DisplayGrand"];
 	        this.ID = source["ID"];
@@ -271,6 +273,7 @@ export namespace backend {
 	    QuoteNumber: string;
 	    CustomerName: string;
 	    Subject: string;
+	    Currency: string;
 	    CreatedAt: string;
 	    DisplayGrand: string;
 	    ID: number;
@@ -286,6 +289,7 @@ export namespace backend {
 	        this.QuoteNumber = source["QuoteNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Subject = source["Subject"];
+	        this.Currency = source["Currency"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.DisplayGrand = source["DisplayGrand"];
 	        this.ID = source["ID"];
@@ -522,6 +526,7 @@ export namespace backend {
 	    CustomerName: string;
 	    UpdatedAt: string;
 	    Label: string;
+	    Currency: string;
 	    ID: number;
 	    ItemCount: number;
 	    CustomerID: number;
@@ -537,6 +542,7 @@ export namespace backend {
 	        this.CustomerName = source["CustomerName"];
 	        this.UpdatedAt = source["UpdatedAt"];
 	        this.Label = source["Label"];
+	        this.Currency = source["Currency"];
 	        this.ID = source["ID"];
 	        this.ItemCount = source["ItemCount"];
 	        this.CustomerID = source["CustomerID"];
@@ -1145,6 +1151,35 @@ export namespace backend {
 	        this.DownloadURL = source["DownloadURL"];
 	        this.UpdateAvailable = source["UpdateAvailable"];
 	        this.Required = source["Required"];
+	    }
+	}
+
+}
+
+export namespace currency {
+	
+	export class CurrencyInfo {
+	    code: string;
+	    exponent: number;
+	    symbol: string;
+	    position: string;
+	    groupSep: string;
+	    decimalSep: string;
+	    symbolSpaced: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CurrencyInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.exponent = source["exponent"];
+	        this.symbol = source["symbol"];
+	        this.position = source["position"];
+	        this.groupSep = source["groupSep"];
+	        this.decimalSep = source["decimalSep"];
+	        this.symbolSpaced = source["symbolSpaced"];
 	    }
 	}
 
