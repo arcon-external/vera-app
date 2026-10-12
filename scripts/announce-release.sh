@@ -80,10 +80,11 @@ trap 'rm -rf "$WORKDIR"' EXIT
 # in both places or the app links 404.
 # The desktop installers, and the CLI beside them.
 #
-# The CLI is in this list on purpose: staff cannot reach GitHub release assets
-# (the repo is private), so a binary that is not mirrored is a binary nobody can
-# download. Listing it here means a release whose CLI failed to build stops the
-# announcement rather than shipping a documented download link that 404s.
+# The CLI is in this list on purpose: staff download from the bucket mirror,
+# never from GitHub release assets, so a binary that is not mirrored is a binary
+# nobody can download. Listing it here means a release whose CLI failed to build
+# stops the announcement rather than shipping a documented download link that
+# 404s.
 ASSETS=(
   "Vera-${VERSION}-windows-amd64-installer.exe"
   "Vera-${VERSION}-windows-arm64-installer.exe"
@@ -209,9 +210,9 @@ done
 
 # ---------------------------------------------------------------------------
 step "4/6  mirror to gs://${BUCKET} and prove the public URLs serve"
-# The repository is private, so GitHub release assets 404 for everyone without
-# access -- which is all of the staff. The bucket is the only download route the
-# app is allowed to hand out.
+# The bucket is the only download route the app is allowed to hand out: every
+# URL below is proven to serve before anything is announced, and the bucket
+# does not depend on the repository's visibility.
 # ---------------------------------------------------------------------------
 if [ "$DRY_RUN" = true ]; then
   note "dry run: would upload ${#ASSETS[@]} files to gs://${BUCKET}/"
@@ -309,7 +310,8 @@ for key in windows windows-arm64 macos; do
   case "$url" in
     *"$BUCKET_BASE"/*"$VERSION"*) : ;;
     *) fail "downloads.$key points at $url, which is neither the public bucket nor $VERSION.
-       GitHub release assets 404 for staff: the repository is private." ;;
+       GitHub release assets are not the staff download route: only the public
+       bucket is proven to serve before anything is announced." ;;
   esac
   code=$(http_code "$url")
   case "$code" in
