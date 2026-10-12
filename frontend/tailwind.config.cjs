@@ -32,10 +32,16 @@ module.exports = {
         // Neutral ramp chosen so every text-bearing step clears WCAG AA (4.5:1)
         // on the paper surfaces; ink-350/300 are reserved for disabled text,
         // placeholder text, and decorative glyphs only.
-        // WARNING: bg-ink-*/<alpha> utilities do not compile under Tailwind
-        // 3.1 (verified: the class silently vanishes from the bundle while
-        // text-ink-* and other bg-*/<alpha> work). Scrims and translucent
-        // ink fills must use inline rgba(28, 27, 25, a) instead.
+        // Alpha utilities compile here: this project runs Tailwind v4, where
+        // `<color>/<alpha>` mixes the colour with `transparent` in oklab. The
+        // bundle carries those rules already — `bg-paper-subtle/50` emits
+        // `background-color:oklab(…/.5)`, and `bg-black/5` emits a
+        // `color-mix(in oklab, … 5%, transparent)` declaration under
+        // `@supports (color:color-mix(…))`. Use the token form
+        // (`bg-ink-950/45`) for scrims and translucent ink fills rather than
+        // inline rgba, which cannot be themed. A class that compiles to
+        // nothing still looks correct in source, so verify any unfamiliar
+        // utility actually appears in frontend/dist/assets/*.css after a build.
         ink: {
           950: "#1c1b19",
           900: "#2b2a27",
@@ -115,9 +121,10 @@ module.exports = {
         title: ["19px", { lineHeight: "26px", letterSpacing: "-0.02em" }],
         display: ["26px", { lineHeight: "32px", letterSpacing: "-0.03em" }],
       },
-      // Tailwind 3.1 ships no numeric min-height scale, so `min-h-10` and
-      // friends silently produced nothing. Define them here; the default
-      // full/screen/min/max/fit values are still merged in.
+      // The 6-14 numeric min-height scale is custom. Tailwind v4's dynamic
+      // spacing scale compiles any other number (e.g. `min-h-13`) without a
+      // config entry; the default full/screen/min/max/fit values are merged
+      // in alongside these.
       minHeight: {
         6: "24px",
         7: "28px",
