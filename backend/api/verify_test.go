@@ -33,6 +33,9 @@ var testSigningSeed = func() []byte {
 func resetTestSchema(t *testing.T, schema string) {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
+	}
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		t.Fatalf("connect for schema reset: %v", err)
