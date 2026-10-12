@@ -172,12 +172,10 @@ type QuotationItem struct {
 // with business data (set per-export by Prepare).
 type QuotationData struct {
 	HtmlTemplate *template.Template
-	// ShowLineDiscounts adds the per-row discount column to the customer item
-	// table, and only when some row carries one. See applyRowDiscountColumn.
-	ShowLineDiscounts bool
-	// OtherColspan is the span of the merged description cell: 6 with the
-	// discount column, 5 without. Precomputed so the template states it once.
-	OtherColspan          int
+	// The item table always prints both price columns -- the list Unit Price
+	// and the After Disc. net price -- on every quotation, so there is no
+	// flag to pick a column set by and no span to precompute for the merged
+	// package rows (Description through Total is always six columns).
 	DisplayDiscountAmount string
 	TaxZone               string
 	LogoBase64            string
@@ -896,7 +894,6 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 	items := buildItems(input.Items)
 	q.Data.Items = items
-	q.applyRowDiscountColumn(items)
 
 	date, validUntil := buildDates(input.Validity)
 	q.Data.Date = date
@@ -1112,39 +1109,6 @@ func (q *Quotation) context() context.Context {
 	return q.ctx
 }
 
-// applyRowDiscountColumn decides whether the customer document shows a
-// discount column at all.
-//
-// A column added to every quotation to accommodate the rows that mostly carry
-// no discount is worse than not showing it: it narrows the description on
-// every document ever printed in order to be empty on most of them. So it
-// appears only when some row actually has one.
-//
-// OtherColspan rides along because the item table merges Description through
-// the last column in five places. Computing the span once here beats repeating
-// the same conditional at each of them.
-func (q *Quotation) applyRowDiscountColumn(items []QuotationItem) {
-	shown := false
-	for _, item := range items {
-		if item.DiscountEnabled {
-			shown = true
-			break
-		}
-		for _, sub := range item.SubItems {
-			if sub.DiscountEnabled {
-				shown = true
-				break
-			}
-		}
-	}
-	q.Data.ShowLineDiscounts = shown
-	if shown {
-		q.Data.OtherColspan = 6
-	} else {
-		q.Data.OtherColspan = 5
-	}
-}
-
 func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath string) store.RevisionDraft {
 	items := make([]store.RevisionItem, 0, len(q.Data.Items))
 	for _, item := range q.Data.Items {
@@ -1281,14 +1245,25 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			for _, low := range sub.SubSubItems {
 				bullets = append(bullets, low.Description)
 			}
+			// The item table prints two prices: the list unit price
+			// (marginalised, before the row's own discount) under Unit Price
+			// IDR, and the net unit price under After Disc. IDR. The After Disc.
+			// cell carries a second line -- the row's discount percentage, or
+			// "—" when it carries none -- packed after a newline, because the
+			// seam type below is frozen (shared with renderers this change may
+			// not touch) and cannot gain a field for it. The template renders
+			// its two lines from DisplayUnitPrice plus DiscountEnabled/Percent
+			// directly; this packs the same two strings so the native renderer
+			// splits out an identical pair. See discountPctLine for the one
+			// formatting both sides must agree on.
 			parts = append(parts, quotation.SubItem{
 				SubNo:       sub.SubNo,
 				Description: sub.Description,
 				Qty:         sub.Qty,
 				UoM:         sub.UoM,
-				UnitPrice:   sub.DisplayUnitPrice,
+				UnitPrice:   sub.DisplayListPrice,
 				Total:       sub.DisplayTotal,
-				Disc:        discountCell(sub.DiscountEnabled, sub.DiscountPercent),
+				Disc:        afterDiscCell(sub.DisplayUnitPrice, sub.DiscountEnabled, sub.DiscountPercent),
 				Bullets:     bullets,
 			})
 		}
@@ -1297,9 +1272,9 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			DisplayDesc:   string(it.DisplayDesc),
 			Qty:           it.Qty,
 			UoM:           it.UoM,
-			UnitPrice:     it.DisplayUnitPrice,
+			UnitPrice:     it.DisplayListUnitPrice,
 			Total:         it.DisplayTotal,
-			Disc:          discountCell(it.DiscountEnabled, it.DiscountPercent),
+			Disc:          afterDiscCell(it.DisplayUnitPrice, it.DiscountEnabled, it.DiscountPercent),
 			SubItems:      parts,
 			ShowSubPrices: it.ShowSubPrices,
 		})
@@ -1355,22 +1330,41 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,
 
-		ShowLineDiscounts: q.Data.ShowLineDiscounts,
+		// The after-discount column is unconditional now: every quotation
+		// prints both price columns, so the seam flag is always on. It stays
+		// on the seam type because the renderers still read it; removing it
+		// would touch both renderer packages.
+		ShowLineDiscounts: true,
 
 		VerificationCode: q.Data.VerifyShortID,
 	}, nil
 }
 
-// discountCell is the Disc. column's text for one row. It reproduces the
+// discountPctLine is the After Disc. cell's second line for one row: the
+// row's discount percentage, or "—" when it carries none. It reproduces the
 // template's {{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}
-// exactly, so the HTML preview, the stored snapshot and the PDF print the same
-// string for the same row. Deciding it once beats two renderers formatting a
-// percentage their own way.
-func discountCell(enabled bool, percent uint16) string {
+// exactly, so the HTML preview, the stored snapshot and the PDF print the
+// same string for the same row.
+//
+// It lives here, on the application's side of the renderer seam, rather than
+// in either renderer: the seam type (render/quotation) is frozen to this
+// change, so the percentage cannot travel in its own field, and the template
+// cannot call Go helpers without a FuncMap in template.go, which is also
+// frozen. The template therefore formats the same one-liner inline, and the
+// agreement between the two is pinned by test, not by shared code.
+func discountPctLine(enabled bool, percent uint16) string {
 	if !enabled {
 		return "—"
 	}
 	return strconv.Itoa(int(percent)) + "%"
+}
+
+// afterDiscCell packs the After Disc. cell's two lines -- the net unit price
+// and the discount percentage line -- into the seam's Disc string, separated
+// by a newline the native renderer splits on. See discountPctLine for why the
+// packing lives here.
+func afterDiscCell(net string, enabled bool, percent uint16) string {
+	return net + "\n" + discountPctLine(enabled, percent)
 }
 
 // decodeDataURL turns an embedded data URL or bare base64 payload into bytes.

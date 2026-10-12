@@ -653,7 +653,7 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 	// carry `border-right` and the last one has none, so nothing of theirs reaches
 	// the outside of the row.
 	tableSides(p, m, clip, top, h, e.pal.Edge)
-	labels := itemHeadLabels(m.cols)
+	labels := HeadLabels()
 	for i, lbl := range labels {
 		p.add(run{
 			x:        m.colX[i] + (m.colX[i+1]-m.colX[i]-e.Width(lbl, px(10), true))/2,
@@ -810,6 +810,68 @@ func (e *Engine) drawSubNumber(p *page, m metrics, top, bodyH, padY float64, num
 	})
 }
 
+// splitAfterDisc separates the After Disc. cell's packed string (see
+// afterDiscCell in backend/quotation.go) into its two printed lines: the net
+// price and the percentage annotation. A string with no newline is a legacy
+// direct engine input that predates the packing, so it is read as a bare
+// price with the undiscounted annotation; an empty price draws no first line
+// but still draws the annotation, because the cell is always two lines.
+func splitAfterDisc(packed string) (price, pct string) {
+	if i := strings.Index(packed, "\n"); i >= 0 {
+		price, pct = packed[:i], packed[i+1:]
+		if pct == "" {
+			pct = "\u2014"
+		}
+		return price, pct
+	}
+	if packed == "" {
+		return "", "\u2014"
+	}
+	return packed, "\u2014"
+}
+
+// drawAfterCell paints the After Disc. cell's two lines in one track: the net
+// price at body size in the row's ink, and beneath it the discount percentage
+// (or an em dash) at 9px in the muted annotation ink the stylesheet gives
+// td.after .after-pct. The percentage carries 0.02em of tracking, exactly as
+// its letter-spacing asks and as the verification code's annotation does.
+//
+// The horizontal geometry is the numeric cells' own: the same track width and
+// the same per-line centring the cell closure beside it uses, so the column
+// cannot sit differently from the numbers around it. Only the vertical
+// discipline differs, because two sizes need two line boxes: the block is
+// centred in the content box the way centeredBlockTop centres, and the second
+// baseline steps one mean line box below the first -- for equal boxes that is
+// the box, which is the step every other numeric cell uses.
+func (e *Engine) drawAfterCell(p *page, m metrics, col int, top, bodyH, padY float64, packed, ink string) {
+	price, pct := splitAfterDisc(packed)
+	trackW := m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)
+	priceLineH := px(bodyPx * bodyLH)
+	pctLineH := px(afterPctPx * afterPctLH)
+	block := priceLineH + pctLineH
+	inner := bodyH - 2*padY
+	offset := (inner - block) / 2
+	if offset < 0 {
+		offset = 0
+	}
+	blockTop := top + padY + offset
+	if price != "" {
+		w := e.Width(price, px(bodyPx), false)
+		p.add(run{
+			x:        m.colX[col] + px(1) + px(tdPadPx) + (trackW-w)/2,
+			baseline: blockTop + bodyBaselineOffset,
+			size:     px(bodyPx), text: price, color: ink,
+		})
+	}
+	tracking := px(0.02 * afterPctPx)
+	w := e.WidthTracked(pct, px(afterPctPx), false, tracking)
+	p.add(run{
+		x:        m.colX[col] + px(1) + px(tdPadPx) + (trackW-w)/2,
+		baseline: blockTop + bodyBaselineOffset + (priceLineH+pctLineH)/2,
+		size:     px(afterPctPx), text: pct, color: e.pal.Muted, tracking: tracking,
+	})
+}
+
 // drawPartRow paints a state-C part: a full six-column row like a main row,
 // drawn one step lighter, with the description indented past the rail and the
 // part's detail bullets beneath it.
@@ -852,17 +914,16 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	}
 	e.drawBullets(p, bulletX, dy, rb.subs, e.pal.SubInk)
 
-	// One renderer for every numeric cell in the row: each is centred in its
-	// track, wrapped if it is wider than the track, and centred vertically in
-	// the row. Only the ink differs, and only for the discount column, which the
-	// stylesheet colours on its own. Sharing the geometry is what keeps that
-	// column aligned with the numbers beside it -- drawing it separately is how
-	// it came to sit differently from all of them.
+	// One renderer for every numeric cell in the row but the After Disc. cell:
+	// each is centred in its track, wrapped if it is wider than the track, and
+	// centred vertically in the row. Sharing the geometry is what keeps the
+	// price columns aligned with each other -- drawing one separately is how a
+	// column once came to sit differently from all of them. The After Disc.
+	// cell is the deliberate exception: it carries two lines at two sizes, so
+	// it draws through drawAfterCell, which reuses this track width and this
+	// centring and differs only in stacking the two line boxes.
 	cell := func(i int, text, colour string) {
-		// i < 0 means the column is not in this layout at all: the discount
-		// column's text is "—" on a row that carries none, which is not empty,
-		// so without this the call indexes colX[-1] and takes the export down.
-		if i < 0 || text == "" {
+		if text == "" {
 			return
 		}
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
@@ -880,7 +941,7 @@ func (e *Engine) drawPartRow(p *page, m metrics, clip *clipRegion, top float64, 
 	cell(m.cols.qty, rb.part.Qty, e.pal.SubInk)
 	cell(m.cols.uom, rb.part.UoM, e.pal.SubInk)
 	cell(m.cols.unit, rb.part.UnitPrice, e.pal.SubInk)
-	cell(m.cols.disc, rb.part.Disc, e.pal.SubNo)
+	e.drawAfterCell(p, m, m.cols.after, top, bodyH, px(subRowPadPx), rb.part.Disc, e.pal.SubInk)
 	cell(m.cols.total, rb.part.Total, e.pal.SubInk)
 }
 
@@ -931,17 +992,16 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	}
 	e.drawBullets(p, subTextX, dy, rb.subs, e.pal.Ink)
 
-	// One renderer for every numeric cell in the row: each is centred in its
-	// track, wrapped if it is wider than the track, and centred vertically in
-	// the row. Only the ink differs, and only for the discount column, which the
-	// stylesheet colours on its own. Sharing the geometry is what keeps that
-	// column aligned with the numbers beside it -- drawing it separately is how
-	// it came to sit differently from all of them.
+	// One renderer for every numeric cell in the row but the After Disc. cell:
+	// each is centred in its track, wrapped if it is wider than the track, and
+	// centred vertically in the row. Sharing the geometry is what keeps the
+	// price columns aligned with each other -- drawing one separately is how a
+	// column once came to sit differently from all of them. The After Disc.
+	// cell is the deliberate exception: it carries two lines at two sizes, so
+	// it draws through drawAfterCell, which reuses this track width and this
+	// centring and differs only in stacking the two line boxes.
 	cell := func(i int, text, colour string) {
-		// i < 0 means the column is not in this layout at all: the discount
-		// column's text is "—" on a row that carries none, which is not empty,
-		// so without this the call indexes colX[-1] and takes the export down.
-		if i < 0 || text == "" {
+		if text == "" {
 			return
 		}
 		trackW := m.colX[i+1] - m.colX[i] - px(1) - 2*px(tdPadPx)
@@ -959,7 +1019,7 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	cell(m.cols.qty, rb.item.Qty, e.pal.Ink)
 	cell(m.cols.uom, rb.item.UoM, e.pal.Ink)
 	cell(m.cols.unit, rb.item.UnitPrice, e.pal.Ink)
-	cell(m.cols.disc, rb.item.Disc, e.pal.SubNo)
+	e.drawAfterCell(p, m, m.cols.after, top, bodyH, px(tdPadPx), rb.item.Disc, e.pal.Ink)
 	// The Total column is centred but not bold: the stylesheet gives every
 	// numeric cell the same treatment and only the header row carries a weight.
 	cell(m.cols.total, rb.item.Total, e.pal.Ink)

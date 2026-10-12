@@ -57,11 +57,11 @@
 				<table class="items-head-table">
 					<colgroup>
 						<col style="width: 7%;">
-						<col style="width: {{if .ShowLineDiscounts}}36%{{else}}43%{{end}};">
+						<col style="width: 26%;">
 						<col style="width: 8%;">
 						<col style="width: 8%;">
 						<col style="width: 17%;">
-						{{if .ShowLineDiscounts}}<col style="width: 7%;">{{end}}
+						<col style="width: 17%;">
 						<col style="width: 17%;">
 					</colgroup>
 					<thead>
@@ -71,7 +71,7 @@
 							<th>Qty.</th>
 							<th>UoM</th>
 							<th>Unit Price IDR</th>
-							{{if .ShowLineDiscounts}}<th>Disc.</th>{{end}}
+							<th>After Disc. IDR</th>
 							<th>Total IDR</th>
 						</tr>
 					</thead>
@@ -80,11 +80,11 @@
 				<table class="items-body-table">
 					<colgroup>
 						<col style="width: 7%;">
-						<col style="width: {{if .ShowLineDiscounts}}36%{{else}}43%{{end}};">
+						<col style="width: 26%;">
 						<col style="width: 8%;">
 						<col style="width: 8%;">
 						<col style="width: 17%;">
-						{{if .ShowLineDiscounts}}<col style="width: 7%;">{{end}}
+						<col style="width: 17%;">
 						<col style="width: 17%;">
 					</colgroup>
 					{{range .Items}}
@@ -98,7 +98,7 @@
 						<tbody class="item">
 							<tr class="sub-parent">
 								<td>{{.No}}</td>
-								<td colspan="{{$.OtherColspan}}">
+								<td colspan="6">
 									<div class="item-desc"><div class="desc-main">{{.DisplayDesc}}</div></div>
 								</td>
 							</tr>
@@ -123,8 +123,8 @@
 								</td>
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
-								<td>{{.DisplayUnitPrice}}</td>
-								{{if $.ShowLineDiscounts}}<td class="disc">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</td>{{end}}
+								<td>{{.DisplayListPrice}}</td>
+								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
 								<td>{{.DisplayTotal}}</td>
 							</tr>
 							{{end}}
@@ -143,14 +143,14 @@
 								</td>
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
-								<td>{{.DisplayUnitPrice}}</td>
-								{{if $.ShowLineDiscounts}}<td class="disc">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</td>{{end}}
+								<td>{{.DisplayListUnitPrice}}</td>
+								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
 								<td>{{.DisplayTotal}}</td>
 							</tr>
 							{{range .SubItems}}
 							<tr class="sub-row">
 								<td>{{.SubNo}}</td>
-								<td colspan="{{$.OtherColspan}}">
+								<td colspan="6">
 									<div class="item-desc">
 										<div class="desc-main">{{.Description}}</div>
 										{{if .SubSubItems}}
@@ -180,8 +180,8 @@
 							</td>
 							<td>{{.Qty}}</td>
 							<td>{{.UoM}}</td>
-							<td>{{.DisplayUnitPrice}}</td>
-							{{if $.ShowLineDiscounts}}<td class="disc">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</td>{{end}}
+							<td>{{.DisplayListUnitPrice}}</td>
+							<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
 							<td>{{.DisplayTotal}}</td>
 						</tr>
 					</tbody>

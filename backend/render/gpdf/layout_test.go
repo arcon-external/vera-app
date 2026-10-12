@@ -51,60 +51,44 @@ func assertNear(t *testing.T, what string, got, want, tol float64) {
 // a different column than a straightforward truncation does, and a pixel in the
 // middle of a centred numeric column moves the number by half of one.
 func TestColumnEdgesOnWholePixels(t *testing.T) {
-	// Both grids, because the table has two and only the column list differs:
-	// the six-column default, and the seven-column one a per-row discount adds.
-	// The expected values are the measured pixel offsets scaled by ptPerPx and
-	// shifted to the table's left edge.
-	cases := []struct {
-		name  string
-		cols  colLayout
-		want  []float64
-		names []string
-	}{
-		{
-			name:  "six columns",
-			cols:  layoutFor(false),
-			want:  []float64{56.25, 90.0, 298.5, 336.75, 375.75, 457.5, 540.75},
-			names: []string{"table left", "No.", "Description", "Qty", "UoM", "Unit price", "table right"},
-		},
-		{
-			name: "seven columns, with a per-row discount",
-			cols: layoutFor(true),
-			// The description gives up exactly the 45px the new column takes, so
-			// Total's own edges (457.5, 540.75) are unchanged between the grids.
-			want: []float64{56.25, 90.0, 264.0, 303.0, 342.0, 423.75, 457.5, 540.75},
-			names: []string{
-				"table left", "No.", "Description", "Qty", "UoM", "Unit price", "Disc.", "table right",
-			},
-		},
+	// One grid, because the table has one column set: No., Description, Qty.,
+	// UoM, the list Unit Price, the After Disc. net price, and Total. The
+	// expected values are the pixel offsets scaled by ptPerPx and shifted to
+	// the table's left edge.
+	cols := itemColumns()
+	want := []float64{56.25, 90.0, 216.0, 254.25, 293.25, 375.75, 457.5, 540.75}
+	names := []string{
+		"table left", "No.", "Description", "Qty", "UoM", "Unit price", "After disc.", "table right",
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := columnEdges(56.25, 484.5, tc.cols)
-			if got[tc.cols.last] != got[len(tc.want)-1] {
-				t.Fatalf("columnEdges wrote the right edge to index %d, not last (%d)",
-					len(tc.want)-1, tc.cols.last)
-			}
-			for i := range tc.want {
-				tol := ptPerPx // one CSS pixel
-				switch {
-				case i == 0 || i == len(tc.want)-1:
-					tol = 0.001 // the table's own edges are exact
-				case tc.names[i] == "Description":
-					tol = 0.01 // decides where the wrapping cell breaks
-				}
-				assertNear(t, tc.names[i], got[i], tc.want[i], tol)
-			}
-		})
+	got := columnEdges(56.25, 484.5, cols)
+	if got[cols.last] != got[len(want)-1] {
+		t.Fatalf("columnEdges wrote the right edge to index %d, not last (%d)",
+			len(want)-1, cols.last)
+	}
+	for i := range want {
+		tol := ptPerPx // one CSS pixel
+		switch {
+		case i == 0 || i == len(want)-1:
+			tol = 0.001 // the table's own edges are exact
+		case names[i] == "Description":
+			tol = 0.01 // decides where the wrapping cell breaks
+		}
+		assertNear(t, names[i], got[i], want[i], tol)
 	}
 }
 
 // TestDescriptionWrapMatchesTheBrowser pins the line breaks of the wrapping cell.
 //
 // Wrapping is the one place where a small measurement difference is not a small
-// visual difference: it moves a whole word onto the next line. The expectations
-// are the browser's breaks for the same string in the same column.
+// visual difference: it moves a whole word onto the next line.
+//
+// NOTE (issue #380): the expectations below are the ENGINE's breaks at the
+// re-cut description width, not fresh browser readings -- no browser was
+// available where this change was made, so the browser side could not be
+// re-measured. They still pin the breaks against future Wrap regressions
+// (which is what moves pagination), but the "matches the browser" claim is
+// provisional until someone with Chrome re-reads them.
 func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 	e := testEngine(t)
 	m := e.derive(sampleInput())
@@ -120,9 +104,11 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "Supply & Install lighting sensor system (PIR Schneider) at AHU block 3, Mezzanine Front & Rear with following scopes:",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx),
 			want: []string{
-				"Supply & Install lighting sensor system (PIR",
-				"Schneider) at AHU block 3, Mezzanine Front &",
-				"Rear with following scopes:",
+				"Supply & Install lighting",
+				"sensor system (PIR",
+				"Schneider) at AHU block 3,",
+				"Mezzanine Front & Rear",
+				"with following scopes:",
 			},
 		},
 		{
@@ -130,7 +116,8 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "6 sensors at Front AHU and 6 sensors at Rear AHU",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx) - px(subIndentPx),
 			want: []string{
-				"6 sensors at Front AHU and 6 sensors at Rear",
+				"6 sensors at Front AHU",
+				"and 6 sensors at Rear",
 				"AHU",
 			},
 		},
@@ -139,7 +126,8 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "6-units batten fixtures with guard (2x 1200mm LED tubes)",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx) - px(subIndentPx),
 			want: []string{
-				"6-units batten fixtures with guard (2x 1200mm",
+				"6-units batten fixtures",
+				"with guard (2x 1200mm",
 				"LED tubes)",
 			},
 		},
@@ -171,12 +159,13 @@ func TestRowHeightsMatchTheBrowser(t *testing.T) {
 	in := sampleInput()
 	rows := e.measureRows(in, e.derive(in))
 
-	// The browser's row heights for the lab document, in order, read off its own
-	// content stream rather than off a raster. The tolerance is two pixels
-	// because this test's input is not the lab document's: its rows wrap
-	// differently, so the fractions the 15.4px line box leaves behind land
-	// differently, and the two are the same size only to within that.
-	want := []float64{132.00, 38.25, 39.00, 84.75, 96.00, 39.00}
+	// NOTE (issue #380): the expectations below are the ENGINE's row heights
+	// at the re-cut description width, in the same order, read off its own
+	// measureRows. The browser values for the new grid were not re-measured
+	// (no browser available); the tolerance stays two pixels because the
+	// fixture's rows wrap differently from the lab document's, so the
+	// fractions the 15.4px line box leaves behind land differently.
+	want := []float64{189.00, 62.25, 62.25, 131.25, 131.25, 62.25}
 	if len(rows) != len(want) {
 		t.Fatalf("laid out %d rows, measured %d", len(rows), len(want))
 	}
@@ -198,27 +187,29 @@ func TestListItemsAreCountedNotLines(t *testing.T) {
 	if items != 3 {
 		t.Errorf("first row has %d list items, the data has 3", items)
 	}
-	if len(first.subs) != 6 {
-		t.Errorf("first row has %d list lines, the browser lays out 6", len(first.subs))
+	// NOTE (issue #380): 9 is the engine's line count at the re-cut
+	// description width, not a fresh browser reading.
+	if len(first.subs) != 9 {
+		t.Errorf("first row has %d list lines, want 9 at this description width", len(first.subs))
 	}
-	// Nine lines of text in all, the list's 6px top margin, one 3px between each
+	// Fourteen lines of text in all, the list's 6px top margin, one 3px between each
 	// pair of items and the last item's own 3px below it, resolved to a whole
 	// pixel, then the cell's padding and both its collapsed borders.
 	//
-	// The assertion is against the browser's number, not against the formula
+	// The assertion is against the row's measured number, not against the formula
 	// restated here. Restating it only checks that the test and the code agree,
-	// which is what let the rounding rule drift: this row came out 132.000
+	// which is what let the rounding rule drift: this row once came out 132.000
 	// because the content was rounded up from 153.6, and every two-line row in
 	// the same document was a pixel tall for the same reason. Across six rows
 	// that was 2.25pt, enough to push the sixth item onto page two and make the
-	// engine paginate a different document from the browser's. The browser
-	// gives this row 132.000pt; the rule that reproduces it also has to leave a
-	// two-line row a pixel shorter, which TestTwoLineRowsResolveDown pins.
-	content := 9*descLinePx + 6 + 3*float64(items)
-	if got, want := content, (132.00-2*px(tdPadPx)-2*px(1))/ptPerPx; math.Abs(got-want) > 1.5 {
-		t.Errorf("first row content %.1fpx is more than a pixel from the browser's %.1fpx", got, want)
+	// engine paginate a different document from the browser's. The rule that
+	// reproduces the browser also has to leave a two-line row a pixel shorter,
+	// which TestTwoLineRowsResolveDown pins.
+	content := 14*descLinePx + 6 + 3*float64(items)
+	if got, want := content, (189.00-2*px(tdPadPx)-2*px(1))/ptPerPx; math.Abs(got-want) > 1.5 {
+		t.Errorf("first row content %.1fpx is more than a pixel from the measured %.1fpx", got, want)
 	}
-	assertNear(t, "first row height", first.height, 132.00, 1.0)
+	assertNear(t, "first row height", first.height, 189.00, 1.0)
 }
 
 // TestTwoLineRowsResolveDown pins the rounding rule that made pagination match.
@@ -237,15 +228,44 @@ func TestTwoLineRowsResolveDown(t *testing.T) {
 	// Two lines of description and no list items: 30.8px of content, which the
 	// browser resolves to 30 or 29. Padding and borders add 22px.
 	const wantLo, wantHi = 51.0, 52.0 // row heights in px, borders included
-	for i, rb := range rows {
+	checked := 0
+	check := func(i int, rb rowBlock) {
+		t.Helper()
 		if len(rb.lines) != 2 || len(rb.subs) != 0 {
-			continue
+			return
 		}
+		checked++
 		got := rb.height / ptPerPx
 		if got < wantLo || got > wantHi {
 			t.Errorf("row %d: two lines resolved to %.0fpx, the browser gives %v-%v",
 				i+1, got, wantLo, wantHi)
 		}
+	}
+	for i, rb := range rows {
+		check(i, rb)
+	}
+	// The shared fixture carries no bare two-line row at the re-cut
+	// description width (its shortest prose rows wrap to four lines now), so
+	// the loop above would pass vacuously -- a guard that asserts nothing.
+	// A synthetic two-line row keeps the rule pinned. The description is
+	// asserted to wrap to exactly two lines first, so a future width change
+	// fails loudly here instead of silently re-vacuuming the test.
+	twoLine := sampleInput()
+	twoLine.Items = []Item{{
+		No: 1, DescMain: "Supply & install exhaust fan system at CDA block 2:",
+		Qty: "1", UoM: "Lot", UnitPrice: "1.000", Total: "1.000",
+	}}
+	synth := e.measureRows(twoLine, e.derive(twoLine))
+	if len(synth) != 1 {
+		t.Fatalf("synthetic input laid out %d rows, want 1", len(synth))
+	}
+	if len(synth[0].lines) != 2 || len(synth[0].subs) != 0 {
+		t.Fatalf("synthetic row has %d lines and %d subs, want 2 lines and none",
+			len(synth[0].lines), len(synth[0].subs))
+	}
+	check(0, synth[0])
+	if checked != 1 {
+		t.Fatalf("checked %d two-line rows, want 1 (the synthetic row)", checked)
 	}
 }
 
@@ -264,8 +284,8 @@ func TestBulletsOnlyOpenListItems(t *testing.T) {
 			open++
 		}
 	}
-	if open != 3 || total != 6 {
-		t.Errorf("%d of %d list lines open an item; 3 of 6 should", open, total)
+	if open != 3 || total != 9 {
+		t.Errorf("%d of %d list lines open an item; 3 of 9 should", open, total)
 	}
 }
 
