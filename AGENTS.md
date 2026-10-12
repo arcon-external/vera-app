@@ -444,15 +444,16 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Writes code, writes and runs tests. |
+| **Worker** | `opencode-go/muse-spark-1.3-contributor#high` | Writes code, writes and runs tests. |
 | **Explorer** | `opencode-go/deepseek-v4.1-flash#high` | Crawls files and reports. Read-only: it never edits. |
-| **Advisor** | `opencode-go/deepseek-v4.1-flash#max` | Advises on what to do next. It advises; it never decides. |
-| **Judge** | `opencode-go/glm-5.3-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
+| **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
 dispatch. The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek. What it costs is stated plainly: the Judge now shares a family with the orchestrator and the Explorer, and the Advisor shares one with the Worker. If a future run shows correlated misses between a reviewer and its family-mate, re-deal the families rather than defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
@@ -464,6 +465,8 @@ A report missing any of its required parts is **not accepted**. Re-brief that wo
 with the gap named rather than filling it in from the diff — the diff shows what
 changed, never what was tried and abandoned, and the abandoned attempt is often the
 most useful thing in the report.
+
+**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not.
 
 ### 12.2 The loop
 
