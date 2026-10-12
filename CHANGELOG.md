@@ -4,6 +4,19 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.10.2] - 2026-10-12
+
+### Fixed
+
+- **A line broken into sub-items no longer shows a 0% discount when its parts
+  carry real ones.** With the sub-prices hidden, such a line printed "0%"
+  underneath a price that had visibly come down — 52.100.000 against 46.380.000.
+  The line's discount is now worked out from its parts, the same way its margin
+  already was, so the figure under the price agrees with the price.
+
+- **A line with no discount now reads "0%" rather than a dash.** The column is a
+  discount percentage, so it states one.
+
 ## [0.10.1] - 2026-10-12
 
 ### Changed
