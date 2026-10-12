@@ -217,6 +217,14 @@ jobs:
     name: Frontend build
     timeout-minutes: 10
     runs-on: ubuntu-24.04
+    # Narrowed, not defaulted. Checkout needs contents; the Dependabot step
+    # below needs security-events. Declaring both keeps the grant
+    # least-privilege -- naming any scope zeroes the rest, so contents has to
+    # be listed explicitly. Kept off the Go job deliberately: its cache
+    # restore/save steps keep whatever token they have today.
+    permissions:
+      contents: read
+      security-events: read
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -241,3 +249,111 @@ jobs:
       # suite alone.
       - name: Frontend tests
         run: npm --prefix frontend test
+
+      - name: Report Dependabot alerts
+        # Repository hygiene, not frontend work: it lives in this job because
+        # this job runs unconditionally on every PR and main push, while the
+        # Go job's heavy steps are skipped for frontend-only diffs.
+        #
+        # The automated half of the AGENTS.md section 11 Dependabot reads. The
+        # open alert list lands in the job summary without anyone typing
+        # anything. It fails ONLY on a successful read that contains a
+        # critical or high alert; anything else is reported without failing.
+        # Every API failure -- bad permission, rate limit, network, an
+        # unexpected response shape -- fails OPEN (warn and exit 0), like the
+        # scope step in the Go job: a blind check must never block a PR. Read
+        # the summary on green, not just the tick: green means "no
+        # critical/high alerts" or "the query failed and this check saw
+        # nothing".
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -u
+          alerts="$(mktemp)"
+          apierr="$(mktemp)"
+          trap 'rm -f "$alerts" "$apierr"' EXIT
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/dependabot/alerts?state=open&per_page=100" >"$alerts" 2>"$apierr"
+          gh_status=$?
+          if [ "$gh_status" -ne 0 ]; then
+            {
+              echo "## Dependabot alerts"
+              echo
+              echo "Query failed (exit ${gh_status}); failing open -- this check saw nothing."
+              echo
+              echo '```'
+              head -c 2000 "$apierr"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::Dependabot alerts query failed (exit ${gh_status}); failing open."
+            cat "$apierr"
+            exit 0
+          fi
+          counts="$(jq -r '"\(length) \([.[] | select((.security_advisory.severity // "" | ascii_downcase) == "critical" or (.security_advisory.severity // "" | ascii_downcase) == "high")] | length)"' "$alerts" 2>"$apierr")"
+          jq_status=$?
+          if [ "$jq_status" -ne 0 ]; then
+            {
+              echo "## Dependabot alerts"
+              echo
+              echo "Query succeeded but the response did not parse as JSON; failing open -- this check saw nothing."
+              echo
+              echo '```'
+              head -c 2000 "$apierr"
+              echo '```'
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::Dependabot alerts response did not parse; failing open."
+            exit 0
+          fi
+          total="${counts%% *}"
+          blocking="${counts##* }"
+          if [ -z "$total" ] || [ -z "$blocking" ]; then
+            {
+              echo "## Dependabot alerts"
+              echo
+              echo "Query succeeded but produced no counts; failing open -- this check saw nothing."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::Dependabot alerts counts were empty; failing open."
+            exit 0
+          fi
+          case "$total/$blocking" in
+            *[!0-9/]*)
+              {
+                echo "## Dependabot alerts"
+                echo
+                echo "Query succeeded but the counts were not numbers; failing open -- this check saw nothing."
+              } >>"$GITHUB_STEP_SUMMARY"
+              echo "::warning::Dependabot alerts counts were not numbers; failing open."
+              exit 0
+              ;;
+          esac
+          rows="$(jq -r '.[] | "\(.security_advisory.severity)\t\(.dependency.package.name)\t\(.security_vulnerability.first_patched_version.identifier // "no patch published")\t\(.html_url)"' "$alerts" 2>"$apierr")"
+          jq_status=$?
+          if [ "$jq_status" -ne 0 ]; then
+            {
+              echo "## Dependabot alerts"
+              echo
+              echo "Query succeeded but the alert rows did not parse; failing open -- this check saw nothing."
+            } >>"$GITHUB_STEP_SUMMARY"
+            echo "::warning::Dependabot alerts rows did not parse; failing open."
+            exit 0
+          fi
+          {
+            echo "## Dependabot alerts"
+            echo
+            if [ "$total" -eq 0 ]; then
+              echo "Dependabot: 0 open"
+            else
+              echo "| Severity | Package | First patched | Alert |"
+              echo "| --- | --- | --- | --- |"
+              printf '%s\n' "$rows" | while IFS=$'\t' read -r sev pkg patched url; do
+                printf '| %s | %s | %s | %s |\n' "$sev" "$pkg" "$patched" "$url"
+              done
+              echo
+              echo "${blocking} of ${total} open alert(s) are critical/high."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+          if [ "$blocking" -gt 0 ]; then
+            echo "::error::${blocking} open Dependabot alert(s) with critical/high severity; see the job summary."
+            exit 1
+          fi
+          echo "Dependabot: ${total} open, none critical/high."
+          exit 0
