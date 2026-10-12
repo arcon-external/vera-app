@@ -4,6 +4,39 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.10.0] - 2026-10-12
+
+### Changed
+
+- **Your brand colours now reach the whole quotation, not part of it.** The four
+  colours under Settings > Company used to recolour roughly a quarter of the
+  document — the headings, the top ribbon, the accents — while everything else
+  stayed blue, because those tints were fixed when the app was built. They are
+  now worked out from your four colours, so the document follows the brand
+  throughout. **The default look is unchanged for practical purposes:** the
+  largest difference anywhere on a page is 7 parts in 255, measured against the
+  old output.
+
+- **Settings > Company is now three sections: General, Quotation and Portal.**
+  Everything that was there is still there — the company profile and logo under
+  General, the quotation's colours under Quotation, the verification page's
+  colours under Portal — and one save button covers all three, so it is reachable
+  from whichever section you are in. Nothing new to learn: the same settings,
+  grouped by what they affect.
+
+### Fixed
+
+- **The totals box on a quotation no longer stretches to match the terms beside
+  it.** When no PPN was charged — services under PPH22, or a free-trade-zone
+  quotation — the box ended well above the bottom of its frame and left a block
+  of empty space. It now ends where its figures end, and the rest of the height is
+  filled with the same tinted bar that sits below the quotation details.
+
+- **Cancel no longer creates the record.** On the new-client and new-account
+  forms, Cancel was submitting the form on its way out: with a required field
+  empty it refused and showed a validation message instead of closing, and with
+  everything filled it created the record *and* closed. Cancel now cancels.
+
 ## [0.9.2] - 2026-10-11
 
 ### Fixed
