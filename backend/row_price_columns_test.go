@@ -12,8 +12,9 @@ import (
 // Guards for issue #380: the item table prints the list unit price under
 // Unit Price IDR and the net unit price under After Disc. IDR, on every
 // quotation and in every row state. The After Disc. cell is always two lines:
-// the net price, then the row's discount percentage -- or an em dash when the
-// row carries none, the convention the old Disc. cell used.
+// the net price, then the row's discount percentage -- or 0% when the row
+// carries none (issue #383 changed the old em-dash default, so a discount
+// percentage column always states a percentage).
 //
 // The example running through these tests is the issue's own: cost 100.000,
 // qty 2, margin 20%, row discount 10% -- list 120.000, net 108.000, total
@@ -61,8 +62,8 @@ func prepareRowPriceFixture(t *testing.T) *Quotation {
 
 // assertPriceRow checks that one row prints list, net, percentage and total:
 // the Unit Price cell, then the After Disc. cell's two lines (the net price
-// and, beneath it, the discount percentage or an em dash), then the Total
-// cell. The three cells are adjacent in the template, so they are matched as
+// and, beneath it, the discount percentage, or 0% when the row carries none),
+// then the Total cell. The three cells are adjacent in the template, so they are matched as
 // one block -- matching them separately would confuse rows that share a
 // figure (an undiscounted row prints its list figure three times over).
 func assertPriceRow(t *testing.T, page, list, net, pct, total string) {
@@ -94,14 +95,14 @@ func TestItemTablePrintsListAndNetPrices(t *testing.T) {
 	// The discounted plain line: the issue's example, end to end.
 	assertPriceRow(t, page, "120.000", "108.000", "10%", "216.000")
 	// The undiscounted line prints the same figure in both price columns, with
-	// an em dash for the percentage it does not carry.
-	assertPriceRow(t, page, "50.000", "50.000", "\u2014", "150.000")
+	// 0% for the percentage it does not carry.
+	assertPriceRow(t, page, "50.000", "50.000", "0%", "150.000")
 	// State C: the priced subs carry both prices; the parent is a merged
 	// title with none of its own.
 	assertPriceRow(t, page, "220.000", "209.000", "5%", "209.000")
-	assertPriceRow(t, page, "75.000", "75.000", "\u2014", "150.000")
+	assertPriceRow(t, page, "75.000", "75.000", "0%", "150.000")
 	// State B: the package parent carries the rolled-up list and net.
-	assertPriceRow(t, page, "300.000", "300.000", "\u2014", "300.000")
+	assertPriceRow(t, page, "300.000", "300.000", "0%", "300.000")
 
 	// The old bare-rate Disc. column is gone: percentages print only as the
 	// After Disc. cell's second line, inside after-pct divs.
@@ -116,8 +117,11 @@ func TestItemTablePrintsListAndNetPrices(t *testing.T) {
 			t.Errorf("percentage %q printed %d times; want once, as one row's second line", pct, n)
 		}
 	}
-	if n := strings.Count(page, "<div class=\"after-pct\">—</div>"); n != 3 {
-		t.Errorf("em-dash second line printed %d times; want 3 (the undiscounted rows)", n)
+	if n := strings.Count(page, "<div class=\"after-pct\">0%</div>"); n != 3 {
+		t.Errorf("0%% second line printed %d times; want 3 (the undiscounted rows)", n)
+	}
+	if strings.Contains(page, "<div class=\"after-pct\">—</div>") {
+		t.Error("em-dash second line still printed on the customer document; undiscounted rows must print 0%")
 	}
 
 	// The native renderer reads renderInput, not the template, so the mapping
@@ -132,16 +136,23 @@ func TestItemTablePrintsListAndNetPrices(t *testing.T) {
 		t.Errorf("line renderer input = %q/%q/%q; want 120.000/108.000\\n10%%/216.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[1]; got.UnitPrice != "50.000" || got.Disc != "50.000\n\u2014" || got.Total != "150.000" {
-		t.Errorf("plain renderer input = %q/%q/%q; want 50.000/50.000\\n\u2014/150.000",
+	if got := in.Items[1]; got.UnitPrice != "50.000" || got.Disc != "50.000\n0%" || got.Total != "150.000" {
+		t.Errorf("plain renderer input = %q/%q/%q; want 50.000/50.000\\n0%%/150.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
 	if got := in.Items[2].SubItems[0]; got.UnitPrice != "220.000" || got.Disc != "209.000\n5%" || got.Total != "209.000" {
 		t.Errorf("sub renderer input = %q/%q/%q; want 220.000/209.000\\n5%%/209.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[3]; got.UnitPrice != "300.000" || got.Disc != "300.000\n\u2014" || got.Total != "300.000" {
-		t.Errorf("package renderer input = %q/%q/%q; want 300.000/300.000\\n\u2014/300.000",
+	// The state-C parent is a merged title with no after cell of its own, but
+	// its fields still carry the rollup -- including the derived discount rate
+	// (11.000 over 370.000 truncates to 2%, issue #383).
+	if got := in.Items[2]; got.UnitPrice != "370.000" || got.Disc != "359.000\n2%" || got.Total != "359.000" {
+		t.Errorf("package renderer input = %q/%q/%q; want 370.000/359.000\\n2%%/359.000",
+			got.UnitPrice, got.Disc, got.Total)
+	}
+	if got := in.Items[3]; got.UnitPrice != "300.000" || got.Disc != "300.000\n0%" || got.Total != "300.000" {
+		t.Errorf("package renderer input = %q/%q/%q; want 300.000/300.000\\n0%%/300.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
 }
@@ -234,20 +245,27 @@ func TestItemTableAlwaysHasAfterDiscColumn(t *testing.T) {
 	if !strings.Contains(page, "<th>After Disc. IDR</th>") {
 		t.Error("a quotation with no discounts prints no After Disc. IDR column")
 	}
-	assertPriceRow(t, page, "1.000.000", "1.000.000", "—", "1.000.000")
+	assertPriceRow(t, page, "1.000.000", "1.000.000", "0%", "1.000.000")
 
 	if _, err := q.build(); err != nil {
 		t.Fatalf("the engine could not render a discount-free quotation: %v", err)
 	}
 }
 
-// TestRowPriceColumnsLeaveCanonicalUnchanged is the compatibility guarantee
-// for this rendering change: it prints different cells, but the signed
-// payload carries the struct values, not the printed strings, so the
-// canonical bytes for a fixed input must be byte-identical before and after.
-// The golden below was captured before the change; if it ever differs, printed
-// verification codes stop verifying -- stop and investigate, do not update it.
-func TestRowPriceColumnsLeaveCanonicalUnchanged(t *testing.T) {
+// TestRowPriceColumnsChangeCanonicalOnlyByTheDerivedPackageRate is the
+// compatibility record for the #383 data change. The cell work itself prints
+// different strings but signs the struct values, not the printed strings --
+// yet deriving the package's discount percentage is a data change, not a
+// rendering-only one: a package with sub-discounts now signs its effective
+// rate (item_3_discount_percent below) where the field was previously omitted.
+//
+// That is the entire delta for this fixed input: one added line. If the bytes
+// ever differ anywhere else, printed verification codes stop verifying --
+// stop and investigate, do not update the golden. CanonicalPrefix is untouched
+// by this change, and old revisions (whose stored package percent is 0, so the
+// field stays omitted for them) keep verifying: TestOldPackageRevisionStillVerifies
+// proves it rather than asserting it.
+func TestRowPriceColumnsChangeCanonicalOnlyByTheDerivedPackageRate(t *testing.T) {
 	q := prepareRowPriceFixture(t)
 
 	const golden = "VERA1:QUOTE\n" +
@@ -269,6 +287,7 @@ func TestRowPriceColumnsLeaveCanonicalUnchanged(t *testing.T) {
 		"item_1_discount_percent: 10\n" +
 		"item_2: plain line|3|Pc|50000|150000\n" +
 		"item_3: package priced|1|Lot|359000|359000\n" +
+		"item_3_discount_percent: 2\n" +
 		"item_3_subs: 2\n" +
 		"item_3_sub_1: part a|1|Pc|209000|209000\n" +
 		"item_3_sub_1_discount_percent: 5\n" +
@@ -282,6 +301,6 @@ func TestRowPriceColumnsLeaveCanonicalUnchanged(t *testing.T) {
 		"grand_total: 1025000"
 
 	if got := string(CanonicalRevision(SignableFromData(q.Data))); got != golden {
-		t.Errorf("canonical bytes changed by a rendering-only change:\n got %q\nwant %q", got, golden)
+		t.Errorf("canonical bytes changed beyond the derived package rate:\n got %q\nwant %q", got, golden)
 	}
 }

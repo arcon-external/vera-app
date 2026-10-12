@@ -1249,7 +1249,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			// (marginalised, before the row's own discount) under Unit Price
 			// IDR, and the net unit price under After Disc. IDR. The After Disc.
 			// cell carries a second line -- the row's discount percentage, or
-			// "—" when it carries none -- packed after a newline, because the
+			// "0%" when it carries none -- packed after a newline, because the
 			// seam type below is frozen (shared with renderers this change may
 			// not touch) and cannot gain a field for it. The template renders
 			// its two lines from DisplayUnitPrice plus DiscountEnabled/Percent
@@ -1341,8 +1341,8 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 }
 
 // discountPctLine is the After Disc. cell's second line for one row: the
-// row's discount percentage, or "—" when it carries none. It reproduces the
-// template's {{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}
+// row's discount percentage, or "0%" when it carries none. It reproduces the
+// template's {{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}
 // exactly, so the HTML preview, the stored snapshot and the PDF print the
 // same string for the same row.
 //
@@ -1354,7 +1354,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 // agreement between the two is pinned by test, not by shared code.
 func discountPctLine(enabled bool, percent uint16) string {
 	if !enabled {
-		return "—"
+		return "0%"
 	}
 	return strconv.Itoa(int(percent)) + "%"
 }
