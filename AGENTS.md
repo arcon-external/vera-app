@@ -16,7 +16,7 @@ the rest of this guide is applied.
 - **Persistence:** PostgreSQL via `backend/store` (pgx v5), configured entirely by
   environment variables.
 - **Frontend:** React 18 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
-  (v3.1).
+  (v4).
 - **Go module:** `vera-app` (Go 1.26).
 - **Wails bindings:** `frontend/wailsjs/go/*` are generated. Treat them as build
   output; keep them in sync when Go signatures change.
@@ -193,10 +193,13 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
 - Tests live in `src/` beside the module they cover, named `<module>.test.ts`,
   and run with `npm --prefix frontend test`. A test is not shipped without the
   runner to execute it.
-- **Tailwind is v3.1: there is no numeric `min-h-*` / `line-clamp-*` utility.**
-  Use the `minHeight` scale defined in `tailwind.config.cjs`, `py` for height, or
-  arbitrary values (`min-h-[42px]`). Verify any new utility actually appears in
-  `frontend/dist/assets/*.css`.
+- **Tailwind is v4** (`tailwindcss ^4.3.3`, loaded via `@import "tailwindcss"`
+  plus `@config` in `frontend/src/index.css`). Numeric `min-h-*` compiles two
+  ways: the custom `minHeight` scale in `tailwind.config.cjs` (6–14) and v4's
+  dynamic spacing scale (any other number, e.g. `min-h-13`). `line-clamp-*` is
+  a v4 core utility — no workaround needed. A class that compiles to nothing
+  still looks correct in source, so verify any unfamiliar utility actually
+  appears in `frontend/dist/assets/*.css` after a frontend build.
 - Do not change the light theme or introduce competing styling systems.
 
 ## 9. Wails Integration Rules
@@ -836,7 +839,6 @@ one in logs.
 
 ## 17. Known Gotchas
 
-- **Tailwind 3.1** lacks numeric `min-h-*` and `line-clamp-*`; see Section 8.
 - `test-data/` is gitignored: fixture changes are on-disk only and never land via PR.
 - `frontend/wailsjs/*` is generated; regenerate rather than hand-editing behavior.
 - `backend/store` tests skip without `VERA_POSTGRES_TEST_DSN`; a green `go test ./...`
