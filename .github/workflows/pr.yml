@@ -268,6 +268,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # GitHub runs this step under `bash -e` (errexit): any failing
+          # command would abort the script before its own fail-open handling
+          # below can run. Disable errexit so the explicit status checks
+          # govern; only a successful critical/high read may fail the job.
+          set +e
           set -u
           alerts="$(mktemp)"
           apierr="$(mktemp)"
