@@ -125,6 +125,13 @@ export function themeFromProfile(profile: CompanyProfileLike): CompanyTheme {
 export type CompanyProfilePayload = {
   LegalName: string; Address: string;
   Phone: string; Email: string; TaxID: string;
+  // Vestigial on the save path, kept deliberately: neither update path
+  // writes it — the desktop forwards thirteen string columns and the server
+  // binds thirteen, while the store recomputes HasLogo from logo_bytes. It
+  // stays because the Wails binding types the UpdateCompanyProfile argument
+  // as the full backend.CompanyProfile, so tsc requires all fourteen fields
+  // at the call site; sending the echoed value is harmless since both update
+  // paths ignore it.
   HasLogo: boolean;
   ThemeQDeep: string; ThemeQAccent: string; ThemeQSoft: string; ThemeQInk: string;
   ThemePDeep: string; ThemePAccent: string; ThemePSoft: string; ThemePInk: string;
