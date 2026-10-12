@@ -724,8 +724,11 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    be copied out of `gh release view <tag> --json assets` rather than typed, or
    the Download section will link a 404 (this happened at v0.5.1). Staff
    download links must point at the public `vera-downloads-508411` bucket
-   mirror, never at GitHub release assets (the private repo 404s anyone without
-   access).
+   mirror, never at GitHub release assets: the announce job proves each mirrored
+   URL serves before anything is announced, and the mirror does not depend on
+   the repository's visibility — a GitHub asset URL offers neither guarantee.
+   (The repo has been public since 2026-10-12; the old private-repo reason is
+   gone, the rule survives on these two properties.)
 
    The `cli` job fails the release if a binary does not carry the tag, so a
    mis-stamped build cannot be published.
@@ -739,8 +742,8 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
      the three installers and the six CLI binaries — to
      `gs://vera-downloads-508411/`, after verifying each against its `.sha256`
      sidecar. The array is the contract: a binary missing from it is a binary
-     staff cannot download, because they cannot reach GitHub release assets (the
-     repo is private);
+     staff cannot download, because staff download from the bucket mirror,
+     never from GitHub release assets;
    - proves each public URL serves before anything is announced, so the app is
      never told to offer a 404;
    - sets the six `VERA_APP_*` variables on `vera-api`, carrying
@@ -847,6 +850,13 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 | `VERA_POSTGRES_TEST_DSN` | Test-only DSN for `backend/store` integration tests |
 | `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_WINDOWS_ARM64` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
 
+The repository is public (since 2026-10-12), which changes the threat model:
+no workflow uses `pull_request_target` or `workflow_run`, and `pr.yml` — the
+only `pull_request`-triggered workflow — references no secrets, so a fork PR
+gets a read-only token and nothing else. Adding either trigger to a public
+repository hands secrets to fork PRs; treat that as its own reviewed decision,
+never an incidental edit.
+
 `.env` is gitignored. Never commit a real password, paste one into an issue, or print
 one in logs.
 
@@ -858,11 +868,12 @@ one in logs.
   does not mean the Postgres path ran.
 - `golang.org/x/crypto`, `pgx/v5`, and `echo/v4` are the dependency areas most often
   flagged by Dependabot; `echo` is transitive via Wails and may need a direct override.
-- The repo is private, so `github.com/.../releases/download/...` links 404 for
-  anyone without GitHub access (i.e. all staff). `VERA_APP_DOWNLOAD_*` must
-  point at the public `vera-downloads-508411` bucket, never at release assets
-  directly. Mirror new installers there at release time; the backups bucket
-  stays private.
+- `VERA_APP_DOWNLOAD_*` must point at the public `vera-downloads-508411`
+  bucket, never at release assets directly: the mirror is verified before
+  anything is announced and survives any change of repository visibility.
+  (The repo has been public since 2026-10-12, so the old private-repo reason
+  no longer applies.) Mirror new installers there at release time; the backups
+  bucket stays private.
 
 ## 18. Cursor / Copilot Rules Status
 
