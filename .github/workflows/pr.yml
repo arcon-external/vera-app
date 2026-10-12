@@ -156,6 +156,16 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go vet ./...
 
+      - name: Build the chromedp tag (the renderer-equivalence oracle)
+        # The default suite never builds this tag, so without this step the
+        # oracle's adapter could rot while everything else stays green --
+        # dependency drift that fails silently (issue #385). go vet compiles
+        # the test files too, so the oracle's own sources cannot rot either.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          go build -tags chromedp ./...
+          go vet -tags chromedp ./...
+
       - name: Install PostgreSQL client (matches service version)
         # The restore drill test shells out to pg_dump/pg_restore, which
         # refuse to talk to a newer server — the client major must be 18.

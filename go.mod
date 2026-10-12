@@ -5,7 +5,7 @@ go 1.26.1
 require (
 	cloud.google.com/go/storage v1.69.0
 	github.com/chromedp/cdproto v0.157.9
-	github.com/chromedp/chromedp v0.15.1
+	github.com/chromedp/chromedp v0.21.0
 	github.com/gpdf-dev/gpdf v1.0.13
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
@@ -67,9 +67,6 @@ require (
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
