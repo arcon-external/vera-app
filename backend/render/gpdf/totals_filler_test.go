@@ -18,8 +18,8 @@ package gpdf
 // between the two renderers in the 4-row state: the browser's row grows past
 // the terms card while the native row stayed.
 //
-// sampleInput carries three term strings, while production always renders at
-// least four (termsLines emits the four fixed terms, plus an optional fifth),
+// sampleInput carries three term strings, while production always renders
+// four (termsLines emits the four fixed terms, matching the template),
 // so the three-row shapes below use fourTerms: with the sample's three terms
 // the terms card is shorter than any real document's, which is what once made
 // a three-row card look filler-free here while real documents painted one.
