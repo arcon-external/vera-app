@@ -18,12 +18,17 @@ func TestCompanyProfileAdminRoundTrip(t *testing.T) {
 	}
 
 	code, updated := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company",
-		`{"legalName":"  PT Example Persada ","address":"Batam","phone":"+62-778-1","email":"info@example.co.id","taxId":"00.000.000.0-000.000","themeQDeep":"#0A1A5C","themePInk":"#111827"}`)
+		`{"legalName":"  PT Example Persada ","address":"Batam","phone":"+62-778-1","email":"info@example.co.id","taxId":"00.000.000.0-000.000","currency":"usd","themeQDeep":"#0A1A5C","themePInk":"#111827"}`)
 	if code != http.StatusOK {
 		t.Fatalf("put = %d; want 200 (%v)", code, updated)
 	}
 	if updated["legalName"] != "PT Example Persada" || updated["email"] != "info@example.co.id" {
 		t.Errorf("updated = %v; want trimmed fields", updated)
+	}
+	// Lower-case codes store upper-cased through the same normalization the
+	// store applies.
+	if updated["currency"] != "USD" {
+		t.Errorf("currency = %v; want USD", updated["currency"])
 	}
 	if updated["themeQDeep"] != "#0A1A5C" || updated["themePInk"] != "#111827" {
 		t.Errorf("updated theme = %v; want stored hex values", updated)
@@ -35,6 +40,8 @@ func TestCompanyProfileAdminRoundTrip(t *testing.T) {
 		`{"legalName":"PT X","themeQDeep":"deep-blue"}`,
 		`{"legalName":"PT X","themePAccent":"#FFF"}`,
 		`{"legalName":"PT X","themeQSoft":"D6E4FF"}`,
+		`{"legalName":"PT X","currency":"Rupiah"}`,
+		`{"legalName":"PT X","currency":"US"}`,
 	} {
 		if code, body := doAdminRequest(t, server, token, http.MethodPut, "/v1/admin/company", bad); code != http.StatusUnprocessableEntity {
 			t.Errorf("put %s = %d (%v); want 422", bad, code, body)

@@ -220,6 +220,7 @@ func TestEverySignedFieldIsTamperProof(t *testing.T) {
 		"lead_time_days":    func(r *SignableRevision) { r.LeadTimeDays = 1 },
 		"discount_percent":  func(r *SignableRevision) { r.DiscountPercent = 0 },
 		"issuer":            func(r *SignableRevision) { r.IssuerName = "PT Impostor" },
+		"currency":          func(r *SignableRevision) { r.Currency = "USD" },
 		"item_count":        func(r *SignableRevision) { r.Items = r.Items[:1] },
 		"item_unit_price":   func(r *SignableRevision) { r.Items[0].UnitPrice = 1 },
 		"item_total":        func(r *SignableRevision) { r.Items[0].Total = 1 },

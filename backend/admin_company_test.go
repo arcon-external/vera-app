@@ -21,7 +21,7 @@ import (
 //
 // HasLogo has no entry: it is a bool and the update map is map[string]string,
 // so it can never travel on this wire. Neither update path writes it — the
-// desktop forwards thirteen string columns and the server binds thirteen —
+// desktop forwards fourteen string columns and the server binds fourteen —
 // and the store recomputes it from logo_bytes (len(LogoBytes) > 0). The test
 // below asserts its absence to pin that contract.
 func companyProfileWireKey(field string) (string, bool) {
@@ -58,7 +58,7 @@ func TestUpdateCompanyProfileSendsEveryField(t *testing.T) {
 		_ = json.NewEncoder(writer).Encode(map[string]any{
 			"legalName": "PT Arcon Penta Persada", "address": "Jl. Merdeka 1, Jakarta",
 			"phone": "+62-21-5550192", "email": "admin@arconpentapersada.co.id",
-			"taxId": "01.234.567.8-901.234", "hasLogo": true,
+			"taxId": "01.234.567.8-901.234", "hasLogo": true, "currency": "USD",
 			"themeQDeep": "#111111", "themeQAccent": "#222222",
 			"themeQSoft": "#333333", "themeQInk": "#444444",
 			"themePDeep": "#555555", "themePAccent": "#666666",
@@ -71,6 +71,7 @@ func TestUpdateCompanyProfileSendsEveryField(t *testing.T) {
 	input := CompanyProfile{
 		LegalName: "sentinel:LegalName", Address: "sentinel:Address",
 		Phone: "sentinel:Phone", Email: "sentinel:Email", TaxID: "sentinel:TaxID",
+		Currency:   "sentinel:Currency",
 		ThemeQDeep: "sentinel:ThemeQDeep", ThemeQAccent: "sentinel:ThemeQAccent",
 		ThemeQSoft: "sentinel:ThemeQSoft", ThemeQInk: "sentinel:ThemeQInk",
 		ThemePDeep: "sentinel:ThemePDeep", ThemePAccent: "sentinel:ThemePAccent",

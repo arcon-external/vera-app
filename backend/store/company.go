@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"vera-app/backend/currency"
 )
 
 // CompanyProfile is the editable company identity shown in the admin-only
@@ -25,8 +27,11 @@ type CompanyProfile struct {
 	LegalName    string
 	ThemePDeep   string
 	ThemePAccent string
-	LogoBytes    []byte
-	HasLogo      bool
+	// Currency is the company's ISO 4217 code from the shipped catalogue.
+	// Normalized to upper-case on write; empty writes as IDR.
+	Currency  string
+	LogoBytes []byte
+	HasLogo   bool
 }
 
 // maxCompanyLogoBytes caps uploaded artwork at 512KB, mirroring the avatar
@@ -76,6 +81,20 @@ func checkTheme(profile CompanyProfile) error {
 	return nil
 }
 
+// checkCurrency validates the company currency against the shipped
+// catalogue. The error names the field, like every other store-boundary
+// validation, so a rejected save says what to fix.
+func checkCurrency(profile CompanyProfile) error {
+	if profile.Currency == "" {
+		return nil
+	}
+	if _, ok := currency.Lookup(profile.Currency); !ok {
+		return fmt.Errorf("company currency %q is not supported (want one of: %s)",
+			profile.Currency, strings.Join(currency.Codes(), ", "))
+	}
+	return nil
+}
+
 // GetCompanyProfile returns the singleton profile, seeding the default
 // identity if the row is somehow missing.
 func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
@@ -86,13 +105,13 @@ func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
 	var profile CompanyProfile
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT legal_name, address, phone, email, tax_id, logo_path,
-		       logo_bytes, logo_mime,
+		       logo_bytes, logo_mime, currency,
 		       theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
 		       theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink
 		FROM %s.company_profile WHERE id = 1`, s.configSchema())).Scan(
 		&profile.LegalName, &profile.Address, &profile.Phone,
 		&profile.Email, &profile.TaxID, &profile.LogoPath,
-		&profile.LogoBytes, &profile.LogoMime,
+		&profile.LogoBytes, &profile.LogoMime, &profile.Currency,
 		&profile.ThemeQDeep, &profile.ThemeQAccent, &profile.ThemeQSoft, &profile.ThemeQInk,
 		&profile.ThemePDeep, &profile.ThemePAccent, &profile.ThemePSoft, &profile.ThemePInk)
 	if err != nil {
@@ -129,6 +148,15 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 	if len(profile.TaxID) > 40 {
 		return CompanyProfile{}, fmt.Errorf("company tax ID is too long")
 	}
+	// Empty writes as the default; anything else must be a catalogue code,
+	// upper-cased so "usd" and "USD" store identically.
+	profile.Currency = strings.ToUpper(strings.TrimSpace(profile.Currency))
+	if profile.Currency == "" {
+		profile.Currency = currency.DefaultCode
+	}
+	if err := checkCurrency(profile); err != nil {
+		return CompanyProfile{}, err
+	}
 	if err := checkTheme(profile); err != nil {
 		return CompanyProfile{}, err
 	}
@@ -138,18 +166,20 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 		SET legal_name = $1, address = $2, phone = $3, email = $4, tax_id = $5,
 		    theme_q_deep = $6, theme_q_accent = $7, theme_q_soft = $8, theme_q_ink = $9,
 		    theme_p_deep = $10, theme_p_accent = $11, theme_p_soft = $12, theme_p_ink = $13,
+		    currency = $14,
 		    updated_at = NOW()
 		WHERE id = 1
 		RETURNING legal_name, address, phone, email, tax_id, logo_path,
-		    logo_bytes, logo_mime,
+		    logo_bytes, logo_mime, currency,
 		    theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
 		    theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink`, s.configSchema()),
 		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID,
 		profile.ThemeQDeep, profile.ThemeQAccent, profile.ThemeQSoft, profile.ThemeQInk,
-		profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk).Scan(
+		profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk,
+		profile.Currency).Scan(
 		&updated.LegalName, &updated.Address, &updated.Phone,
 		&updated.Email, &updated.TaxID, &updated.LogoPath,
-		&updated.LogoBytes, &updated.LogoMime,
+		&updated.LogoBytes, &updated.LogoMime, &updated.Currency,
 		&updated.ThemeQDeep, &updated.ThemeQAccent, &updated.ThemeQSoft, &updated.ThemeQInk,
 		&updated.ThemePDeep, &updated.ThemePAccent, &updated.ThemePSoft, &updated.ThemePInk)
 	if err != nil {

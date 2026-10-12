@@ -61,7 +61,7 @@ type PricingSummary struct {
 	CustomerGrandTotal        uint64
 }
 
-func buildItems(inputItems []QuotationItemInput) []QuotationItem {
+func buildItems(inputItems []QuotationItemInput, currencyCode string) []QuotationItem {
 	items := make([]QuotationItem, 0, len(inputItems))
 	for key, itemInput := range inputItems {
 		item := newQuotationItem(
@@ -69,6 +69,7 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 			itemInput.Qty,
 			itemInput.UoM,
 			itemInput.UnitPrice,
+			currencyCode,
 		)
 		item.ShowSubPrices = itemInput.ShowSubPrices
 		// Margin first, then the row's own discount. newQuotationItem seeded
@@ -76,7 +77,8 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 		if itemInput.MarginEnabled || itemInput.DiscountEnabled {
 			priced := priceLine(item.OriginalUnitPrice, item.Qty,
 				itemInput.MarginPercent, itemInput.MarginEnabled,
-				itemInput.DiscountPercent, itemInput.DiscountEnabled)
+				itemInput.DiscountPercent, itemInput.DiscountEnabled,
+				currencyCode)
 			item.ListUnitPrice = priced.ListUnitPrice
 			item.ListTotal = priced.ListTotal
 			item.UnitPrice = priced.UnitPrice
@@ -99,7 +101,7 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 
 		item.No = uint32(key + 1)
 		if len(itemInput.SubItems) > 0 {
-			item.SubItems = buildSubItems(item.No, itemInput.SubItems)
+			item.SubItems = buildSubItems(item.No, itemInput.SubItems, currencyCode)
 			// The parent is a package rollup: its cost and price are the sums
 			// of its parts. Qty 1 by validation, so the totals below carry the
 			// package once. MarginAmount keeps its per-unit meaning (sell
@@ -142,13 +144,13 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 			// would disagree with that display while no consumer reads it.
 			item.DiscountPercent = packageDiscountPercent(listSum, discountSum)
 			item.MarginAmount = signedDifference(sellSum, costSum)
-			item.DisplayOriginalUnitPrice = formatRupiah(costSum)
-			item.DisplayOriginalTotal = formatRupiah(costSum)
-			item.DisplayUnitPrice = formatRupiah(sellSum)
-			item.DisplayTotal = formatRupiah(sellSum)
-			item.DisplayListUnitPrice = formatRupiah(listSum)
-			item.DisplayDiscount = formatRupiah(discountSum)
-			item.DisplayMarginAmount = formatSignedRupiah(item.MarginAmount)
+			item.DisplayOriginalUnitPrice = formatMoney(currencyCode, costSum)
+			item.DisplayOriginalTotal = formatMoney(currencyCode, costSum)
+			item.DisplayUnitPrice = formatMoney(currencyCode, sellSum)
+			item.DisplayTotal = formatMoney(currencyCode, sellSum)
+			item.DisplayListUnitPrice = formatMoney(currencyCode, listSum)
+			item.DisplayDiscount = formatMoney(currencyCode, discountSum)
+			item.DisplayMarginAmount = formatSignedMoney(currencyCode, item.MarginAmount)
 		}
 		items = append(items, item)
 	}
@@ -163,7 +165,7 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 //
 // Sub-sub-items attach numbering only: they carry no values, so they sum to
 // nothing and leave every total untouched.
-func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSubItem {
+func buildSubItems(parentNo uint32, subs []QuotationSubItemInput, currencyCode string) []QuotationSubItem {
 	out := make([]QuotationSubItem, 0, len(subs))
 	for i, sub := range subs {
 		listUnit := sub.UnitCost
@@ -189,11 +191,11 @@ func buildSubItems(parentNo uint32, subs []QuotationSubItemInput) []QuotationSub
 			Qty:               sub.Qty,
 		}
 		item.MarginAmount = signedDifference(sellUnit, sub.UnitCost)
-		item.DisplayUnitPrice = formatRupiah(sellUnit)
-		item.DisplayTotal = formatRupiah(qty * sellUnit)
-		item.DisplayListPrice = formatRupiah(listUnit)
-		item.DisplayDiscount = formatRupiah(qty * (listUnit - sellUnit))
-		item.DisplayMarginAmount = formatSignedRupiah(item.MarginAmount)
+		item.DisplayUnitPrice = formatMoney(currencyCode, sellUnit)
+		item.DisplayTotal = formatMoney(currencyCode, qty*sellUnit)
+		item.DisplayListPrice = formatMoney(currencyCode, listUnit)
+		item.DisplayDiscount = formatMoney(currencyCode, qty*(listUnit-sellUnit))
+		item.DisplayMarginAmount = formatSignedMoney(currencyCode, item.MarginAmount)
 		item.MarginEnabled = sub.MarginEnabled
 		item.MarginPercent = sub.MarginPercent
 		item.DiscountEnabled = sub.DiscountEnabled
@@ -288,26 +290,26 @@ func signedDifference(left, right uint64) int64 {
 	return -int64(right - left)
 }
 
-func buildViews(subTotal, discountAmount, grandTotal uint64) (string, string, string) {
-	return formatRupiah(subTotal), formatRupiah(discountAmount), formatRupiah(grandTotal)
+func buildViews(subTotal, discountAmount, grandTotal uint64, currencyCode string) (string, string, string) {
+	return formatMoney(currencyCode, subTotal), formatMoney(currencyCode, discountAmount), formatMoney(currencyCode, grandTotal)
 }
 
 // newQuotationItem seeds an unpriced line: cost and sell are the same figure,
 // and the list price starts equal to the sell price so an undiscounted line
 // reads identically to a line whose discount happens to be zero.
-func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) QuotationItem {
+func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64, currencyCode string) QuotationItem {
 	total := uint64(qty) * unitPrice
 	return QuotationItem{
 		Description:              desc,
 		DisplayDesc:              formatDescription(desc),
 		UoM:                      uom,
-		DisplayOriginalUnitPrice: formatRupiah(unitPrice),
-		DisplayOriginalTotal:     formatRupiah(total),
-		DisplayUnitPrice:         formatRupiah(unitPrice),
-		DisplayTotal:             formatRupiah(total),
-		DisplayMarginAmount:      formatSignedRupiah(0),
-		DisplayListUnitPrice:     formatRupiah(unitPrice),
-		DisplayDiscount:          formatRupiah(0),
+		DisplayOriginalUnitPrice: formatMoney(currencyCode, unitPrice),
+		DisplayOriginalTotal:     formatMoney(currencyCode, total),
+		DisplayUnitPrice:         formatMoney(currencyCode, unitPrice),
+		DisplayTotal:             formatMoney(currencyCode, total),
+		DisplayMarginAmount:      formatSignedMoney(currencyCode, 0),
+		DisplayListUnitPrice:     formatMoney(currencyCode, unitPrice),
+		DisplayDiscount:          formatMoney(currencyCode, 0),
 		OriginalUnitPrice:        unitPrice,
 		OriginalTotal:            total,
 		UnitPrice:                unitPrice,
@@ -326,7 +328,7 @@ func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64) Quo
 // customer is given a lower price. That is the same rule the whole-quotation
 // discount follows (issue #270), applied per row here.
 func priceLine(costUnit uint64, qty uint32, margin uint16, marginOn bool,
-	discount uint16, discountOn bool) QuotationItem {
+	discount uint16, discountOn bool, currencyCode string) QuotationItem {
 	sellUnit := costUnit
 	if marginOn {
 		sellUnit = applyMarkup(costUnit, margin)
@@ -342,16 +344,16 @@ func priceLine(costUnit uint64, qty uint32, margin uint16, marginOn bool,
 		Total:         uint64(qty) * finalUnit,
 		DiscountAmount: (uint64(qty) * sellUnit) -
 			(uint64(qty) * finalUnit),
-		DisplayUnitPrice:     formatRupiah(finalUnit),
-		DisplayTotal:         formatRupiah(uint64(qty) * finalUnit),
-		DisplayListUnitPrice: formatRupiah(sellUnit),
-		DisplayDiscount:      formatRupiah((uint64(qty) * sellUnit) - (uint64(qty) * finalUnit)),
+		DisplayUnitPrice:     formatMoney(currencyCode, finalUnit),
+		DisplayTotal:         formatMoney(currencyCode, uint64(qty)*finalUnit),
+		DisplayListUnitPrice: formatMoney(currencyCode, sellUnit),
+		DisplayDiscount:      formatMoney(currencyCode, (uint64(qty)*sellUnit)-(uint64(qty)*finalUnit)),
 		// Per unit, like every other line: a plain line is sell-unit minus
 		// cost-unit, and a package is pinned to qty 1 so the two agree. Going
 		// through signedDifference is what lets a discount below cost show a
 		// loss instead of wrapping around as a huge uint64 gain.
 		MarginAmount:        signedDifference(finalUnit, costUnit),
-		DisplayMarginAmount: formatSignedRupiah(signedDifference(finalUnit, costUnit)),
+		DisplayMarginAmount: formatSignedMoney(currencyCode, signedDifference(finalUnit, costUnit)),
 		DiscountEnabled:     discountOn,
 		DiscountPercent:     discount,
 		MarginEnabled:       marginOn,

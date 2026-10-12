@@ -124,7 +124,7 @@ func TestPricingMatchesTheSharedFixture(t *testing.T) {
 				t.Fatalf("%s: resolveTax(%q, %q, %q): %v",
 					tc.Why, tc.TaxZone, tc.TaxType, tc.ServiceCategory, err)
 			}
-			got := actual(buildPricing(buildItems(inputs), tc.OverallDiscountPercent, ppnBps, servicesBps))
+			got := actual(buildPricing(buildItems(inputs, "IDR"), tc.OverallDiscountPercent, ppnBps, servicesBps))
 
 			// Every field the fixture states must match, and every field the
 			// fixture omits is simply not asserted -- so adding a field to the
@@ -189,7 +189,7 @@ func TestNegativeMarginIsSigned(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			return buildPricing(buildItems(inputs), tc.OverallDiscountPercent, ppnBps, servicesBps)
+			return buildPricing(buildItems(inputs, "IDR"), tc.OverallDiscountPercent, ppnBps, servicesBps)
 		}()
 
 		if summary.MarginalizedGrand < summary.OriginalGrand {

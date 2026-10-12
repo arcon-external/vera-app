@@ -214,7 +214,10 @@ type CompanyProfile struct {
 	ThemePDeep   string
 	ThemePAccent string
 	ThemeQAccent string
-	HasLogo      bool
+	// Currency is the company's ISO 4217 code from the shipped catalogue.
+	// It round-trips verbatim like the theme colours; empty reads as IDR.
+	Currency string
+	HasLogo  bool
 }
 
 // GetCompanyProfile loads the company profile.
@@ -244,6 +247,7 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		"phone":        profile.Phone,
 		"email":        profile.Email,
 		"taxId":        profile.TaxID,
+		"currency":     profile.Currency,
 		"themeQDeep":   profile.ThemeQDeep,
 		"themeQAccent": profile.ThemeQAccent,
 		"themeQSoft":   profile.ThemeQSoft,

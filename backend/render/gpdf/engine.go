@@ -69,14 +69,18 @@ type Input struct {
 	Items []Item
 
 	// Money strings are bare, exactly as the data bag carries them: the template
-	// writes "Rp" in front of each one, and the engine has to agree with the
-	// wording it is replacing rather than reformat it a second time.
+	// writes the currency affixes in front of (or behind) each one, and the
+	// engine has to agree with the wording it is replacing rather than
+	// reformat it a second time.
 	DisplaySubTotal   string
 	DisplayDiscount   string
 	DiscountAmount    uint64
 	DisplayPpn        string
 	DisplayGrandTotal string
 	DiscountPercent   string
+	// Currency is the normalized company code for the headers and the totals
+	// card. Empty reads as IDR, exactly like every other fallback.
+	Currency string
 	// ShowLineDiscounts adds a seventh column to the item table. It matches the
 	// template's own switch, so the preview and the PDF print the same columns.
 	ShowLineDiscounts bool

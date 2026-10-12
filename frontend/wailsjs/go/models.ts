@@ -349,6 +349,7 @@ export namespace backend {
 	    ThemePDeep: string;
 	    ThemePAccent: string;
 	    ThemeQAccent: string;
+	    Currency: string;
 	    HasLogo: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -370,6 +371,7 @@ export namespace backend {
 	        this.ThemePDeep = source["ThemePDeep"];
 	        this.ThemePAccent = source["ThemePAccent"];
 	        this.ThemeQAccent = source["ThemeQAccent"];
+	        this.Currency = source["Currency"];
 	        this.HasLogo = source["HasLogo"];
 	    }
 	}
@@ -1329,6 +1331,7 @@ export namespace store {
 	    Subject: string;
 	    Incoterm: string;
 	    IssuerName: string;
+	    Currency: string;
 	    CanonicalSHA256: string;
 	    SigKeyID: string;
 	    Signature: string;
@@ -1365,6 +1368,7 @@ export namespace store {
 	        this.Subject = source["Subject"];
 	        this.Incoterm = source["Incoterm"];
 	        this.IssuerName = source["IssuerName"];
+	        this.Currency = source["Currency"];
 	        this.CanonicalSHA256 = source["CanonicalSHA256"];
 	        this.SigKeyID = source["SigKeyID"];
 	        this.Signature = source["Signature"];

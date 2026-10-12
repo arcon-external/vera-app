@@ -677,7 +677,13 @@ vera company show
 ```bash
 vera company set --name "PT Arcon Penta Persada" --address "Batam, Indonesia"
 vera company set --phone "+62 778 000 000" --email "sales@example.com"
+vera company set --currency USD
 ```
+
+The currency is one code from the shipped catalogue (IDR, USD, EUR, SGD, MYR,
+JPY, CNY, HKD, AUD, GBP, THB, PHP, VND, KRW, INR, AED); anything else is
+refused before the request. It decides the exponent and symbol every money
+figure on future documents uses.
 
 The endpoint replaces the record, so the CLI reads the current one and moves only
 the fields you name — a partial body would blank the rest.

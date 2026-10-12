@@ -135,7 +135,7 @@ func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
 				t.Fatalf("preview: %v", err)
 			}
 			fromTemplate := templateHeadLabels(t, html)
-			fromEngine := gpdfrender.HeadLabels()
+			fromEngine := gpdfrender.HeadLabels("IDR")
 
 			if len(fromTemplate) != len(wantItemColumns) {
 				t.Fatalf("template printed %d columns %v; want %d %v",
@@ -190,5 +190,82 @@ func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
 				t.Fatalf("the engine could not render this quotation: %v", err)
 			}
 		})
+	}
+}
+
+// TestRenderersAgreeOnItemTableColumnsForCurrency holds the template and the
+// native engine to the same dynamic headers: a non-IDR company prints its
+// own code in the three price headers on both. The default path above pins
+// IDR; this pins that the code travels end to end.
+func TestRenderersAgreeOnItemTableColumnsForCurrency(t *testing.T) {
+	// Renders through whichever engine the build selected.
+	render.RequireUsable(t)
+	templates := &Quotation{}
+	if err := Startup(templates, context.Background()); err != nil {
+		t.Fatalf("load templates: %v", err)
+	}
+
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	q.companyIdentity.Currency = "USD"
+	q.Data.HtmlTemplate = templates.Data.HtmlTemplate
+	q.Data.CustomCSS = templates.Data.CustomCSS
+	q.Data.LogoBase64 = templates.Data.LogoBase64
+
+	if err := q.Prepare(QuotationInput{
+		Subject: "currency probe", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
+		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
+		Items: []QuotationItemInput{
+			{Description: "plain line", UoM: "Lot", Qty: 1, UnitPrice: 1000000},
+		},
+	}); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	want := []string{"No.", "Description", "Qty.", "UoM", "Unit Price USD", "After Disc. USD", "Total USD"}
+	html, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	fromTemplate := templateHeadLabels(t, html)
+	fromEngine := gpdfrender.HeadLabels(q.Data.Currency)
+	if len(fromTemplate) != len(want) {
+		t.Fatalf("template printed %d columns %v; want %d %v",
+			len(fromTemplate), fromTemplate, len(want), want)
+	}
+	for i := range want {
+		if fromTemplate[i] != want[i] {
+			t.Errorf("template column %d: got %q, want %q", i+1, fromTemplate[i], want[i])
+		}
+		if fromEngine[i] != want[i] {
+			t.Errorf("engine column %d: got %q, want %q", i+1, fromEngine[i], want[i])
+		}
+	}
+
+	// The totals carry the symbol while the cells stay bare: the template's
+	// existing shape, now in the company's currency. 1000000 minor units is
+	// $10,000.00 — the exponent is the point.
+	if !strings.Contains(html, "<span>$10,000.00</span>") {
+		t.Error("the USD grand total carries no $ prefix in the template")
+	}
+	// Matched on the cell opening, not the bare letters: the embedded
+	// logo and font blobs contain "Rp" as base64 noise.
+	if strings.Contains(html, "<span>Rp") || strings.Contains(html, "<td>Rp") {
+		t.Error("an Rp survived into a USD document")
+	}
+	in, err := q.renderInput()
+	if err != nil {
+		t.Fatalf("renderInput: %v", err)
+	}
+	if in.Currency != "USD" {
+		t.Errorf("seam currency = %q; want USD", in.Currency)
+	}
+	if got := in.Items[0]; got.UnitPrice != "10,000.00" || got.Total != "10,000.00" {
+		t.Errorf("line renderer input = %q/%q; want bare 10,000.00 in both",
+			got.UnitPrice, got.Total)
+	}
+	if _, err := q.build(); err != nil {
+		t.Fatalf("the engine could not render a USD quotation: %v", err)
 	}
 }

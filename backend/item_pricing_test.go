@@ -24,7 +24,7 @@ func TestBuildItemsUsesPerItemMargins(t *testing.T) {
 			MarginEnabled: false,
 			MarginPercent: 50,
 		},
-	})
+	}, "IDR")
 
 	if len(items) != 2 {
 		t.Fatalf("buildItems returned %d items; want 2", len(items))
@@ -64,7 +64,7 @@ func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
 			UoM:         "Unit",
 			UnitPrice:   50000,
 		},
-	})
+	}, "IDR")
 
 	pricing := buildPricing(items, 10, 0, 200)
 
@@ -183,7 +183,7 @@ func TestRowDiscountFollowsTheConfirmedFlow(t *testing.T) {
 				MarginPercent:   tc.margin,
 				DiscountEnabled: true,
 				DiscountPercent: tc.discount,
-			}})
+			}}, "IDR")
 			if len(items) != 1 {
 				t.Fatalf("buildItems returned %d items; want 1", len(items))
 			}
@@ -220,7 +220,7 @@ func TestUndiscountedLineIsUnchanged(t *testing.T) {
 	items := buildItems([]QuotationItemInput{{
 		Description: "Control panel", Qty: 2, UoM: "Lot", UnitPrice: 15000000,
 		MarginEnabled: true, MarginPercent: 20,
-	}})
+	}}, "IDR")
 	item := items[0]
 	if item.UnitPrice != 18000000 || item.Total != 36000000 {
 		t.Errorf("priced %d/%d; want 18000000/36000000", item.UnitPrice, item.Total)

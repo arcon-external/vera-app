@@ -464,7 +464,7 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     legalName: "",
     address: "",
   });
-  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "" });
+  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "", currency: "" });
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);

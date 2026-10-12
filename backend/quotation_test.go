@@ -190,7 +190,7 @@ func TestBuildItems(t *testing.T) {
 		{Description: "Item B", Qty: 3, UoM: "Unit", UnitPrice: 5000},
 	}
 
-	items := buildItems(inputs)
+	items := buildItems(inputs, "IDR")
 	if len(items) != 2 {
 		t.Fatalf("buildItems returned %d items; want 2", len(items))
 	}
@@ -213,7 +213,7 @@ func TestBuildItems(t *testing.T) {
 }
 
 func TestBuildItemsEmpty(t *testing.T) {
-	items := buildItems(nil)
+	items := buildItems(nil, "IDR")
 	if items == nil {
 		t.Fatal("buildItems(nil) returned nil; want empty slice")
 	}
@@ -280,7 +280,7 @@ func TestBuildPricesEmptyItems(t *testing.T) {
 }
 
 func TestBuildViews(t *testing.T) {
-	dSub, dDisc, dGrand := buildViews(100000, 10000, 90000)
+	dSub, dDisc, dGrand := buildViews(100000, 10000, 90000, "IDR")
 	if dSub != "100.000" {
 		t.Errorf("display sub total = %q; want %q", dSub, "100.000")
 	}
@@ -293,7 +293,7 @@ func TestBuildViews(t *testing.T) {
 }
 
 func TestNewQuotationItem(t *testing.T) {
-	item := newQuotationItem("Service installation", 5, "Unit", 10000)
+	item := newQuotationItem("Service installation", 5, "Unit", 10000, "IDR")
 
 	if item.Description != "Service installation" {
 		t.Errorf("Description = %q; want %q", item.Description, "Service installation")

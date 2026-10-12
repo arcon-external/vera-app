@@ -9,6 +9,8 @@ import (
 
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+
+	"vera-app/backend/currency"
 )
 
 var rupiahPrinter = message.NewPrinter(language.Indonesian)
@@ -19,6 +21,18 @@ func formatRupiah(amount uint64) string {
 
 func formatSignedRupiah(amount int64) string {
 	return rupiahPrinter.Sprintf("%d", amount)
+}
+
+// formatMoney renders a non-negative minor-unit amount as a bare number in
+// the company currency's home convention: the item table's cells stay bare
+// while the totals carry the symbol. For IDR this is formatRupiah exactly.
+func formatMoney(code string, amount uint64) string {
+	return currency.FormatAmount(code, amount)
+}
+
+// formatSignedMoney renders a signed minor-unit amount the same way.
+func formatSignedMoney(code string, amount int64) string {
+	return currency.FormatSignedAmount(code, amount)
 }
 
 func formatDescription(raw string) template.HTML {

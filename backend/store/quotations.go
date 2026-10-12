@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"vera-app/backend/apicontract"
+	"vera-app/backend/currency"
 )
 
 type RevisionItem struct {
@@ -93,25 +94,29 @@ type RevisionDraft struct {
 	Subject          string
 	Incoterm         string
 	IssuerName       string
-	CanonicalSHA256  string
-	SigKeyID         string
-	Signature        string
-	TaxZone          string
-	DocumentHash     string
-	ServiceCategory  string
-	QuoteNumber      string
-	HTMLSnapshot     string
-	TaxType          string
-	Items            []RevisionItem
-	PDFData          []byte
-	Totals           RevisionTotals
-	TaxRateBps       int16
-	CustomerCode     int16
-	DiscountPercent  int16
-	LeadTimeDays     int16
-	PaymentTermDays  int16
-	ValidityDays     int16
-	RevisionNumber   int16
+	// Currency is the company's ISO 4217 code at issue time, stored per
+	// revision beside the issuer name: a later company change must not
+	// rewrite history or break old signatures.
+	Currency        string
+	CanonicalSHA256 string
+	SigKeyID        string
+	Signature       string
+	TaxZone         string
+	DocumentHash    string
+	ServiceCategory string
+	QuoteNumber     string
+	HTMLSnapshot    string
+	TaxType         string
+	Items           []RevisionItem
+	PDFData         []byte
+	Totals          RevisionTotals
+	TaxRateBps      int16
+	CustomerCode    int16
+	DiscountPercent int16
+	LeadTimeDays    int16
+	PaymentTermDays int16
+	ValidityDays    int16
+	RevisionNumber  int16
 }
 
 type QuotationSummary struct {
@@ -119,6 +124,7 @@ type QuotationSummary struct {
 	QuoteNumber    string
 	CustomerName   string
 	Subject        string
+	Currency       string
 	ID             int64
 	GrandTotal     int64
 	RevisionNumber int16
@@ -149,8 +155,11 @@ type QuotationRecord struct {
 	HasDocument        bool
 	TaxType            string
 	AvailableRevisions []int16
-	Items              []RevisionItem
-	PDFData            []byte
+	// Currency is the code the revision was issued in, for money displays
+	// built from this record. History, not the live profile.
+	Currency string
+	Items    []RevisionItem
+	PDFData  []byte
 	QuotationSummary
 	Totals          RevisionTotals
 	CustomerCode    int16
@@ -172,7 +181,7 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT DISTINCT ON (q.id)
 		       q.id, q.quote_number, r.revision_number, c.legal_name,
-		       r.subject, r.created_at, t.customer_grand_total
+		       r.subject, r.created_at, t.customer_grand_total, r.currency
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
@@ -194,6 +203,7 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 			&quotation.Subject,
 			&quotation.CreatedAt,
 			&quotation.GrandTotal,
+			&quotation.Currency,
 		); err != nil {
 			return nil, fmt.Errorf("scan quotation summary: %w", err)
 		}
@@ -217,6 +227,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       r.subject, r.incoterm, r.validity_days, r.payment_term_days,
 		       r.lead_time_days, r.discount_percent, r.tax_zone, r.tax_category,
 		       r.tax_rate_bps, r.tax_type, r.service_category, r.created_at,
+		       r.currency,
 		       d.html_snapshot, d.pdf_data,
 		       (d.pdf_data IS NOT NULL OR d.pdf_path IS NOT NULL) AS has_document,
 		       COALESCE(d.pdf_path, ''),
@@ -266,6 +277,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.TaxType,
 		&record.ServiceCategory,
 		&record.CreatedAt,
+		&record.Currency,
 		&record.HTMLSnapshot,
 		&record.PDFData,
 		&record.HasDocument,
@@ -537,14 +549,18 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 	}
 
 	var revisionID int64
+	// An empty draft currency stores as the default, exactly like the column
+	// would: revisions written before this column existed read back as IDR,
+	// and so does a draft that never set one.
+	currencyCode := currency.Normalize(draft.Currency)
 	err = tx.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.quotation_revisions (
 			quotation_id, revision_number, recipient_name, recipient_address,
 			subject, incoterm, validity_days, payment_term_days, lead_time_days,
 			discount_percent, tax_zone, tax_category, tax_rate_bps,
 			tax_type, service_category,
-			short_id, signature, sig_key_id, canonical_sha256, issuer_name
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+			short_id, signature, sig_key_id, canonical_sha256, issuer_name, currency
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 		RETURNING id`, schema),
 		quoteID,
 		revisionNumber,
@@ -566,6 +582,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		draft.SigKeyID,
 		draft.CanonicalSHA256,
 		draft.IssuerName,
+		currencyCode,
 	).Scan(&revisionID)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("insert quotation revision %d: %w", revisionNumber, err)

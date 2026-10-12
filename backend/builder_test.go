@@ -41,7 +41,7 @@ func TestBuildItemsAppliesMargin(t *testing.T) {
 		{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
 	}
 
-	items := buildItems(inputs)
+	items := buildItems(inputs, "IDR")
 	if len(items) != 1 {
 		t.Fatalf("buildItems returned %d items; want 1", len(items))
 	}

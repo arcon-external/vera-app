@@ -239,9 +239,9 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	view.IssueDate = evidence.CreatedAt.Format("2 January 2006")
 	view.Recipient = evidence.RecipientCompany
 	view.Issuer = evidence.IssuerName
-	view.Total = "Rp" + formatAmount(evidence.GrandTotal)
+	view.Total = moneyWithSymbol(evidence.Currency, evidence.GrandTotal)
 	if evidence.PpnAmount > 0 {
-		view.PPN = "Rp" + formatAmount(evidence.PpnAmount)
+		view.PPN = moneyWithSymbol(evidence.Currency, evidence.PpnAmount)
 	}
 
 	// Theme and issuer display follow the live company profile; a stored
@@ -347,7 +347,7 @@ func compareClaims(claims map[string]string, evidence store.RevisionEvidence) []
 		recordNumber := strconv.FormatInt(evidence.GrandTotal, 10)
 		matches := digits != "" && digits == recordNumber
 		diffs = append(diffs, verifyFieldDiff{
-			Label: "Grand total", Claimed: formatClaimAmount(claimed), Record: "Rp" + formatAmount(evidence.GrandTotal),
+			Label: "Grand total", Claimed: formatClaimAmount(evidence.Currency, claimed), Record: moneyWithSymbol(evidence.Currency, evidence.GrandTotal),
 			Matches: matches,
 			Meaning: "A changed amount is the most common sign of an altered document.",
 		})
@@ -365,7 +365,7 @@ func onlyDigits(value string) string {
 	return b.String()
 }
 
-func formatClaimAmount(value string) string {
+func formatClaimAmount(code, value string) string {
 	digits := onlyDigits(value)
 	if digits == "" {
 		return strings.TrimSpace(value)
@@ -374,7 +374,7 @@ func formatClaimAmount(value string) string {
 	if err != nil {
 		return strings.TrimSpace(value)
 	}
-	return "Rp" + formatAmount(number)
+	return moneyWithSymbol(code, number)
 }
 
 func pad2(n int16) string {

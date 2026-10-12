@@ -4,6 +4,8 @@ import (
 	"math"
 
 	"github.com/gpdf-dev/gpdf/document"
+
+	"vera-app/backend/currency"
 )
 
 // The display list and page composition.
@@ -356,14 +358,17 @@ func columnEdges(tableX, tableW float64, cols colLayout) [8]float64 {
 	return out
 }
 
-// HeadLabels returns the item table's header cells, in track order. It is
-// exported so the application's tests can hold the engine and the HTML
-// template to the same columns: the engine drew six while the template
-// printed seven for a whole release, and nothing compared them. Kept beside
-// the layout because the two must agree: a label list that drifts out of step
-// with the tracks puts every heading over the wrong column.
-func HeadLabels() []string {
-	return []string{"No.", "Description", "Qty.", "UoM", "Unit Price IDR", "After Disc. IDR", "Total IDR"}
+// HeadLabels returns the item table's header cells, in track order, for one
+// currency. It is exported so the application's tests can hold the engine
+// and the HTML template to the same columns: the engine drew six while the
+// template printed seven for a whole release, and nothing compared them.
+// Kept beside the layout because the two must agree: a label list that
+// drifts out of step with the tracks puts every heading over the wrong
+// column. An unknown or empty code reads as IDR, exactly like every other
+// fallback, so the default document is byte-identical.
+func HeadLabels(currencyCode string) []string {
+	code := currency.Normalize(currencyCode)
+	return []string{"No.", "Description", "Qty.", "UoM", "Unit Price " + code, "After Disc. " + code, "Total " + code}
 }
 
 // itemColumns is the item table's column layout. The table has one layout:
@@ -599,7 +604,7 @@ func (e *Engine) layout(in Input) []*page {
 	for {
 		// The header row belongs to the first page only.
 		if first == 0 {
-			e.drawTableHead(cur, m, tableClip(m, tableTop, bottom, true), tableTop)
+			e.drawTableHead(cur, m, tableClip(m, tableTop, bottom, true), tableTop, in.Currency)
 			used += headRowH
 		}
 		placed := 0

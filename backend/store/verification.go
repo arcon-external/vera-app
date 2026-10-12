@@ -94,23 +94,27 @@ type RevisionEvidence struct {
 	RecipientName    string
 	RecipientCompany string
 	IssuerName       string
-	Subject          string
-	Incoterm         string
-	CanonicalSHA256  string
-	SigKeyID         string
-	Signature        string
-	Items            []EvidenceItem
-	Subtotal         int64
-	DiscountAmount   int64
-	PpnAmount        int64
-	GrandTotal       int64
-	ItemCount        int
-	QuotationID      int64
-	DiscountPercent  int16
-	LeadTimeDays     int16
-	PaymentTermDays  int16
-	ValidityDays     int16
-	RevisionNumber   int16
+	// Currency is the code the revision was issued in, so SignableFromEvidence
+	// reproduces the signed bytes. Revisions written before the column read
+	// back as IDR, which is what they were signed as.
+	Currency        string
+	Subject         string
+	Incoterm        string
+	CanonicalSHA256 string
+	SigKeyID        string
+	Signature       string
+	Items           []EvidenceItem
+	Subtotal        int64
+	DiscountAmount  int64
+	PpnAmount       int64
+	GrandTotal      int64
+	ItemCount       int
+	QuotationID     int64
+	DiscountPercent int16
+	LeadTimeDays    int16
+	PaymentTermDays int16
+	ValidityDays    int16
+	RevisionNumber  int16
 }
 
 // EvidenceItem is the customer-visible slice of a line: description, qty,
@@ -163,7 +167,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT r.short_id, q.id, q.quote_number, r.revision_number,
 		       r.recipient_name, r.recipient_address, c.legal_name,
-		       r.subject, r.incoterm,
+		       r.subject, r.incoterm, r.currency,
 		       r.validity_days, r.payment_term_days, r.lead_time_days,
 		       r.discount_percent, r.created_at,
 		       r.signature, r.sig_key_id, r.canonical_sha256, r.issuer_name,
@@ -177,7 +181,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		normalized).Scan(
 		&evidence.ShortID, &evidence.QuotationID, &evidence.QuoteNumber, &evidence.RevisionNumber,
 		&evidence.RecipientName, &evidence.RecipientAddress, &evidence.RecipientCompany,
-		&evidence.Subject, &evidence.Incoterm,
+		&evidence.Subject, &evidence.Incoterm, &evidence.Currency,
 		&evidence.ValidityDays, &evidence.PaymentTermDays, &evidence.LeadTimeDays,
 		&evidence.DiscountPercent, &evidence.CreatedAt,
 		&evidence.Signature, &evidence.SigKeyID, &evidence.CanonicalSHA256, &evidence.IssuerName,

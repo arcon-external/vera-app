@@ -9,6 +9,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"vera-app/backend/currency"
 )
 
 // CanonicalPrefix versions the signed payload format. It must never change
@@ -28,16 +30,22 @@ type SignableRevision struct {
 	Subject          string
 	Incoterm         string
 	QuoteNumber      string
-	Items            []SignableItem
-	Subtotal         int64
-	DiscountAmount   int64
-	PpnAmount        int64
-	GrandTotal       int64
-	LeadTimeDays     int16
-	DiscountPercent  int16
-	PaymentTermDays  int16
-	ValidityDays     int16
-	RevisionNumber   int16
+	// Currency is the company's ISO 4217 code. The canonical line is
+	// unconditional and defaults to IDR: an IDR revision therefore produces
+	// byte-identical canonical bytes to one signed before this field
+	// existed, so every printed verification code keeps verifying. Never
+	// bump CanonicalPrefix for this.
+	Currency        string
+	Items           []SignableItem
+	Subtotal        int64
+	DiscountAmount  int64
+	PpnAmount       int64
+	GrandTotal      int64
+	LeadTimeDays    int16
+	DiscountPercent int16
+	PaymentTermDays int16
+	ValidityDays    int16
+	RevisionNumber  int16
 }
 
 // SignableItem carries the values printed on the customer document (the
@@ -101,7 +109,7 @@ func CanonicalRevision(revision SignableRevision) []byte {
 	writeField(&b, "lead_time_days", strconv.Itoa(int(revision.LeadTimeDays)))
 	writeField(&b, "discount_percent", strconv.Itoa(int(revision.DiscountPercent)))
 	writeField(&b, "issuer", revision.IssuerName)
-	writeField(&b, "currency", "IDR")
+	writeField(&b, "currency", currency.Normalize(revision.Currency))
 	writeField(&b, "item_count", strconv.Itoa(len(revision.Items)))
 	for i, item := range revision.Items {
 		writeField(&b, fmt.Sprintf("item_%d", i+1), strings.Join([]string{

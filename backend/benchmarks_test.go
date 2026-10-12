@@ -59,7 +59,7 @@ var benchmarkSizes = []int{4, 20, 100, 500}
 func BenchmarkBuildPricing(b *testing.B) {
 	for _, n := range benchmarkSizes {
 		b.Run(fmt.Sprintf("lines=%d", n), func(b *testing.B) {
-			items := buildItems(realisticItems(n))
+			items := buildItems(realisticItems(n), "IDR")
 			// Non-FTZ goods: PPN 11% on the customer document. Matches the
 			// common production case in builder_test.go.
 			const ppnBps, servicesBps = 1100, 0
@@ -91,7 +91,7 @@ func BenchmarkBuildItemsAndPricing(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				items := buildItems(input)
+				items := buildItems(input, "IDR")
 				summary := buildPricing(items, 5, ppnBps, servicesBps)
 				if summary.CustomerGrandTotal == 0 {
 					b.Fatal("unexpected zero grand total")
