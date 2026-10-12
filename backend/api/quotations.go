@@ -17,6 +17,7 @@ import (
 
 	"vera-app/backend"
 	"vera-app/backend/apicontract"
+	"vera-app/backend/currency"
 	"vera-app/backend/store"
 )
 
@@ -241,18 +242,27 @@ func (s *Server) listEndpoint(context echo.Context) error {
 	}
 	summaries := make([]apicontract.QuotationSummaryRow, 0, len(rows))
 	for _, row := range rows {
-		summaries = append(summaries, apicontract.QuotationSummaryRow{
-			ID:             row.ID,
-			QuoteNumber:    row.QuoteNumber,
-			RevisionNumber: row.RevisionNumber,
-			CustomerName:   row.CustomerName,
-			Subject:        row.Subject,
-			CreatedAt:      row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-			GrandTotal:     row.GrandTotal,
-			DisplayGrand:   formatAmount(row.GrandTotal),
-		})
+		summaries = append(summaries, mapSummaryRow(row))
 	}
 	return context.JSON(http.StatusOK, map[string]any{"quotations": summaries})
+}
+
+// mapSummaryRow renders one archive row. The currency travels with the money
+// it describes: a mixed-currency archive is unreadable without it, and the
+// code is normalised so a row that predates the column reads as the default
+// rather than an empty string beside an IDR-formatted figure.
+func mapSummaryRow(row store.QuotationSummary) apicontract.QuotationSummaryRow {
+	return apicontract.QuotationSummaryRow{
+		ID:             row.ID,
+		QuoteNumber:    row.QuoteNumber,
+		RevisionNumber: row.RevisionNumber,
+		CustomerName:   row.CustomerName,
+		Subject:        row.Subject,
+		Currency:       currency.Normalize(row.Currency),
+		CreatedAt:      row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		GrandTotal:     row.GrandTotal,
+		DisplayGrand:   formatMoney(row.Currency, row.GrandTotal),
+	}
 }
 
 func (s *Server) detailEndpoint(context echo.Context) error {
@@ -357,11 +367,11 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 				OriginalTotal:            sub.Qty * sub.UnitCost,
 				MarginalizedUnitPrice:    sub.UnitPrice,
 				MarginalizedTotal:        sub.Total,
-				DisplayOriginalUnit:      formatAmount(sub.UnitCost),
-				DisplayOriginalTotal:     formatAmount(sub.Qty * sub.UnitCost),
-				DisplayMarginalizedUnit:  formatAmount(sub.UnitPrice),
-				DisplayMarginalizedTotal: formatAmount(sub.Total),
-				DisplayMarginAmount:      formatAmount(sub.MarginAmount),
+				DisplayOriginalUnit:      formatMoney(record.Currency, sub.UnitCost),
+				DisplayOriginalTotal:     formatMoney(record.Currency, sub.Qty*sub.UnitCost),
+				DisplayMarginalizedUnit:  formatMoney(record.Currency, sub.UnitPrice),
+				DisplayMarginalizedTotal: formatMoney(record.Currency, sub.Total),
+				DisplayMarginAmount:      formatMoney(record.Currency, sub.MarginAmount),
 			})
 		}
 		items = append(items, apicontract.QuotationItemRow{
@@ -382,11 +392,11 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 			MarginalizedTotal:        item.MarginalizedTotal,
 			ShowSubPrices:            item.ShowSubPrices,
 			Subs:                     subs,
-			DisplayOriginalUnit:      formatAmount(item.UnitPrice),
-			DisplayOriginalTotal:     formatAmount(item.OriginalTotal),
-			DisplayMarginalizedUnit:  formatAmount(item.MarginalizedUnitPrice),
-			DisplayMarginalizedTotal: formatAmount(item.MarginalizedTotal),
-			DisplayMarginAmount:      formatAmount(item.MarginAmount),
+			DisplayOriginalUnit:      formatMoney(record.Currency, item.UnitPrice),
+			DisplayOriginalTotal:     formatMoney(record.Currency, item.OriginalTotal),
+			DisplayMarginalizedUnit:  formatMoney(record.Currency, item.MarginalizedUnitPrice),
+			DisplayMarginalizedTotal: formatMoney(record.Currency, item.MarginalizedTotal),
+			DisplayMarginAmount:      formatMoney(record.Currency, item.MarginAmount),
 		})
 	}
 	return apicontract.QuotationDetail{
@@ -397,6 +407,7 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		AvailableRevisions:          record.AvailableRevisions,
 		CustomerName:                record.CustomerName,
 		Subject:                     record.Subject,
+		Currency:                    currency.Normalize(record.Currency),
 		RecipientName:               record.RecipientName,
 		Incoterm:                    record.Incoterm,
 		DiscountPercent:             record.DiscountPercent,
@@ -416,17 +427,17 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		MarginalizedGrandAfterTax:   record.Totals.MarginalizedGrandAfterTax,
 		ProfitAmount:                record.Totals.ProfitAmount,
 		NettProfit:                  record.Totals.NettProfit,
-		DisplayOriginalSubtotal:     formatAmount(record.Totals.OriginalSubtotal),
-		DisplayOriginalDiscount:     formatAmount(record.Totals.OriginalDiscount),
-		DisplayOriginalGrand:        formatAmount(record.Totals.OriginalGrand),
-		DisplayMarginalizedSubtotal: formatAmount(record.Totals.MarginalizedSubtotal),
-		DisplayMarginalizedDiscount: formatAmount(record.Totals.MarginalizedDiscount),
-		DisplayMarginalizedGrand:    formatAmount(record.Totals.MarginalizedGrand),
-		DisplayPpn:                  formatAmount(record.Totals.PpnAmount),
-		DisplayTax:                  formatAmount(record.Totals.TaxAmount),
-		DisplayMarginalizedAfterTax: formatAmount(record.Totals.MarginalizedGrandAfterTax),
-		DisplayProfit:               formatSignedAmount(record.Totals.ProfitAmount),
-		DisplayNett:                 formatSignedAmount(record.Totals.NettProfit),
+		DisplayOriginalSubtotal:     formatMoney(record.Currency, record.Totals.OriginalSubtotal),
+		DisplayOriginalDiscount:     formatMoney(record.Currency, record.Totals.OriginalDiscount),
+		DisplayOriginalGrand:        formatMoney(record.Currency, record.Totals.OriginalGrand),
+		DisplayMarginalizedSubtotal: formatMoney(record.Currency, record.Totals.MarginalizedSubtotal),
+		DisplayMarginalizedDiscount: formatMoney(record.Currency, record.Totals.MarginalizedDiscount),
+		DisplayMarginalizedGrand:    formatMoney(record.Currency, record.Totals.MarginalizedGrand),
+		DisplayPpn:                  formatMoney(record.Currency, record.Totals.PpnAmount),
+		DisplayTax:                  formatMoney(record.Currency, record.Totals.TaxAmount),
+		DisplayMarginalizedAfterTax: formatMoney(record.Currency, record.Totals.MarginalizedGrandAfterTax),
+		DisplayProfit:               formatSignedMoney(record.Currency, record.Totals.ProfitAmount),
+		DisplayNett:                 formatSignedMoney(record.Currency, record.Totals.NettProfit),
 		Items:                       items,
 		HTMLSnapshot:                record.HTMLSnapshot,
 		HasPDF:                      hasPDF,

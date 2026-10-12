@@ -70,9 +70,9 @@
 							<th>Description</th>
 							<th>Qty.</th>
 							<th>UoM</th>
-							<th>Unit Price IDR</th>
-							<th>After Disc. IDR</th>
-							<th>Total IDR</th>
+							<th>Unit Price {{.Currency}}</th>
+							<th>After Disc. {{.Currency}}</th>
+							<th>Total {{.Currency}}</th>
 						</tr>
 					</thead>
 				</table>
@@ -204,7 +204,7 @@
 					<div class="totals">
 						<div class="line">
 							<span>Sub Total</span>
-							<span>Rp{{.DisplaySubTotal}}</span>
+							<span>{{.CurrencyPrefix}}{{.DisplaySubTotal}}{{.CurrencySuffix}}</span>
 						</div>
 						{{/* Discounts are entered per line now, so a quotation
 						     without one must not print an empty "Discount (0%) Rp0"
@@ -212,15 +212,15 @@
 						     whole-quotation discount, which older ones still can. */}}
 						{{if .DiscountAmount}}<div class="line discount">
 							<span>Discount ({{.DiscountPercent}}%)</span>
-							<span>Rp{{.DisplayDiscountAmount}}</span>
+							<span>{{.CurrencyPrefix}}{{.DisplayDiscountAmount}}{{.CurrencySuffix}}</span>
 						</div>{{end}}
 						{{if .PpnAmount}}<div class="line ppn">
 							<span>PPN 11%</span>
-							<span>Rp{{.DisplayPpnAmount}}</span>
+							<span>{{.CurrencyPrefix}}{{.DisplayPpnAmount}}{{.CurrencySuffix}}</span>
 						</div>{{end}}
 						<div class="line grand">
 							<span>Grand Total</span>
-							<span>Rp{{.DisplayGrandTotal}}</span>
+							<span>{{.CurrencyPrefix}}{{.DisplayGrandTotal}}{{.CurrencySuffix}}</span>
 						</div>
 					</div>
 					<div class="totals-decor" aria-hidden="true"></div>

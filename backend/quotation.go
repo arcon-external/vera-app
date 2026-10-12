@@ -15,6 +15,7 @@ import (
 
 	"vera-app/backend/apicontract"
 	"vera-app/backend/auth"
+	"vera-app/backend/currency"
 	"vera-app/backend/render"
 	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
@@ -186,10 +187,17 @@ type QuotationData struct {
 	ValidUntil            string
 	CompanyName           string
 	Incoterm              string
-	ThemeQDeep            string
-	ThemeQAccent          string
-	ThemeQSoft            string
-	ThemeQInk             string
+	// Currency is the normalized company code (unknown reads as IDR). It
+	// decides the exponent and symbol of every Display string Prepare builds,
+	// and the template reads CurrencyPrefix/CurrencySuffix around the totals
+	// plus Currency itself in the item-table headers.
+	Currency       string
+	CurrencyPrefix string
+	CurrencySuffix string
+	ThemeQDeep     string
+	ThemeQAccent   string
+	ThemeQSoft     string
+	ThemeQInk      string
 	// Palette is the theme resolved to every colour the document paints
 	// with: the four bases above plus each derived role. It is refreshed
 	// wherever the bases are set (readTemplate at startup, refreshCustomCSS
@@ -265,6 +273,10 @@ type Quotation struct {
 type CompanyIdentity struct {
 	Name    string
 	Address string
+	// Currency is the company's ISO 4217 code, normalized to a catalogue
+	// entry by Prepare (unknown or empty reads as IDR). It decides the
+	// exponent and symbol every Display string on the document uses.
+	Currency string
 	// Theme carries the quotation brand colors. Empty values are valid and
 	// mean "use the stylesheet default" (the template guards each one).
 	ThemeQDeep   string
@@ -301,6 +313,7 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 	q.companyIdentity = &CompanyIdentity{
 		Name:         profile.LegalName,
 		Address:      profile.Address,
+		Currency:     profile.Currency,
 		ThemeQDeep:   profile.ThemeQDeep,
 		ThemeQAccent: profile.ThemeQAccent,
 		ThemeQSoft:   profile.ThemeQSoft,
@@ -338,6 +351,7 @@ func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
 		return CompanyIdentity{
 			Name:         profile.LegalName,
 			Address:      profile.Address,
+			Currency:     profile.Currency,
 			ThemeQDeep:   profile.ThemeQDeep,
 			ThemeQAccent: profile.ThemeQAccent,
 			ThemeQSoft:   profile.ThemeQSoft,
@@ -880,6 +894,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.ThemeQAccent = identity.ThemeQAccent
 	q.Data.ThemeQSoft = identity.ThemeQSoft
 	q.Data.ThemeQInk = identity.ThemeQInk
+	// Unknown or empty codes render as the default rather than breaking a
+	// document: this is the second fallback, after the store's write-time
+	// validation.
+	q.Data.Currency = currency.Normalize(identity.Currency)
+	q.Data.CurrencyPrefix, q.Data.CurrencySuffix = currency.Affixes(q.Data.Currency)
 
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
@@ -892,7 +911,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.ServiceCategory = serviceCategory
 	q.Data.Incoterm = input.Incoterm
 
-	items := buildItems(input.Items)
+	items := buildItems(input.Items, q.Data.Currency)
 	q.Data.Items = items
 
 	date, validUntil := buildDates(input.Validity)
@@ -920,13 +939,14 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		pricing.MarginalizedSubtotal,
 		pricing.MarginalizedDiscount,
 		pricing.CustomerGrandTotal,
+		q.Data.Currency,
 	)
 	q.Data.DisplaySubTotal = displaySubTotal
 	q.Data.DisplayDiscountAmount = displayDiscountAmount
 	q.Data.DisplayGrandTotal = displayGrandTotal
-	q.Data.DisplayPpnAmount = formatRupiah(pricing.PpnAmount)
-	q.Data.DisplayTaxAmount = formatRupiah(pricing.TaxAmount)
-	q.Data.DisplayNettProfit = formatSignedRupiah(q.Data.NettProfit)
+	q.Data.DisplayPpnAmount = formatMoney(q.Data.Currency, pricing.PpnAmount)
+	q.Data.DisplayTaxAmount = formatMoney(q.Data.Currency, pricing.TaxAmount)
+	q.Data.DisplayNettProfit = formatSignedMoney(q.Data.Currency, q.Data.NettProfit)
 
 	q.lastInput = input
 	q.prepared = true
@@ -1172,6 +1192,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 		PaymentTermDays:  int16(q.Data.PaymentTerm),
 		LeadTimeDays:     int16(q.Data.LeadTime),
 		DiscountPercent:  int16(q.Data.DiscountPercent),
+		Currency:         q.Data.Currency,
 		TaxZone:          q.Data.TaxZone,
 		TaxCategory:      q.Data.TaxCategory,
 		TaxType:          q.Data.TaxType,
@@ -1304,6 +1325,10 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 		CompanyName:    q.Data.CompanyName,
 		CompanyAddress: q.Data.CompanyAddress,
+
+		// The currency travels on the seam so the native renderer prints the
+		// same headers and totals the template renders from the same code.
+		Currency: q.Data.Currency,
 
 		Subject:          q.Data.Subject,
 		RecipientName:    q.Data.RecipientName,

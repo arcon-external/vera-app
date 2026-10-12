@@ -167,6 +167,7 @@ export namespace backend {
 	    QuoteNumber: string;
 	    CustomerName: string;
 	    Subject: string;
+	    Currency: string;
 	    CreatedAt: string;
 	    DisplayGrand: string;
 	    ID: number;
@@ -222,6 +223,7 @@ export namespace backend {
 	        this.QuoteNumber = source["QuoteNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Subject = source["Subject"];
+	        this.Currency = source["Currency"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.DisplayGrand = source["DisplayGrand"];
 	        this.ID = source["ID"];
@@ -271,6 +273,7 @@ export namespace backend {
 	    QuoteNumber: string;
 	    CustomerName: string;
 	    Subject: string;
+	    Currency: string;
 	    CreatedAt: string;
 	    DisplayGrand: string;
 	    ID: number;
@@ -286,6 +289,7 @@ export namespace backend {
 	        this.QuoteNumber = source["QuoteNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Subject = source["Subject"];
+	        this.Currency = source["Currency"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.DisplayGrand = source["DisplayGrand"];
 	        this.ID = source["ID"];
@@ -349,6 +353,7 @@ export namespace backend {
 	    ThemePDeep: string;
 	    ThemePAccent: string;
 	    ThemeQAccent: string;
+	    Currency: string;
 	    HasLogo: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -370,6 +375,7 @@ export namespace backend {
 	        this.ThemePDeep = source["ThemePDeep"];
 	        this.ThemePAccent = source["ThemePAccent"];
 	        this.ThemeQAccent = source["ThemeQAccent"];
+	        this.Currency = source["Currency"];
 	        this.HasLogo = source["HasLogo"];
 	    }
 	}
@@ -520,6 +526,7 @@ export namespace backend {
 	    CustomerName: string;
 	    UpdatedAt: string;
 	    Label: string;
+	    Currency: string;
 	    ID: number;
 	    ItemCount: number;
 	    CustomerID: number;
@@ -535,6 +542,7 @@ export namespace backend {
 	        this.CustomerName = source["CustomerName"];
 	        this.UpdatedAt = source["UpdatedAt"];
 	        this.Label = source["Label"];
+	        this.Currency = source["Currency"];
 	        this.ID = source["ID"];
 	        this.ItemCount = source["ItemCount"];
 	        this.CustomerID = source["CustomerID"];
@@ -1148,6 +1156,35 @@ export namespace backend {
 
 }
 
+export namespace currency {
+	
+	export class CurrencyInfo {
+	    code: string;
+	    exponent: number;
+	    symbol: string;
+	    position: string;
+	    groupSep: string;
+	    decimalSep: string;
+	    symbolSpaced: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CurrencyInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.exponent = source["exponent"];
+	        this.symbol = source["symbol"];
+	        this.position = source["position"];
+	        this.groupSep = source["groupSep"];
+	        this.decimalSep = source["decimalSep"];
+	        this.symbolSpaced = source["symbolSpaced"];
+	    }
+	}
+
+}
+
 export namespace store {
 	
 	export class RevisionTotals {
@@ -1329,6 +1366,7 @@ export namespace store {
 	    Subject: string;
 	    Incoterm: string;
 	    IssuerName: string;
+	    Currency: string;
 	    CanonicalSHA256: string;
 	    SigKeyID: string;
 	    Signature: string;
@@ -1365,6 +1403,7 @@ export namespace store {
 	        this.Subject = source["Subject"];
 	        this.Incoterm = source["Incoterm"];
 	        this.IssuerName = source["IssuerName"];
+	        this.Currency = source["Currency"];
 	        this.CanonicalSHA256 = source["CanonicalSHA256"];
 	        this.SigKeyID = source["SigKeyID"];
 	        this.Signature = source["Signature"];

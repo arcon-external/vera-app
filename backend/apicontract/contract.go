@@ -75,6 +75,7 @@ type QuotationSummaryRow struct {
 	QuoteNumber    string `json:"quoteNumber"`
 	CustomerName   string `json:"customerName"`
 	Subject        string `json:"subject"`
+	Currency       string `json:"currency"`
 	CreatedAt      string `json:"createdAt"`
 	DisplayGrand   string `json:"displayGrand"`
 	ID             int64  `json:"id"`
@@ -145,6 +146,7 @@ type QuotationDetail struct {
 	DisplayNett                 string             `json:"displayNett"`
 	CustomerName                string             `json:"customerName"`
 	Subject                     string             `json:"subject"`
+	Currency                    string             `json:"currency"`
 	RecipientName               string             `json:"recipientName"`
 	Incoterm                    string             `json:"incoterm"`
 	DisplayProfit               string             `json:"displayProfit"`

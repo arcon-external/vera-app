@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"vera-app/backend/currency"
 )
 
 // CompanyProfile is the singleton company record.
@@ -23,7 +25,10 @@ type CompanyProfile struct {
 	Phone     string `json:"Phone,omitempty"`
 	Email     string `json:"Email,omitempty"`
 	TaxID     string `json:"TaxID,omitempty"`
-	HasLogo   bool   `json:"HasLogo"`
+	// Currency is the company's ISO 4217 code from the shipped catalogue.
+	// Empty reads as IDR.
+	Currency string `json:"Currency,omitempty"`
+	HasLogo  bool   `json:"HasLogo"`
 
 	ThemeQDeep   string `json:"ThemeQDeep,omitempty"`
 	ThemeQAccent string `json:"ThemeQAccent,omitempty"`
@@ -72,6 +77,7 @@ func companyShowCommand() *command {
 			a.field("Phone", profile.Phone)
 			a.field("Email", profile.Email)
 			a.field("NPWP", profile.TaxID)
+			a.field("Currency", currency.Normalize(profile.Currency))
 			a.field("Logo", fmt.Sprintf("%v", profile.HasLogo))
 			a.field("Quotation theme", colourSummary(profile.ThemeQDeep, profile.ThemeQAccent, profile.ThemeQSoft, profile.ThemeQInk))
 			a.field("Portal theme", colourSummary(profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk))
@@ -97,21 +103,28 @@ func colourSummary(deep, accent, soft, ink string) string {
 }
 
 func companySetCommand() *command {
-	var name, address, phone, email, taxID string
+	var name, address, phone, email, taxID, currencyCode string
 	return &command{
 		name:    "set",
 		summary: "Change the company record (admin).",
-		usage:   `vera company set [--name "..."] [--address "..."] [--phone "..."] [--email "..."] [--npwp "..."]`,
+		usage:   `vera company set [--name "..."] [--address "..."] [--phone "..."] [--email "..."] [--npwp "..."] [--currency USD]`,
 		flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&name, "name", "", "legal name, printed on every document")
 			fs.StringVar(&address, "address", "", "address, printed under the name")
 			fs.StringVar(&phone, "phone", "", "phone (recorded, never printed on a quotation)")
 			fs.StringVar(&email, "email", "", "email (recorded, never printed on a quotation)")
 			fs.StringVar(&taxID, "npwp", "", "tax id (dormant, for invoices)")
+			fs.StringVar(&currencyCode, "currency", "", "ISO 4217 code from the catalogue ("+strings.Join(currency.Codes(), ", ")+")")
 		},
 		run: func(a *app) error {
 			if err := a.requireArgs(0, "no arguments"); err != nil {
 				return err
+			}
+			if currencyCode != "" {
+				if _, ok := currency.Lookup(currencyCode); !ok {
+					return usagef(a.cmd, "--currency must be one of %s, got %q",
+						strings.Join(currency.Codes(), ", "), currencyCode)
+				}
 			}
 			client, err := a.client()
 			if err != nil {
@@ -138,6 +151,9 @@ func companySetCommand() *command {
 			}
 			if taxID != "" {
 				profile.TaxID = taxID
+			}
+			if currencyCode != "" {
+				profile.Currency = currency.Normalize(currencyCode)
 			}
 			if err := client.Put("/v1/admin/company", profile, &profile); err != nil {
 				return err

@@ -71,7 +71,7 @@ func TestPackageRollupDerivesDiscountFields(t *testing.T) {
 		SubItems: []QuotationSubItemInput{
 			{Description: "scope", UoM: "Pc", Qty: 1, UnitCost: 300_000},
 		},
-	}})
+	}}, "IDR")
 
 	discounted := items[0]
 	// List 2.000.000, discount 100.000, net 1.900.000: the rate is 5%.

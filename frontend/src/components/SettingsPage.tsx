@@ -6,6 +6,7 @@ import {
   DownloadBackup,
   GetCompanyLogo,
   GetCompanyProfile,
+  GetCurrencyCatalogue,
   RestoreBackup,
   SetCompanyLogo,
   SetUserEmail,
@@ -34,6 +35,7 @@ import {
   themeFromProfile,
 } from "../company";
 import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company";
+import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
@@ -464,7 +466,12 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     legalName: "",
     address: "",
   });
-  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "" });
+  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "", currency: "" });
+  // The shipped currency catalogue. Fetched here, not in the panel: the
+  // panel is a presentational slice by design (see company.ts) and owns no
+  // loading state. Null while loading disables the picker; a failed fetch
+  // also leaves null rather than blocking the profile load below.
+  const [catalogue, setCatalogue] = useState<CurrencyInfo[] | null>(null);
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -518,6 +525,12 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
       setError(message);
     } finally {
       setLoading(false);
+    }
+    try {
+      setCatalogue((await GetCurrencyCatalogue()) as CurrencyInfo[]);
+    } catch {
+      // The picker stays disabled on its own; the profile above already loaded.
+      setCatalogue(null);
     }
   }, []);
 
@@ -665,6 +678,9 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             logoMeta={logoMeta}
             onPickLogo={pickLogo}
             onRemoveLogo={removeLogo}
+            currency={extras.currency}
+            catalogue={catalogue}
+            onCurrencyChange={(code) => setExtras((current) => ({ ...current, currency: code }))}
           />
         ) : (
           <CompanyThemePanel

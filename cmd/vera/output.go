@@ -90,31 +90,6 @@ func (a *app) warn(format string, args ...any) {
 	fmt.Fprintf(a.stderr, "vera: "+format+"\n", args...)
 }
 
-// money renders an integer rupiah amount the way the documents do: thousands
-// separated by dots, no currency symbol (worth a column header instead).
-//
-// The API sends raw numbers for list rows and pre-formatted strings for
-// documents; this is for the numbers, so a table of quotations reads like the
-// figures staff see everywhere else.
-func money(amount int64) string {
-	negative := amount < 0
-	digits := fmt.Sprintf("%d", amount)
-	if negative {
-		digits = digits[1:]
-	}
-	var parts []string
-	for len(digits) > 3 {
-		parts = append([]string{digits[len(digits)-3:]}, parts...)
-		digits = digits[:len(digits)-3]
-	}
-	parts = append([]string{digits}, parts...)
-	out := strings.Join(parts, ".")
-	if negative {
-		return "-" + out
-	}
-	return out
-}
-
 // truncate shortens a long description to a column's worth, marking that it did.
 // Descriptions in a quotation are prose; a list view needs them short without
 // pretending the short form is the whole thing.

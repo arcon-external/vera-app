@@ -24,6 +24,8 @@ import (
 	"github.com/gpdf-dev/gpdf/document"
 	"github.com/gpdf-dev/gpdf/document/render"
 	"github.com/gpdf-dev/gpdf/pdf"
+
+	"vera-app/backend/currency"
 )
 
 // Baseline offsets, in points, measured from Chrome's own output.
@@ -627,7 +629,7 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 // The table's outer corners are rounded, which is why every fill in it carries
 // the table's outline as a clip: without it the header bar and the zebra rows
 // would square off the corners.
-func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64) {
+func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64, currencyCode string) {
 	h := headRowH
 
 	p.add(box{x: m.tableX, y: top, w: m.tableW, h: h, fill: e.pal.Deep, clip: clip})
@@ -653,7 +655,7 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 	// carry `border-right` and the last one has none, so nothing of theirs reaches
 	// the outside of the row.
 	tableSides(p, m, clip, top, h, e.pal.Edge)
-	labels := HeadLabels()
+	labels := HeadLabels(currencyCode)
 	for i, lbl := range labels {
 		p.add(run{
 			x:        m.colX[i] + (m.colX[i+1]-m.colX[i]-e.Width(lbl, px(10), true))/2,
@@ -1143,27 +1145,28 @@ type totalRow struct {
 }
 
 // totalsRows builds the totals card's lines. The labels and the conditional PPN
-// line match the template exactly.
+// line match the template exactly. Values decorate with the currency's symbol
+// placement, exactly as the template's prefix/suffix pair does.
 func (e *Engine) totalsRows(in Input) []totalRow {
 	// Keyed, not positional. The field order here is chosen for memory layout, so
 	// an unkeyed literal would silently move a value into the wrong field when
 	// that order changes -- two of these four fields are strings, so the compiler
 	// would not catch it.
 	rows := []totalRow{
-		{label: "Sub Total", value: "Rp" + in.DisplaySubTotal},
+		{label: "Sub Total", value: currency.Decorate(in.Currency, in.DisplaySubTotal)},
 	}
 	// Conditional exactly as the template is: no discount, no row.
 	if in.DiscountAmount > 0 {
 		rows = append(rows, totalRow{
 			label:  "Discount (" + in.DiscountPercent + "%)",
-			value:  "Rp" + in.DisplayDiscount,
+			value:  currency.Decorate(in.Currency, in.DisplayDiscount),
 			colour: e.pal.Green,
 		})
 	}
 	if in.DisplayPpn != "" {
-		rows = append(rows, totalRow{label: "PPN 11%", value: "Rp" + in.DisplayPpn})
+		rows = append(rows, totalRow{label: "PPN 11%", value: currency.Decorate(in.Currency, in.DisplayPpn)})
 	}
-	rows = append(rows, totalRow{label: "Grand Total", value: "Rp" + in.DisplayGrandTotal, grand: true})
+	rows = append(rows, totalRow{label: "Grand Total", value: currency.Decorate(in.Currency, in.DisplayGrandTotal), grand: true})
 	return rows
 }
 

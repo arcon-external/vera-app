@@ -1,20 +1,43 @@
 import type { ReactNode } from "react";
 import type { CustomerPreview, InternalBreakdown } from "../preview";
-import { formatIdr } from "../format";
+import {
+  decorateMoney,
+  formatMoney,
+  type CurrencyInfo,
+} from "../format";
 import { Badge, Card, SectionHeading } from "./ui";
+
+// The IDR entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the prop default only -- the live
+// entry always arrives from the caller -- not a catalogue mirror.
+const IDR_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
 
 interface ReviewPanelProps {
   customer: CustomerPreview;
   internal: InternalBreakdown;
   quotationHTML: string;
+  /** The live profile currency: this panel previews un-exported input, so
+   * there is no revision currency to render. Server Display* strings are
+   * bare numbers; they are decorated here, never re-rendered. */
+  currency?: CurrencyInfo;
 }
 
 function Amount({
   value,
+  currency,
   strong = false,
   tone = "default",
 }: {
   value: string;
+  currency: CurrencyInfo;
   strong?: boolean;
   tone?: "default" | "internal" | "success";
 }) {
@@ -25,7 +48,7 @@ function Amount({
   } as const;
   return (
     <span className={`tnum whitespace-nowrap text-body ${tones[tone]}`}>
-      Rp{value}
+      {decorateMoney(currency, value)}
     </span>
   );
 }
@@ -33,18 +56,20 @@ function Amount({
 function SummaryRow({
   label,
   value,
+  currency,
   strong = false,
   tone = "default",
 }: {
   label: string;
   value: string;
+  currency: CurrencyInfo;
   strong?: boolean;
   tone?: "default" | "internal" | "success";
 }) {
   return (
     <div className="flex items-baseline justify-between gap-6 border-b border-rule py-2 last:border-b-0">
       <span className="min-w-0 text-body text-ink-500">{label}</span>
-      <Amount value={value} strong={strong} tone={tone} />
+      <Amount value={value} currency={currency} strong={strong} tone={tone} />
     </div>
   );
 }
@@ -85,7 +110,7 @@ function TableFrame({ children }: { children: ReactNode }) {
   );
 }
 
-export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelProps) {
+export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_ENTRY }: ReviewPanelProps) {
   return (
     <section aria-labelledby="review-heading" className="space-y-6">
       <SectionHeading
@@ -138,10 +163,10 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                       {item.Qty} {item.UoM}
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <Amount value={item.DisplayOriginalUnitPrice} />
+                      <Amount value={item.DisplayOriginalUnitPrice} currency={currency} />
                     </td>
                     <td className="px-4 py-2.5 text-right">
-                      <Amount value={item.DisplayOriginalTotal} />
+                      <Amount value={item.DisplayOriginalTotal} currency={currency} />
                     </td>
                   </tr>
                 ))}
@@ -156,6 +181,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
             <SummaryRow
               label="Cost total (undiscounted)"
               value={internal.DisplayOriginalGrand}
+              currency={currency}
               strong
             />
           </div>
@@ -209,11 +235,11 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="tnum text-body font-medium text-ink-950">
-                          Rp{item.DisplayMarginalizedUnit}
+                          {decorateMoney(currency, item.DisplayMarginalizedUnit)}
                           {item.DiscountEnabled ? (
                             <div className="tnum mt-0.5 text-caption text-accent-700">
-                              −{item.DiscountPercent}% off · was Rp
-                              {formatIdr(item.ListUnitPrice)}
+                              −{item.DiscountPercent}% off · was{" "}
+                              {formatMoney(currency, item.ListUnitPrice)}
                             </div>
                           ) : null}
                         </div>
@@ -221,12 +247,12 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                           {subItems.length > 0
                             ? `${item.DisplayMarginBlended} overall margin`
                             : item.MarginEnabled
-                              ? `+${item.MarginPercent}% · +Rp${item.DisplayMarginAmount}`
+                              ? `+${item.MarginPercent}% · +${decorateMoney(currency, item.DisplayMarginAmount)}`
                               : "No margin"}
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <Amount value={item.DisplayMarginalizedTotal} />
+                        <Amount value={item.DisplayMarginalizedTotal} currency={currency} />
                       </td>
                     </tr>,
                   ];
@@ -255,7 +281,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="tnum text-caption text-ink-700">
-                            Rp{sub.DisplayMarginalizedUnit}
+                            {decorateMoney(currency, sub.DisplayMarginalizedUnit)}
                             {sub.DiscountEnabled ? (
                               <div className="tnum mt-0.5 text-caption text-accent-700">
                                 −{sub.DiscountPercent}% off
@@ -270,7 +296,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                         </td>
                         <td className="px-4 py-2 text-right">
                           <span className="tnum text-caption text-ink-700">
-                            Rp{sub.DisplayMarginalizedTotal}
+                            {decorateMoney(currency, sub.DisplayMarginalizedTotal)}
                           </span>
                         </td>
                       </tr>
@@ -291,33 +317,39 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                 <SummaryRow
                   label="Customer subtotal"
                   value={internal.DisplayMarginalizedSubtotal}
+                  currency={currency}
                 />
                 {internal.MarginalizedDiscount > 0 ? (
                   <SummaryRow
                     label={`Discount ${customer.DiscountPercent}% (on the price)`}
                     value={`−${internal.DisplayMarginalizedDiscount}`}
+                    currency={currency}
                   />
                 ) : null}
                 <SummaryRow
                   label="Grand total before tax"
                   value={internal.DisplayMarginalizedGrand}
+                  currency={currency}
                   strong
                 />
                 {internal.PpnAmount > 0 ? (
                   <SummaryRow
                     label="PPN 11% (on the quotation)"
                     value={`+${internal.DisplayPpn}`}
+                    currency={currency}
                   />
                 ) : null}
                 {internal.TaxAmount > 0 ? (
                   <SummaryRow
                     label={`Services tax, internal — ${internal.TaxLabel}`}
                     value={`−${internal.DisplayTax}`}
+                    currency={currency}
                   />
                 ) : null}
                 <SummaryRow
                   label="Grand total after tax"
                   value={internal.DisplayMarginalizedAfterTax}
+                  currency={currency}
                   strong
                 />
               </div>
@@ -331,8 +363,9 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                 <SummaryRow
                   label="Cost total (undiscounted)"
                   value={internal.DisplayOriginalGrand}
+                  currency={currency}
                 />
-                <SummaryRow label="Profit before PPH22" value={internal.DisplayProfit} />
+                <SummaryRow label="Profit before PPH22" value={internal.DisplayProfit} currency={currency} />
               </div>
               <div className="mt-3 rounded-lg bg-success-700 px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-4">
@@ -340,7 +373,7 @@ export function ReviewPanel({ customer, internal, quotationHTML }: ReviewPanelPr
                     Nett profit after tax
                   </span>
                   <span className="tnum text-title font-semibold text-white">
-                    Rp{internal.DisplayNett}
+                    {decorateMoney(currency, internal.DisplayNett)}
                   </span>
                 </div>
                 <p className="mt-1 text-caption text-success-100">

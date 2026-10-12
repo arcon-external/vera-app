@@ -316,6 +316,70 @@ func TestVerifySubmitComparesPaperClaims(t *testing.T) {
 	}
 }
 
+// TestCompareClaimsParsesAmountInRevisionCurrency is the B2 contract: a USD
+// revision holding 1500000 minor units ($15,000.00) must match every truthful
+// typing of that figure, echo the catalogue format, and still fail a wrong
+// one. Each claim runs through sanitizeClaim first, exactly as verifySubmit
+// feeds it, so the table below is the production path, not the helper alone.
+func TestCompareClaimsParsesAmountInRevisionCurrency(t *testing.T) {
+	evidence := store.RevisionEvidence{Currency: "USD", GrandTotal: 1500000, QuoteNumber: "15010001"}
+	cases := []struct {
+		claim string
+		echo  string
+		match bool
+	}{
+		{"$15,000.00", "$15,000.00", true},
+		{"15,000.00", "$15,000.00", true},
+		{"15,000", "$15,000.00", true},
+		{"15000", "$15,000.00", true},
+		{"16,000", "$16,000.00", false},
+	}
+	for _, tc := range cases {
+		sanitized := sanitizeClaim("amount", tc.claim)
+		if sanitized == "" {
+			t.Fatalf("claim %q sanitized to nothing; the comparison never runs", tc.claim)
+		}
+		diffs := compareClaims(map[string]string{"amount": sanitized}, evidence)
+		if len(diffs) != 1 {
+			t.Fatalf("claim %q produced %d diffs; want 1", tc.claim, len(diffs))
+		}
+		if diffs[0].Claimed != tc.echo {
+			t.Errorf("claim %q echoed %q; want %q", tc.claim, diffs[0].Claimed, tc.echo)
+		}
+		if diffs[0].Matches != tc.match {
+			t.Errorf("claim %q matches = %v; want %v", tc.claim, diffs[0].Matches, tc.match)
+		}
+	}
+}
+
+// TestCompareClaimsKeepsIDRDigitsPath pins the pre-currency behaviour at the
+// pure-function level: the portal test posts "Rp200.000" (with symbol) and
+// expects that exact echo on a mismatch, and bare digits still match their
+// record. If this test fails, the IDR path changed.
+func TestCompareClaimsKeepsIDRDigitsPath(t *testing.T) {
+	evidence := store.RevisionEvidence{Currency: "IDR", GrandTotal: 62100000, QuoteNumber: "15010001"}
+
+	sanitized := sanitizeClaim("amount", "Rp200.000")
+	diffs := compareClaims(map[string]string{"amount": sanitized}, evidence)
+	if len(diffs) != 1 {
+		t.Fatalf("symbol claim produced %d diffs; want 1", len(diffs))
+	}
+	if diffs[0].Matches {
+		t.Error("Rp200.000 against a 62100000 record must not match")
+	}
+	if diffs[0].Claimed != "Rp200.000" {
+		t.Errorf("symbol claim echoed %q; want %q", diffs[0].Claimed, "Rp200.000")
+	}
+
+	matching := sanitizeClaim("amount", "62100000")
+	if got := compareClaims(map[string]string{"amount": matching}, evidence); len(got) != 1 || !got[0].Matches {
+		t.Error("bare IDR digits against their own record must match")
+	}
+	if echo := formatClaimAmount("IDR", matching); echo != "Rp62.100.000" {
+		t.Errorf("bare IDR digits echoed %q; want %q", echo, "Rp62.100.000")
+	}
+}
+
 func TestVerifyPageAcceptsPastedLink(t *testing.T) {
 	resetTestSchema(t, "vera_api_verify_link")
 	server, token := testQuotationServer(t, "vera_api_verify_link")

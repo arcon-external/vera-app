@@ -90,8 +90,19 @@ func (s *Server) saveDraft(context echo.Context) error {
 			request.Subject, request.CustomerName, request.CustomerID,
 			request.ItemCount, request.Payload)
 	} else {
+		// The currency is stamped server-side from the live company profile,
+		// never trusted from the client: it is the denomination the editor's
+		// integers are written in, and opening the draft later blocks when
+		// the profile has moved on. An update keeps the original stamp (see
+		// UpdateDraft), so a save under a new profile cannot relabel old
+		// amounts.
+		profile, profileErr := s.database.GetCompanyProfile(ctx)
+		if profileErr != nil {
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "save draft"})
+		}
 		draft, err = s.database.CreateDraft(ctx, user.ID, request.Label, request.Subject,
-			request.CustomerName, request.CustomerID, request.ItemCount, request.Payload)
+			request.CustomerName, request.CustomerID, request.ItemCount,
+			profile.Currency, request.Payload)
 	}
 	if err != nil {
 		switch {
@@ -134,6 +145,7 @@ func (s *Server) getDraft(context echo.Context) error {
 		"customerName": draft.CustomerName,
 		"customerId":   draft.CustomerID,
 		"itemCount":    draft.ItemCount,
+		"currency":     draft.Currency,
 		"payload":      draft.Payload,
 		"createdAt":    draft.CreatedAt.Format(time.RFC3339),
 		"updatedAt":    draft.UpdatedAt.Format(time.RFC3339),

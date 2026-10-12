@@ -11,8 +11,8 @@ import (
 	"vera-app/backend/store"
 )
 
-// companyDTO renders the editable profile, theme included. Artwork bytes
-// travel through the dedicated logo endpoints, never this DTO.
+// companyDTO renders the editable profile, theme and currency included.
+// Artwork bytes travel through the dedicated logo endpoints, never this DTO.
 func companyDTO(profile store.CompanyProfile) map[string]any {
 	return map[string]any{
 		"legalName":    profile.LegalName,
@@ -21,6 +21,7 @@ func companyDTO(profile store.CompanyProfile) map[string]any {
 		"email":        profile.Email,
 		"taxId":        profile.TaxID,
 		"hasLogo":      profile.HasLogo,
+		"currency":     profile.Currency,
 		"themeQDeep":   profile.ThemeQDeep,
 		"themeQAccent": profile.ThemeQAccent,
 		"themeQSoft":   profile.ThemeQSoft,
@@ -58,6 +59,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 		Phone        string `json:"phone"`
 		Email        string `json:"email"`
 		TaxID        string `json:"taxId"`
+		Currency     string `json:"currency"`
 		ThemeQDeep   string `json:"themeQDeep"`
 		ThemeQAccent string `json:"themeQAccent"`
 		ThemeQSoft   string `json:"themeQSoft"`
@@ -76,6 +78,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 		Phone:        request.Phone,
 		Email:        request.Email,
 		TaxID:        request.TaxID,
+		Currency:     request.Currency,
 		ThemeQDeep:   request.ThemeQDeep,
 		ThemeQAccent: request.ThemeQAccent,
 		ThemeQSoft:   request.ThemeQSoft,
@@ -91,6 +94,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "company legal name is required"})
 		case strings.Contains(err.Error(), "invalid company email"),
 			strings.Contains(err.Error(), "too long"),
+			strings.Contains(err.Error(), "company currency"),
 			strings.Contains(err.Error(), "must be a #RRGGBB"):
 			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		default:

@@ -214,8 +214,10 @@ printf '%s\n' "$VERA_PASSWORD" | vera login --email me@example.com --password-st
 `vera schema` prints a worked example and the field reference. This section is
 the same thing in prose.
 
-Money is always a **plain integer of rupiah** — `15000000`, never `"15.000.000"`
-and never a float. Anything else invites a rounding bug into a pricing system.
+Money is always a **plain integer in minor units of the company currency** —
+`15000000` (whole rupiah for an IDR company; a USD company sends `1500000`
+for $15,000.00), never `"15.000.000"` and never a float. Anything else invites
+a rounding bug into a pricing system.
 
 ```json
 {
@@ -298,7 +300,7 @@ Per item:
 | `description` | **Required.** Prints on the customer's document. |
 | `uom` | One the editor offers: `Lot`, `Pc`, `EA`, `LS`, `set`, `meter`, `m2`, `m3`, … |
 | `qty` | Whole number, greater than zero. |
-| `unitCost` | Plain rupiah. |
+| `unitCost` | Minor units of the company currency (whole rupiah for IDR, cents for USD). |
 | `marginEnabled` / `marginPercent` | Adds to the line's own price. |
 | `discountEnabled` / `discountPercent` | Comes off the marginalised price. |
 | `showSubPrices` | `true` prints the line as a title with each part priced under it; `false` leaves the whole price on the line and prints the parts as unbilled scope. |
@@ -650,6 +652,11 @@ credentials is the point of it.
 Passing `--number` or `--amount` additionally asserts what is printed on the
 document, so a tampered figure is caught.
 
+The `--amount` claim is parsed in the **revision's currency** — the code the
+document was issued in, never the company's current one — so `15,000.00`
+against a USD document reads as dollars, and `62100000` against an IDR
+document as whole rupiah.
+
 | Verdict | Exit | Meaning |
 |---|---|---|
 | `valid` | 0 | The document matches the record. |
@@ -677,7 +684,13 @@ vera company show
 ```bash
 vera company set --name "PT Arcon Penta Persada" --address "Batam, Indonesia"
 vera company set --phone "+62 778 000 000" --email "sales@example.com"
+vera company set --currency USD
 ```
+
+The currency is one code from the shipped catalogue (IDR, USD, EUR, SGD, MYR,
+JPY, CNY, HKD, AUD, GBP, THB, PHP, VND, KRW, INR, AED); anything else is
+refused before the request. It decides the exponent and symbol every money
+figure on future documents uses.
 
 The endpoint replaces the record, so the CLI reads the current one and moves only
 the fields you name — a partial body would blank the rest.

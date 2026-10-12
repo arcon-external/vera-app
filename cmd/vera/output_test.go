@@ -7,27 +7,6 @@ import (
 	"testing"
 )
 
-func TestMoneyGroupsThousandsWithDots(t *testing.T) {
-	// The documents print rupiah this way, so a table that grouped differently
-	// would read as a different number to anyone scanning it.
-	cases := map[int64]string{
-		0:             "0",
-		1:             "1",
-		999:           "999",
-		1000:          "1.000",
-		15000:         "15.000",
-		1234567:       "1.234.567",
-		58881000:      "58.881.000",
-		1000000000000: "1.000.000.000.000",
-		-2500000:      "-2.500.000",
-	}
-	for amount, want := range cases {
-		if got := money(amount); got != want {
-			t.Errorf("money(%d) = %q; want %q", amount, got, want)
-		}
-	}
-}
-
 func TestTruncateCollapsesWhitespaceAndMarksTheCut(t *testing.T) {
 	// Descriptions are prose that arrives with newlines and runs of spaces from
 	// a paste; a table cell needs one line.

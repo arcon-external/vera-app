@@ -64,7 +64,7 @@ func TestDraftsArePrivateToTheirOwner(t *testing.T) {
 
 	payload := json.RawMessage(`{"Items":[{"Description":"Half-written line"}]}`)
 	draft, err := database.CreateDraft(ctx, owner.ID, "Mine", "Roof works",
-		"Test Customer", nil, 1, payload)
+		"Test Customer", nil, 1, "IDR", payload)
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestDraftSaveUpdatesInPlace(t *testing.T) {
 	owner := draftTestUser(t, database, "draft-a@example.com")
 
 	draft, err := database.CreateDraft(ctx, owner.ID, "First", "Subject", "Client", nil, 1,
-		json.RawMessage(`{"v":1}`))
+		"IDR", json.RawMessage(`{"v":1}`))
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestDraftsStoreUnvalidatedState(t *testing.T) {
 	owner := draftTestUser(t, database, "draft-a@example.com")
 
 	garbage := json.RawMessage(`{"Items":"not an array","qty":"","margin":"NaN","notes":{"a":[1,2]}}`)
-	draft, err := database.CreateDraft(ctx, owner.ID, "", "", "", nil, 0, garbage)
+	draft, err := database.CreateDraft(ctx, owner.ID, "", "", "", nil, 0, "IDR", garbage)
 	if err != nil {
 		t.Fatalf("saving a half-typed draft failed: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestDraftAcceptsAClientByCode(t *testing.T) {
 	}
 
 	if _, err := database.CreateDraft(ctx, owner.ID, "", "", "By code",
-		int64Pointer(code), 0, json.RawMessage(`{}`)); err != nil {
+		int64Pointer(code), 0, "IDR", json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("a draft for client code %d must save; got %v", code, err)
 	}
 }
@@ -254,7 +254,7 @@ func TestDraftRejectsUnknownClient(t *testing.T) {
 	// to encode before the check is reached and the test would pass for the
 	// wrong reason.
 	if _, err := database.CreateDraft(ctx, owner.ID, "", "", "Ghost", int64Pointer(99),
-		0, json.RawMessage(`{}`)); !errors.Is(err, ErrDraftCustomerUnknown) {
+		0, "IDR", json.RawMessage(`{}`)); !errors.Is(err, ErrDraftCustomerUnknown) {
 		t.Fatalf("create draft with unknown client = %v; want ErrDraftCustomerUnknown", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestDraftsDieWithTheAccount(t *testing.T) {
 	owner := draftTestUser(t, database, "draft-a@example.com")
 
 	if _, err := database.CreateDraft(ctx, owner.ID, "Doomed", "Subject", "Client", nil, 1,
-		json.RawMessage(`{"v":1}`)); err != nil {
+		"IDR", json.RawMessage(`{"v":1}`)); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if err := database.DeleteUserDrafts(ctx, owner.ID); err != nil {

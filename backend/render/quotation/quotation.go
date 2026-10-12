@@ -44,13 +44,17 @@ type Named interface {
 // other's fields, which is what keeps a change to one from silently altering the
 // other.
 type Input struct {
-	Fonts             fs.FS
-	Theme             Theme
-	Date              string
-	DisplayPpn        string
-	VerificationCode  string
-	CompanyName       string
-	CompanyAddress    string
+	Fonts            fs.FS
+	Theme            Theme
+	Date             string
+	DisplayPpn       string
+	VerificationCode string
+	CompanyName      string
+	CompanyAddress   string
+	// Currency is the normalized company code. The browser renderer never
+	// reads it (the HTML already carries the headers and totals); the native
+	// renderer prints its headers and totals card from it.
+	Currency          string
 	Subject           string
 	RecipientName     string
 	RecipientCompany  string

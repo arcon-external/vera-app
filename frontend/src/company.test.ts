@@ -21,6 +21,7 @@ const FULL_PROFILE: CompanyProfileLike = {
   Phone: "+62-21-5550192",
   Email: "admin@arconpentapersada.co.id",
   TaxID: "01.234.567.8-901.234",
+  Currency: "USD",
   ThemeQDeep: "#111111",
   ThemeQAccent: "#222222",
   ThemeQSoft: "#333333",
@@ -45,6 +46,7 @@ describe("company profile round trip", () => {
     expect(payload.Phone).toBe("+62-21-5550192");
     expect(payload.Email).toBe("admin@arconpentapersada.co.id");
     expect(payload.TaxID).toBe("01.234.567.8-901.234");
+    expect(payload.Currency).toBe("USD");
     expect(payload.HasLogo).toBe(true);
     expect(payload.ThemeQDeep).toBe("#111111");
     expect(payload.ThemeQAccent).toBe("#222222");
@@ -86,7 +88,7 @@ describe("company profile round trip", () => {
     expect(payload.ThemePInk).toBe("#888888");
   });
 
-  it("carries the hidden phone, email and tax id even though no control renders them", () => {
+  it("carries the hidden phone, email, tax id and currency even though no control renders them", () => {
     const payload = profilePayload({
       form: formFromProfile(FULL_PROFILE),
       extras: extrasFromProfile(FULL_PROFILE),
@@ -97,6 +99,7 @@ describe("company profile round trip", () => {
     expect(payload.Phone).toBe("+62-21-5550192");
     expect(payload.Email).toBe("admin@arconpentapersada.co.id");
     expect(payload.TaxID).toBe("01.234.567.8-901.234");
+    expect(payload.Currency).toBe("USD");
   });
 
   it.each([["undefined", undefined] as const, ["null", null] as const])(
@@ -108,6 +111,7 @@ describe("company profile round trip", () => {
         Phone: absent,
         Email: absent,
         TaxID: absent,
+        Currency: absent,
         ThemeQDeep: absent,
         ThemeQAccent: absent,
         ThemeQSoft: absent,
@@ -141,7 +145,7 @@ describe("company profile round trip", () => {
   it("trims the legal name and address but passes extras through verbatim", () => {
     const payload = profilePayload({
       form: { legalName: "  PT Arcon Penta Persada  ", address: "\tJl. Merdeka 1\n" },
-      extras: { phone: "  +62-21-5550192  ", email: " admin@example.id ", taxId: " 01.234 " },
+      extras: { phone: "  +62-21-5550192  ", email: " admin@example.id ", taxId: " 01.234 ", currency: "USD" },
       theme: themeFromProfile(FULL_PROFILE),
       hasLogo: false,
     });
@@ -151,6 +155,7 @@ describe("company profile round trip", () => {
     expect(payload.Phone).toBe("  +62-21-5550192  ");
     expect(payload.Email).toBe(" admin@example.id ");
     expect(payload.TaxID).toBe(" 01.234 ");
+    expect(payload.Currency).toBe("USD");
   });
 
   it("trims colour values exactly as the current save does", () => {
@@ -214,7 +219,7 @@ describe("CompanyProfilePayload shape", () => {
     const payloadKeys = Object.keys(
       profilePayload({
         form: { legalName: "", address: "" },
-        extras: { phone: "", email: "", taxId: "" },
+        extras: { phone: "", email: "", taxId: "", currency: "" },
         theme: EMPTY_THEME,
         hasLogo: false,
       })
@@ -249,7 +254,7 @@ describe("CompanyProfile load shape", () => {
     // it is not part of the profile load at all. CompanyProfileCard's load
     // ignores profile.HasLogo and takes hasLogo from GetCompanyLogo
     // instead (setHasLogo(!logo.BuiltIn)), and the update endpoints never
-    // write it either — PUT /v1/admin/company binds only the thirteen
+    // write it either — PUT /v1/admin/company binds only the fourteen
     // editable columns and the store recomputes HasLogo from logo_bytes
     // (len(LogoBytes) > 0). A reader that skipped HasLogo therefore cannot
     // wipe the column, so excluding it here is safe. The assertion below

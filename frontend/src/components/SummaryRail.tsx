@@ -1,9 +1,22 @@
 import type { ReactNode } from "react";
 import { Badge, Card } from "./ui";
 import { ppnRateBps, servicesRateBps, taxRateLabel } from "../tax";
-import { applyDiscount, applyMargin, formatIdr, parseIntOrZero } from "../format";
+import { applyDiscount, applyMargin, formatMoney, parseIntOrZero, type CurrencyInfo } from "../format";
 import { subItemsRollup } from "./ItemEditor";
 import type { EditorSubItem } from "./ItemEditor";
+
+// The IDR entry, transcribed field-for-field from
+// backend/currency/currency.go. This is the prop default only -- the live
+// entry always arrives from the caller -- not a catalogue mirror.
+const IDR_ENTRY: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
 
 export interface PricedItem {
   qty: string;
@@ -22,6 +35,9 @@ interface SummaryRailProps {
   taxZone: string;
   taxType: string;
   serviceCategory: string;
+  /** The live profile currency: this rail prices un-exported editor input,
+   * so every figure is a raw minor-unit integer rendered with it. */
+  currency?: CurrencyInfo;
   variant?: "editor" | "internal";
   footer?: ReactNode;
 }
@@ -112,6 +128,7 @@ export function SummaryRail({
   taxZone,
   taxType,
   serviceCategory,
+  currency = IDR_ENTRY,
   variant = "editor",
   footer,
 }: SummaryRailProps) {
@@ -130,19 +147,21 @@ export function SummaryRail({
       </div>
 
       <div className="mt-4 space-y-2.5">
-        <AmountRow label="Unit subtotal" value={pricing.costSubtotal} />
+        <AmountRow label="Unit subtotal" value={pricing.costSubtotal} currency={currency} />
         <AmountRow
           label={pricing.marginedLines > 0 ? "Customer subtotal" : "Subtotal"}
           value={pricing.sellSubtotal}
+          currency={currency}
         />
         {pricing.sellDiscount > 0 ? (
           <AmountRow
             label={`Discount ${discountPercent}%`}
             value={-pricing.sellDiscount}
+            currency={currency}
           />
         ) : null}
         {pricing.ppnAmount > 0 ? (
-          <AmountRow label="PPN 11%" value={pricing.ppnAmount} />
+          <AmountRow label="PPN 11%" value={pricing.ppnAmount} currency={currency} />
         ) : null}
         <div className="border-t border-rule pt-2.5">
           <div className="flex items-baseline justify-between gap-4">
@@ -150,7 +169,7 @@ export function SummaryRail({
               Grand total
             </span>
             <span className="tnum text-lead font-semibold text-ink-950">
-              Rp{formatIdr(pricing.customerGrand)}
+              {formatMoney(currency, pricing.customerGrand)}
             </span>
           </div>
           <p className="mt-0.5 text-caption text-ink-500">
@@ -171,7 +190,7 @@ export function SummaryRail({
         </div>
         <div className="mt-3 space-y-2">
           {pricing.taxAmount > 0 ? (
-            <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} />
+            <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} currency={currency} />
           ) : null}
           {/* PPN is collected for the state, so it has to be shown
               leaving the figure the way PPH22 is -- otherwise the grand
@@ -182,12 +201,13 @@ export function SummaryRail({
             <AmountRow
               label="PPN collected"
               value={-pricing.ppnAmount}
+              currency={currency}
             />
           ) : null}
           <div className="flex items-baseline justify-between gap-4">
             <span className="text-small text-internal-700">Nett after Tax</span>
             <span className="tnum text-body font-semibold text-internal-900">
-              Rp{formatIdr(pricing.grandAfterTax)}
+              {formatMoney(currency, pricing.grandAfterTax)}
             </span>
           </div>
           <div className="flex items-baseline justify-between gap-4 border-t border-internal-200 pt-2">
@@ -199,8 +219,7 @@ export function SummaryRail({
                 pricing.netProfit < 0 ? "text-danger-600" : "text-success-700"
               }`}
             >
-              {pricing.netProfit < 0 ? "−" : ""}Rp
-              {formatIdr(Math.abs(pricing.netProfit))}
+              {pricing.netProfit < 0 ? "−" : ""}{formatMoney(currency, Math.abs(pricing.netProfit))}
             </span>
           </div>
         </div>
@@ -208,7 +227,7 @@ export function SummaryRail({
 
       {variant === "internal" && pricing.profitBeforeTax !== pricing.netProfit ? (
         <p className="mt-2 text-caption text-ink-500">
-          Profit before tax: Rp{formatIdr(pricing.profitBeforeTax)}
+          Profit before tax: {formatMoney(currency, pricing.profitBeforeTax)}
         </p>
       ) : null}
 
@@ -220,9 +239,11 @@ export function SummaryRail({
 function AmountRow({
   label,
   value,
+  currency,
 }: {
   label: string;
   value: number;
+  currency: CurrencyInfo;
 }) {
   const negative = value < 0;
   return (
@@ -233,7 +254,7 @@ function AmountRow({
           negative ? "text-ink-600" : "text-ink-900"
         }`}
       >
-        {negative ? "−" : ""}Rp{formatIdr(Math.abs(value))}
+        {negative ? "−" : ""}{formatMoney(currency, Math.abs(value))}
       </span>
     </div>
   );

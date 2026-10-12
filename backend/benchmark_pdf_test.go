@@ -35,7 +35,7 @@ func benchmarkQuotation(b *testing.B, lines int) *Quotation {
 		b.Fatalf("startup: %v", err)
 	}
 
-	items := buildItems(realisticItems(lines))
+	items := buildItems(realisticItems(lines), "IDR")
 	summary := buildPricing(items, 5, 1100, 0)
 
 	quotation.Data.Subject = "Supply and installation of electrical and mechanical systems"

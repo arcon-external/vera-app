@@ -24,11 +24,14 @@ export type CompanyForm = {
 
 // Stored-but-unedited profile values. Phone, email, and tax ID print
 // nowhere, so they have no inputs — but they still round-trip verbatim so
-// saving never wipes them.
+// saving never wipes them. Currency rides here too in Wave A: it has no
+// picker yet (Wave B), so like the hidden extras it round-trips verbatim
+// until the General panel owns it.
 export type StoredCompanyExtras = {
   phone: string;
   email: string;
   taxId: string;
+  currency: string;
 };
 
 export type CompanyTheme = {
@@ -87,6 +90,7 @@ export const THEME_FIELDS: {
 export type CompanyProfileLike = {
   LegalName?: string | null; Address?: string | null;
   Phone?: string | null; Email?: string | null; TaxID?: string | null;
+  Currency?: string | null;
   ThemeQDeep?: string | null; ThemeQAccent?: string | null;
   ThemeQSoft?: string | null; ThemeQInk?: string | null;
   ThemePDeep?: string | null; ThemePAccent?: string | null;
@@ -105,6 +109,7 @@ export function extrasFromProfile(profile: CompanyProfileLike): StoredCompanyExt
     phone: profile.Phone ?? "",
     email: profile.Email ?? "",
     taxId: profile.TaxID ?? "",
+    currency: profile.Currency ?? "",
   };
 }
 
@@ -125,11 +130,15 @@ export function themeFromProfile(profile: CompanyProfileLike): CompanyTheme {
 export type CompanyProfilePayload = {
   LegalName: string; Address: string;
   Phone: string; Email: string; TaxID: string;
+  // The company currency, round-tripped verbatim until the picker lands
+  // (Wave B). It must be present: UpdateCompanyProfile full-replaces, so a
+  // missing Currency is cleared on every save.
+  Currency: string;
   // Vestigial on the save path, kept deliberately: neither update path
-  // writes it — the desktop forwards thirteen string columns and the server
-  // binds thirteen, while the store recomputes HasLogo from logo_bytes. It
+  // writes it — the desktop forwards fourteen string columns and the server
+  // binds fourteen, while the store recomputes HasLogo from logo_bytes. It
   // stays because the Wails binding types the UpdateCompanyProfile argument
-  // as the full backend.CompanyProfile, so tsc requires all fourteen fields
+  // as the full backend.CompanyProfile, so tsc requires all fifteen fields
   // at the call site; sending the echoed value is harmless since both update
   // paths ignore it.
   HasLogo: boolean;
@@ -146,6 +155,7 @@ export function profilePayload(input: {
     Phone: input.extras.phone,
     Email: input.extras.email,
     TaxID: input.extras.taxId,
+    Currency: input.extras.currency,
     HasLogo: input.hasLogo,
     ThemeQDeep: input.theme.qDeep.trim(),
     ThemeQAccent: input.theme.qAccent.trim(),

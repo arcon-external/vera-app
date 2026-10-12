@@ -27,9 +27,13 @@ type DraftDTO struct {
 	CustomerName string
 	UpdatedAt    string
 	Label        string
-	ID           int64
-	ItemCount    int
-	CustomerID   int64
+	// Currency is the code the amounts were written in, stamped at creation.
+	// The editor blocks opening the draft when it differs from the live
+	// company profile rather than reinterpreting the integers.
+	Currency   string
+	ID         int64
+	ItemCount  int
+	CustomerID int64
 }
 
 // SavedDraft is what the editor hands over on save. Payload is the editor
@@ -85,7 +89,14 @@ func (q *Quotation) GetDraft(id int64) (DraftDTO, error) {
 	if err != nil {
 		return DraftDTO{}, err
 	}
-	var row apicontract.DraftRow
+	var row struct {
+		apicontract.DraftRow
+		// Currency rides beside the typed row rather than inside
+		// apicontract: the draft contract is additive this wave and the
+		// archive contract file is another worker's, so the decode reads
+		// the extra key here instead of adding a field there.
+		Currency string `json:"currency"`
+	}
 	if err := client.Get("/v1/drafts/"+idParam(id), &row); err != nil {
 		return DraftDTO{}, err
 	}
@@ -96,6 +107,7 @@ func (q *Quotation) GetDraft(id int64) (DraftDTO, error) {
 		CustomerName: row.CustomerName,
 		ItemCount:    row.ItemCount,
 		UpdatedAt:    row.UpdatedAt,
+		Currency:     row.Currency,
 	}
 	// The payload is raw JSON on the wire so the server never has to know the
 	// editor's shape; here it stays a string for the same reason, and the
