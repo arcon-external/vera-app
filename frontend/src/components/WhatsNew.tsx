@@ -149,8 +149,7 @@ export function WhatsNewModal({
   if (notes.length === 0) return null;
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-5"
-      style={{ backgroundColor: "rgba(28, 27, 25, 0.45)" }}
+      className="bg-ink-950/45 fixed inset-0 z-50 flex items-center justify-center p-5"
       onClick={onDismiss}
       role="presentation"
     >
