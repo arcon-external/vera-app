@@ -420,7 +420,7 @@ function CreateClientForm({
           <Button type="submit" variant="primary" disabled={busy} className="flex-1">
             {busy ? "Creating…" : "Create client"}
           </Button>
-          <Button variant="ghost" onClick={onCancel}>
+          <Button type="button" variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
         </div>
