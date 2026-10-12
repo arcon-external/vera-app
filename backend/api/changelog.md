@@ -4,6 +4,29 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.10.1] - 2026-10-12
+
+### Changed
+
+- **The item table now shows both unit prices, so the columns add up at a
+  glance.** A discounted line printed the price *after* its discount under
+  "Unit Price IDR", with a discount percentage beside it — so the arithmetic
+  appeared not to work, and a reader would take the percentage off a figure that
+  already had it. **Unit Price IDR now shows the price before the discount**, and
+  the column beside it, **After Disc. IDR**, shows the price after, with the
+  discount percentage underneath. "Total IDR" is unchanged: the price after
+  discount multiplied by the quantity. A line with no discount shows the same
+  figure in both columns, and every quotation now carries the same columns
+  rather than one that appeared only when something was discounted.
+
+### Fixed
+
+- **A services quotation no longer prints an internal code on the customer's
+  copy.** The PDF carried a fifth term reading "Service category:
+  NonConstruction" — a value from inside the app that means nothing to a
+  customer, and one the on-screen preview never showed. Both now print the same
+  four terms.
+
 ## [0.10.0] - 2026-10-12
 
 ### Changed
