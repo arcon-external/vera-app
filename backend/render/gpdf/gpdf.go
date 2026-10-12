@@ -199,17 +199,21 @@ func stripTags(s string) string {
 // a change to one and not the other would make the two renderers disagree about
 // what the document says, which is the one class of difference the comparison
 // test cannot see.
+//
+// The service category is deliberately not printed. It decides the tax
+// treatment, but the template's .tnc block (template-fixed.html) carries four
+// hard-coded terms and no conditional, and the template is the source of truth
+// for how a quotation looks -- so the native renderer prints the same four.
+// If the category should reach the customer one day, that is a template change
+// with customer-facing wording, not a native-only line, and the guard in
+// terms_test.go will fail until both sides carry it together.
 func termsLines(in quotation.Input) []string {
-	lines := []string{
+	return []string{
 		fmt.Sprintf("1. Payment terms agreed for this quotation is %d days.", in.PaymentTerm),
 		fmt.Sprintf("2. This quotation is valid for %d days.", in.Validity),
 		fmt.Sprintf("3. Lead time is %d days.", in.LeadTime),
 		fmt.Sprintf("4. Incoterms: %s", in.Incoterm),
 	}
-	if in.ServiceCategory != "" {
-		lines = append(lines, fmt.Sprintf("5. Service category: %s", in.ServiceCategory))
-	}
-	return lines
 }
 
 // closingText is the centred paragraph between the totals and the verification
