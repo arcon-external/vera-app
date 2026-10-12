@@ -1,3 +1,5 @@
+import type { JSX } from "react";
+
 export type TabItem = { id: string; label: string };
 
 /** The id a panel should carry so the matching tab points at it. */

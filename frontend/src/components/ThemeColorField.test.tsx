@@ -101,9 +101,12 @@ describe("ThemeColorField", () => {
   it("disables spellcheck and autocomplete on the text input", () => {
     const html = render();
     const text = inputWithLabel(html, `${SECTION} ${LABEL} hex value`);
-    // Casing read off actual renderToString output: React lowercases
-    // spellCheck to spellcheck but preserves autoComplete's camelCase.
-    expect(text).toContain('spellcheck="false"');
+    // Case-insensitive on purpose: the contract is that spellcheck is present
+    // and false, not how the framework cases the attribute name. React 18's
+    // server renderer lowercased spellCheck to spellcheck; React 19 emits the
+    // canonical camelCase spellCheck. Match either, as CompanyGeneralPanel
+    // already does for maxLength/tabIndex.
+    expect(text.toLowerCase()).toContain('spellcheck="false"');
     expect(text).toContain('autoComplete="off"');
   });
 

@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 import type { CompanyTheme } from "../company";
 import { DEFAULT_THEME, THEME_FIELDS } from "../company";
 import { ThemeColorField } from "./ThemeColorField";
