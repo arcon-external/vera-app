@@ -2,6 +2,7 @@
 // colour inputs share this exact markup, so CompanyThemePanel renders both
 // the Quotation and Portal panels through this component instead of
 // duplicating thirty lines of JSX.
+import type { JSX } from "react";
 import { isCompleteHex } from "../company";
 import { fieldClass } from "./ui";
 

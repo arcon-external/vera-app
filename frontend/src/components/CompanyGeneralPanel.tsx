@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { JSX } from "react";
 import type { CompanyForm } from "../company";
 import { Button, Card, SectionHeading, fieldClass } from "./ui";
 
