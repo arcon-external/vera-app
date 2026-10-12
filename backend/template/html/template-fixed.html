@@ -124,7 +124,7 @@
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
 								<td>{{.DisplayListPrice}}</td>
-								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
+								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
 								<td>{{.DisplayTotal}}</td>
 							</tr>
 							{{end}}
@@ -144,7 +144,7 @@
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
 								<td>{{.DisplayListUnitPrice}}</td>
-								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
+								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
 								<td>{{.DisplayTotal}}</td>
 							</tr>
 							{{range .SubItems}}
@@ -181,7 +181,7 @@
 							<td>{{.Qty}}</td>
 							<td>{{.UoM}}</td>
 							<td>{{.DisplayListUnitPrice}}</td>
-							<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}—{{end}}</div></td>
+							<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
 							<td>{{.DisplayTotal}}</td>
 						</tr>
 					</tbody>

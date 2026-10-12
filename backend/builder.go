@@ -18,6 +18,20 @@ func applyMarkup(cost uint64, margin uint16) uint64 {
 	return cost + cost*uint64(margin)/100
 }
 
+// packageDiscountPercent is the effective discount rate across a package's
+// parts: the summed discount over the summed list price the parts would have
+// carried before their discounts. Integer arithmetic, multiply before divide,
+// truncating -- the same rule applyMarkup and applyDiscount follow -- with a
+// guard for a zero list sum so a package with no list price cannot divide by
+// zero. The result cannot exceed 100: no part sells above its list price, so
+// the summed discount never exceeds the summed list.
+func packageDiscountPercent(listSum, discountSum uint64) uint16 {
+	if listSum == 0 {
+		return 0
+	}
+	return uint16(discountSum * 100 / listSum)
+}
+
 // applyDiscount takes a percentage off an already-marginalised price.
 //
 // The order is margin first, then discount, and that order is the point: the
@@ -106,6 +120,27 @@ func buildItems(inputItems []QuotationItemInput) []QuotationItem {
 			item.Total = sellSum
 			item.DiscountAmount = discountSum
 			item.DiscountEnabled = discountSum > 0
+			// The package's own percentage is derived from its parts, the same
+			// way its amount is: the summed discount over the summed list price
+			// the parts would have carried before their discounts. Integer
+			// arithmetic, multiply before divide, truncating -- the same rule
+			// applyMarkup and applyDiscount follow -- with a guard for a zero
+			// list sum so a package with no list price cannot divide by zero.
+			// Without this the flag says "discounted" while the percentage
+			// keeps its zero value, and the parent row prints 0% beside a
+			// visibly reduced price (issue #383). Zeroed explicitly when there
+			// is no sub-discount so a stale parent input cannot linger: the
+			// parent's own discount fields are ignored once it has sub-items,
+			// and DiscountEnabled above is already reset the same way.
+			//
+			// MarginPercent is deliberately not derived here. It is
+			// internal-only and never printed, and on a plain line it means
+			// "the rate that was applied" -- a package has no single applied
+			// rate, and its effective margin already has a derived home with
+			// its own rounding (blendedMarginPercent, half-up with an
+			// approximate flag). A truncated effective rate in this field
+			// would disagree with that display while no consumer reads it.
+			item.DiscountPercent = packageDiscountPercent(listSum, discountSum)
 			item.MarginAmount = signedDifference(sellSum, costSum)
 			item.DisplayOriginalUnitPrice = formatRupiah(costSum)
 			item.DisplayOriginalTotal = formatRupiah(costSum)
