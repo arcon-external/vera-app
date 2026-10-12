@@ -146,18 +146,25 @@ const (
 	// empty decoration still carries its 1px top and bottom borders under
 	// `box-sizing: border-box`, so the stack is never shorter than the card
 	// plus the gap plus these 2px. The metadata stack has the same floor and
-	// its native formula omits it -- a pre-existing 2px drift there, left for
-	// a follow-up -- but the totals row counts it: in the 4-row state the card
-	// plus the gap already exceeds the terms card, so the row is decided by
-	// the stack and omitting the floor puts the closing 2px high while the
-	// browser paints a 2px sliver under the card.
+	// its native formula counts it too (see metaDecorFloor): in the 4-row
+	// state the card plus the gap already exceeds the terms card, so the row
+	// is decided by the stack and omitting the floor puts the closing 2px
+	// high while the browser paints a 2px sliver under the card.
 	totalsDecorFloor = 2 * ptPerPx
-	bodyPx           = 11.0
-	bodyLH           = 1.45
-	descLH           = 1.4
-	subGapPx         = 6 // .desc-subitems margin-top
-	liMarginPx       = 3 // .desc-subitems li margin, collapses between siblings
-	subIndentPx      = 16
+	// metaDecorFloor is `.meta-decor`'s border-box floor, in points: the same
+	// 2px the totals decoration carries, because the two stacks are the same
+	// shape -- a flex column whose last child flexes and carries `border: 1px
+	// solid` under `box-sizing: border-box`. infoHeight counts it, mirroring
+	// the totals row: in the stack-deciding state omitting it puts everything
+	// below the block 2px high while the browser paints the 2px sliver under
+	// the card.
+	metaDecorFloor = 2 * ptPerPx
+	bodyPx         = 11.0
+	bodyLH         = 1.45
+	descLH         = 1.4
+	subGapPx       = 6 // .desc-subitems margin-top
+	liMarginPx     = 3 // .desc-subitems li margin, collapses between siblings
+	subIndentPx    = 16
 
 	// Package rows, verbatim from the stylesheet's sub-item rules.
 	subRowPadPx       = 6  // tr.sub-row td padding
@@ -505,7 +512,8 @@ func (e *Engine) derive(in Input) metrics {
 	//
 	// The row counts the whole stack -- card plus gap plus the decoration's
 	// border-box floor -- mirroring infoHeight, which counts its card plus its
-	// gap (`maxF(recv, metaHeight + metaStackGap)`). Counting only the taller
+	// gap plus its floor (`maxF(recv, metaHeight + metaStackGap +
+	// metaDecorFloor)`). Counting only the taller
 	// card repeated the bug that stack fixed: in the 4-row state (PPN plus a
 	// whole-quotation discount) the card plus the gap already exceeds the
 	// terms card, so the browser's row grows past it while the native row
@@ -876,7 +884,7 @@ func (e *Engine) infoHeight(in Input, m metrics) float64 {
 		addr = float64(n) * addrLineBox
 	}
 	recv += addr + cardAfterAddr
-	stack := e.metaHeight(in, m) + metaStackGap
+	stack := e.metaHeight(in, m) + metaStackGap + metaDecorFloor
 	return maxF(recv, stack)
 }
 

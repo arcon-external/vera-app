@@ -14,7 +14,7 @@ package gpdf
 //
 // The footer row counts the whole stack -- card plus gap plus the decoration's
 // border-box floor -- mirroring infoHeight's `maxF(recv, metaHeight +
-// metaStackGap)`. Counting only the taller card put the closing 12px apart
+// metaStackGap + metaDecorFloor)`. Counting only the taller card put the closing 12px apart
 // between the two renderers in the 4-row state: the browser's row grows past
 // the terms card while the native row stayed.
 //
