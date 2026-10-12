@@ -299,57 +299,55 @@ const descLineH = 15.5 * ptPerPx
 
 // colLayout says which track each logical cell of the item table occupies.
 //
-// The table has six tracks, or seven when some row carries a per-row discount:
-// the template adds a Disc. column, and only then, so a column is not added to
-// every quotation to sit empty on most of them (see applyRowDiscountColumn).
+// The table always has seven tracks: No., Description, Qty., UoM, the list
+// Unit Price, the After Disc. net price, and Total. The after-discount column
+// is present on every quotation -- a row with no discount prints the list
+// figure in both price columns -- so every customer sees the same columns.
 // Both layouts put No. in 0 and Description in 1, which is what lets the merged
 // package rows share the code.
 //
-// disc is -1 when the column is absent. last is the index of the table's right
-// edge, and is also the track count.
+// last is the index of the table's right edge, and is also the track count.
 type colLayout struct {
-	no, desc, qty, uom, unit, disc, total, last int
+	no, desc, qty, uom, unit, after, total, last int
 }
 
 // colOffsetsPx are the table's column boundaries, in whole CSS pixels from the
-// table's left edge.
+// table's left edge, for the colgroup 7/26/8/8/17/17/17 percent at the 646px
+// table width.
 //
-// They are the browser's own, read off its output, and they are not the colgroup's
-// percentages rounded. Those percentages give 45, 323, 375, 426 and 536 for the
-// first five boundaries of this table, where the browser lays out 45, 323, 374,
-// 426 and 535 — the third and fifth land a pixel left of any truncation of their
-// own percentage, so no single rounding rule reproduces all five: floor and round
-// each miss one.
+// Truncating the cumulative percentages gives 0, 45, 213, 264, 316, 426, 536
+// and 646. The last internal boundary is 535 here instead of 536: both
+// measured grids put Total's left edge one pixel left of its own truncation
+// (535 in the six- and seven-column tables alike, where truncation says 536),
+// the browser handing Total's track the odd pixel from its left neighbour.
+// Following that habit keeps Total's own edges (535, 646) unchanged across
+// all three grids this table has ever had.
 //
-// Reproducing that needed the exact arithmetic the browser uses to divide a
-// truncated width between tracks, which is a LayoutUnit computation over a page
-// box this engine does not otherwise model. The colgroup is part of a fixed
-// template and this is the only table it describes, so the grid is a constant
-// here rather than a computation — and it is the constant the browser uses, so
-// the cell borders land where its borders land.
-var colOffsetsPx = [7]int{0, 45, 323, 374, 426, 535, 646}
+// This grid was NOT re-measured in a browser: the 535 follows the two measured
+// grids' habit rather than a fresh reading, so a browser pass should confirm
+// it when one is available. What is asserted is that the engine and the
+// template agree (see ColumnEdgesPx and the column tests): the two renderers
+// cannot drift apart again even if both sit a pixel off the browser.
+//
+// Reproducing the browser exactly would need the arithmetic it uses to divide
+// a truncated width between tracks, which is a LayoutUnit computation over a
+// page box this engine does not otherwise model. The colgroup is part of a
+// fixed template and this is the only table it describes, so the grid is a
+// constant here rather than a computation.
+var colOffsetsPx = [8]int{0, 45, 213, 264, 316, 426, 535, 646}
 
-// colOffsetsDiscPx are the same boundaries for the seven-column table, where the
-// colgroup is 7/36/8/8/17/7/17 percent.
-//
-// Measured the same way, by laying the template's own table out at the same 646px
-// and reading each cell's offsetLeft: 0, 45, 277, 329, 381, 490 and 535. Worth
-// noting what they show -- the description gives up exactly the 45px the new
-// column takes, so Unit Price, Disc. and Total land where a reader expects them,
-// and Total's own edges (535, 646) are unchanged from the six-column grid.
-var colOffsetsDiscPx = [8]int{0, 45, 277, 329, 381, 490, 535, 646}
+// ColumnEdgesPx reports the item table's column boundaries in whole CSS
+// pixels from the table's left edge. It is exported so the application's
+// tests can hold the engine to the template's colgroup: the engine once drew
+// six columns while the template printed seven for a whole release, and
+// nothing compared them.
+func ColumnEdgesPx() [8]int { return colOffsetsPx }
 
 // columnEdges returns the table's column boundaries in points for one layout.
 func columnEdges(tableX, tableW float64, cols colLayout) [8]float64 {
 	var out [8]float64
-	if cols.disc >= 0 {
-		for i, off := range colOffsetsDiscPx {
-			out[i] = tableX + float64(off)*ptPerPx
-		}
-	} else {
-		for i, off := range colOffsetsPx {
-			out[i] = tableX + float64(off)*ptPerPx
-		}
+	for i, off := range colOffsetsPx {
+		out[i] = tableX + float64(off)*ptPerPx
 	}
 	// The table's own right edge is its width rather than the last offset, so a
 	// width that does not divide into a whole number of pixels still ends where
@@ -358,33 +356,20 @@ func columnEdges(tableX, tableW float64, cols colLayout) [8]float64 {
 	return out
 }
 
-// HeadLabels returns the item table's header cells for a column layout. It is
-// exported so the application's tests can hold the engine and the HTML template
-// to the same columns: the engine drew six while the template printed seven for
-// a whole release, and nothing compared them.
-func HeadLabels(showLineDiscounts bool) []string {
-	return itemHeadLabels(layoutFor(showLineDiscounts))
+// HeadLabels returns the item table's header cells, in track order. It is
+// exported so the application's tests can hold the engine and the HTML
+// template to the same columns: the engine drew six while the template
+// printed seven for a whole release, and nothing compared them. Kept beside
+// the layout because the two must agree: a label list that drifts out of step
+// with the tracks puts every heading over the wrong column.
+func HeadLabels() []string {
+	return []string{"No.", "Description", "Qty.", "UoM", "Unit Price IDR", "After Disc. IDR", "Total IDR"}
 }
 
-// itemHeadLabels are the header row's cells, in track order. Kept beside the
-// layout because the two must agree: a label list that drifts out of step with
-// the tracks puts every heading over the wrong column.
-func itemHeadLabels(cols colLayout) []string {
-	labels := []string{"No.", "Description", "Qty.", "UoM", "Unit Price IDR"}
-	if cols.disc >= 0 {
-		labels = append(labels, "Disc.")
-	}
-	return append(labels, "Total IDR")
-}
-
-// layoutFor picks the item table's column layout. The flag is the application's,
-// the same one the template reads, so the preview and the PDF cannot disagree
-// about how many columns the table has.
-func layoutFor(showDisc bool) colLayout {
-	if showDisc {
-		return colLayout{no: 0, desc: 1, qty: 2, uom: 3, unit: 4, disc: 5, total: 6, last: 7}
-	}
-	return colLayout{no: 0, desc: 1, qty: 2, uom: 3, unit: 4, disc: -1, total: 5, last: 6}
+// itemColumns is the item table's column layout. The table has one layout:
+// the after-discount column is unconditional, so there is no flag to pick by.
+func itemColumns() colLayout {
+	return colLayout{no: 0, desc: 1, qty: 2, uom: 3, unit: 4, after: 5, total: 6, last: 7}
 }
 
 // metrics holds the derived point-valued measures the composition shares.
@@ -459,7 +444,7 @@ func (e *Engine) derive(in Input) metrics {
 	m.innerW = m.cardW - 2*px(1) - 2*px(contentPadPx)
 	m.tableX = m.innerX
 	m.tableW = m.innerW
-	m.cols = layoutFor(in.ShowLineDiscounts)
+	m.cols = itemColumns()
 	m.colX = columnEdges(m.tableX, m.tableW, m.cols)
 
 	// Top-lead band: whichever is taller, the text block or the logo.
@@ -712,6 +697,20 @@ func (e *Engine) layout(in Input) []*page {
 // of lines lands on 15 or 16 each depending on where it starts.
 const descLinePx = 15.4
 
+// The After Disc. cell's line boxes, in CSS pixels. The first line is the net
+// price at the body's 11px/1.45; the second is the percentage annotation the
+// stylesheet pins to 9px/1.5 (see td.after .after-pct). afterCellPx is their
+// sum, and it is the floor every priced row is measured against: a row whose
+// description is shorter than its own after cell is still as tall as the
+// cell, because the browser sizes a row by its tallest cell. Merged rows
+// (the state-C title, state-B scope rows) have no after cell and keep the
+// description-only height.
+const (
+	afterPctPx  = 9.0
+	afterPctLH  = 1.5
+	afterCellPx = bodyPx*bodyLH + afterPctPx*afterPctLH
+)
+
 // measureRows lays out every row's description and derives its height from the
 // CSS box model: cell padding, one line box per wrapped line, the sub-item list's
 // top margin, and the li margins collapsing between siblings. A modular line
@@ -748,7 +747,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 		if it.Package == nil {
 			out = append(out, rowBlock{
 				item: it, kind: rowMain, lines: lines, subs: subs,
-				height: rowHeight(lines, subs, padY),
+				height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 			})
 			continue
 		}
@@ -774,7 +773,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 				}
 				out = append(out, rowBlock{
 					item: it, part: part, kind: rowPart, lines: plines, subs: bullets,
-					height: rowHeight(plines, bullets, subPadY),
+					height: rowHeightWithMin(plines, bullets, subPadY, afterCellPx),
 				})
 			}
 			continue
@@ -783,7 +782,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 		// State B: the full-value main row, then unpriced scope rows.
 		out = append(out, rowBlock{
 			item: it, kind: rowMain, lines: lines, subs: subs,
-			height: rowHeight(lines, subs, padY),
+			height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 		})
 		for i := range it.Package.Parts {
 			part := &it.Package.Parts[i]
@@ -808,6 +807,14 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 // row's height in whole pixels), plus the cell's vertical padding plus both of
 // its 1px collapsed borders.
 func rowHeight(lines []string, subs []subLine, padY float64) float64 {
+	return rowHeightWithMin(lines, subs, padY, 0)
+}
+
+// rowHeightWithMin is rowHeight with a content floor: the row is at least
+// minPx of content tall before padding and borders. Priced rows pass
+// afterCellPx (the After Disc. cell is two lines on every row); merged rows
+// pass nothing through rowHeight, because they have no after cell.
+func rowHeightWithMin(lines []string, subs []subLine, padY float64, minPx float64) float64 {
 	content := float64(len(lines)) * descLinePx
 	if n := countItems(subs); n > 0 {
 		// The list's 6px top margin absorbs the first item's own 3px, so it
@@ -815,6 +822,9 @@ func rowHeight(lines []string, subs []subLine, padY float64) float64 {
 		// item's 3px bottom margin, which collapses with nothing.
 		content += 6 + 3*float64(n)
 		content += float64(len(subs)) * descLinePx
+	}
+	if content < minPx {
+		content = minPx
 	}
 	return math.Floor(content)*ptPerPx + padY + 2*px(1)
 }

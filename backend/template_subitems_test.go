@@ -11,7 +11,7 @@ import (
 
 // TestTemplateRendersAllThreeStates executes the real customer template over
 // one mixed document and pins the markup that makes the three states distinct:
-// B keeps a full five-column main row with merged scope rows beneath it, C
+// B keeps a full six-cell main row with merged scope rows beneath it, C
 // merges the parent across Description..Total and prices every sub, A draws
 // exactly as the template always has.
 func TestTemplateRendersAllThreeStates(t *testing.T) {
@@ -22,9 +22,10 @@ func TestTemplateRendersAllThreeStates(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 
-	// State C: the parent row is merged through Total IDR...
-	if !strings.Contains(page, `<td colspan="5">`) {
-		t.Errorf("state C parent not merged: no colspan=\"5\" cell in the document")
+	// State C: the parent row is merged through Total IDR: No. plus one cell
+	// spanning the other six columns...
+	if !strings.Contains(page, `<td colspan="6">`) {
+		t.Errorf("state C parent not merged: no colspan=\"6\" cell in the document")
 	}
 	// ...and its subs are full priced rows carrying fractional numbers.
 	for _, want := range []string{">3.1<", ">3.2<", ">3.3<"} {

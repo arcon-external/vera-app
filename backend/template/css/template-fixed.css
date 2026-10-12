@@ -260,11 +260,8 @@
 		}
 
 		/* Every cell is a centred figure except the description, which flows
-		   from the top. Written as "all but the description" rather than a
-		   list of positions: the Disc. column only exists when some row
-		   carries a discount, which shifts every position after it. As a
-		   positional list, Total silently stopped being centred the moment
-		   per-row discounts arrived, and cell 6 became the discount instead. */
+		   from the top. The item table always has the same seven columns, so
+		   every position is stable. */
 		.items-body-table td {
 			padding: 10px;
 			border: 1px solid var(--rule);
@@ -343,17 +340,33 @@
 			position: relative;
 		}
 
-		/* The per-row discount column. Tabular figures so a column of
-		   percentages lines up, and muted so it reads as an annotation on the
-		   price beside it rather than as a price of its own. */
-		.items-body-table td.disc {
-			/* Centred like every other numeric cell. It was briefly
-			   right-aligned, as a column of percentages reads well against its
-			   right edge -- but a table where one number sits differently from
-			   the rest reads as a mistake, and it is one column of many. */
+		/* The after-discount column. Its first line is the net unit price, so
+		   it is a money line like its neighbours -- tabular figures that stay
+		   on one line, in the row's ordinary ink. Its second line is the row's
+		   discount percentage, a subordinate annotation rather than a second
+		   price: it takes the document's small-muted treatment, the same one
+		   .verify-code uses for the code under its caption (9px, muted, a
+		   breath of tracking), rather than inventing a new one. A row with no
+		   discount prints an em dash there, the convention the old Disc. cell
+		   used. The 1.5 line height is explicit so the second line's box is
+		   13.5px by construction, which is the number the native renderer
+		   models; leaving it inherited would pin the layout to whatever the
+		   table's 1.45 happens to give a 9px line today. */
+		.items-body-table td.after {
 			font-variant-numeric: tabular-nums;
-			color: var(--sub-no);
 			white-space: nowrap;
+		}
+
+		.items-body-table td.after .after-price {
+			display: block;
+		}
+
+		.items-body-table td.after .after-pct {
+			display: block;
+			font-size: 9px;
+			line-height: 1.5;
+			color: var(--muted);
+			letter-spacing: 0.02em;
 		}
 
 		.items-body-table tr.sub-row td:nth-child(2)::before {
