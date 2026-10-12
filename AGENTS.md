@@ -15,7 +15,7 @@ the rest of this guide is applied.
   via `chromedp` (headless Chrome `PrintToPDF`).
 - **Persistence:** PostgreSQL via `backend/store` (pgx v5), configured entirely by
   environment variables.
-- **Frontend:** React 18 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
+- **Frontend:** React 19 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
   (v4).
 - **Go module:** `vera-app` (Go 1.26).
 - **Wails bindings:** `frontend/wailsjs/go/*` are generated. Treat them as build
@@ -133,12 +133,10 @@ go test ./backend -run '^TestBuildPricing' -v
 in-process against a real `veraserver` and a throwaway schema: login → clients →
 validate → export (a real PDF and a signed revision) → verify → archive → drafts
 → logout. It skips without `VERA_POSTGRES_TEST_DSN`, and it drops the schema it
-uses — point it only at a throwaway database. `backend/store` skips the same
-way, but `backend/api` does not fully skip: the tests that call `resetTestSchema`
-directly (`drafts_test.go`, `verify_test.go`, `verify_hardening_test.go`,
-`verify_theme_test.go`, and the render test in `company_logo_test.go`) fail to
-connect instead, so the `./...` gates need the DSN pointed at a throwaway
-database to pass.
+uses — point it only at a throwaway database. `backend/store` and `backend/api`
+skip the same way (`resetTestSchema` carries the empty-DSN guard the other
+helpers have), so a bare `go test -race ./...` passes with no database — and
+the DSN is what makes the integration paths actually run.
 
 The Postgres repository test is skipped unless a test DSN is supplied. Use a
 throwaway database/schema, never the production one:
@@ -387,13 +385,20 @@ printed nothing. Then decide explicitly what this PR does about the result:
 you just closed**. A merge is not finished until this is done — the comment is what
 makes the read visible afterwards, which a merge otherwise has no place for.
 
-> **This is a norm, not a guard, and it says so deliberately.** Nothing in CI fails
-> when these reads are skipped, and the PR-body line is typed by whoever opens the PR.
-> By §12.5's own standard — a guard is not a guard until it is proven to fail — this
-> check cannot fail. The real fix is a workflow step that queries the API and can go
-> red: that is issue #348. Until it lands, the check rests on a reviewer reading the
-> output in the PR body, which is exactly why the output goes there rather than a
-> summary of it.
+> **What enforces this now.** A `pr.yml` step ("Report Dependabot alerts", in the
+> Frontend build job) queries the open-alert list on every PR and writes it to the
+> job summary, so the "before" read is visible without anyone typing anything. It
+> fails the job only when a *successful* read finds a `critical`/`high` alert:
+> `low`/`medium` are reported without failing, and any API failure — bad
+> permission, rate limit, network, an unexpected response — warns and passes, so a
+> blind check never blocks a PR. That fail-open is load-bearing, not decorative:
+> `GITHUB_TOKEN` has returned HTTP 403 on this endpoint even with broad grants
+> (upstream discussion `github.com/orgs/community/discussions/60612`), while the
+> docs promise `security-events` only for code-scanning alerts — so until a real
+> run shows a successful read, treat a green tick as "no blocking alerts *that this
+> check could see*" and keep doing the manual reads above. By §12.5's own standard
+> this step becomes a guard the day a run proves it can go red; today it is a
+> visible reminder with a tripwire attached.
 
 **When something is open**, fix it immediately and release a patch (Section 14):
 
