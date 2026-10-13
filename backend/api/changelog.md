@@ -4,6 +4,19 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.10.3] - 2026-10-13
+
+### Changed
+
+- **The discount percentage no longer prints under the After Disc. price.** The
+  cell shows the price after the discount and nothing else; the percentage was
+  noise beside a figure that already had the discount taken off.
+
+- **More room for the item description.** The No., Qty. and price columns are
+  slimmer and the Description column is wider, so long scope text fits on fewer
+  lines. A price figure too long for its column now prints slightly smaller
+  rather than running into its neighbour — it never wraps or crops.
+
 ## [0.10.2] - 2026-10-12
 
 ### Fixed
