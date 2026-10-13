@@ -1,0 +1,188 @@
+// ui-snapshot.harness.test.tsx — a local, evidence-only render harness.
+//
+// `npm --prefix frontend test` skips this file (UI_SNAPSHOT is unset): the
+// suite stays green and the file stays visible-but-skipped. `scripts/ui-snapshot.sh`
+// sets UI_SNAPSHOT=1, runs only this file, and screenshots every page it writes.
+//
+// This is not a test in the assertion sense and not a pixel diff. It renders a
+// registered component with renderToString (the house pattern), wraps it in a
+// shell copied from the app root, inlines the freshly built Tailwind CSS and the
+// Inter face the PDF already bundles, and writes one self-contained HTML per
+// case. The screenshot is the evidence; a person (or a vision-capable model)
+// reads the PNG. Nothing here is committed: pages land in UI_SNAPSHOT_DIR.
+//
+// What it cannot see, stated here so it is not assumed: no effects, no
+// interactions (keyboard, paste, focus), no real OS font, no animation end
+// states, and no pixel diff against a baseline.
+
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import type { ReactElement } from "react";
+import { renderToString } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { DetailsPanel } from "./components/DetailsPanel";
+import type { DetailsState } from "./components/DetailsPanel";
+import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
+
+// frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
+// the harness behaves the same however it is invoked.
+const SRC_DIR = path.dirname(fileURLToPath(import.meta.url));
+const FRONTEND_DIR = path.resolve(SRC_DIR, "..");
+const REPO_ROOT = path.resolve(FRONTEND_DIR, "..");
+
+const INCOTERM_OPTIONS = [
+  "EXW",
+  "FCA",
+  "FAS",
+  "FOB",
+  "CFR",
+  "CIF",
+  "CPT",
+  "CIP",
+  "DPU",
+  "DAP",
+  "DDP",
+].map((value) => ({ value, label: value }));
+
+// The pilot case: the lead-time group (#407) that has never been rendered. The
+// figures are the issue's example, so the four segments read 2 / 10 / 4 / 5.
+const DETAILS: DetailsState = {
+  subject: "Supply and installation of electrical and mechanical systems",
+  recipientName: "Budi Santoso",
+  validity: 30,
+  paymentTerm: 90,
+  leadTimeYears: 2,
+  leadTimeMonths: 10,
+  leadTimeWeeks: 4,
+  leadTimeDays: 5,
+  discountPercent: 0,
+  incoterm: "CIF",
+  taxZone: "NonFTZ",
+  taxType: "Goods",
+  serviceCategory: "",
+};
+
+interface SnapshotCase {
+  name: string;
+  element: ReactElement;
+}
+
+const CASES: SnapshotCase[] = [
+  {
+    name: "DetailsPanel",
+    element: (
+      <DetailsPanel
+        value={DETAILS}
+        customerOptions={[{ value: 2, label: "PT Contoh Nusantara" }]}
+        customerId={2}
+        incotermOptions={INCOTERM_OPTIONS}
+        taxZoneOptions={TAX_ZONE_OPTIONS}
+        taxTypeOptions={TAX_TYPE_OPTIONS}
+        onChange={() => undefined}
+        onCustomerChange={() => undefined}
+        onPaste={() => undefined}
+      />
+    ),
+  },
+];
+
+// newestBuiltCss reads the most recently written frontend/dist/assets/*.css.
+// The script builds the frontend first, so this is the CSS for the code as it
+// stands now, not a stale copy. Read lazily (inside the test): a fresh checkout
+// has no dist/, and reading at module load would break the skipped suite.
+function newestBuiltCss(): string {
+  const assetsDir = path.join(FRONTEND_DIR, "dist", "assets");
+  const files = readdirSync(assetsDir)
+    .filter((file) => file.endsWith(".css"))
+    .map((file) => path.join(assetsDir, file));
+  if (files.length === 0) {
+    throw new Error(`no built CSS in ${assetsDir}; run the frontend build first`);
+  }
+  files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return readFileSync(files[0], "utf8");
+}
+
+function fontFace(): string {
+  const medium = readFileSync(
+    path.join(REPO_ROOT, "backend", "assets", "inter-medium.ttf")
+  ).toString("base64");
+  const bold = readFileSync(
+    path.join(REPO_ROOT, "backend", "assets", "inter-bold.ttf")
+  ).toString("base64");
+  return [
+    `@font-face{font-family:"Inter";font-style:normal;font-weight:400;src:url(data:font/ttf;base64,${medium}) format("truetype");}`,
+    `@font-face{font-family:"Inter";font-style:normal;font-weight:700;src:url(data:font/ttf;base64,${bold}) format("truetype");}`,
+  ].join("\n");
+}
+
+// buildPage assembles one self-contained page: the built CSS, then the Inter
+// face, then a body font-family that puts Inter first over the app's system
+// stack. The last rule wins over Tailwind preflight's html font-family.
+function buildPage(name: string, markup: string): string {
+  const css = newestBuiltCss();
+  const shell = [
+    '<div id="root">',
+    '  <div class="flex min-h-full flex-col bg-paper">',
+    '    <main class="flex-1">',
+    '      <div class="mx-auto w-full max-w-[1560px] px-5 pt-7 pb-10 lg:px-8 lg:pt-9">',
+    '        <div class="flex flex-col gap-6">',
+    `          ${markup}`,
+    "        </div>",
+    "      </div>",
+    "    </main>",
+    "  </div>",
+    "</div>",
+  ].join("\n");
+
+  return [
+    "<!DOCTYPE html>",
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="UTF-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+    `<title>${name} — UI snapshot</title>`,
+    "<!--",
+    "  Local UI snapshot written by scripts/ui-snapshot.sh. Not committed.",
+    "  The app's font stack is -apple-system / BlinkMacSystemFont / Segoe UI /",
+    "  system-ui, none of which exists inside the render container. Inter — the",
+    "  face the PDF template already bundles — is inlined here (base64) as the",
+    "  closest available approximation: it is not the app's real rendering font,",
+    "  only its stand-in. The CSS and the root shell classes are the app's own.",
+    "-->",
+    "<style>",
+    css,
+    fontFace(),
+    'body{font-family:"Inter",-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;}',
+    "</style>",
+    "</head>",
+    "<body>",
+    shell,
+    "</body>",
+    "</html>",
+    "",
+  ].join("\n");
+}
+
+const ENABLED = process.env.UI_SNAPSHOT === "1";
+const OUT_DIR = process.env.UI_SNAPSHOT_DIR ?? "/tmp/opencode/ui-snap";
+
+describe.skipIf(!ENABLED)("UI snapshot harness", () => {
+  for (const snapshotCase of CASES) {
+    it(`writes ${snapshotCase.name}.html`, () => {
+      const markup = renderToString(snapshotCase.element);
+      const page = buildPage(snapshotCase.name, markup);
+
+      mkdirSync(OUT_DIR, { recursive: true });
+      const file = path.join(OUT_DIR, `${snapshotCase.name}.html`);
+      writeFileSync(file, page, "utf8");
+
+      // Cheap guards that the page is real: the markup landed and the styles
+      // and font data are inlined (a page without them screenshots unstyled).
+      expect(page).toContain(markup);
+      expect(page).toContain("@font-face");
+      expect(page).toContain("data:font/ttf;base64,");
+      expect(page.length).toBeGreaterThan(100_000);
+    });
+  }
+});
