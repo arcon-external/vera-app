@@ -1,5 +1,5 @@
 import type { CurrencyInfo } from "../format";
-import { parseMoneyKeystroke } from "./ItemEditor";
+import { newSubItem, parseMoneyKeystroke } from "./ItemEditor";
 
 // Issue #336 Wave B U1: the editor's money inputs display through
 // formatMoneyInput(entry, storedMinorDigits) and must parse keystrokes back
@@ -79,5 +79,23 @@ describe("parseMoneyKeystroke", () => {
     expect(parseMoneyKeystroke(USD, "0")).toBe("0");
     expect(parseMoneyKeystroke(USD, "0.00")).toBe("0");
     expect(parseMoneyKeystroke(IDR, "0")).toBe("0");
+  });
+});
+
+describe("newSubItem default unit (#337)", () => {
+  // The sub-item default is the company's served canonical unit passed by the
+  // caller, not a hardcoded "Lot": a company may have removed that unit, and a
+  // sub-item defaulting to it would fail Prepare. Reverting newSubItem to a
+  // hardcoded "Lot" fails the "Pc"/"m2" lines below.
+  it("carries the canonical unit it is given", () => {
+    expect(newSubItem(1, "scope line", "Pc").uom).toBe("Pc");
+    expect(newSubItem(2, "", "m2").uom).toBe("m2");
+  });
+
+  it("defaults the unit to empty, ready to be filled from the served list", () => {
+    const sub = newSubItem(3);
+    expect(sub.uom).toBe("");
+    expect(sub.qty).toBe("1");
+    expect(sub.unitCost).toBe("");
   });
 });

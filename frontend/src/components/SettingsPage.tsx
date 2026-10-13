@@ -6,11 +6,13 @@ import {
   DownloadBackup,
   GetCompanyLogo,
   GetCompanyProfile,
+  GetCompanyUnits,
   GetCurrencyCatalogue,
   RestoreBackup,
   SetCompanyLogo,
   SetUserEmail,
   UpdateCompanyProfile,
+  UpdateCompanyUnits,
 } from "@backend/backend/AdminAPI";
 import { PickDirectory, RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { CheckForUpdates, Version } from "@backend/backend/UpdateAPI";
@@ -27,6 +29,8 @@ import {
   type BindingMap,
 } from "../shortcuts";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
+import { validateCompanyUnits } from "../companyUnits";
+import type { CompanyUnitOption } from "../companyUnits";
 import {
   EMPTY_THEME,
   extrasFromProfile,
@@ -39,6 +43,7 @@ import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
+import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
 import { TabBar, tabId, tabPanelId } from "./TabBar";
 import type { TabItem } from "./TabBar";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
@@ -456,12 +461,13 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
 
 const COMPANY_TABS: TabItem[] = [
   { id: "general", label: "General" },
+  { id: "units", label: "Units" },
   { id: "quotation", label: "Quotation" },
   { id: "portal", label: "Portal" },
 ];
 
 export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
-  const [companyTab, setCompanyTab] = useState<"general" | "quotation" | "portal">("general");
+  const [companyTab, setCompanyTab] = useState<"general" | "units" | "quotation" | "portal">("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
@@ -472,6 +478,12 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   // loading state. Null while loading disables the picker; a failed fetch
   // also leaves null rather than blocking the profile load below.
   const [catalogue, setCatalogue] = useState<CurrencyInfo[] | null>(null);
+  // The served unit list (issue #337), fetched here for the same reason: the
+  // Units panel is a presentational slice. Null while loading or on a failed
+  // fetch; the canonical picker and list render their own pending/empty state.
+  const [units, setUnits] = useState<CompanyUnitOption[] | null>(null);
+  const [unitsBusy, setUnitsBusy] = useState(false);
+  const [unitsError, setUnitsError] = useState("");
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -531,6 +543,13 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     } catch {
       // The picker stays disabled on its own; the profile above already loaded.
       setCatalogue(null);
+    }
+    try {
+      const served = (await GetCompanyUnits()) as { Value: string; Label: string }[];
+      setUnits((served ?? []).map((unit) => ({ value: unit.Value, label: unit.Label })));
+    } catch {
+      // The Units panel shows its own empty/pending state; keep null.
+      setUnits(null);
     }
   }, []);
 
@@ -635,11 +654,45 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
+  // The unit list has its own save (UpdateCompanyUnits full-replaces it,
+  // server-side validated: never empty, shaped short values, distinct
+  // case-insensitively, and the canonical unit must survive). The canonical
+  // unit itself rides the profile save above — a separate whole-record call —
+  // so it is not written here. validateCompanyUnits mirrors the store so a bad
+  // list is refused before the round trip.
+  const saveUnits = async () => {
+    if (units === null || unitsBusy) return;
+    const invalid = validateCompanyUnits(units, extras.canonicalUoM);
+    if (invalid) {
+      setUnitsError(invalid);
+      return;
+    }
+    setUnitsBusy(true);
+    setUnitsError("");
+    try {
+      const updated = (await UpdateCompanyUnits(
+        units.map((unit) => new backend.CompanyUnit({ Value: unit.value, Label: unit.label }))
+      )) as { Value: string; Label: string }[];
+      setUnits((updated ?? []).map((unit) => ({ value: unit.Value, label: unit.Label })));
+      try {
+        await RefreshCompanyIdentity();
+      } catch {
+        // The list already updated; previews refresh on next sign-in.
+      }
+      onSaved?.();
+      pushToast("success", "Units saved.");
+    } catch (err: unknown) {
+      setUnitsError(errorMessage(err, "We couldn't save the units."));
+    } finally {
+      setUnitsBusy(false);
+    }
+  };
+
   const companyTabs = (
     <TabBar
       items={COMPANY_TABS}
       active={companyTab}
-      onSelect={(id) => setCompanyTab(id as "general" | "quotation" | "portal")}
+      onSelect={(id) => setCompanyTab(id as "general" | "units" | "quotation" | "portal")}
       label="Company sections"
       idPrefix="company"
     />
@@ -681,6 +734,18 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             currency={extras.currency}
             catalogue={catalogue}
             onCurrencyChange={(code) => setExtras((current) => ({ ...current, currency: code }))}
+          />
+        ) : companyTab === "units" ? (
+          <CompanyUnitsPanel
+            units={units}
+            canonical={extras.canonicalUoM}
+            onUnitsChange={(next) => setUnits(next)}
+            onCanonicalChange={(value) =>
+              setExtras((current) => ({ ...current, canonicalUoM: value }))
+            }
+            busy={unitsBusy}
+            error={unitsError === "" ? null : unitsError}
+            onSaveUnits={() => void saveUnits()}
           />
         ) : (
           <CompanyThemePanel

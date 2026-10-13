@@ -33,6 +33,7 @@ import type { DetailsState } from "./components/DetailsPanel";
 import { parseLeadTimeSegment } from "./components/DetailsPanel";
 import { ItemEditor, newSubItem } from "./components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
+import type { CompanyUnitOption } from "./companyUnits";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SummaryRail } from "./components/SummaryRail";
 import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
@@ -56,7 +57,7 @@ import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
-import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
+import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
 import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
@@ -75,29 +76,14 @@ function pickCustomerId(options: { value: number }[], current: number): number {
   return options[0]?.value ?? 0;
 }
 
-// The staff unit catalog, in the order the dropdown shows it, spelled exactly
-// as the quotation template should print it. "m2" and "m3" are area and
-// volume (the paste normalizer folds m²/m³ and other spellings onto them);
-// the backend's shape validator already accepts everything here, so the
-// catalog lives in one place on this side only. Legacy values stored before
-// this catalog (e.g. "Unit", "PC", "Meter") still display as their own value
-// through the unrecognized-option rule in ItemEditor; see #256.
-const UOM_OPTIONS = [
-  { value: "Lot", label: "Lot" },
-  { value: "Pc", label: "Pc" },
-  { value: "EA", label: "EA" },
-  { value: "LS", label: "LS" },
-  { value: "set", label: "set" },
-  { value: "meter", label: "meter" },
-  { value: "m2", label: "m2" },
-  { value: "m3", label: "m3" },
-  { value: "Hour", label: "Hour" },
-  { value: "Day", label: "Day" },
-  { value: "Week", label: "Week" },
-  { value: "Month", label: "Month" },
-  { value: "Year", label: "Year" },
-  { value: "Quarter", label: "Quarter" },
-] as const;
+// The staff unit catalog is served, no longer hardcoded here: App fetches it
+// once with GetCompanyUnits() (see loadUnits below) and passes it to the
+// editor as options, the same pattern the currency catalogue already uses
+// (issue #336). Two copies of a list drift, and a hardcoded copy here would
+// keep offering a unit a company has removed. Legacy values stored before the
+// catalog (e.g. "Unit", "PC", "Meter") still display through the
+// "(not recognised)" rule in UoMSelect. The canonical unit the defaults fall
+// back to is served too, on the company profile. See issue #337.
 
 const INCOTERM_OPTIONS = [
   "EXW",
@@ -118,7 +104,10 @@ const DEFAULT_ITEM: EditorItem = {
   description: "",
   bullets: [],
   qty: "1",
-  uom: "Lot",
+  // Empty here on purpose: the served canonical unit is applied per-company
+  // by newItem below. A hardcoded "Lot" would force a unit a company may have
+  // removed or replaced as canonical (issue #337).
+  uom: "",
   unitPrice: "",
   marginEnabled: false,
   marginPercent: "0",
@@ -147,8 +136,16 @@ const DEFAULT_DETAILS: DetailsState = {
   serviceCategory: "",
 };
 
-function newItem(key: number): EditorItem {
-  return { ...DEFAULT_ITEM, key };
+/**
+ * Builds one empty line whose unit of measure is the company's canonical
+ * unit. Exported for its test: the new-line default must be the served
+ * canonical, not a hardcoded "Lot" (#337) — a company may have removed that
+ * unit or set a different canonical one, and a line defaulting to a unit the
+ * server will refuse fails Prepare. Empty only in the pre-load window; the
+ * fill-empty effect below sets it once the served list arrives.
+ */
+export function newItem(key: number, uom: string): EditorItem {
+  return { ...DEFAULT_ITEM, key, uom };
 }
 
 function splitRows(text: string): string[] {
@@ -296,8 +293,8 @@ export function parsePasteMoneyCell(entry: CurrencyInfo, cell: string | undefine
   return "";
 }
 
-// normalizeUoM turns a pasted cell into a unit of measure, or into the default
-// when it is not one.
+// normalizeUoM turns a pasted cell into a unit of measure, or into the
+// canonical unit when it is not one.
 //
 // A pasted row is positional, and parseRow splits on tabs while honouring quotes,
 // so a description cell containing an unquoted tab arrives as two columns and the
@@ -305,20 +302,28 @@ export function parsePasteMoneyCell(entry: CurrencyInfo, cell: string | undefine
 // from later columns and land correctly, which is what made the row look nearly
 // right while the UoM carried a sentence.
 //
-// Anything that is not a UoM becomes "Lot" rather than being stored: the UoM
-// control is a <select> bound to this value, so it cannot display a value
-// outside UOM_OPTIONS and would show "Lot" while the state held the text. That
-// mismatch is what let the value reach a customer quotation unnoticed, so a
-// value that cannot be displayed must not be stored either.
+// Anything that is not a UoM becomes the canonical unit rather than being
+// stored: the UoM control is a <select> bound to this value, so it cannot
+// display a value the served list does not carry and would show a unit while
+// the state held the text. That mismatch is what let the value reach a
+// customer quotation unnoticed, so a value that cannot be displayed must not
+// be stored either. The fallback is the company's canonical unit, not a
+// hardcoded "Lot" (#337), so a paste under a company that never used "Lot"
+// still lands on a unit the served list accepts.
 //
-// The match is case-insensitive and returns the canonical spelling, so "lot"
-// and "LOT" both become "Lot".
+// The match is case-insensitive and returns the served spelling, so "lot"
+// and "LOT" both become the list's spelling of that unit.
 //
 // Pasted rows rarely carry the canonical spelling: plurals ("hours"), short
 // forms ("hr", "mtr") and area/volume symbols ("m²", "sqm") all appear in real
-// spreadsheets. The alias table folds them onto the catalog rather than
-// letting a real unit fall back to Lot -- which would silently change what the
-// line means. A value with no alias still falls back, exactly as before.
+// spreadsheets. The alias table folds them onto the served list rather than
+// letting a real unit fall back to the canonical -- which would silently change
+// what the line means.
+//
+// The alias spellings (the keys) are fixed; the targets are resolved against
+// the served list, so a fold naming a value the company removed falls through
+// to the exact match / canonical fallback instead of storing a unit off the
+// list.
 const UOM_ALIASES: Record<string, string> = {
   lots: "Lot",
   pc: "Pc",
@@ -356,16 +361,35 @@ const UOM_ALIASES: Record<string, string> = {
   quarters: "Quarter",
 };
 
-function normalizeUoM(raw: string): string {
+/**
+ * Folds one pasted UoM cell onto the served unit list, or onto the canonical
+ * unit when it is not a unit the company uses. Exported for its test: the
+ * fallback must be the served canonical, never a hardcoded "Lot" (#337), and
+ * an alias target must resolve against the served list so a removed value
+ * never gets stored.
+ */
+export function normalizeUoM(
+  raw: string,
+  options: readonly { value: string; label: string }[],
+  canonical: string
+): string {
   const candidate = raw.trim();
-  if (candidate === "") return "Lot";
+  if (candidate === "") return canonical;
 
   const key = candidate.toLowerCase();
-  const aliased = UOM_ALIASES[key];
-  if (aliased) return aliased;
 
-  const match = UOM_OPTIONS.find((option) => key === option.value.toLowerCase());
-  return match ? match.value : "Lot";
+  const aliased = UOM_ALIASES[key];
+  if (aliased) {
+    // Resolve the alias target against the served list, so a fold naming a
+    // value the company removed falls through rather than storing it.
+    const resolved = options.find(
+      (option) => option.value.toLowerCase() === aliased.toLowerCase()
+    );
+    if (resolved) return resolved.value;
+  }
+
+  const match = options.find((option) => key === option.value.toLowerCase());
+  return match ? match.value : canonical;
 }
 
 function parseSubItems(text: string): { description: string; subItems: string[] } {
@@ -418,7 +442,9 @@ function App() {
 
   const nextKey = useRef(1);
   const nextSubId = useRef(1);
-  const [items, setItems] = useState<EditorItem[]>([newItem(0)]);
+  // "" until the served list arrives; the fill-empty effect below sets the
+  // canonical unit on this first line once GetCompanyUnits() answers.
+  const [items, setItems] = useState<EditorItem[]>([newItem(0, "")]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
   const [customerId, setCustomerId] = useState(2);
   const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
@@ -448,6 +474,20 @@ function App() {
   // consumer below reads liveEntry, never this, so the fallback stays in one
   // place.
   const [currencyCatalogue, setCurrencyCatalogue] = useState<CurrencyInfo[] | null>(null);
+  // The company's served unit list, in display order, as the editor dropdown
+  // sees it (issue #337). Null until GetCompanyUnits() answers (or when it
+  // throws / the device is offline): the UoM selects render a disabled pending
+  // state rather than a stale or invented list, and an empty array is never
+  // treated as "no units" — a company always has at least one.
+  const [storedUoMs, setStoredUoMs] = useState<CompanyUnitOption[] | null>(null);
+  // True when that read failed, so the pending state can say so honestly (and
+  // offer a retry) instead of loading forever.
+  const [unitsError, setUnitsError] = useState(false);
+  // The canonical unit from the company profile: the value a new line,
+  // sub-item, split-line parent and unrecognized paste fall back to. The
+  // server seeds it to "Lot" and a company may change it to any unit on the
+  // served list, so nothing here hardcodes a unit.
+  const [canonicalUoM, setCanonicalUoM] = useState("");
 
   const signedIn = user !== null;
 
@@ -463,6 +503,9 @@ function App() {
       const profile = (await GetCompany()) as backend.CompanyProfile;
       if (profile?.LegalName?.trim()) setCompanyName(profile.LegalName.trim());
       setCompanyCurrency(normalizeCurrencyCode(profile?.Currency));
+      // The served canonical unit. Trimmed: the server stores it byte for byte
+      // against a unit value (issue #337). Empty only in the pre-load window.
+      setCanonicalUoM((profile?.CanonicalUoM ?? "").trim());
     } catch {
       // Offline or plain-browser dev: keep the default.
     }
@@ -473,6 +516,7 @@ function App() {
     else {
       setCompanyName(DEFAULT_COMPANY_NAME);
       setCompanyCurrency(DEFAULT_CURRENCY_CODE);
+      setCanonicalUoM("");
     }
   }, [signedIn, loadCompany]);
 
@@ -509,6 +553,33 @@ function App() {
     };
   }, [signedIn, loadCatalogue]);
 
+  // The served unit list (#337). Read once per sign-in, like the catalogue:
+  // the list is company data the editor dropdown, the canonical default and
+  // the paste fallback all draw from. It rides its own try/catch so a units
+  // failure never clears the currency, and it keeps a loaded list on a later
+  // failure rather than nulling it (the same keep-previous rule the catalogue
+  // uses). Unlike the catalogue it does not gate money: a failed read leaves
+  // the selects disabled pending with a retry (see unitsError), because a
+  // stale unit is a label, not a denomination.
+  const loadUnits = useCallback(async () => {
+    try {
+      const units = (await GetCompanyUnits()) as { Value: string; Label: string }[];
+      setStoredUoMs((units ?? []).map((unit) => ({ value: unit.Value, label: unit.Label })));
+      setUnitsError(false);
+    } catch {
+      setUnitsError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setStoredUoMs(null);
+      setUnitsError(false);
+      return;
+    }
+    void loadUnits();
+  }, [signedIn, loadUnits]);
+
   // The live profile currency, resolved once from the catalogue by the
   // normalized profile code. Null means the entry cannot be known -- the
   // catalogue is absent and the profile is not IDR -- and every money surface
@@ -519,6 +590,43 @@ function App() {
     () => resolveLiveEntry(currencyCatalogue, companyCurrency, IDR_FALLBACK_ENTRY),
     [currencyCatalogue, companyCurrency]
   );
+
+  // The resolved canonical unit every default falls back to: the profile's
+  // canonical when it is on the served list, otherwise the first served unit —
+  // never a value off the list, and never a hardcoded default (#337). Empty
+  // only before either read lands; the profile value rides the loading window
+  // so a line added right after sign-in still names the company's unit.
+  const canonicalUnit = useMemo(() => {
+    if (storedUoMs === null) return canonicalUoM;
+    if (canonicalUoM !== "" && storedUoMs.some((unit) => unit.value === canonicalUoM)) {
+      return canonicalUoM;
+    }
+    return storedUoMs[0]?.value ?? "";
+  }, [canonicalUoM, storedUoMs]);
+
+  // A line created before the served list arrived carries an empty unit (the
+  // pre-load default). When the list lands, fill every empty unit with the
+  // canonical so the dropdown reads a real unit rather than "(not recognised)".
+  // Only empty units are touched: a staff-entered or restored value is never
+  // overwritten.
+  useEffect(() => {
+    if (storedUoMs === null) return;
+    const fallback = canonicalUnit;
+    if (fallback === "") return;
+    setItems((prev) => {
+      const empty = prev.some(
+        (item) => item.uom === "" || item.subItems.some((sub) => sub.uom === "")
+      );
+      if (!empty) return prev;
+      return prev.map((item) => ({
+        ...item,
+        uom: item.uom === "" ? fallback : item.uom,
+        subItems: item.subItems.map((sub) =>
+          sub.uom === "" ? { ...sub, uom: fallback } : sub
+        ),
+      }));
+    });
+  }, [storedUoMs, canonicalUnit]);
 
   // Restore the keychain session on startup; otherwise show the login page.
   // The try/catch also covers plain-browser dev, where the Wails runtime
@@ -544,7 +652,7 @@ function App() {
   const resetForm = useCallback(() => {
     nextKey.current = 1;
     nextSubId.current = 1;
-    setItems([newItem(0)]);
+    setItems([newItem(0, canonicalUnit)]);
     setDetails(DEFAULT_DETAILS);
     setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
@@ -555,7 +663,7 @@ function App() {
     void ClearDraftContext().catch(() => undefined);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview, customerOptions]);
+  }, [clearPreview, customerOptions, canonicalUnit]);
 
   // Server-owned client directory: the editor dropdown reads here, and new
   // clients appear without a rebuild. Prepare validates server-side.
@@ -862,8 +970,8 @@ function App() {
   }, [items, details, customerId, clearPreview]);
 
   const handleAddItem = useCallback(() => {
-    setItems((prev) => [...prev, newItem(nextKey.current++)]);
-  }, []);
+    setItems((prev) => [...prev, newItem(nextKey.current++, canonicalUnit)]);
+  }, [canonicalUnit]);
 
   const handleRemoveItem = useCallback((key: number) => {
     setItems((prev) => {
@@ -925,26 +1033,32 @@ function App() {
 
   // Entering sub-item mode converts the line: existing description bullets
   // become sub-items with their text pre-filled, and the main item takes
-  // the rollup shape (Qty 1, Lot) before the user prices anything.
+  // the rollup shape (Qty 1, the canonical unit) before the user prices
+  // anything. The parent and each new sub-item carry the served canonical
+  // unit (#337), not a hardcoded "Lot", so the backend's package gate — which
+  // requires the parent to be the company's canonical unit — accepts it and a
+  // company that renamed the unit sees their own.
   const handleEnableSubItems = useCallback((key: number) => {
     setItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item;
         const converted = item.bullets
           .filter((line) => line.trim() !== "")
-          .map((line) => newSubItem(nextSubId.current++, line.trim()));
+          .map((line) => newSubItem(nextSubId.current++, line.trim(), canonicalUnit));
         return {
           ...item,
           bullets: [],
           qty: "1",
-          uom: "Lot",
+          uom: canonicalUnit,
           showSubPrices: false,
           subItems:
-            converted.length > 0 ? converted : [newSubItem(nextSubId.current++)],
+            converted.length > 0
+              ? converted
+              : [newSubItem(nextSubId.current++, "", canonicalUnit)],
         };
       })
     );
-  }, []);
+  }, [canonicalUnit]);
 
   // Leaving sub-item mode keeps the composition readable as description
   // lines; the per-sub values go away with the pricing they described.
@@ -966,12 +1080,12 @@ function App() {
         item.key === key
           ? {
               ...item,
-              subItems: [...item.subItems, newSubItem(nextSubId.current++)],
+              subItems: [...item.subItems, newSubItem(nextSubId.current++, "", canonicalUnit)],
             }
           : item
       )
     );
-  }, []);
+  }, [canonicalUnit]);
 
   const handleRemoveSubRow = useCallback((key: number, subId: number) => {
     setItems((prev) =>
@@ -1107,10 +1221,10 @@ function App() {
             MAX_MARGIN_PERCENT
           );
           return {
-            ...newSubItem(nextSubId.current++),
+            ...newSubItem(nextSubId.current++, "", canonicalUnit),
             description: (cols[0] || "").trim(),
             qty: (cols[1] || "").trim() || "1",
-            uom: normalizeUoM(cols[2] || ""),
+            uom: normalizeUoM(cols[2] || "", storedUoMs ?? [], canonicalUnit),
             unitCost: parsePasteMoneyCell(liveEntry, cols[3]),
             marginPercent: margin.toString(),
             marginEnabled: margin > 0,
@@ -1126,7 +1240,7 @@ function App() {
         )
       );
     },
-    [liveEntry]
+    [liveEntry, storedUoMs, canonicalUnit]
   );
 
   const handlePaste = useCallback(
@@ -1157,7 +1271,7 @@ function App() {
             key: 0,
             description,
             bullets,
-            uom: normalizeUoM(cols[1] || ""),
+            uom: normalizeUoM(cols[1] || "", storedUoMs ?? [], canonicalUnit),
             qty: (cols[2] || "").trim() || "1",
             unitPrice: parsePasteMoneyCell(liveEntry, cols[3]),
             marginPercent: margin.toString(),
@@ -1180,7 +1294,7 @@ function App() {
         ];
       });
     },
-    [liveEntry]
+    [liveEntry, storedUoMs, canonicalUnit]
   );
 
   const handlePrepare = useCallback(async () => {
@@ -1215,13 +1329,16 @@ function App() {
             ShowSubPrices: false,
           });
         }
-        // A main item with sub-items never prices itself: Qty 1 / Lot and a
-        // zero unit price are placeholders the backend replaces with the
-        // sub-item rollup, so the margin controls do not apply either.
+        // A main item with sub-items never prices itself: Qty 1 / the
+        // canonical unit and a zero unit price are placeholders the backend
+        // replaces with the sub-item rollup, so the margin controls do not
+        // apply either. The unit is the served canonical (#337): the backend
+        // package gate requires it to match the company's canonical, and a
+        // hardcoded "Lot" would be refused for a company that removed it.
         return new backend.QuotationItemInput({
           Description: item.description,
           Qty: 1,
-          UoM: "Lot",
+          UoM: canonicalUnit,
           UnitPrice: 0,
           MarginEnabled: false,
           MarginPercent: 0,
@@ -1293,7 +1410,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [items, details, customerId, clearPreview, pushToast, liveEntry]);
+  }, [items, details, customerId, clearPreview, pushToast, liveEntry, canonicalUnit]);
 
   const handlePasteDetails = useCallback(
     (event: React.ClipboardEvent<HTMLInputElement>) => {
@@ -1661,6 +1778,28 @@ function App() {
                 />
               ) : (
                 <div>
+                  {/* #337: the served unit list failed to load. Say so and
+                      offer a retry rather than leaving the selects disabled
+                      on a pending label that would never resolve. */}
+                  {unitsError && storedUoMs === null ? (
+                    <div className="mb-4">
+                      <StatusBanner tone="danger">
+                        <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                          <span>
+                            The unit list couldn't be loaded, so units can't be
+                            chosen yet. New lines use the company's canonical unit.
+                          </span>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => void loadUnits()}
+                          >
+                            Try again
+                          </Button>
+                        </span>
+                      </StatusBanner>
+                    </div>
+                  ) : null}
                   <SectionHeading
                     title="Line items"
                     action={
@@ -1672,7 +1811,14 @@ function App() {
                   <ItemEditor
                     items={items}
                     currency={liveEntry}
-                    uomOptions={UOM_OPTIONS}
+                    uomOptions={storedUoMs ?? []}
+                    uomPendingLabel={
+                      storedUoMs === null
+                        ? unitsError
+                          ? "Units unavailable"
+                          : "Loading units…"
+                        : undefined
+                    }
                     onAddItem={handleAddItem}
                     onRemoveItem={handleRemoveItem}
                     onChange={handleItemChange}
@@ -1785,7 +1931,14 @@ function App() {
           isAdmin={user.Role === "admin"}
           user={user}
           onProfileChanged={setUser}
-          onCompanyChanged={() => void loadCompany()}
+          onCompanyChanged={() => {
+            // A company save (name, currency, canonical unit, or the unit list
+            // itself) reaches the editor through here: re-read the profile and
+            // the served list so the dropdown and the canonical default track
+            // what was just saved.
+            void loadCompany();
+            void loadUnits();
+          }}
         />
       ) : null}
     </AppShell>
