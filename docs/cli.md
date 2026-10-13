@@ -227,7 +227,10 @@ a rounding bug into a pricing system.
   "incoterm": "DAP",
   "validityDays": 30,
   "paymentTermDays": 90,
-  "leadTimeDays": 60,
+  "leadTimeYears": 1,
+  "leadTimeMonths": 2,
+  "leadTimeWeeks": 3,
+  "leadTimeDays": 4,
   "taxZone": "FTZ",
   "taxType": "Goods",
   "items": [

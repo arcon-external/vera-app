@@ -186,6 +186,10 @@ export namespace backend {
 	    MarginalizedGrand: number;
 	    CustomerGrandTotal: number;
 	    CustomerCode: number;
+	    DisplayLeadTime: string;
+	    LeadTimeYears: number;
+	    LeadTimeMonths: number;
+	    LeadTimeWeeks: number;
 	    LeadTimeDays: number;
 	    PaymentTermDays: number;
 	    DiscountPercent: number;
@@ -242,6 +246,10 @@ export namespace backend {
 	        this.MarginalizedGrand = source["MarginalizedGrand"];
 	        this.CustomerGrandTotal = source["CustomerGrandTotal"];
 	        this.CustomerCode = source["CustomerCode"];
+	        this.DisplayLeadTime = source["DisplayLeadTime"];
+	        this.LeadTimeYears = source["LeadTimeYears"];
+	        this.LeadTimeMonths = source["LeadTimeMonths"];
+	        this.LeadTimeWeeks = source["LeadTimeWeeks"];
 	        this.LeadTimeDays = source["LeadTimeDays"];
 	        this.PaymentTermDays = source["PaymentTermDays"];
 	        this.DiscountPercent = source["DiscountPercent"];
@@ -442,9 +450,13 @@ export namespace backend {
 	    OriginalDiscountAmount: number;
 	    RevisionID: number;
 	    DiscountPercent: number;
+	    DisplayLeadTime: string;
+	    LeadTimeYears: number;
+	    LeadTimeMonths: number;
+	    LeadTimeWeeks: number;
+	    LeadTimeDays: number;
 	    Validity: number;
 	    PaymentTerm: number;
-	    LeadTime: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new CustomerPreview(source);
@@ -474,9 +486,13 @@ export namespace backend {
 	        this.OriginalDiscountAmount = source["OriginalDiscountAmount"];
 	        this.RevisionID = source["RevisionID"];
 	        this.DiscountPercent = source["DiscountPercent"];
+	        this.DisplayLeadTime = source["DisplayLeadTime"];
+	        this.LeadTimeYears = source["LeadTimeYears"];
+	        this.LeadTimeMonths = source["LeadTimeMonths"];
+	        this.LeadTimeWeeks = source["LeadTimeWeeks"];
+	        this.LeadTimeDays = source["LeadTimeDays"];
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
-	        this.LeadTime = source["LeadTime"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -776,6 +792,7 @@ export namespace backend {
 	    DisplayProfit: string;
 	    DisplayTax: string;
 	    DisplayMarginalizedDiscount: string;
+	    DisplayRowDiscountTotal: string;
 	    DisplayOriginalSubtotal: string;
 	    DisplayOriginalDiscount: string;
 	    DisplayOriginalGrand: string;
@@ -799,6 +816,7 @@ export namespace backend {
 	    OriginalGrand: number;
 	    MarginalizedSubtotal: number;
 	    MarginalizedDiscount: number;
+	    RowDiscountTotal: number;
 	    TaxRateBps: number;
 	    DiscountPercent: number;
 	
@@ -823,6 +841,7 @@ export namespace backend {
 	        this.DisplayProfit = source["DisplayProfit"];
 	        this.DisplayTax = source["DisplayTax"];
 	        this.DisplayMarginalizedDiscount = source["DisplayMarginalizedDiscount"];
+	        this.DisplayRowDiscountTotal = source["DisplayRowDiscountTotal"];
 	        this.DisplayOriginalSubtotal = source["DisplayOriginalSubtotal"];
 	        this.DisplayOriginalDiscount = source["DisplayOriginalDiscount"];
 	        this.DisplayOriginalGrand = source["DisplayOriginalGrand"];
@@ -846,6 +865,7 @@ export namespace backend {
 	        this.OriginalGrand = source["OriginalGrand"];
 	        this.MarginalizedSubtotal = source["MarginalizedSubtotal"];
 	        this.MarginalizedDiscount = source["MarginalizedDiscount"];
+	        this.RowDiscountTotal = source["RowDiscountTotal"];
 	        this.TaxRateBps = source["TaxRateBps"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	    }
@@ -1045,7 +1065,10 @@ export namespace backend {
 	    Items: QuotationItemInput[];
 	    DiscountPercent: number;
 	    PaymentTerm: number;
-	    LeadTime: number;
+	    LeadTimeYears: number;
+	    LeadTimeMonths: number;
+	    LeadTimeWeeks: number;
+	    LeadTimeDays: number;
 	    CustomerID: number;
 	    Validity: number;
 	
@@ -1065,7 +1088,10 @@ export namespace backend {
 	        this.Items = this.convertValues(source["Items"], QuotationItemInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.PaymentTerm = source["PaymentTerm"];
-	        this.LeadTime = source["LeadTime"];
+	        this.LeadTimeYears = source["LeadTimeYears"];
+	        this.LeadTimeMonths = source["LeadTimeMonths"];
+	        this.LeadTimeWeeks = source["LeadTimeWeeks"];
+	        this.LeadTimeDays = source["LeadTimeDays"];
 	        this.CustomerID = source["CustomerID"];
 	        this.Validity = source["Validity"];
 	    }
@@ -1383,6 +1409,9 @@ export namespace store {
 	    CustomerCode: number;
 	    DiscountPercent: number;
 	    LeadTimeDays: number;
+	    LeadTimeYears: number;
+	    LeadTimeMonths: number;
+	    LeadTimeWeeks: number;
 	    PaymentTermDays: number;
 	    ValidityDays: number;
 	    RevisionNumber: number;
@@ -1420,6 +1449,9 @@ export namespace store {
 	        this.CustomerCode = source["CustomerCode"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.LeadTimeDays = source["LeadTimeDays"];
+	        this.LeadTimeYears = source["LeadTimeYears"];
+	        this.LeadTimeMonths = source["LeadTimeMonths"];
+	        this.LeadTimeWeeks = source["LeadTimeWeeks"];
 	        this.PaymentTermDays = source["PaymentTermDays"];
 	        this.ValidityDays = source["ValidityDays"];
 	        this.RevisionNumber = source["RevisionNumber"];

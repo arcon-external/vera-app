@@ -20,7 +20,7 @@ func testPreviewInput() QuotationInput {
 		RecipientName:   "Test",
 		Validity:        30,
 		PaymentTerm:     30,
-		LeadTime:        30,
+		LeadTimeDays:    30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
 		DiscountPercent: 10,
@@ -131,7 +131,7 @@ func TestInternalBreakdownCarriesSubItems(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	}); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -412,7 +412,7 @@ func TestRenderedQuotationHidesPackageInternals(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	}); err != nil {
 		t.Fatalf("Prepare: %v", err)

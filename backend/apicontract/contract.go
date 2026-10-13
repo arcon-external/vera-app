@@ -179,8 +179,18 @@ type QuotationDetail struct {
 	MarginalizedGrandAfterTax   int64              `json:"marginalizedGrandAfterTax"`
 	PpnAmount                   int64              `json:"ppnAmount"`
 	DiscountPercent             int16              `json:"discountPercent"`
-	Revision                    int16              `json:"revision"`
-	HasPDF                      bool               `json:"hasPdf"`
+	// LeadTimeYears/Months/Weeks/Days are the lead time as the revision stated
+	// it, each 0..255, all zero meaning none was stated. They are the stored
+	// figures rather than a display so the editor restores the units.
+	LeadTimeYears  uint8 `json:"leadTimeYears"`
+	LeadTimeMonths uint8 `json:"leadTimeMonths"`
+	LeadTimeWeeks  uint8 `json:"leadTimeWeeks"`
+	LeadTimeDays   uint8 `json:"leadTimeDays"`
+	// DisplayLeadTime is the composed sentence the document printed
+	// ("2 Years, 10 Months, 4 Weeks, and 5 Days", "-" when none was stated).
+	DisplayLeadTime string `json:"displayLeadTime"`
+	Revision        int16  `json:"revision"`
+	HasPDF          bool   `json:"hasPdf"`
 }
 
 // AttachDocumentRequest uploads locally rendered PDF bytes for a revision.

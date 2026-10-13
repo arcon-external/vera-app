@@ -122,7 +122,7 @@ func preparePackageDiscountFixture(t *testing.T) *Quotation {
 	}
 	if err := q.Prepare(QuotationInput{
 		Subject: "package discount", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "discounted package", UoM: "Lot", Qty: 1, ShowSubPrices: false,
@@ -188,7 +188,7 @@ func TestZeroListPackageCannotDivideByZero(t *testing.T) {
 	}
 	if err := q.Prepare(QuotationInput{
 		Subject: "zero list", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "free package", UoM: "Lot", Qty: 1, ShowSubPrices: false,

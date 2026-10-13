@@ -112,6 +112,9 @@ type RevisionEvidence struct {
 	QuotationID     int64
 	DiscountPercent int16
 	LeadTimeDays    int16
+	LeadTimeYears   int16
+	LeadTimeMonths  int16
+	LeadTimeWeeks   int16
 	PaymentTermDays int16
 	ValidityDays    int16
 	RevisionNumber  int16
@@ -169,6 +172,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		       r.recipient_name, r.recipient_address, c.legal_name,
 		       r.subject, r.incoterm, r.currency,
 		       r.validity_days, r.payment_term_days, r.lead_time_days,
+		       r.lead_time_years, r.lead_time_months, r.lead_time_weeks,
 		       r.discount_percent, r.created_at,
 		       r.signature, r.sig_key_id, r.canonical_sha256, r.issuer_name,
 		       t.marginalized_subtotal, t.marginalized_discount,
@@ -183,6 +187,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		&evidence.RecipientName, &evidence.RecipientAddress, &evidence.RecipientCompany,
 		&evidence.Subject, &evidence.Incoterm, &evidence.Currency,
 		&evidence.ValidityDays, &evidence.PaymentTermDays, &evidence.LeadTimeDays,
+		&evidence.LeadTimeYears, &evidence.LeadTimeMonths, &evidence.LeadTimeWeeks,
 		&evidence.DiscountPercent, &evidence.CreatedAt,
 		&evidence.Signature, &evidence.SigKeyID, &evidence.CanonicalSHA256, &evidence.IssuerName,
 		&evidence.Subtotal, &evidence.DiscountAmount, &evidence.PpnAmount, &evidence.GrandTotal,

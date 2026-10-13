@@ -62,7 +62,7 @@ func quotationInput() map[string]any {
 		"TaxZone":         "FTZ",
 		"Validity":        30,
 		"PaymentTerm":     30,
-		"LeadTime":        10,
+		"LeadTimeDays":    10,
 		"CustomerID":      2,
 		"Incoterm":        "EXW",
 	}
@@ -130,7 +130,7 @@ func TestPrepareEndpointRejectsInvalidInput(t *testing.T) {
 		"RecipientName": "Test",
 		"Validity":      30,
 		"PaymentTerm":   30,
-		"LeadTime":      10,
+		"LeadTimeDays":  10,
 		"CustomerID":    2,
 		"Incoterm":      "EXW",
 		"TaxZone":       "FTZ",

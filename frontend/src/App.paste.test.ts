@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePasteMoneyCell } from "./App";
+import { parsePasteMoneyCell, parsePastedLeadTimeDays } from "./App";
 import type { CurrencyInfo } from "./format";
 
 // The paste handlers in App.tsx route every pasted money cell through
@@ -61,5 +61,25 @@ describe("parsePasteMoneyCell", () => {
     expect(parsePasteMoneyCell(USD, "0")).toBe("0");
     expect(parsePasteMoneyCell(USD, "$0.00")).toBe("0");
     expect(parsePasteMoneyCell(IDR, "0")).toBe("0");
+  });
+});
+
+describe("parsePastedLeadTimeDays", () => {
+  it("maps a legacy days-only cell into the days segment", () => {
+    expect(parsePastedLeadTimeDays("60")).toBe(60);
+    expect(parsePastedLeadTimeDays("90")).toBe(90);
+  });
+
+  it("reads empty and unreadable cells as unstated, not the old default", () => {
+    // The paste used to fall back to 60 when the cell held nothing; an empty
+    // cell now means no lead time was stated.
+    expect(parsePastedLeadTimeDays("")).toBe(0);
+    expect(parsePastedLeadTimeDays(undefined)).toBe(0);
+    expect(parsePastedLeadTimeDays("abc")).toBe(0);
+  });
+
+  it("strips non-digits and clamps to the uint8 range", () => {
+    expect(parsePastedLeadTimeDays("60 days")).toBe(60);
+    expect(parsePastedLeadTimeDays("999")).toBe(255);
   });
 });

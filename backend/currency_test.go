@@ -33,7 +33,7 @@ func TestPrepareFormatsInCompanyCurrency(t *testing.T) {
 		q.Data.LogoBase64 = templates.Data.LogoBase64
 		if err := q.Prepare(QuotationInput{
 			Subject: "currency probe", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-			Validity: 30, PaymentTerm: 30, LeadTime: 30,
+			Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 			TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 			Items: []QuotationItemInput{
 				{Description: "plain line", UoM: "Lot", Qty: 1, UnitPrice: 1000000},
@@ -113,7 +113,7 @@ func TestInternalBreakdownFormatsInCompanyCurrency(t *testing.T) {
 	q.companyIdentity.Currency = "USD"
 	if err := q.Prepare(QuotationInput{
 		Subject: "currency probe", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "plain line", UoM: "Lot", Qty: 1, UnitPrice: 1000000},

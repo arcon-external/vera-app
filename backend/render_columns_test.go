@@ -123,7 +123,7 @@ func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
 
 			if err := q.Prepare(QuotationInput{
 				Subject: "probe", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-				Validity: 30, PaymentTerm: 30, LeadTime: 30,
+				Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 				TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 				Items: tc.items,
 			}); err != nil {
@@ -214,7 +214,7 @@ func TestRenderersAgreeOnItemTableColumnsForCurrency(t *testing.T) {
 
 	if err := q.Prepare(QuotationInput{
 		Subject: "currency probe", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "plain line", UoM: "Lot", Qty: 1, UnitPrice: 1000000},

@@ -35,13 +35,22 @@ type SignableRevision struct {
 	// byte-identical canonical bytes to one signed before this field
 	// existed, so every printed verification code keeps verifying. Never
 	// bump CanonicalPrefix for this.
-	Currency        string
-	Items           []SignableItem
-	Subtotal        int64
-	DiscountAmount  int64
-	PpnAmount       int64
-	GrandTotal      int64
-	LeadTimeDays    int16
+	Currency       string
+	Items          []SignableItem
+	Subtotal       int64
+	DiscountAmount int64
+	PpnAmount      int64
+	GrandTotal     int64
+	LeadTimeDays   int16
+	// LeadTimeYears, LeadTimeMonths and LeadTimeWeeks are the longer units a
+	// lead time can be stated in. They are emitted only when non-zero, exactly
+	// like DiscountPercent on a row and Subs on an item: a day-only revision
+	// then produces byte-identical canonical bytes to every revision signed
+	// before these fields existed, so every printed verification code keeps
+	// verifying. Never bump CanonicalPrefix for this.
+	LeadTimeYears   int16
+	LeadTimeMonths  int16
+	LeadTimeWeeks   int16
 	DiscountPercent int16
 	PaymentTermDays int16
 	ValidityDays    int16
@@ -106,7 +115,22 @@ func CanonicalRevision(revision SignableRevision) []byte {
 	writeField(&b, "incoterm", revision.Incoterm)
 	writeField(&b, "validity_days", strconv.Itoa(int(revision.ValidityDays)))
 	writeField(&b, "payment_term_days", strconv.Itoa(int(revision.PaymentTermDays)))
+	// lead_time_days is unconditional and always has been: a revision whose
+	// lead time is stated in days only -- which is every revision signed
+	// before years/months/weeks existed -- emits exactly these bytes and
+	// nothing more. The three longer units follow it, each only when the
+	// revision actually carries one, which is the rule Subs and a row
+	// discount already follow.
 	writeField(&b, "lead_time_days", strconv.Itoa(int(revision.LeadTimeDays)))
+	if revision.LeadTimeYears > 0 {
+		writeField(&b, "lead_time_years", strconv.Itoa(int(revision.LeadTimeYears)))
+	}
+	if revision.LeadTimeMonths > 0 {
+		writeField(&b, "lead_time_months", strconv.Itoa(int(revision.LeadTimeMonths)))
+	}
+	if revision.LeadTimeWeeks > 0 {
+		writeField(&b, "lead_time_weeks", strconv.Itoa(int(revision.LeadTimeWeeks)))
+	}
 	writeField(&b, "discount_percent", strconv.Itoa(int(revision.DiscountPercent)))
 	writeField(&b, "issuer", revision.IssuerName)
 	writeField(&b, "currency", currency.Normalize(revision.Currency))

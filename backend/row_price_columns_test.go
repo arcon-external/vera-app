@@ -34,7 +34,7 @@ func prepareRowPriceFixture(t *testing.T) *Quotation {
 	}
 	if err := q.Prepare(QuotationInput{
 		Subject: "row prices", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "Widget", UoM: "Lot", Qty: 2, UnitPrice: 100000,
@@ -202,7 +202,7 @@ func TestItemTableAlwaysHasAfterDiscColumn(t *testing.T) {
 	}
 	if err := q.Prepare(QuotationInput{
 		Subject: "no discounts", RecipientName: "x", CustomerID: 2, Incoterm: "DAP",
-		Validity: 30, PaymentTerm: 30, LeadTime: 30,
+		Validity: 30, PaymentTerm: 30, LeadTimeDays: 30,
 		TaxZone: TaxZoneFTZ, TaxType: TaxTypeGoods,
 		Items: []QuotationItemInput{
 			{Description: "plain line", UoM: "Lot", Qty: 1, UnitPrice: 1000000},

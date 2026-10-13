@@ -159,25 +159,36 @@ export function parseDraftPayload(payload: string): DraftPayload | null {
   const draft = decoded as Record<string, unknown>;
   const rawItems = Array.isArray(draft.items) ? draft.items : [];
   const rawDetails = (draft.details ?? {}) as Record<string, unknown>;
-  const details = rawDetails as unknown as DetailsState;
+  const details = rawDetails as unknown as DetailsState & { leadTime?: unknown };
+  const restored: DetailsState & Record<string, unknown> = {
+    ...details,
+    subject: asString(details.subject),
+    recipientName: asString(details.recipientName),
+    validity: asNumber(details.validity, 30),
+    paymentTerm: asNumber(details.paymentTerm, 90),
+    leadTimeYears: asNumber(details.leadTimeYears, 0),
+    leadTimeMonths: asNumber(details.leadTimeMonths, 0),
+    leadTimeWeeks: asNumber(details.leadTimeWeeks, 0),
+    // Drafts written before per-unit lead times carried one days-only figure;
+    // it restores into the days segment so old work keeps its duration, and a
+    // draft with neither reads as unstated (all zero), not as the old 60-day
+    // default.
+    leadTimeDays: asNumber(details.leadTimeDays, asNumber(details.leadTime, 0)),
+    discountPercent: asNumber(details.discountPercent, 0),
+    incoterm: asString(details.incoterm, "EXW"),
+    taxZone: asString(details.taxZone, "FTZ"),
+    taxType: asString(details.taxType, "Goods"),
+    serviceCategory: asString(details.serviceCategory),
+  };
+  // The legacy single figure must not survive the restore: the editor state it
+  // re-saves would otherwise carry both shapes forever.
+  delete restored.leadTime;
   return {
     // Keys and sub-item ids are reissued on load. They are React identity and
     // row handles, never data, and reusing stale ones is how a reopened draft
     // ends up with two rows editing each other.
     items: rawItems.map((item, index) => restoreItem(item, index)),
-    details: {
-      ...details,
-      subject: asString(details.subject),
-      recipientName: asString(details.recipientName),
-      validity: asNumber(details.validity, 30),
-      paymentTerm: asNumber(details.paymentTerm, 90),
-      leadTime: asNumber(details.leadTime, 60),
-      discountPercent: asNumber(details.discountPercent, 0),
-      incoterm: asString(details.incoterm, "EXW"),
-      taxZone: asString(details.taxZone, "FTZ"),
-      taxType: asString(details.taxType, "Goods"),
-      serviceCategory: asString(details.serviceCategory),
-    },
+    details: restored,
     customerId: asNumber(draft.customerId, 0),
   };
 }

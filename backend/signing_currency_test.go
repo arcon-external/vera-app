@@ -64,7 +64,7 @@ func TestSignableMappersAgreeOnCurrency(t *testing.T) {
 		QuoteNumber: "15020005", RevisionID: 1,
 		RecipientName: "Jesicha", RecipientCompany: "PT. Infineon",
 		RecipientAddress: "Batam", Subject: "Scope", Incoterm: "EXW",
-		Validity: 30, PaymentTerm: 90, LeadTime: 60, DiscountPercent: 5,
+		Validity: 30, PaymentTerm: 90, LeadTimeDays: 60, DiscountPercent: 5,
 		CompanyName: "PT Arcon Penta Persada", Currency: "USD",
 		SubTotal: 290000, DiscountAmount: 14500, PpnAmount: 30305, GrandTotal: 305805,
 		Items: []QuotationItem{

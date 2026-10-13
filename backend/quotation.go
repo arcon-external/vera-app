@@ -35,9 +35,16 @@ type QuotationInput struct {
 	Items           []QuotationItemInput
 	DiscountPercent uint8
 	PaymentTerm     uint8
-	LeadTime        uint8
-	CustomerID      uint8
-	Validity        uint8
+	// LeadTimeYears, LeadTimeMonths, LeadTimeWeeks and LeadTimeDays are the
+	// four units a lead time is stated in, each 0..255, all zero meaning no
+	// lead time is stated at all. Lead time is optional now: a quotation may
+	// have none, which is what zero means and why nothing rejects it.
+	LeadTimeYears  uint8
+	LeadTimeMonths uint8
+	LeadTimeWeeks  uint8
+	LeadTimeDays   uint8
+	CustomerID     uint8
+	Validity       uint8
 }
 
 // QuotationSubItemInput is one priced part of a modular line item. Sub-items
@@ -241,10 +248,20 @@ type QuotationData struct {
 	TaxRateBps                uint16
 	RevisionID                uint16
 	DiscountPercent           uint8
-	LeadTime                  uint8
-	PaymentTerm               uint8
-	CustomerID                uint8
-	Validity                  uint8
+	// LeadTime is the composed lead time sentence the terms line prints
+	// ("2 Years, 10 Months, 4 Weeks, and 5 Days"), "-" when none is stated.
+	// Composed once here by FormatLeadTime, like DisplayPpnAmount, so the
+	// HTML template and the native renderer print the same words.
+	LeadTime string
+	// The four stated units, kept beside it so the signed payload, the stored
+	// revision and the archive detail all carry the figures as entered.
+	LeadTimeYears  uint8
+	LeadTimeMonths uint8
+	LeadTimeWeeks  uint8
+	LeadTimeDays   uint8
+	PaymentTerm    uint8
+	CustomerID     uint8
+	Validity       uint8
 }
 
 // Quotation is the Wails-bound application struct.
@@ -840,9 +857,9 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("payment term must be greater than zero")
 	}
 
-	if input.LeadTime < 1 {
-		return fmt.Errorf("lead time must be greater than zero")
-	}
+	// Lead time carries no rule of its own: the four units are uint8, so the
+	// JSON decode already pins each to 0..255, and zero means "no lead time
+	// stated" -- a legitimate quotation, not a missing field.
 
 	if input.DiscountPercent > 100 {
 		return fmt.Errorf("discount percent cannot be greater than 100")
@@ -904,7 +921,12 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.Subject = input.Subject
 	q.Data.Validity = input.Validity
 	q.Data.PaymentTerm = input.PaymentTerm
-	q.Data.LeadTime = input.LeadTime
+	q.Data.LeadTimeYears = input.LeadTimeYears
+	q.Data.LeadTimeMonths = input.LeadTimeMonths
+	q.Data.LeadTimeWeeks = input.LeadTimeWeeks
+	q.Data.LeadTimeDays = input.LeadTimeDays
+	q.Data.LeadTime = FormatLeadTime(input.LeadTimeYears, input.LeadTimeMonths,
+		input.LeadTimeWeeks, input.LeadTimeDays)
 	q.Data.DiscountPercent = input.DiscountPercent
 	q.Data.TaxZone = input.TaxZone
 	q.Data.TaxCategory = input.TaxCategory
@@ -1192,7 +1214,10 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 		Incoterm:         q.Data.Incoterm,
 		ValidityDays:     int16(q.Data.Validity),
 		PaymentTermDays:  int16(q.Data.PaymentTerm),
-		LeadTimeDays:     int16(q.Data.LeadTime),
+		LeadTimeDays:     int16(q.Data.LeadTimeDays),
+		LeadTimeYears:    int16(q.Data.LeadTimeYears),
+		LeadTimeMonths:   int16(q.Data.LeadTimeMonths),
+		LeadTimeWeeks:    int16(q.Data.LeadTimeWeeks),
 		DiscountPercent:  int16(q.Data.DiscountPercent),
 		Currency:         q.Data.Currency,
 		TaxZone:          q.Data.TaxZone,
@@ -1338,9 +1363,14 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		ValidUntil:  q.Data.ValidUntil,
 		RevisionID:  q.Data.RevisionID,
 
-		Validity:        q.Data.Validity,
-		PaymentTerm:     q.Data.PaymentTerm,
-		LeadTime:        q.Data.LeadTime,
+		Validity:    q.Data.Validity,
+		PaymentTerm: q.Data.PaymentTerm,
+		// The seam carries the composed sentence, not the four numerics: the
+		// native renderer prints the same words the template does, so the two
+		// documents cannot disagree about what the lead time says (the #377
+		// lesson -- a renderer reading its own copy of a value is a renderer
+		// reading it differently).
+		DisplayLeadTime: q.Data.LeadTime,
 		Incoterm:        q.Data.Incoterm,
 		ServiceCategory: q.Data.ServiceCategory,
 

@@ -12,7 +12,10 @@ const DETAILS: DetailsState = {
   recipientName: "PT Contoh",
   validity: 45,
   paymentTerm: 60,
-  leadTime: 90,
+  leadTimeYears: 1,
+  leadTimeMonths: 2,
+  leadTimeWeeks: 3,
+  leadTimeDays: 4,
   discountPercent: 10,
   incoterm: "DAP",
   taxZone: "NonFTZ",
@@ -158,12 +161,61 @@ describe("draft payloads", () => {
     expect(restored!.details).toMatchObject({
       validity: 30,
       paymentTerm: 90,
-      leadTime: 60,
+      leadTimeYears: 0,
+      leadTimeMonths: 0,
+      leadTimeWeeks: 0,
+      leadTimeDays: 0,
       incoterm: "EXW",
       taxZone: "FTZ",
       taxType: "Goods",
     });
     expect(restored!.customerId).toBe(3);
+  });
+
+  it("maps a pre-unit draft's single lead time into the days segment", () => {
+    // Drafts written before per-unit lead times carried one days-only figure
+    // under `leadTime`. It restores into days so old work keeps its duration;
+    // the other segments read as unstated, and the legacy key is dropped
+    // rather than re-saved alongside the new shape.
+    const restored = parseDraftPayload(
+      JSON.stringify({
+        items: [],
+        details: { subject: "Legacy", leadTime: 90 },
+        customerId: 3,
+      })
+    );
+    expect(restored).not.toBeNull();
+    expect(restored!.details.leadTimeYears).toBe(0);
+    expect(restored!.details.leadTimeMonths).toBe(0);
+    expect(restored!.details.leadTimeWeeks).toBe(0);
+    expect(restored!.details.leadTimeDays).toBe(90);
+    expect("leadTime" in restored!.details).toBe(false);
+  });
+
+  it("prefers the four segments over a stale legacy lead time", () => {
+    // A draft carrying both (saved across the migration) restores the units
+    // as entered; the legacy figure must not overwrite the days segment.
+    const restored = parseDraftPayload(
+      JSON.stringify({
+        items: [],
+        details: {
+          leadTimeYears: 2,
+          leadTimeMonths: 10,
+          leadTimeWeeks: 4,
+          leadTimeDays: 5,
+          leadTime: 90,
+        },
+        customerId: 3,
+      })
+    );
+    expect(restored).not.toBeNull();
+    expect(restored!.details).toMatchObject({
+      leadTimeYears: 2,
+      leadTimeMonths: 10,
+      leadTimeWeeks: 4,
+      leadTimeDays: 5,
+    });
+    expect("leadTime" in restored!.details).toBe(false);
   });
 
   it("ignores fields of the wrong type rather than storing them", () => {

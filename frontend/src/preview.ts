@@ -42,6 +42,16 @@ export interface CustomerPreview {
   OriginalDiscountAmount: number;
   OriginalGrandTotal: number;
   DiscountPercent: number;
+  // The composed lead-time sentence the document prints ("2 Years, 10 Months,
+  // 4 Weeks, and 5 Days", "-" when none is stated), built once in Go and
+  // consumed verbatim here: the frontend never composes it client-side, so
+  // the review screen cannot disagree with the quotation. The four numerics
+  // beside it are the figures as entered.
+  DisplayLeadTime: string;
+  LeadTimeYears: number;
+  LeadTimeMonths: number;
+  LeadTimeWeeks: number;
+  LeadTimeDays: number;
 }
 
 export interface InternalPreviewSubItem {

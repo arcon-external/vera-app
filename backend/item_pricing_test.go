@@ -112,7 +112,7 @@ func TestPrepareRejectsItemMarginOverCeiling(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      30,
 		PaymentTerm:   30,
-		LeadTime:      30,
+		LeadTimeDays:  30,
 		CustomerID:    2,
 		Incoterm:      "EXW",
 		TaxZone:       TaxZoneFTZ,

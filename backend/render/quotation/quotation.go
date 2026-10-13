@@ -48,6 +48,14 @@ type Input struct {
 	Theme      Theme
 	Date       string
 	DisplayPpn string
+	// DisplayLeadTime is the composed lead time sentence
+	// ("2 Years, 10 Months, 4 Weeks, and 5 Days", "-" when none is stated).
+	// It travels on the seam beside DisplayPpn for the same reason that one
+	// does: the template prints it inside its HTML, and the native renderer
+	// prints it in its own terms card, so both read one string rather than
+	// each recomputing one (issue #377). The four numerics stay on the
+	// application side -- no renderer needs them.
+	DisplayLeadTime string
 	// PpnAmount is the PPN charged on top of the price, in minor units. It is
 	// the numeric the template's {{if .PpnAmount}} tests, so the native
 	// renderer decides the row from the same value the browser does rather
@@ -86,7 +94,6 @@ type Input struct {
 	LogoPNG         []byte
 	QRPNG           []byte
 	RevisionID      uint16
-	LeadTime        uint8
 	PaymentTerm     uint8
 	Validity        uint8
 	DiscountPercent uint8

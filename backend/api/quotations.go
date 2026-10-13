@@ -454,17 +454,27 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		})
 	}
 	return apicontract.QuotationDetail{
-		ID:                          record.ID,
-		QuoteNumber:                 record.QuoteNumber,
-		UUID:                        record.UUID,
-		Revision:                    record.RevisionNumber,
-		AvailableRevisions:          record.AvailableRevisions,
-		CustomerName:                record.CustomerName,
-		Subject:                     record.Subject,
-		Currency:                    currency.Normalize(record.Currency),
-		RecipientName:               record.RecipientName,
-		Incoterm:                    record.Incoterm,
-		DiscountPercent:             record.DiscountPercent,
+		ID:                 record.ID,
+		QuoteNumber:        record.QuoteNumber,
+		UUID:               record.UUID,
+		Revision:           record.RevisionNumber,
+		AvailableRevisions: record.AvailableRevisions,
+		CustomerName:       record.CustomerName,
+		Subject:            record.Subject,
+		Currency:           currency.Normalize(record.Currency),
+		RecipientName:      record.RecipientName,
+		Incoterm:           record.Incoterm,
+		DiscountPercent:    record.DiscountPercent,
+		LeadTimeYears:      uint8(record.LeadTimeYears),
+		LeadTimeMonths:     uint8(record.LeadTimeMonths),
+		LeadTimeWeeks:      uint8(record.LeadTimeWeeks),
+		LeadTimeDays:       uint8(record.LeadTimeDays),
+		// Composed here, once, from the stored figures -- the same function
+		// Prepare used at export and both renderers print, so the archive
+		// cannot show a different lead time from the document it archived.
+		DisplayLeadTime: backend.FormatLeadTime(
+			uint8(record.LeadTimeYears), uint8(record.LeadTimeMonths),
+			uint8(record.LeadTimeWeeks), uint8(record.LeadTimeDays)),
 		TaxZone:                     record.TaxZone,
 		TaxCategory:                 record.TaxCategory,
 		TaxType:                     record.TaxType,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"html/template"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -82,6 +83,55 @@ func formatDescription(raw string) template.HTML {
 	}
 
 	return template.HTML(b.String())
+}
+
+// FormatLeadTime composes the lead time sentence the document prints:
+// "2 Years, 10 Months, 4 Weeks, and 5 Days".
+//
+// The four units are stated independently and print as entered -- there is no
+// normalisation, because "4 Weeks" is what staff typed and converting it to
+// "28 Days" would print something nobody chose. Zeros are skipped, so a lead
+// time of 60 days reads "60 Days" rather than "0 Years, 0 Months, 0 Weeks,
+// and 60 Days", and a lead time with no unit at all reads "-".
+//
+// It lives here, beside the money formatters, because it is a display
+// composition and not a modelling decision: exported once by the app layer
+// (Prepare), by the archive detail (api/mapDetail), and by both renderers
+// through the seam, so no two of them can disagree about the sentence.
+func FormatLeadTime(years, months, weeks, days uint8) string {
+	units := []struct {
+		count    uint8
+		singular string
+		plural   string
+	}{
+		{years, "Year", "Years"},
+		{months, "Month", "Months"},
+		{weeks, "Week", "Weeks"},
+		{days, "Day", "Days"},
+	}
+	segments := make([]string, 0, len(units))
+	for _, unit := range units {
+		if unit.count == 0 {
+			continue
+		}
+		word := unit.plural
+		if unit.count == 1 {
+			word = unit.singular
+		}
+		segments = append(segments, strconv.Itoa(int(unit.count))+" "+word)
+	}
+	switch len(segments) {
+	case 0:
+		// Nothing stated. A dash reads as "not applicable"; "0 days" would
+		// read as a commitment to deliver instantly.
+		return "-"
+	case 1:
+		return segments[0]
+	case 2:
+		return segments[0] + " and " + segments[1]
+	default:
+		return strings.Join(segments[:len(segments)-1], ", ") + ", and " + segments[len(segments)-1]
+	}
 }
 
 // maxExportSubjectRunes caps the subject segment of export filenames.
