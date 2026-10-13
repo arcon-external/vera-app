@@ -56,7 +56,7 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 	// expected values are the pixel offsets scaled by ptPerPx and shifted to
 	// the table's left edge.
 	cols := itemColumns()
-	want := []float64{56.25, 90.0, 216.0, 254.25, 293.25, 375.75, 457.5, 540.75}
+	want := []float64{56.25, 90.0, 240.0, 276.75, 315.75, 390.75, 465.75, 540.75}
 	names := []string{
 		"table left", "No.", "Description", "Qty", "UoM", "Unit price", "After disc.", "table right",
 	}
@@ -75,6 +75,51 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 			tol = 0.01 // decides where the wrapping cell breaks
 		}
 		assertNear(t, names[i], got[i], want[i], tol)
+	}
+}
+
+// TestNarrowColumnsFitTheirWorstValues pins the measured floors of the narrow
+// columns against the new grid (issue #398): every value the columns must
+// carry fits its content box in both engines' metrics. The strings are the
+// real option values (UoM from the editor's catalog plus the legacy values
+// the unrecognized-option rule still displays) and the widest numbering each
+// column can receive. The engine's width and Chrome 155's are both recorded;
+// Chrome renders the embedded Inter slightly narrower, so the engine's number
+// is the binding one. "10000", "Month" and "Quarter" overflow the old grid
+// too -- pre-existing, reported on the issue rather than fixed here.
+func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
+	e := testEngine(t)
+	in := sampleInput()
+	m := e.derive(in)
+	contentPx := func(col int) float64 {
+		return (m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)) / ptPerPx
+	}
+	cases := []struct {
+		col      int
+		text     string
+		size     float64
+		engineW  float64 // measured, CSS px
+		browserW float64 // Chrome 155, embedded Inter, canvas measureText
+	}{
+		{m.cols.no, "10.10", 10, 23.79, 22.62},  // the sub number, at its 10px cell
+		{m.cols.no, "999", 11, 20.53, 20.53},    // the main number
+		{m.cols.qty, "9999", 11, 27.37, 27.37},  // the widest quantity
+		{m.cols.uom, "meter", 11, 30.24, 30.14}, // the longest catalog value
+		{m.cols.uom, "Meter", 11, 30.50, 30.39}, // its legacy capitalization
+	}
+	for _, tc := range cases {
+		box := contentPx(tc.col)
+		w := e.Width(tc.text, px(tc.size), false) / ptPerPx
+		if w > box {
+			t.Errorf("%q measures %.2fpx, wider than the %.2fpx content box", tc.text, w, box)
+		}
+		if tc.browserW > box {
+			t.Errorf("%q measures %.2fpx in Chrome, wider than the %.2fpx content box", tc.text, tc.browserW, box)
+		}
+		if math.Abs(w-tc.engineW) > 0.5 {
+			t.Errorf("%q at %vpx: engine now measures %.2fpx; recorded %.2fpx -- re-measure both engines",
+				tc.text, tc.size, w, tc.engineW)
+		}
 	}
 }
 
@@ -104,10 +149,9 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "Supply & Install lighting sensor system (PIR Schneider) at AHU block 3, Mezzanine Front & Rear with following scopes:",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx),
 			want: []string{
-				"Supply & Install lighting",
-				"sensor system (PIR",
-				"Schneider) at AHU block 3,",
-				"Mezzanine Front & Rear",
+				"Supply & Install lighting sensor",
+				"system (PIR Schneider) at AHU",
+				"block 3, Mezzanine Front & Rear",
 				"with following scopes:",
 			},
 		},
@@ -116,9 +160,8 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "6 sensors at Front AHU and 6 sensors at Rear AHU",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx) - px(subIndentPx),
 			want: []string{
-				"6 sensors at Front AHU",
-				"and 6 sensors at Rear",
-				"AHU",
+				"6 sensors at Front AHU and 6",
+				"sensors at Rear AHU",
 			},
 		},
 		{
@@ -126,9 +169,8 @@ func TestDescriptionWrapMatchesTheBrowser(t *testing.T) {
 			text:  "6-units batten fixtures with guard (2x 1200mm LED tubes)",
 			width: m.colX[2] - m.colX[1] - px(1) - 2*px(tdPadPx) - px(subIndentPx),
 			want: []string{
-				"6-units batten fixtures",
-				"with guard (2x 1200mm",
-				"LED tubes)",
+				"6-units batten fixtures with",
+				"guard (2x 1200mm LED tubes)",
 			},
 		},
 	}
@@ -159,13 +201,15 @@ func TestRowHeightsMatchTheBrowser(t *testing.T) {
 	in := sampleInput()
 	rows := e.measureRows(in, e.derive(in))
 
-	// NOTE (issue #380): the expectations below are the ENGINE's row heights
-	// at the re-cut description width, in the same order, read off its own
-	// measureRows. The browser values for the new grid were not re-measured
-	// (no browser available); the tolerance stays two pixels because the
-	// fixture's rows wrap differently from the lab document's, so the
-	// fractions the 15.4px line box leaves behind land differently.
-	want := []float64{189.00, 62.25, 62.25, 131.25, 131.25, 62.25}
+	// NOTE (issues #380, #398): the expectations below are the ENGINE's row
+	// heights at the re-cut description width, in the same order, read off
+	// its own measureRows. The browser values for this grid were not
+	// re-measured (no browser available at the change); the tolerance stays
+	// two pixels because the fixture's rows wrap differently from the lab
+	// document's, so the fractions the 15.4px line box leaves behind land
+	// differently. What these pin is that the rows do not drift between
+	// releases -- which is what moves pagination.
+	want := []float64{143.25, 51.00, 51.00, 120.00, 120.00, 51.00}
 	if len(rows) != len(want) {
 		t.Fatalf("laid out %d rows, measured %d", len(rows), len(want))
 	}
@@ -187,14 +231,15 @@ func TestListItemsAreCountedNotLines(t *testing.T) {
 	if items != 3 {
 		t.Errorf("first row has %d list items, the data has 3", items)
 	}
-	// NOTE (issue #380): 9 is the engine's line count at the re-cut
+	// NOTE (issues #380, #398): 6 is the engine's line count at the re-cut
 	// description width, not a fresh browser reading.
-	if len(first.subs) != 9 {
-		t.Errorf("first row has %d list lines, want 9 at this description width", len(first.subs))
+	if len(first.subs) != 6 {
+		t.Errorf("first row has %d list lines, want 6 at this description width", len(first.subs))
 	}
-	// Fourteen lines of text in all, the list's 6px top margin, one 3px between each
-	// pair of items and the last item's own 3px below it, resolved to a whole
-	// pixel, then the cell's padding and both its collapsed borders.
+	// Ten lines of text in all (four of description, six of list), the list's
+	// 6px top margin, one 3px between each pair of items and the last item's
+	// own 3px below it, resolved to a whole pixel, then the cell's padding and
+	// both its collapsed borders.
 	//
 	// The assertion is against the row's measured number, not against the formula
 	// restated here. Restating it only checks that the test and the code agree,
@@ -205,11 +250,11 @@ func TestListItemsAreCountedNotLines(t *testing.T) {
 	// engine paginate a different document from the browser's. The rule that
 	// reproduces the browser also has to leave a two-line row a pixel shorter,
 	// which TestTwoLineRowsResolveDown pins.
-	content := 14*descLinePx + 6 + 3*float64(items)
-	if got, want := content, (189.00-2*px(tdPadPx)-2*px(1))/ptPerPx; math.Abs(got-want) > 1.5 {
+	content := 10*descLinePx + 6 + 3*float64(items)
+	if got, want := content, (143.25-2*px(tdPadPx)-2*px(1))/ptPerPx; math.Abs(got-want) > 1.5 {
 		t.Errorf("first row content %.1fpx is more than a pixel from the measured %.1fpx", got, want)
 	}
-	assertNear(t, "first row height", first.height, 189.00, 1.0)
+	assertNear(t, "first row height", first.height, 143.25, 1.0)
 }
 
 // TestTwoLineRowsResolveDown pins the rounding rule that made pagination match.
@@ -284,8 +329,8 @@ func TestBulletsOnlyOpenListItems(t *testing.T) {
 			open++
 		}
 	}
-	if open != 3 || total != 9 {
-		t.Errorf("%d of %d list lines open an item; 3 of 9 should", open, total)
+	if open != 3 || total != 6 {
+		t.Errorf("%d of %d list lines open an item; 3 of 6 should", open, total)
 	}
 }
 

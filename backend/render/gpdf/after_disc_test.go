@@ -3,36 +3,16 @@ package gpdf
 import (
 	"math"
 	"testing"
+
+	"vera-app/backend/render/quotation"
 )
 
-// Guards for issue #380's refinement: the After Disc. cell is always two lines
-// -- the net price, then the discount percentage or an em dash -- in both
-// renderers, and the row is tall enough to hold them.
+// Guards for the After Disc. cell after issue #398: it is one line -- the net
+// price, drawn through the shared price-size rule -- and the row is tall
+// enough to hold it.
 
-func TestSplitAfterDisc(t *testing.T) {
-	cases := []struct {
-		name       string
-		packed     string
-		wantPrice  string
-		wantSecond string
-	}{
-		{"discounted", "108.000\n10%", "108.000", "10%"},
-		{"undiscounted", "50.000\n—", "50.000", "—"},
-		{"legacy bare price", "108.000", "108.000", "—"},
-		{"legacy empty", "", "", "—"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			price, pct := splitAfterDisc(tc.packed)
-			if price != tc.wantPrice || pct != tc.wantSecond {
-				t.Errorf("splitAfterDisc(%q) = (%q, %q); want (%q, %q)",
-					tc.packed, price, pct, tc.wantPrice, tc.wantSecond)
-			}
-		})
-	}
-}
-
-// afterDiscInput builds a one-row document whose After Disc. cell packs net/pct.
+// afterDiscInput builds a one-row document whose After Disc. cell carries the
+// net price.
 func afterDiscInput() Input {
 	return Input{
 		CompanyName: "C", CompanyAddress: []string{"A"},
@@ -41,7 +21,7 @@ func afterDiscInput() Input {
 		Terms: []string{"1. a"}, Closing: "c",
 		Items: []Item{
 			{No: 1, DescMain: "Widget", Qty: "2", UoM: "Lot",
-				UnitPrice: "120.000", Total: "216.000", Disc: "108.000\n10%"},
+				UnitPrice: "120.000", Total: "216.000", Disc: "108.000"},
 		},
 	}
 }
@@ -72,10 +52,10 @@ func findRuns(t *testing.T, runs []run, text string) []run {
 	return out
 }
 
-// TestAfterDiscDrawsTwoLines pins the cell's two printed lines: the net price
-// at body size in the row's ink, and the percentage at 9px in the muted
-// annotation ink, tracked per the stylesheet's letter-spacing.
-func TestAfterDiscDrawsTwoLines(t *testing.T) {
+// TestAfterDiscDrawsTheNetPrice pins the cell's single line: the net price,
+// centred in its track like the numeric cells beside it, at the shared
+// price-size rule's size for its text (11px for a short figure).
+func TestAfterDiscDrawsTheNetPrice(t *testing.T) {
 	e := testEngine(t)
 	runs := runsOnFirstPage(e, afterDiscInput())
 
@@ -83,59 +63,32 @@ func TestAfterDiscDrawsTwoLines(t *testing.T) {
 	if len(price) != 1 {
 		t.Fatalf("want 1 run printing the net price, got %d", len(price))
 	}
-	if price[0].size != px(bodyPx) {
-		t.Errorf("net price size %.3fpt; want %.3fpt (body)", price[0].size, px(bodyPx))
+	wantSize := px(quotation.PriceSizePx("108.000"))
+	if price[0].size != wantSize {
+		t.Errorf("net price size %.3fpt; want %.3fpt (PriceSizePx)", price[0].size, wantSize)
 	}
 
-	pct := findRuns(t, runs, "10%")
-	if len(pct) != 1 {
-		t.Fatalf("want 1 run printing the percentage, got %d", len(pct))
+	// The percentage line is gone: nothing prints a "%" in the item table.
+	for _, r := range runs {
+		if r.text == "10%" || r.text == "0%" || r.text == "—" {
+			t.Errorf("second-line run %q still drawn in the After Disc. cell", r.text)
+		}
 	}
-	if pct[0].size != px(afterPctPx) {
-		t.Errorf("percentage size %.3fpt; want %.3fpt (9px)", pct[0].size, px(afterPctPx))
-	}
-	if pct[0].tracking != px(0.02*afterPctPx) {
-		t.Errorf("percentage tracking %.4fpt; want %.4fpt (0.02em)", pct[0].tracking, px(0.02*afterPctPx))
-	}
-	wantMuted := e.pal.Muted
-	if pct[0].color != wantMuted {
-		t.Errorf("percentage color %q; want muted %q", pct[0].color, wantMuted)
-	}
-	// The annotation sits below the price, inside the same track.
-	if !(pct[0].baseline > price[0].baseline) {
-		t.Errorf("percentage baseline %.2f not below price baseline %.2f", pct[0].baseline, price[0].baseline)
-	}
-	dx := pct[0].x - price[0].x
-	// Both lines are centred in the same track, so their centres agree to
-	// within the shaping difference of two different strings -- far less than
-	// a track's width, far more than zero.
-	pc := price[0].x + e.Width("108.000", px(bodyPx), false)/2
-	qc := pct[0].x + e.WidthTracked("10%", px(afterPctPx), false, px(0.02*afterPctPx))/2
-	if d := math.Abs(pc - qc); d > 1.0 {
-		t.Errorf("after lines centred %.2fpt apart (price x %.2f, pct x %.2f, dx %.2f)", d, price[0].x, pct[0].x, dx)
+
+	// Centred in the same track the Unit Price and Total cells use.
+	m := e.derive(afterDiscInput())
+	col := m.cols.after
+	trackW := m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)
+	w := e.Width("108.000", wantSize, false)
+	wantX := m.colX[col] + px(1) + px(tdPadPx) + (trackW-w)/2
+	if d := math.Abs(price[0].x - wantX); d > 0.01 {
+		t.Errorf("net price x %.3f; want centred at %.3f (d %.3f)", price[0].x, wantX, d)
 	}
 }
 
-// TestAfterDiscUndiscountedDrawsDash pins the no-discount state: the price and
-// an em dash, not a percentage.
-func TestAfterDiscUndiscountedDrawsDash(t *testing.T) {
-	e := testEngine(t)
-	in := afterDiscInput()
-	in.Items[0].Disc = "50.000\n—"
-	runs := runsOnFirstPage(e, in)
-	findRuns(t, runs, "50.000")
-	dash := findRuns(t, runs, "—")
-	if len(dash) != 1 {
-		t.Fatalf("want 1 em-dash run, got %d", len(dash))
-	}
-	if dash[0].size != px(afterPctPx) || dash[0].color != e.pal.Muted {
-		t.Errorf("dash run size %.3f color %q; want %.3f muted %q",
-			dash[0].size, dash[0].color, px(afterPctPx), e.pal.Muted)
-	}
-}
-
-// TestRowHeightsFitTheAfterCell pins the floor: a one-line priced row is as
-// tall as its two-line after cell, not as tall as its one-line description.
+// TestRowHeightsFitTheAfterCell pins the floor: a one-line priced row is at
+// least as tall as its one-line money cells, not merely as tall as its
+// one-line description.
 func TestRowHeightsFitTheAfterCell(t *testing.T) {
 	e := testEngine(t)
 
@@ -148,15 +101,12 @@ func TestRowHeightsFitTheAfterCell(t *testing.T) {
 	wantPx := math.Floor(afterCellPx)
 	want := wantPx*ptPerPx + 2*px(tdPadPx) + 2*px(1)
 	assertNear(t, "one-line main row height", rows[0].height, want, 0.001)
-	if rows[0].height/ptPerPx < wantPx+2*tdPadPx+2 {
-		t.Errorf("row height %.2fpx fits no two-line cell", rows[0].height/ptPerPx)
-	}
 
 	// A part row carries the same cell with the sub-row's padding.
 	part := afterDiscInput()
 	part.Items[0].Package = &Package{ShowPrices: true, Parts: []Part{
 		{SubNo: "1.1", Desc: "part a", Qty: "1", UoM: "Pc",
-			UnitPrice: "220.000", Total: "209.000", Disc: "209.000\n5%"},
+			UnitPrice: "220.000", Total: "209.000", Disc: "209.000"},
 	}}
 	mp := e.derive(part)
 	prows := e.measureRows(part, mp)
@@ -165,4 +115,66 @@ func TestRowHeightsFitTheAfterCell(t *testing.T) {
 	}
 	wantPart := wantPx*ptPerPx + 2*px(subRowPadPx) + 2*px(1)
 	assertNear(t, "one-line part row height", prows[1].height, wantPart, 0.001)
+}
+
+// TestPriceSizeStepsFitTheColumn pins the calibration of the shared price-size
+// rule (quotation.PriceSizePx, issue #398): the worst string each step can
+// receive must fit the price column's content box in the engine's own
+// metrics. The strings are all digits and separators -- digits are the widest
+// glyphs money uses, and these are the widest strings at each length the rule
+// can see.
+//
+// The column's content box is 79px (the 15.5% track at the 646px table, less
+// the 1px collapsed border and the 10px padding each side). Both engines'
+// measured widths are quoted below: the engine's (Inter parsed by gpdf) and
+// Chrome 155's (the embedded Inter, canvas measureText, after
+// document.fonts.load). Chrome renders this font slightly narrower than the
+// engine, so the engine's number is the binding one -- but both are held
+// under the box, because the two renderers print the same document. The rule
+// guarantees a fit through 18 characters; a 20-character figure (86.11px in
+// the engine; the 19-character worst is 83.82px) overflows the content box
+// but stays inside the cell, exactly as it did before this rule existed.
+func TestPriceSizeStepsFitTheColumn(t *testing.T) {
+	e := testEngine(t)
+	in := afterDiscInput()
+	m := e.derive(in)
+	col := m.cols.unit
+	content := m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)
+
+	cases := []struct {
+		text     string
+		wantPx   float64
+		engineW  float64 // the engine's own measured width, CSS px
+		browserW float64 // Chrome 155, embedded Inter, canvas measureText
+	}{
+		{"999.999.999,9", 11, 77.89, 76.71},     // 13 chars: the 11px step's worst
+		{"1.234.567.890", 11, 74.92, 72.83},     // 13 chars: still 11px
+		{"999.999.999,99", 10, 77.03, 75.96},    // 14 chars: the 10px step's worst
+		{"9.999.999.999.99", 9, 77.50, 76.22},   // 16 chars: the 9px step's worst
+		{"1.234.567.890.12", 9, 72.99, 70.22},   // 16 chars: still 9px
+		{"9.999.999.999.999", 8, 73.87, 72.73},  // 17 chars: the 8px floor
+		{"999.999.999.999.99", 8, 78.84, 77.70}, // 18 chars: the floor's worst
+	}
+	for _, tc := range cases {
+		if got := quotation.PriceSizePx(tc.text); got != tc.wantPx {
+			t.Errorf("PriceSizePx(%q) = %v; want %v", tc.text, got, tc.wantPx)
+		}
+		w := e.Width(tc.text, px(tc.wantPx), false)
+		if w > content {
+			t.Errorf("PriceSizePx(%q) at %vpx measures %.2fpx, wider than the %.2fpx content box",
+				tc.text, tc.wantPx, w/ptPerPx, content/ptPerPx)
+		}
+		if got := w / ptPerPx; math.Abs(got-tc.engineW) > 0.5 {
+			t.Errorf("%q at %vpx: engine now measures %.2fpx; the calibration recorded %.2fpx -- re-measure both engines",
+				tc.text, tc.wantPx, got, tc.engineW)
+		}
+		if tc.browserW > content/ptPerPx {
+			t.Errorf("%q at %vpx measures %.2fpx in Chrome, wider than the %.2fpx content box",
+				tc.text, tc.wantPx, tc.browserW, content/ptPerPx)
+		}
+		// The rule is only useful if it actually shrinks what would overflow.
+		if bodyW := e.Width(tc.text, px(bodyPx), false); bodyW <= content && tc.wantPx != bodyPx {
+			t.Errorf("%q fits at body size (%.2fpx) but steps down to %vpx", tc.text, bodyW/ptPerPx, tc.wantPx)
+		}
+	}
 }

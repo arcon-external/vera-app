@@ -154,9 +154,9 @@ func TestPackageDiscountPrintsDerivedRate(t *testing.T) {
 		t.Fatalf("preview: %v", err)
 	}
 	// List 2.000.000, net 1.900.000, derived 5%, total 1.900.000.
-	assertPriceRow(t, page, "2.000.000", "1.900.000", "5%", "1.900.000")
-	assertPriceRow(t, page, "300.000", "300.000", "0%", "300.000")
-	assertPriceRow(t, page, "50.000", "50.000", "0%", "150.000")
+	assertPriceRow(t, page, "2.000.000", "1.900.000", "1.900.000")
+	assertPriceRow(t, page, "300.000", "300.000", "300.000")
+	assertPriceRow(t, page, "50.000", "50.000", "150.000")
 	if strings.Contains(page, "<div class=\"after-pct\">—</div>") {
 		t.Error("em-dash second line still printed on the customer document; every row must state a percentage")
 	}
@@ -165,15 +165,15 @@ func TestPackageDiscountPrintsDerivedRate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderInput: %v", err)
 	}
-	if got := in.Items[0]; got.UnitPrice != "2.000.000" || got.Disc != "1.900.000\n5%" || got.Total != "1.900.000" {
-		t.Errorf("package renderer input = %q/%q/%q; want 2.000.000/1.900.000\\n5%%/1.900.000",
+	if got := in.Items[0]; got.UnitPrice != "2.000.000" || got.Disc != "1.900.000" || got.Total != "1.900.000" {
+		t.Errorf("package renderer input = %q/%q/%q; want 2.000.000/1.900.000/1.900.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[1]; got.Disc != "300.000\n0%" {
-		t.Errorf("undiscounted package renderer input = %q; want 300.000\\n0%%", got.Disc)
+	if got := in.Items[1].Disc; got != "300.000" {
+		t.Errorf("undiscounted package renderer input = %q; want 300.000", got)
 	}
-	if got := in.Items[2]; got.Disc != "50.000\n0%" {
-		t.Errorf("plain renderer input = %q; want 50.000\\n0%%", got.Disc)
+	if got := in.Items[2].Disc; got != "50.000" {
+		t.Errorf("plain renderer input = %q; want 50.000", got)
 	}
 }
 

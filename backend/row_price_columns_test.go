@@ -3,24 +3,23 @@ package backend
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
 	"vera-app/backend/auth"
+	"vera-app/backend/render/quotation"
 )
 
-// Guards for issue #380: the item table prints the list unit price under
-// Unit Price IDR and the net unit price under After Disc. IDR, on every
-// quotation and in every row state. The After Disc. cell is always two lines:
-// the net price, then the row's discount percentage -- or 0% when the row
-// carries none (issue #383 changed the old em-dash default, so a discount
-// percentage column always states a percentage).
+// Guards for issues #380 and #398: the item table prints the list unit price
+// under Unit Price IDR and the net unit price under After Disc. IDR, on every
+// quotation and in every row state. The After Disc. cell is one line since
+// #398 -- the net price alone; the discount percentage no longer prints.
 //
-// The example running through these tests is the issue's own: cost 100.000,
-// qty 2, margin 20%, row discount 10% -- list 120.000, net 108.000, total
-// 216.000. Before the change the table printed the net under the Unit Price
-// heading beside a bare "10%", so a reader computed 194.400 against a Total
-// of 216.000.
+// The example running through these tests is #380's own: cost 100.000, qty 2,
+// margin 20%, row discount 10% -- list 120.000, net 108.000, total 216.000.
+// Before #380 the table printed the net under the Unit Price heading beside a
+// bare "10%", so a reader computed 194.400 against a Total of 216.000.
 
 // prepareRowPriceFixture builds the mixed document every guard here renders:
 // a discounted plain line, an undiscounted plain line, a package with priced
@@ -60,23 +59,21 @@ func prepareRowPriceFixture(t *testing.T) *Quotation {
 	return q
 }
 
-// assertPriceRow checks that one row prints list, net, percentage and total:
-// the Unit Price cell, then the After Disc. cell's two lines (the net price
-// and, beneath it, the discount percentage, or 0% when the row carries none),
-// then the Total cell. The three cells are adjacent in the template, so they are matched as
-// one block -- matching them separately would confuse rows that share a
-// figure (an undiscounted row prints its list figure three times over).
-func assertPriceRow(t *testing.T, page, list, net, pct, total string) {
+// assertPriceRow checks that one row prints list, net and total: the Unit
+// Price cell, then the After Disc. cell (the net price, one line), then the
+// Total cell. The three cells are adjacent in the template, so they are
+// matched as one block -- matching them separately would confuse rows that
+// share a figure (an undiscounted row prints its list figure three times
+// over). Each price cell carries its font size from the shared rule
+// (PriceSizePx, issue #398), so the block pattern accepts any size.
+func assertPriceRow(t *testing.T, page, list, net, total string) {
 	t.Helper()
 	block := regexp.MustCompile(
-		`<td>` + regexp.QuoteMeta(list) + `</td>\s*` +
-			`<td class="after">` + `\s*` +
-			`<div class="after-price">` + regexp.QuoteMeta(net) + `</div>` + `\s*` +
-			`<div class="after-pct">` + regexp.QuoteMeta(pct) + `</div>` + `\s*` +
-			`</td>\s*` +
-			`<td>` + regexp.QuoteMeta(total) + `</td>`)
+		`<td style="font-size: [0-9.]+px">` + regexp.QuoteMeta(list) + `</td>\s*` +
+			`<td class="after" style="font-size: [0-9.]+px">` + regexp.QuoteMeta(net) + `</td>\s*` +
+			`<td style="font-size: [0-9.]+px">` + regexp.QuoteMeta(total) + `</td>`)
 	if !block.MatchString(page) {
-		t.Errorf("no row prints %s / %s / %s / %s as list / net / pct / total", list, net, pct, total)
+		t.Errorf("no row prints %s / %s / %s as list / net / total", list, net, total)
 	}
 }
 
@@ -93,77 +90,69 @@ func TestItemTablePrintsListAndNetPrices(t *testing.T) {
 	}
 
 	// The discounted plain line: the issue's example, end to end.
-	assertPriceRow(t, page, "120.000", "108.000", "10%", "216.000")
-	// The undiscounted line prints the same figure in both price columns, with
-	// 0% for the percentage it does not carry.
-	assertPriceRow(t, page, "50.000", "50.000", "0%", "150.000")
+	assertPriceRow(t, page, "120.000", "108.000", "216.000")
+	// The undiscounted line prints the same figure in both price columns.
+	assertPriceRow(t, page, "50.000", "50.000", "150.000")
 	// State C: the priced subs carry both prices; the parent is a merged
 	// title with none of its own.
-	assertPriceRow(t, page, "220.000", "209.000", "5%", "209.000")
-	assertPriceRow(t, page, "75.000", "75.000", "0%", "150.000")
+	assertPriceRow(t, page, "220.000", "209.000", "209.000")
+	assertPriceRow(t, page, "75.000", "75.000", "150.000")
 	// State B: the package parent carries the rolled-up list and net.
-	assertPriceRow(t, page, "300.000", "300.000", "0%", "300.000")
+	assertPriceRow(t, page, "300.000", "300.000", "300.000")
 
-	// The old bare-rate Disc. column is gone: percentages print only as the
-	// After Disc. cell's second line, inside after-pct divs.
+	// The discount percentage no longer prints anywhere in the item table
+	// (issue #398): no after-pct div, no bare percentage cell.
 	if !strings.Contains(page, "<th>After Disc. IDR</th>") {
 		t.Error("After Disc. IDR header missing from the document")
 	}
 	if strings.Contains(page, ">Disc.<") {
 		t.Error("old Disc. header still printed on the customer document")
 	}
-	for _, pct := range []string{">10%<", ">5%<"} {
-		if n := strings.Count(page, pct); n != 1 {
-			t.Errorf("percentage %q printed %d times; want once, as one row's second line", pct, n)
+	if strings.Contains(page, "after-pct") {
+		t.Error("the removed discount-percentage line still renders (after-pct present)")
+	}
+	for _, pct := range []string{">10%<", ">5%<", ">0%<"} {
+		if strings.Contains(page, pct) {
+			t.Errorf("discount percentage %q still printed in the item table", pct)
 		}
-	}
-	if n := strings.Count(page, "<div class=\"after-pct\">0%</div>"); n != 3 {
-		t.Errorf("0%% second line printed %d times; want 3 (the undiscounted rows)", n)
-	}
-	if strings.Contains(page, "<div class=\"after-pct\">—</div>") {
-		t.Error("em-dash second line still printed on the customer document; undiscounted rows must print 0%")
 	}
 
 	// The native renderer reads renderInput, not the template, so the mapping
-	// is pinned there too: UnitPrice carries the list, Disc packs the net and
-	// the percentage line after a newline (see afterDiscCell). The seam type
-	// still names the packed field Disc; the packing is the contract.
+	// is pinned there too: UnitPrice carries the list, Disc carries the net.
 	in, err := q.renderInput()
 	if err != nil {
 		t.Fatalf("renderInput: %v", err)
 	}
-	if got := in.Items[0]; got.UnitPrice != "120.000" || got.Disc != "108.000\n10%" || got.Total != "216.000" {
-		t.Errorf("line renderer input = %q/%q/%q; want 120.000/108.000\\n10%%/216.000",
+	if got := in.Items[0]; got.UnitPrice != "120.000" || got.Disc != "108.000" || got.Total != "216.000" {
+		t.Errorf("line renderer input = %q/%q/%q; want 120.000/108.000/216.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[1]; got.UnitPrice != "50.000" || got.Disc != "50.000\n0%" || got.Total != "150.000" {
-		t.Errorf("plain renderer input = %q/%q/%q; want 50.000/50.000\\n0%%/150.000",
+	if got := in.Items[1]; got.UnitPrice != "50.000" || got.Disc != "50.000" || got.Total != "150.000" {
+		t.Errorf("plain renderer input = %q/%q/%q; want 50.000/50.000/150.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[2].SubItems[0]; got.UnitPrice != "220.000" || got.Disc != "209.000\n5%" || got.Total != "209.000" {
-		t.Errorf("sub renderer input = %q/%q/%q; want 220.000/209.000\\n5%%/209.000",
+	if got := in.Items[2].SubItems[0]; got.UnitPrice != "220.000" || got.Disc != "209.000" || got.Total != "209.000" {
+		t.Errorf("sub renderer input = %q/%q/%q; want 220.000/209.000/209.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
 	// The state-C parent is a merged title with no after cell of its own, but
-	// its fields still carry the rollup -- including the derived discount rate
-	// (11.000 over 370.000 truncates to 2%, issue #383).
-	if got := in.Items[2]; got.UnitPrice != "370.000" || got.Disc != "359.000\n2%" || got.Total != "359.000" {
-		t.Errorf("package renderer input = %q/%q/%q; want 370.000/359.000\\n2%%/359.000",
+	// its fields still carry the rollup.
+	if got := in.Items[2]; got.UnitPrice != "370.000" || got.Disc != "359.000" || got.Total != "359.000" {
+		t.Errorf("package renderer input = %q/%q/%q; want 370.000/359.000/359.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
-	if got := in.Items[3]; got.UnitPrice != "300.000" || got.Disc != "300.000\n0%" || got.Total != "300.000" {
-		t.Errorf("package renderer input = %q/%q/%q; want 300.000/300.000\\n0%%/300.000",
+	if got := in.Items[3]; got.UnitPrice != "300.000" || got.Disc != "300.000" || got.Total != "300.000" {
+		t.Errorf("package renderer input = %q/%q/%q; want 300.000/300.000/300.000",
 			got.UnitPrice, got.Disc, got.Total)
 	}
 }
 
-// TestAfterDiscSecondLineAgreesAcrossRenderers pins the one formatting the two
-// renderers must share: the template's after-pct div and the seam's packed
-// second line print the same string for every priced row. The template formats
-// inline ({{if .DiscountEnabled}}...), the seam packs discountPctLine; this
-// compares them row by row, so either side drifting fails here rather than in
-// a customer's hands.
-func TestAfterDiscSecondLineAgreesAcrossRenderers(t *testing.T) {
+// TestPriceCellsCarryTheirSharedSize pins the template half of the shared
+// price-size rule (issue #398): every price cell carries an inline font-size
+// equal to quotation.PriceSizePx of its own text, in all three row states.
+// The rule itself is pinned in backend/render/gpdf; this pins that the
+// template actually consults it rather than leaving the size to the body.
+func TestPriceCellsCarryTheirSharedSize(t *testing.T) {
 	q := prepareRowPriceFixture(t)
 	page, err := q.GetQuotationPreviewHTML()
 	if err != nil {
@@ -173,48 +162,32 @@ func TestAfterDiscSecondLineAgreesAcrossRenderers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderInput: %v", err)
 	}
-	// Every after-pct div in document order.
-	pctRe := regexp.MustCompile(`<div class="after-pct">(.*?)</div>`)
-	divs := pctRe.FindAllStringSubmatch(page, -1)
-	// Every priced row's packed second line in document order: the state-C
-	// parent is a merged title with no after cell, and state-B scope rows are
-	// merged too, so only priced rows contribute.
-	secondLine := func(packed string) string {
-		t.Helper()
-		parts := strings.SplitN(packed, "\n", 2)
-		if len(parts) != 2 {
-			t.Fatalf("packed after cell %q has no second line", packed)
+	// Every price figure the seam carries must appear with its computed size.
+	// The state-C parent (370.000/359.000) is deliberately absent: it is a
+	// merged title row with no price cells of its own.
+	sizes := []string{"11", "10", "9", "8"}
+	for _, text := range []string{"120.000", "108.000", "216.000", "50.000",
+		"220.000", "209.000", "75.000", "300.000"} {
+		size := strconv.FormatFloat(quotation.PriceSizePx(text), 'f', -1, 64)
+		if !containsAny(sizes, size) {
+			t.Fatalf("test table does not cover size %s", size)
 		}
-		return parts[1]
-	}
-	var packed []string
-	for _, it := range in.Items {
-		if len(it.SubItems) > 0 && it.ShowSubPrices {
-			// State C: the priced parts carry the cells.
-			for _, sub := range it.SubItems {
-				packed = append(packed, secondLine(sub.Disc))
-			}
-			continue
-		}
-		packed = append(packed, secondLine(it.Disc))
-	}
-	if len(divs) != len(packed) {
-		t.Fatalf("template prints %d second lines, seam packs %d", len(divs), len(packed))
-	}
-	for i := range divs {
-		if divs[i][1] != packed[i] {
-			t.Errorf("row %d: template second line %q, seam second line %q", i+1, divs[i][1], packed[i])
+		want := `style="font-size: ` + size + `px">` + text + `</td>`
+		if !strings.Contains(page, want) {
+			t.Errorf("no price cell prints %q at its shared size %s", text, size)
 		}
 	}
+	_ = in
 }
 
-// cutLast splits s at its last newline, reporting the head, the tail and
-// whether a newline was present.
-func cutLast(s string) (head, tail string, ok bool) {
-	if i := strings.LastIndex(s, "\n"); i >= 0 {
-		return s[:i], s[i+1:], true
+// containsAny reports whether the slice holds the value.
+func containsAny(all []string, v string) bool {
+	for _, s := range all {
+		if s == v {
+			return true
+		}
 	}
-	return s, "", false
+	return false
 }
 
 // TestItemTableAlwaysHasAfterDiscColumn pins the column's unconditional
@@ -245,7 +218,7 @@ func TestItemTableAlwaysHasAfterDiscColumn(t *testing.T) {
 	if !strings.Contains(page, "<th>After Disc. IDR</th>") {
 		t.Error("a quotation with no discounts prints no After Disc. IDR column")
 	}
-	assertPriceRow(t, page, "1.000.000", "1.000.000", "0%", "1.000.000")
+	assertPriceRow(t, page, "1.000.000", "1.000.000", "1.000.000")
 
 	if _, err := q.build(); err != nil {
 		t.Fatalf("the engine could not render a discount-free quotation: %v", err)

@@ -314,29 +314,29 @@ type colLayout struct {
 }
 
 // colOffsetsPx are the table's column boundaries, in whole CSS pixels from the
-// table's left edge, for the colgroup 7/26/8/8/17/17/17 percent at the 646px
-// table width.
+// table's left edge, for the colgroup 7/31/7.5/8/15.5/15.5/15.5 percent at
+// the 646px table width.
 //
-// Truncating the cumulative percentages gives 0, 45, 213, 264, 316, 426, 536
-// and 646. The last internal boundary is 535 here instead of 536: both
-// measured grids put Total's left edge one pixel left of its own truncation
-// (535 in the six- and seven-column tables alike, where truncation says 536),
-// the browser handing Total's track the odd pixel from its left neighbour.
-// Following that habit keeps Total's own edges (535, 646) unchanged across
-// all three grids this table has ever had.
+// Rounding the cumulative percentages to the nearest pixel gives 0, 45, 245,
+// 294, 346, 446, 546 and 646. The narrow columns keep the fit their content
+// needs (measured in both engines, issue #398): No. keeps 7% because the sub
+// number "10.10" needs its 24px of content (23.79px measured), Qty. fits
+// "9999" at 7.5%, and UoM keeps 8% because its real values ("meter"/"Meter")
+// need the 31px of content. The price columns carry a shared size rule
+// (quotation.PriceSizePx) so their figures step down instead of wrapping.
 //
-// This grid was NOT re-measured in a browser: the 535 follows the two measured
-// grids' habit rather than a fresh reading, so a browser pass should confirm
-// it when one is available. What is asserted is that the engine and the
-// template agree (see ColumnEdgesPx and the column tests): the two renderers
-// cannot drift apart again even if both sit a pixel off the browser.
+// This grid was NOT re-measured in a browser: it follows the rounded
+// percentages the template's colgroup states, so the engine and the template
+// agree by construction (see ColumnEdgesPx and the column tests): the two
+// renderers cannot drift apart again even if both sit a pixel off the
+// browser.
 //
 // Reproducing the browser exactly would need the arithmetic it uses to divide
 // a truncated width between tracks, which is a LayoutUnit computation over a
 // page box this engine does not otherwise model. The colgroup is part of a
 // fixed template and this is the only table it describes, so the grid is a
 // constant here rather than a computation.
-var colOffsetsPx = [8]int{0, 45, 213, 264, 316, 426, 535, 646}
+var colOffsetsPx = [8]int{0, 45, 245, 294, 346, 446, 546, 646}
 
 // ColumnEdgesPx reports the item table's column boundaries in whole CSS
 // pixels from the table's left edge. It is exported so the application's
@@ -702,19 +702,15 @@ func (e *Engine) layout(in Input) []*page {
 // of lines lands on 15 or 16 each depending on where it starts.
 const descLinePx = 15.4
 
-// The After Disc. cell's line boxes, in CSS pixels. The first line is the net
-// price at the body's 11px/1.45; the second is the percentage annotation the
-// stylesheet pins to 9px/1.5 (see td.after .after-pct). afterCellPx is their
-// sum, and it is the floor every priced row is measured against: a row whose
-// description is shorter than its own after cell is still as tall as the
-// cell, because the browser sizes a row by its tallest cell. Merged rows
-// (the state-C title, state-B scope rows) have no after cell and keep the
-// description-only height.
-const (
-	afterPctPx  = 9.0
-	afterPctLH  = 1.5
-	afterCellPx = bodyPx*bodyLH + afterPctPx*afterPctLH
-)
+// The After Disc. cell's line box, in CSS pixels: the net price at the
+// body's 11px/1.45. It used to be two lines (a 9px percentage annotation
+// under the price); that second line is gone (issue #398), so the cell is
+// now one line like every other numeric cell. afterCellPx is still the floor
+// every priced row is measured against: a row whose description is shorter
+// than its own after cell is still as tall as the cell, because the browser
+// sizes a row by its tallest cell. Merged rows (the state-C title, state-B
+// scope rows) have no after cell and keep the description-only height.
+const afterCellPx = bodyPx * bodyLH
 
 // measureRows lays out every row's description and derives its height from the
 // CSS box model: cell padding, one line box per wrapped line, the sub-item list's
