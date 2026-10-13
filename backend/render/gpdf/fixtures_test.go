@@ -21,19 +21,24 @@ func sampleInput() Input {
 		}
 	}
 	return Input{
-		QuoteNumber:       "1502260002",
-		Date:              "02 January 2026",
-		ValidUntil:        "02 February 2026",
-		CompanyName:       "PT. Arcon Penta Persada",
-		CompanyAddress:    []string{"Komp. Ruko Legenda Gemilang, Blok D. NO 12, Baloi Permai, Batam"},
-		RecipientName:     "PT. Sandhi MCS",
-		RecipientCompany:  "Ruko Panakkukang",
-		RecipientAddress:  "Jl.Boulevard Raya Blok A5 No. 8, Panakkukang, Makassar",
-		Subject:           "Pekerjaan Instalasi Sistem Sensor Cahaya",
+		QuoteNumber:      "1502260002",
+		Date:             "02 January 2026",
+		ValidUntil:       "02 February 2026",
+		CompanyName:      "PT. Arcon Penta Persada",
+		CompanyAddress:   []string{"Komp. Ruko Legenda Gemilang, Blok D. NO 12, Baloi Permai, Batam"},
+		RecipientName:    "PT. Sandhi MCS",
+		RecipientCompany: "Ruko Panakkukang",
+		RecipientAddress: "Jl.Boulevard Raya Blok A5 No. 8, Panakkukang, Makassar",
+		Subject:          "Pekerjaan Instalasi Sistem Sensor Cahaya",
+		// The PPN row is decided by the numeric, the value the template's
+		// {{if .PpnAmount}} tests (issue #377). The fixture carries one so
+		// every measurement taken of it keeps the three-row totals card a
+		// real quotation with PPN prints.
+		PpnAmount:         76592203,
 		DiscountPercent:   "0",
 		DisplaySubTotal:   "0",
 		DisplayDiscount:   "0",
-		DisplayPpn:        "0",
+		DisplayPpn:        "76.592.203",
 		DisplayGrandTotal: "0",
 		Terms: []string{
 			"1. Payment terms agreed for this quotation is 90 days.",

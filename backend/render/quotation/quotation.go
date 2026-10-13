@@ -44,10 +44,15 @@ type Named interface {
 // other's fields, which is what keeps a change to one from silently altering the
 // other.
 type Input struct {
-	Fonts            fs.FS
-	Theme            Theme
-	Date             string
-	DisplayPpn       string
+	Fonts      fs.FS
+	Theme      Theme
+	Date       string
+	DisplayPpn string
+	// PpnAmount is the PPN charged on top of the price, in minor units. It is
+	// the numeric the template's {{if .PpnAmount}} tests, so the native
+	// renderer decides the row from the same value the browser does rather
+	// than from the display string's emptiness (issue #377).
+	PpnAmount        uint64
 	VerificationCode string
 	CompanyName      string
 	CompanyAddress   string

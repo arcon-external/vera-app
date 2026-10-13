@@ -83,6 +83,7 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		DisplaySubTotal:   in.DisplaySubTotal,
 		DisplayDiscount:   in.DisplayDiscount,
 		DiscountAmount:    in.DiscountAmount,
+		PpnAmount:         in.PpnAmount,
 		DisplayPpn:        in.DisplayPpn,
 		DisplayGrandTotal: in.DisplayGrandTotal,
 		DiscountPercent:   strconv.Itoa(int(in.DiscountPercent)),

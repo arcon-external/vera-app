@@ -46,16 +46,19 @@ func fourTerms() []string {
 func noPPNInput() Input {
 	in := sampleInput()
 	in.Terms = fourTerms()
+	in.PpnAmount = 0
 	in.DisplayPpn = ""
 	in.DisplayGrandTotal = "270.000"
 	return in
 }
 
 // ppnInput is the three-row PPN shape beside the production terms card: the
-// sample fixture's DisplayPpn "0" prints the PPN row (the native condition is
-// DisplayPpn != ""), and no whole-quotation discount means no discount row.
+// sample fixture carries a non-zero PpnAmount, so the PPN row prints -- the
+// condition reads the numeric, the same value the template's
+// {{if .PpnAmount}} tests (issue #377) -- and no whole-quotation discount
+// means no discount row.
 func ppnInput() Input {
-	in := sampleInput() // DisplayPpn "0": the PPN row prints.
+	in := sampleInput() // PpnAmount 76592203: the PPN row prints.
 	in.Terms = fourTerms()
 	return in
 }
@@ -382,4 +385,68 @@ func TestTotalsWithPPNAndDiscountLeavesFloorFiller(t *testing.T) {
 	}
 	t.Logf("  card %.3fpt, row %.3fpt, filler %.3fpt (floor): sliver paints, as drawn",
 		m.footerTotalsH, m.footerCardsH, m.footerTotalsDecorH)
+}
+
+// TestTotalsPPNRowFollowsTheNumeric pins issue #377: the PPN row is decided
+// by the numeric PpnAmount -- the value the template's {{if .PpnAmount}}
+// tests -- never by the display string's emptiness. A caller handing the
+// engine a stray "0" display string with no PPN charged must not draw a
+// "PPN 11% Rp0" row the browser never prints; under the old condition
+// (DisplayPpn != "") it did, and the two renderers could disagree with no
+// code path in the app to catch it.
+//
+// Both engine outputs are checked: the totalsRows list, which the layout
+// derives its heights from, and the runs drawFooterCards paints, which is
+// what reaches the page.
+func TestTotalsPPNRowFollowsTheNumeric(t *testing.T) {
+	e := testEngine(t)
+
+	hasPPNRow := func(rows []totalRow) bool {
+		for _, r := range rows {
+			if r.label == "PPN 11%" {
+				return true
+			}
+		}
+		return false
+	}
+	ppnPainted := func(in Input) bool {
+		m := e.derive(in)
+		const top = 100.0
+		for _, r := range footerRuns(e, in, m, top) {
+			if r.text == "PPN 11%" {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("no PPN charged draws no row even with a display string", func(t *testing.T) {
+		in := sampleInput()
+		in.PpnAmount = 0
+		in.DisplayPpn = "0" // the stray string: it must not decide anything
+		rows := e.totalsRows(in)
+		if len(rows) != 2 {
+			t.Errorf("totals card has %d rows, want 2 (Sub Total, Grand Total)", len(rows))
+		}
+		if hasPPNRow(rows) {
+			t.Errorf("PPN row drawn from display string %q with PpnAmount 0: the browser prints no such row", in.DisplayPpn)
+		}
+		if ppnPainted(in) {
+			t.Error("drawFooterCards painted a PPN 11% run the template never prints")
+		}
+	})
+
+	t.Run("PPN charged draws the row", func(t *testing.T) {
+		in := sampleInput() // PpnAmount 76592203, as a quotation with PPN carries
+		rows := e.totalsRows(in)
+		if len(rows) != 3 {
+			t.Errorf("totals card has %d rows, want 3 (Sub Total, PPN 11%%, Grand Total)", len(rows))
+		}
+		if !hasPPNRow(rows) {
+			t.Error("PpnAmount > 0 dropped the PPN row the template prints")
+		}
+		if !ppnPainted(in) {
+			t.Error("drawFooterCards drew no PPN 11% run for a quotation with PPN charged")
+		}
+	})
 }
