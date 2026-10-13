@@ -22,6 +22,7 @@ const FULL_PROFILE: CompanyProfileLike = {
   Email: "admin@arconpentapersada.co.id",
   TaxID: "01.234.567.8-901.234",
   Currency: "USD",
+  CanonicalUoM: "Week",
   ThemeQDeep: "#111111",
   ThemeQAccent: "#222222",
   ThemeQSoft: "#333333",
@@ -47,6 +48,7 @@ describe("company profile round trip", () => {
     expect(payload.Email).toBe("admin@arconpentapersada.co.id");
     expect(payload.TaxID).toBe("01.234.567.8-901.234");
     expect(payload.Currency).toBe("USD");
+    expect(payload.CanonicalUoM).toBe("Week");
     expect(payload.HasLogo).toBe(true);
     expect(payload.ThemeQDeep).toBe("#111111");
     expect(payload.ThemeQAccent).toBe("#222222");
@@ -88,7 +90,7 @@ describe("company profile round trip", () => {
     expect(payload.ThemePInk).toBe("#888888");
   });
 
-  it("carries the hidden phone, email, tax id and currency even though no control renders them", () => {
+  it("carries the hidden phone, email, tax id, currency and canonical unit even though no control renders them", () => {
     const payload = profilePayload({
       form: formFromProfile(FULL_PROFILE),
       extras: extrasFromProfile(FULL_PROFILE),
@@ -100,6 +102,7 @@ describe("company profile round trip", () => {
     expect(payload.Email).toBe("admin@arconpentapersada.co.id");
     expect(payload.TaxID).toBe("01.234.567.8-901.234");
     expect(payload.Currency).toBe("USD");
+    expect(payload.CanonicalUoM).toBe("Week");
   });
 
   it.each([["undefined", undefined] as const, ["null", null] as const])(
@@ -145,7 +148,7 @@ describe("company profile round trip", () => {
   it("trims the legal name and address but passes extras through verbatim", () => {
     const payload = profilePayload({
       form: { legalName: "  PT Arcon Penta Persada  ", address: "\tJl. Merdeka 1\n" },
-      extras: { phone: "  +62-21-5550192  ", email: " admin@example.id ", taxId: " 01.234 ", currency: "USD" },
+      extras: { phone: "  +62-21-5550192  ", email: " admin@example.id ", taxId: " 01.234 ", currency: "USD", canonicalUoM: "  Lot  " },
       theme: themeFromProfile(FULL_PROFILE),
       hasLogo: false,
     });
@@ -156,6 +159,7 @@ describe("company profile round trip", () => {
     expect(payload.Email).toBe(" admin@example.id ");
     expect(payload.TaxID).toBe(" 01.234 ");
     expect(payload.Currency).toBe("USD");
+    expect(payload.CanonicalUoM).toBe("  Lot  ");
   });
 
   it("trims colour values exactly as the current save does", () => {
@@ -219,7 +223,7 @@ describe("CompanyProfilePayload shape", () => {
     const payloadKeys = Object.keys(
       profilePayload({
         form: { legalName: "", address: "" },
-        extras: { phone: "", email: "", taxId: "", currency: "" },
+        extras: { phone: "", email: "", taxId: "", currency: "", canonicalUoM: "" },
         theme: EMPTY_THEME,
         hasLogo: false,
       })

@@ -103,13 +103,16 @@ export interface EditorItem {
   showSubPrices: boolean;
 }
 
-/** Builds one empty priced sub-item with its stable id. */
-export function newSubItem(id: number, description = ""): EditorSubItem {
+/** Builds one empty priced sub-item with its stable id. The unit is the
+ *  company's canonical unit, passed in by the caller (#337): there is no
+ *  hardcoded "Lot" default any more, because a company may have removed that
+ *  unit or set a different canonical one. */
+export function newSubItem(id: number, description = "", uom = ""): EditorSubItem {
   return {
     id,
     description,
     qty: "1",
-    uom: "Lot",
+    uom,
     unitCost: "",
     marginEnabled: false,
     marginPercent: "0",
@@ -166,6 +169,10 @@ interface ItemEditorProps {
    * and percent fields are counts, not money, and stay digit-stripped. */
   currency?: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
+  /** Text the UoM selects show while `uomOptions` is still empty (the served
+   *  list is loading or failed to load). Kept honest rather than rendering a
+   *  stale list or a "(not recognised)" that would look like a stored fault. */
+  uomPendingLabel?: string;
   onAddItem: () => void;
   onRemoveItem: (key: number) => void;
   onChange: (
@@ -211,6 +218,7 @@ export function ItemEditor({
   items,
   currency = IDR_ENTRY,
   uomOptions,
+  uomPendingLabel,
   onAddItem,
   onRemoveItem,
   onChange,
@@ -349,6 +357,7 @@ export function ItemEditor({
             canRemove={items.length > 1}
             currency={currency}
             uomOptions={uomOptions}
+            uomPendingLabel={uomPendingLabel}
             showPanel={
               expanded[item.key] ??
               (item.subItems.length > 0 || item.bullets.length > 0)
@@ -581,6 +590,7 @@ function UoMSelect({
   disabled,
   dense,
   dataAttrs,
+  pendingLabel,
 }: {
   value: string;
   options: readonly { value: string; label: string }[];
@@ -589,24 +599,39 @@ function UoMSelect({
   disabled?: boolean;
   dense?: boolean;
   dataAttrs?: Record<string, string | number>;
+  /** Shown, disabled, while the served list is still empty so the control
+   *  never renders a stale or invented list. Empty options is never "no
+   *  units": a company always has at least one, so an empty list means the
+   *  read hasn't landed (or failed) yet. */
+  pendingLabel?: string;
 }) {
+  // An empty options list is the loading/unavailable window, not a real empty
+  // catalog. The control is disabled and shows the pending label rather than
+  // the "(not recognised)" fallback, which would look like a stored fault.
+  const loading = options.length === 0;
   const known = options.some((option) => option.value === value);
   return (
     <select
       {...dataAttrs}
       aria-label={ariaLabel}
-      value={value}
-      disabled={disabled}
+      value={loading ? "" : value}
+      disabled={disabled || loading}
       onChange={(event) => onChange(event.target.value)}
       className={`${dense ? subCellClass : cellClass} cursor-pointer appearance-none bg-[length:10px] bg-[right_0.6rem_center] bg-no-repeat pr-7`}
       style={uomChevronStyle}
     >
-      {known ? null : <option value={value}>{value} (not recognised)</option>}
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
+      {loading ? (
+        <option value="">{pendingLabel ?? "Loading units…"}</option>
+      ) : (
+        <>
+          {known ? null : <option value={value}>{`${value} (not recognised)`}</option>}
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </>
+      )}
     </select>
   );
 }
@@ -617,6 +642,7 @@ function ItemRow({
   canRemove,
   currency,
   uomOptions,
+  uomPendingLabel,
   showPanel,
   onTogglePanel,
   onRemoveItem,
@@ -641,6 +667,7 @@ function ItemRow({
   canRemove: boolean;
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
+  uomPendingLabel?: string;
   showPanel: boolean;
   onTogglePanel: () => void;
   onRemoveItem: (key: number) => void;
@@ -684,7 +711,9 @@ function ItemRow({
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
-        <div className="flex h-10 items-center text-body text-ink-500">Lot</div>
+        <div className="flex h-10 items-center text-body text-ink-500">
+          {uomOptions.find((option) => option.value === item.uom)?.label ?? "…"}
+        </div>
       </Captioned>
       <Captioned label="Qty">
         <div className="flex h-10 items-center text-body tnum text-ink-500">
@@ -730,6 +759,7 @@ function ItemRow({
         <UoMSelect
           value={item.uom}
           options={uomOptions}
+          pendingLabel={uomPendingLabel}
           ariaLabel={`Unit of measure for line ${index + 1}`}
           onChange={(value) => onChange(item.key, "uom", value)}
           dataAttrs={{ "data-grid-cell": "", "data-grid-row": index, "data-grid-col": 1 }}
@@ -1073,6 +1103,7 @@ function ItemRow({
                 canMoveDown={subIndex < item.subItems.length - 1}
                 currency={currency}
                 uomOptions={uomOptions}
+                uomPendingLabel={uomPendingLabel}
                 onPatch={(patch) => onPatchSubRow(item.key, sub.id, patch)}
                 onRemove={() => onRemoveSubRow(item.key, sub.id)}
                 onMove={(direction) => onMoveSubRow(item.key, sub.id, direction)}
@@ -1131,6 +1162,7 @@ function SubRow({
   canMoveDown,
   currency,
   uomOptions,
+  uomPendingLabel,
   onPatch,
   onRemove,
   onMove,
@@ -1145,6 +1177,7 @@ function SubRow({
   canMoveDown: boolean;
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
+  uomPendingLabel?: string;
   onPatch: (patch: Partial<EditorSubItem>) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -1244,6 +1277,7 @@ function SubRow({
             dense
             value={sub.uom}
             options={uomOptions}
+            pendingLabel={uomPendingLabel}
             ariaLabel={`Unit of measure for ${label}`}
             onChange={(value) => onPatch({ uom: value })}
           />

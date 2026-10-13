@@ -362,6 +362,7 @@ export namespace backend {
 	    ThemePAccent: string;
 	    ThemeQAccent: string;
 	    Currency: string;
+	    CanonicalUoM: string;
 	    HasLogo: boolean;
 	
 	    static createFrom(source: any = {}) {
@@ -384,7 +385,22 @@ export namespace backend {
 	        this.ThemePAccent = source["ThemePAccent"];
 	        this.ThemeQAccent = source["ThemeQAccent"];
 	        this.Currency = source["Currency"];
+	        this.CanonicalUoM = source["CanonicalUoM"];
 	        this.HasLogo = source["HasLogo"];
+	    }
+	}
+	export class CompanyUnit {
+	    Value: string;
+	    Label: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompanyUnit(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Value = source["Value"];
+	        this.Label = source["Label"];
 	    }
 	}
 	export class CustomerPreviewItem {

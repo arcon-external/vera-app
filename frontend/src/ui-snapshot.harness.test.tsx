@@ -23,6 +23,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
+import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
@@ -82,6 +83,32 @@ const CASES: SnapshotCase[] = [
         onChange={() => undefined}
         onCustomerChange={() => undefined}
         onPaste={() => undefined}
+      />
+    ),
+  },
+  {
+    // The Company settings Units tab (issue #337): the canonical-unit picker
+    // and the served unit list. A representative slice of the seeded list —
+    // canonical first, a short token (m2 whose label is the wider m²), and the
+    // widest seed (Quarter) — so the snapshot reads the layout at both widths.
+    name: "CompanyUnitsPanel",
+    element: (
+      <CompanyUnitsPanel
+        units={[
+          { value: "Lot", label: "Lot" },
+          { value: "Pc", label: "Pc" },
+          { value: "set", label: "set" },
+          { value: "meter", label: "meter" },
+          { value: "m2", label: "m²" },
+          { value: "Hour", label: "Hour" },
+          { value: "Quarter", label: "Quarter" },
+        ]}
+        canonical="Lot"
+        onUnitsChange={() => undefined}
+        onCanonicalChange={() => undefined}
+        busy={false}
+        error={null}
+        onSaveUnits={() => undefined}
       />
     ),
   },

@@ -44,11 +44,11 @@ function tabs(html: string): string[] {
 }
 
 describe("CompanyProfileCard sub-tabs", () => {
-  it("renders three sub-tabs labelled General, Quotation and Portal, each role=tab", () => {
+  it("renders four sub-tabs labelled General, Units, Quotation and Portal, each role=tab", () => {
     const html = render();
     const found = tabs(html);
-    expect(found).toHaveLength(3);
-    for (const label of ["General", "Quotation", "Portal"]) {
+    expect(found).toHaveLength(4);
+    for (const label of ["General", "Units", "Quotation", "Portal"]) {
       expect(
         found.find((segment) => segment.includes(`>${label}</button>`)),
         `expected a tab labelled ${label} in: ${html}`
@@ -73,7 +73,7 @@ describe("CompanyProfileCard sub-tabs", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-label="Company sections"');
-    for (const [id, label] of [["general", "General"], ["quotation", "Quotation"], ["portal", "Portal"]]) {
+    for (const [id, label] of [["general", "General"], ["units", "Units"], ["quotation", "Quotation"], ["portal", "Portal"]]) {
       const button = tabs(html).find((segment) => segment.includes(`>${label}</button>`));
       expect(button).toBeDefined();
       expect(button).toContain(`id="${tabId("company", id)}"`);

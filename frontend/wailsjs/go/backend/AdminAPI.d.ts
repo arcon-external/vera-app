@@ -24,6 +24,8 @@ export function GetCompanyLogo():Promise<backend.CompanyLogo>;
 
 export function GetCompanyProfile():Promise<backend.CompanyProfile>;
 
+export function GetCompanyUnits():Promise<Array<backend.CompanyUnit>>;
+
 export function GetCurrencyCatalogue():Promise<Array<currency.CurrencyInfo>>;
 
 export function IssuePasswordReset(arg1:number):Promise<string>;
@@ -51,3 +53,5 @@ export function SetUserRole(arg1:number,arg2:string):Promise<void>;
 export function UpdateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
 
 export function UpdateCompanyProfile(arg1:backend.CompanyProfile):Promise<backend.CompanyProfile>;
+
+export function UpdateCompanyUnits(arg1:Array<backend.CompanyUnit>):Promise<Array<backend.CompanyUnit>>;

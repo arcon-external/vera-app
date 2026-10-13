@@ -81,12 +81,24 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 // TestNarrowColumnsFitTheirWorstValues pins the measured floors of the narrow
 // columns against the new grid (issue #398): every value the columns must
 // carry fits its content box in both engines' metrics. The strings are the
-// real option values (UoM from the editor's catalog plus the legacy values
-// the unrecognized-option rule still displays) and the widest numbering each
-// column can receive. The engine's width and Chrome 155's are both recorded;
-// Chrome renders the embedded Inter slightly narrower, so the engine's number
-// is the binding one. "10000", "Month" and "Quarter" overflow the old grid
-// too -- pre-existing, reported on the issue rather than fixed here.
+// real option values (UoM from the company's seeded unit list -- migration
+// 026's value = label catalog -- plus the legacy values the
+// unrecognized-option rule still displays) and the widest numbering each
+// column can receive. The engine's width and Chrome 155's are both recorded
+// when measured; Chrome renders the embedded Inter slightly narrower, so the
+// engine's number is the binding one. The seeds were last re-measured on the
+// gpdf engine (backend/assets inter-medium.ttf, 11 CSS px body); their Chrome
+// widths are recorded as -1 until someone re-measures them there, and the
+// engine check is the binding one regardless.
+//
+// Twelve of the fourteen seeds fit the UoM column's 31CSS px content box
+// (the 8% track minus borders and padding). "Month" (33.2px) and "Quarter"
+// (39.4px) overflow it -- pre-existing, exactly like "10000" and the longest
+// legacy capitalization, reported on #398 rather than fixed here, and #337
+// must not silently claim them as fitting values. The 20-character label cap
+// (unitColumnList's labelMaxLen) therefore rides on this pin's honesty: a
+// label that long always overflows, so the editor's real bound on a clean
+// document is roughly the width of "Quarter", not the 20-char cap.
 func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
 	e := testEngine(t)
 	in := sampleInput()
@@ -99,13 +111,27 @@ func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
 		text     string
 		size     float64
 		engineW  float64 // measured, CSS px
-		browserW float64 // Chrome 155, embedded Inter, canvas measureText
+		browserW float64 // Chrome 155, embedded Inter, canvas measureText; -1 = not re-measured there
 	}{
 		{m.cols.no, "10.10", 10, 23.79, 22.62},  // the sub number, at its 10px cell
 		{m.cols.no, "999", 11, 20.53, 20.53},    // the main number
 		{m.cols.qty, "9999", 11, 27.37, 27.37},  // the widest quantity
 		{m.cols.uom, "meter", 11, 30.24, 30.14}, // the longest catalog value
 		{m.cols.uom, "Meter", 11, 30.50, 30.39}, // its legacy capitalization
+		// The twelve seeds of migration 026 that fit, value = label, measured
+		// on the gpdf engine at 11 CSS px. Month and Quarter are deliberately
+		// absent: they overflow (33.22px and 39.41px), see the header note.
+		{m.cols.uom, "Lot", 11, 16.42, -1},
+		{m.cols.uom, "Pc", 11, 13.25, -1},
+		{m.cols.uom, "EA", 11, 14.31, -1},
+		{m.cols.uom, "LS", 11, 13.22, -1},
+		{m.cols.uom, "set", 11, 15.88, -1},
+		{m.cols.uom, "m2", 11, 16.36, -1},
+		{m.cols.uom, "m3", 11, 16.53, -1},
+		{m.cols.uom, "Hour", 11, 25.29, -1},
+		{m.cols.uom, "Day", 11, 20.23, -1},
+		{m.cols.uom, "Week", 11, 29.70, -1},
+		{m.cols.uom, "Year", 11, 24.20, -1},
 	}
 	for _, tc := range cases {
 		box := contentPx(tc.col)
@@ -113,7 +139,7 @@ func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
 		if w > box {
 			t.Errorf("%q measures %.2fpx, wider than the %.2fpx content box", tc.text, w, box)
 		}
-		if tc.browserW > box {
+		if tc.browserW >= 0 && tc.browserW > box {
 			t.Errorf("%q measures %.2fpx in Chrome, wider than the %.2fpx content box", tc.text, tc.browserW, box)
 		}
 		if math.Abs(w-tc.engineW) > 0.5 {

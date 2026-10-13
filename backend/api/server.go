@@ -134,8 +134,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.PUT("/v1/admin/company/logo", server.setCompanyLogo, server.requireSession, server.requireAdmin)
 	server.echo.DELETE("/v1/admin/company/logo", server.clearCompanyLogo, server.requireSession, server.requireAdmin)
 	// Session-readable company identity for the app shell and other UI
-	// surfaces. Writes stay admin-only above.
+	// surfaces. Writes stay admin-only above. The unit list rides a sibling
+	// route: units print on customer documents, so every signed-in role reads
+	// them, but only admins replace the list.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)
+	server.echo.GET("/v1/company/units", server.getCompanyUnits, server.requireSession)
+	server.echo.PUT("/v1/admin/company/units", server.updateCompanyUnits, server.requireSession, server.requireAdmin)
 	// Public verification surface. Deliberately registered without
 	// requireSession and with no write path: see docs in verify.go. The POST
 	// route carries a body limit so an oversized form is rejected before it

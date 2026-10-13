@@ -282,7 +282,12 @@ func (q *Quotation) GetQuotationPreviewHTML() (string, error) {
 	}
 
 	var body bytes.Buffer
-	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+	// The preview must match the PDF byte for byte, and the PDF executes the
+	// display copy (UoMs resolved to labels, see renderInput), so this path
+	// executes the same copy: a stale preview that still printed raw values
+	// would show the editor one document and the customer another.
+	data := q.displayData()
+	if err := q.Data.HtmlTemplate.Execute(&body, data); err != nil {
 		return "", fmt.Errorf("execute quotation preview template: %w", err)
 	}
 	if body.Len() == 0 {
