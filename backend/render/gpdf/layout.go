@@ -314,17 +314,18 @@ type colLayout struct {
 }
 
 // colOffsetsPx are the table's column boundaries, in whole CSS pixels from the
-// table's left edge, for the colgroup 6.5/31.5/7.5/8/15.5/15.5/15.5 percent at
+// table's left edge, for the colgroup 7/31/7.5/8/15.5/15.5/15.5 percent at
 // the 646px table width.
 //
-// Rounding the cumulative percentages to the nearest pixel gives 0, 42, 245,
+// Rounding the cumulative percentages to the nearest pixel gives 0, 45, 245,
 // 294, 346, 446, 546 and 646. The narrow columns keep the fit their content
-// needs (measured in both engines, issue #398): No. fits "1.10", Qty. fits
-// "9999", UoM keeps the width its real values need ("meter"/"Meter" at the
-// 11px body size). The price columns carry a shared size rule
+// needs (measured in both engines, issue #398): No. keeps 7% because the sub
+// number "10.10" needs its 24px of content (23.79px measured), Qty. fits
+// "9999" at 7.5%, and UoM keeps 8% because its real values ("meter"/"Meter")
+// need the 31px of content. The price columns carry a shared size rule
 // (quotation.PriceSizePx) so their figures step down instead of wrapping.
 //
-// This grid was NOT re-measured in a browser: it follows the truncated
+// This grid was NOT re-measured in a browser: it follows the rounded
 // percentages the template's colgroup states, so the engine and the template
 // agree by construction (see ColumnEdgesPx and the column tests): the two
 // renderers cannot drift apart again even if both sit a pixel off the
@@ -335,7 +336,7 @@ type colLayout struct {
 // page box this engine does not otherwise model. The colgroup is part of a
 // fixed template and this is the only table it describes, so the grid is a
 // constant here rather than a computation.
-var colOffsetsPx = [8]int{0, 42, 245, 294, 346, 446, 546, 646}
+var colOffsetsPx = [8]int{0, 45, 245, 294, 346, 446, 546, 646}
 
 // ColumnEdgesPx reports the item table's column boundaries in whole CSS
 // pixels from the table's left edge. It is exported so the application's

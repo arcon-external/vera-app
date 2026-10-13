@@ -56,7 +56,7 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 	// expected values are the pixel offsets scaled by ptPerPx and shifted to
 	// the table's left edge.
 	cols := itemColumns()
-	want := []float64{56.25, 87.75, 240.0, 276.75, 315.75, 390.75, 465.75, 540.75}
+	want := []float64{56.25, 90.0, 240.0, 276.75, 315.75, 390.75, 465.75, 540.75}
 	names := []string{
 		"table left", "No.", "Description", "Qty", "UoM", "Unit price", "After disc.", "table right",
 	}
@@ -85,9 +85,8 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 // the unrecognized-option rule still displays) and the widest numbering each
 // column can receive. The engine's width and Chrome 155's are both recorded;
 // Chrome renders the embedded Inter slightly narrower, so the engine's number
-// is the binding one. The values that overflow -- "10.10"/"10000", "Month",
-// "Quarter" -- overflow the old grid too: pre-existing, reported on the issue
-// rather than fixed here.
+// is the binding one. "10000", "Month" and "Quarter" overflow the old grid
+// too -- pre-existing, reported on the issue rather than fixed here.
 func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
 	e := testEngine(t)
 	in := sampleInput()
@@ -102,16 +101,20 @@ func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
 		engineW  float64 // measured, CSS px
 		browserW float64 // Chrome 155, embedded Inter, canvas measureText
 	}{
-		{m.cols.no, "1.10", 10, 17.38, 16.47},   // the sub number, at its 10px cell
+		{m.cols.no, "10.10", 10, 23.79, 22.62},  // the sub number, at its 10px cell
 		{m.cols.no, "999", 11, 20.53, 20.53},    // the main number
 		{m.cols.qty, "9999", 11, 27.37, 27.37},  // the widest quantity
 		{m.cols.uom, "meter", 11, 30.24, 30.14}, // the longest catalog value
 		{m.cols.uom, "Meter", 11, 30.50, 30.39}, // its legacy capitalization
 	}
 	for _, tc := range cases {
+		box := contentPx(tc.col)
 		w := e.Width(tc.text, px(tc.size), false) / ptPerPx
-		if box := contentPx(tc.col); w > box {
+		if w > box {
 			t.Errorf("%q measures %.2fpx, wider than the %.2fpx content box", tc.text, w, box)
+		}
+		if tc.browserW > box {
+			t.Errorf("%q measures %.2fpx in Chrome, wider than the %.2fpx content box", tc.text, tc.browserW, box)
 		}
 		if math.Abs(w-tc.engineW) > 0.5 {
 			t.Errorf("%q at %vpx: engine now measures %.2fpx; recorded %.2fpx -- re-measure both engines",
