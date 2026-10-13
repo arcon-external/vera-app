@@ -580,8 +580,10 @@ func (e *Engine) layout(in Input) []*page {
 	rows := e.measureRows(in, m)
 	// The table runs to the page's bottom edge rather than to the content box's.
 	// `.content` reserves 26px of bottom padding, but a row is never split across
-	// pages, so the browser fills into that reserve when a row would otherwise be
-	// stranded and only gives up once the next row will not fit at all.
+	// pages -- the stylesheet's break-inside: avoid on .items-body-table tr
+	// (issue #391) enforces that in the browser too -- so the browser fills into
+	// that reserve when a row would otherwise be stranded and only gives up once
+	// the next row will not fit at all.
 	bottom := m.cardBottom
 
 	var pages []*page

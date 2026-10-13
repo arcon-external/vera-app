@@ -318,6 +318,21 @@
 			background: var(--surface);
 		}
 
+		/* Item rows are atomic: a row is never split across a page break.
+		   The native renderer has always kept rows whole (layout.go), while
+		   Chrome fragmented them. Measured on the equivalence fixture with
+		   Chrome 155.0.8059.39 (2026-10-13): item 5's 120pt row straddled the
+		   page 1/2 boundary -- its description cell and first bullet stayed on
+		   page 1 and the remaining two bullets landed on page 2 -- so the
+		   native renderer's page 2 began at item 5 where the browser's began
+		   at item 6. Declaring the break as avoid gives both renderers the
+		   same rule: the row moves whole, and they agree on where every page
+		   begins. */
+		.items-body-table tr {
+			break-inside: avoid;
+			page-break-inside: avoid;
+		}
+
 		.items-body-table tr.sub-parent td {
 			/* Uniform padding, like every other cell: the 12/7 asymmetry made
 			   the title sit low in its band. */
