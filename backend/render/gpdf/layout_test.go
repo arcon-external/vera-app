@@ -78,6 +78,48 @@ func TestColumnEdgesOnWholePixels(t *testing.T) {
 	}
 }
 
+// TestNarrowColumnsFitTheirWorstValues pins the measured floors of the narrow
+// columns against the new grid (issue #398): every value the columns must
+// carry fits its content box in both engines' metrics. The strings are the
+// real option values (UoM from the editor's catalog plus the legacy values
+// the unrecognized-option rule still displays) and the widest numbering each
+// column can receive. The engine's width and Chrome 155's are both recorded;
+// Chrome renders the embedded Inter slightly narrower, so the engine's number
+// is the binding one. The values that overflow -- "10.10"/"10000", "Month",
+// "Quarter" -- overflow the old grid too: pre-existing, reported on the issue
+// rather than fixed here.
+func TestNarrowColumnsFitTheirWorstValues(t *testing.T) {
+	e := testEngine(t)
+	in := sampleInput()
+	m := e.derive(in)
+	contentPx := func(col int) float64 {
+		return (m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)) / ptPerPx
+	}
+	cases := []struct {
+		col      int
+		text     string
+		size     float64
+		engineW  float64 // measured, CSS px
+		browserW float64 // Chrome 155, embedded Inter, canvas measureText
+	}{
+		{m.cols.no, "1.10", 10, 17.38, 16.47},   // the sub number, at its 10px cell
+		{m.cols.no, "999", 11, 20.53, 20.53},    // the main number
+		{m.cols.qty, "9999", 11, 27.37, 27.37},  // the widest quantity
+		{m.cols.uom, "meter", 11, 30.24, 30.14}, // the longest catalog value
+		{m.cols.uom, "Meter", 11, 30.50, 30.39}, // its legacy capitalization
+	}
+	for _, tc := range cases {
+		w := e.Width(tc.text, px(tc.size), false) / ptPerPx
+		if box := contentPx(tc.col); w > box {
+			t.Errorf("%q measures %.2fpx, wider than the %.2fpx content box", tc.text, w, box)
+		}
+		if math.Abs(w-tc.engineW) > 0.5 {
+			t.Errorf("%q at %vpx: engine now measures %.2fpx; recorded %.2fpx -- re-measure both engines",
+				tc.text, tc.size, w, tc.engineW)
+		}
+	}
+}
+
 // TestDescriptionWrapMatchesTheBrowser pins the line breaks of the wrapping cell.
 //
 // Wrapping is the one place where a small measurement difference is not a small

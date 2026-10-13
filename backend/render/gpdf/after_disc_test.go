@@ -121,13 +121,20 @@ func TestRowHeightsFitTheAfterCell(t *testing.T) {
 // rule (quotation.PriceSizePx, issue #398): the worst string each step can
 // receive must fit the price column's content box in the engine's own
 // metrics. The strings are all digits and separators -- digits are the widest
-// glyphs money uses, so an all-digit string is the worst shape of its length.
+// glyphs money uses, so an all-digit string is the worst shape of its length,
+// and a comma is the widest separator (it is the true worst at 12 and 14
+// characters).
 //
 // The column's content box is 79px (the 15.5% track at the 646px table, less
-// the 1px collapsed border and the 10px padding each side). The engine's
-// measured widths for these cases are quoted in the table below; a change
-// that makes any of them exceed the box fails here rather than printing over
-// a border.
+// the 1px collapsed border and the 10px padding each side). Both engines'
+// measured widths are quoted below: the engine's (Inter parsed by gpdf) and
+// Chrome 155's (the embedded Inter, canvas measureText, after
+// document.fonts.load). Chrome renders this font slightly narrower than the
+// engine, so the engine's number is the binding one -- but both are held
+// under the box, because the two renderers print the same document. The rule
+// guarantees a fit through 18 characters; a 19-character figure (86.11px in
+// the engine) overflows the content box but stays inside the cell, exactly as
+// it did before this rule existed.
 func TestPriceSizeStepsFitTheColumn(t *testing.T) {
 	e := testEngine(t)
 	in := afterDiscInput()
@@ -136,17 +143,18 @@ func TestPriceSizeStepsFitTheColumn(t *testing.T) {
 	content := m.colX[col+1] - m.colX[col] - px(1) - 2*px(tdPadPx)
 
 	cases := []struct {
-		text    string
-		wantPx  float64
-		engineW float64 // measured, CSS px
+		text     string
+		wantPx   float64
+		engineW  float64 // the engine's own measured width, CSS px
+		browserW float64 // Chrome 155, embedded Inter, canvas measureText
 	}{
-		{"999.999.999", 11, 67.89},       // 11 chars: the 11px step's worst
-		{"1.234.567.890", 11, 74.92},     // 13 chars: still 11px
-		{"999.999.999,99", 10, 77.03},    // 14 chars: the 10px step's worst
-		{"999.999.999.999", 9, 74.92},    // 15 chars: the 9px step's worst
-		{"1.234.567.890.12", 9, 72.99},   // 16 chars: still 9px
-		{"9.999.999.999.999", 8, 73.87},  // 17 chars: the 8px floor's worst
-		{"999.999.999.999.99", 8, 78.84}, // 18 chars: still the 8px floor
+		{"999.999.999,9", 11, 77.89, 76.71},     // 12 chars: the 11px step's worst
+		{"1.234.567.890", 11, 74.92, 72.83},     // 13 chars: still 11px
+		{"999.999.999,99", 10, 77.03, 75.96},    // 14 chars: the 10px step's worst
+		{"9.999.999.999.99", 9, 77.50, 76.22},   // 15 chars: the 9px step's worst
+		{"1.234.567.890.12", 9, 72.99, 70.22},   // 16 chars: still 9px
+		{"9.999.999.999.999", 8, 73.87, 72.73},  // 17 chars: the 8px floor
+		{"999.999.999.999.99", 8, 78.84, 77.70}, // 18 chars: the floor's worst
 	}
 	for _, tc := range cases {
 		if got := quotation.PriceSizePx(tc.text); got != tc.wantPx {
@@ -156,6 +164,10 @@ func TestPriceSizeStepsFitTheColumn(t *testing.T) {
 		if w > content {
 			t.Errorf("PriceSizePx(%q) at %vpx measures %.2fpx, wider than the %.2fpx content box",
 				tc.text, tc.wantPx, w/ptPerPx, content/ptPerPx)
+		}
+		if got := w / ptPerPx; math.Abs(got-tc.engineW) > 0.5 {
+			t.Errorf("%q at %vpx: engine now measures %.2fpx; the calibration recorded %.2fpx -- re-measure both engines",
+				tc.text, tc.wantPx, got, tc.engineW)
 		}
 		// The rule is only useful if it actually shrinks what would overflow.
 		if bodyW := e.Width(tc.text, px(bodyPx), false); bodyW <= content && tc.wantPx != bodyPx {

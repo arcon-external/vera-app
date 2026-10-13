@@ -317,12 +317,12 @@ type colLayout struct {
 // table's left edge, for the colgroup 6.5/31.5/7.5/8/15.5/15.5/15.5 percent at
 // the 646px table width.
 //
-// Truncating the cumulative percentages gives 0, 42, 245, 294, 346, 446, 546
-// and 646. The narrow columns keep the fit their content needs (measured in
-// both engines, issue #398): No. fits "1.10", Qty. fits "9999", UoM keeps the
-// width its real values need ("meter"/"Meter" at the 11px body size). The
-// price columns carry a shared size rule (quotation.PriceSizePx) so their
-// figures step down instead of wrapping.
+// Rounding the cumulative percentages to the nearest pixel gives 0, 42, 245,
+// 294, 346, 446, 546 and 646. The narrow columns keep the fit their content
+// needs (measured in both engines, issue #398): No. fits "1.10", Qty. fits
+// "9999", UoM keeps the width its real values need ("meter"/"Meter" at the
+// 11px body size). The price columns carry a shared size rule
+// (quotation.PriceSizePx) so their figures step down instead of wrapping.
 //
 // This grid was NOT re-measured in a browser: it follows the truncated
 // percentages the template's colgroup states, so the engine and the template
