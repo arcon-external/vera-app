@@ -56,13 +56,13 @@
 			<section class="items-wrap">
 				<table class="items-head-table">
 					<colgroup>
-						<col style="width: 7%;">
-						<col style="width: 26%;">
+						<col style="width: 6.5%;">
+						<col style="width: 31.5%;">
+						<col style="width: 7.5%;">
 						<col style="width: 8%;">
-						<col style="width: 8%;">
-						<col style="width: 17%;">
-						<col style="width: 17%;">
-						<col style="width: 17%;">
+						<col style="width: 15.5%;">
+						<col style="width: 15.5%;">
+						<col style="width: 15.5%;">
 					</colgroup>
 					<thead>
 						<tr>
@@ -79,13 +79,13 @@
 
 				<table class="items-body-table">
 					<colgroup>
-						<col style="width: 7%;">
-						<col style="width: 26%;">
+						<col style="width: 6.5%;">
+						<col style="width: 31.5%;">
+						<col style="width: 7.5%;">
 						<col style="width: 8%;">
-						<col style="width: 8%;">
-						<col style="width: 17%;">
-						<col style="width: 17%;">
-						<col style="width: 17%;">
+						<col style="width: 15.5%;">
+						<col style="width: 15.5%;">
+						<col style="width: 15.5%;">
 					</colgroup>
 					{{range .Items}}
 
@@ -123,9 +123,9 @@
 								</td>
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
-								<td>{{.DisplayListPrice}}</td>
-								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
-								<td>{{.DisplayTotal}}</td>
+								<td style="font-size: {{priceSizePx .DisplayListPrice}}px">{{.DisplayListPrice}}</td>
+								<td class="after" style="font-size: {{priceSizePx .DisplayUnitPrice}}px">{{.DisplayUnitPrice}}</td>
+								<td style="font-size: {{priceSizePx .DisplayTotal}}px">{{.DisplayTotal}}</td>
 							</tr>
 							{{end}}
 						</tbody>
@@ -143,9 +143,9 @@
 								</td>
 								<td>{{.Qty}}</td>
 								<td>{{.UoM}}</td>
-								<td>{{.DisplayListUnitPrice}}</td>
-								<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
-								<td>{{.DisplayTotal}}</td>
+								<td style="font-size: {{priceSizePx .DisplayListUnitPrice}}px">{{.DisplayListUnitPrice}}</td>
+								<td class="after" style="font-size: {{priceSizePx .DisplayUnitPrice}}px">{{.DisplayUnitPrice}}</td>
+								<td style="font-size: {{priceSizePx .DisplayTotal}}px">{{.DisplayTotal}}</td>
 							</tr>
 							{{range .SubItems}}
 							<tr class="sub-row">
@@ -180,9 +180,9 @@
 							</td>
 							<td>{{.Qty}}</td>
 							<td>{{.UoM}}</td>
-							<td>{{.DisplayListUnitPrice}}</td>
-							<td class="after"><div class="after-price">{{.DisplayUnitPrice}}</div><div class="after-pct">{{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}</div></td>
-							<td>{{.DisplayTotal}}</td>
+							<td style="font-size: {{priceSizePx .DisplayListUnitPrice}}px">{{.DisplayListUnitPrice}}</td>
+							<td class="after" style="font-size: {{priceSizePx .DisplayUnitPrice}}px">{{.DisplayUnitPrice}}</td>
+							<td style="font-size: {{priceSizePx .DisplayTotal}}px">{{.DisplayTotal}}</td>
 						</tr>
 					</tbody>
 					{{end}}

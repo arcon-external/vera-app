@@ -340,33 +340,18 @@
 			position: relative;
 		}
 
-		/* The after-discount column. Its first line is the net unit price, so
-		   it is a money line like its neighbours -- tabular figures that stay
-		   on one line, in the row's ordinary ink. Its second line is the row's
-		   discount percentage, a subordinate annotation rather than a second
-		   price: it takes the document's small-muted treatment, the same one
-		   .verify-code uses for the code under its caption (9px, muted, a
-		   breath of tracking), rather than inventing a new one. A row with no
-		   discount prints an em dash there, the convention the old Disc. cell
-		   used. The 1.5 line height is explicit so the second line's box is
-		   13.5px by construction, which is the number the native renderer
-		   models; leaving it inherited would pin the layout to whatever the
-		   table's 1.45 happens to give a 9px line today. */
-		.items-body-table td.after {
+		/* The price columns: the net unit price (After Disc.), the list unit
+		   price and the total are money lines like their neighbours --
+		   tabular figures that stay on one line, in the row's ordinary ink.
+		   Each price cell's font size is set per cell by the shared
+		   length-based rule (PriceSizePx): it renders at the body size until
+		   the figure outgrows the column, then steps down to a floor -- so a
+		   long figure never wraps or crops. */
+		.items-body-table td:nth-child(5),
+		.items-body-table td:nth-child(6),
+		.items-body-table td:nth-child(7) {
 			font-variant-numeric: tabular-nums;
 			white-space: nowrap;
-		}
-
-		.items-body-table td.after .after-price {
-			display: block;
-		}
-
-		.items-body-table td.after .after-pct {
-			display: block;
-			font-size: 9px;
-			line-height: 1.5;
-			color: var(--muted);
-			letter-spacing: 0.02em;
 		}
 
 		.items-body-table tr.sub-row td:nth-child(2)::before {

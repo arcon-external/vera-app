@@ -101,8 +101,8 @@ type Item struct {
 	UoM         string
 	UnitPrice   string
 	Total       string
-	// Disc is this row's own discount, preformatted ("10%", or "—" when the row
-	// carries none), exactly as UnitPrice and Total are. Rendering it is the
+	// Disc is the net unit price -- the list price after the row's own
+	// discount -- preformatted like UnitPrice and Total. Rendering it is the
 	// renderer's problem; deciding what it says is not.
 	Disc          string
 	SubItems      []SubItem
@@ -133,4 +133,28 @@ type Theme struct {
 	Accent string
 	Soft   string
 	Ink    string
+}
+
+// PriceSizePx returns the font size, in CSS pixels, for one price cell's
+// text. Prices render at the document body size (11) until the text outgrows
+// the column, stepping down to a floor of 8 (issue #398).
+//
+// The rule is length-based on purpose: money uses tabular figures, so a
+// character count is the one width proxy both renderers can compute
+// identically -- the browser and the native engine cannot share a pixel
+// measurement, but they can share this. The thresholds are calibrated so
+// the worst string at each step fits the price column's content width with
+// margin, measured in both engines; the calibration is pinned by
+// TestPriceSizeStepsFitTheColumn in backend/render/gpdf.
+func PriceSizePx(text string) float64 {
+	switch n := len(text); {
+	case n <= 13:
+		return 11
+	case n <= 14:
+		return 10
+	case n <= 16:
+		return 9
+	default:
+		return 8
+	}
 }

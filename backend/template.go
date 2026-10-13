@@ -7,6 +7,8 @@ import (
 	"html/template"
 	"strings"
 	texttemplate "text/template"
+
+	"vera-app/backend/render/quotation"
 )
 
 //go:embed assets/*
@@ -60,7 +62,12 @@ func readTemplate(q *Quotation) error {
 		return fmt.Errorf("load bold font asset: %w", err)
 	}
 
-	htmlTmpl, err := template.New("quotation").Parse(string(htmlContent))
+	htmlTmpl, err := template.New("quotation").Funcs(template.FuncMap{
+		// The shared price-size rule (issue #398): the same function the
+		// native renderer calls, so both renderers pick the same size for
+		// the same string by construction.
+		"priceSizePx": quotation.PriceSizePx,
+	}).Parse(string(htmlContent))
 	if err != nil {
 		return fmt.Errorf("parse quotation template: %w", err)
 	}

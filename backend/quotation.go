@@ -1268,15 +1268,9 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			}
 			// The item table prints two prices: the list unit price
 			// (marginalised, before the row's own discount) under Unit Price
-			// IDR, and the net unit price under After Disc. IDR. The After Disc.
-			// cell carries a second line -- the row's discount percentage, or
-			// "0%" when it carries none -- packed after a newline, because the
-			// seam type below is frozen (shared with renderers this change may
-			// not touch) and cannot gain a field for it. The template renders
-			// its two lines from DisplayUnitPrice plus DiscountEnabled/Percent
-			// directly; this packs the same two strings so the native renderer
-			// splits out an identical pair. See discountPctLine for the one
-			// formatting both sides must agree on.
+			// IDR, and the net unit price under After Disc. IDR. The After
+			// Disc. cell is one line: the row's discount percentage no longer
+			// prints (issue #398).
 			parts = append(parts, quotation.SubItem{
 				SubNo:       sub.SubNo,
 				Description: sub.Description,
@@ -1284,7 +1278,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 				UoM:         sub.UoM,
 				UnitPrice:   sub.DisplayListPrice,
 				Total:       sub.DisplayTotal,
-				Disc:        afterDiscCell(sub.DisplayUnitPrice, sub.DiscountEnabled, sub.DiscountPercent),
+				Disc:        sub.DisplayUnitPrice,
 				Bullets:     bullets,
 			})
 		}
@@ -1295,7 +1289,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			UoM:           it.UoM,
 			UnitPrice:     it.DisplayListUnitPrice,
 			Total:         it.DisplayTotal,
-			Disc:          afterDiscCell(it.DisplayUnitPrice, it.DiscountEnabled, it.DiscountPercent),
+			Disc:          it.DisplayUnitPrice,
 			SubItems:      parts,
 			ShowSubPrices: it.ShowSubPrices,
 		})
@@ -1363,33 +1357,6 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 
 		VerificationCode: q.Data.VerifyShortID,
 	}, nil
-}
-
-// discountPctLine is the After Disc. cell's second line for one row: the
-// row's discount percentage, or "0%" when it carries none. It reproduces the
-// template's {{if .DiscountEnabled}}{{.DiscountPercent}}%{{else}}0%{{end}}
-// exactly, so the HTML preview, the stored snapshot and the PDF print the
-// same string for the same row.
-//
-// It lives here, on the application's side of the renderer seam, rather than
-// in either renderer: the seam type (render/quotation) is frozen to this
-// change, so the percentage cannot travel in its own field, and the template
-// cannot call Go helpers without a FuncMap in template.go, which is also
-// frozen. The template therefore formats the same one-liner inline, and the
-// agreement between the two is pinned by test, not by shared code.
-func discountPctLine(enabled bool, percent uint16) string {
-	if !enabled {
-		return "0%"
-	}
-	return strconv.Itoa(int(percent)) + "%"
-}
-
-// afterDiscCell packs the After Disc. cell's two lines -- the net unit price
-// and the discount percentage line -- into the seam's Disc string, separated
-// by a newline the native renderer splits on. See discountPctLine for why the
-// packing lives here.
-func afterDiscCell(net string, enabled bool, percent uint16) string {
-	return net + "\n" + discountPctLine(enabled, percent)
 }
 
 // decodeDataURL turns an embedded data URL or bare base64 payload into bytes.
