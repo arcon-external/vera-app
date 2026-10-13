@@ -444,8 +444,8 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode-go/step-5-preview-free#high`, fallback `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
-| **Explorer** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Crawls files and reports. Read-only: it never edits. |
+| **Worker** | `opencode/big-pickle`, fallbacks `opencode-go/step-5-preview-free#high` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
 | **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
@@ -453,11 +453,18 @@ Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
 dispatch. A role with no variant suffix names the provider's **default** variant —
 the bare model ID, because `#default` is not a variant that exists.
-The Worker and the Explorer each name a **fallback**, used when the primary times
-out or errors at dispatch; a dispatch that falls back says so in its report.
+The Worker names a **chain** of fallbacks; the Riddler names one. A fallback is used
+when the model before it times out or errors at dispatch, and a dispatch that falls
+back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek. What it costs is stated plainly: the Judge shares a family with the orchestrator, and the Advisor shares one with the Worker's fallback (the primary Worker and the Explorer are trial models). If a future run shows correlated misses between a reviewer and its family-mate, re-deal the families rather than defending the table.
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek.
+What it costs is stated plainly: the Judge shares a family with the orchestrator and
+with the Riddler's fallback, and the Advisor shares one with the Worker's last
+fallback (the primary Worker and the Riddler are trial models). The Riddler is not a
+reviewer, so the pairing rule does not bind it. If a future run shows correlated
+misses between a reviewer and its family-mate, re-deal the families rather than
+defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
@@ -472,10 +479,24 @@ most useful thing in the report.
 
 **The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not.
 
+**The Riddler interrogates the problem.** Fed one or more problems, it produces 10–20
+questions per problem that map the surface before anyone designs against it. Its
+output is held to a bar, because padded questions cost more than they return: every
+question names a surface (an edge value, a mirror struct, a legacy path, an empty
+state, a signed-payload line, a viewport width); every question is answerable by
+evidence (a test, a measurement, a `file:line`), never by opinion; every question
+states why it is still open rather than already answered in the issue or plan; and
+the output is numbered and grouped by surface, so the consumers can lift it
+wholesale. It runs once per issue after the issue is understood and before the plan
+is frozen: the plan comment answers its questions, the Advisor's brief takes the
+design-fork subset, and the Judge's brief takes the full set as its verification
+checklist. A feature earns a second pass before merge. It never verifies and never
+decides — it widens the interrogation surface; the Judge deepens it.
+
 ### 12.2 The loop
 
 ```
-Explorer (only when the code is not already mapped)
+Riddler (questions, before the plan freezes)
       |
 Orchestrator: decide the design, freeze the interfaces, write the todolist
       |
@@ -502,6 +523,11 @@ Worker waves  -->  Advisor (if a design decision)  -->  Judge
 A **wave** is one dispatch round: the workers sent out together, and the reports that
 come back. A wave ends when every worker in it has reported, not when the first one
 does.
+
+**One Judge session per issue.** The first pass is briefed in full; every follow-up
+commit resumes the same session, hands back its own findings, and asks whether each
+is closed. Re-briefing a fresh Judge for an increment is the exception, not the
+habit — a resumed Judge knows what it found and why.
 
 ### 12.3 The todolist, and the tool that does not exist
 
