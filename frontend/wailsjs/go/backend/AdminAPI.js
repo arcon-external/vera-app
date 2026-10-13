@@ -42,6 +42,10 @@ export function GetCompanyProfile() {
   return window['go']['backend']['AdminAPI']['GetCompanyProfile']();
 }
 
+export function GetCompanyUnits() {
+  return window['go']['backend']['AdminAPI']['GetCompanyUnits']();
+}
+
 export function GetCurrencyCatalogue() {
   return window['go']['backend']['AdminAPI']['GetCurrencyCatalogue']();
 }
@@ -96,4 +100,8 @@ export function UpdateClient(arg1, arg2, arg3) {
 
 export function UpdateCompanyProfile(arg1) {
   return window['go']['backend']['AdminAPI']['UpdateCompanyProfile'](arg1);
+}
+
+export function UpdateCompanyUnits(arg1) {
+  return window['go']['backend']['AdminAPI']['UpdateCompanyUnits'](arg1);
 }

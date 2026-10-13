@@ -720,13 +720,22 @@ func TestPrepareReportsEmptyUoMAsMissing(t *testing.T) {
 	}
 }
 
-// TestPrepareAcceptsUnitsOutsideTheEditorList is a guard on the design decision,
-// not on the code. Enforcing the editor's five options on the server was tried
-// and reverted: it would have rejected the "Month" on a maintenance line and the
-// "Unit" on several others, both of which real quotations carry, while fixing
-// nothing the editor does not already prevent.
-func TestPrepareAcceptsUnitsOutsideTheEditorList(t *testing.T) {
-	for _, uom := range []string{"Month", "Unit", "Box"} {
+// TestPrepareFoldsUnitsOntoTheCompanyList pins the #337 contract at the
+// gate that replaced the editor-list decision below.
+//
+// The old design, recorded under TestPlausibleUoM's comment, was: enforce
+// nothing on the server except shape, because the editor's five options
+// would have rejected "Month" and "Unit" that real quotations carry. #337
+// moves the list into the database, so the server can (and must) validate
+// against the company's own catalog instead of a global allowlist -- a
+// plausible label that no company unit (or legacy spelling) covers is refused
+// here and now, named, instead of arriving on a customer document. The values
+// the old decision was protecting all survive: "Month" is a seed, and "Unit"
+// is one of the legacy spellings every historical quotation may carry.
+func TestPrepareFoldsUnitsOntoTheCompanyList(t *testing.T) {
+	// Fold cases: a seed, legacy spellings, and a paste
+	// case-variant of the canonical, all of which climb the same gate.
+	for _, uom := range []string{"Month", "Unit", "PC", "meter", "lot"} {
 		t.Run(uom, func(t *testing.T) {
 			q := newTestQuotation()
 			q.SetAuthService(auth.StaffTestService())
@@ -741,9 +750,35 @@ func TestPrepareAcceptsUnitsOutsideTheEditorList(t *testing.T) {
 				Incoterm:      "FOB",
 			})
 			if err != nil {
-				t.Errorf("Prepare rejected the legitimate UoM %q: %v", uom, err)
+				t.Errorf("Prepare rejected the valid UoM %q: %v", uom, err)
 			}
 		})
+	}
+
+	// A plausible label that is neither a company unit nor a legacy spelling
+	// is refused, with the unit and the row named.
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	err := q.Prepare(QuotationInput{
+		CustomerID: 2,
+		Items: []QuotationItemInput{
+			{Description: "Fine", Qty: 1, UoM: "Lot", UnitPrice: 1000},
+			{Description: "Not ours", Qty: 1, UoM: "Box", UnitPrice: 1000},
+		},
+		Subject:       "Test",
+		RecipientName: "Test",
+		Validity:      30,
+		PaymentTerm:   30,
+		LeadTimeDays:  30,
+		Incoterm:      "FOB",
+	})
+	if err == nil {
+		t.Fatal("Prepare accepted the unit Box, which is on neither the company list nor the legacy set")
+	}
+	for _, want := range []string{"item 2", `unit of measure "Box" is not on the company's unit list`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err.Error(), want)
+		}
 	}
 }
 

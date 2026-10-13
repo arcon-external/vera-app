@@ -466,7 +466,7 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     legalName: "",
     address: "",
   });
-  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "", currency: "" });
+  const [extras, setExtras] = useState<StoredCompanyExtras>({ phone: "", email: "", taxId: "", currency: "", canonicalUoM: "" });
   // The shipped currency catalogue. Fetched here, not in the panel: the
   // panel is a presentational slice by design (see company.ts) and owns no
   // loading state. Null while loading disables the picker; a failed fetch

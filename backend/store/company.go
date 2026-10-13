@@ -32,6 +32,12 @@ type CompanyProfile struct {
 	Currency  string
 	LogoBytes []byte
 	HasLogo   bool
+	// CanonicalUoM is the unit a quotation's package lines are quoted in
+	// (it replaces the hardcoded "Lot"). It must name a member of the
+	// company's unit list exactly; the FK on the column enforces that at the
+	// database too (migration 026). Empty reads as the stored value on
+	// update -- see UpdateCompanyProfile.
+	CanonicalUoM string
 }
 
 // maxCompanyLogoBytes caps uploaded artwork at 512KB, mirroring the avatar
@@ -105,13 +111,13 @@ func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
 	var profile CompanyProfile
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT legal_name, address, phone, email, tax_id, logo_path,
-		       logo_bytes, logo_mime, currency,
+		       logo_bytes, logo_mime, currency, canonical_uom,
 		       theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
 		       theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink
 		FROM %s.company_profile WHERE id = 1`, s.configSchema())).Scan(
 		&profile.LegalName, &profile.Address, &profile.Phone,
 		&profile.Email, &profile.TaxID, &profile.LogoPath,
-		&profile.LogoBytes, &profile.LogoMime, &profile.Currency,
+		&profile.LogoBytes, &profile.LogoMime, &profile.Currency, &profile.CanonicalUoM,
 		&profile.ThemeQDeep, &profile.ThemeQAccent, &profile.ThemeQSoft, &profile.ThemeQInk,
 		&profile.ThemePDeep, &profile.ThemePAccent, &profile.ThemePSoft, &profile.ThemePInk)
 	if err != nil {
@@ -157,6 +163,23 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 	if err := checkCurrency(profile); err != nil {
 		return CompanyProfile{}, err
 	}
+	// Canonical unit: an empty value keeps whatever is stored -- an old
+	// desktop client that does not know the field must not be able to move
+	// it -- and anything else must name a live list member exactly: the FK
+	// compares canonical_uom against company_uom.value byte for byte, so a
+	// value that matches only case-insensitively would be refused by the
+	// database at commit anyway, and the store refuses earlier with a
+	// message naming the unit.
+	if trimmed := strings.TrimSpace(profile.CanonicalUoM); trimmed != "" {
+		profile.CanonicalUoM = trimmed
+		units, err := s.GetCompanyUnits(ctx)
+		if err != nil {
+			return CompanyProfile{}, fmt.Errorf("validate canonical unit: %w", err)
+		}
+		if !unitListContains(units, profile.CanonicalUoM) {
+			return CompanyProfile{}, fmt.Errorf("company canonical unit %q is not on the company's unit list", profile.CanonicalUoM)
+		}
+	}
 	if err := checkTheme(profile); err != nil {
 		return CompanyProfile{}, err
 	}
@@ -167,19 +190,20 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 		    theme_q_deep = $6, theme_q_accent = $7, theme_q_soft = $8, theme_q_ink = $9,
 		    theme_p_deep = $10, theme_p_accent = $11, theme_p_soft = $12, theme_p_ink = $13,
 		    currency = $14,
+		    canonical_uom = COALESCE(NULLIF($15, ''), canonical_uom),
 		    updated_at = NOW()
 		WHERE id = 1
 		RETURNING legal_name, address, phone, email, tax_id, logo_path,
-		    logo_bytes, logo_mime, currency,
+		    logo_bytes, logo_mime, currency, canonical_uom,
 		    theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
 		    theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink`, s.configSchema()),
 		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID,
 		profile.ThemeQDeep, profile.ThemeQAccent, profile.ThemeQSoft, profile.ThemeQInk,
 		profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk,
-		profile.Currency).Scan(
+		profile.Currency, profile.CanonicalUoM).Scan(
 		&updated.LegalName, &updated.Address, &updated.Phone,
 		&updated.Email, &updated.TaxID, &updated.LogoPath,
-		&updated.LogoBytes, &updated.LogoMime, &updated.Currency,
+		&updated.LogoBytes, &updated.LogoMime, &updated.Currency, &updated.CanonicalUoM,
 		&updated.ThemeQDeep, &updated.ThemeQAccent, &updated.ThemeQSoft, &updated.ThemeQInk,
 		&updated.ThemePDeep, &updated.ThemePAccent, &updated.ThemePSoft, &updated.ThemePInk)
 	if err != nil {
@@ -213,11 +237,11 @@ func (s *Store) SetCompanyLogo(ctx context.Context, data []byte, mime string) (C
 		SET logo_bytes = $1, logo_mime = $2, updated_at = NOW()
 		WHERE id = 1
 		RETURNING legal_name, address, phone, email, tax_id, logo_path,
-		    logo_bytes, logo_mime`, s.configSchema()),
+		    logo_bytes, logo_mime, canonical_uom`, s.configSchema()),
 		nilIfEmptyBytes(data), &mime).Scan(
 		&profile.LegalName, &profile.Address, &profile.Phone,
 		&profile.Email, &profile.TaxID, &profile.LogoPath,
-		&profile.LogoBytes, &profile.LogoMime)
+		&profile.LogoBytes, &profile.LogoMime, &profile.CanonicalUoM)
 	if err != nil {
 		return CompanyProfile{}, fmt.Errorf("set company logo: %w", err)
 	}

@@ -276,8 +276,16 @@ type Quotation struct {
 	customerDirectory  []ManagedClient
 	lastInput          QuotationInput
 	Data               QuotationData
-	archiveRevision    uint16
-	prepared           bool
+	// units is the company's unit-of-measure list, value → label, resolved
+	// once per Prepare from the company identity (issue #337). It decides
+	// what a line may carry and what each stored value prints as.
+	units map[string]string
+	// canonicalUoM is the unit a package (sub-item) line is quoted in,
+	// replacing the hardcoded "Lot". It is a member of units; Prepare falls
+	// back to "Lot" when the resolved identity carries none.
+	canonicalUoM    string
+	archiveRevision uint16
+	prepared        bool
 	// activeDraftID is the draft the editor currently holds, 0 when the
 	// quotation is not a resumed draft. It is sent with the export so the
 	// server can consume the draft as part of the same request: a draft that
@@ -295,12 +303,57 @@ type CompanyIdentity struct {
 	// entry by Prepare (unknown or empty reads as IDR). It decides the
 	// exponent and symbol every Display string on the document uses.
 	Currency string
+	// CanonicalUoM is the unit a package (sub-item) line is quoted in,
+	// replacing the hardcoded "Lot". Empty reads as "Lot".
+	CanonicalUoM string
+	// Units is the company's unit-of-measure list, value → label, in the
+	// order the editor shows it. It decides what a quotation may carry and
+	// what each stored value prints as. Empty falls back to the seeds.
+	Units map[string]string
 	// Theme carries the quotation brand colors. Empty values are valid and
 	// mean "use the stylesheet default" (the template guards each one).
 	ThemeQDeep   string
 	ThemeQAccent string
 	ThemeQSoft   string
 	ThemeQInk    string
+}
+
+// defaultUnitsMap is the shipped unit list, value = label, in the order the
+// editor's dropdown showed it before the list became a company setting (the
+// exact UOM_OPTIONS catalog frontend/src/App.tsx used to carry). Migration
+// 026 seeds the database with these, and this is the offline fallback for the
+// desktop cache and for unit tests exercising Prepare without a store.
+func defaultUnitsMap() map[string]string {
+	return map[string]string{
+		"Lot":     "Lot",
+		"Pc":      "Pc",
+		"EA":      "EA",
+		"LS":      "LS",
+		"set":     "set",
+		"meter":   "meter",
+		"m2":      "m2",
+		"m3":      "m3",
+		"Hour":    "Hour",
+		"Day":     "Day",
+		"Week":    "Week",
+		"Month":   "Month",
+		"Year":    "Year",
+		"Quarter": "Quarter",
+	}
+}
+
+// completeIdentity fills the unit fields a caller may leave empty: the
+// shipped seed list and the canonical default "Lot". A hand-built identity
+// (unit tests) and a stale offline cache both rely on the fallback; the
+// authoritative path always carries both, so this never overrides real data.
+func completeIdentity(identity CompanyIdentity) CompanyIdentity {
+	if len(identity.Units) == 0 {
+		identity.Units = defaultUnitsMap()
+	}
+	if identity.CanonicalUoM == "" {
+		identity.CanonicalUoM = "Lot"
+	}
+	return identity
 }
 
 // DefaultCompanyIdentity is the last-resort header when the stored profile
@@ -310,6 +363,11 @@ func DefaultCompanyIdentity() CompanyIdentity {
 	return CompanyIdentity{
 		Name:    "PT Arcon Penta Persada",
 		Address: "Perkantoran Graha Kadin Blk C no. 6 Jl. Engku Putri, Kel. Belian, Kec. Batam, Kota Batam 29433, Indonesia",
+		// CanonicalUoM and Units are the same seeds the database starts
+		// from, so the offline path validates exactly what an online one
+		// would.
+		CanonicalUoM: "Lot",
+		Units:        defaultUnitsMap(),
 	}
 }
 
@@ -328,10 +386,22 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 	if err := client.Get("/v1/company", &profile); err != nil {
 		return err
 	}
+	var units struct {
+		Units []CompanyUnit `json:"units"`
+	}
+	if err := client.Get("/v1/company/units", &units); err != nil {
+		return err
+	}
+	unitMap := make(map[string]string, len(units.Units))
+	for _, unit := range units.Units {
+		unitMap[unit.Value] = unit.Label
+	}
 	q.companyIdentity = &CompanyIdentity{
 		Name:         profile.LegalName,
 		Address:      profile.Address,
 		Currency:     profile.Currency,
+		CanonicalUoM: profile.CanonicalUoM,
+		Units:        unitMap,
 		ThemeQDeep:   profile.ThemeQDeep,
 		ThemeQAccent: profile.ThemeQAccent,
 		ThemeQSoft:   profile.ThemeQSoft,
@@ -366,22 +436,32 @@ func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
 		if err != nil {
 			return CompanyIdentity{}, err
 		}
-		return CompanyIdentity{
+		units, err := q.store.GetCompanyUnits(q.context())
+		if err != nil {
+			return CompanyIdentity{}, err
+		}
+		unitMap := make(map[string]string, len(units))
+		for _, unit := range units {
+			unitMap[unit.Value] = unit.Label
+		}
+		return completeIdentity(CompanyIdentity{
 			Name:         profile.LegalName,
 			Address:      profile.Address,
 			Currency:     profile.Currency,
+			CanonicalUoM: profile.CanonicalUoM,
+			Units:        unitMap,
 			ThemeQDeep:   profile.ThemeQDeep,
 			ThemeQAccent: profile.ThemeQAccent,
 			ThemeQSoft:   profile.ThemeQSoft,
 			ThemeQInk:    profile.ThemeQInk,
-		}, nil
+		}), nil
 	}
 	if q.companyIdentity == nil {
 		if err := q.RefreshCompanyIdentity(); err != nil {
 			return DefaultCompanyIdentity(), nil
 		}
 	}
-	identity := *q.companyIdentity
+	identity := completeIdentity(*q.companyIdentity)
 	if strings.TrimSpace(identity.Name) == "" {
 		identity.Name = DefaultCompanyIdentity().Name
 	}
@@ -676,6 +756,35 @@ func plausibleUoM(s string) bool {
 	return true
 }
 
+// unitIsAccepted reports whether a unit value may be used on a quotation: it
+// must fold (case-insensitively) onto a member of the company's unit list or
+// one of the legacy spellings every historical quotation may carry ("Unit",
+// "PC", "Meter"). Folding, not exact match, is deliberate: "lot", "LOT" or
+// whitespace-padded values from a paste climb the same path as the exact
+// spelling, and the stored value keeps whatever spelling arrived, exactly as
+// it always has.
+func unitIsAccepted(uom string, units map[string]string) bool {
+	folded := strings.TrimSpace(uom)
+	for _, legacy := range []string{"unit", "pc", "meter"} {
+		if strings.EqualFold(folded, legacy) {
+			return true
+		}
+	}
+	for value := range units {
+		if strings.EqualFold(folded, value) {
+			return true
+		}
+	}
+	return false
+}
+
+// unitMatches reports whether a unit value is the canonical unit,
+// case-insensitively, so "lot" from a paste still climbs the package path the
+// exact spelling does.
+func unitMatches(uom, canonical string) bool {
+	return strings.EqualFold(strings.TrimSpace(uom), strings.TrimSpace(canonical))
+}
+
 // MaxMarginPercent is the highest profit margin a line may carry.
 //
 // 1000% means selling at eleven times cost, which is ordinary for a low-cost
@@ -698,13 +807,14 @@ const MaxDiscountPercent = 100
 //
 // A line with sub-items is a package: the parent stops being a priceable row
 // and becomes the rollup of its parts. That is why the parent's quantity and
-// unit are pinned to 1 and Lot (the parent's price IS the sum, so a second lot
-// would double-count), why the parent's own margin is refused (the parts carry
-// the margin now), and why description bullets are refused (the sub rows
-// replace them; keeping both would print the scope twice). ShowSubPrices with
-// no sub-items is a contradiction and is refused rather than ignored, because a
-// flag the code silently drops today is a bug it ships tomorrow.
-func validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemInput, error) {
+// unit are pinned to 1 and the canonical unit (the parent's price IS the sum,
+// so a second lot would double-count), why the parent's own margin is refused
+// (the parts carry the margin now), and why description bullets are refused
+// (the sub rows replace them; keeping both would print the scope twice).
+// ShowSubPrices with no sub-items is a contradiction and is refused rather
+// than ignored, because a flag the code silently drops today is a bug it ships
+// tomorrow.
+func (q *Quotation) validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemInput, error) {
 	if len(item.SubItems) == 0 {
 		if item.ShowSubPrices {
 			return nil, fmt.Errorf("item %d: sub-item breakdown requested but no sub-items given", itemNo)
@@ -712,14 +822,15 @@ func validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemIn
 		return nil, nil
 	}
 
-	// 1 exactly, so the parent contributes its price once; Lot, because a
-	// package is quoted as a lot. Case-insensitive so "lot" from a paste
-	// still climbs the same path if the editor ever sends it that way.
+	// 1 exactly, so the parent contributes its price once; the canonical unit,
+	// because a package is quoted in the company's package unit. Any value
+	// folding onto the canonical -- "lot" from a paste included -- is accepted
+	// and normalized to the canonical spelling below (Prepare).
 	if item.Qty != 1 {
 		return nil, fmt.Errorf("item %d: a line with sub-items must have quantity 1 (the package is the rollup of its parts)", itemNo)
 	}
-	if !strings.EqualFold(strings.TrimSpace(item.UoM), "lot") {
-		return nil, fmt.Errorf("item %d: a line with sub-items must use the unit Lot", itemNo)
+	if !unitMatches(item.UoM, q.canonicalUoM) {
+		return nil, fmt.Errorf("item %d: a line with sub-items must use the unit %s", itemNo, q.canonicalUoM)
 	}
 	if item.MarginEnabled {
 		return nil, fmt.Errorf("item %d: a line with sub-items takes its margin per sub-item; clear the line margin", itemNo)
@@ -748,6 +859,9 @@ func validateSubItems(item QuotationItemInput, itemNo int) ([]QuotationSubItemIn
 		}
 		if !plausibleUoM(uom) {
 			return nil, fmt.Errorf("item %d sub-item %d: unit of measure %q is not a unit", itemNo, j+1, sub.UoM)
+		}
+		if !unitIsAccepted(uom, q.units) {
+			return nil, fmt.Errorf("item %d sub-item %d: unit of measure %q is not on the company's unit list", itemNo, j+1, sub.UoM)
 		}
 		if sub.MarginPercent > MaxMarginPercent {
 			return nil, fmt.Errorf("item %d sub-item %d: margin percent cannot be greater than %d", itemNo, j+1, MaxMarginPercent)
@@ -795,6 +909,19 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return err
 	}
 
+	// Resolve the company identity once, before the item loop: the unit list
+	// decides what each line may carry, and the profile decides the header,
+	// so validation and rendering draw on one snapshot rather than two reads
+	// of a list that could change between them. Both land on the Quotation
+	// (q.units, q.canonicalUoM) for the whole of Prepare and the rendering
+	// paths that print what was validated.
+	identity, err := q.resolveCompanyIdentity()
+	if err != nil {
+		return err
+	}
+	q.units = identity.Units
+	q.canonicalUoM = identity.CanonicalUoM
+
 	if len(input.Items) < 1 {
 		return fmt.Errorf("at least one item is required")
 	}
@@ -812,14 +939,20 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		// into -- a <select> bound to the stored value shows something else when
 		// the value is not one of the options -- so a value that slipped through
 		// used to reach the customer PDF silently, printed in the UoM column and
-		// overflowing into the unit price beside it. See plausibleUoM for why this
-		// is a bound rather than a list of the five units the editor offers.
+		// overflowing into the unit price beside it. plausibleUoM rejects the
+		// paste-bug shape (a sentence where a label belongs); unitIsAccepted
+		// then checks the value against the company's own list, so a plausible
+		// label that is not a unit this company uses is refused here and now,
+		// with the unit named, instead of arriving on a customer document.
 		uom := strings.TrimSpace(item.UoM)
 		if uom == "" {
 			return fmt.Errorf("item %d: unit of measure is required", i+1)
 		}
 		if !plausibleUoM(uom) {
 			return fmt.Errorf("item %d: unit of measure %q is not a unit", i+1, item.UoM)
+		}
+		if !unitIsAccepted(uom, q.units) {
+			return fmt.Errorf("item %d: unit of measure %q is not on the company's unit list", i+1, item.UoM)
 		}
 
 		if item.MarginPercent > MaxMarginPercent {
@@ -829,15 +962,16 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 			return fmt.Errorf("item discount percent cannot be greater than %d", MaxDiscountPercent)
 		}
 
-		normalized, err := validateSubItems(item, i+1)
+		normalized, err := q.validateSubItems(item, i+1)
 		if err != nil {
 			return err
 		}
 		input.Items[i].SubItems = normalized
 		if len(normalized) > 0 {
-			// A package is quoted as a Lot by definition; canonicalize instead
-			// of letting "lot", "LOT" or "Lot " reach the customer document.
-			input.Items[i].UoM = "Lot"
+			// A package is quoted in the canonical unit by definition;
+			// canonicalize instead of letting "lot", "LOT" or "Lot " reach
+			// the customer document.
+			input.Items[i].UoM = q.canonicalUoM
 		}
 	}
 
@@ -902,10 +1036,6 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.RecipientCompany = companyName
 	q.Data.RecipientAddress = companyAddress
 
-	identity, err := q.resolveCompanyIdentity()
-	if err != nil {
-		return err
-	}
 	q.Data.CompanyName = identity.Name
 	q.Data.CompanyAddress = identity.Address
 	q.Data.ThemeQDeep = identity.ThemeQDeep
@@ -1246,6 +1376,44 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 	}
 }
 
+// uomLabel resolves a unit's printed label: the exact company-list match,
+// or the raw value when the value is not on the list. Legacy spellings
+// ("Unit", "PC", "Meter") and units removed from the list after a quotation
+// was prepared are both absent from the map, and both print as they always
+// have -- the label lookup must never turn a stored value that is not on the
+// list into a blank cell or a guess.
+func (q *Quotation) uomLabel(value string) string {
+	if label, ok := q.units[value]; ok {
+		return label
+	}
+	return value
+}
+
+// displayData returns the quotation data with every item and sub-item UoM
+// resolved to its printed label. Value is what stores, signs and validates;
+// the label is what the customer document prints (issue #337).
+//
+// The copy is defensive: it never mutates q.Data, because the signed payload
+// and the stored revision read the raw values (SignableFromData and
+// revisionDraft), and a template execution must not change what gets signed
+// or stored. A shallow copy is not enough -- item := q.Data.Items[i] shares
+// the underlying sub-item slice, so resolving a sub's UoM in place would
+// corrupt q.Data -- hence the deep copy of every SubItems slice.
+func (q *Quotation) displayData() QuotationData {
+	data := q.Data
+	data.Items = make([]QuotationItem, len(q.Data.Items))
+	for i, item := range q.Data.Items {
+		item.UoM = q.uomLabel(item.UoM)
+		item.SubItems = make([]QuotationSubItem, len(q.Data.Items[i].SubItems))
+		for j, sub := range q.Data.Items[i].SubItems {
+			sub.UoM = q.uomLabel(sub.UoM)
+			item.SubItems[j] = sub
+		}
+		data.Items[i] = item
+	}
+	return data
+}
+
 // build renders the customer PDF through the application's selected renderer.
 //
 // The choice itself lives in backend/render, in one line, and is a compile-time
@@ -1267,8 +1435,13 @@ func (q *Quotation) build() ([]byte, error) {
 // one field of the result, which is what keeps the two implementations from
 // drifting into sharing a convention that only one of them honours.
 func (q *Quotation) renderInput() (quotation.Input, error) {
+	// Every reader of this function -- the HTML template here and the seam
+	// items below -- sees the display copy, with UoMs resolved to their
+	// labels; q.Data itself keeps the raw values that sign and store.
+	data := q.displayData()
+
 	var body bytes.Buffer
-	if err := q.Data.HtmlTemplate.Execute(&body, q.Data); err != nil {
+	if err := q.Data.HtmlTemplate.Execute(&body, data); err != nil {
 		return quotation.Input{}, fmt.Errorf("execute quotation template: %w", err)
 	}
 
@@ -1285,8 +1458,8 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		return quotation.Input{}, fmt.Errorf("decode verification qr: %w", err)
 	}
 
-	items := make([]quotation.Item, 0, len(q.Data.Items))
-	for _, it := range q.Data.Items {
+	items := make([]quotation.Item, 0, len(data.Items))
+	for _, it := range data.Items {
 		parts := make([]quotation.SubItem, 0, len(it.SubItems))
 		for _, sub := range it.SubItems {
 			bullets := make([]string, 0, len(sub.SubSubItems))

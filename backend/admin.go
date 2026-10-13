@@ -219,7 +219,19 @@ type CompanyProfile struct {
 	// Currency is the company's ISO 4217 code from the shipped catalogue.
 	// It round-trips verbatim like the theme colours; empty reads as IDR.
 	Currency string
-	HasLogo  bool
+	// CanonicalUoM is the unit a quotation's package lines are quoted in,
+	// replacing the hardcoded "Lot". Empty keeps the stored value.
+	CanonicalUoM string
+	HasLogo      bool
+}
+
+// CompanyUnit is one entry of the company's unit-of-measure list as the
+// desktop sees it: the value the editor stores and the label that prints. The
+// list is ordered; the wire carries it as an array (a SortOrder number is
+// deliberately absent -- the array position IS the order).
+type CompanyUnit struct {
+	Value string
+	Label string
 }
 
 // GetCompanyProfile loads the company profile.
@@ -250,6 +262,7 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		"email":        profile.Email,
 		"taxId":        profile.TaxID,
 		"currency":     profile.Currency,
+		"canonicalUoM": profile.CanonicalUoM,
 		"themeQDeep":   profile.ThemeQDeep,
 		"themeQAccent": profile.ThemeQAccent,
 		"themeQSoft":   profile.ThemeQSoft,
@@ -262,6 +275,48 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 		return CompanyProfile{}, err
 	}
 	return updated, nil
+}
+
+// GetCompanyUnits loads the company's unit list in display order. Every
+// signed-in role reads it -- units print on customer documents, so the
+// editor, the review panel and the admin list all draw from the same source.
+func (a *AdminAPI) GetCompanyUnits() ([]CompanyUnit, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Units []CompanyUnit `json:"units"`
+	}
+	if err := client.Get("/v1/company/units", &response); err != nil {
+		return nil, err
+	}
+	if response.Units == nil {
+		response.Units = []CompanyUnit{}
+	}
+	return NonNilList(response.Units), nil
+}
+
+// UpdateCompanyUnits full-replaces the company's unit list, in the given
+// order. The server refuses a replacement that drops the canonical unit or
+// violates the shape rules.
+func (a *AdminAPI) UpdateCompanyUnits(units []CompanyUnit) ([]CompanyUnit, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var updated struct {
+		Units []CompanyUnit `json:"units"`
+	}
+	if err := client.Put("/v1/admin/company/units", map[string]any{
+		"units": units,
+	}, &updated); err != nil {
+		return nil, err
+	}
+	if updated.Units == nil {
+		updated.Units = []CompanyUnit{}
+	}
+	return NonNilList(updated.Units), nil
 }
 
 // GetCurrencyCatalogue returns the shipped currency catalogue for the

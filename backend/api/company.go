@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -22,6 +23,7 @@ func companyDTO(profile store.CompanyProfile) map[string]any {
 		"taxId":        profile.TaxID,
 		"hasLogo":      profile.HasLogo,
 		"currency":     profile.Currency,
+		"canonicalUoM": profile.CanonicalUoM,
 		"themeQDeep":   profile.ThemeQDeep,
 		"themeQAccent": profile.ThemeQAccent,
 		"themeQSoft":   profile.ThemeQSoft,
@@ -60,6 +62,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 		Email        string `json:"email"`
 		TaxID        string `json:"taxId"`
 		Currency     string `json:"currency"`
+		CanonicalUoM string `json:"canonicalUoM"`
 		ThemeQDeep   string `json:"themeQDeep"`
 		ThemeQAccent string `json:"themeQAccent"`
 		ThemeQSoft   string `json:"themeQSoft"`
@@ -79,6 +82,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 		Email:        request.Email,
 		TaxID:        request.TaxID,
 		Currency:     request.Currency,
+		CanonicalUoM: request.CanonicalUoM,
 		ThemeQDeep:   request.ThemeQDeep,
 		ThemeQAccent: request.ThemeQAccent,
 		ThemeQSoft:   request.ThemeQSoft,
@@ -95,6 +99,7 @@ func (s *Server) updateCompanyProfile(context echo.Context) error {
 		case strings.Contains(err.Error(), "invalid company email"),
 			strings.Contains(err.Error(), "too long"),
 			strings.Contains(err.Error(), "company currency"),
+			strings.Contains(err.Error(), "canonical unit"),
 			strings.Contains(err.Error(), "must be a #RRGGBB"):
 			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		default:
@@ -149,6 +154,66 @@ func (s *Server) clearCompanyLogo(context echo.Context) error {
 	actorID := me.ID
 	_ = s.database.Audit(context.Request().Context(), &actorID, "company.logo.clear", nil, "")
 	return context.JSON(http.StatusOK, map[string]any{"hasLogo": profile.HasLogo})
+}
+
+// companyUnitsDTO renders the unit list as the ordered array the wire
+// contract promises. SortOrder is deliberately absent: the array order IS
+// the order, and a redundant number on the wire could drift from it.
+func companyUnitsDTO(units []store.CompanyUnit) map[string]any {
+	rows := make([]map[string]any, 0, len(units))
+	for _, unit := range units {
+		rows = append(rows, map[string]any{"value": unit.Value, "label": unit.Label})
+	}
+	return map[string]any{"units": rows}
+}
+
+// getCompanyUnits serves the company's unit list to every signed-in role:
+// units print on customer documents, so hiding them from staff would break
+// their previews (the same reasoning the logo endpoints carry).
+func (s *Server) getCompanyUnits(context echo.Context) error {
+	units, err := s.database.GetCompanyUnits(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company units"})
+	}
+	return context.JSON(http.StatusOK, companyUnitsDTO(units))
+}
+
+// updateCompanyUnits full-replaces the company's unit list. The store
+// validates shape, uniqueness and the canonical unit's survival; this handler
+// only crosses the wire.
+func (s *Server) updateCompanyUnits(context echo.Context) error {
+	var request struct {
+		Units []struct {
+			Value string `json:"value"`
+			Label string `json:"label"`
+		} `json:"units"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	units := make([]store.CompanyUnit, 0, len(request.Units))
+	for _, unit := range request.Units {
+		units = append(units, store.CompanyUnit{Value: unit.Value, Label: unit.Label})
+	}
+	updated, err := s.database.UpdateCompanyUnits(context.Request().Context(), units)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "at least one unit"),
+			strings.Contains(err.Error(), "value is required"),
+			strings.Contains(err.Error(), "is too long"),
+			strings.Contains(err.Error(), "not shaped like a unit label"),
+			strings.Contains(err.Error(), "label is required"),
+			strings.Contains(err.Error(), "duplicates an earlier unit"),
+			strings.Contains(err.Error(), "canonical unit"):
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		default:
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "replace company units"})
+		}
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.units.update", nil, fmt.Sprintf("%d units", len(updated)))
+	return context.JSON(http.StatusOK, companyUnitsDTO(updated))
 }
 
 // getCompanyLogo serves the effective artwork for previews: the upload when
