@@ -170,6 +170,7 @@ type InternalBreakdown struct {
 	DisplayProfit               string
 	DisplayTax                  string
 	DisplayMarginalizedDiscount string
+	DisplayRowDiscountTotal     string
 	DisplayOriginalSubtotal     string
 	DisplayOriginalDiscount     string
 	DisplayOriginalGrand        string
@@ -193,6 +194,7 @@ type InternalBreakdown struct {
 	OriginalGrand               uint64
 	MarginalizedSubtotal        uint64
 	MarginalizedDiscount        uint64
+	RowDiscountTotal            uint64
 	TaxRateBps                  uint16
 	DiscountPercent             uint8
 }
@@ -389,6 +391,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 		DisplayOriginalGrand:        formatMoney(q.Data.Currency, q.Data.OriginalGrandTotal),
 		DisplayMarginalizedSubtotal: formatMoney(q.Data.Currency, q.Data.SubTotal),
 		DisplayMarginalizedDiscount: formatMoney(q.Data.Currency, q.Data.DiscountAmount),
+		DisplayRowDiscountTotal:     formatMoney(q.Data.Currency, q.Data.RowDiscountTotal),
 		DisplayMarginalizedGrand:    formatMoney(q.Data.Currency, q.Data.SellGrandTotal),
 		DisplayMarginalizedAfterTax: formatMoney(q.Data.Currency, q.Data.MarginalizedGrandAfterTax),
 		CostSubtotal:                q.Data.OriginalSubTotal,
@@ -407,6 +410,7 @@ func (q *Quotation) GetInternalBreakdown() (InternalBreakdown, error) {
 		OriginalGrand:               q.Data.OriginalGrandTotal,
 		MarginalizedSubtotal:        q.Data.SubTotal,
 		MarginalizedDiscount:        q.Data.DiscountAmount,
+		RowDiscountTotal:            q.Data.RowDiscountTotal,
 		MarginalizedGrand:           q.Data.SellGrandTotal,
 		MarginalizedGrandAfterTax:   q.Data.MarginalizedGrandAfterTax,
 	}, nil
