@@ -58,7 +58,7 @@ func mockMixedInput() QuotationInput {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	}
 }
@@ -179,7 +179,7 @@ func TestPackageTruncatesPerSubNotAtTheSum(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	}); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -213,7 +213,7 @@ func TestPrepareSubItemValidation(t *testing.T) {
 			RecipientName: "Test",
 			Validity:      14,
 			PaymentTerm:   30,
-			LeadTime:      45,
+			LeadTimeDays:  45,
 			Incoterm:      "FOB",
 		}
 	}

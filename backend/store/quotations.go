@@ -114,6 +114,9 @@ type RevisionDraft struct {
 	CustomerCode    int16
 	DiscountPercent int16
 	LeadTimeDays    int16
+	LeadTimeYears   int16
+	LeadTimeMonths  int16
+	LeadTimeWeeks   int16
 	PaymentTermDays int16
 	ValidityDays    int16
 	RevisionNumber  int16
@@ -166,6 +169,9 @@ type QuotationRecord struct {
 	TaxRateBps      int16
 	DiscountPercent int16
 	LeadTimeDays    int16
+	LeadTimeYears   int16
+	LeadTimeMonths  int16
+	LeadTimeWeeks   int16
 	PaymentTermDays int16
 	ValidityDays    int16
 }
@@ -225,7 +231,9 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		SELECT q.id, q.uuid::text, q.quote_number, r.revision_number, c.customer_code,
 		       c.legal_name, ca.address, r.recipient_name, r.recipient_address,
 		       r.subject, r.incoterm, r.validity_days, r.payment_term_days,
-		       r.lead_time_days, r.discount_percent, r.tax_zone, r.tax_category,
+		       r.lead_time_days, r.lead_time_years, r.lead_time_months,
+		       r.lead_time_weeks,
+		       r.discount_percent, r.tax_zone, r.tax_category,
 		       r.tax_rate_bps, r.tax_type, r.service_category, r.created_at,
 		       r.currency,
 		       d.html_snapshot, d.pdf_data,
@@ -270,6 +278,9 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.ValidityDays,
 		&record.PaymentTermDays,
 		&record.LeadTimeDays,
+		&record.LeadTimeYears,
+		&record.LeadTimeMonths,
+		&record.LeadTimeWeeks,
 		&record.DiscountPercent,
 		&record.TaxZone,
 		&record.TaxCategory,
@@ -557,10 +568,11 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		INSERT INTO %s.quotation_revisions (
 			quotation_id, revision_number, recipient_name, recipient_address,
 			subject, incoterm, validity_days, payment_term_days, lead_time_days,
+			lead_time_years, lead_time_months, lead_time_weeks,
 			discount_percent, tax_zone, tax_category, tax_rate_bps,
 			tax_type, service_category,
 			short_id, signature, sig_key_id, canonical_sha256, issuer_name, currency
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
 		RETURNING id`, schema),
 		quoteID,
 		revisionNumber,
@@ -571,6 +583,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		draft.ValidityDays,
 		draft.PaymentTermDays,
 		draft.LeadTimeDays,
+		draft.LeadTimeYears,
+		draft.LeadTimeMonths,
+		draft.LeadTimeWeeks,
 		draft.DiscountPercent,
 		draft.TaxZone,
 		draft.TaxCategory,
@@ -732,6 +747,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		ValidityDays:     draft.ValidityDays,
 		PaymentTermDays:  draft.PaymentTermDays,
 		LeadTimeDays:     draft.LeadTimeDays,
+		LeadTimeYears:    draft.LeadTimeYears,
+		LeadTimeMonths:   draft.LeadTimeMonths,
+		LeadTimeWeeks:    draft.LeadTimeWeeks,
 		DiscountPercent:  draft.DiscountPercent,
 		TaxZone:          draft.TaxZone,
 		TaxCategory:      draft.TaxCategory,

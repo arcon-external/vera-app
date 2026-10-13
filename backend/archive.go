@@ -114,11 +114,21 @@ type ArchivedQuotation struct {
 	MarginalizedGrand    int64
 	CustomerGrandTotal   int64
 	CustomerCode         int16
-	LeadTimeDays         int16
-	PaymentTermDays      int16
-	DiscountPercent      int16
-	ValidityDays         int16
-	TaxRateBps           int16
+	// DisplayLeadTime is the composed sentence the revision printed
+	// ("2 Years, 10 Months, 4 Weeks, and 5 Days", "-" when none was stated).
+	// The four numerics beside it are the figures as entered, so reopening a
+	// revision in the editor restores the units and not a back-solved total.
+	DisplayLeadTime string
+	LeadTimeYears   uint8
+	LeadTimeMonths  uint8
+	LeadTimeWeeks   uint8
+	LeadTimeDays    uint8
+	// PaymentTermDays and the neighbour terms are the stored revision's own
+	// figures: history, not the live profile's defaults.
+	PaymentTermDays int16
+	DiscountPercent int16
+	ValidityDays    int16
+	TaxRateBps      int16
 }
 
 func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
@@ -245,6 +255,11 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		RecipientName:               detail.RecipientName,
 		Incoterm:                    detail.Incoterm,
 		DiscountPercent:             int16(detail.DiscountPercent),
+		DisplayLeadTime:             detail.DisplayLeadTime,
+		LeadTimeYears:               detail.LeadTimeYears,
+		LeadTimeMonths:              detail.LeadTimeMonths,
+		LeadTimeWeeks:               detail.LeadTimeWeeks,
+		LeadTimeDays:                detail.LeadTimeDays,
 		TaxZone:                     detail.TaxZone,
 		TaxCategory:                 detail.TaxCategory,
 		TaxType:                     detail.TaxType,

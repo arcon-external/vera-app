@@ -123,6 +123,14 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   Currency: string;
   ValidityDays: number;
   PaymentTermDays: number;
+  // The composed lead-time sentence the revision printed, built once in Go
+  // and consumed verbatim: the detail page never composes it client-side.
+  // The four numerics beside it are the figures as entered, so reopening a
+  // revision in the editor restores the units.
+  DisplayLeadTime: string;
+  LeadTimeYears: number;
+  LeadTimeMonths: number;
+  LeadTimeWeeks: number;
   LeadTimeDays: number;
   DiscountPercent: number;
   TaxZone: string;

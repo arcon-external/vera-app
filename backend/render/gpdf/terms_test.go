@@ -30,11 +30,15 @@ const templateTermsPath = "../../template/html/template-fixed.html"
 
 // wantTemplateTerms is the .tnc block's four terms exactly as the template
 // carries them, placeholders included.
+//
+// The lead time line prints the composed sentence -- one string built by the
+// application layer, so the template's {{.LeadTime}} and the native renderer's
+// in.DisplayLeadTime read the same words.
 func wantTemplateTerms() []string {
 	return []string{
 		"1. Payment terms agreed for this quotation is {{.PaymentTerm}} days.",
 		"2. This quotation is valid for {{.Validity}} days.",
-		"3. Lead time is {{.LeadTime}} days.",
+		"3. Lead time is {{.LeadTime}}.",
 		"4. Incoterms: {{.Incoterm}}",
 	}
 }
@@ -108,15 +112,15 @@ func TestNativeTermsMatchTheTemplate(t *testing.T) {
 	}
 
 	base := quotation.Input{
-		PaymentTerm: 90,
-		Validity:    30,
-		LeadTime:    60,
-		Incoterm:    "FOB",
+		PaymentTerm:     90,
+		Validity:        30,
+		DisplayLeadTime: "60 Days",
+		Incoterm:        "FOB",
 	}
 	wantNative := []string{
 		"1. Payment terms agreed for this quotation is 90 days.",
 		"2. This quotation is valid for 30 days.",
-		"3. Lead time is 60 days.",
+		"3. Lead time is 60 Days.",
 		"4. Incoterms: FOB",
 	}
 	for _, category := range []string{"", "NonConstruction", "Construction"} {
@@ -150,10 +154,10 @@ func quoteCategory(s string) string {
 func TestTermsHeightIgnoresServiceCategory(t *testing.T) {
 	e := testEngine(t)
 	base := quotation.Input{
-		PaymentTerm: 90,
-		Validity:    30,
-		LeadTime:    60,
-		Incoterm:    "FOB",
+		PaymentTerm:     90,
+		Validity:        30,
+		DisplayLeadTime: "60 Days",
+		Incoterm:        "FOB",
 	}
 	var heights []float64
 	for _, category := range []string{"", "NonConstruction", "Construction"} {

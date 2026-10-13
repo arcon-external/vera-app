@@ -65,9 +65,17 @@ type CustomerPreview struct {
 	OriginalDiscountAmount uint64
 	RevisionID             uint16
 	DiscountPercent        uint8
-	Validity               uint8
-	PaymentTerm            uint8
-	LeadTime               uint8
+	// DisplayLeadTime is the composed sentence ("2 Years, 10 Months, 4 Weeks,
+	// and 5 Days", "-" when none is stated), so the review screen shows the
+	// customer exactly what the document prints. The four numerics beside it
+	// are the figures as entered, for the editor to restore.
+	DisplayLeadTime string
+	LeadTimeYears   uint8
+	LeadTimeMonths  uint8
+	LeadTimeWeeks   uint8
+	LeadTimeDays    uint8
+	Validity        uint8
+	PaymentTerm     uint8
 }
 
 // InternalPreviewItem shows the cost vs sell economics of one line.
@@ -253,9 +261,13 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 		OriginalDiscountAmount: q.Data.OriginalDiscountAmount,
 		OriginalGrandTotal:     q.Data.OriginalGrandTotal,
 		DiscountPercent:        q.Data.DiscountPercent,
+		DisplayLeadTime:        q.Data.LeadTime,
+		LeadTimeYears:          q.Data.LeadTimeYears,
+		LeadTimeMonths:         q.Data.LeadTimeMonths,
+		LeadTimeWeeks:          q.Data.LeadTimeWeeks,
+		LeadTimeDays:           q.Data.LeadTimeDays,
 		Validity:               q.Data.Validity,
 		PaymentTerm:            q.Data.PaymentTerm,
-		LeadTime:               q.Data.LeadTime,
 	}, nil
 }
 

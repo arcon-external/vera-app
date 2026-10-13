@@ -13,7 +13,14 @@ export interface DetailsState {
   recipientName: string;
   validity: number;
   paymentTerm: number;
-  leadTime: number;
+  // Lead time is four independent units, each 0..255, all defaulting to 0.
+  // Zero means "no lead time stated", never a duration: the inputs store 0
+  // but display empty (see formatLeadTimeSegment), while Validity/Payment
+  // above carry real defaults (30/90) and display their figures.
+  leadTimeYears: number;
+  leadTimeMonths: number;
+  leadTimeWeeks: number;
+  leadTimeDays: number;
   discountPercent: number;
   incoterm: string;
   taxZone: string;
@@ -63,6 +70,7 @@ function NumberField({
   suffix = "days",
   max,
   onChange,
+  className = "",
 }: {
   label: string;
   hint?: string;
@@ -70,24 +78,74 @@ function NumberField({
   suffix?: string;
   max?: number;
   onChange: (value: number) => void;
+  className?: string;
 }) {
   return (
-    <Field label={label} hint={hint}>
-      <div className="flex items-center rounded-md border border-rule bg-white pr-3 transition duration-150 focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20">
-        <input
-          type="text"
-          inputMode="numeric"
-          value={value}
-          onChange={(event) => {
-            const parsed = Number.parseInt(event.target.value.replace(/\D/g, ""), 10);
-            const next = Number.isFinite(parsed) ? parsed : 0;
-            onChange(max !== undefined ? Math.min(next, max) : next);
-          }}
-          className="w-full bg-transparent px-3 py-2 text-right text-body tnum text-ink-900 outline-hidden"
-        />
-        <span className="text-caption text-ink-400">{suffix}</span>
-      </div>
-    </Field>
+    <div className={className}>
+      <Field label={label} hint={hint}>
+        <div className="flex items-center rounded-md border border-rule bg-white pr-3 transition duration-150 focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={value}
+            onChange={(event) => {
+              const parsed = Number.parseInt(event.target.value.replace(/\D/g, ""), 10);
+              const next = Number.isFinite(parsed) ? parsed : 0;
+              onChange(max !== undefined ? Math.min(next, max) : next);
+            }}
+            className="w-full bg-transparent px-3 py-2 text-right text-body tnum text-ink-900 outline-hidden"
+          />
+          <span className="text-caption text-ink-400">{suffix}</span>
+        </div>
+      </Field>
+    </div>
+  );
+}
+
+// parseLeadTimeSegment sanitises one lead-time segment's raw text into a
+// uint8-range figure. Digits-only, onChange-only by design: one guard site
+// covers typing, paste and autofill alike. No keystroke filter (breaks
+// IME/paste), no type="number" (spinner chrome). Three digits then clamp 255:
+// a segment can never hold more.
+export function parseLeadTimeSegment(raw: string): number {
+  return Math.min(Number.parseInt(raw.replace(/\D/g, "").slice(0, 3), 10) || 0, 255);
+}
+
+// formatLeadTimeSegment is the display half of the store-0-display-empty
+// convention (the formatMoneyInput rule: untouched fields never read as
+// zero). The 0 is a sentinel for "unstated", not a duration, so it renders
+// as an empty field over a "0" placeholder.
+export function formatLeadTimeSegment(value: number): string {
+  return value === 0 ? "" : String(value);
+}
+
+function LeadTimeSegment({
+  ariaLabel,
+  suffix,
+  value,
+  onChange,
+}: {
+  ariaLabel: string;
+  suffix: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    // min-w-0 on the wrapper AND the input: the four-across row overflows at
+    // narrow widths without both, because a grid item will not shrink past
+    // its content's intrinsic width otherwise.
+    <div className="flex min-w-0 items-center rounded-md border border-rule bg-white pr-3 transition duration-150 focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20">
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label={ariaLabel}
+        value={formatLeadTimeSegment(value)}
+        placeholder="0"
+        onChange={(event) => onChange(parseLeadTimeSegment(event.target.value))}
+        className="w-full min-w-0 bg-transparent px-3 py-2 text-right text-body tnum text-ink-900 outline-hidden placeholder:text-ink-300"
+      />
+      <span className="text-caption text-ink-400">{suffix}</span>
+    </div>
   );
 }
 
@@ -176,30 +234,70 @@ export function DetailsPanel({
           />
         </Field>
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:col-span-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-6 lg:col-span-2">
           <NumberField
             label="Validity"
             value={value.validity}
             onChange={(validity) => onChange({ validity })}
+            className="sm:col-span-2"
           />
           <NumberField
             label="Payment"
             value={value.paymentTerm}
             onChange={(paymentTerm) => onChange({ paymentTerm })}
+            className="sm:col-span-2"
           />
-          <NumberField
-            label="Lead time"
-            value={value.leadTime}
-            onChange={(leadTime) => onChange({ leadTime })}
-          />
-          <Field label="Incoterm">
-            <Select
-              value={value.incoterm}
-              options={incotermOptions}
-              ariaLabel="Incoterm"
-              onChange={(next) => onChange({ incoterm: String(next) })}
-            />
-          </Field>
+          <div className="col-span-2 sm:col-span-2">
+            <Field label="Incoterm">
+              <Select
+                value={value.incoterm}
+                options={incotermOptions}
+                ariaLabel="Incoterm"
+                onChange={(next) => onChange({ incoterm: String(next) })}
+              />
+            </Field>
+          </div>
+          <div
+            role="group"
+            aria-labelledby="lead-time-label"
+            className="col-span-2 flex flex-col gap-1.5 sm:col-span-6"
+          >
+            <span className="flex items-baseline justify-between gap-2">
+              <span
+                id="lead-time-label"
+                className="text-caption font-medium text-ink-600"
+              >
+                Lead time
+              </span>
+              <span className="text-caption text-ink-400">optional</span>
+            </span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <LeadTimeSegment
+                ariaLabel="Lead time years"
+                suffix="yr"
+                value={value.leadTimeYears}
+                onChange={(leadTimeYears) => onChange({ leadTimeYears })}
+              />
+              <LeadTimeSegment
+                ariaLabel="Lead time months"
+                suffix="mo"
+                value={value.leadTimeMonths}
+                onChange={(leadTimeMonths) => onChange({ leadTimeMonths })}
+              />
+              <LeadTimeSegment
+                ariaLabel="Lead time weeks"
+                suffix="wk"
+                value={value.leadTimeWeeks}
+                onChange={(leadTimeWeeks) => onChange({ leadTimeWeeks })}
+              />
+              <LeadTimeSegment
+                ariaLabel="Lead time days"
+                suffix="day"
+                value={value.leadTimeDays}
+                onChange={(leadTimeDays) => onChange({ leadTimeDays })}
+              />
+            </div>
+          </div>
         </div>
 
         <div className="lg:col-span-2">

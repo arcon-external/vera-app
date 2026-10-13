@@ -22,7 +22,7 @@ func TestSignableMappersAgree(t *testing.T) {
 		Incoterm:         "EXW",
 		Validity:         30,
 		PaymentTerm:      90,
-		LeadTime:         60,
+		LeadTimeDays:     60,
 		DiscountPercent:  5,
 		CompanyName:      "PT Arcon Penta Persada",
 		SubTotal:         290000,

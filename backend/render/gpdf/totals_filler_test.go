@@ -32,11 +32,15 @@ import (
 // fourTerms is the production terms shape: the four fixed one-line terms the
 // template hard-codes (template-fixed.html) and termsLines emits. Each wraps
 // to one line at the terms track width, so the terms card is 98.4pt.
+//
+// The lead time term is the composed sentence, not a bare number: "60 Days"
+// for a day-only lead time, exactly what the application hands both
+// renderers.
 func fourTerms() []string {
 	return []string{
 		"1. Payment terms agreed for this quotation is 90 days.",
 		"2. This quotation is valid for 30 days.",
-		"3. Lead time is 60 days.",
+		"3. Lead time is 60 Days.",
 		"4. Incoterms: FOB",
 	}
 }

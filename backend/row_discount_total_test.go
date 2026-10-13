@@ -219,7 +219,7 @@ func TestInternalBreakdownReportsRowDiscountTotal(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      30,
 		PaymentTerm:   30,
-		LeadTime:      30,
+		LeadTimeDays:  30,
 		Incoterm:      "EXW",
 	}); err != nil {
 		t.Fatalf("Prepare: %v", err)

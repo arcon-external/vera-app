@@ -30,6 +30,7 @@ import type { DraftSummaryDTO } from "./drafts";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
+import { parseLeadTimeSegment } from "./components/DetailsPanel";
 import { ItemEditor, newSubItem } from "./components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import { ReviewPanel } from "./components/ReviewPanel";
@@ -132,7 +133,10 @@ const DEFAULT_DETAILS: DetailsState = {
   recipientName: "",
   validity: 30,
   paymentTerm: 90,
-  leadTime: 60,
+  leadTimeYears: 0,
+  leadTimeMonths: 0,
+  leadTimeWeeks: 0,
+  leadTimeDays: 0,
   // No quotation-wide discount is offered any more: discounts are entered per
   // line. The field stays in the payload so older drafts and revisions keep
   // whatever value they were saved with.
@@ -251,6 +255,17 @@ function CurrencyUnknownCard({
       </div>
     </Card>
   );
+}
+
+/**
+ * Parses the pasted lead-time cell (column 4 of a details paste) into the
+ * days segment. Pasted rows predate per-unit lead times and carry one
+ * days-only figure; it restores into days exactly as old drafts do, and an
+ * empty or unreadable cell reads as unstated (0), not as the old 60-day
+ * default. Digits-only through the same segment parser the inputs use.
+ */
+export function parsePastedLeadTimeDays(cell: string | undefined): number {
+  return parseLeadTimeSegment(cell ?? "");
 }
 
 /**
@@ -803,7 +818,10 @@ function App() {
           recipientName: quotation.RecipientName,
           validity: quotation.ValidityDays,
           paymentTerm: quotation.PaymentTermDays,
-          leadTime: quotation.LeadTimeDays,
+          leadTimeYears: quotation.LeadTimeYears,
+          leadTimeMonths: quotation.LeadTimeMonths,
+          leadTimeWeeks: quotation.LeadTimeWeeks,
+          leadTimeDays: quotation.LeadTimeDays,
           discountPercent: quotation.DiscountPercent,
           incoterm: quotation.Incoterm,
           taxZone: quotation.TaxZone,
@@ -1246,7 +1264,10 @@ function App() {
       TaxCategory: "",
       Validity: details.validity,
       PaymentTerm: details.paymentTerm,
-      LeadTime: details.leadTime,
+      LeadTimeYears: details.leadTimeYears,
+      LeadTimeMonths: details.leadTimeMonths,
+      LeadTimeWeeks: details.leadTimeWeeks,
+      LeadTimeDays: details.leadTimeDays,
       CustomerID: customerId,
       Incoterm: details.incoterm,
     });
@@ -1295,7 +1316,10 @@ function App() {
           recipientName: (cols[1] || "").trim(),
           validity: Number.parseInt(cols[2], 10) || 30,
           paymentTerm: Number.parseInt(cols[3], 10) || 90,
-          leadTime: Number.parseInt(cols[4], 10) || 60,
+          leadTimeYears: 0,
+          leadTimeMonths: 0,
+          leadTimeWeeks: 0,
+          leadTimeDays: parsePastedLeadTimeDays(cols[4]),
           incoterm: (cols[7] || "").trim() || "EXW",
         };
 

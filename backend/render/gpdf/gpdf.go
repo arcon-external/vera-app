@@ -202,6 +202,10 @@ func stripTags(s string) string {
 // what the document says, which is the one class of difference the comparison
 // test cannot see.
 //
+// The lead time line prints the same composed sentence the template's
+// {{.LeadTime}} does -- the seam carries it as one string, so this reads it
+// rather than reassembling it from numbers.
+//
 // The service category is deliberately not printed. It decides the tax
 // treatment, but the template's .tnc block (template-fixed.html) carries four
 // hard-coded terms and no conditional, and the template is the source of truth
@@ -213,7 +217,7 @@ func termsLines(in quotation.Input) []string {
 	return []string{
 		fmt.Sprintf("1. Payment terms agreed for this quotation is %d days.", in.PaymentTerm),
 		fmt.Sprintf("2. This quotation is valid for %d days.", in.Validity),
-		fmt.Sprintf("3. Lead time is %d days.", in.LeadTime),
+		fmt.Sprintf("3. Lead time is %s.", in.DisplayLeadTime),
 		fmt.Sprintf("4. Incoterms: %s", in.Incoterm),
 	}
 }

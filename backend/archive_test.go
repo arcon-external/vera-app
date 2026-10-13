@@ -19,7 +19,7 @@ func TestRevisionDraftPreservesInternalAndCustomerValues(t *testing.T) {
 		Incoterm:                  "EXW",
 		Validity:                  30,
 		PaymentTerm:               90,
-		LeadTime:                  10,
+		LeadTimeDays:              10,
 		DiscountPercent:           5,
 		TaxZone:                   TaxZoneNonFTZ,
 		TaxCategory:               TaxCategorySupplyInstall,

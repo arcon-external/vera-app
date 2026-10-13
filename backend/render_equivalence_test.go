@@ -481,7 +481,12 @@ func quotationDataFromEngineInput(t *testing.T, q *Quotation, logo, qrPNG []byte
 
 	d.Validity = 30
 	d.PaymentTerm = 90
-	d.LeadTime = 60
+	// The terms line prints the composed sentence on both paths: this is the
+	// QuotationData field the template reads, and renderInput carries the same
+	// string to the native renderer, so the two documents cannot disagree
+	// about what the lead time says.
+	d.LeadTime = "60 Days"
+	d.LeadTimeDays = 60
 	d.DiscountPercent = 5
 	d.Incoterm = "FOB"
 

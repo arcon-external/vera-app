@@ -158,12 +158,18 @@ func TestConversionAppliesTheEditorsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A minimal file has to produce the document a new quotation in the editor
-	// would, not a zeroed one.
+	// would, not a zeroed one. The lead time is the one term with no default:
+	// a quotation need not carry one, and zero in every unit says exactly that.
 	if input.Incoterm != "EXW" {
 		t.Errorf("Incoterm = %q; want EXW", input.Incoterm)
 	}
-	if input.Validity != 30 || input.PaymentTerm != 90 || input.LeadTime != 60 {
-		t.Errorf("terms = %d/%d/%d; want 30/90/60", input.Validity, input.PaymentTerm, input.LeadTime)
+	if input.Validity != 30 || input.PaymentTerm != 90 {
+		t.Errorf("terms = %d/%d; want 30/90", input.Validity, input.PaymentTerm)
+	}
+	if input.LeadTimeYears != 0 || input.LeadTimeMonths != 0 ||
+		input.LeadTimeWeeks != 0 || input.LeadTimeDays != 0 {
+		t.Errorf("lead time = %d/%d/%d/%d; want 0/0/0/0 (none stated)",
+			input.LeadTimeYears, input.LeadTimeMonths, input.LeadTimeWeeks, input.LeadTimeDays)
 	}
 	if input.TaxZone != backend.TaxZoneFTZ {
 		t.Errorf("TaxZone = %q; want %q", input.TaxZone, backend.TaxZoneFTZ)

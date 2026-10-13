@@ -54,7 +54,10 @@ const exampleInput = `{
   "incoterm": "DAP",
   "validityDays": 30,
   "paymentTermDays": 90,
-  "leadTimeDays": 60,
+  "leadTimeYears": 1,
+  "leadTimeMonths": 2,
+  "leadTimeWeeks": 3,
+  "leadTimeDays": 4,
   "taxZone": "FTZ",
   "taxType": "Goods",
   "items": [
@@ -126,7 +129,11 @@ func inputReference() string {
   incoterm          EXW (default), DAP, FCA, FOB, ...
   validityDays      30 by default.
   paymentTermDays   90 by default.
-  leadTimeDays      60 by default.
+  leadTimeYears     optional, 0..255, no default. The lead time is four
+  leadTimeMonths    independent units and a quotation need not state one at
+  leadTimeWeeks     all. They print exactly as entered: "1 Year, 3 Months,
+  leadTimeDays      2 Weeks, and 4 Days", with a zero unit skipped and no
+                    conversion between them.
   taxZone           FTZ (default) or NonFTZ.
   taxType           Goods (default) or Services.
   serviceCategory   services only, and only then: NonConstruction (2% PPH22) or

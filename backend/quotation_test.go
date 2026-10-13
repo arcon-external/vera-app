@@ -100,7 +100,7 @@ func TestGeneratePDF(t *testing.T) {
 		DiscountPercent: 5,
 		Validity:        30,
 		PaymentTerm:     90,
-		LeadTime:        60,
+		LeadTimeDays:    60,
 		CustomerID:      2,
 		Incoterm:        "FOB",
 	})
@@ -405,7 +405,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 			},
 		},
 		{
@@ -417,7 +417,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 			},
 		},
 		{
@@ -429,7 +429,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "",
 				Validity:      30,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 			},
 		},
 		{
@@ -441,7 +441,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      0,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 			},
 		},
 		{
@@ -453,19 +453,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   0,
-				LeadTime:      30,
-			},
-		},
-		{
-			name: "zero lead time",
-			input: QuotationInput{
-				CustomerID:    2,
-				Items:         []QuotationItemInput{validItem},
-				Subject:       "Test",
-				RecipientName: "Test",
-				Validity:      30,
-				PaymentTerm:   30,
-				LeadTime:      0,
+				LeadTimeDays:  30,
 			},
 		},
 		{
@@ -477,7 +465,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName:   "Test",
 				Validity:        30,
 				PaymentTerm:     30,
-				LeadTime:        30,
+				LeadTimeDays:    30,
 				DiscountPercent: 101,
 			},
 		},
@@ -497,7 +485,7 @@ func TestPrepareValidation(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 			},
 		},
 	}
@@ -539,7 +527,7 @@ func TestPrepareRejectsUnrecognisedUoMWithLocation(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      30,
 		PaymentTerm:   30,
-		LeadTime:      30,
+		LeadTimeDays:  30,
 		Incoterm:      "FOB",
 	})
 	if err == nil {
@@ -577,7 +565,7 @@ func TestMarginPercentCeiling(t *testing.T) {
 			RecipientName:   "Test",
 			Validity:        30,
 			PaymentTerm:     30,
-			LeadTime:        30,
+			LeadTimeDays:    30,
 			Incoterm:        "FOB",
 			DiscountPercent: discount,
 		})
@@ -641,7 +629,7 @@ func TestMarginCeilingPricesAsElevenTimesCost(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      30,
 		PaymentTerm:   30,
-		LeadTime:      30,
+		LeadTimeDays:  30,
 		Incoterm:      "FOB",
 	}); err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -721,7 +709,7 @@ func TestPrepareReportsEmptyUoMAsMissing(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      30,
 		PaymentTerm:   30,
-		LeadTime:      30,
+		LeadTimeDays:  30,
 		Incoterm:      "FOB",
 	})
 	if err == nil {
@@ -749,7 +737,7 @@ func TestPrepareAcceptsUnitsOutsideTheEditorList(t *testing.T) {
 				RecipientName: "Test",
 				Validity:      30,
 				PaymentTerm:   30,
-				LeadTime:      30,
+				LeadTimeDays:  30,
 				Incoterm:      "FOB",
 			})
 			if err != nil {

@@ -26,13 +26,19 @@ import (
 type InputDoc struct {
 	// CustomerCode is the two-digit client code, the same number the desktop's
 	// dropdown carries and the one printed inside the quote number.
-	CustomerCode    int    `json:"customerCode"`
-	Subject         string `json:"subject"`
-	RecipientName   string `json:"recipientName,omitempty"`
-	Incoterm        string `json:"incoterm,omitempty"`
-	Validity        int    `json:"validityDays,omitempty"`
-	PaymentTerm     int    `json:"paymentTermDays,omitempty"`
-	LeadTime        int    `json:"leadTimeDays,omitempty"`
+	CustomerCode  int    `json:"customerCode"`
+	Subject       string `json:"subject"`
+	RecipientName string `json:"recipientName,omitempty"`
+	Incoterm      string `json:"incoterm,omitempty"`
+	Validity      int    `json:"validityDays,omitempty"`
+	PaymentTerm   int    `json:"paymentTermDays,omitempty"`
+	// The lead time is four independent units, each 0..255 and each optional:
+	// a quotation may state none of them, which means no lead time at all.
+	// They print as entered, with no conversion between them.
+	LeadTimeYears   int    `json:"leadTimeYears,omitempty"`
+	LeadTimeMonths  int    `json:"leadTimeMonths,omitempty"`
+	LeadTimeWeeks   int    `json:"leadTimeWeeks,omitempty"`
+	LeadTimeDays    int    `json:"leadTimeDays,omitempty"`
 	TaxZone         string `json:"taxZone,omitempty"`
 	TaxType         string `json:"taxType,omitempty"`
 	ServiceCategory string `json:"serviceCategory,omitempty"`
@@ -117,6 +123,23 @@ func LoadInputDoc(path string) (*InputDoc, error) {
 	if doc.CustomerCode < 1 || doc.CustomerCode > 99 {
 		return nil, fmt.Errorf(`"customerCode" must be between 1 and 99, got %d`, doc.CustomerCode)
 	}
+	// Each lead-time unit is a uint8 on the wire, so the server's own decoder
+	// would reject anything above 255 with a JSON type error rather than a
+	// sentence naming the field. Naming it here is the same courtesy
+	// customerCode gets.
+	for _, unit := range []struct {
+		name  string
+		value int
+	}{
+		{"leadTimeYears", doc.LeadTimeYears},
+		{"leadTimeMonths", doc.LeadTimeMonths},
+		{"leadTimeWeeks", doc.LeadTimeWeeks},
+		{"leadTimeDays", doc.LeadTimeDays},
+	} {
+		if unit.value < 0 || unit.value > 255 {
+			return nil, fmt.Errorf(`%q must be between 0 and 255, got %d`, unit.name, unit.value)
+		}
+	}
 	if len(doc.Items) == 0 {
 		return nil, fmt.Errorf(`"items" is empty; a quotation needs at least one line`)
 	}
@@ -151,7 +174,8 @@ func LoadInputDoc(path string) (*InputDoc, error) {
 //
 // The defaults are the same ones the editor applies to a new quotation, so a
 // minimal file produces a sane document rather than a zeroed one: 30 days valid,
-// 90 days payment, 60 days lead, EXW, FTZ goods.
+// 90 days payment, no lead time stated at all (a quotation need not have one),
+// EXW, FTZ goods.
 func (d *InputDoc) toQuotationInput() (backend.QuotationInput, error) {
 	input := backend.QuotationInput{
 		CustomerID:      uint8(d.CustomerCode),
@@ -160,7 +184,10 @@ func (d *InputDoc) toQuotationInput() (backend.QuotationInput, error) {
 		Incoterm:        defaultString(d.Incoterm, "EXW"),
 		Validity:        uint8(defaultInt(d.Validity, 30)),
 		PaymentTerm:     uint8(defaultInt(d.PaymentTerm, 90)),
-		LeadTime:        uint8(defaultInt(d.LeadTime, 60)),
+		LeadTimeYears:   uint8(d.LeadTimeYears),
+		LeadTimeMonths:  uint8(d.LeadTimeMonths),
+		LeadTimeWeeks:   uint8(d.LeadTimeWeeks),
+		LeadTimeDays:    uint8(d.LeadTimeDays),
 		TaxZone:         defaultString(d.TaxZone, backend.TaxZoneFTZ),
 		TaxType:         defaultString(d.TaxType, backend.TaxTypeGoods),
 		ServiceCategory: d.ServiceCategory,

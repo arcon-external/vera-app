@@ -115,7 +115,7 @@ func TestTemplateRendersAllThreeStates(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	})
 	if err != nil {
@@ -152,7 +152,7 @@ func TestTemplateSubFreeDocumentIsUnchanged(t *testing.T) {
 		RecipientName: "Test",
 		Validity:      14,
 		PaymentTerm:   30,
-		LeadTime:      45,
+		LeadTimeDays:  45,
 		Incoterm:      "FOB",
 	})
 	if err != nil {
