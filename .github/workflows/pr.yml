@@ -140,7 +140,7 @@ jobs:
 
       - name: Set up Go
         if: steps.scope.outputs.needs_go != 'false'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           # The cache steps above own this now. Leaving it on would save a
