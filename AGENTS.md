@@ -444,7 +444,7 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode/big-pickle`, fallbacks `opencode-go/step-5-preview-free#high` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Worker** | `opencode/ling-3.1-flash-free`, fallbacks `opencode/big-pickle` then `opencode-go/step-5-preview-free#high` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
 | **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
 | **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
@@ -603,6 +603,12 @@ While workers run in parallel:
 
 - **A guard is not a guard until it is proven to fail.** Break it, show it naming
   what it caught, restore it. A test that cannot fail proves nothing.
+- **Every bug fix begins with a test that reproduces the bug.** Write the failing
+  test first — the one that names the wrong behaviour — then fix until it passes,
+  and keep the test as the guard, so the same bug cannot return unnoticed. A bug
+  found by hand (a report, a document, a screenshot) becomes permanent protection
+  this way, and a fix without its reproducing test is an unverified claim. If a
+  reproduction is genuinely impossible, the report says so and why.
 - **Every claim of "clean" or "passes" names its command and its exit code.**
 - **A piped exit code is not an exit code.** `cmd | head -3; echo $?` reports
   **`head`'s** status, not `cmd`'s. Redirect to a file, then read `$?`. This exact
@@ -676,6 +682,11 @@ npm --prefix frontend test        # Vitest: the frontend's pure modules
 `npm run build` type-checks the test files too (tsconfig pulls in
 `vitest/globals`), so a test that stops compiling fails the build rather than
 lying in the suite.
+
+For a change that alters a React panel's layout, run `scripts/ui-snapshot.sh` and
+read both PNGs (360 and 1280); the pull request states what was seen. Interactions —
+keyboard, paste, focus — remain hand-driven, and that stays written down. Snapshots
+are local evidence: they are never committed.
 
 If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
