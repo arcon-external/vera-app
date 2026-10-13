@@ -80,6 +80,32 @@ func (s *Server) prepareEndpoint(context echo.Context) error {
 	return context.JSON(http.StatusOK, map[string]any{"customer": customer, "internal": internal})
 }
 
+// draftExportCurrencyBlock is the server-side counterpart of the desktop's
+// open-time guard (currencyEditBlockMessage). It reports why an export must
+// be refused, or "" when the export may proceed. Both codes are named and
+// the remedy stated, in the same register as the desktop's message: the
+// decision is block, never convert -- there is no FX rate to convert with,
+// and a silent reinterpretation of stored integers is a money-integrity
+// failure.
+func draftExportCurrencyBlock(draft store.Draft, profile store.CompanyProfile) string {
+	stored := currency.Normalize(draft.Currency)
+	live := currency.Normalize(profile.Currency)
+	if stored == live {
+		return ""
+	}
+	name := strings.TrimSpace(draft.Label)
+	if name == "" {
+		name = "This draft"
+	} else {
+		name = fmt.Sprintf("Draft %q", name)
+	}
+	return fmt.Sprintf(
+		"%s was saved in %s, but the company currency is now %s. "+
+			"Its amounts would be reinterpreted, so it cannot be exported. "+
+			"Switch the company currency back to %s to export it.",
+		name, stored, live, stored)
+}
+
 func (s *Server) exportEndpoint(context echo.Context) error {
 	var envelope map[string]any
 	if err := context.Bind(&envelope); err != nil {
@@ -102,6 +128,34 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 		// draft intact and nothing is lost to a part-finished request.
 		if value, ok := envelope["draftId"].(float64); ok {
 			sourceDraftID = int64(value)
+		}
+	}
+	// Export is where the document is actually stamped, and every client
+	// (desktop, CLI, a bare API caller) goes through here. A draft's stored
+	// currency is the denomination its integers were written in; the live
+	// profile's is what the server would format, total and sign them under.
+	// A mismatch would reinterpret whole-rupiah figures under a dollar
+	// symbol, so it is refused before anything is allocated, rendered or
+	// stored -- the draft survives for a retry.
+	if sourceDraftID > 0 {
+		draft, err := s.database.GetDraft(context.Request().Context(), sourceDraftID, requestUser(context).ID)
+		switch {
+		case errors.Is(err, store.ErrDraftNotFound):
+			// A draft id that is missing, or another user's, keeps the
+			// best-effort treatment the delete below has always given it:
+			// there is no stored currency to compare, nothing is stamped
+			// from the draft, and the export stands either way. A 404 here
+			// would also confirm another account's draft id.
+		case err != nil:
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load draft"})
+		default:
+			profile, err := s.database.GetCompanyProfile(context.Request().Context())
+			if err != nil {
+				return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company profile"})
+			}
+			if blocked := draftExportCurrencyBlock(draft, profile); blocked != "" {
+				return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": blocked})
+			}
 		}
 	}
 	input, err := decodeInput(rawInput)
