@@ -4,6 +4,16 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.10.4] - 2026-10-13
+
+### Added
+
+- **Lead time can now be quoted in years, months, weeks and days.** Four fields
+  — years, months, weeks, days — all optional; the quotation prints exactly
+  what was entered, skipping the empty units: "2 Years, 10 Months, 4 Weeks, and
+  5 Days". With every field left at 0 the lead time reads "-" rather than
+  "0 days". Existing quotations keep their day-only lead times.
+
 ## [0.10.3] - 2026-10-13
 
 ### Changed
