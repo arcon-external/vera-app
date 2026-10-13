@@ -36,16 +36,26 @@ const sizes: Record<ButtonSize, string> = {
 export const fieldClass =
   "w-full rounded-md border border-rule bg-white px-3 py-2 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
+// The default is `type="button"`, not the HTML default. A bare <button> is a
+// submit button, so inside a form the common case -- a button that just does
+// something -- submits by accident: the logo picker never opened with a
+// required field empty (#338), and two Cancel buttons created the record on
+// the way out (#342). A button that means to submit says type="submit".
 export function Button({
   variant = "secondary",
   size = "md",
   leading,
   className = "",
   children,
+  type = "button",
   ...rest
 }: ButtonProps) {
   return (
-    <button className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest}>
+    <button
+      type={type}
+      className={`${base} ${variants[variant]} ${sizes[size]} ${className}`}
+      {...rest}
+    >
       {leading}
       {children}
     </button>
