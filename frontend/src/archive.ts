@@ -35,6 +35,33 @@ export function resolveCurrencyEntry(
   return fallback;
 }
 
+/**
+ * Resolves the LIVE profile currency for the editor and page-level gates.
+ * Returns null when the entry cannot be known: the catalogue is absent AND
+ * the profile code is not IDR. Callers must gate money UI on null -- never
+ * `?? fallback`; the IDR fallback is only for the IDR path, where every
+ * pre-currency integer was written.
+ *
+ * This is the same match resolveCurrencyEntry does (trim, upper-case, then a
+ * case-insensitive find), with one deliberate difference: an absent catalogue
+ * has no honest answer for a non-IDR profile. Returning the IDR entry there
+ * is what #390 was -- Rp printed over USD minor units, in the editor and
+ * through every paste, so the figure was wrong by a factor of 100 rather
+ * than merely mislabelled. An unknown entry must therefore stop the money
+ * UI, not decorate it with the wrong denomination.
+ */
+export function resolveLiveEntry(
+  catalogue: readonly CurrencyInfo[] | null | undefined,
+  companyCurrency: string | null | undefined,
+  idrFallback: CurrencyInfo
+): CurrencyInfo | null {
+  // Blank and missing mean IDR, exactly as normalizeCurrencyCode reads them:
+  // the profile has no code yet, and every stored integer predates one.
+  const want = (companyCurrency ?? "").trim().toUpperCase();
+  if (want === "" || want === "IDR") return idrFallback;
+  return catalogue?.find((entry) => entry.code === want) ?? null;
+}
+
 export interface ArchivedQuotationSubItem {
   SubNo: number;
   Description: string;
