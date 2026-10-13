@@ -72,9 +72,12 @@ type Input struct {
 	// writes the currency affixes in front of (or behind) each one, and the
 	// engine has to agree with the wording it is replacing rather than
 	// reformat it a second time.
-	DisplaySubTotal   string
-	DisplayDiscount   string
-	DiscountAmount    uint64
+	DisplaySubTotal string
+	DisplayDiscount string
+	DiscountAmount  uint64
+	// PpnAmount is the numeric the template's {{if .PpnAmount}} tests: the PPN
+	// row is decided by it, not by DisplayPpn's emptiness (issue #377).
+	PpnAmount         uint64
 	DisplayPpn        string
 	DisplayGrandTotal string
 	DiscountPercent   string

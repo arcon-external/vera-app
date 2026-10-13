@@ -1298,9 +1298,11 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 	}
 
 	// The template prints the PPN line only when a PPN was actually charged
-	// ({{if .PpnAmount}}), so a zero-tax zone must present an empty display
-	// amount to the renderers too -- passing "0" made the native engine draw
-	// a "PPN 11% Rp0" row the browser never prints.
+	// ({{if .PpnAmount}}), and both renderers now decide the row from that
+	// numeric -- the seam carries it as PpnAmount for exactly that reason.
+	// This display-string bridge is kept as belt-and-braces on top of it: a
+	// zero-tax zone still presents an empty display amount, so a stray "0"
+	// cannot render as the row's value anywhere either.
 	displayPpn := ""
 	if q.Data.PpnAmount > 0 {
 		displayPpn = q.Data.DisplayPpnAmount
@@ -1348,6 +1350,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		DisplayDiscount:   q.Data.DisplayDiscountAmount,
 		DiscountAmount:    q.Data.DiscountAmount,
 		DisplayPpn:        displayPpn,
+		PpnAmount:         q.Data.PpnAmount,
 		DisplayGrandTotal: q.Data.DisplayGrandTotal,
 		DiscountPercent:   q.Data.DiscountPercent,
 

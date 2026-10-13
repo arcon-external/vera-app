@@ -1119,7 +1119,10 @@ func (e *Engine) totalsRows(in Input) []totalRow {
 			colour: e.pal.Green,
 		})
 	}
-	if in.DisplayPpn != "" {
+	// Conditional exactly as the template is: {{if .PpnAmount}} decides from
+	// the numeric, so a stray "0" display string with no PPN charged draws
+	// nothing (issue #377).
+	if in.PpnAmount > 0 {
 		rows = append(rows, totalRow{label: "PPN 11%", value: currency.Decorate(in.Currency, in.DisplayPpn)})
 	}
 	rows = append(rows, totalRow{label: "Grand Total", value: currency.Decorate(in.Currency, in.DisplayGrandTotal), grand: true})
