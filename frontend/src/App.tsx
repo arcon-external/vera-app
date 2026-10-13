@@ -34,11 +34,11 @@ import { ItemEditor, newSubItem } from "./components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SummaryRail } from "./components/SummaryRail";
-import { Button, SectionHeading, StatusBanner } from "./components/ui";
+import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
-import type { ArchivedQuotation } from "./archive";
+import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
   TAX_TYPE_OPTIONS,
   TAX_ZONE_OPTIONS,
@@ -203,6 +203,55 @@ const IDR_FALLBACK_ENTRY: CurrencyInfo = {
   decimalSep: ",",
   symbolSpaced: false,
 };
+
+// The one message the shortcut guards show when the live entry is unknown
+// (#390). Shortcuts bypass rendering, so the same refusal has to exist where
+// the keyboard can reach.
+const CURRENCY_UNKNOWN_TOAST =
+  "The currency list could not be loaded, so amounts cannot be shown or used. " +
+  "Choose Try again to reload it.";
+
+/**
+ * Stands in for every money surface while the live profile currency cannot be
+ * resolved (#390): a card naming the profile code, with a manual retry.
+ *
+ * A figure carrying the wrong denomination is worse than no figure. The
+ * resolution used to fall back to the IDR entry, so a USD profile with a
+ * failed catalogue read printed Rp over integers stored as USD minor units --
+ * off by a factor of 100 in the editor and in every pasted cell. There is no
+ * rate to convert with, so the honest answer is to withhold the figures and
+ * name the reason.
+ */
+function CurrencyUnknownCard({
+  code,
+  onRetry,
+}: {
+  code: string;
+  onRetry: () => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-rule bg-paper-subtle text-ink-400">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <path d="M8 1.333l5.333 10H2.667z" />
+            <path d="M8 6v2.667M8 10.667h.007" />
+          </svg>
+        </span>
+        <p className="text-lead font-medium text-ink-900">Amounts are hidden</p>
+        <p className="max-w-md text-body text-ink-500">
+          The company currency is {code}, but the currency list could not be
+          loaded, so Vera cannot tell which denomination these figures are in.
+          Nothing is shown rather than the wrong symbol. Saved work is not
+          affected.
+        </p>
+        <Button variant="primary" onClick={onRetry} className="mt-1">
+          Try again
+        </Button>
+      </div>
+    </Card>
+  );
+}
 
 /**
  * Parses one pasted money cell into the stored minor-unit digit string,
@@ -414,37 +463,47 @@ function App() {
 
   // The catalogue is static, so one fetch per launch is enough. It rides its
   // own try/catch rather than loadCompany's: a catalogue failure must not
-  // clear the company name, and the IDR fallback below keeps every consumer
-  // rendering while offline.
+  // clear the company name, and the gates below keep every consumer from
+  // rendering a figure while the entry is unknown. The failure path keeps the
+  // previous value -- a loaded catalogue is never nulled by a later failure
+  // (#390) -- and there is no automatic retry: the binding reads compiled-in
+  // memory with no error channel, so there is no transient to retry away. The
+  // card's Try again calls this by hand.
+  const loadCatalogue = useCallback(async () => {
+    try {
+      const catalogue = (await GetCurrencyCatalogue()) as CurrencyInfo[];
+      setCurrencyCatalogue(catalogue);
+    } catch {
+      setCurrencyCatalogue((prev) => prev);
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
     if (!signedIn) {
       setCurrencyCatalogue(null);
       return;
     }
-    void (async () => {
-      try {
-        const catalogue = (await GetCurrencyCatalogue()) as CurrencyInfo[];
-        if (active) setCurrencyCatalogue(catalogue);
-      } catch {
-        if (active) setCurrencyCatalogue(null);
-      }
-    })();
+    let active = true;
+    void loadCatalogue().then(() => {
+      // A sign-out mid-flight must not leave a catalogue behind on the login
+      // page, the same race the inline fetch always covered.
+      if (!active) setCurrencyCatalogue(null);
+    });
     return () => {
       active = false;
     };
-  }, [signedIn]);
+  }, [signedIn, loadCatalogue]);
 
   // The live profile currency, resolved once from the catalogue by the
-  // normalized profile code, defaulting to the IDR fallback. Editor
-  // components (ReviewPanel, SummaryRail, ItemEditor) render this; the
-  // archive/detail call sites below receive it as their fallback entry only
-  // -- both pages resolve each revision's own currency in-page once loaded.
-  const liveEntry: CurrencyInfo = useMemo(() => {
-    const code = normalizeCurrencyCode(companyCurrency);
-    const found = currencyCatalogue?.find((entry) => entry.code === code);
-    return found ?? IDR_FALLBACK_ENTRY;
-  }, [currencyCatalogue, companyCurrency]);
+  // normalized profile code. Null means the entry cannot be known -- the
+  // catalogue is absent and the profile is not IDR -- and every money surface
+  // below gates on it (#390). The IDR fallback is the one honest default:
+  // every pre-currency integer was written in IDR. Never `?? IDR_FALLBACK_ENTRY`
+  // on a non-IDR code: that printed Rp over USD minor units.
+  const liveEntry: CurrencyInfo | null = useMemo(
+    () => resolveLiveEntry(currencyCatalogue, companyCurrency, IDR_FALLBACK_ENTRY),
+    [currencyCatalogue, companyCurrency]
+  );
 
   // Restore the keychain session on startup; otherwise show the login page.
   // The try/catch also covers plain-browser dev, where the Wails runtime
@@ -1013,6 +1072,10 @@ function App() {
   // Columns are positional, matching the header the panel shows.
   const handleSubRowPaste = useCallback(
     (key: number, event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      // #390: no money is parsed under an entry that cannot be known. The
+      // editor is unmounted while liveEntry is null, so this is unreachable
+      // through the UI and exists to keep the type honest.
+      if (liveEntry === null) return;
       const raw = event.clipboardData.getData("text");
       if (!raw.includes("\t") && !raw.includes("\n")) return;
       event.preventDefault();
@@ -1050,6 +1113,9 @@ function App() {
 
   const handlePaste = useCallback(
     (targetKey: number, event: React.ClipboardEvent<HTMLInputElement>) => {
+      // #390: the same guard as the sub-row paste -- an unknown entry is
+      // never the entry a pasted figure is parsed against.
+      if (liveEntry === null) return;
       const raw = event.clipboardData.getData("text");
       if (!raw.includes("\t")) return;
 
@@ -1100,6 +1166,13 @@ function App() {
   );
 
   const handlePrepare = useCallback(async () => {
+    // #390: a keyboard shortcut bypasses the rendered gate, so the refusal is
+    // repeated here. Preparing under an unknown entry would store figures the
+    // editor cannot even display.
+    if (liveEntry === null) {
+      pushToast("error", CURRENCY_UNKNOWN_TOAST);
+      return;
+    }
     setStatus({ type: "loading", message: "Validating quotation…" });
 
     const lineItems = items
@@ -1199,7 +1272,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [items, details, customerId, clearPreview, pushToast]);
+  }, [items, details, customerId, clearPreview, pushToast, liveEntry]);
 
   const handlePasteDetails = useCallback(
     (event: React.ClipboardEvent<HTMLInputElement>) => {
@@ -1248,6 +1321,12 @@ function App() {
   );
 
   const handleExport = useCallback(async () => {
+    // #390: the export shortcut bypasses the rendered gate exactly as prepare
+    // does, and a signed revision cannot be unsent.
+    if (liveEntry === null) {
+      pushToast("error", CURRENCY_UNKNOWN_TOAST);
+      return;
+    }
     setStatus({ type: "loading", message: "Rendering PDF…" });
     try {
       // Device-local export default from Settings; blank means OS default.
@@ -1278,7 +1357,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [activeDraftId, clearPreview, pushToast]);
+  }, [activeDraftId, clearPreview, pushToast, liveEntry]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
@@ -1549,53 +1628,68 @@ function App() {
                 onPaste={handlePasteDetails}
               />
 
-              <div>
-                <SectionHeading
-                  title="Line items"
-                  action={
-                    <span className="text-caption text-ink-500">
-                      Toggle margin per line
-                    </span>
-                  }
+              {/* #390: no line-item pricing while the live entry is unknown.
+                  Removing this gate reintroduces Rp over USD minor units. */}
+              {liveEntry === null ? (
+                <CurrencyUnknownCard
+                  code={companyCurrency}
+                  onRetry={() => void loadCatalogue()}
                 />
-                <ItemEditor
+              ) : (
+                <div>
+                  <SectionHeading
+                    title="Line items"
+                    action={
+                      <span className="text-caption text-ink-500">
+                        Toggle margin per line
+                      </span>
+                    }
+                  />
+                  <ItemEditor
+                    items={items}
+                    currency={liveEntry}
+                    uomOptions={UOM_OPTIONS}
+                    onAddItem={handleAddItem}
+                    onRemoveItem={handleRemoveItem}
+                    onChange={handleItemChange}
+                    onAddBullet={handleAddBullet}
+                    onRemoveBullet={handleRemoveBullet}
+                    onBulletChange={handleBulletChange}
+                    onEnableSubItems={handleEnableSubItems}
+                    onDisableSubItems={handleDisableSubItems}
+                    onAddSubRow={handleAddSubRow}
+                    onRemoveSubRow={handleRemoveSubRow}
+                    onPatchSubRow={handlePatchSubRow}
+                    onMoveSubRow={handleMoveSubRow}
+                    onPasteSubRows={handleSubRowPaste}
+                    onAddSubBullet={handleAddSubBullet}
+                    onRemoveSubBullet={handleRemoveSubBullet}
+                    onSubBulletChange={handleSubBulletChange}
+                    onPasteItems={handlePaste}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* #390: the rail prices what is typed above it; with no entry it
+                would price in the wrong denomination. */}
+            {liveEntry === null ? null : (
+              <div className="xl:sticky xl:top-[80px] xl:self-start">
+                <SummaryRail
                   items={items}
                   currency={liveEntry}
-                  uomOptions={UOM_OPTIONS}
-                  onAddItem={handleAddItem}
-                  onRemoveItem={handleRemoveItem}
-                  onChange={handleItemChange}
-                  onAddBullet={handleAddBullet}
-                  onRemoveBullet={handleRemoveBullet}
-                  onBulletChange={handleBulletChange}
-                  onEnableSubItems={handleEnableSubItems}
-                  onDisableSubItems={handleDisableSubItems}
-                  onAddSubRow={handleAddSubRow}
-                  onRemoveSubRow={handleRemoveSubRow}
-                  onPatchSubRow={handlePatchSubRow}
-                  onMoveSubRow={handleMoveSubRow}
-                  onPasteSubRows={handleSubRowPaste}
-                  onAddSubBullet={handleAddSubBullet}
-                  onRemoveSubBullet={handleRemoveSubBullet}
-                  onSubBulletChange={handleSubBulletChange}
-                  onPasteItems={handlePaste}
+                  discountPercent={details.discountPercent}
+                  taxZone={details.taxZone}
+                  taxType={details.taxType}
+                  serviceCategory={details.serviceCategory}
                 />
               </div>
-            </div>
-
-            <div className="xl:sticky xl:top-[80px] xl:self-start">
-              <SummaryRail
-                items={items}
-                currency={liveEntry}
-                discountPercent={details.discountPercent}
-                taxZone={details.taxZone}
-                taxType={details.taxType}
-                serviceCategory={details.serviceCategory}
-              />
-            </div>
+            )}
           </div>
 
-          {ready ? (
+          {/* #390: the review carries the customer preview in the live
+              currency, margin and nett included. */}
+          {ready && liveEntry !== null ? (
             <ReviewPanel
               customer={customerPreview}
               currency={liveEntry}
@@ -1614,30 +1708,48 @@ function App() {
       ) : null}
 
       {page === "archive" ? (
-        // The currency prop is the initial-render fallback only: ArchivePage
-        // fetches the catalogue itself and resolves each row's REVISION
-        // currency in-page (row.Currency, filled by the server and plumbed
-        // through archive.go). The live entry covers the window before the
-        // catalogue loads, never a row's steady state.
-        <ArchivePage
-          currency={liveEntry}
-          onNewQuotation={handleNewQuotation}
-          onOpenQuotation={handleOpenQuotation}
-        />
+        // #390: every row's grand total is live-currency chrome until the
+        // catalogue loads, so nothing renders while the entry is unknown.
+        liveEntry === null ? (
+          <CurrencyUnknownCard
+            code={companyCurrency}
+            onRetry={() => void loadCatalogue()}
+          />
+        ) : (
+          // The currency prop is the initial-render fallback only: ArchivePage
+          // fetches the catalogue itself and resolves each row's REVISION
+          // currency in-page (row.Currency, filled by the server and plumbed
+          // through archive.go). The live entry covers the window before the
+          // catalogue loads, never a row's steady state.
+          <ArchivePage
+            currency={liveEntry}
+            onNewQuotation={handleNewQuotation}
+            onOpenQuotation={handleOpenQuotation}
+          />
+        )
       ) : null}
 
       {page === "detail" && selectedQuotation !== null ? (
-        // Same fallback shape as ArchivePage: QuotationDetailPage fetches the
-        // catalogue itself and resolves the revision's own currency
-        // (quotation.Currency) in-page once GetQuotationRevision returns. The
-        // live entry is only the initial render's currency until then.
-        <QuotationDetailPage
-          quotationID={selectedQuotation.id}
-          currency={liveEntry}
-          revision={selectedQuotation.revision}
-          onBack={() => setPage("archive")}
-          onEdit={handleEditQuotation}
-        />
+        // #390: the detail page shows margin, tax and nett in the live
+        // currency until the revision's own is resolved.
+        liveEntry === null ? (
+          <CurrencyUnknownCard
+            code={companyCurrency}
+            onRetry={() => void loadCatalogue()}
+          />
+        ) : (
+          // Same fallback shape as ArchivePage: QuotationDetailPage fetches the
+          // catalogue itself and resolves the revision's own currency
+          // (quotation.Currency) in-page once GetQuotationRevision returns. The
+          // live entry is only the initial render's currency until then.
+          <QuotationDetailPage
+            quotationID={selectedQuotation.id}
+            currency={liveEntry}
+            revision={selectedQuotation.revision}
+            onBack={() => setPage("archive")}
+            onEdit={handleEditQuotation}
+          />
+        )
       ) : null}
 
       {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
