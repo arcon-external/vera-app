@@ -236,6 +236,7 @@ type QuotationData struct {
 	ProfitAmount              int64
 	MarginalizedGrandAfterTax uint64
 	PpnAmount                 uint64
+	RowDiscountTotal          uint64
 	SubTotal                  uint64
 	TaxRateBps                uint16
 	RevisionID                uint16
@@ -921,6 +922,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	pricing := buildPricing(items, input.DiscountPercent, ppnBps, servicesBps)
 	q.Data.SubTotal = pricing.MarginalizedSubtotal
 	q.Data.DiscountAmount = pricing.MarginalizedDiscount
+	q.Data.RowDiscountTotal = pricing.RowDiscountTotal
 	q.Data.GrandTotal = pricing.CustomerGrandTotal
 	q.Data.SellGrandTotal = pricing.MarginalizedGrand
 	q.Data.OriginalSubTotal = pricing.OriginalSubtotal

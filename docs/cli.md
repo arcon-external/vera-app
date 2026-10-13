@@ -500,12 +500,12 @@ the operator's and are shown here on purpose; they never reach a customer.
 The input prices cleanly.
 
 Cost subtotal                 52.200.000
-Customer subtotal             62.100.000
-Row discounts                 500.000
+Customer subtotal             61.980.000
+Row discounts                 620.000
 Whole-quotation discount      0
-Grand total (customer pays)   62.100.000
-Nett after tax                62.100.000
-Nett profit                   9.900.000
+Grand total (customer pays)   61.980.000
+Nett after tax                61.980.000
+Nett profit                   9.780.000
 ```
 
 ### `vera quotations preview`

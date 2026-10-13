@@ -52,6 +52,7 @@ type PricingSummary struct {
 	OriginalGrand             uint64
 	MarginalizedSubtotal      uint64
 	MarginalizedDiscount      uint64
+	RowDiscountTotal          uint64
 	MarginalizedGrand         uint64
 	TaxAmount                 uint64
 	MarginalizedGrandAfterTax uint64
@@ -239,9 +240,27 @@ func buildPrices(items []QuotationItem, discountPercent uint8) (uint64, uint64, 
 func buildPricing(items []QuotationItem, discountPercent uint8, ppnBps, servicesBps uint16) PricingSummary {
 	var originalSubtotal uint64
 	var marginalizedSubtotal uint64
+	var rowDiscountTotal uint64
 	for _, item := range items {
 		originalSubtotal += item.OriginalTotal
 		marginalizedSubtotal += item.Total
+		// The row-discount total is leaf-aware, and the reason is double
+		// counting. A package -- any item carrying sub-items, whether its parts
+		// are priced (state C) or shown as unbilled scope (state B) -- already
+		// holds the rollup of its parts' discounts in its own DiscountAmount:
+		// buildItems set it to that sum. Each priced sub-item then carries the
+		// same amount again as its own leaf discount. Summing a package's own
+		// DiscountAmount AND its parts' would count the package twice, so a
+		// package contributes its parts' discounts and its parent rollup is
+		// never added. A plain row has no parts: its own DiscountAmount is the
+		// leaf, so it is added directly.
+		if len(item.SubItems) > 0 {
+			for _, sub := range item.SubItems {
+				rowDiscountTotal += sub.DiscountAmount
+			}
+		} else {
+			rowDiscountTotal += item.DiscountAmount
+		}
 	}
 
 	// A discount is a price cut, not a cost cut: what we pay suppliers does not
@@ -270,6 +289,7 @@ func buildPricing(items []QuotationItem, discountPercent uint8, ppnBps, services
 		OriginalGrand:             originalGrand,
 		MarginalizedSubtotal:      marginalizedSubtotal,
 		MarginalizedDiscount:      marginalizedDiscount,
+		RowDiscountTotal:          rowDiscountTotal,
 		MarginalizedGrand:         marginalizedGrand,
 		TaxAmount:                 servicesTax,
 		MarginalizedGrandAfterTax: marginalizedGrandAfterTax,

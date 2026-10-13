@@ -117,8 +117,8 @@ func (a *app) printInternalTotals(internal backend.InternalBreakdown) {
 	rows := [][]string{
 		{"Cost subtotal", internal.DisplayOriginalSubtotal},
 		{"Customer subtotal", internal.DisplayMarginalizedSubtotal},
-		{"Row discounts", internal.DisplayMarginalizedDiscount},
-		{"Whole-quotation discount", internal.DisplayOriginalDiscount},
+		{"Row discounts", internal.DisplayRowDiscountTotal},
+		{"Whole-quotation discount", internal.DisplayMarginalizedDiscount},
 		{"Grand total (customer pays)", internal.DisplayGrand},
 	}
 	if internal.DisplayPpn != "" {
