@@ -444,7 +444,7 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode/ling-3.1-flash-free`, fallbacks `opencode/big-pickle` then `opencode-go/step-5-preview-free#high` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Worker** | `opencode-go/step-5-preview-free#high`, fallbacks `opencode/big-pickle` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
 | **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
 | **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
