@@ -54,6 +54,7 @@ import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
 import { PortalPreviewPanel } from "./PortalPreviewPanel";
+import { TemplatePreviewPanel, templatePreviewFingerprint, templatePreviewRefresh } from "./TemplatePreviewPanel";
 import { CompanyTemplatePanel } from "./CompanyTemplatePanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
@@ -546,6 +547,33 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   // than dropping it with the timer.
   const pendingLabels = useRef<{ entries: CompanyLabelEntry[]; sent: string } | null>(null);
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
+  // The template preview's refresh signal (issue #425). The preview shows the
+  // real sample PDF for the draft wording and colours, re-rendered on
+  // blur/Enter — never per keystroke. The key below is the only thing the
+  // panel's effect depends on; the fingerprint decides whether a blur or an
+  // Enter carries values worth a render, so tabbing through unchanged fields
+  // renders nothing. The baseline is taken when the served set first lands.
+  const [templatePreviewKey, setTemplatePreviewKey] = useState(0);
+  const lastTemplatePreview = useRef("");
+  useEffect(() => {
+    if (labels !== null && lastTemplatePreview.current === "") {
+      lastTemplatePreview.current = templatePreviewFingerprint(labels, theme);
+    }
+  }, [labels, theme]);
+  const maybeRefreshTemplatePreview = useCallback(() => {
+    if (labels === null) return;
+    const next = templatePreviewRefresh(lastTemplatePreview.current, labels, theme);
+    if (next !== null) {
+      lastTemplatePreview.current = next;
+      setTemplatePreviewKey((key) => key + 1);
+    }
+  }, [labels, theme]);
+  const refreshTemplatePreviewOnEnter = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Enter") maybeRefreshTemplatePreview();
+    },
+    [maybeRefreshTemplatePreview]
+  );
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -894,29 +922,42 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             onSaveUnits={() => void saveUnits()}
           />
         ) : companyTab === "template" ? (
-          <div className="grid gap-6">
-            <CompanyTemplatePanel
-              labels={labels}
-              saveState={labelsStatus}
-              error={labelsError === "" ? null : labelsError}
-              notice={labelsNotice === "" ? null : labelsNotice}
-              onChange={(key, value) =>
-                setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
-              }
-            />
-            {/* The four quotation colours, through the same panel the
-                Quotation tab renders: one UI over the theme columns, saved by
-                the profile save below, never a second copy of a colour. */}
-            <CompanyThemePanel
-              section="Quotation"
-              theme={theme}
-              onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
-            />
-            <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
-              The same four colors the Quotation tab edits — they are saved with{" "}
-              <span className="font-medium text-ink-500">Save company profile</span>{" "}
-              below, not with the wording above.
-            </p>
+          // The blur/Enter contract lives on this wrapper: leaving any field
+          // (or pressing Enter inside one) re-renders the preview when the
+          // draft changed, while keystrokes alone never do. Capture phase, so
+          // the wording inputs' own Enter blocker (which stops a partial
+          // profile save) does not swallow the refresh first.
+          <div
+            onBlurCapture={maybeRefreshTemplatePreview}
+            onKeyDownCapture={refreshTemplatePreviewOnEnter}
+          >
+            <div className="grid items-start gap-6 xl:grid-cols-2">
+              <div className="grid gap-6">
+                <CompanyTemplatePanel
+                  labels={labels}
+                  saveState={labelsStatus}
+                  error={labelsError === "" ? null : labelsError}
+                  notice={labelsNotice === "" ? null : labelsNotice}
+                  onChange={(key, value) =>
+                    setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
+                  }
+                />
+                {/* The four quotation colours, through the same panel the
+                    Quotation tab renders: one UI over the theme columns, saved by
+                    the profile save below, never a second copy of a colour. */}
+                <CompanyThemePanel
+                  section="Quotation"
+                  theme={theme}
+                  onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+                />
+                <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
+                  The same four colors the Quotation tab edits — they are saved with{" "}
+                  <span className="font-medium text-ink-500">Save company profile</span>{" "}
+                  below, not with the wording above.
+                </p>
+              </div>
+              <TemplatePreviewPanel labels={labels} theme={theme} refreshKey={templatePreviewKey} />
+            </div>
           </div>
         ) : companyTab === "portal" ? (
           <div className="grid gap-6">
