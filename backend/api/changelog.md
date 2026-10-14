@@ -4,6 +4,16 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.12.0] - 2026-10-14
+
+### Added
+
+- **The Template tab now shows the real document while you edit the wording.** Change a
+  label, leave the field, and the quotation PDF beside it re-renders with your words —
+  the same document a customer receives, with a Download sample button. The sample is
+  marked (a fake quote number, a code that verifies as nothing), and previewing can
+  never affect a real quotation.
+
 ## [0.11.0] - 2026-10-14
 
 ### Added
