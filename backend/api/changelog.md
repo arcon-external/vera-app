@@ -4,6 +4,41 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.11.0] - 2026-10-14
+
+### Added
+
+- **Your quotation can now say what you want it to say.** A new **Template** tab
+  in Company settings holds every customer-facing label — the title, the
+  "Quotation to" heading, the terms heading, the four meta labels, the seven
+  column headers, the four totals labels, the closing sentence and the four
+  terms sentences. Each field is named after the wording it prints today, and
+  empty a field to put that wording back. Type over a value and it saves by
+  itself a moment after you stop typing, with a *Saved* readout; a value the
+  system would refuse is held and the field is marked instead. Quotations that
+  were already issued keep the wording they were exported with.
+
+- **The verification page's colours can now be judged before they are saved.**
+  The Portal tab shows the verification page beside its four colours, one state
+  at a time — valid, superseded, mismatch, not found, unavailable — so a colour
+  choice cannot make one state look like another. The page shown is the real
+  one, rendered from the same template your customer sees, and it updates a
+  moment after you stop adjusting a colour. The wording of the portal is
+  deliberately fixed: "this document does not match our records" has to stay
+  exactly that unambiguous.
+
+- **Units of measure are yours to choose.** Company settings gains a **Units**
+  tab: the list your quotations offer, plus a canonical unit that a package
+  line is quoted in. Both are saved with the company, and every signed-in
+  account sees the same list.
+
+### Fixed
+
+- **A line broken into sub-items no longer splits across a page break.** The
+  whole line — its header and its parts — now moves together to the next page
+  in both the native and the browser renderer, so a package's sub-items are
+  never printed on one page while their parent sits on another.
+
 ## [0.10.4] - 2026-10-13
 
 ### Added
