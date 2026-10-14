@@ -26,6 +26,7 @@ import type { DetailsState } from "./components/DetailsPanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
+import { TemplatePreviewPanel } from "./components/TemplatePreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
@@ -200,6 +201,21 @@ const CASES: SnapshotCase[] = [
     // verdict in the preview stays hand-driven.
     name: "PortalPreviewPanel",
     element: <PortalPreviewPanel theme={EMPTY_THEME} />,
+  },
+  {
+    // The Company settings Template tab's preview (issue #425): the real
+    // sample PDF beside the wording and colours. The fixture reuses the
+    // Template panel's served set above (one override, one cleared field) so
+    // both halves of the tab snapshot the same draft.
+    //
+    // What this case cannot show, stated so it is not assumed: the panel
+    // fetches the PDF bytes from the binding in an effect, and renderToString
+    // runs no effects — so the screenshot is the panel's pending state
+    // (header, intro, the pending rectangle, the sample note, the disabled
+    // download). The iframe the document lands in is a plain embed of those
+    // bytes, and the blur/Enter re-render stays hand-driven.
+    name: "TemplatePreviewPanel",
+    element: <TemplatePreviewPanel labels={TEMPLATE_LABELS} theme={EMPTY_THEME} refreshKey={0} />,
   },
 ];
 

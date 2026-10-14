@@ -22,6 +22,10 @@ export function DeleteQuotation(arg1) {
   return window['go']['backend']['Quotation']['DeleteQuotation'](arg1);
 }
 
+export function DownloadTemplateSample(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['backend']['Quotation']['DownloadTemplateSample'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function DraftRevision(arg1, arg2, arg3) {
   return window['go']['backend']['Quotation']['DraftRevision'](arg1, arg2, arg3);
 }
@@ -76,6 +80,10 @@ export function PickDirectory() {
 
 export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
+}
+
+export function PreviewTemplateDocument(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['backend']['Quotation']['PreviewTemplateDocument'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function RefreshCompanyIdentity() {
