@@ -7,8 +7,9 @@ import { isCompleteHex, type CompanyTheme } from "../company";
 import { serializeCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
-// The template preview (issue #425): the real sample PDF beside the Template
-// tab's inputs, rendered through the active engine by the PreviewTemplateDocument
+// The template preview (issue #425): the real sample PDF on the merged
+// Quotation tab (issue #429), above the wording inputs and the four colours,
+// rendered through the active engine by the PreviewTemplateDocument
 // binding — never a client-side re-implementation, which is what would let the
 // preview drift from what an export prints.
 //
@@ -21,8 +22,10 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 //
 // Like the portal preview it owns its own fetch, but unlike it there is no
 // debounce: the parent re-renders this panel on blur/Enter (never per
-// keystroke), signalled through refreshKey. The effect reads the latest props
-// through a ref so a keystroke alone can never start a render.
+// keystroke), signalled through refreshKey, and once more when the served
+// wording lands — the panel can mount mid-fetch, and [refreshKey] alone never
+// re-ran then (#429). The effect reads the latest props through a ref so a
+// keystroke alone can never start a render.
 
 /** The four quotation colours, trimmed, in the order the binding takes them. */
 export function templatePreviewColors(theme: CompanyTheme): [string, string, string, string] {
@@ -81,6 +84,38 @@ export function templatePreviewRefresh(
   return fingerprint;
 }
 
+/** The preview effect's trigger beyond refreshKey (issue #429): false while
+ *  the wording fetch is in flight, true once a set has landed.
+ *
+ *  The panel can mount while that fetch is still running — the profile
+ *  fetch that clears the loading skeleton is awaited before the labels fetch
+ *  that follows it in the same load(), so labels lands strictly after the
+ *  skeleton clears and the panel mounts. Keyed on [refreshKey] alone, the
+ *  effect then ran once, found labels null, and never ran again: the preview
+ *  sat on its "still loading" error for the rest of the session, and even a
+ *  blur would not save it, because the fingerprint is unchanged and
+ *  templatePreviewRefresh answers null. That is the blank preview.
+ *
+ *  This flips exactly once, on the null → loaded transition. A keystroke
+ *  swaps the entries array without touching it, which is what keeps the
+ *  latest-ref contract intact: no render per keystroke. */
+export function templatePreviewLabelsReady(labels: CompanyLabelEntry[] | null): boolean {
+  return labels !== null;
+}
+
+/** The backend's reason for a failed preview, when it sent one. The Wails
+ *  runtime rejects with the Go error — a string, or an Error wrapping it —
+ *  and those messages are descriptive ("no clients available for template
+ *  sample", "template sample: deep colour ... is not a #RRGGBB colour").
+ *  The catch used to discard them (#425), which left the #429 blank preview
+ *  with a generic sentence and nothing to diagnose from. Empty when the
+ *  rejection carries nothing readable, so the caller keeps its fallback. */
+export function templatePreviewErrorDetail(err: unknown): string {
+  if (typeof err === "string") return err.trim();
+  if (err instanceof Error) return err.message.trim();
+  return "";
+}
+
 type RenderedArgs = [CompanyLabelEntry[], string, string, string, string];
 
 export function TemplatePreviewPanel(props: {
@@ -100,11 +135,15 @@ export function TemplatePreviewPanel(props: {
   // What the visible document was rendered from. The download reuses it, so
   // the saved file is the document on screen rather than a newer draft.
   const rendered = useRef<RenderedArgs | null>(null);
-  // The latest props for the refreshKey effect, which must not depend on them
+  // The latest props for the effect, which must not depend on them
   // directly: depending on labels/theme would re-render per keystroke, which
   // is exactly what the blur/Enter contract forbids.
   const latest = useRef({ labels, theme });
   latest.current = { labels, theme };
+  // The one labels change the effect must answer beyond refreshKey: the set
+  // landing. Everything else about labels is a keystroke, and keystrokes
+  // never render (see templatePreviewLabelsReady).
+  const labelsReady = templatePreviewLabelsReady(labels);
   const request = useRef(0);
 
   useEffect(() => {
@@ -140,12 +179,21 @@ export function TemplatePreviewPanel(props: {
         rendered.current = args;
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (id !== request.current) return;
-        setError("We couldn't render the preview. The last good preview stays above.");
+        // The backend's reason is the diagnosis — swallowed here, a blank
+        // preview is a generic sentence and a guess (#429). It is logged for
+        // the console and shown in the banner, which is admin-only settings.
+        console.error("PreviewTemplateDocument failed", err);
+        const detail = templatePreviewErrorDetail(err);
+        setError(
+          detail === ""
+            ? "We couldn't render the preview. The last good preview stays below."
+            : `We couldn't render the preview: ${detail}. The last good preview stays below.`
+        );
         setLoading(false);
       });
-  }, [refreshKey]);
+  }, [refreshKey, labelsReady]);
 
   useEffect(() => {
     return () => {
@@ -164,8 +212,12 @@ export function TemplatePreviewPanel(props: {
     try {
       const path = (await DownloadTemplateSample(...args)) as string;
       setSavedPath(`Sample saved to ${path}.`);
-    } catch {
-      setError("We couldn't save the sample.");
+    } catch (err: unknown) {
+      // Same obligation as the render catch above: the backend says why
+      // ("user cancelled", a write failure), and the banner must carry it.
+      console.error("DownloadTemplateSample failed", err);
+      const detail = templatePreviewErrorDetail(err);
+      setError(detail === "" ? "We couldn't save the sample." : `We couldn't save the sample: ${detail}`);
     } finally {
       setDownloading(false);
     }
@@ -187,7 +239,7 @@ export function TemplatePreviewPanel(props: {
       />
       <p className="max-w-2xl text-body text-ink-600">
         The sample quotation as it prints right now, with the wording and
-        colours above typed but not yet saved. It re-renders when you leave a
+        colours below typed but not yet saved. It re-renders when you leave a
         field or press Enter — never while you type.
       </p>
       {error ? (

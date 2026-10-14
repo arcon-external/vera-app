@@ -7,7 +7,7 @@ import {
 } from "../companyLabels";
 import { Badge, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
-// Presentational slice of the Company settings Template tab: the 26 editable
+// Presentational slice of the Company settings Quotation tab: the 26 editable
 // labels grouped the way the document reads. Like the Units panel it holds no
 // state and no save — the parent (CompanyProfileCard) owns the served set, the
 // autosave and the identity refresh, and forwards edits up. The colours that

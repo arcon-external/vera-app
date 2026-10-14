@@ -23,10 +23,10 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
-import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
+import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
+import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
-import { TemplatePreviewPanel } from "./components/TemplatePreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
@@ -142,10 +142,13 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The Company settings Units tab (issue #337): the canonical-unit picker
-    // and the served unit list. A representative slice of the seeded list —
-    // canonical first, a short token (m2 whose label is the wider m²), and the
-    // widest seed (Quarter) — so the snapshot reads the layout at both widths.
+    // The Company settings Units tab (issue #337; the select restyle and the
+    // row relayout of #429): the chevron-styled canonical-unit picker and the
+    // served unit list with its captioned fields ("Value — stored" /
+    // "Label — printed") and the footer row holding the badge and the row
+    // controls. A representative slice of the seeded list — canonical first, a
+    // short token (m2 whose label is the wider m²), and the widest seed
+    // (Quarter) — so the snapshot reads the layout at both widths.
     name: "CompanyUnitsPanel",
     element: (
       <CompanyUnitsPanel
@@ -203,19 +206,35 @@ const CASES: SnapshotCase[] = [
     element: <PortalPreviewPanel theme={EMPTY_THEME} />,
   },
   {
-    // The Company settings Template tab's preview (issue #425): the real
-    // sample PDF beside the wording and colours. The fixture reuses the
-    // Template panel's served set above (one override, one cleared field) so
-    // both halves of the tab snapshot the same draft.
+    // The Company settings merged Quotation tab (issue #429): the real sample
+    // PDF on top, the 26 editable labels below it, then the four quotation
+    // colours and the one caption naming both save paths. The fixture reuses
+    // the Template panel's served set above (one override, one cleared field)
+    // so the preview and the wording snapshot the same draft, and the stacked
+    // shape is the Portal tab's, verbatim.
     //
     // What this case cannot show, stated so it is not assumed: the panel
     // fetches the PDF bytes from the binding in an effect, and renderToString
-    // runs no effects — so the screenshot is the panel's pending state
+    // runs no effects — so the screenshot is the preview's pending state
     // (header, intro, the pending rectangle, the sample note, the disabled
-    // download). The iframe the document lands in is a plain embed of those
-    // bytes, and the blur/Enter re-render stays hand-driven.
-    name: "TemplatePreviewPanel",
-    element: <TemplatePreviewPanel labels={TEMPLATE_LABELS} theme={EMPTY_THEME} refreshKey={0} />,
+    // download) above the live wording and colour stacks. The iframe the
+    // document lands in is a plain embed of those bytes, and the blur/Enter
+    // re-render stays hand-driven.
+    name: "CompanyQuotationTab",
+    element: (
+      <CompanyQuotationTab
+        labels={TEMPLATE_LABELS}
+        theme={EMPTY_THEME}
+        refreshKey={0}
+        labelsStatus="saved"
+        labelsError={null}
+        labelsNotice={null}
+        onLabelChange={() => undefined}
+        onThemeChange={() => undefined}
+        onFieldBlur={() => undefined}
+        onFieldEnter={() => undefined}
+      />
+    ),
   },
 ];
 

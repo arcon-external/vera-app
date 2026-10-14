@@ -5,6 +5,23 @@ import { normalizeCurrencyCode } from "../drafts";
 import type { CurrencyInfo } from "../format";
 import { Button, Card, SectionHeading, fieldClass } from "./ui";
 
+// The native-select chevron idiom, the one UoMSelect in ItemEditor.tsx uses:
+// `appearance-none` strips the platform arrow, and this inline SVG is drawn as
+// the background at 10px, right 0.6rem from the centre — the same chevron the
+// house Select draws. The house Select itself is deliberately not extended here
+// (it has no disabled prop, and the picker is disabled while the catalogue
+// loads); copying the idiom costs one constant.
+//
+// The xmlns attribute is load-bearing, not decoration: a data-URI SVG used as
+// a background image is parsed in image mode, which has no HTML parser to
+// imply the SVG namespace — without the attribute Chrome paints nothing at all,
+// silently (verified in the ui-snapshot container: the same SVG with and
+// without it). ItemEditor's copy of this idiom is missing it; see the report.
+const currencyChevronStyle = {
+  backgroundImage:
+    "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767469' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+} as const;
+
 // Presentational slice of the company form: the parent (CompanyProfileCard)
 // owns all state and the whole-record save; see profilePayload in
 // frontend/src/company.ts for why a slice must never save on its own.
@@ -76,7 +93,8 @@ export function CompanyGeneralPanel(props: {
               value={displayCode}
               disabled={catalogue === null}
               onChange={(event) => onCurrencyChange(event.target.value)}
-              className={fieldClass}
+              className={`${fieldClass} cursor-pointer appearance-none bg-[length:10px] bg-[right_0.6rem_center] bg-no-repeat pr-7`}
+              style={currencyChevronStyle}
               aria-label="Company currency"
             >
               {catalogue === null ? (

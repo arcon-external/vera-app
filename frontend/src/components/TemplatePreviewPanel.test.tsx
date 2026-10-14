@@ -7,7 +7,9 @@ import {
   templatePreviewArgs,
   templatePreviewColorError,
   templatePreviewColors,
+  templatePreviewErrorDetail,
   templatePreviewFingerprint,
+  templatePreviewLabelsReady,
   templatePreviewRefresh,
 } from "./TemplatePreviewPanel";
 
@@ -50,6 +52,14 @@ describe("template preview panel", () => {
 
   it("says the preview follows blur and Enter, not keystrokes", () => {
     expect(render()).toContain("never while you type");
+  });
+
+  it("points at the wording and colours below, where the merged tab puts them", () => {
+    // Issue #429 merged Template into Quotation in the Portal tab's shape:
+    // the preview is on top, so the copy's direction flipped with the move.
+    // A stale "above" here reads as a bug in the merged tab.
+    expect(render()).toContain("colours below typed");
+    expect(render()).not.toContain("colours above typed");
   });
 
   it("paints the pending document even before the wording loads", () => {
@@ -121,5 +131,54 @@ describe("template preview mapping", () => {
     expect(
       templatePreviewRefresh(shown, LABELS, { ...DEFAULT_THEME, qInk: "#000000" })
     ).toBe(templatePreviewFingerprint(LABELS, { ...DEFAULT_THEME, qInk: "#000000" }));
+  });
+});
+
+// The labels-landing trigger (issue #429). The panel can mount while the
+// wording fetch is in flight — the profile fetch that clears the loading
+// skeleton is awaited before the labels fetch that follows it in the same
+// load(), so the set lands strictly after the skeleton clears — and an
+// effect keyed on [refreshKey] alone then ran once against null and never
+// again: the preview sat on its "still loading" error for the rest of the
+// session, and even a blur would not save it, because the fingerprint is
+// unchanged. The trigger must therefore be false while the fetch runs and
+// flip exactly once when the set lands; anything else strands the preview.
+//
+// What this does NOT prove, stated plainly: the dependency array itself.
+// renderToString runs no effects, so the wiring — that the panel passes this
+// to useEffect beside refreshKey — has the same standing as the blur/Enter
+// re-render above: it needs a browser and stays hand-driven.
+describe("the labels-landing trigger", () => {
+  it("is false while the wording is in flight and true once a set lands", () => {
+    expect(templatePreviewLabelsReady(null)).toBe(false);
+    expect(templatePreviewLabelsReady(LABELS)).toBe(true);
+  });
+
+  it("does not move when a keystroke swaps the entries", () => {
+    // The latest-ref contract: a new array (same loaded state) must not
+    // re-arm the effect, or the preview would render per keystroke.
+    const reworded = LABELS.map((entry) => ({ ...entry, Value: `${entry.Value} x` }));
+    expect(templatePreviewLabelsReady(reworded)).toBe(templatePreviewLabelsReady(LABELS));
+  });
+});
+
+// The swallowed error (issue #429). The catch used to discard the backend's
+// rejection, which is the one place its descriptive messages ("no clients
+// available for template sample", "template sample: deep colour ... is not a
+// #RRGGBB colour") could be read from — a blank preview with a generic
+// sentence was the result. The detail is logged and shown; this pins the
+// reading of every shape a Wails rejection arrives in.
+describe("the preview error's backend detail", () => {
+  it("reads a Wails rejection's message, whatever shape it arrives in", () => {
+    expect(templatePreviewErrorDetail("no clients available for template sample")).toBe(
+      "no clients available for template sample"
+    );
+    expect(templatePreviewErrorDetail(new Error("prepare template sample: no clients available"))).toBe(
+      "prepare template sample: no clients available"
+    );
+    expect(templatePreviewErrorDetail("  spaced  ")).toBe("spaced");
+    // Nothing readable: the caller keeps its fallback sentence.
+    expect(templatePreviewErrorDetail({})).toBe("");
+    expect(templatePreviewErrorDetail(undefined)).toBe("");
   });
 });

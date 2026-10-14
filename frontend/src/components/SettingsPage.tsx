@@ -53,9 +53,9 @@ import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company"
 import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
+import { CompanyQuotationTab } from "./CompanyQuotationTab";
 import { PortalPreviewPanel } from "./PortalPreviewPanel";
-import { TemplatePreviewPanel, templatePreviewFingerprint, templatePreviewRefresh } from "./TemplatePreviewPanel";
-import { CompanyTemplatePanel } from "./CompanyTemplatePanel";
+import { templatePreviewFingerprint, templatePreviewRefresh } from "./TemplatePreviewPanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
 import { TabBar, tabId, tabPanelId } from "./TabBar";
@@ -476,7 +476,6 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
 const COMPANY_TABS: TabItem[] = [
   { id: "general", label: "General" },
   { id: "units", label: "Units" },
-  { id: "template", label: "Template" },
   { id: "quotation", label: "Quotation" },
   { id: "portal", label: "Portal" },
 ];
@@ -503,7 +502,7 @@ export const LABELS_SAVE_DEPS: CompanyLabelSaveDeps = {
 
 export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [companyTab, setCompanyTab] = useState<
-    "general" | "units" | "template" | "quotation" | "portal"
+    "general" | "units" | "quotation" | "portal"
   >("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
@@ -522,8 +521,8 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState("");
   // The document's editable wording (issue #339): served, never hard-coded in
-  // the client. Null while loading or on a failed fetch; the Template panel
-  // renders its own pending state. The wording keeps its own save
+  // the client. Null while loading or on a failed fetch; the Quotation tab's
+  // wording panel renders its own pending state. The wording keeps its own save
   // (UpdateCompanyLabels full-replaces the override table), so — like the
   // units list — it lives here rather than riding the whole-record profile
   // save the colours use.
@@ -921,44 +920,21 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             error={unitsError === "" ? null : unitsError}
             onSaveUnits={() => void saveUnits()}
           />
-        ) : companyTab === "template" ? (
-          // The blur/Enter contract lives on this wrapper: leaving any field
-          // (or pressing Enter inside one) re-renders the preview when the
-          // draft changed, while keystrokes alone never do. Capture phase, so
-          // the wording inputs' own Enter blocker (which stops a partial
-          // profile save) does not swallow the refresh first.
-          <div
-            onBlurCapture={maybeRefreshTemplatePreview}
-            onKeyDownCapture={refreshTemplatePreviewOnEnter}
-          >
-            <div className="grid items-start gap-6 xl:grid-cols-2">
-              <div className="grid gap-6">
-                <CompanyTemplatePanel
-                  labels={labels}
-                  saveState={labelsStatus}
-                  error={labelsError === "" ? null : labelsError}
-                  notice={labelsNotice === "" ? null : labelsNotice}
-                  onChange={(key, value) =>
-                    setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
-                  }
-                />
-                {/* The four quotation colours, through the same panel the
-                    Quotation tab renders: one UI over the theme columns, saved by
-                    the profile save below, never a second copy of a colour. */}
-                <CompanyThemePanel
-                  section="Quotation"
-                  theme={theme}
-                  onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
-                />
-                <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
-                  The same four colors the Quotation tab edits — they are saved with{" "}
-                  <span className="font-medium text-ink-500">Save company profile</span>{" "}
-                  below, not with the wording above.
-                </p>
-              </div>
-              <TemplatePreviewPanel labels={labels} theme={theme} refreshKey={templatePreviewKey} />
-            </div>
-          </div>
+        ) : companyTab === "quotation" ? (
+          <CompanyQuotationTab
+            labels={labels}
+            theme={theme}
+            refreshKey={templatePreviewKey}
+            labelsStatus={labelsStatus}
+            labelsError={labelsError === "" ? null : labelsError}
+            labelsNotice={labelsNotice === "" ? null : labelsNotice}
+            onLabelChange={(key, value) =>
+              setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
+            }
+            onThemeChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+            onFieldBlur={maybeRefreshTemplatePreview}
+            onFieldEnter={refreshTemplatePreviewOnEnter}
+          />
         ) : companyTab === "portal" ? (
           <div className="grid gap-6">
             {/* The portal is judged as a document, one state at a time: the
@@ -976,13 +952,7 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               below, and the preview above shows them before you save.
             </p>
           </div>
-        ) : (
-          <CompanyThemePanel
-            section="Quotation"
-            theme={theme}
-            onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
-          />
-        )}
+        ) : null}
       </div>
       <div className="mt-6">
         <Button type="submit" variant="primary" disabled={loading || busy}>
