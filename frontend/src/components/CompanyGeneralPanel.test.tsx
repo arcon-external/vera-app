@@ -85,6 +85,16 @@ function inputWithPlaceholder(html: string, placeholder: string): string {
   return found as string;
 }
 
+/** Returns the decoded background-image data URI out of a markup segment's
+ *  inline style: React SSR escapes both the attribute's double quotes and the
+ *  URI's single quotes as entities, so they are undone before decoding. */
+function decodedChevron(segment: string): string {
+  const match = segment.match(/background-image:url\((.*?)\)/);
+  expect(match, `expected a background-image url in: ${segment}`).toBeDefined();
+  const escaped = (match as RegExpMatchArray)[1].replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
+  return decodeURIComponent(escaped);
+}
+
 describe("CompanyGeneralPanel", () => {
   it("renders both headings", () => {
     const html = render();
@@ -254,6 +264,30 @@ describe("CompanyGeneralPanel currency picker", () => {
     const select = selectSegment(html);
     expect(select).toContain("disabled");
     expect(select).toContain("USD");
+  });
+
+  it("styles the currency select with the house trigger recipe plus the chevron idiom", () => {
+    const select = selectSegment(render());
+    // The house recipe is the shared fieldClass export, asserted against the
+    // export rather than a retyped copy…
+    expect(select).toContain(fieldClass);
+    // …plus the ItemEditor UoMSelect idiom: no platform arrow, a
+    // background-drawn chevron at 10px, right padding that clears it, and a
+    // pointer cursor (a select is not a text field).
+    expect(select).toContain("appearance-none");
+    expect(select).toContain("bg-[length:10px]");
+    expect(select).toContain("bg-[right_0.6rem_center]");
+    expect(select).toContain("bg-no-repeat");
+    expect(select).toContain("pr-7");
+    expect(select).toContain("cursor-pointer");
+    // The chevron itself is the inline SVG background, not a sprite file.
+    expect(select).toContain("background-image");
+    expect(select).toContain("data:image/svg+xml");
+    // Decoded, the URI must be an image-mode SVG: without the explicit
+    // xmlns the browser paints nothing, and the select loses its arrow with
+    // no console error to notice. Measured in the ui-snapshot container
+    // (the house idiom in ItemEditor.tsx is missing the attribute).
+    expect(decodedChevron(select)).toContain("<svg xmlns='http://www.w3.org/2000/svg'");
   });
 
   it("wires the change handler to the select", () => {

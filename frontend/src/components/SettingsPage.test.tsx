@@ -2,8 +2,10 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { ToastProvider } from "../toast";
+import { DEFAULT_THEME } from "../company";
 import { saveCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
 import { LABELS_SAVE_DEPS, CompanyProfileCard } from "./SettingsPage";
+import { CompanyQuotationTab } from "./CompanyQuotationTab";
 import { tabId, tabPanelId } from "./TabBar";
 
 // The wording autosave's one out-of-band obligation is the identity refresh:
@@ -72,16 +74,22 @@ function tabs(html: string): string[] {
 }
 
 describe("CompanyProfileCard sub-tabs", () => {
-  it("renders five sub-tabs labelled General, Units, Template, Quotation and Portal, each role=tab", () => {
+  it("renders four sub-tabs labelled General, Units, Quotation and Portal, each role=tab", () => {
+    // Template and Quotation are one thing (issue #429): the merged tab is
+    // named Quotation and there is no Template tab.
     const html = render();
     const found = tabs(html);
-    expect(found).toHaveLength(5);
-    for (const label of ["General", "Units", "Template", "Quotation", "Portal"]) {
+    expect(found).toHaveLength(4);
+    for (const label of ["General", "Units", "Quotation", "Portal"]) {
       expect(
         found.find((segment) => segment.includes(`>${label}</button>`)),
         `expected a tab labelled ${label} in: ${html}`
       ).toBeDefined();
     }
+    expect(
+      found.find((segment) => segment.includes(">Template</button>")),
+      "the Template sub-tab was merged into Quotation and must be gone"
+    ).toBeUndefined();
   });
 
   it("marks exactly one tab selected, and it is General on first render", () => {
@@ -90,7 +98,7 @@ describe("CompanyProfileCard sub-tabs", () => {
     const general = tabs(html).find((segment) => segment.includes(">General</button>"));
     expect(general).toBeDefined();
     expect(general).toContain('aria-selected="true"');
-    for (const label of ["Template", "Quotation", "Portal"]) {
+    for (const label of ["Quotation", "Portal"]) {
       const button = tabs(html).find((segment) => segment.includes(`>${label}</button>`));
       expect(button).toBeDefined();
       expect(button).toContain('aria-selected="false"');
@@ -104,7 +112,6 @@ describe("CompanyProfileCard sub-tabs", () => {
     const ids: [string, string][] = [
       ["general", "General"],
       ["units", "Units"],
-      ["template", "Template"],
       ["quotation", "Quotation"],
       ["portal", "Portal"],
     ];
@@ -125,6 +132,65 @@ describe("CompanyProfileCard sub-tabs", () => {
     expect(html).toContain('role="tabpanel"');
     expect(html).toContain(`id="${tabPanelId("company", "general")}"`);
     expect(html).toContain(`aria-labelledby="${tabId("company", "general")}"`);
+  });
+
+  // The merged Quotation tab (issue #429): the Portal tab's shape — preview
+  // on top, the config stack below, one caption naming both save paths.
+  // CompanyProfileCard can only render its loading skeleton here (the tab
+  // content waits on effects), and the branch renders this component
+  // verbatim, so the composition is what gets pinned.
+  describe("the merged Quotation tab", () => {
+    function renderTab(): string {
+      return renderToString(
+        <CompanyQuotationTab
+          labels={SERVED}
+          theme={DEFAULT_THEME}
+          refreshKey={0}
+          labelsStatus="saved"
+          labelsError={null}
+          labelsNotice={null}
+          onLabelChange={() => undefined}
+          onThemeChange={() => undefined}
+          onFieldBlur={() => undefined}
+          onFieldEnter={() => undefined}
+        />
+      );
+    }
+
+    it("stacks the preview above the wording, the colours and one caption", () => {
+      const html = renderTab();
+      const preview = html.indexOf('aria-label="Loading template preview"');
+      const wording = html.indexOf("Document wording");
+      const colours = html.indexOf("Quotation colors");
+      const caption = html.indexOf("Wording above saves automatically");
+      expect(preview).toBeGreaterThan(-1);
+      expect(wording).toBeGreaterThan(preview);
+      expect(colours).toBeGreaterThan(wording);
+      expect(caption).toBeGreaterThan(colours);
+      // The preview is the pending document, not an empty frame.
+      expect(html).not.toContain("<iframe");
+    });
+
+    it("names both save paths in one caption, and only one", () => {
+      const html = renderTab();
+      expect(html).toContain("Wording above saves automatically");
+      expect(html).toContain("Save company profile");
+      expect(html).toContain("the preview shows both before you save");
+      expect(html.split("Wording above saves automatically").length - 1).toBe(1);
+      // The old Template tab carried a caption of its own about "the same
+      // four colors the Quotation tab edits"; the merge says it once.
+      expect(html).not.toContain("The same four colors the Quotation tab edits");
+    });
+
+    it("still carries the wording inputs and the four quotation colours", () => {
+      const html = renderTab();
+      expect(html).toContain('aria-label="Document wording: QUOTATION"');
+      // The served override (PROPOSAL over the built-in QUOTATION) shows its
+      // Reset affordance, so the wording panel is the live one.
+      expect(html).toContain(`aria-label="Reset QUOTATION to the built-in wording"`);
+      expect(html).toContain('aria-label="Quotation Deep hex value"');
+      expect(html).toContain('aria-label="Quotation Ink hex value"');
+    });
   });
 
   it("renders a disabled save button inside the shared form root while loading", () => {

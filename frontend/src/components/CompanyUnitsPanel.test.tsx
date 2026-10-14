@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompanyUnitOption } from "../companyUnits";
 import { validateCompanyUnits } from "../companyUnits";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
+import { fieldClass } from "./ui";
 
 // Same house pattern as CompanyGeneralPanel.test.tsx: node, no DOM, the panel
 // rendered to a string and asserted on as markup. The panel is a presentational
@@ -37,6 +38,16 @@ function selects(html: string): string[] {
   return html.split("<select").slice(1).map((segment) => segment.split("</select>")[0]);
 }
 
+/** Returns the decoded background-image data URI out of a markup segment's
+ *  inline style: React SSR escapes both the attribute's double quotes and the
+ *  URI's single quotes as entities, so they are undone before decoding. */
+function decodedChevron(segment: string): string {
+  const match = segment.match(/background-image:url\((.*?)\)/);
+  expect(match, `expected a background-image url in: ${segment}`).toBeDefined();
+  const escaped = (match as RegExpMatchArray)[1].replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
+  return decodeURIComponent(escaped);
+}
+
 /** The button segment whose aria-label matches exactly. */
 function buttonWithAria(html: string, label: string): string {
   const found = html.split("<button").slice(1).find((segment) =>
@@ -50,9 +61,16 @@ describe("CompanyUnitsPanel", () => {
   it("renders the heading and the value/label explainer", () => {
     const html = render();
     expect(html).toContain("Units of measure");
-    expect(html).toContain("value");
-    expect(html).toContain("what prints");
+    expect(html).toContain("line-item editor");
+    // The m2/m² example survives the shortening: it is the only place the
+    // stored/printed difference is shown concretely.
+    expect(html).toContain("square meters can store as");
+    expect(html).toContain("and print as");
     expect(html).toContain("m²");
+    expect(html).toContain("Units already on saved quotations keep whatever they were issued with.");
+    // …and the explanation the visible captions now carry is gone.
+    expect(html).not.toContain("what prints");
+    expect(html).not.toContain("stores and signs");
   });
 
   it("shows a loading skeleton while the served list is null", () => {
@@ -159,6 +177,56 @@ describe("CompanyUnitsPanel", () => {
     const html = render({ canonical: "Week" });
     const canonical = selects(html).find((segment) => segment.includes('aria-label="Canonical unit"')) as string;
     expect(canonical).toContain('value="Week"');
+  });
+
+  it("styles the canonical select with the house trigger recipe plus the chevron idiom", () => {
+    const canonical = selects(render()).find((segment) => segment.includes('aria-label="Canonical unit"')) as string;
+    expect(canonical).toContain(fieldClass);
+    expect(canonical).toContain("appearance-none");
+    expect(canonical).toContain("bg-[length:10px]");
+    expect(canonical).toContain("bg-[right_0.6rem_center]");
+    expect(canonical).toContain("bg-no-repeat");
+    expect(canonical).toContain("pr-7");
+    expect(canonical).toContain("cursor-pointer");
+    expect(canonical).toContain("background-image");
+    expect(canonical).toContain("data:image/svg+xml");
+    // The picker keeps its cap: it is a short-control field, not full-bleed.
+    expect(render()).toContain("max-w-sm");
+    // Decoded, the URI must be an image-mode SVG: without the explicit
+    // xmlns the browser paints nothing, and the select loses its arrow with
+    // no console error to notice. Measured in the ui-snapshot container
+    // (the house idiom in ItemEditor.tsx is missing the attribute).
+    expect(decodedChevron(canonical)).toContain("<svg xmlns='http://www.w3.org/2000/svg'");
+  });
+});
+
+describe("CompanyUnitsPanel unit rows", () => {
+  it("captions each input visibly with the stored/printed meaning", () => {
+    const html = render();
+    expect(html).toContain("Value — stored");
+    expect(html).toContain("Label — printed");
+    expect(html).toContain('class="text-caption font-medium text-ink-600"');
+    // The captions never replace the aria-labels: a screen reader hears
+    // "Value for unit 2", which names the row the caption cannot.
+    expect(html).toContain('aria-label="Value for unit 2"');
+    expect(html).toContain('aria-label="Label for unit 2"');
+  });
+
+  it("puts the badge and the controls in an explicit footer row that is full-width at 360", () => {
+    const html = render();
+    // w-full at the base breakpoint (the row drops below the inputs), sm:w-auto
+    // (it joins the input line again), justify-between (badge left, icons right).
+    expect(html).toContain('class="flex w-full items-center justify-between sm:w-auto"');
+    // The spacer that keeps the badge column's width when a row is not canonical.
+    expect(html).toContain('class="w-[68px]"');
+  });
+
+  it("gives every icon button a 40x40 hit box, with a 4px gap", () => {
+    const html = render();
+    for (const label of ["Move unit 2 up", "Move unit 2 down", "Remove unit 2"]) {
+      expect(buttonWithAria(html, label)).toContain("h-10 w-10");
+    }
+    expect(html).toContain('class="flex shrink-0 items-center gap-1"');
   });
 });
 
