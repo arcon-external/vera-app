@@ -81,7 +81,9 @@ func TestCompanyUnitsRoundTripPreservesOrder(t *testing.T) {
 	for i := range want {
 		want[i].SortOrder = i + 1
 	}
-	updated, err := database.UpdateCompanyUnits(ctx, want)
+	// A list-only save: the canonical argument is empty, so the stored
+	// canonical unit has to survive the replacement.
+	updated, err := database.UpdateCompanyUnits(ctx, want, "")
 	if err != nil {
 		t.Fatalf("update company units: %v", err)
 	}
@@ -127,7 +129,7 @@ func TestCompanyUnitsRejectsInvalidInput(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := database.UpdateCompanyUnits(ctx, tc.units)
+			_, err := database.UpdateCompanyUnits(ctx, tc.units, "")
 			if err == nil {
 				t.Fatal("update company units succeeded; want a validation error")
 			}
@@ -156,7 +158,7 @@ func TestCanonicalUnitMustSurviveListReplacement(t *testing.T) {
 	_, err := database.UpdateCompanyUnits(ctx, []CompanyUnit{
 		{Value: "Lot", Label: "Lot"},
 		{Value: "EA", Label: "EA"},
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("replacing the list without the canonical unit succeeded; want a refusal")
 	}
@@ -256,6 +258,88 @@ func TestCompanyUnitsForeignKeyRefusesCanonicalRemoval(t *testing.T) {
 	}
 }
 
+// TestCanonicalUnitMovesWithTheListInOneTransaction covers the Units tab's own
+// canonical field: a save that renames the canonical unit to a value the new
+// list carries commits both, and the value is validated against the list being
+// written — never the stored one — because after this transaction the new list
+// is the only list there is.
+func TestCanonicalUnitMovesWithTheListInOneTransaction(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run Postgres integration tests")
+	}
+	ctx := context.Background()
+	database := openTestSchema(t, "vera_test_units_canonical_together")
+
+	// The new list deliberately drops the seeded canonical "Lot" and names
+	// "Pc" in its place, so a validation that read the stored list instead of
+	// the new one would accept this and the FK would refuse it at commit.
+	if _, err := database.UpdateCompanyUnits(ctx, []CompanyUnit{
+		{Value: "Pc", Label: "piece"},
+		{Value: "EA", Label: "each"},
+	}, "Pc"); err != nil {
+		t.Fatalf("move the canonical unit with the list: %v", err)
+	}
+
+	units, err := database.GetCompanyUnits(ctx)
+	if err != nil {
+		t.Fatalf("get company units: %v", err)
+	}
+	if len(units) != 2 || units[0].Value != "Pc" || units[1].Value != "EA" {
+		t.Errorf("units = %+v; want the new list in the new order", units)
+	}
+	profile, err := database.GetCompanyProfile(ctx)
+	if err != nil {
+		t.Fatalf("get company profile: %v", err)
+	}
+	if profile.CanonicalUoM != "Pc" {
+		t.Errorf("canonical unit = %q; want the %q the save named", profile.CanonicalUoM, "Pc")
+	}
+
+	// A canonical the new list does not carry is refused before anything is
+	// written, and the refusal names the unit.
+	if _, err := database.UpdateCompanyUnits(ctx, []CompanyUnit{
+		{Value: "Lot", Label: "Lot"},
+		{Value: "EA", Label: "EA"},
+	}, "m2"); err == nil || !strings.Contains(err.Error(),
+		`company canonical unit "m2" is not on the company's unit list`) {
+		t.Errorf("off-list canonical: err = %v; want a refusal naming the unit", err)
+	}
+	// The refusal left both sides alone: the list is still the two rows above
+	// and the canonical is still Pc.
+	units, err = database.GetCompanyUnits(ctx)
+	if err != nil {
+		t.Fatalf("get company units after refusal: %v", err)
+	}
+	if len(units) != 2 || units[0].Value != "Pc" {
+		t.Errorf("units = %+v; want the refused save to write nothing", units)
+	}
+	profile, err = database.GetCompanyProfile(ctx)
+	if err != nil {
+		t.Fatalf("get company profile after refusal: %v", err)
+	}
+	if profile.CanonicalUoM != "Pc" {
+		t.Errorf("canonical unit = %q after a refused save; want it kept \"Pc\"", profile.CanonicalUoM)
+	}
+
+	// An empty canonical keeps the stored one even when the list changes:
+	// the canonical must survive the replacement, which is the list-only save
+	// the Units tab makes when the unit dropdown is untouched.
+	if _, err := database.UpdateCompanyUnits(ctx, []CompanyUnit{
+		{Value: "EA", Label: "each"},
+		{Value: "Pc", Label: "piece"},
+	}, ""); err != nil {
+		t.Fatalf("reorder the list without touching the canonical: %v", err)
+	}
+	profile, err = database.GetCompanyProfile(ctx)
+	if err != nil {
+		t.Fatalf("get company profile after reorder: %v", err)
+	}
+	if profile.CanonicalUoM != "Pc" {
+		t.Errorf("canonical unit = %q; want an empty canonical to keep the stored \"Pc\"", profile.CanonicalUoM)
+	}
+}
+
 // TestRemovedUnitRevisionStillReadsBack is the read-compatibility promise:
 // revisions self-snapshot their row's UoM (migration 016/017), so removing a
 // unit from the company list — which blocks nothing new being written — never
@@ -281,7 +365,7 @@ func TestRemovedUnitRevisionStillReadsBack(t *testing.T) {
 		{Value: "Lot", Label: "Lot"},
 		{Value: "EA", Label: "EA"},
 		{Value: "m2", Label: "m²"},
-	}); err != nil {
+	}, ""); err != nil {
 		t.Fatalf("replace list without Pc: %v", err)
 	}
 

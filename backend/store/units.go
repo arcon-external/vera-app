@@ -141,13 +141,21 @@ func (s *Store) GetCompanyUnits(ctx context.Context) ([]CompanyUnit, error) {
 }
 
 // UpdateCompanyUnits full-replaces the company's unit list with the given
-// array, in the given order. The canonical unit must survive the replacement
-// (the profile's canonical_uom FK would refuse the transaction otherwise, and
-// the store refuses earlier with a message naming the unit). The replacement
-// runs in one transaction so the list is never observable half-replaced, and
-// the FK -- DEFERRABLE, see migration 026 -- is checked at commit, when the
-// canonical row is back in place.
-func (s *Store) UpdateCompanyUnits(ctx context.Context, units []CompanyUnit) ([]CompanyUnit, error) {
+// array, in the given order, and -- in the same transaction -- may move the
+// canonical unit.
+//
+// An empty canonicalUoM keeps whatever is stored: the canonical unit must
+// survive the replacement (the profile's canonical_uom FK would refuse the
+// transaction otherwise, and the store refuses earlier with a message naming
+// the unit), which is what a list-only save from the Units tab does. A
+// non-empty canonicalUoM is validated against the list being written, never
+// the stored one, because after this transaction the new list is the only
+// list there is.
+//
+// The replacement runs in one transaction so the list and the canonical unit
+// are never observable half-replaced, and the FK -- DEFERRABLE, see migration
+// 026 -- is checked at commit, when the canonical row is in place.
+func (s *Store) UpdateCompanyUnits(ctx context.Context, units []CompanyUnit, canonicalUoM string) ([]CompanyUnit, error) {
 	pool, err := s.poolOrError()
 	if err != nil {
 		return nil, err
@@ -155,12 +163,23 @@ func (s *Store) UpdateCompanyUnits(ctx context.Context, units []CompanyUnit) ([]
 	if err := checkCompanyUnits(units); err != nil {
 		return nil, err
 	}
-	profile, err := s.GetCompanyProfile(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !unitListContains(units, profile.CanonicalUoM) {
-		return nil, fmt.Errorf("the canonical unit %q must stay on the list", profile.CanonicalUoM)
+	// Decide the canonical once, against the new list, before anything is
+	// written: a supplied value is about to be stored, and a stored one is
+	// about to be kept, so both must name a row the replacement is about to
+	// insert. The two refusals are worded for the mistake each names.
+	nextCanonical := strings.TrimSpace(canonicalUoM)
+	if nextCanonical != "" {
+		if !unitListContains(units, nextCanonical) {
+			return nil, fmt.Errorf("company canonical unit %q is not on the company's unit list", nextCanonical)
+		}
+	} else {
+		profile, err := s.GetCompanyProfile(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !unitListContains(units, profile.CanonicalUoM) {
+			return nil, fmt.Errorf("the canonical unit %q must stay on the list", profile.CanonicalUoM)
+		}
 	}
 
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
@@ -177,6 +196,17 @@ func (s *Store) UpdateCompanyUnits(ctx context.Context, units []CompanyUnit) ([]
 			INSERT INTO %s.company_uom (%s) VALUES ($1, $2, $3)`,
 			s.configSchema(), unitColumnList),
 			strings.TrimSpace(unit.Value), strings.TrimSpace(unit.Label), i+1); err != nil {
+			return nil, fmt.Errorf("replace company units: %w", err)
+		}
+	}
+	// The canonical rides the same transaction: a save that renames the
+	// canonical unit to a value the new list carries commits both, and one
+	// whose value the new list does not carry was refused above, so the FK
+	// never sees a dangling name.
+	if nextCanonical != "" {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.company_profile SET canonical_uom = $1, updated_at = NOW() WHERE id = 1`,
+			s.configSchema()), nextCanonical); err != nil {
 			return nil, fmt.Errorf("replace company units: %w", err)
 		}
 	}

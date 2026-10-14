@@ -10,11 +10,15 @@
  *
  * What the client owns is the chrome around that data: the grouping the editor
  * shows, the edit-time mirror of the store's plain-text rules (so a save the
- * server would refuse is never offered), and the save sequence's obligation —
- * the full replacement, then the identity refresh that stops this device's
- * PDFs printing the previous wording. Those pieces live here as pure
- * functions so the panel and both test files can share one implementation,
- * the way companyUnits.ts does for the unit list.
+ * server would refuse is never offered), and the full-replacement payload the
+ * save sends. Those pieces live here as pure functions so the panel and both
+ * test files can share one implementation, the way companyUnits.ts does for
+ * the unit list.
+ *
+ * The save itself — which endpoint, in what order, and the identity refresh
+ * that follows it — lives in companySaves.ts (#432). It used to live here as
+ * saveCompanyLabels; the wording stopped autosaving, and the sequence became
+ * one of four per-tab sequences rather than the wording's private concern.
  */
 
 /**
@@ -262,58 +266,19 @@ export function validateCompanyLabelSet(entries: CompanyLabelEntry[]): Record<st
 }
 
 /**
- * How long the editor waits after the last keystroke before it saves. Long
- * enough that a pause in typing is a pause, short enough that the "Saved"
- * readout never feels stuck.
- */
-export const LABEL_SAVE_DEBOUNCE_MS = 700;
-
-/**
- * What the autosave should do with a set that differs from the last saved one.
+ * Why the wording may not be saved, or null when it may.
  *
- * Extracted from the effect that drives the save so the decision is pinnable
- * without a DOM: "unchanged" is the freshly loaded set (or one already saved),
- * "held" is a set carrying a value the store would refuse — it never leaves the
- * machine, and the panel shows the row that is wrong — and "save" schedules the
- * replacement after the pause.
+ * The store's own rules are mirrored here (validateCompanyLabelSet) so the save
+ * row can refuse a set the server would bounce — the wording saves manually
+ * now (#432), so the button is where that refusal has to surface. The sentence
+ * matches the one the panel shows under its heading, because two different
+ * sentences describing the same refusal reads as two different problems.
  */
-export function labelSaveDecision(
-  entries: CompanyLabelEntry[],
-  savedFingerprint: string
-): "unchanged" | "held" | "save" {
-  if (serializeCompanyLabels(entries) === savedFingerprint) return "unchanged";
-  if (Object.keys(validateCompanyLabelSet(entries)).length > 0) return "held";
-  return "save";
+export function companyLabelsRefusal(entries: CompanyLabelEntry[]): string | null {
+  const invalidCount = Object.keys(validateCompanyLabelSet(entries)).length;
+  if (invalidCount === 0) return null;
+  return invalidCount === 1
+    ? "One field is highlighted below and must be fixed before anything saves."
+    : `${invalidCount} fields are highlighted below and must be fixed before anything saves.`;
 }
 
-export interface CompanyLabelSaveDeps {
-  /** Full-replaces the company's overrides. A refused save rejects. */
-  update: (rows: { Key: string; Value: string }[]) => Promise<unknown>;
-  /** Re-reads the company identity into this device's quotation instance. */
-  refreshIdentity: () => Promise<unknown>;
-}
-
-/**
- * Saves the wording, then refreshes the identity — in that order, and the
- * refresh only after a save that landed.
- *
- * The second call is the obligation: the desktop renders its own PDFs from the
- * identity it cached at startup, so a label changed on the server without this
- * call keeps printing the old wording here until the next sign-in. A save that
- * was refused must not claim a refresh, so the refresh never runs when the
- * replacement rejects; a refresh that fails after a landed save is reported,
- * not thrown, because the wording is already changed and the document on the
- * server is already correct.
- */
-export async function saveCompanyLabels(
-  entries: CompanyLabelEntry[],
-  deps: CompanyLabelSaveDeps
-): Promise<{ refreshFailed: boolean }> {
-  await deps.update(companyLabelPayload(entries));
-  try {
-    await deps.refreshIdentity();
-    return { refreshFailed: false };
-  } catch {
-    return { refreshFailed: true };
-  }
-}

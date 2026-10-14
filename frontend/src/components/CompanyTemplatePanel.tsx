@@ -1,58 +1,32 @@
 import type { JSX } from "react";
 import {
+  companyLabelsRefusal,
   groupCompanyLabels,
   placeholderTokens,
   validateCompanyLabelSet,
   type CompanyLabelEntry,
 } from "../companyLabels";
-import { Badge, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import { Badge, Card, SaveStateChip, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
 // Presentational slice of the Company settings Quotation tab: the 26 editable
 // labels grouped the way the document reads. Like the Units panel it holds no
-// state and no save — the parent (CompanyProfileCard) owns the served set, the
-// autosave and the identity refresh, and forwards edits up. The colours that
-// share this tab are the existing CompanyThemePanel over the theme columns;
-// this panel never touches a colour.
+// state and no save — the parent (CompanyProfileCard) owns the served set and
+// the save, and forwards edits up. The colours that share this tab are the
+// existing CompanyThemePanel over the theme columns; this panel never touches a
+// colour.
 //
 // The wording is served data, never hard-coded here: each field is named after
 // its built-in default and prefilled from its effective value, so the client
 // carries no copy of the document's words and a label added on the server
 // appears without a release (in the fallback group until it is grouped).
-
-/** Enter inside a field must not submit the surrounding profile form: it would
- *  save the profile while the wording autosave is still pending — a partial
- *  save that reads as success. The Units panel blocks Enter for the same
- *  reason. */
-function blockEnter(event: React.KeyboardEvent): void {
-  if (event.key === "Enter") event.preventDefault();
-}
-
-/** The live save readout. Wrapped in role="status" so the state change is
- *  announced rather than only repainted. */
-function SaveStateChip({ state }: { state: "saved" | "dirty" | "saving" }): JSX.Element {
-  if (state === "saving") {
-    return (
-      <span role="status" className="flex items-center">
-        <Badge tone="internal">Saving…</Badge>
-      </span>
-    );
-  }
-  if (state === "dirty") {
-    return (
-      <span role="status" className="flex items-center">
-        <Badge tone="accent">Unsaved changes</Badge>
-      </span>
-    );
-  }
-  return (
-    <span role="status" className="flex items-center gap-1.5 text-caption text-ink-400">
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-        <path d="M3 8.5l3.2 3.2L13 5" />
-      </svg>
-      Saved
-    </span>
-  );
-}
+//
+// The wording saves manually, from the tab's own save row (#432). The autosave
+// it used to have cost a save per pause in typing and a save nobody saw; the
+// button, the Unsaved changes chip and the tab-switch guard replace it, and the
+// copy below says so rather than promising an autosave. The Enter blocker this
+// panel used to carry retired with the shared <form> it existed to protect:
+// there is no form to submit, and Enter in a field still refreshes the preview
+// through the tab's capture-phase handler.
 
 /** A value this long never fits two columns: the closing sentence and the four
  *  terms sentences span the full width of the grid. */
@@ -85,9 +59,10 @@ export function CompanyTemplatePanel(props: {
 
   // The store's own rules, mirrored here so a row the server would refuse is
   // marked before anything is sent (validateCompanyLabelSet). The parent reads
-  // the same verdict to hold the autosave.
+  // the same verdict to disable the save row — one sentence, from one place, so
+  // the row and the panel cannot describe the same refusal differently.
   const invalid = validateCompanyLabelSet(labels);
-  const invalidCount = Object.keys(invalid).length;
+  const refusal = companyLabelsRefusal(labels);
   const groups = groupCompanyLabels(labels);
 
   return (
@@ -96,9 +71,9 @@ export function CompanyTemplatePanel(props: {
       <p className="max-w-2xl text-body text-ink-600">
         What prints on every customer quotation. Each field is named after its
         built-in wording and holds what the document says today; type over a
-        value to change it, and empty a field to restore the built-in. Changes
-        save automatically, and quotations already issued keep the wording they
-        were exported with.
+        value to change it, and empty a field to restore the built-in. The
+        wording saves with the button below, together with the four colours,
+        and quotations already issued keep the wording they were exported with.
       </p>
       {error ? (
         <div className="mt-4">
@@ -110,11 +85,9 @@ export function CompanyTemplatePanel(props: {
           <StatusBanner tone="info">{notice}</StatusBanner>
         </div>
       ) : null}
-      {invalidCount > 0 ? (
+      {refusal ? (
         <p className="mt-4 text-caption leading-relaxed text-danger-600">
-          {invalidCount === 1
-            ? "One field is highlighted below and must be fixed before anything saves."
-            : `${invalidCount} fields are highlighted below and must be fixed before anything saves.`}
+          {refusal}
         </p>
       ) : null}
 
@@ -175,7 +148,6 @@ export function CompanyTemplatePanel(props: {
                       autoComplete="off"
                       aria-label={`Document wording: ${entry.Default}`}
                       aria-invalid={message ? true : undefined}
-                      onKeyDown={blockEnter}
                       onChange={(event) => onChange(entry.Key, event.target.value)}
                       className={`${fieldClass} ${
                         message ? "border-danger-300 focus:border-danger-400" : ""

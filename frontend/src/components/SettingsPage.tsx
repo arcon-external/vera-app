@@ -12,9 +12,11 @@ import {
   RestoreBackup,
   SetCompanyLogo,
   SetUserEmail,
+  UpdateCompanyGeneral,
   UpdateCompanyLabels,
-  UpdateCompanyProfile,
   UpdateCompanyUnits,
+  UpdatePortalTheme,
+  UpdateQuotationTheme,
 } from "@backend/backend/AdminAPI";
 import { PickDirectory, RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { CheckForUpdates, Version } from "@backend/backend/UpdateAPI";
@@ -34,43 +36,77 @@ import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { validateCompanyUnits } from "../companyUnits";
 import type { CompanyUnitOption } from "../companyUnits";
 import {
-  LABEL_SAVE_DEBOUNCE_MS,
-  labelSaveDecision,
+  companyLabelsRefusal,
   patchCompanyLabel,
-  saveCompanyLabels,
-  serializeCompanyLabels,
-  type CompanyLabelEntry,
-  type CompanyLabelSaveDeps,
 } from "../companyLabels";
+import type { CompanyLabelEntry } from "../companyLabels";
+import {
+  COMPANY_TABS,
+  COMPANY_TAB_SAVES,
+  type CompanyDraft,
+  type CompanyFingerprints,
+  type CompanySaveDeps,
+  type CompanyTabId,
+  companyTabDirty,
+  errorMessage,
+  generalFingerprint,
+  labelsDirty,
+  labelsFingerprint,
+  portalColoursDirty,
+  portalThemeFingerprint,
+  quotationColoursDirty,
+  quotationThemeFingerprint,
+  quotationSaveHalves,
+  saveGeneralTab,
+  savePortalTab,
+  saveQuotationTab,
+  saveUnitsTab,
+  tabSwitchGuard,
+  unitsFingerprint,
+} from "../companySaves";
 import {
   EMPTY_THEME,
   extrasFromProfile,
   formFromProfile,
-  profilePayload,
   themeFromProfile,
 } from "../company";
 import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company";
 import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
+import { CompanyPortalTab } from "./CompanyPortalTab";
 import { CompanyQuotationTab } from "./CompanyQuotationTab";
-import { PortalPreviewPanel } from "./PortalPreviewPanel";
 import { templatePreviewFingerprint, templatePreviewRefresh } from "./TemplatePreviewPanel";
-import { CompanyThemePanel } from "./CompanyThemePanel";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
 import { TabBar, tabId, tabPanelId } from "./TabBar";
-import type { TabItem } from "./TabBar";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import type { SaveState } from "./ui";
 import type { SignedInUser } from "./LoginPage";
-
-function errorMessage(err: unknown, fallback: string): string {
-  return typeof err === "string" && err.trim() ? err : fallback;
-}
 
 // EXPORT_DIR_KEY is the Settings export default: a device-local folder the
 // save dialog opens in. localStorage, never the server — a client-machine
 // path is meaningless anywhere else, and exports must work offline.
 export const EXPORT_DIR_KEY = "vera-export-dir";
+
+/** The note a landed save whose identity refresh did not. The data is correct
+ *  on the server; this device keeps printing the previous copy until the next
+ *  sign-in, which is worth one sentence and not an error banner. */
+const REFRESH_FAILED_NOTICE =
+  "Saved, but this device's quotations may keep the old copy until you sign in again.";
+
+/**
+ * Claims a saved baseline only when the draft is still the one that was sent.
+ * An edit that lands during the round trip must stay unsaved: claiming it would
+ * mark a value the server never saw as saved, and the next switch away from
+ * the tab would lose it silently. The autosave carried the same guard (#432).
+ */
+function claimSaved(
+  setSaved: (value: string) => void,
+  sent: string,
+  current: string
+): void {
+  if (current === sent) setSaved(sent);
+}
 
 export function SettingsPage({
   isAdmin,
@@ -473,37 +509,59 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
   );
 }
 
-const COMPANY_TABS: TabItem[] = [
-  { id: "general", label: "General" },
-  { id: "units", label: "Units" },
-  { id: "quotation", label: "Quotation" },
-  { id: "portal", label: "Portal" },
-];
-
-// What the wording autosave hands the store seam: the full-replacement call,
-// followed by the identity refresh. Both save paths below — the debounced save
-// and the unmount flush — must carry the same obligation, so it lives in one
-// place: the desktop renders its own PDFs from the identity it cached at
-// startup, and a wording change without this call keeps printing the previous
-// wording on this device until the next sign-in.
+// The per-tab save model (#432). Each Company sub-tab saves itself through its
+// own endpoint, and none of them can write a column another tab owns — the
+// reason the whole-record UpdateCompanyProfile is gone from this page: a
+// General save through it had to resend the eight theme colours and the
+// canonical unit, and a save that forgot one cleared it.
 //
-// It lives here rather than in companyLabels.ts because that module is pure —
-// the Wails bindings are the page's business. It is exported so the obligation
-// is pinned by a test rather than assumed: SettingsPage.test.tsx drives it
-// through saveCompanyLabels with the binding spied on, which is what catches a
-// refresh that is quietly dropped or turned into a no-op.
-export const LABELS_SAVE_DEPS: CompanyLabelSaveDeps = {
-  update: (rows) =>
-    UpdateCompanyLabels(
-      rows.map((row) => new backend.CompanyLabelEntry({ Key: row.Key, Value: row.Value }))
-    ),
-  refreshIdentity: () => RefreshCompanyIdentity(),
-};
+// The bindings live here rather than in companySaves.ts because that module is
+// pure — the Wails calls are the page's business. The sequences, the dirty
+// verdicts and the tab-switch guard live there, where the node suite can drive
+// them with spies; there are no DOM tests in this repo, and a save model pinned
+// only through clicks is a save model nobody tested.
+//
+// One deps object for all four saves: it is rebuilt every render because it
+// captures nothing but the Wails bindings themselves, so there is no stale
+// closure to guard against and no memo to keep in sync.
+//
+// Exported so the wiring is pinned rather than assumed: SettingsPage.test.tsx
+// mocks the bindings and drives each dep, which is what proves a save answers
+// the endpoint its tab owns — with the positional arguments in the order the Go
+// method takes them.
+export function companySaveDeps(): CompanySaveDeps {
+  return {
+    updateGeneral: (values) =>
+      UpdateCompanyGeneral(
+        values.legalName,
+        values.address,
+        values.phone,
+        values.email,
+        values.taxID,
+        values.currency
+      ),
+    updateUnits: (units, canonicalUoM) =>
+      UpdateCompanyUnits(
+        units.map((unit) => new backend.CompanyUnit({ Value: unit.value, Label: unit.label })),
+        canonicalUoM
+      ),
+    updateLabels: (rows) =>
+      UpdateCompanyLabels(
+        rows.map((row) => new backend.CompanyLabelEntry({ Key: row.Key, Value: row.Value }))
+      ),
+    updateQuotationTheme: (deep, accent, soft, ink) =>
+      UpdateQuotationTheme(deep, accent, soft, ink),
+    updatePortalTheme: (deep, accent, soft, ink) => UpdatePortalTheme(deep, accent, soft, ink),
+    // The obligation every successful save carries: the desktop renders its own
+    // PDFs from the identity it cached at startup, so a save that lands without
+    // this call keeps printing the previous wording, colours or header on this
+    // device until the next sign-in.
+    refreshIdentity: () => RefreshCompanyIdentity(),
+  };
+}
 
 export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
-  const [companyTab, setCompanyTab] = useState<
-    "general" | "units" | "quotation" | "portal"
-  >("general");
+  const [companyTab, setCompanyTab] = useState<CompanyTabId>("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
@@ -518,69 +576,82 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   // Units panel is a presentational slice. Null while loading or on a failed
   // fetch; the canonical picker and list render their own pending/empty state.
   const [units, setUnits] = useState<CompanyUnitOption[] | null>(null);
-  const [unitsBusy, setUnitsBusy] = useState(false);
-  const [unitsError, setUnitsError] = useState("");
   // The document's editable wording (issue #339): served, never hard-coded in
   // the client. Null while loading or on a failed fetch; the Quotation tab's
-  // wording panel renders its own pending state. The wording keeps its own save
-  // (UpdateCompanyLabels full-replaces the override table), so — like the
-  // units list — it lives here rather than riding the whole-record profile
-  // save the colours use.
+  // wording panel renders its own pending state. It keeps its own save
+  // (UpdateCompanyLabels full-replaces the override table), which is why it
+  // lives here rather than riding the profile load.
   const [labels, setLabels] = useState<CompanyLabelEntry[] | null>(null);
-  const [labelsStatus, setLabelsStatus] = useState<"saved" | "dirty" | "saving">("saved");
-  const [labelsError, setLabelsError] = useState("");
-  const [labelsNotice, setLabelsNotice] = useState("");
-  // What the server holds, as the autosave sees it: a fingerprint of the last
-  // saved (or freshly loaded) set. An edit whose fingerprint differs from it
-  // is unsaved; a save that completes with a newer fingerprint already in
-  // state is superseded and says nothing.
-  const savedLabels = useRef("");
-  // A mirror of `labels` for the async save callbacks, which would otherwise
-  // close over the set as it was when the save started.
-  const labelsRef = useRef<CompanyLabelEntry[] | null>(null);
-  useEffect(() => {
-    labelsRef.current = labels;
-  }, [labels]);
-  // A save scheduled but not yet started. The unmount flush below reads it, so
-  // leaving Settings inside the debounce window sends the last edit rather
-  // than dropping it with the timer.
-  const pendingLabels = useRef<{ entries: CompanyLabelEntry[]; sent: string } | null>(null);
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
+  // What the server holds, per tab: the fingerprint taken when the served set
+  // landed and re-taken after each successful save. A tab whose fingerprint
+  // differs is unsaved. Null means that piece has not loaded, which never
+  // reads as dirty — there is nothing on screen to lose yet.
+  const [savedGeneral, setSavedGeneral] = useState<string | null>(null);
+  const [savedUnits, setSavedUnits] = useState<string | null>(null);
+  const [savedLabels, setSavedLabels] = useState<string | null>(null);
+  const [savedQuotationTheme, setSavedQuotationTheme] = useState<string | null>(null);
+  const [savedPortalTheme, setSavedPortalTheme] = useState<string | null>(null);
+  // One save state per tab, because one save button per tab means one verdict
+  // per tab: a wording refusal must not disable the colour half's button, and
+  // the Portal tab must not carry the General tab's error.
+  const [generalBusy, setGeneralBusy] = useState(false);
+  const [generalError, setGeneralError] = useState("");
+  const [unitsBusy, setUnitsBusy] = useState(false);
+  const [unitsError, setUnitsError] = useState("");
+  const [wordingBusy, setWordingBusy] = useState(false);
+  const [wordingError, setWordingError] = useState("");
+  const [wordingNotice, setWordingNotice] = useState("");
+  const [quotationColoursBusy, setQuotationColoursBusy] = useState(false);
+  const [quotationColoursError, setQuotationColoursError] = useState("");
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState("");
+  // The blocked tab switch's sentence, or empty. The guard names the tab that
+  // is unsaved and the button that saves it — never a window.confirm, which
+  // blocks the whole window and names nothing.
+  const [switchGuard, setSwitchGuard] = useState("");
   // The template preview's refresh signal (issue #425). The preview shows the
-  // real sample PDF for the draft wording and colours, re-rendered on
+  // real document for the draft wording and colours, re-rendered on
   // blur/Enter — never per keystroke. The key below is the only thing the
   // panel's effect depends on; the fingerprint decides whether a blur or an
   // Enter carries values worth a render, so tabbing through unchanged fields
   // renders nothing. The baseline is taken when the served set first lands.
   const [templatePreviewKey, setTemplatePreviewKey] = useState(0);
   const lastTemplatePreview = useRef("");
-  useEffect(() => {
-    if (labels !== null && lastTemplatePreview.current === "") {
-      lastTemplatePreview.current = templatePreviewFingerprint(labels, theme);
-    }
-  }, [labels, theme]);
-  const maybeRefreshTemplatePreview = useCallback(() => {
-    if (labels === null) return;
-    const next = templatePreviewRefresh(lastTemplatePreview.current, labels, theme);
-    if (next !== null) {
-      lastTemplatePreview.current = next;
-      setTemplatePreviewKey((key) => key + 1);
-    }
-  }, [labels, theme]);
-  const refreshTemplatePreviewOnEnter = useCallback(
-    (event: React.KeyboardEvent) => {
-      if (event.key === "Enter") maybeRefreshTemplatePreview();
-    },
-    [maybeRefreshTemplatePreview]
-  );
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [hasLogo, setHasLogo] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const [logoMeta, setLogoMeta] = useState<string | null>(null);
   const { pushToast } = useToast();
+  const saveDeps = companySaveDeps();
+
+  // The latest draft, for the async save callbacks: a value that changes while
+  // a save is in flight must stay unsaved rather than be claimed by the save
+  // that never saw it (claimSaved).
+  const latest = useRef<CompanyDraft>({ form, extras, units, labels, theme });
+  latest.current = { form, extras, units, labels, theme };
+  const fingerprints: CompanyFingerprints = {
+    general: savedGeneral,
+    units: savedUnits,
+    labels: savedLabels,
+    quotationTheme: savedQuotationTheme,
+    portalTheme: savedPortalTheme,
+  };
+  const wordingDirty = labelsDirty(latest.current, fingerprints);
+  const quotationColoursDirtyNow = quotationColoursDirty(latest.current, fingerprints);
+  const portalDirty = portalColoursDirty(latest.current, fingerprints);
+  const dirty: Record<CompanyTabId, boolean> = {
+    general: companyTabDirty("general", latest.current, fingerprints),
+    units: companyTabDirty("units", latest.current, fingerprints),
+    quotation: companyTabDirty("quotation", latest.current, fingerprints),
+    portal: portalDirty,
+  };
+
+  // The store's own wording rules, mirrored for the button: a set the server
+  // would refuse is never offered as saved.
+  const wordingRefusal = labels === null ? null : companyLabelsRefusal(labels);
 
   const loadLogo = useCallback(async () => {
     try {
@@ -615,11 +686,18 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
+    let loadedExtras: StoredCompanyExtras | null = null;
     try {
       const profile = (await GetCompanyProfile()) as backend.CompanyProfile;
-      setForm(formFromProfile(profile));
-      setExtras(extrasFromProfile(profile));
-      setTheme(themeFromProfile(profile));
+      const nextForm = formFromProfile(profile);
+      loadedExtras = extrasFromProfile(profile);
+      const nextTheme = themeFromProfile(profile);
+      setForm(nextForm);
+      setExtras(loadedExtras);
+      setTheme(nextTheme);
+      setSavedGeneral(generalFingerprint(nextForm, loadedExtras));
+      setSavedQuotationTheme(quotationThemeFingerprint(nextTheme));
+      setSavedPortalTheme(portalThemeFingerprint(nextTheme));
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't load the company profile.");
       setError(message);
@@ -634,24 +712,27 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     }
     try {
       const served = (await GetCompanyUnits()) as { Value: string; Label: string }[];
-      setUnits((served ?? []).map((unit) => ({ value: unit.Value, label: unit.Label })));
+      const next = (served ?? []).map((unit) => ({ value: unit.Value, label: unit.Label }));
+      setUnits(next);
+      // The canonical unit is the profile's, so it is fingerprinted with the
+      // list: the Units tab owns both now (#432), in one transaction.
+      setSavedUnits(unitsFingerprint(next, loadedExtras?.canonicalUoM ?? ""));
     } catch {
       // The Units panel shows its own empty/pending state; keep null.
       setUnits(null);
     }
     try {
       // Same shape as the units fetch: the served entries are stored verbatim,
-      // and the fingerprint is taken from what was served so the autosave's
-      // first run sees a set that is already saved and does nothing.
+      // and the fingerprint is taken from what was served so a freshly loaded
+      // set reads as saved.
       const served = (await GetCompanyLabels()) as CompanyLabelEntry[];
       const entries = served ?? [];
       setLabels(entries);
-      savedLabels.current = serializeCompanyLabels(entries);
-      setLabelsStatus("saved");
-      setLabelsError("");
+      setSavedLabels(labelsFingerprint(entries));
+      setWordingError("");
     } catch {
       setLabels(null);
-      setLabelsError("We couldn't load the document wording.");
+      setWordingError("We couldn't load the document wording.");
     }
   }, []);
 
@@ -718,7 +799,7 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
       onSaved?.();
       pushToast("success", "Logo removed. Quotations use the built-in logo.");
     } catch (err: unknown) {
-      const message = errorMessage(err, "We couldn't remove the logo.");
+      const message = errorMessage(err, "We couldn't remove this logo.");
       setError(message);
       pushToast("error", message);
     } finally {
@@ -726,44 +807,42 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (loading) return;
-    if (busy) return;
-    setBusy(true);
-    setError("");
+  // The four saves, one per tab. Each calls only its own endpoint (see
+  // companySaves.ts, where the sequences are pinned with spies), ends with the
+  // identity refresh when the store accepted the write, and re-bases the tab's
+  // fingerprint from the values it sent — so the chip returns to Saved and the
+  // tab is no longer dirty.
+
+  const saveGeneral = async () => {
+    if (loading || generalBusy) return;
+    setGeneralBusy(true);
+    setGeneralError("");
     try {
-      const updated = (await UpdateCompanyProfile(
-        profilePayload({ form, extras, theme, hasLogo })
-      )) as backend.CompanyProfile;
-      setForm(formFromProfile(updated));
-      setExtras(extrasFromProfile(updated));
-      setTheme(themeFromProfile(updated));
-      pushToast("success", "Company profile saved.");
-      try {
-        await RefreshCompanyIdentity();
-      } catch {
-        // Previews keep the previous header until the next sign-in;
-        // the stored profile (and shell name) already updated above.
+      const result = await saveGeneralTab(form, extras, saveDeps);
+      if (result.error !== null) {
+        setGeneralError(result.error);
+        pushToast("error", result.error);
+        return;
       }
+      claimSaved(
+        setSavedGeneral,
+        generalFingerprint(form, extras),
+        generalFingerprint(latest.current.form, latest.current.extras)
+      );
       onSaved?.();
-    } catch (err: unknown) {
-      const message = errorMessage(err, "We couldn't save the company profile.");
-      setError(message);
-      pushToast("error", message);
+      pushToast(
+        "success",
+        result.refreshFailed ? `Company details saved. ${REFRESH_FAILED_NOTICE}` : "Company details saved."
+      );
     } finally {
-      setBusy(false);
+      setGeneralBusy(false);
     }
   };
 
-  // The unit list has its own save (UpdateCompanyUnits full-replaces it,
-  // server-side validated: never empty, shaped short values, distinct
-  // case-insensitively, and the canonical unit must survive). The canonical
-  // unit itself rides the profile save above — a separate whole-record call —
-  // so it is not written here. validateCompanyUnits mirrors the store so a bad
-  // list is refused before the round trip.
   const saveUnits = async () => {
     if (units === null || unitsBusy) return;
+    // The list is validated here exactly as the store does, so a list the
+    // server would refuse never leaves the machine.
     const invalid = validateCompanyUnits(units, extras.canonicalUoM);
     if (invalid) {
       setUnitsError(invalid);
@@ -772,117 +851,176 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     setUnitsBusy(true);
     setUnitsError("");
     try {
-      const updated = (await UpdateCompanyUnits(
-        units.map((unit) => new backend.CompanyUnit({ Value: unit.value, Label: unit.label }))
-      )) as { Value: string; Label: string }[];
-      setUnits((updated ?? []).map((unit) => ({ value: unit.Value, label: unit.Label })));
-      try {
-        await RefreshCompanyIdentity();
-      } catch {
-        // The list already updated; previews refresh on next sign-in.
+      const result = await saveUnitsTab(units, extras.canonicalUoM, saveDeps);
+      if (result.error !== null) {
+        setUnitsError(result.error);
+        pushToast("error", result.error);
+        return;
       }
+      claimSaved(
+        setSavedUnits,
+        unitsFingerprint(units, extras.canonicalUoM),
+        unitsFingerprint(latest.current.units, latest.current.extras.canonicalUoM)
+      );
       onSaved?.();
-      pushToast("success", "Units saved.");
-    } catch (err: unknown) {
-      setUnitsError(errorMessage(err, "We couldn't save the units."));
+      pushToast("success", result.refreshFailed ? `Units saved. ${REFRESH_FAILED_NOTICE}` : "Units saved.");
     } finally {
       setUnitsBusy(false);
     }
   };
 
-  // The wording autosaves. The editor is a grid of two dozen text fields with
-  // no save button of its own (the profile save below writes the colours, a
-  // different table), and a button at the bottom of a panel that long is the
-  // one button nobody finds. Each edit schedules one full replacement after a
-  // pause, skips entirely while a value is one the store would refuse, and
-  // closes with the identity refresh that stops this device's PDFs printing
-  // the previous wording (see saveCompanyLabels).
-  const persistLabels = useCallback(async (entries: CompanyLabelEntry[], sent: string) => {
-    setLabelsStatus("saving");
-    setLabelsError("");
-    setLabelsNotice("");
+  const saveQuotation = async () => {
+    if (labels === null || wordingBusy || quotationColoursBusy) return;
+    const halves = quotationSaveHalves(wordingDirty, quotationColoursDirtyNow);
+    setWordingBusy(true);
+    setQuotationColoursBusy(true);
+    setWordingError("");
+    setQuotationColoursError("");
+    setWordingNotice("");
     try {
-      const { refreshFailed } = await saveCompanyLabels(entries, LABELS_SAVE_DEPS);
-      // Claim the save only while the state it was sent from is still current.
-      // A keystroke during the round trip leaves a newer, unsaved set, whose
-      // own save is already scheduled by the effect below — and overwriting
-      // the field with the older response would lose that keystroke.
-      if (serializeCompanyLabels(labelsRef.current ?? []) !== sent) return;
-      savedLabels.current = sent;
-      setLabelsStatus("saved");
-      if (refreshFailed) {
-        setLabelsNotice(
-          "Saved, but this device's quotations may keep the old wording until you sign in again."
+      const result = await saveQuotationTab(
+        { labels, labelsDirty: wordingDirty, theme, themeDirty: quotationColoursDirtyNow },
+        saveDeps
+      );
+      if (result.labelsError === null) {
+        claimSaved(
+          setSavedLabels,
+          labelsFingerprint(labels),
+          labelsFingerprint(latest.current.labels)
         );
+      } else {
+        setWordingError(result.labelsError);
+        pushToast("error", result.labelsError);
       }
-    } catch (err: unknown) {
-      if (serializeCompanyLabels(labelsRef.current ?? []) !== sent) return;
-      setLabelsError(errorMessage(err, "We couldn't save the document wording."));
-      setLabelsStatus("dirty");
+      if (result.themeError === null) {
+        claimSaved(
+          setSavedQuotationTheme,
+          quotationThemeFingerprint(theme),
+          quotationThemeFingerprint(latest.current.theme)
+        );
+      } else {
+        setQuotationColoursError(result.themeError);
+        pushToast("error", result.themeError);
+      }
+      if (!result.saved) return;
+      onSaved?.();
+      if (result.refreshFailed) {
+        setWordingNotice(REFRESH_FAILED_NOTICE);
+        return;
+      }
+      // The toast names what actually went: a colour-only save that reports
+      // "wording saved" is a lie a person can act on.
+      const savedWhat =
+        halves.length === 2
+          ? "Wording and colours"
+          : halves[0] === "labels"
+            ? "Wording"
+            : "Colours";
+      pushToast("success", `${savedWhat} saved.`);
+    } finally {
+      setWordingBusy(false);
+      setQuotationColoursBusy(false);
     }
-  }, []);
+  };
 
-  useEffect(() => {
-    if (labels === null) return;
-    const sent = serializeCompanyLabels(labels);
-    // The three-way decision is pure (labelSaveDecision) and pinned in
-    // companyLabels.test.ts: unchanged does nothing, held never sends, save
-    // schedules the replacement after a pause.
-    const decision = labelSaveDecision(labels, savedLabels.current);
-    if (decision === "unchanged") {
-      // An edit that undoes itself is not an edit: the readout returns to
-      // Saved rather than sitting on Unsaved with nothing to send.
-      setLabelsStatus("saved");
-      pendingLabels.current = null;
+  const savePortal = async () => {
+    if (portalBusy) return;
+    setPortalBusy(true);
+    setPortalError("");
+    try {
+      const result = await savePortalTab(theme, saveDeps);
+      if (result.error !== null) {
+        setPortalError(result.error);
+        pushToast("error", result.error);
+        return;
+      }
+      claimSaved(
+        setSavedPortalTheme,
+        portalThemeFingerprint(theme),
+        portalThemeFingerprint(latest.current.theme)
+      );
+      onSaved?.();
+      pushToast("success", result.refreshFailed ? `Colours saved. ${REFRESH_FAILED_NOTICE}` : "Colours saved.");
+    } finally {
+      setPortalBusy(false);
+    }
+  };
+
+  // The tab switch, guarded. Leaving a dirty tab loses its edits, so the
+  // switch is intercepted: the tab stays, and the banner names the tab and the
+  // button that saves it. Everything that selects a tab — a click, an arrow
+  // key, Home/End — comes through here, so the guard cannot be walked around.
+  const requestCompanyTab = (next: string) => {
+    const message = tabSwitchGuard(companyTab, dirty, next as CompanyTabId);
+    if (message !== null) {
+      setSwitchGuard(message);
       return;
     }
-    setLabelsStatus("dirty");
-    if (decision === "held") return;
-    pendingLabels.current = { entries: labels, sent };
-    const timer = setTimeout(() => {
-      pendingLabels.current = null;
-      void persistLabels(labels, sent);
-    }, LABEL_SAVE_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [labels, persistLabels]);
+    setSwitchGuard("");
+    setCompanyTab(next as CompanyTabId);
+  };
 
-  // Leaving Settings with a save still pending sends it. The Wails runtime
-  // outlives React, so the call lands; nobody is left to show its result, and
-  // a swallowed failure is the better trade against a silently dropped edit.
-  // A save already in flight is not pending (the ref was cleared when it
-  // started), so this never double-sends.
-  useEffect(
-    () => () => {
-      const pending = pendingLabels.current;
-      if (pending === null) return;
-      pendingLabels.current = null;
-      void saveCompanyLabels(pending.entries, LABELS_SAVE_DEPS).catch(() => undefined);
+  const maybeRefreshTemplatePreview = useCallback(() => {
+    if (labels === null) return;
+    const next = templatePreviewRefresh(lastTemplatePreview.current, labels, theme);
+    if (next !== null) {
+      lastTemplatePreview.current = next;
+      setTemplatePreviewKey((key) => key + 1);
+    }
+  }, [labels, theme]);
+  const refreshTemplatePreviewOnEnter = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (event.key === "Enter") maybeRefreshTemplatePreview();
     },
-    []
+    [maybeRefreshTemplatePreview]
   );
+  useEffect(() => {
+    if (labels !== null && lastTemplatePreview.current === "") {
+      lastTemplatePreview.current = templatePreviewFingerprint(labels, theme);
+    }
+  }, [labels, theme]);
+
+  const wordingStatus: SaveState = wordingBusy
+    ? "saving"
+    : wordingDirty
+      ? "dirty"
+      : "saved";
+  const quotationTabStatus: SaveState =
+    wordingBusy || quotationColoursBusy
+      ? "saving"
+      : dirty.quotation
+        ? "dirty"
+        : "saved";
 
   const companyTabs = (
     <TabBar
-      items={COMPANY_TABS}
+      items={COMPANY_TABS.map((id) => ({ id, label: COMPANY_TAB_SAVES[id].label }))}
       active={companyTab}
-      onSelect={(id) => setCompanyTab(id as "general" | "units" | "quotation" | "portal")}
+      onSelect={requestCompanyTab}
       label="Company sections"
       idPrefix="company"
     />
   );
 
-  // One <form> for both states: the panel swaps the skeleton for the live
-  // inputs without remounting, so focus survives the load. Save stays
-  // disabled until load() fills the record — a full-replace save has nothing
-  // to send yet. (State ownership: see company.ts.)
+  // One root for every state: the tab bar, the guard banner and the tabpanel
+  // swap as the tab changes without remounting, so focus survives a load and a
+  // tab switch alike. There is no shared <form> and no footer save button any
+  // more (#432): each tab saves itself, and a form root that submits one tab's
+  // save from another tab's Enter key is exactly the partial save the split
+  // removed.
   return (
-    <form onSubmit={save}>
+    <div>
       {error ? (
         <div className="mb-6">
           <StatusBanner tone="danger">{error}</StatusBanner>
         </div>
       ) : null}
       {companyTabs}
+      {switchGuard !== "" && dirty[companyTab] ? (
+        <div className="mt-4">
+          <StatusBanner tone="danger">{switchGuard}</StatusBanner>
+        </div>
+      ) : null}
       <div
         role="tabpanel"
         id={tabPanelId("company", companyTab)}
@@ -907,6 +1045,11 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             currency={extras.currency}
             catalogue={catalogue}
             onCurrencyChange={(code) => setExtras((current) => ({ ...current, currency: code }))}
+            status={generalBusy ? "saving" : dirty.general ? "dirty" : "saved"}
+            busy={generalBusy}
+            error={generalError === "" ? null : generalError}
+            disabled={loading}
+            onSave={() => void saveGeneral()}
           />
         ) : companyTab === "units" ? (
           <CompanyUnitsPanel
@@ -916,6 +1059,7 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             onCanonicalChange={(value) =>
               setExtras((current) => ({ ...current, canonicalUoM: value }))
             }
+            status={unitsBusy ? "saving" : dirty.units ? "dirty" : "saved"}
             busy={unitsBusy}
             error={unitsError === "" ? null : unitsError}
             onSaveUnits={() => void saveUnits()}
@@ -925,44 +1069,35 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             labels={labels}
             theme={theme}
             refreshKey={templatePreviewKey}
-            labelsStatus={labelsStatus}
-            labelsError={labelsError === "" ? null : labelsError}
-            labelsNotice={labelsNotice === "" ? null : labelsNotice}
+            wordingStatus={wordingStatus}
+            tabStatus={quotationTabStatus}
+            labelsError={wordingError === "" ? null : wordingError}
+            labelsNotice={wordingNotice === "" ? null : wordingNotice}
+            themeError={quotationColoursError === "" ? null : quotationColoursError}
+            invalid={wordingRefusal}
+            busy={wordingBusy || quotationColoursBusy}
             onLabelChange={(key, value) =>
               setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
             }
             onThemeChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+            onSave={() => void saveQuotation()}
             onFieldBlur={maybeRefreshTemplatePreview}
             onFieldEnter={refreshTemplatePreviewOnEnter}
           />
-        ) : companyTab === "portal" ? (
-          <div className="grid gap-6">
-            {/* The portal is judged as a document, one state at a time: the
-                four colours are only meaningful against the five verdicts a
-                customer can meet. */}
-            <PortalPreviewPanel theme={theme} />
-            <CompanyThemePanel
-              section="Portal"
-              theme={theme}
-              onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
-            />
-            <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
-              The four colors the verification page uses — they are saved with{" "}
-              <span className="font-medium text-ink-500">Save company profile</span>{" "}
-              below, and the preview above shows them before you save.
-            </p>
-          </div>
-        ) : null}
+        ) : (
+          <CompanyPortalTab
+            theme={theme}
+            onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+            status={portalBusy ? "saving" : portalDirty ? "dirty" : "saved"}
+            busy={portalBusy}
+            error={portalError === "" ? null : portalError}
+            onSave={() => void savePortal()}
+          />
+        )}
       </div>
-      <div className="mt-6">
-        <Button type="submit" variant="primary" disabled={loading || busy}>
-          {busy ? "Saving…" : "Save company profile"}
-        </Button>
-      </div>
-    </form>
+    </div>
   );
 }
-
 function PasswordCard() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");

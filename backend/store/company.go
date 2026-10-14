@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"vera-app/backend/currency"
 )
 
@@ -40,6 +42,36 @@ type CompanyProfile struct {
 	CanonicalUoM string
 }
 
+// companyProfileColumns is the single declaration of the company_profile
+// columns the store reads and writes, shared between the SELECT and every
+// RETURNING below. The list used to be written out in full in each statement;
+// a column dropped from one copy and not the others is a field that stops
+// persisting, and nothing says so.
+const companyProfileColumns = `legal_name, address, phone, email, tax_id, logo_path,
+		logo_bytes, logo_mime, currency, canonical_uom,
+		theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
+		theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink`
+
+// scanCompanyProfile scans one companyProfileColumns row into a profile. The
+// caller wraps the error in the operation that failed, so the message still
+// names the statement. HasLogo is recomputed from the artwork bytes here
+// rather than read: it is derived, and a column for it would be a second
+// truth.
+func scanCompanyProfile(row pgx.Row) (CompanyProfile, error) {
+	var profile CompanyProfile
+	err := row.Scan(
+		&profile.LegalName, &profile.Address, &profile.Phone,
+		&profile.Email, &profile.TaxID, &profile.LogoPath,
+		&profile.LogoBytes, &profile.LogoMime, &profile.Currency, &profile.CanonicalUoM,
+		&profile.ThemeQDeep, &profile.ThemeQAccent, &profile.ThemeQSoft, &profile.ThemeQInk,
+		&profile.ThemePDeep, &profile.ThemePAccent, &profile.ThemePSoft, &profile.ThemePInk)
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	profile.HasLogo = len(profile.LogoBytes) > 0
+	return profile, nil
+}
+
 // maxCompanyLogoBytes caps uploaded artwork at 512KB, mirroring the avatar
 // rules so admins meet one consistent limit everywhere.
 const maxCompanyLogoBytes = 512 * 1024
@@ -68,9 +100,23 @@ func isHexColor(value string) bool {
 	return true
 }
 
+// checkThemeColors is the per-field rule behind every theme write, shared by
+// the full-replace endpoint's checkTheme and the narrow per-tab endpoints:
+// empty means "use the stylesheet default", anything else must be a strict
+// #RRGGBB. One rule, one place, so a save from the Quotation tab and a save
+// from the whole-record form cannot disagree about what a colour is.
+func checkThemeColors(fields [][2]string) error {
+	for _, field := range fields {
+		if field[1] != "" && !isHexColor(field[1]) {
+			return fmt.Errorf("company theme %s must be a #RRGGBB color", field[0])
+		}
+	}
+	return nil
+}
+
 // checkTheme validates the eight theme fields, all optional but strict.
 func checkTheme(profile CompanyProfile) error {
-	for _, field := range [][2]string{
+	return checkThemeColors([][2]string{
 		{"quotation deep", profile.ThemeQDeep},
 		{"quotation accent", profile.ThemeQAccent},
 		{"quotation soft", profile.ThemeQSoft},
@@ -79,12 +125,7 @@ func checkTheme(profile CompanyProfile) error {
 		{"portal accent", profile.ThemePAccent},
 		{"portal soft", profile.ThemePSoft},
 		{"portal ink", profile.ThemePInk},
-	} {
-		if field[1] != "" && !isHexColor(field[1]) {
-			return fmt.Errorf("company theme %s must be a #RRGGBB color", field[0])
-		}
-	}
-	return nil
+	})
 }
 
 // checkCurrency validates the company currency against the shipped
@@ -101,39 +142,15 @@ func checkCurrency(profile CompanyProfile) error {
 	return nil
 }
 
-// GetCompanyProfile returns the singleton profile, seeding the default
-// identity if the row is somehow missing.
-func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
-	pool, err := s.poolOrError()
-	if err != nil {
-		return CompanyProfile{}, err
-	}
-	var profile CompanyProfile
-	err = pool.QueryRow(ctx, fmt.Sprintf(`
-		SELECT legal_name, address, phone, email, tax_id, logo_path,
-		       logo_bytes, logo_mime, currency, canonical_uom,
-		       theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
-		       theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink
-		FROM %s.company_profile WHERE id = 1`, s.configSchema())).Scan(
-		&profile.LegalName, &profile.Address, &profile.Phone,
-		&profile.Email, &profile.TaxID, &profile.LogoPath,
-		&profile.LogoBytes, &profile.LogoMime, &profile.Currency, &profile.CanonicalUoM,
-		&profile.ThemeQDeep, &profile.ThemeQAccent, &profile.ThemeQSoft, &profile.ThemeQInk,
-		&profile.ThemePDeep, &profile.ThemePAccent, &profile.ThemePSoft, &profile.ThemePInk)
-	if err != nil {
-		return CompanyProfile{}, fmt.Errorf("get company profile: %w", err)
-	}
-	profile.HasLogo = len(profile.LogoBytes) > 0
-	return profile, nil
-}
-
-// UpdateCompanyProfile full-replaces the editable fields. Empty strings
-// clear a field, except legal name which is always required.
-func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile) (CompanyProfile, error) {
-	pool, err := s.poolOrError()
-	if err != nil {
-		return CompanyProfile{}, err
-	}
+// normalizeCompanyGeneral trims and validates the six fields the admin
+// General tab owns: the legal name, address, phone, email, tax ID and
+// currency. Both update paths run through it -- the full-replace
+// UpdateCompanyProfile and the narrow UpdateCompanyGeneral -- so a value that
+// is acceptable from one is acceptable from the other, and the store one
+// spelling of the currency code either way.
+//
+// The legal name is the only required field; every other one clears on empty.
+func normalizeCompanyGeneral(profile CompanyProfile) (CompanyProfile, error) {
 	profile.LegalName = strings.TrimSpace(profile.LegalName)
 	profile.Address = strings.TrimSpace(profile.Address)
 	profile.Phone = strings.TrimSpace(profile.Phone)
@@ -163,6 +180,42 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 	if err := checkCurrency(profile); err != nil {
 		return CompanyProfile{}, err
 	}
+	return profile, nil
+}
+
+// GetCompanyProfile returns the singleton profile, seeding the default
+// identity if the row is somehow missing.
+func (s *Store) GetCompanyProfile(ctx context.Context) (CompanyProfile, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	profile, err := scanCompanyProfile(pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT %s FROM %s.company_profile WHERE id = 1`,
+		companyProfileColumns, s.configSchema())))
+	if err != nil {
+		return CompanyProfile{}, fmt.Errorf("get company profile: %w", err)
+	}
+	return profile, nil
+}
+
+// UpdateCompanyProfile full-replaces the editable fields. Empty strings
+// clear a field, except legal name which is always required.
+//
+// This is the old-client path: a desktop that knows only this endpoint sends
+// every editable column in one payload, so it still works untouched beside the
+// narrow per-tab writes below. New clients save one tab at a time through
+// UpdateCompanyGeneral, UpdateQuotationTheme, UpdatePortalTheme and
+// UpdateCompanyUnits.
+func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile) (CompanyProfile, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	profile, err = normalizeCompanyGeneral(profile)
+	if err != nil {
+		return CompanyProfile{}, err
+	}
 	// Canonical unit: an empty value keeps whatever is stored -- an old
 	// desktop client that does not know the field must not be able to move
 	// it -- and anything else must name a live list member exactly: the FK
@@ -183,8 +236,7 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 	if err := checkTheme(profile); err != nil {
 		return CompanyProfile{}, err
 	}
-	var updated CompanyProfile
-	err = pool.QueryRow(ctx, fmt.Sprintf(`
+	updated, err := scanCompanyProfile(pool.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.company_profile
 		SET legal_name = $1, address = $2, phone = $3, email = $4, tax_id = $5,
 		    theme_q_deep = $6, theme_q_accent = $7, theme_q_soft = $8, theme_q_ink = $9,
@@ -193,23 +245,102 @@ func (s *Store) UpdateCompanyProfile(ctx context.Context, profile CompanyProfile
 		    canonical_uom = COALESCE(NULLIF($15, ''), canonical_uom),
 		    updated_at = NOW()
 		WHERE id = 1
-		RETURNING legal_name, address, phone, email, tax_id, logo_path,
-		    logo_bytes, logo_mime, currency, canonical_uom,
-		    theme_q_deep, theme_q_accent, theme_q_soft, theme_q_ink,
-		    theme_p_deep, theme_p_accent, theme_p_soft, theme_p_ink`, s.configSchema()),
+		RETURNING %s`, s.configSchema(), companyProfileColumns),
 		profile.LegalName, profile.Address, profile.Phone, profile.Email, profile.TaxID,
 		profile.ThemeQDeep, profile.ThemeQAccent, profile.ThemeQSoft, profile.ThemeQInk,
 		profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk,
-		profile.Currency, profile.CanonicalUoM).Scan(
-		&updated.LegalName, &updated.Address, &updated.Phone,
-		&updated.Email, &updated.TaxID, &updated.LogoPath,
-		&updated.LogoBytes, &updated.LogoMime, &updated.Currency, &updated.CanonicalUoM,
-		&updated.ThemeQDeep, &updated.ThemeQAccent, &updated.ThemeQSoft, &updated.ThemeQInk,
-		&updated.ThemePDeep, &updated.ThemePAccent, &updated.ThemePSoft, &updated.ThemePInk)
+		profile.Currency, profile.CanonicalUoM))
 	if err != nil {
 		return CompanyProfile{}, fmt.Errorf("update company profile: %w", err)
 	}
-	updated.HasLogo = len(updated.LogoBytes) > 0
+	return updated, nil
+}
+
+// UpdateCompanyGeneral writes the six General-tab columns and nothing else:
+// the legal name, address, phone, email, tax ID and currency. The theme
+// columns, the canonical unit and the artwork are not in this statement, so a
+// save from the General tab cannot clear a colour or move the canonical unit
+// the way the full-replace path requires its caller to resend everything.
+//
+// Validation is the same normalizeCompanyGeneral the full-replace runs, so the
+// two paths cannot disagree about what a legal name is.
+func (s *Store) UpdateCompanyGeneral(ctx context.Context, profile CompanyProfile) (CompanyProfile, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	profile, err = normalizeCompanyGeneral(profile)
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	updated, err := scanCompanyProfile(pool.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE %s.company_profile
+		SET legal_name = $1, address = $2, phone = $3, email = $4, tax_id = $5,
+		    currency = $6, updated_at = NOW()
+		WHERE id = 1
+		RETURNING %s`, s.configSchema(), companyProfileColumns),
+		profile.LegalName, profile.Address, profile.Phone, profile.Email,
+		profile.TaxID, profile.Currency))
+	if err != nil {
+		return CompanyProfile{}, fmt.Errorf("update company profile: %w", err)
+	}
+	return updated, nil
+}
+
+// UpdateQuotationTheme writes the four quotation-theme columns and nothing
+// else, so a colour save from the Quotation tab cannot touch the portal's
+// four. Each value is optional and strict: empty means "use the stylesheet
+// default", and anything else must be a #RRGGBB, the same rule checkTheme
+// applies to the full-replace path.
+func (s *Store) UpdateQuotationTheme(ctx context.Context, deep, accent, soft, ink string) (CompanyProfile, error) {
+	if err := checkThemeColors([][2]string{
+		{"quotation deep", deep}, {"quotation accent", accent},
+		{"quotation soft", soft}, {"quotation ink", ink},
+	}); err != nil {
+		return CompanyProfile{}, err
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	updated, err := scanCompanyProfile(pool.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE %s.company_profile
+		SET theme_q_deep = $1, theme_q_accent = $2, theme_q_soft = $3, theme_q_ink = $4,
+		    updated_at = NOW()
+		WHERE id = 1
+		RETURNING %s`, s.configSchema(), companyProfileColumns),
+		deep, accent, soft, ink))
+	if err != nil {
+		return CompanyProfile{}, fmt.Errorf("update company quotation theme: %w", err)
+	}
+	return updated, nil
+}
+
+// UpdatePortalTheme writes the four portal-theme columns and nothing else. It
+// is UpdateQuotationTheme with the other half of the brand, and it exists
+// separately because the two halves are independent columns: rebranding the
+// verification page must not repaint every quotation.
+func (s *Store) UpdatePortalTheme(ctx context.Context, deep, accent, soft, ink string) (CompanyProfile, error) {
+	if err := checkThemeColors([][2]string{
+		{"portal deep", deep}, {"portal accent", accent},
+		{"portal soft", soft}, {"portal ink", ink},
+	}); err != nil {
+		return CompanyProfile{}, err
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	updated, err := scanCompanyProfile(pool.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE %s.company_profile
+		SET theme_p_deep = $1, theme_p_accent = $2, theme_p_soft = $3, theme_p_ink = $4,
+		    updated_at = NOW()
+		WHERE id = 1
+		RETURNING %s`, s.configSchema(), companyProfileColumns),
+		deep, accent, soft, ink))
+	if err != nil {
+		return CompanyProfile{}, fmt.Errorf("update company portal theme: %w", err)
+	}
 	return updated, nil
 }
 

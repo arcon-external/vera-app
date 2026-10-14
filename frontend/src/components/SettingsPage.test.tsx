@@ -1,29 +1,49 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
-import { ToastProvider } from "../toast";
 import { DEFAULT_THEME } from "../company";
-import { saveCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
-import { LABELS_SAVE_DEPS, CompanyProfileCard } from "./SettingsPage";
+import {
+  COMPANY_TABS,
+  COMPANY_TAB_SAVES,
+  companyTabDirty,
+  errorMessage,
+  generalFingerprint,
+  labelsFingerprint,
+  portalThemeFingerprint,
+  quotationThemeFingerprint,
+  saveGeneralTab,
+  savePortalTab,
+  saveQuotationTab,
+  saveUnitsTab,
+  tabSwitchGuard,
+  unitsFingerprint,
+} from "../companySaves";
+import { ToastProvider } from "../toast";
+import { companySaveDeps, CompanyProfileCard } from "./SettingsPage";
+import { CompanyPortalTab } from "./CompanyPortalTab";
 import { CompanyQuotationTab } from "./CompanyQuotationTab";
 import { tabId, tabPanelId } from "./TabBar";
 
-// The wording autosave's one out-of-band obligation is the identity refresh:
-// the desktop renders its own PDFs from the identity it cached at startup, so a
-// wording change saved without RefreshCompanyIdentity() keeps printing the
-// previous wording on this device until the next sign-in. It runs inside a
-// debounced effect, which renderToString never runs — so the wiring itself is
-// what gets pinned: the deps object the page hands the seam, driven through
-// saveCompanyLabels with the binding spied on. Deleting the refresh, or turning
-// it into a no-op, fails here.
-vi.mock("@backend/backend/Quotation", () => ({
-  PickDirectory: vi.fn(async () => ""),
-  RefreshCompanyIdentity: vi.fn(async () => {}),
-}));
+// The suite runs in node with no DOM (see vitest.config.ts), so the component
+// is rendered to a string and asserted on as markup -- the same house pattern
+// as ReviewPanel.test.tsx and CompanyGeneralPanel.test.tsx. No DOM, no
+// testing-library, no new dependency.
+//
+// Effects never run under renderToString, so load()/loadLogo() never fire and
+// `loading` stays true: the first render shows the tab bar, the guard's (empty)
+// slot and the tabpanel shell holding the skeleton. The save rows live inside
+// the tab panels, which are only reached once a load lands, so they are pinned
+// through the panels themselves (CompanyGeneralPanel, CompanyQuotationTab,
+// CompanyPortalTab, CompanyUnitsPanel) rather than through this loading render.
+//
+// What this test does NOT prove: tab switching, the saves and the guard all
+// need events, which renderToString cannot fire. The decisions behind them are
+// pinned as pure functions (companySaves.test.ts) and the page's endpoint
+// wiring is pinned by driving companySaveDeps() with the bindings mocked --
+// the two halves of the behaviour that a click would join together.
 
 // A served set in the shape GET /v1/company/labels answers: one plain label and
 // one terms sentence, which is all saveCompanyLabels looks at.
-const SERVED: CompanyLabelEntry[] = [
+const SERVED = [
   { Key: "docTitle", Value: "PROPOSAL", Default: "QUOTATION", MaxLength: 24, Terms: false },
   {
     Key: "termsPayment",
@@ -33,26 +53,6 @@ const SERVED: CompanyLabelEntry[] = [
     Terms: true,
   },
 ];
-
-// The suite runs in node with no DOM (see vitest.config.ts), so the component
-// is rendered to a string and asserted on as markup -- the same house pattern
-// as ReviewPanel.test.tsx and CompanyGeneralPanel.test.tsx. No DOM, no
-// testing-library, no new dependency.
-//
-// Effects never run under renderToString, so load()/loadLogo() never fire and
-// `loading` stays true: the first render shows the shared <form> root with
-// the sub-tabs, the tabpanel shell holding the skeleton, and the save button
-// disabled — which is exactly what these tests pin. There is no separate
-// loading branch anymore (loading and loaded share one root), so "first
-// render" here means the loading state of the single shape. The Wails
-// bindings are imported but never called (calls happen only inside
-// effects and handlers), and every binding touches window only when called,
-// so importing SettingsPage in node is safe. CompanyProfileCard calls
-// useToast, so it renders inside a ToastProvider.
-//
-// What this test does NOT prove: tab switching (needs clicks), the loaded
-// panels (needs effects), or the save round-trip (needs the backend). Those
-// stay hand-driven.
 
 function render(): string {
   return renderToString(
@@ -109,14 +109,10 @@ describe("CompanyProfileCard sub-tabs", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-label="Company sections"');
-    const ids: [string, string][] = [
-      ["general", "General"],
-      ["units", "Units"],
-      ["quotation", "Quotation"],
-      ["portal", "Portal"],
-    ];
-    for (const [id, label] of ids) {
-      const button = tabs(html).find((segment) => segment.includes(`>${label}</button>`));
+    for (const id of COMPANY_TABS) {
+      const button = tabs(html).find((segment) =>
+        segment.includes(`>${COMPANY_TAB_SAVES[id].label}</button>`)
+      );
       expect(button).toBeDefined();
       expect(button).toContain(`id="${tabId("company", id)}"`);
       expect(button).toContain(`aria-controls="${tabPanelId("company", id)}"`);
@@ -133,117 +129,434 @@ describe("CompanyProfileCard sub-tabs", () => {
     expect(html).toContain(`id="${tabPanelId("company", "general")}"`);
     expect(html).toContain(`aria-labelledby="${tabId("company", "general")}"`);
   });
+});
 
-  // The merged Quotation tab (issue #429): the Portal tab's shape — preview
-  // on top, the config stack below, one caption naming both save paths.
-  // CompanyProfileCard can only render its loading skeleton here (the tab
-  // content waits on effects), and the branch renders this component
-  // verbatim, so the composition is what gets pinned.
-  describe("the merged Quotation tab", () => {
-    function renderTab(): string {
-      return renderToString(
-        <CompanyQuotationTab
-          labels={SERVED}
-          theme={DEFAULT_THEME}
-          refreshKey={0}
-          labelsStatus="saved"
-          labelsError={null}
-          labelsNotice={null}
-          onLabelChange={() => undefined}
-          onThemeChange={() => undefined}
-          onFieldBlur={() => undefined}
-          onFieldEnter={() => undefined}
-        />
-      );
-    }
-
-    it("stacks the preview above the wording, the colours and one caption", () => {
-      const html = renderTab();
-      const preview = html.indexOf('aria-label="Loading template preview"');
-      const wording = html.indexOf("Document wording");
-      const colours = html.indexOf("Quotation colors");
-      const caption = html.indexOf("Wording above saves automatically");
-      expect(preview).toBeGreaterThan(-1);
-      expect(wording).toBeGreaterThan(preview);
-      expect(colours).toBeGreaterThan(wording);
-      expect(caption).toBeGreaterThan(colours);
-      // The preview is the pending document, not an empty frame.
-      expect(html).not.toContain("<iframe");
-    });
-
-    it("names both save paths in one caption, and only one", () => {
-      const html = renderTab();
-      expect(html).toContain("Wording above saves automatically");
-      expect(html).toContain("Save company profile");
-      expect(html).toContain("the preview shows both before you save");
-      expect(html.split("Wording above saves automatically").length - 1).toBe(1);
-      // The old Template tab carried a caption of its own about "the same
-      // four colors the Quotation tab edits"; the merge says it once.
-      expect(html).not.toContain("The same four colors the Quotation tab edits");
-    });
-
-    it("still carries the wording inputs and the four quotation colours", () => {
-      const html = renderTab();
-      expect(html).toContain('aria-label="Document wording: QUOTATION"');
-      // The served override (PROPOSAL over the built-in QUOTATION) shows its
-      // Reset affordance, so the wording panel is the live one.
-      expect(html).toContain(`aria-label="Reset QUOTATION to the built-in wording"`);
-      expect(html).toContain('aria-label="Quotation Deep hex value"');
-      expect(html).toContain('aria-label="Quotation Ink hex value"');
-    });
-  });
-
-  it("renders a disabled save button inside the shared form root while loading", () => {
+// The shared <form> root and its footer save button are gone (#432): each tab
+// saves itself, so there is nothing at the bottom of the page to press and no
+// form for another tab's Enter to submit. The loading render is where that used
+// to be asserted, so it is asserted here instead — the retired shape must not
+// come back.
+describe("the retired shared form and footer save", () => {
+  it("renders no form root, no submit button and no footer save", () => {
     const html = render();
-    // Loading and loaded states share one <form> root, so flipping `loading`
-    // swaps the panel content without remounting (and without dropping focus):
-    // the form — and the save button inside it — must already exist here.
-    expect(html).toContain("<form");
-    expect(html).toContain("</form>");
-    expect(html).toContain('aria-label="Loading company profile"');
-    const save = buttons(html).find((segment) =>
-      segment.includes(">Save company profile</button>")
-    );
-    expect(save).toBeDefined();
-    expect(save).toContain('type="submit"');
-    expect(save).toContain("disabled");
-    expect(html.indexOf("<form")).toBeLessThan(html.indexOf("Save company profile"));
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain("</form>");
+    expect(html).not.toContain('type="submit"');
+    expect(html).not.toContain(">Save company profile</button>");
+    expect(buttons(html).filter((segment) => segment.includes(">Save"))).toHaveLength(0);
   });
 
-  it("renders without throwing", () => {
-    let html = "";
-    expect(() => {
-      html = render();
-    }).not.toThrow();
-    expect(html).toContain("Company sections");
+  it("shows the loading skeleton inside the tabpanel, with no save button to press early", () => {
+    // Saving before load() has landed would clear every hidden column, so the
+    // rows only exist once the record is in hand.
+    const html = render();
+    expect(html).toContain('aria-label="Loading company profile"');
+    expect(html).not.toContain(COMPANY_TAB_SAVES.general.button);
+    expect(html).not.toContain(COMPANY_TAB_SAVES.units.button);
+    expect(html).not.toContain(COMPANY_TAB_SAVES.quotation.button);
+    expect(html).not.toContain(COMPANY_TAB_SAVES.portal.button);
   });
 });
 
-describe("the wording autosave hands the seam the identity refresh", () => {
-  const refresh = vi.mocked(RefreshCompanyIdentity);
+// The merged Quotation tab (issue #429): the Portal tab's shape — the document
+// on top, the colours, the wording, the save row, then the two standing notes.
+// CompanyProfileCard can only render its loading skeleton here, and the branch
+// renders this component verbatim, so the composition is what gets pinned.
+describe("the merged Quotation tab", () => {
+  function renderTab(): string {
+    return renderToString(
+      <CompanyQuotationTab
+        labels={SERVED}
+        theme={DEFAULT_THEME}
+        refreshKey={0}
+        wordingStatus="saved"
+        tabStatus="saved"
+        labelsError={null}
+        labelsNotice={null}
+        themeError={null}
+        invalid={null}
+        busy={false}
+        onLabelChange={() => undefined}
+        onThemeChange={() => undefined}
+        onSave={() => undefined}
+        onFieldBlur={() => undefined}
+        onFieldEnter={() => undefined}
+      />
+    );
+  }
 
-  beforeEach(() => {
-    refresh.mockClear();
+  it("stacks the document, the colours, the wording, the save row and the two notes", () => {
+    const html = renderTab();
+    const preview = html.indexOf('aria-label="Loading template preview"');
+    const colours = html.indexOf("Quotation colors");
+    const wording = html.indexOf("Document wording");
+    const saveRow = html.indexOf(`>${COMPANY_TAB_SAVES.quotation.button}</button>`);
+    const fixedColours = html.indexOf("These four colours paint the whole document.");
+    const draftNote = html.indexOf("The preview above shows the draft");
+    expect(preview).toBeGreaterThan(-1);
+    // The reorder (#432): colours above the wording, the save row below both,
+    // then the fixed-colour sentence and the draft sentence.
+    expect(colours).toBeGreaterThan(preview);
+    expect(wording).toBeGreaterThan(colours);
+    expect(saveRow).toBeGreaterThan(wording);
+    expect(fixedColours).toBeGreaterThan(saveRow);
+    expect(draftNote).toBeGreaterThan(fixedColours);
+    // The preview is the pending document, not an empty frame.
+    expect(html).not.toContain("<iframe");
   });
 
-  it("refreshes the company identity after a save the store accepted", async () => {
-    const update = vi.fn(async () => []);
-    const result = await saveCompanyLabels(SERVED, {
-      update,
-      refreshIdentity: LABELS_SAVE_DEPS.refreshIdentity,
-    });
-    expect(update).toHaveBeenCalledTimes(1);
-    expect(refresh).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ refreshFailed: false });
+  it("names its own save button, and only that one", () => {
+    const html = renderTab();
+    expect(html).toContain(`>${COMPANY_TAB_SAVES.quotation.button}</button>`);
+    // One save row for the whole tab: the wording and the colours are one save.
+    expect(html.split(`>${COMPANY_TAB_SAVES.quotation.button}</button>`).length - 1).toBe(1);
+    expect(html).not.toContain(`>${COMPANY_TAB_SAVES.general.button}</button>`);
+    expect(html).not.toContain(`>${COMPANY_TAB_SAVES.portal.button}</button>`);
   });
 
-  it("does not refresh when the store refused the save", async () => {
-    const update = vi.fn(async () => {
-      throw new Error('label "docTitle" is over 24 characters');
+  it("describes the save model truthfully: no autosave, one button, the draft in the preview", () => {
+    const html = renderTab();
+    // The old caption promised an autosave and pointed at a footer button that
+    // no longer exists. Under per-tab saves both halves save together, and the
+    // copy says exactly that.
+    expect(html).toContain(
+      "The wording and the four colours save together with this button."
+    );
+    expect(html).not.toContain("saves automatically");
+    expect(html).not.toContain("Wording above saves automatically");
+    expect(html).not.toContain("Save company profile");
+    // The palette-coverage sentence, frozen by the plan: what the four colours
+    // paint, and the two things no rebrand may move.
+    expect(html).toContain("The white page and the green discount row stay fixed");
+    // The draft sentence, and the fact the preview follows blur/Enter only.
+    expect(html).toContain("before either is saved");
+    expect(html).toContain("never while you type");
+  });
+
+  it("still carries the wording inputs and the four quotation colours", () => {
+    const html = renderTab();
+    expect(html).toContain('aria-label="Document wording: QUOTATION"');
+    // The served override (PROPOSAL over the built-in QUOTATION) shows its
+    // Reset affordance, so the wording panel is the live one.
+    expect(html).toContain(`aria-label="Reset QUOTATION to the built-in wording"`);
+    expect(html).toContain('aria-label="Quotation Deep hex value"');
+    expect(html).toContain('aria-label="Quotation Ink hex value"');
+  });
+
+  it("disables the save row and says why when a wording value would be refused", () => {
+    // The store's rules are mirrored, so the button refuses a set the server
+    // would bounce — the "held" state the autosave used to carry.
+    const html = renderToString(
+      <CompanyQuotationTab
+        labels={[{ ...SERVED[0], Value: "{{.DocTitle}}" }]}
+        theme={DEFAULT_THEME}
+        refreshKey={0}
+        wordingStatus="dirty"
+        tabStatus="dirty"
+        labelsError={null}
+        labelsNotice={null}
+        themeError={null}
+        invalid="One field is highlighted below and must be fixed before anything saves."
+        busy={false}
+        onLabelChange={() => undefined}
+        onThemeChange={() => undefined}
+        onSave={() => undefined}
+        onFieldBlur={() => undefined}
+        onFieldEnter={() => undefined}
+      />
+    );
+    const save = buttons(html).find((segment) =>
+      segment.includes(`>${COMPANY_TAB_SAVES.quotation.button}</button>`)
+    );
+    expect(save).toBeDefined();
+    expect(save).toContain('disabled=""');
+    expect(html).toContain("must be fixed before anything saves");
+  });
+
+  it("refuses an incomplete colour hex before the store has to", () => {
+    // A colour that is neither empty nor #RRGGBB can only be refused by the
+    // server; the row names the field here instead, the way the preview panel
+    // does. A half-typed hex must not send anything.
+    const html = renderToString(
+      <CompanyQuotationTab
+        labels={SERVED}
+        theme={{ ...DEFAULT_THEME, qAccent: "#284AF" }}
+        refreshKey={0}
+        wordingStatus="saved"
+        tabStatus="dirty"
+        labelsError={null}
+        labelsNotice={null}
+        themeError={null}
+        invalid={null}
+        busy={false}
+        onLabelChange={() => undefined}
+        onThemeChange={() => undefined}
+        onSave={() => undefined}
+        onFieldBlur={() => undefined}
+        onFieldEnter={() => undefined}
+      />
+    );
+    expect(html).toContain("The Quotation Accent colour is not a complete hex — fix it before saving.");
+    expect(
+      buttons(html).find((segment) =>
+        segment.includes(`>${COMPANY_TAB_SAVES.quotation.button}</button>`)
+      )
+    ).toContain('disabled=""');
+  });
+});
+
+// The Portal tab carries the same shape: the page on top, its four colours, its
+// own save row, and the frozen sentence about the verdict colours that stay
+// fixed. It is a component of its own so it can be pinned without a DOM.
+describe("the Portal tab", () => {
+  function renderTab(): string {
+    return renderToString(
+      <CompanyPortalTab
+        theme={DEFAULT_THEME}
+        onChange={() => undefined}
+        status="saved"
+        busy={false}
+        error={null}
+        onSave={() => undefined}
+      />
+    );
+  }
+
+  it("stacks the page, the colours, the save row and the fixed-colour sentence", () => {
+    const html = renderTab();
+    const preview = html.indexOf('aria-label="Loading portal preview"');
+    const colours = html.indexOf("Portal colors");
+    const saveRow = html.indexOf(`>${COMPANY_TAB_SAVES.portal.button}</button>`);
+    const fixed = html.indexOf("These four colours paint the page around the verdict.");
+    expect(preview).toBeGreaterThan(-1);
+    expect(colours).toBeGreaterThan(preview);
+    expect(saveRow).toBeGreaterThan(colours);
+    expect(fixed).toBeGreaterThan(saveRow);
+    expect(html).toContain("green valid, amber superseded, red mismatch, grey not-found");
+  });
+
+  it("names the Portal save and not the profile save it used to ride", () => {
+    const html = renderTab();
+    expect(html).toContain(`>${COMPANY_TAB_SAVES.portal.button}</button>`);
+    expect(html).not.toContain("Save company profile");
+    expect(html).not.toContain("saves automatically");
+  });
+});
+
+// The guard's decision, pinned where the page makes it. A click cannot be fired
+// in node, so the switch itself stays hand-driven; what is pinned is that a
+// dirty outgoing tab blocks the switch with a sentence naming the tab and its
+// button, and that a clean tab never blocks — the two halves of "edit wording →
+// switch tab → warned, nothing sent".
+describe("the tab-switch guard", () => {
+  const clean = {
+    general: false,
+    units: false,
+    quotation: false,
+    portal: false,
+  };
+
+  it("blocks a switch out of a dirty tab and names the tab and its button", () => {
+    const message = tabSwitchGuard("quotation", { ...clean, quotation: true }, "portal");
+    expect(message).toBe(
+      "The Quotation tab has unsaved changes. Save them with “Save wording and colours” before switching tabs."
+    );
+    // The page applies this by not switching: `message !== null` is the only
+    // branch that keeps the current tab, and it never calls a save. Nothing is
+    // sent on the way out.
+    expect(companyTabDirty("quotation", dirtyDraft(), savedAll())).toBe(true);
+  });
+
+  it("lets a clean tab switch, and never blocks re-selecting the current tab", () => {
+    expect(tabSwitchGuard("general", { ...clean }, "quotation")).toBeNull();
+    expect(tabSwitchGuard("quotation", { ...clean, quotation: true }, "quotation")).toBeNull();
+  });
+});
+
+/** A draft whose Quotation wording has moved, and every tab's saved baseline. */
+function dirtyDraft() {
+  return {
+    form: { legalName: "PT Arcon Penta Persada", address: "Jl. Merdeka 1" },
+    extras: {
+      phone: "+62-21-5550192",
+      email: "admin@arconpentapersada.co.id",
+      taxId: "01.234.567.8-901.234",
+      currency: "IDR",
+      canonicalUoM: "Lot",
+    },
+    units: [
+      { value: "Lot", label: "Lot" },
+      { value: "m2", label: "m²" },
+    ],
+    labels: SERVED.map((entry) => ({ ...entry, Value: `${entry.Value} edited` })),
+    theme: DEFAULT_THEME,
+  };
+}
+
+function savedAll() {
+  const base = dirtyDraft();
+  return {
+    general: generalFingerprint(base.form, base.extras),
+    units: unitsFingerprint(base.units, base.extras.canonicalUoM),
+    labels: labelsFingerprint(SERVED),
+    quotationTheme: quotationThemeFingerprint(base.theme),
+    portalTheme: portalThemeFingerprint(base.theme),
+  };
+}
+
+// The page's wiring: which endpoint each tab's save answers, and with which
+// arguments. The Bindings are mocked, so these run in node; the sequences they
+// feed are pinned in companySaves.test.ts.
+describe("the page's save wiring answers one endpoint per tab", () => {
+  it("sends the General tab's six columns through UpdateCompanyGeneral", async () => {
+    const deps = companySaveDeps();
+    const result = await saveGeneralTab(
+      { legalName: "PT Arcon Penta Persada", address: "Jl. Merdeka 1" },
+      {
+        phone: "+62-21-5550192",
+        email: "admin@arconpentapersada.co.id",
+        taxId: "01.234.567.8-901.234",
+        currency: "USD",
+        canonicalUoM: "Lot",
+      },
+      deps
+    );
+    expect(mocked.updateGeneral).toHaveBeenCalledWith(
+      "PT Arcon Penta Persada",
+      "Jl. Merdeka 1",
+      "+62-21-5550192",
+      "admin@arconpentapersada.co.id",
+      "01.234.567.8-901.234",
+      "USD"
+    );
+    // No theme and no unit call: a General save cannot clear a colour or a unit.
+    expect(mocked.updateQuotationTheme).not.toHaveBeenCalled();
+    expect(mocked.updatePortalTheme).not.toHaveBeenCalled();
+    expect(mocked.updateUnits).not.toHaveBeenCalled();
+    expect(mocked.updateLabels).not.toHaveBeenCalled();
+    expect(result.saved).toBe(true);
+    expect(mocked.refreshIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the list and the canonical through UpdateCompanyUnits", async () => {
+    const deps = companySaveDeps();
+    await saveUnitsTab([{ value: "Lot", label: "Lot" }], "Lot", deps);
+    expect(mocked.updateUnits).toHaveBeenCalledWith(
+      [expect.objectContaining({ Value: "Lot", Label: "Lot" })],
+      "Lot"
+    );
+    expect(mocked.updateGeneral).not.toHaveBeenCalled();
+  });
+
+  it("sends the wording through UpdateCompanyLabels and the colours through UpdateQuotationTheme", async () => {
+    const deps = companySaveDeps();
+    await saveQuotationTab(
+      {
+        labels: SERVED,
+        labelsDirty: true,
+        theme: DEFAULT_THEME,
+        themeDirty: true,
+      },
+      deps
+    );
+    expect(mocked.updateLabels).toHaveBeenCalledWith([
+      expect.objectContaining({ Key: "docTitle", Value: "PROPOSAL" }),
+      expect.objectContaining({ Key: "termsPayment" }),
+    ]);
+    expect(mocked.updateQuotationTheme).toHaveBeenCalledWith(
+      "#1A237E",
+      "#284AF3",
+      "#D6E4FF",
+      "#1a1a1a"
+    );
+    // The portal's four are a different endpoint.
+    expect(mocked.updatePortalTheme).not.toHaveBeenCalled();
+    expect(mocked.updateGeneral).not.toHaveBeenCalled();
+  });
+
+  it("sends the portal's four colours through UpdatePortalTheme", async () => {
+    const deps = companySaveDeps();
+    await savePortalTab(DEFAULT_THEME, deps);
+    expect(mocked.updatePortalTheme).toHaveBeenCalledWith(
+      "#1A237E",
+      "#284AF3",
+      "#D6E4FF",
+      "#1a1a1a"
+    );
+    expect(mocked.updateQuotationTheme).not.toHaveBeenCalled();
+    expect(mocked.updateLabels).not.toHaveBeenCalled();
+  });
+});
+
+// The bindings, mocked. Every AdminAPI export the page imports is listed, or
+// the import itself fails before any assertion runs.
+const mocked = vi.hoisted(() => ({
+  updateGeneral: vi.fn(async () => ({})),
+  updateUnits: vi.fn(async () => []),
+  updateLabels: vi.fn(async () => []),
+  updateQuotationTheme: vi.fn(async () => ({})),
+  updatePortalTheme: vi.fn(async () => ({})),
+  refreshIdentity: vi.fn(async () => {}),
+  updateProfile: vi.fn(async () => ({})),
+}));
+
+vi.mock("@backend/backend/AdminAPI", () => ({
+  ClearCompanyLogo: vi.fn(async () => {}),
+  DownloadBackup: vi.fn(async () => ""),
+  GetCompanyLabels: vi.fn(async () => []),
+  GetCompanyLogo: vi.fn(async () => ({})),
+  GetCompanyProfile: vi.fn(async () => ({})),
+  GetCompanyUnits: vi.fn(async () => []),
+  GetCurrencyCatalogue: vi.fn(async () => []),
+  RestoreBackup: vi.fn(async () => ({})),
+  SetCompanyLogo: vi.fn(async () => {}),
+  SetUserEmail: vi.fn(async () => ({})),
+  UpdateCompanyGeneral: mocked.updateGeneral,
+  UpdateCompanyUnits: mocked.updateUnits,
+  UpdateCompanyLabels: mocked.updateLabels,
+  UpdateCompanyProfile: mocked.updateProfile,
+  UpdatePortalTheme: mocked.updatePortalTheme,
+  UpdateQuotationTheme: mocked.updateQuotationTheme,
+}));
+
+vi.mock("@backend/backend/Quotation", () => ({
+  PickDirectory: vi.fn(async () => ""),
+  RefreshCompanyIdentity: mocked.refreshIdentity,
+}));
+
+// The identity refresh is the obligation every save carries: the desktop
+// renders its own PDFs from the identity it cached at startup, so a save that
+// lands without it keeps printing the previous copy on this device until the
+// next sign-in. Pinned through the deps the page hands over.
+describe("the page hands every save the identity refresh", () => {
+  it("refreshes once per landed save, and never after a refusal", async () => {
+    const deps = companySaveDeps();
+    await saveGeneralTab(
+      { legalName: "PT Arcon", address: "" },
+      {
+        phone: "",
+        email: "",
+        taxId: "",
+        currency: "IDR",
+        canonicalUoM: "Lot",
+      },
+      deps
+    );
+    expect(mocked.refreshIdentity).toHaveBeenCalledTimes(1);
+
+    mocked.refreshIdentity.mockClear();
+    mocked.updateGeneral.mockImplementationOnce(async () => {
+      throw new Error("company legal name is required");
     });
-    await expect(
-      saveCompanyLabels(SERVED, { update, refreshIdentity: LABELS_SAVE_DEPS.refreshIdentity })
-    ).rejects.toThrow("over 24 characters");
-    expect(refresh).not.toHaveBeenCalled();
+    const refused = await saveGeneralTab(
+      { legalName: "", address: "" },
+      { phone: "", email: "", taxId: "", currency: "IDR", canonicalUoM: "" },
+      deps
+    );
+    expect(refused.saved).toBe(false);
+    expect(mocked.refreshIdentity).not.toHaveBeenCalled();
+    // The refusal's message reaches the banner through errorMessage, which the
+    // page and the seam share.
+    expect(errorMessage(refused.error, "fallback")).toBe("company legal name is required");
   });
 });

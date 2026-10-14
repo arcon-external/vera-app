@@ -1,18 +1,20 @@
 /**
  * Load→save mapping for the Company section of Settings. This module is the
  * real production path: CompanyProfileCard calls formFromProfile,
- * extrasFromProfile and themeFromProfile on load, and profilePayload on save.
+ * extrasFromProfile and themeFromProfile on load.
  *
- * The company save is a single whole-record UpdateCompanyProfile call — the
- * legal name, the address, the hidden extras and all eight theme colours in
- * one payload — because the Go endpoint full-replaces the editable columns
- * and empty strings clear a field. A saver that sent only its own slice
- * would silently wipe everything else. So the page owns the whole record in
- * one place and the General/Theme panels are purely presentational slices:
- * they render their controls and forward edits back up, holding no state.
- * Phone, email and tax ID have no inputs at all and round-trip verbatim so
- * saving never wipes them. There is deliberately no save before load: saving
- * an empty record would clear those same columns.
+ * The company save used to be one whole-record UpdateCompanyProfile call — the
+ * legal name, the address, the hidden extras and all eight theme colours in a
+ * single full-replacing payload, which meant a client saving one tab had to
+ * resend every column another tab owned or clear it. Issue #432 replaced it
+ * with per-tab saves (see companySaves.ts): the General tab writes its six
+ * columns, Units writes the list plus the canonical unit, the Quotation tab
+ * writes the wording and its four colours, the Portal tab writes its four.
+ *
+ * What survives here is the read side, and it is still the whole record: the
+ * narrow endpoints write one slice, so the page must hold every served value —
+ * including the phone, email, tax ID and currency that have no inputs of their
+ * own — or the General save would clear them.
  *
  * This repo has no DOM tests, so "a field was lost" cannot be asserted
  * through the UI — company.test.ts pins this mapping instead.
@@ -23,12 +25,11 @@ export type CompanyForm = {
 };
 
 // Stored-but-unedited profile values. Phone, email, and tax ID print
-// nowhere, so they have no inputs — but they still round-trip verbatim so
-// saving never wipes them. Currency rides here too in Wave A: it has no
-// picker yet (Wave B), so like the hidden extras it round-trips verbatim
-// until the General panel owns it. CanonicalUoM is the same: the units
-// admin (issue #337, Wave 2) will own it the way the General panel owns
-// currency; until then it round-trips verbatim.
+// nowhere, so they have no inputs — but the General save sends them (it
+// writes all six of its columns), so they must be read on load and held.
+// Currency has its picker on the General tab. CanonicalUoM belongs to the
+// Units tab (#432): it is written in the same transaction as the unit list, so
+// the General save neither sends nor clears it.
 export type StoredCompanyExtras = {
   phone: string;
   email: string;
@@ -127,53 +128,6 @@ export function themeFromProfile(profile: CompanyProfileLike): CompanyTheme {
     pAccent: profile.ThemePAccent ?? "",
     pSoft: profile.ThemePSoft ?? "",
     pInk: profile.ThemePInk ?? "",
-  };
-}
-
-/** The exact payload CompanyProfileCard's save passes to UpdateCompanyProfile. */
-export type CompanyProfilePayload = {
-  LegalName: string; Address: string;
-  Phone: string; Email: string; TaxID: string;
-  // The company currency, round-tripped verbatim until the picker lands
-  // (Wave B). It must be present: UpdateCompanyProfile full-replaces, so a
-  // missing Currency is cleared on every save.
-  Currency: string;
-  // The canonical unit, round-tripped verbatim until the units admin lands
-  // (issue #337, Wave 2). Same rule as Currency: it must be present, or the
-  // next whole-record save clears it.
-  CanonicalUoM: string;
-  // Vestigial on the save path, kept deliberately: neither update path
-  // writes it — the desktop forwards fifteen string columns and the server
-  // binds fifteen, while the store recomputes HasLogo from logo_bytes. It
-  // stays because the Wails binding types the UpdateCompanyProfile argument
-  // as the full backend.CompanyProfile, so tsc requires all sixteen fields
-  // at the call site; sending the echoed value is harmless since both update
-  // paths ignore it.
-  HasLogo: boolean;
-  ThemeQDeep: string; ThemeQAccent: string; ThemeQSoft: string; ThemeQInk: string;
-  ThemePDeep: string; ThemePAccent: string; ThemePSoft: string; ThemePInk: string;
-};
-
-export function profilePayload(input: {
-  form: CompanyForm; extras: StoredCompanyExtras; theme: CompanyTheme; hasLogo: boolean;
-}): CompanyProfilePayload {
-  return {
-    LegalName: input.form.legalName.trim(),
-    Address: input.form.address.trim(),
-    Phone: input.extras.phone,
-    Email: input.extras.email,
-    TaxID: input.extras.taxId,
-    Currency: input.extras.currency,
-    CanonicalUoM: input.extras.canonicalUoM,
-    HasLogo: input.hasLogo,
-    ThemeQDeep: input.theme.qDeep.trim(),
-    ThemeQAccent: input.theme.qAccent.trim(),
-    ThemeQSoft: input.theme.qSoft.trim(),
-    ThemeQInk: input.theme.qInk.trim(),
-    ThemePDeep: input.theme.pDeep.trim(),
-    ThemePAccent: input.theme.pAccent.trim(),
-    ThemePSoft: input.theme.pSoft.trim(),
-    ThemePInk: input.theme.pInk.trim(),
   };
 }
 

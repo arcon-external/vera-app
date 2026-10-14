@@ -54,6 +54,19 @@ describe("template preview panel", () => {
     expect(render()).toContain("never while you type");
   });
 
+  it("says what the preview is and what the download is (#432)", () => {
+    // The terminal swapped from the PDF's blob URL to the document's own HTML
+    // (it was blank on some platforms), so the copy must not promise a PDF in
+    // the frame: the preview is the template the print engine runs, and the
+    // Download button is what saves the real PDF bytes.
+    const html = render();
+    expect(html).toContain("The preview is the document&#x27;s own HTML");
+    expect(html).toContain("Download sample saves the real PDF bytes");
+    // The sample disclaimer survives the swap.
+    expect(html).toContain("fake quote number");
+    expect(html).toContain("does not verify");
+  });
+
   it("points at the wording and colours below, where the merged tab puts them", () => {
     // Issue #429 merged Template into Quotation in the Portal tab's shape:
     // the preview is on top, so the copy's direction flipped with the move.

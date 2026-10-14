@@ -58,6 +58,10 @@ function render(overrides: Partial<Parameters<typeof CompanyGeneralPanel>[0]> = 
       currency="IDR"
       catalogue={SAMPLE_CATALOGUE}
       onCurrencyChange={() => {}}
+      status="saved"
+      busy={false}
+      error={null}
+      onSave={() => {}}
       {...overrides}
     />
   );
@@ -213,6 +217,85 @@ describe("CompanyGeneralPanel", () => {
     }).not.toThrow();
     expect(html).toContain("Company profile");
     expect(html).toContain("Logo");
+  });
+});
+
+// The General tab saves itself (#432). This is where the shared footer button
+// used to be replaced: the row lives under the fields it writes, sends only the
+// six General columns, and carries the one save-row shape all four tabs share.
+describe("CompanyGeneralPanel save row", () => {
+  /** The save button's own segment. */
+  function saveButton(html: string): string {
+    const found = buttonSegments(html).find((segment) =>
+      segment.includes(">Save company details</button>")
+    );
+    expect(found, `expected a save button in: ${html}`).toBeDefined();
+    return found as string;
+  }
+
+  it("names its own save, and no other tab's", () => {
+    const html = render();
+    expect(saveButton(html)).toContain('type="button"');
+    expect(html).toContain(">Save company details</button>");
+    // The retired footer button saved every column of the record; this one
+    // saves the General tab, and the copy must not promise otherwise.
+    expect(html).not.toContain("Save company profile");
+    for (const label of ["Save units", "Save wording and colours", "Save colours"]) {
+      expect(html).not.toContain(`>${label}</button>`);
+    }
+  });
+
+  it("shows the live save state beside the button", () => {
+    // The chip is the tab's own: Saved when the draft matches the server,
+    // Unsaved changes when it does not, Saving… while the write is in flight.
+    expect(render({ status: "saved" })).toContain("Saved");
+    const dirty = render({ status: "dirty" });
+    expect(dirty).toContain("Unsaved changes");
+    expect(dirty).toContain('role="status"');
+    expect(render({ status: "saving", busy: true })).toContain("Saving…");
+  });
+
+  it("reads the busy label and disables the button while saving", () => {
+    const html = render({ busy: true, status: "saving" });
+    const save = buttonSegments(html).find((segment) => segment.includes(">Saving…</button>"));
+    expect(save, `expected a saving button in: ${html}`).toBeDefined();
+    expect(save).toContain('disabled=""');
+    // The idle label is not on screen while busy.
+    expect(html).not.toContain(">Save company details</button>");
+  });
+
+  it("stays disabled until the profile has loaded", () => {
+    // A save before load() would send an empty record and clear every hidden
+    // column, so the row is wired to the page's loading state.
+    expect(saveButton(render({ disabled: true }))).toContain('disabled=""');
+    expect(saveButton(render({ disabled: false }))).not.toContain('disabled=""');
+  });
+
+  it("shows a failed save's reason in a banner under the row", () => {
+    const html = render({ error: "The server refused the company details." });
+    expect(html).toContain("The server refused the company details.");
+    expect(html).toContain('role="alert"');
+    // The banner is the row's, not the card's: it sits below the button.
+    expect(html.indexOf("The server refused the company details.")).toBeGreaterThan(
+      html.indexOf(">Save company details</button>")
+    );
+  });
+
+  it("refuses an empty legal name before the store has to", () => {
+    // The shared <form>'s `required` used to enforce this; with no form root
+    // (#432) the row does, or a save would bounce on the one field the store
+    // insists on.
+    const html = render({ form: { legalName: "   ", address: "Jl. Merdeka 1" } });
+    expect(html).toContain("The legal name is required.");
+    expect(saveButton(html)).toContain('disabled=""');
+    // The chip gives way to the reason, so one thing is said at a time.
+    expect(html).not.toContain("Unsaved changes");
+  });
+
+  it("wires the save handler without calling it during render", () => {
+    const onSave = vi.fn();
+    render({ onSave });
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 
