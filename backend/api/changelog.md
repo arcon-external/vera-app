@@ -4,6 +4,38 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.13.0] - 2026-10-15
+
+### Added
+
+- **Every settings tab saves itself.** Company settings' four sub-tabs each have
+  their own save button — General saves the company profile, Units saves the
+  unit list, Quotation saves the quotation template (its wording and its
+  colours), Portal saves the portal colours. A save in one tab can no longer
+  carry another tab's unfinished edits, and leaving a tab with unsaved changes
+  says so and stays put.
+
+### Changed
+
+- **The Quotation tab's colours sit above the document wording**, so the order
+  runs preview, colours, wording — the colours you change are the ones the
+  preview beside them shows.
+- **The document wording saves with its tab's button now**, instead of saving
+  by itself a moment after you stop typing. "Save Quotation Template" saves the
+  wording and the colours together.
+
+### Fixed
+
+- **The template preview no longer comes up blank.** The preview showed the
+  document as a PDF inside a frame, which some systems refused to paint; it now
+  shows the document's own HTML — the same template the print engine runs —
+  and the Download sample still saves the real PDF.
+- **The colour panels say what stays fixed.** The quotation's white page and
+  green discount row, and the portal's verdict colours (valid, superseded,
+  mismatch, not found), are not among the four editable colours — and the
+  panels now say so, so no rebrand can wash out the paper or make one verdict
+  look like another.
+
 ## [0.12.1] - 2026-10-14
 
 ### Fixed
