@@ -53,6 +53,7 @@ import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company"
 import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
+import { PortalPreviewPanel } from "./PortalPreviewPanel";
 import { CompanyTemplatePanel } from "./CompanyTemplatePanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
@@ -917,9 +918,26 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
               below, not with the wording above.
             </p>
           </div>
+        ) : companyTab === "portal" ? (
+          <div className="grid gap-6">
+            {/* The portal is judged as a document, one state at a time: the
+                four colours are only meaningful against the five verdicts a
+                customer can meet. */}
+            <PortalPreviewPanel theme={theme} />
+            <CompanyThemePanel
+              section="Portal"
+              theme={theme}
+              onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+            />
+            <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
+              The four colors the verification page uses — they are saved with{" "}
+              <span className="font-medium text-ink-500">Save company profile</span>{" "}
+              below, and the preview above shows them before you save.
+            </p>
+          </div>
         ) : (
           <CompanyThemePanel
-            section={companyTab === "quotation" ? "Quotation" : "Portal"}
+            section="Quotation"
             theme={theme}
             onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
           />

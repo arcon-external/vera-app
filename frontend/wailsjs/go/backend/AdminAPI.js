@@ -54,6 +54,10 @@ export function GetCurrencyCatalogue() {
   return window['go']['backend']['AdminAPI']['GetCurrencyCatalogue']();
 }
 
+export function GetPortalPreviewHTML(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['backend']['AdminAPI']['GetPortalPreviewHTML'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function IssuePasswordReset(arg1) {
   return window['go']['backend']['AdminAPI']['IssuePasswordReset'](arg1);
 }
