@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, JSX, ReactNode } from "react";
 
 type ButtonVariant = "primary" | "dark" | "secondary" | "ghost" | "danger";
 type ButtonSize = "xs" | "sm" | "md";
@@ -94,6 +94,102 @@ export function SectionHeading({
       {hint ? <span className="tnum text-caption text-ink-500">{hint}</span> : null}
       {action}
     </div>
+  );
+}
+
+export type SaveState = "saved" | "dirty" | "saving";
+
+/** The live save readout, shared by the four Company settings save rows and
+ *  the wording panel's heading. Wrapped in role="status" so the state change is
+ *  announced rather than only repainted. */
+export function SaveStateChip({ state }: { state: SaveState }): JSX.Element {
+  if (state === "saving") {
+    return (
+      <span role="status" className="flex items-center">
+        <Badge tone="internal">Saving…</Badge>
+      </span>
+    );
+  }
+  if (state === "dirty") {
+    return (
+      <span role="status" className="flex items-center">
+        <Badge tone="accent">Unsaved changes</Badge>
+      </span>
+    );
+  }
+  return (
+    <span role="status" className="flex items-center gap-1.5 text-caption text-ink-400">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+        <path d="M3 8.5l3.2 3.2L13 5" />
+      </svg>
+      Saved
+    </span>
+  );
+}
+
+/**
+ * The one save row every Company settings tab renders (#432): a primary
+ * button with a busy label, the standing reason the save is refused when the
+ * store would bounce it (otherwise the live Save chip), and a failed save's
+ * reason in a banner under the row.
+ *
+ * It exists so the four tabs cannot drift into four shapes — the old footer
+ * button saved everything from everywhere; now each tab saves itself, and this
+ * is what "saving itself" looks like. The Units tab's row is the precedent it
+ * was extracted from.
+ */
+export function SaveRow({
+  label,
+  busyLabel,
+  busy,
+  state,
+  onSave,
+  invalid = null,
+  error = null,
+  hint = null,
+  disabled = false,
+}: {
+  /** The idle button label, e.g. "Save wording and colours". */
+  label: string;
+  /** The busy button label, e.g. "Saving…". */
+  busyLabel: string;
+  /** True while the tab's save is in flight. */
+  busy: boolean;
+  /** The live save state, shown as the chip beside the button. */
+  state: SaveState;
+  /** Runs the tab's save. */
+  onSave: () => void;
+  /** Why the save is unavailable: the store would refuse it. Shown inline
+   *  beside the button, in place of the chip, and the button is disabled. */
+  invalid?: string | null;
+  /** A failed save's reason, shown in a banner under the row. */
+  error?: string | null;
+  /** A standing note under the row when there is nothing to report. */
+  hint?: string | null;
+  /** Extra reason to disable the button (a load still in flight). */
+  disabled?: boolean;
+}): JSX.Element {
+  const refused = invalid !== null && invalid !== "";
+  return (
+    <>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button variant="primary" onClick={onSave} disabled={busy || disabled || refused}>
+          {busy ? busyLabel : label}
+        </Button>
+        {refused ? (
+          <span className="text-caption text-ink-500">{invalid}</span>
+        ) : (
+          <SaveStateChip state={state} />
+        )}
+      </div>
+      {error !== null && error !== "" ? (
+        <div className="mt-3">
+          <StatusBanner tone="danger">{error}</StatusBanner>
+        </div>
+      ) : hint !== null && hint !== "" ? (
+        <p className="mt-2 text-caption leading-relaxed text-ink-400">{hint}</p>
+      ) : null}
+    </>
   );
 }
 

@@ -4,16 +4,22 @@ package backend
 //
 // The Company settings Template tab edits the wording a customer reads and
 // the four colours the document paints with, and staff need to see the real
-// PDF beside the inputs -- not a client-side re-implementation that can drift
-// from what an export prints. The two bindings here render a fixed mock
-// quotation through the active engine (native gpdf in a default build, the
-// browser under -tags chromedp) and hand back the document.
+// document beside the inputs -- not a client-side re-implementation that can
+// drift from what an export prints. The bindings here render a fixed mock
+// quotation: PreviewTemplateDocument and DownloadTemplateSample return the PDF
+// bytes drawn through the active engine (native gpdf in a default build, the
+// browser under -tags chromedp), and PreviewTemplateHTML returns the same
+// document as HTML -- the executed template, stylesheet inlined, artwork and
+// QR as base64 data URIs -- for the settings iframe. The HTML path is there
+// because the PDF-in-an-iframe mechanism is blank on some platforms (#432),
+// and it is not a second rendering: it is the renderer's own input, so the
+// preview and the printed document come from one execution of one template.
 //
 // The load-bearing property is statelessness. Prepare writes the shared
 // instance's lastInput/Data and ExportTo reads lastInput back, so rendering
 // the mock through the live binding would make the next export store and
-// print the mock as a real signed revision (the #339 measurement). Both
-// bindings below render on a scratch Quotation that carries copies of the
+// print the mock as a real signed revision (the #339 measurement). Every
+// binding below renders on a scratch Quotation that carries copies of the
 // template assets and never touches the receiver -- q.lastInput, q.Data and
 // q.prepared read exactly as before afterwards. TestPreviewTemplateDocumentIsStateless
 // pins it, including the export half: the bytes RenderPDF produces after a
@@ -185,15 +191,15 @@ func sampleVerifyBase() string {
 	return sampleVerifyHost
 }
 
-// renderTemplateSample builds the sample document for the given draft wording
-// and colours. Entries carry Key/Value pairs in the served shape; a blank
-// value clears that label back to its built-in default, exactly as the store
-// resolves it. Colours are the four quotation bases, empty meaning default.
+// templateSampleScratch builds and prepares the scratch instance the preview
+// bindings render. It is the one shared piece behind all three of them:
+// PreviewTemplateDocument (PDF bytes), PreviewTemplateHTML (the executed
+// document for the settings iframe) and DownloadTemplateSample.
 //
 // Everything renders on a scratch instance: the receiver's lastInput, Data
 // and prepared flag are never written, so a preview can never leak into the
 // next export.
-func (q *Quotation) renderTemplateSample(entries []CompanyLabelEntry, deep, accent, soft, ink string) ([]byte, error) {
+func (q *Quotation) templateSampleScratch(entries []CompanyLabelEntry, deep, accent, soft, ink string) (*Quotation, error) {
 	for field, value := range map[string]string{
 		"deep": deep, "accent": accent, "soft": soft, "ink": ink,
 	} {
@@ -252,6 +258,19 @@ func (q *Quotation) renderTemplateSample(entries []CompanyLabelEntry, deep, acce
 	if err := scratch.SetVerifyURL(sampleVerifyBase() + "/v/" + sampleVerifyCode); err != nil {
 		return nil, fmt.Errorf("build sample verification code: %w", err)
 	}
+	return scratch, nil
+}
+
+// renderTemplateSample builds the sample document for the given draft wording
+// and colours and returns the PDF bytes. Entries carry Key/Value pairs in the
+// served shape; a blank value clears that label back to its built-in default,
+// exactly as the store resolves it. Colours are the four quotation bases,
+// empty meaning default.
+func (q *Quotation) renderTemplateSample(entries []CompanyLabelEntry, deep, accent, soft, ink string) ([]byte, error) {
+	scratch, err := q.templateSampleScratch(entries, deep, accent, soft, ink)
+	if err != nil {
+		return nil, err
+	}
 	return scratch.build()
 }
 
@@ -264,6 +283,47 @@ func (q *Quotation) PreviewTemplateDocument(entries []CompanyLabelEntry, deep, a
 		return nil, err
 	}
 	return q.renderTemplateSample(entries, deep, accent, soft, ink)
+}
+
+// PreviewTemplateHTML renders the same sample and returns the document as
+// HTML: the executed template with the stylesheet inlined and the fonts,
+// artwork and QR code carried as base64 data URIs, so the string is a whole
+// document an iframe's srcDoc can show on its own.
+//
+// It exists because the PDF could not be shown everywhere: the blob-URL
+// iframe the preview used (issues #425/#429) is blank on some platforms, and
+// a settings editor that shows nothing judges nothing. The templates are
+// HTML-derived, so the HTML path renders wherever the desktop renders at all.
+// DownloadTemplateSample still writes the real PDF bytes, drawn from the same
+// scratch instance through the same active engine, so "Download sample" saves
+// the document staff just looked at rather than a print of it.
+//
+// What is guaranteed is the same guarantee the export carries: this is the
+// template both engines print, and the native engine agrees with the browser
+// to the extent the equivalence tests prove. No pixel parity is promised --
+// an HTML==gpdf byte test cannot exist without a browser and would only lie
+// in CI.
+//
+// It is admin-only and stateless for exactly the reasons
+// PreviewTemplateDocument is: it renders on a scratch instance and never
+// touches q.lastInput, q.Data or q.prepared.
+func (q *Quotation) PreviewTemplateHTML(entries []CompanyLabelEntry, deep, accent, soft, ink string) (string, error) {
+	if err := q.requireAdmin(q.ctx); err != nil {
+		return "", err
+	}
+	scratch, err := q.templateSampleScratch(entries, deep, accent, soft, ink)
+	if err != nil {
+		return "", err
+	}
+	// The HTML terminal is the renderer's input: the template is executed
+	// once, here, and both engines read the resulting body. Returning
+	// in.HTML therefore shows exactly what the PDF is drawn from -- not a
+	// second execution of the template that could drift from it.
+	in, err := scratch.renderInput()
+	if err != nil {
+		return "", fmt.Errorf("render template sample: %w", err)
+	}
+	return in.HTML, nil
 }
 
 // DownloadTemplateSample renders the same sample PreviewTemplateDocument

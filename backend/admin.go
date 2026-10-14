@@ -337,6 +337,12 @@ func (a *AdminAPI) GetCompanyProfile() (CompanyProfile, error) {
 
 // UpdateCompanyProfile full-replaces the editable company fields. Empty
 // strings clear a field, except legal name which is always required.
+//
+// This is the old-client path: it sends every editable column -- the eight
+// theme colours and the canonical unit included -- so it still works for a
+// desktop that knows only this endpoint. New clients save one settings tab at
+// a time through UpdateCompanyGeneral, UpdateQuotationTheme, UpdatePortalTheme
+// and UpdateCompanyUnits, none of which can clear a column another tab owns.
 func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile, error) {
 	client, err := api()
 	if err != nil {
@@ -365,6 +371,61 @@ func (a *AdminAPI) UpdateCompanyProfile(profile CompanyProfile) (CompanyProfile,
 	return updated, nil
 }
 
+// UpdateCompanyGeneral saves the General tab and only the General tab: the
+// legal name, address, phone, email, tax ID and currency. No theme colour and
+// no canonical unit travel in the payload, so saving here cannot clear a
+// colour the Quotation or Portal tab owns -- the reason the narrow endpoints
+// exist beside the whole-record UpdateCompanyProfile.
+func (a *AdminAPI) UpdateCompanyGeneral(legalName, address, phone, email, taxID, currency string) (CompanyProfile, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	var updated CompanyProfile
+	if err := client.Put("/v1/admin/company/general", map[string]string{
+		"legalName": legalName,
+		"address":   address,
+		"phone":     phone,
+		"email":     email,
+		"taxId":     taxID,
+		"currency":  currency,
+	}, &updated); err != nil {
+		return CompanyProfile{}, err
+	}
+	return updated, nil
+}
+
+// UpdateQuotationTheme saves the quotation document's four brand colours.
+// Each value is optional and strict: empty means "use the stylesheet
+// default", anything else must be a #RRGGBB, and the server refuses the whole
+// save naming the field it objects to. The portal's four colours are a
+// different endpoint, so this write cannot move them.
+func (a *AdminAPI) UpdateQuotationTheme(deep, accent, soft, ink string) (CompanyProfile, error) {
+	return a.updateTheme("/v1/admin/company/theme/quotation", deep, accent, soft, ink)
+}
+
+// UpdatePortalTheme saves the verification portal's four brand colours, the
+// other half of the brand and the other endpoint.
+func (a *AdminAPI) UpdatePortalTheme(deep, accent, soft, ink string) (CompanyProfile, error) {
+	return a.updateTheme("/v1/admin/company/theme/portal", deep, accent, soft, ink)
+}
+
+// updateTheme sends a four-colour body to one of the theme routes. The two
+// halves of the brand differ only in the path, which is what this takes.
+func (a *AdminAPI) updateTheme(path, deep, accent, soft, ink string) (CompanyProfile, error) {
+	client, err := api()
+	if err != nil {
+		return CompanyProfile{}, err
+	}
+	var updated CompanyProfile
+	if err := client.Put(path, map[string]string{
+		"deep": deep, "accent": accent, "soft": soft, "ink": ink,
+	}, &updated); err != nil {
+		return CompanyProfile{}, err
+	}
+	return updated, nil
+}
+
 // GetCompanyUnits loads the company's unit list in display order. Every
 // signed-in role reads it -- units print on customer documents, so the
 // editor, the review panel and the admin list all draw from the same source.
@@ -386,9 +447,12 @@ func (a *AdminAPI) GetCompanyUnits() ([]CompanyUnit, error) {
 }
 
 // UpdateCompanyUnits full-replaces the company's unit list, in the given
-// order. The server refuses a replacement that drops the canonical unit or
-// violates the shape rules.
-func (a *AdminAPI) UpdateCompanyUnits(units []CompanyUnit) ([]CompanyUnit, error) {
+// order, and -- in the same transaction -- may move the canonical unit. An
+// empty canonicalUoM keeps whatever is stored: the Units tab owns that field
+// now, and a save that touches only the list must not have to resend it. The
+// server refuses a replacement that drops the canonical unit, or names a
+// canonical the new list does not carry.
+func (a *AdminAPI) UpdateCompanyUnits(units []CompanyUnit, canonicalUoM string) ([]CompanyUnit, error) {
 	client, err := api()
 	if err != nil {
 		return nil, err
@@ -397,7 +461,8 @@ func (a *AdminAPI) UpdateCompanyUnits(units []CompanyUnit) ([]CompanyUnit, error
 		Units []CompanyUnit `json:"units"`
 	}
 	if err := client.Put("/v1/admin/company/units", map[string]any{
-		"units": units,
+		"units":        units,
+		"canonicalUoM": canonicalUoM,
 	}, &updated); err != nil {
 		return nil, err
 	}

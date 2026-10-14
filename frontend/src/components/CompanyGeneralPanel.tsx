@@ -3,7 +3,9 @@ import type { JSX } from "react";
 import type { CompanyForm } from "../company";
 import { normalizeCurrencyCode } from "../drafts";
 import type { CurrencyInfo } from "../format";
-import { Button, Card, SectionHeading, fieldClass } from "./ui";
+import { COMPANY_TAB_SAVES } from "../companySaves";
+import { Button, Card, SaveRow, SectionHeading, fieldClass } from "./ui";
+import type { SaveState } from "./ui";
 
 // The native-select chevron idiom, the one UoMSelect in ItemEditor.tsx uses:
 // `appearance-none` strips the platform arrow, and this inline SVG is drawn as
@@ -23,14 +25,17 @@ const currencyChevronStyle = {
 } as const;
 
 // Presentational slice of the company form: the parent (CompanyProfileCard)
-// owns all state and the whole-record save; see profilePayload in
-// frontend/src/company.ts for why a slice must never save on its own.
-// This panel holds no state — the file-input ref below is a DOM detail,
-// not state. The currency catalogue is fetched by the parent for the same
-// reason: a fetch here would give this slice loading state, and a slice
-// with loading state is a slice that eventually saves on its own.
-export function CompanyGeneralPanel(props: {
-  /** The two edited profile fields. The parent owns this state. */
+// owns all state and the save; see companySaves.ts for why a slice must never
+// save on its own. This panel holds no state — the file-input ref below is a
+// DOM detail, not state. The currency catalogue is fetched by the parent for
+// the same reason: a fetch here would give this slice loading state, and a
+// slice with loading state is a slice that eventually saves on its own.
+//
+// The save row at the bottom of the profile card is the tab's own (#432): it
+// calls back up to the parent, which is the only place a Wails binding is
+// allowed to be named. The logo card beside it has always saved its own upload
+// immediately; that is unchanged.
+export function CompanyGeneralPanel(props: {  /** The two edited profile fields. The parent owns this state. */
   form: CompanyForm;
   /** Called with the field name and its new value. The parent applies it
    *  with the setForm updater at the CompanyGeneralPanel call site in
@@ -54,12 +59,27 @@ export function CompanyGeneralPanel(props: {
    *  A null catalogue disables the picker but still shows the current code. */
   catalogue: CurrencyInfo[] | null;
   /** Called with the picked code. The parent writes it into extras, and the
-   *  existing whole-record save round-trips it via profilePayload. */
+   *  General save sends it through UpdateCompanyGeneral. */
   onCurrencyChange: (code: string) => void;
+  /** The live save state, shown on the save row's chip. */
+  status: SaveState;
+  /** True while the General save is in flight. */
+  busy: boolean;
+  /** A failed save's reason, or null. */
+  error: string | null;
+  /** True until the profile has loaded: a save has nothing to send yet. */
+  disabled?: boolean;
+  /** Saves the name, address and currency, plus the hidden phone, email and
+   *  tax ID — the six General columns and nothing else. */
+  onSave: () => void;
 }): JSX.Element {
-  const { form, onFieldChange, logoPreview, hasLogo, logoBusy, logoMeta, onPickLogo, onRemoveLogo, currency, catalogue, onCurrencyChange } = props;
+  const { form, onFieldChange, logoPreview, hasLogo, logoBusy, logoMeta, onPickLogo, onRemoveLogo, currency, catalogue, onCurrencyChange, status, busy, error, disabled, onSave } = props;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const displayCode = normalizeCurrencyCode(currency);
+  // The legal name is the one required field. The shared <form> used to enforce
+  // it with `required`; with no form root any more (#432) the row refuses an
+  // empty name itself, with the sentence the store would have answered.
+  const nameRefusal = form.legalName.trim() === "" ? "The legal name is required." : null;
   return (
     <div className="grid items-stretch gap-6 lg:grid-cols-2">
       <Card className="p-5">
@@ -108,9 +128,20 @@ export function CompanyGeneralPanel(props: {
               )}
             </select>
           </label>
-          {/* No save button here by design: the page keeps a single shared
-              footer so the record can be saved from any of the three sub-tabs.
-              A sub-tab that cannot save is a dead end. */}
+          {/* The General tab saves itself (#432). The old shared footer button
+              lived at the bottom of a page-long scroll and saved every column
+              of the record; this one sits under the fields it writes and sends
+              only the General columns, so it cannot clear a colour or a unit. */}
+          <SaveRow
+            label={COMPANY_TAB_SAVES.general.button}
+            busyLabel={COMPANY_TAB_SAVES.general.busy}
+            busy={busy}
+            state={status}
+            onSave={onSave}
+            invalid={nameRefusal}
+            error={error}
+            disabled={disabled}
+          />
         </div>
         <p className="mt-3 text-caption leading-relaxed text-ink-400">
           Only admins see this section. The quotation header prints this name

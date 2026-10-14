@@ -106,6 +106,10 @@ export function UpdateClient(arg1, arg2, arg3) {
   return window['go']['backend']['AdminAPI']['UpdateClient'](arg1, arg2, arg3);
 }
 
+export function UpdateCompanyGeneral(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['backend']['AdminAPI']['UpdateCompanyGeneral'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function UpdateCompanyLabels(arg1) {
   return window['go']['backend']['AdminAPI']['UpdateCompanyLabels'](arg1);
 }
@@ -114,6 +118,14 @@ export function UpdateCompanyProfile(arg1) {
   return window['go']['backend']['AdminAPI']['UpdateCompanyProfile'](arg1);
 }
 
-export function UpdateCompanyUnits(arg1) {
-  return window['go']['backend']['AdminAPI']['UpdateCompanyUnits'](arg1);
+export function UpdateCompanyUnits(arg1, arg2) {
+  return window['go']['backend']['AdminAPI']['UpdateCompanyUnits'](arg1, arg2);
+}
+
+export function UpdatePortalTheme(arg1, arg2, arg3, arg4) {
+  return window['go']['backend']['AdminAPI']['UpdatePortalTheme'](arg1, arg2, arg3, arg4);
+}
+
+export function UpdateQuotationTheme(arg1, arg2, arg3, arg4) {
+  return window['go']['backend']['AdminAPI']['UpdateQuotationTheme'](arg1, arg2, arg3, arg4);
 }

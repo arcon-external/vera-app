@@ -46,6 +46,8 @@ export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 
 export function PreviewTemplateDocument(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<number>>;
 
+export function PreviewTemplateHTML(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
 export function RefreshCompanyIdentity():Promise<void>;
 
 export function RenderPDF():Promise<Array<number>>;

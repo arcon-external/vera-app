@@ -93,6 +93,15 @@ func TestStaffDeniedAdminEndpoints(t *testing.T) {
 		{http.MethodPatch, "/v1/admin/users/1/role", `{"role":"staff"}`},
 		{http.MethodPatch, "/v1/admin/users/1/active", `{"active":false}`},
 		{http.MethodPost, "/v1/admin/users/1/reset", ""},
+		// The company writes (issue #432): the whole-record PUT and the three
+		// narrow per-tab routes. A route missing from this list is a route whose
+		// admin gate nothing checks, which is how the units route stayed
+		// ungated until these landed.
+		{http.MethodPut, "/v1/admin/company", `{"legalName":"PT Hijack"}`},
+		{http.MethodPut, "/v1/admin/company/general", `{"legalName":"PT Hijack"}`},
+		{http.MethodPut, "/v1/admin/company/theme/quotation", `{"deep":"#000000"}`},
+		{http.MethodPut, "/v1/admin/company/theme/portal", `{"deep":"#000000"}`},
+		{http.MethodPut, "/v1/admin/company/units", `{"units":[{"value":"Lot","label":"Lot"}]}`},
 	}
 	for _, tc := range cases {
 		if code, _ := doAdminRequest(t, server, staffToken, tc.method, tc.path, tc.body); code != http.StatusForbidden {

@@ -137,6 +137,14 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/admin/email-change-requests/:id/reject", server.decideEmailChange(false), server.requireSession, server.requireAdmin)
 	server.echo.GET("/v1/admin/company", server.getCompanyProfile, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/admin/company", server.updateCompanyProfile, server.requireSession, server.requireAdmin)
+	// The narrow company writes (issue #432): one route per settings tab, each
+	// writing only its own columns. The whole-record PUT above stays for the
+	// clients that still send every editable field at once -- the CLI's
+	// `vera company set` among them -- so a save from one tab can never clear
+	// the columns another tab owns.
+	server.echo.PUT("/v1/admin/company/general", server.updateCompanyGeneral, server.requireSession, server.requireAdmin)
+	server.echo.PUT("/v1/admin/company/theme/quotation", server.updateQuotationTheme, server.requireSession, server.requireAdmin)
+	server.echo.PUT("/v1/admin/company/theme/portal", server.updatePortalTheme, server.requireSession, server.requireAdmin)
 	server.echo.GET("/v1/admin/company/logo", server.getCompanyLogo, server.requireSession)
 	server.echo.PUT("/v1/admin/company/logo", server.setCompanyLogo, server.requireSession, server.requireAdmin)
 	server.echo.DELETE("/v1/admin/company/logo", server.clearCompanyLogo, server.requireSession, server.requireAdmin)

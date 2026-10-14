@@ -55,8 +55,14 @@ export function SetUserRole(arg1:number,arg2:string):Promise<void>;
 
 export function UpdateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
 
+export function UpdateCompanyGeneral(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string,arg6:string):Promise<backend.CompanyProfile>;
+
 export function UpdateCompanyLabels(arg1:Array<backend.CompanyLabelEntry>):Promise<Array<backend.CompanyLabelEntry>>;
 
 export function UpdateCompanyProfile(arg1:backend.CompanyProfile):Promise<backend.CompanyProfile>;
 
-export function UpdateCompanyUnits(arg1:Array<backend.CompanyUnit>):Promise<Array<backend.CompanyUnit>>;
+export function UpdateCompanyUnits(arg1:Array<backend.CompanyUnit>,arg2:string):Promise<Array<backend.CompanyUnit>>;
+
+export function UpdatePortalTheme(arg1:string,arg2:string,arg3:string,arg4:string):Promise<backend.CompanyProfile>;
+
+export function UpdateQuotationTheme(arg1:string,arg2:string,arg3:string,arg4:string):Promise<backend.CompanyProfile>;

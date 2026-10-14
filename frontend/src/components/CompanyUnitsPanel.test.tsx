@@ -25,6 +25,7 @@ function render(overrides: Partial<Parameters<typeof CompanyUnitsPanel>[0]> = {}
       canonical="Lot"
       onUnitsChange={() => {}}
       onCanonicalChange={() => {}}
+      status="saved"
       busy={false}
       error={null}
       onSaveUnits={() => {}}
@@ -145,6 +146,30 @@ describe("CompanyUnitsPanel", () => {
     const save = html.split("<button").slice(1).find((segment) => segment.includes(">Save units</button>"));
     expect(save).not.toContain('disabled=""');
     expect(html).toContain("Order is the order the editor dropdown shows.");
+  });
+
+  it("shows the live save state beside the button, and the busy label while saving", () => {
+    // The Units tab carries the same save row as the other three (#432): one
+    // button, one chip, one banner.
+    expect(render({ status: "saved" })).toContain("Saved");
+    const dirty = render({ status: "dirty" });
+    expect(dirty).toContain("Unsaved changes");
+    expect(dirty).toContain('role="status"');
+    const saving = render({ status: "saving", busy: true });
+    expect(saving).toContain(">Saving…</button>");
+    expect(
+      saving.split("<button").slice(1).find((segment) => segment.includes(">Saving…</button>"))
+    ).toContain('disabled=""');
+  });
+
+  it("keeps the canonical unit's copy pointed at the Units save, not the profile save", () => {
+    // The canonical unit moved to this tab's save (#432), in the same write as
+    // the list; the caption says where it saves and the guard pins that moving
+    // it does not dirty the General tab.
+    const html = render();
+    expect(html).toContain("It saves with");
+    expect(html).toContain(">Save units</button>");
+    expect(html).not.toContain("Save company profile");
   });
 
   it("shows a save error banner when one is passed", () => {

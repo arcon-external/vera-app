@@ -9,14 +9,17 @@ import {
   validateCompanyUnits,
 } from "../companyUnits";
 import type { CompanyUnitOption } from "../companyUnits";
-import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import { COMPANY_TAB_SAVES } from "../companySaves";
+import { Badge, Button, Card, SaveRow, SectionHeading, type SaveState, fieldClass } from "./ui";
 
 // Presentational slice of the Company settings Units tab: the canonical-unit
 // picker and the unit-list editor. Like the General and Theme panels, this
-// holds no state — the parent (CompanyProfileCard) owns the list and the save.
-// The canonical unit rides the whole-record profile save; the list has its
-// own UpdateCompanyUnits save. See companyUnits.ts for the edit-time rules and
-// frontend/src/company.ts for why a slice never saves on its own.
+// holds no state — the parent (CompanyProfileCard) owns the list, the canonical
+// unit and the save. The canonical unit moved to this tab's save (#432): it is
+// written in the same transaction as the list, because a list that drops the
+// canonical must be refused as one write, not corrected afterwards. See
+// companyUnits.ts for the edit-time rules and frontend/src/companySaves.ts for
+// why a slice never saves on its own.
 
 // The native-select chevron idiom, the one UoMSelect in ItemEditor.tsx uses:
 // `appearance-none` strips the platform arrow, and this inline SVG is drawn as
@@ -38,13 +41,6 @@ const canonicalChevronStyle = {
 const moveButtonClass =
   "flex h-10 w-10 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent";
 
-/** Enter inside a field must not submit the surrounding profile form: it would
- *  save the profile (name, currency, canonical) while leaving the list unsaved —
- *  a partial save that reads as success. Bullets in the editor do the same. */
-function blockEnter(event: React.KeyboardEvent): void {
-  if (event.key === "Enter") event.preventDefault();
-}
-
 export function CompanyUnitsPanel(props: {
   /** The served unit list in display order, or null while it loads. */
   units: CompanyUnitOption[] | null;
@@ -52,13 +48,15 @@ export function CompanyUnitsPanel(props: {
   canonical: string;
   onUnitsChange: (units: CompanyUnitOption[]) => void;
   onCanonicalChange: (value: string) => void;
+  /** The live save state, shown on the save row's chip. */
+  status: SaveState;
   /** True while a units save is in flight. */
   busy: boolean;
   /** A units-save error to show, or null. */
   error: string | null;
   onSaveUnits: () => void;
 }): JSX.Element {
-  const { units, canonical, onUnitsChange, onCanonicalChange, busy, error, onSaveUnits } = props;
+  const { units, canonical, onUnitsChange, onCanonicalChange, status, busy, error, onSaveUnits } = props;
 
   if (units === null) {
     return (
@@ -111,8 +109,11 @@ export function CompanyUnitsPanel(props: {
       </label>
       <p className="mt-1 max-w-2xl text-caption leading-relaxed text-ink-400">
         The unit a new line, sub-item and a package (sub-item) group default to.
-        Saved with <span className="font-medium text-ink-500">Save company
-        profile</span> below, not with the list. It must be one of the units on
+        It saves with{" "}
+        <span className="font-medium text-ink-500">
+          {COMPANY_TAB_SAVES.units.button}
+        </span>{" "}
+        below, in the same write as the list, and it must be one of the units on
         this list.
       </p>
 
@@ -153,7 +154,6 @@ export function CompanyUnitsPanel(props: {
                       maxLength={UOM_VALUE_MAX}
                       spellCheck={false}
                       autoComplete="off"
-                      onKeyDown={blockEnter}
                       onChange={(event) =>
                         onUnitsChange(patchCompanyUnit(units, index, { value: event.target.value }))
                       }
@@ -170,7 +170,6 @@ export function CompanyUnitsPanel(props: {
                       placeholder="Label (printed)"
                       value={unit.label}
                       maxLength={UOM_LABEL_MAX}
-                      onKeyDown={blockEnter}
                       onChange={(event) =>
                         onUnitsChange(patchCompanyUnit(units, index, { label: event.target.value }))
                       }
@@ -232,27 +231,19 @@ export function CompanyUnitsPanel(props: {
           })}
         </ul>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <Button
-            variant="primary"
-            onClick={onSaveUnits}
-            disabled={busy || invalid !== null}
-          >
-            {busy ? "Saving…" : "Save units"}
-          </Button>
-          {invalid ? (
-            <span className="text-caption text-ink-500">{invalid}</span>
-          ) : (
-            <span className="text-caption text-ink-400">
-              Order is the order the editor dropdown shows.
-            </span>
-          )}
-        </div>
-        {error ? (
-          <div className="mt-3">
-            <StatusBanner tone="danger">{error}</StatusBanner>
-          </div>
-        ) : null}
+        {/* The tab's own save row (#432), the shared shape all four Company
+            tabs now render: the button, the chip, the store's reason when it
+            would refuse the list, and the save's error in a banner. */}
+        <SaveRow
+          label={COMPANY_TAB_SAVES.units.button}
+          busyLabel={COMPANY_TAB_SAVES.units.busy}
+          busy={busy}
+          state={status}
+          onSave={onSaveUnits}
+          invalid={invalid}
+          error={error}
+          hint="Order is the order the editor dropdown shows."
+        />
       </div>
     </Card>
   );

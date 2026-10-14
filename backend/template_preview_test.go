@@ -286,6 +286,176 @@ func TestTemplateSampleCoversTheShapes(t *testing.T) {
 	}
 }
 
+// The HTML terminal (issue #432).
+//
+// The preview a settings editor judges used to be a PDF in a blob-URL
+// iframe, which is blank on some platforms. PreviewTemplateHTML hands the
+// iframe the executed template itself instead — the renderer's own input
+// body, with the stylesheet inlined and the artwork, fonts and QR carried as
+// base64 data URIs, so the string is a whole document that renders anywhere
+// the desktop does. These guards pin what that string is, and that producing
+// it is as stateless as producing the PDF is.
+
+// sampleHTML returns a rendered sample as HTML, failing the test on error.
+func sampleHTML(t *testing.T, q *Quotation, entries []CompanyLabelEntry, deep, accent, soft, ink string) string {
+	t.Helper()
+	page, err := q.PreviewTemplateHTML(entries, deep, accent, soft, ink)
+	if err != nil {
+		t.Fatalf("PreviewTemplateHTML: %v", err)
+	}
+	return page
+}
+
+// TestPreviewTemplateHTMLMatchesRenderInput pins the terminal exactly: the
+// string the binding returns is the body the renderer is handed — the one
+// execution of the template both PDF engines draw from — not a second
+// execution that could drift from what prints.
+func TestPreviewTemplateHTMLMatchesRenderInput(t *testing.T) {
+	q := newAdminSampleQuotation(t)
+	entries := []CompanyLabelEntry{{Key: "docTitle", Value: "PROPOSAL"}}
+	page := sampleHTML(t, q, entries, "#1A237E", "#284AF3", "#D6E4FF", "#1a1a1a")
+
+	// The same scratch the binding built, executed through the same terminal.
+	scratch, err := q.templateSampleScratch(entries, "#1A237E", "#284AF3", "#D6E4FF", "#1a1a1a")
+	if err != nil {
+		t.Fatalf("templateSampleScratch: %v", err)
+	}
+	in, err := scratch.renderInput()
+	if err != nil {
+		t.Fatalf("renderInput: %v", err)
+	}
+	if page != in.HTML {
+		t.Errorf("PreviewTemplateHTML did not return renderInput's body: %d bytes returned, %d in the renderer's input",
+			len(page), len(in.HTML))
+	}
+
+	// A whole document, not a fragment: the settings iframe loads this string
+	// as srcDoc with nothing else on the page, so a bare <body> would render
+	// unstyled and an unclosed document would render nothing at all.
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		"<style>",
+		"data:image/png;base64,", // the artwork and the verification QR
+		"data:font/ttf;base64,",  // the two Inter faces
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the sample HTML does not contain %q: srcDoc needs a self-contained document", want)
+		}
+	}
+	if strings.HasPrefix(page, "%PDF") {
+		t.Error("the HTML binding returned PDF bytes")
+	}
+}
+
+// TestPreviewTemplateHTMLAppliesTheDraft is the behavioural half: the wording
+// and the four colours the editor typed reach the rendered document, and a
+// cleared label falls back to the built-in default exactly as the PDF path
+// does.
+func TestPreviewTemplateHTMLAppliesTheDraft(t *testing.T) {
+	q := newAdminSampleQuotation(t)
+	plain := sampleHTML(t, q, nil, "", "", "", "")
+	reworded := sampleHTML(t, q, []CompanyLabelEntry{{Key: "docTitle", Value: "PROPOSAL"}}, "", "", "", "")
+	if plain == reworded {
+		t.Error("a reworded title produced identical HTML: the preview ignores the draft")
+	}
+	if !strings.Contains(reworded, "PROPOSAL") {
+		t.Error("the reworded sample does not print the draft title")
+	}
+	// A cleared label restores the built-in default.
+	cleared := sampleHTML(t, q, []CompanyLabelEntry{{Key: "docTitle", Value: "  "}}, "", "", "", "")
+	if plain != cleared {
+		t.Error("a cleared label did not fall back to the built-in default")
+	}
+
+	// The four bases print as CSS variables, so a rebrand is judged on the
+	// document staff would actually export.
+	coloured := sampleHTML(t, q, nil, "#123456", "#234567", "#345678", "#456789")
+	for _, want := range []string{"--deep-blue: #123456", "--accent-blue: #234567", "--soft-blue: #345678", "--ink: #456789"} {
+		if !strings.Contains(coloured, want) {
+			t.Errorf("the draft colour %q is missing from the inlined stylesheet", want)
+		}
+	}
+	// The fixed colours stay fixed: the white page and the discount green
+	// survive any rebrand, which is what the palette-coverage sentence beside
+	// the colour panel promises.
+	for _, want := range []string{"--paper: #FFFFFF", "--green: #228B22"} {
+		if !strings.Contains(coloured, want) {
+			t.Errorf("fixed colour %q moved with the brand: it must not be derived from the four bases", want)
+		}
+	}
+}
+
+// TestPreviewTemplateHTMLIsStateless is the load-bearing half of the HTML
+// binding: the receiver is untouched by a preview, and what RenderPDF
+// produces afterwards is still the real document.
+func TestPreviewTemplateHTMLIsStateless(t *testing.T) {
+	q := newAdminSampleQuotation(t)
+	before := prepareRealQuotation(t, q)
+	lastInput := q.lastInput
+	data := q.Data
+	prepared := q.prepared
+
+	// Twice, with different drafts, so a leak cannot hide behind one render.
+	first := sampleHTML(t, q, nil, "", "", "", "")
+	second := sampleHTML(t, q, []CompanyLabelEntry{{Key: "docTitle", Value: "PROPOSAL"}},
+		"#1A237E", "#284AF3", "#D6E4FF", "#1a1a1a")
+	if len(first) == 0 || len(second) == 0 {
+		t.Fatalf("previews returned %d and %d bytes", len(first), len(second))
+	}
+
+	if !reflect.DeepEqual(q.lastInput, lastInput) {
+		t.Errorf("preview rewrote lastInput: the next export would store the mock as a real signed revision")
+	}
+	if !reflect.DeepEqual(q.Data, data) {
+		t.Errorf("preview rewrote Data: the next export would print the mock")
+	}
+	if q.prepared != prepared {
+		t.Errorf("preview flipped prepared to %v", q.prepared)
+	}
+	// The export half, the same way the PDF binding is pinned.
+	after, err := q.RenderPDF()
+	if err != nil {
+		t.Fatalf("render after preview: %v", err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("RenderPDF after preview differs from before (%d vs %d bytes): the export would print the mock",
+			len(after), len(before))
+	}
+}
+
+// TestPreviewTemplateHTMLRejectsBadHex mirrors the PDF guard: the colours are
+// unsaved drafts that have passed no write path, so the terminal checks them
+// before rendering rather than trusting the caller.
+func TestPreviewTemplateHTMLRejectsBadHex(t *testing.T) {
+	q := newAdminSampleQuotation(t)
+	for _, colours := range [][4]string{
+		{"red", "", "", ""},
+		{"", "#12345", "", ""},
+		{"", "", "#GGGGGG", ""},
+		{"", "", "", "123456"},
+	} {
+		if _, err := q.PreviewTemplateHTML(nil, colours[0], colours[1], colours[2], colours[3]); err == nil {
+			t.Errorf("colours %q accepted, want a field error holding the last good preview", colours)
+		}
+	}
+	if _, err := q.PreviewTemplateHTML(nil, "", "", "", ""); err != nil {
+		t.Errorf("empty colours rejected: %v", err)
+	}
+}
+
+// TestPreviewTemplateHTMLRequiresAdmin mirrors the PDF gate: the wording and
+// the colours are company settings, so the editor is admin-only.
+func TestPreviewTemplateHTMLRequiresAdmin(t *testing.T) {
+	q := newTestQuotation()
+	q.SetAuthService(auth.StaffTestService())
+	if err := Startup(q, context.Background()); err != nil {
+		t.Fatalf("startup: %v", err)
+	}
+	if _, err := q.PreviewTemplateHTML(nil, "", "", "", ""); err == nil {
+		t.Errorf("staff reached the sample: the binding is company settings and must be admin-only")
+	}
+}
+
 func TestDownloadTemplateSampleWritesFile(t *testing.T) {
 	q := newAdminSampleQuotation(t)
 	path := filepath.Join(t.TempDir(), "sample.pdf")

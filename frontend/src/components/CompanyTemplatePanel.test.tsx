@@ -94,7 +94,10 @@ describe("CompanyTemplatePanel", () => {
     const html = render();
     expect(html).toContain("Document wording");
     expect(html).toContain("What prints on every customer quotation");
-    expect(html).toContain("save automatically");
+    // The wording saves manually now (#432): the copy names the button rather
+    // than promising an autosave that no longer exists.
+    expect(html).toContain("saves with the button below");
+    expect(html).not.toContain("save automatically");
   });
 
   it("renders one field per served entry — all 26, each with a distinct name", () => {

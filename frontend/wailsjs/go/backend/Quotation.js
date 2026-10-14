@@ -86,6 +86,10 @@ export function PreviewTemplateDocument(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['backend']['Quotation']['PreviewTemplateDocument'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function PreviewTemplateHTML(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['backend']['Quotation']['PreviewTemplateHTML'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function RefreshCompanyIdentity() {
   return window['go']['backend']['Quotation']['RefreshCompanyIdentity']();
 }

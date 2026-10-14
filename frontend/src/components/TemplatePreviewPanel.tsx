@@ -1,24 +1,31 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from "react";
-import {
-  DownloadTemplateSample,
-  PreviewTemplateDocument,
-} from "@backend/backend/Quotation";
+import { DownloadTemplateSample, PreviewTemplateHTML } from "@backend/backend/Quotation";
 import { isCompleteHex, type CompanyTheme } from "../company";
 import { serializeCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
-// The template preview (issue #425): the real sample PDF on the merged
-// Quotation tab (issue #429), above the wording inputs and the four colours,
-// rendered through the active engine by the PreviewTemplateDocument
-// binding — never a client-side re-implementation, which is what would let the
-// preview drift from what an export prints.
+// The template preview (issue #425, terminal swapped in #432): the real sample
+// document on the merged Quotation tab (issue #429), above the colours and the
+// wording inputs, rendered through the active engine by the
+// PreviewTemplateHTML binding — never a client-side re-implementation, which is
+// what would let the preview drift from what an export prints.
 //
 // What this panel deliberately does not do: rasterise pages into images. The
 // engine renders PDF bytes and neither side ships a PDF rasteriser (adding one
 // would be a cgo dependency that breaks the CGO_ENABLED=0 cross-compile
-// contract, or a commercial pure-Go one), so the document is shown embedded in
-// the webview's own viewer — the bytes are the export's, only the chrome
-// around them is the platform's. Download sample saves those same bytes.
+// contract, or a commercial pure-Go one). The document is therefore shown as
+// what the engine executed — the template's own HTML, stylesheet inlined,
+// artwork and QR as data URIs — in a sandboxed iframe: no scripts, no forms,
+// no same-origin access, because a preview is a picture of a document, not the
+// document. Download sample saves the real PDF bytes for the same draft.
+//
+// Why the terminal is HTML rather than the PDF bytes (#432): the blob-URL
+// iframe the PDF used is blank on some platforms, and a settings editor that
+// shows nothing judges nothing. The HTML is not a second rendering — it is the
+// renderer's own input, the string the engines draw the PDF from — so the
+// preview and the printed document come from one execution of one template. No
+// pixel parity is promised: the native engine agrees with the browser to the
+// extent the equivalence tests prove.
 //
 // Like the portal preview it owns its own fetch, but unlike it there is no
 // debounce: the parent re-renders this panel on blur/Enter (never per
@@ -127,13 +134,16 @@ export function TemplatePreviewPanel(props: {
   refreshKey: number;
 }): JSX.Element {
   const { labels, theme, refreshKey } = props;
-  const [pdfUrl, setPdfUrl] = useState("");
+  // The executed document, a whole HTML page for the iframe's srcDoc. Empty
+  // until the first render lands, which is also the pending state.
+  const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savedPath, setSavedPath] = useState("");
   const [downloading, setDownloading] = useState(false);
   // What the visible document was rendered from. The download reuses it, so
-  // the saved file is the document on screen rather than a newer draft.
+  // the saved file is the PDF bytes for the document on screen rather than a
+  // newer draft.
   const rendered = useRef<RenderedArgs | null>(null);
   // The latest props for the effect, which must not depend on them
   // directly: depending on labels/theme would re-render per keystroke, which
@@ -166,16 +176,10 @@ export function TemplatePreviewPanel(props: {
     setLoading(true);
     setError("");
     const args = templatePreviewArgs(current, draft);
-    PreviewTemplateDocument(...args)
-      .then((bytes) => {
+    PreviewTemplateHTML(...args)
+      .then((document) => {
         if (id !== request.current) return;
-        const url = URL.createObjectURL(
-          new Blob([new Uint8Array(bytes as unknown as number[])], { type: "application/pdf" })
-        );
-        setPdfUrl((previous) => {
-          if (previous) URL.revokeObjectURL(previous);
-          return url;
-        });
+        setHtml(document);
         rendered.current = args;
         setLoading(false);
       })
@@ -184,7 +188,7 @@ export function TemplatePreviewPanel(props: {
         // The backend's reason is the diagnosis — swallowed here, a blank
         // preview is a generic sentence and a guess (#429). It is logged for
         // the console and shown in the banner, which is admin-only settings.
-        console.error("PreviewTemplateDocument failed", err);
+        console.error("PreviewTemplateHTML failed", err);
         const detail = templatePreviewErrorDetail(err);
         setError(
           detail === ""
@@ -194,15 +198,6 @@ export function TemplatePreviewPanel(props: {
         setLoading(false);
       });
   }, [refreshKey, labelsReady]);
-
-  useEffect(() => {
-    return () => {
-      setPdfUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous);
-        return "";
-      });
-    };
-  }, []);
 
   const download = useCallback(async () => {
     const args = rendered.current;
@@ -228,7 +223,7 @@ export function TemplatePreviewPanel(props: {
       <SectionHeading
         title="Template preview"
         action={
-          error && pdfUrl === "" ? (
+          error && html === "" ? (
             <Badge tone="neutral">Preview failed</Badge>
           ) : loading ? (
             <Badge tone="internal">Rendering…</Badge>
@@ -244,16 +239,19 @@ export function TemplatePreviewPanel(props: {
       </p>
       {error ? (
         <div className="mt-4">
-          <StatusBanner tone={pdfUrl === "" ? "danger" : "info"}>{error}</StatusBanner>
+          <StatusBanner tone={html === "" ? "danger" : "info"}>{error}</StatusBanner>
         </div>
       ) : null}
       <div className="mt-4 bg-paper-muted p-3 lg:p-5">
-        {pdfUrl === "" ? (
+        {html === "" ? (
           <div className="h-48 animate-pulse rounded-xl bg-paper-subtle" aria-label="Loading template preview" />
         ) : (
           <iframe
             title="Template sample preview"
-            src={pdfUrl}
+            srcDoc={html}
+            // No scripts, no forms, no same-origin access: the preview is a
+            // picture of a page, not the page.
+            sandbox=""
             className="h-[min(760px,72vh)] min-h-[420px] w-full border-0 bg-white shadow-card"
           />
         )}
@@ -261,6 +259,11 @@ export function TemplatePreviewPanel(props: {
       <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
         A two-page sample with a fake quote number. Its QR points at a code
         that does not verify, so it can never be mistaken for a document.
+      </p>
+      <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
+        The preview is the document's own HTML — the template the print engine
+        runs, shown as it executes. Download sample saves the real PDF bytes
+        for the same draft.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Button variant="secondary" onClick={() => void download()} disabled={downloading || rendered.current === null}>

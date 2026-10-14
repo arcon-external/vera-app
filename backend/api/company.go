@@ -55,6 +55,122 @@ func (s *Server) getCompanyIdentity(context echo.Context) error {
 	return context.JSON(http.StatusOK, companyDTO(profile))
 }
 
+// updateCompanyGeneral writes the six General-tab columns and nothing else:
+// the legal name, address, phone, email, tax ID and currency. It is the
+// narrow half of updateCompanyProfile, which stays whole-record for the
+// clients that still send every editable column in one payload.
+//
+// The split matters because the full-replace writes fourteen columns: a client
+// that saves one tab through it must resend the eight theme colours and the
+// canonical unit or clear them. This handler has no theme or canonical fields
+// at all, so the General tab cannot do that.
+func (s *Server) updateCompanyGeneral(context echo.Context) error {
+	var request struct {
+		LegalName string `json:"legalName"`
+		Address   string `json:"address"`
+		Phone     string `json:"phone"`
+		Email     string `json:"email"`
+		TaxID     string `json:"taxId"`
+		Currency  string `json:"currency"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	updated, err := s.database.UpdateCompanyGeneral(context.Request().Context(), store.CompanyProfile{
+		LegalName: request.LegalName,
+		Address:   request.Address,
+		Phone:     request.Phone,
+		Email:     request.Email,
+		TaxID:     request.TaxID,
+		Currency:  request.Currency,
+	})
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "required"):
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "company legal name is required"})
+		case strings.Contains(err.Error(), "invalid company email"),
+			strings.Contains(err.Error(), "too long"),
+			strings.Contains(err.Error(), "company currency"):
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		default:
+			return context.JSON(http.StatusInternalServerError, map[string]string{"error": "update company profile"})
+		}
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.update", nil, updated.LegalName)
+	return context.JSON(http.StatusOK, companyDTO(updated))
+}
+
+// updateQuotationTheme writes the four quotation-theme columns. Strict hex per
+// field, empty meaning "use the stylesheet default", audited like every other
+// company write. The portal's four colours are a different endpoint, so
+// rebranding one half of the brand cannot move the other.
+func (s *Server) updateQuotationTheme(context echo.Context) error {
+	var request struct {
+		Deep   string `json:"deep"`
+		Accent string `json:"accent"`
+		Soft   string `json:"soft"`
+		Ink    string `json:"ink"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	updated, err := s.database.UpdateQuotationTheme(context.Request().Context(),
+		request.Deep, request.Accent, request.Soft, request.Ink)
+	if err != nil {
+		if strings.Contains(err.Error(), "must be a #RRGGBB") {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		}
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "update company theme"})
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.quotation-theme.update", nil,
+		themeAuditDetail(request.Deep, request.Accent, request.Soft, request.Ink))
+	return context.JSON(http.StatusOK, companyDTO(updated))
+}
+
+// updatePortalTheme writes the four portal-theme columns, the other half of
+// the brand.
+func (s *Server) updatePortalTheme(context echo.Context) error {
+	var request struct {
+		Deep   string `json:"deep"`
+		Accent string `json:"accent"`
+		Soft   string `json:"soft"`
+		Ink    string `json:"ink"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	updated, err := s.database.UpdatePortalTheme(context.Request().Context(),
+		request.Deep, request.Accent, request.Soft, request.Ink)
+	if err != nil {
+		if strings.Contains(err.Error(), "must be a #RRGGBB") {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		}
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "update company theme"})
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.portal-theme.update", nil,
+		themeAuditDetail(request.Deep, request.Accent, request.Soft, request.Ink))
+	return context.JSON(http.StatusOK, companyDTO(updated))
+}
+
+// themeAuditDetail renders a theme write for the audit trail. Empty values are
+// written as "-" so a half-cleared palette reads as what it is rather than as
+// a missing field.
+func themeAuditDetail(deep, accent, soft, ink string) string {
+	values := []string{deep, accent, soft, ink}
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			values[i] = "-"
+		}
+	}
+	return strings.Join(values, " ")
+}
+
 func (s *Server) updateCompanyProfile(context echo.Context) error {
 	var request struct {
 		LegalName    string `json:"legalName"`
@@ -249,15 +365,18 @@ func (s *Server) getCompanyUnits(context echo.Context) error {
 	return context.JSON(http.StatusOK, companyUnitsDTO(units))
 }
 
-// updateCompanyUnits full-replaces the company's unit list. The store
-// validates shape, uniqueness and the canonical unit's survival; this handler
-// only crosses the wire.
+// updateCompanyUnits full-replaces the company's unit list, and -- in the same
+// transaction -- may move the canonical unit. An absent or blank canonicalUoM
+// keeps whatever is stored, which is what a client that does not know the
+// field sends. The store validates shape, uniqueness and the canonical unit's
+// survival against the list being written; this handler only crosses the wire.
 func (s *Server) updateCompanyUnits(context echo.Context) error {
 	var request struct {
 		Units []struct {
 			Value string `json:"value"`
 			Label string `json:"label"`
 		} `json:"units"`
+		CanonicalUoM string `json:"canonicalUoM"`
 	}
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -266,7 +385,7 @@ func (s *Server) updateCompanyUnits(context echo.Context) error {
 	for _, unit := range request.Units {
 		units = append(units, store.CompanyUnit{Value: unit.Value, Label: unit.Label})
 	}
-	updated, err := s.database.UpdateCompanyUnits(context.Request().Context(), units)
+	updated, err := s.database.UpdateCompanyUnits(context.Request().Context(), units, request.CanonicalUoM)
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "at least one unit"),
@@ -283,7 +402,13 @@ func (s *Server) updateCompanyUnits(context echo.Context) error {
 	}
 	me := sessionUser(context)
 	actorID := me.ID
-	_ = s.database.Audit(context.Request().Context(), &actorID, "company.units.update", nil, fmt.Sprintf("%d units", len(updated)))
+	// The audit names the canonical when the save moved it, so the trail says
+	// which unit a package is quoted in after this write.
+	detail := fmt.Sprintf("%d units", len(updated))
+	if trimmed := strings.TrimSpace(request.CanonicalUoM); trimmed != "" {
+		detail = fmt.Sprintf("%d units, canonical %s", len(updated), trimmed)
+	}
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.units.update", nil, detail)
 	return context.JSON(http.StatusOK, companyUnitsDTO(updated))
 }
 

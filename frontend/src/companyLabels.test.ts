@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  LABEL_SAVE_DEBOUNCE_MS,
   companyLabelPayload,
+  companyLabelsRefusal,
   groupCompanyLabels,
-  labelSaveDecision,
   patchCompanyLabel,
   placeholderTokens,
-  saveCompanyLabels,
   serializeCompanyLabels,
   validateCompanyLabelSet,
   type CompanyLabelEntry,
@@ -218,75 +216,42 @@ describe("validateCompanyLabelSet mirrors the store", () => {
   });
 });
 
-describe("saveCompanyLabels", () => {
-  type Row = { Key: string; Value: string };
-  const deps = () => {
-    const calls: string[] = [];
-    return {
-      calls,
-      update: vi.fn(async (_rows: Row[]) => {
-        calls.push("update");
-      }),
-      refreshIdentity: vi.fn(async () => {
-        calls.push("refresh");
-      }),
-    };
-  };
+describe("companyLabelsRefusal", () => {
+  // The wording saves manually now (#432), so the refusal that used to hold the
+  // autosave ("held" — a set the store would refuse never leaves the machine)
+  // disables the save row instead. Same rule, same mirror of the store; it is
+  // pinned here and the sequence that used to carry it lives in
+  // companySaves.test.ts.
 
-  it("sends the full replacement, then refreshes the identity that order", async () => {
-    const fake = deps();
-    const entries = patchCompanyLabel(served(), "docTitle", "");
-    const result = await saveCompanyLabels(entries, fake);
-    expect(fake.update).toHaveBeenCalledTimes(1);
-    expect(fake.update.mock.calls[0][0]).toEqual(companyLabelPayload(entries));
-    expect(fake.update.mock.calls[0][0]).toHaveLength(26);
-    expect(fake.update.mock.calls[0][0][0]).toEqual({ Key: "docTitle", Value: "" });
-    expect(fake.refreshIdentity).toHaveBeenCalledTimes(1);
-    expect(fake.calls).toEqual(["update", "refresh"]);
-    expect(result).toEqual({ refreshFailed: false });
+  it("lets a served set be saved", () => {
+    expect(companyLabelsRefusal(served())).toBeNull();
   });
 
-  it("never refreshes when the save was refused, and surfaces the refusal", async () => {
-    const fake = deps();
-    fake.update = vi.fn(async () => {
-      fake.calls.push("update");
-      throw new Error('label "docTitle" is over 24 characters');
-    });
-    await expect(saveCompanyLabels(served(), fake)).rejects.toThrow("over 24 characters");
-    expect(fake.refreshIdentity).not.toHaveBeenCalled();
+  it("names the offending rows, singular and plural, exactly as the panel says", () => {
+    const one = patchCompanyLabel(served(), "docTitle", "{{.DocTitle}}");
+    expect(companyLabelsRefusal(one)).toBe(
+      "One field is highlighted below and must be fixed before anything saves."
+    );
+    const two = patchCompanyLabel(patchCompanyLabel(served(), "docTitle", "{{.DocTitle}}"), "subject", "<b>x</b>");
+    expect(companyLabelsRefusal(two)).toBe(
+      "2 fields are highlighted below and must be fixed before anything saves."
+    );
+    // The per-key map it is built from still points at the row.
+    expect(Object.keys(validateCompanyLabelSet(two)).sort()).toEqual(["docTitle", "subject"]);
   });
 
-  it("reports a failed refresh instead of throwing: the wording already changed", async () => {
-    const fake = deps();
-    fake.refreshIdentity = vi.fn(async () => {
-      fake.calls.push("refresh");
-      throw new Error("offline");
-    });
-    const result = await saveCompanyLabels(served(), fake);
-    expect(result).toEqual({ refreshFailed: true });
-    expect(fake.update).toHaveBeenCalledTimes(1);
+  it("refuses for the same reasons the store does, not only markup", () => {
+    // An over-long value, an unknown placeholder and a stray brace are all
+    // store refusals; each must disable the button rather than bounce.
+    expect(companyLabelsRefusal(patchCompanyLabel(served(), "docTitle", "x".repeat(25)))).toContain(
+      "must be fixed before anything saves"
+    );
+    expect(
+      companyLabelsRefusal(patchCompanyLabel(served(), "termsPayment", "1. {duedate} days."))
+    ).toContain("must be fixed before anything saves");
+    expect(
+      companyLabelsRefusal(patchCompanyLabel(served(), "termsValidity", "2. {validity days}"))
+    ).toContain("must be fixed before anything saves");
   });
 });
 
-describe("labelSaveDecision drives the autosave", () => {
-  it("does nothing for a set that matches what the server holds", () => {
-    expect(labelSaveDecision(served(), serializeCompanyLabels(served()))).toBe("unchanged");
-  });
-
-  it("holds a set carrying a value the store would refuse", () => {
-    const edited = patchCompanyLabel(served(), "docTitle", "{{.DocTitle}}");
-    expect(labelSaveDecision(edited, serializeCompanyLabels(served()))).toBe("held");
-  });
-
-  it("saves an edited, valid set", () => {
-    const edited = patchCompanyLabel(served(), "docTitle", "QUOTE");
-    expect(labelSaveDecision(edited, serializeCompanyLabels(served()))).toBe("save");
-  });
-});
-
-describe("LABEL_SAVE_DEBOUNCE_MS", () => {
-  it("is a real pause, not a save per keystroke", () => {
-    expect(LABEL_SAVE_DEBOUNCE_MS).toBeGreaterThanOrEqual(300);
-    expect(LABEL_SAVE_DEBOUNCE_MS).toBeLessThanOrEqual(2000);
-  });
-});

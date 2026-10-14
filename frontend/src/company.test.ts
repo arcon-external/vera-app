@@ -4,14 +4,22 @@ import {
   extrasFromProfile,
   formFromProfile,
   isCompleteHex,
-  profilePayload,
   themeFromProfile,
 } from "./company";
 import type { CompanyProfileLike } from "./company";
 import { backend } from "@backend/models";
 
-// The company save must stay whole-record — see company.ts for why. These
-// tests pin the load/payload mapping so "a field was lost" fails here instead.
+// The company save is per-tab (#432): the General tab writes its six columns
+// through UpdateCompanyGeneral, the Units tab writes the list plus the
+// canonical unit, the Quotation tab writes the wording and its four colours,
+// the Portal tab writes its four. Those payloads are pinned in
+// companySaves.test.ts, against the endpoints that receive them.
+//
+// What is pinned here is the read side, and it is still the whole record: the
+// narrow endpoints each write one slice, so the page must hold every served
+// value — including the phone, email, tax ID and currency that have no inputs
+// of their own — or the General save would clear them. "A field was lost"
+// cannot be asserted through the UI (no DOM tests), so it fails here instead.
 
 // Every field carries a distinct, recognisable value, so a swap or a drop
 // points at exactly the field that broke.
@@ -33,76 +41,32 @@ const FULL_PROFILE: CompanyProfileLike = {
   ThemePInk: "#888888",
 };
 
-describe("company profile round trip", () => {
-  it("loses nothing from load to payload", () => {
-    const payload = profilePayload({
-      form: formFromProfile(FULL_PROFILE),
-      extras: extrasFromProfile(FULL_PROFILE),
-      theme: themeFromProfile(FULL_PROFILE),
-      hasLogo: true,
+describe("company profile load", () => {
+  it("reads every field the tabs edit, and the hidden ones they re-send", () => {
+    // The whole record reaches the form: the two displayed fields, the six the
+    // General save re-sends without showing, and the eight colours split
+    // between the Quotation and Portal tabs.
+    expect(formFromProfile(FULL_PROFILE)).toEqual({
+      legalName: "PT Arcon Penta Persada",
+      address: "Jl. Merdeka 1, Jakarta",
     });
-
-    expect(payload.LegalName).toBe("PT Arcon Penta Persada");
-    expect(payload.Address).toBe("Jl. Merdeka 1, Jakarta");
-    expect(payload.Phone).toBe("+62-21-5550192");
-    expect(payload.Email).toBe("admin@arconpentapersada.co.id");
-    expect(payload.TaxID).toBe("01.234.567.8-901.234");
-    expect(payload.Currency).toBe("USD");
-    expect(payload.CanonicalUoM).toBe("Week");
-    expect(payload.HasLogo).toBe(true);
-    expect(payload.ThemeQDeep).toBe("#111111");
-    expect(payload.ThemeQAccent).toBe("#222222");
-    expect(payload.ThemeQSoft).toBe("#333333");
-    expect(payload.ThemeQInk).toBe("#444444");
-    expect(payload.ThemePDeep).toBe("#555555");
-    expect(payload.ThemePAccent).toBe("#666666");
-    expect(payload.ThemePSoft).toBe("#777777");
-    expect(payload.ThemePInk).toBe("#888888");
-  });
-
-  it("never drops a theme section when only one section changed", () => {
-    // The wipe scenario: the Quotation tab edits four colours, the Portal
-    // colours ride along untouched in the same theme object. A builder that
-    // saved only the edited slice would send the other four as empty and
-    // wipe them server-side.
-    const theme = themeFromProfile(FULL_PROFILE);
-    theme.qDeep = "#abcdef";
-    theme.qAccent = "#123456";
-    theme.qSoft = "#654321";
-    theme.qInk = "#fedcba";
-
-    const payload = profilePayload({
-      form: formFromProfile(FULL_PROFILE),
-      extras: extrasFromProfile(FULL_PROFILE),
-      theme,
-      hasLogo: false,
+    expect(extrasFromProfile(FULL_PROFILE)).toEqual({
+      phone: "+62-21-5550192",
+      email: "admin@arconpentapersada.co.id",
+      taxId: "01.234.567.8-901.234",
+      currency: "USD",
+      canonicalUoM: "Week",
     });
-
-    expect(payload.ThemeQDeep).toBe("#abcdef");
-    expect(payload.ThemeQAccent).toBe("#123456");
-    expect(payload.ThemeQSoft).toBe("#654321");
-    expect(payload.ThemeQInk).toBe("#fedcba");
-    // Distinct portal values: a swap with the quotation colours, or an
-    // empty-section wipe, would both fail here.
-    expect(payload.ThemePDeep).toBe("#555555");
-    expect(payload.ThemePAccent).toBe("#666666");
-    expect(payload.ThemePSoft).toBe("#777777");
-    expect(payload.ThemePInk).toBe("#888888");
-  });
-
-  it("carries the hidden phone, email, tax id, currency and canonical unit even though no control renders them", () => {
-    const payload = profilePayload({
-      form: formFromProfile(FULL_PROFILE),
-      extras: extrasFromProfile(FULL_PROFILE),
-      theme: themeFromProfile(FULL_PROFILE),
-      hasLogo: false,
+    expect(themeFromProfile(FULL_PROFILE)).toEqual({
+      qDeep: "#111111",
+      qAccent: "#222222",
+      qSoft: "#333333",
+      qInk: "#444444",
+      pDeep: "#555555",
+      pAccent: "#666666",
+      pSoft: "#777777",
+      pInk: "#888888",
     });
-
-    expect(payload.Phone).toBe("+62-21-5550192");
-    expect(payload.Email).toBe("admin@arconpentapersada.co.id");
-    expect(payload.TaxID).toBe("01.234.567.8-901.234");
-    expect(payload.Currency).toBe("USD");
-    expect(payload.CanonicalUoM).toBe("Week");
   });
 
   it.each([["undefined", undefined] as const, ["null", null] as const])(
@@ -131,60 +95,19 @@ describe("company profile round trip", () => {
       for (const value of [...Object.values(form), ...Object.values(extras), ...Object.values(theme)]) {
         expect(value).toBe("");
       }
-
-      const payload = profilePayload({ form, extras, theme, hasLogo: false });
-      for (const value of Object.values(payload)) {
-        if (typeof value === "string") {
-          expect(value).toBe("");
-        }
-      }
       // Belt and suspenders: the coercion bug this guards against is
       // String(undefined) === "undefined" leaking into a saved column.
-      expect(JSON.stringify(payload)).not.toContain("undefined");
-      expect(JSON.stringify(payload)).not.toContain("null");
+      expect(JSON.stringify({ form, extras, theme })).not.toContain("undefined");
+      expect(JSON.stringify({ form, extras, theme })).not.toContain("null");
     }
   );
 
-  it("trims the legal name and address but passes extras through verbatim", () => {
-    const payload = profilePayload({
-      form: { legalName: "  PT Arcon Penta Persada  ", address: "\tJl. Merdeka 1\n" },
-      extras: { phone: "  +62-21-5550192  ", email: " admin@example.id ", taxId: " 01.234 ", currency: "USD", canonicalUoM: "  Lot  " },
-      theme: themeFromProfile(FULL_PROFILE),
-      hasLogo: false,
-    });
-
-    expect(payload.LegalName).toBe("PT Arcon Penta Persada");
-    expect(payload.Address).toBe("Jl. Merdeka 1");
-    expect(payload.Phone).toBe("  +62-21-5550192  ");
-    expect(payload.Email).toBe(" admin@example.id ");
-    expect(payload.TaxID).toBe(" 01.234 ");
-    expect(payload.Currency).toBe("USD");
-    expect(payload.CanonicalUoM).toBe("  Lot  ");
-  });
-
-  it("trims colour values exactly as the current save does", () => {
-    // profilePayload applies .trim() to all eight colours. Kept
-    // here (rather than "colours are not trimmed") so the module reproduces
-    // the current behaviour byte-for-byte; a pasted "  #1A237E  " must save
-    // as "#1A237E" before and after the refactor.
-    const payload = profilePayload({
-      form: formFromProfile(FULL_PROFILE),
-      extras: extrasFromProfile(FULL_PROFILE),
-      theme: {
-        qDeep: "  #111111  ",
-        qAccent: "#222222",
-        qSoft: "#333333",
-        qInk: "#444444",
-        pDeep: "#555555",
-        pAccent: "#666666",
-        pSoft: "#777777",
-        pInk: "\t#888888\n",
-      },
-      hasLogo: false,
-    });
-
-    expect(payload.ThemeQDeep).toBe("#111111");
-    expect(payload.ThemePInk).toBe("#888888");
+  it("keeps the quotation and portal colours apart, so one tab cannot edit the other's", () => {
+    // The two halves of the brand are four columns each and two saves; a
+    // reader that crossed them would let the Portal tab paint the document.
+    const theme = themeFromProfile(FULL_PROFILE);
+    expect(theme.qDeep).not.toBe(theme.pDeep);
+    expect(theme.qInk).not.toBe(theme.pInk);
   });
 });
 
@@ -204,49 +127,14 @@ describe("THEME_FIELDS", () => {
   });
 });
 
-describe("CompanyProfilePayload shape", () => {
-  it("covers every generated backend.CompanyProfile field exactly once", () => {
-    // CompanyProfilePayload is a hand-written mirror of the generated
-    // backend.CompanyProfile, and UpdateCompanyProfile full-replaces: a Go
-    // field missing from the payload is cleared on every save. This test
-    // fails — naming the field — the moment the two drift apart.
-    //
-    // Wails model constructors assign every declared field (to undefined
-    // when the source omits it, so JSON.stringify shows {}), which is why
-    // Object.keys(new backend.CompanyProfile()) is the full field list.
-    // The keys under test come from a real profilePayload output, not a
-    // hand-written list, so a builder that dropped a field fails here too.
-    // Boundary: this pins the builder's runtime output only, not the
-    // CompanyProfilePayload declaration — that is pinned by tsc, so run the
-    // type check and read its exit code (never through a pipe).
-    const modelKeys = Object.keys(new backend.CompanyProfile()).sort();
-    const payloadKeys = Object.keys(
-      profilePayload({
-        form: { legalName: "", address: "" },
-        extras: { phone: "", email: "", taxId: "", currency: "", canonicalUoM: "" },
-        theme: EMPTY_THEME,
-        hasLogo: false,
-      })
-    ).sort();
-    const missing = modelKeys.filter((key) => !payloadKeys.includes(key));
-    const extra = payloadKeys.filter((key) => !modelKeys.includes(key));
-    expect(
-      payloadKeys,
-      `CompanyProfilePayload drifted from backend.CompanyProfile: ` +
-        `missing [${missing.join(", ")}]` +
-        (extra.length ? `, unknown [${extra.join(", ")}]` : "") +
-        `. UpdateCompanyProfile full-replaces, so a missing field is cleared on every save.`
-    ).toEqual(modelKeys);
-  });
-});
-
 describe("CompanyProfile load shape", () => {
   it("reads every generated backend.CompanyProfile field except HasLogo", () => {
     // CompanyProfileLike plus the three *FromProfile readers are a
-    // hand-written mirror of the generated backend.CompanyProfile, exactly
-    // like the payload: a Go field missing from the readers never reaches
-    // the form, and the next whole-record save writes it back as "". This
-    // test fails — naming the field — the moment the two drift apart.
+    // hand-written mirror of the generated backend.CompanyProfile: a Go field
+    // missing from the readers never reaches the form, and the General save —
+    // which writes the six columns it knows about — would clear the column it
+    // never read. This test fails — naming the field — the moment the two
+    // drift apart.
     //
     // Wails model constructors assign every declared field (to undefined
     // when the source omits it, so JSON.stringify shows {}), which is why
@@ -254,15 +142,13 @@ describe("CompanyProfile load shape", () => {
     // Each model field gets a distinct sentinel, so a reader that dropped
     // or swapped a field fails here naming exactly which one was lost.
     //
-    // HasLogo is the one deliberate exception: it is not read here because
-    // it is not part of the profile load at all. CompanyProfileCard's load
-    // ignores profile.HasLogo and takes hasLogo from GetCompanyLogo
-    // instead (setHasLogo(!logo.BuiltIn)), and the update endpoints never
-    // write it either — PUT /v1/admin/company binds only the fourteen
-    // editable columns and the store recomputes HasLogo from logo_bytes
-    // (len(LogoBytes) > 0). A reader that skipped HasLogo therefore cannot
-    // wipe the column, so excluding it here is safe. The assertion below
-    // pins that the readers genuinely do not consume it.
+    // HasLogo is the one deliberate exception: it is not part of the profile
+    // load at all. CompanyProfileCard's load ignores profile.HasLogo and takes
+    // hasLogo from GetCompanyLogo instead (setHasLogo(!logo.BuiltIn)), and the
+    // update endpoints never write it either — the store recomputes HasLogo
+    // from logo_bytes (len(LogoBytes) > 0). A reader that skipped HasLogo
+    // therefore cannot wipe the column, so excluding it here is safe. The
+    // assertion below pins that the readers genuinely do not consume it.
     const modelKeys = Object.keys(new backend.CompanyProfile()).sort();
     const expected = modelKeys.filter((key) => key !== "HasLogo");
     const probe: Record<string, string> = {};
@@ -280,8 +166,8 @@ describe("CompanyProfile load shape", () => {
       unread,
       `CompanyProfile readers stopped reading [${unread.join(", ")}] ` +
         `from backend.CompanyProfile. formFromProfile, extrasFromProfile and ` +
-        `themeFromProfile must cover every model field except HasLogo, or ` +
-        `the next whole-record save clears the column.`
+        `themeFromProfile must cover every model field except HasLogo, or the ` +
+        `next General save clears the column.`
     ).toEqual([]);
     expect(
       seen.has("sentinel:HasLogo"),

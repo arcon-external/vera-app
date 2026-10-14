@@ -23,12 +23,14 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
+import { CompanyGeneralPanel } from "./components/CompanyGeneralPanel";
+import { CompanyPortalTab } from "./components/CompanyPortalTab";
 import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
-import { EMPTY_THEME } from "./company";
+import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
@@ -142,6 +144,36 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The Company settings General tab (#432): the two edited fields, the
+    // currency picker and the logo card, with the tab's own save row under the
+    // profile card. The snapshot carries the chip's "Saved" state, so the row
+    // reads as a row rather than an error; the Unsaved changes state is pinned
+    // in CompanyGeneralPanel.test.tsx.
+    name: "CompanyGeneralPanel",
+    element: (
+      <CompanyGeneralPanel
+        form={{ legalName: "PT Arcon Penta Persada", address: "Jl. Merdeka 1, Jakarta" }}
+        onFieldChange={() => undefined}
+        logoPreview={null}
+        hasLogo={false}
+        logoBusy={false}
+        logoMeta={null}
+        onPickLogo={() => undefined}
+        onRemoveLogo={() => undefined}
+        currency="IDR"
+        catalogue={[
+          { code: "IDR", exponent: 0, symbol: "Rp", position: "before", groupSep: ".", decimalSep: ",", symbolSpaced: false },
+          { code: "USD", exponent: 2, symbol: "$", position: "before", groupSep: ",", decimalSep: ".", symbolSpaced: false },
+        ]}
+        onCurrencyChange={() => undefined}
+        status="saved"
+        busy={false}
+        error={null}
+        onSave={() => undefined}
+      />
+    ),
+  },
+  {
     // The Company settings Units tab (issue #337; the select restyle and the
     // row relayout of #429): the chevron-styled canonical-unit picker and the
     // served unit list with its captioned fields ("Value — stored" /
@@ -149,6 +181,9 @@ const CASES: SnapshotCase[] = [
     // controls. A representative slice of the seeded list — canonical first, a
     // short token (m2 whose label is the wider m²), and the widest seed
     // (Quarter) — so the snapshot reads the layout at both widths.
+    //
+    // The save row at the bottom is the shared shape all four Company tabs now
+    // render (#432): the button, the live chip and the standing hint.
     name: "CompanyUnitsPanel",
     element: (
       <CompanyUnitsPanel
@@ -164,6 +199,7 @@ const CASES: SnapshotCase[] = [
         canonical="Lot"
         onUnitsChange={() => undefined}
         onCanonicalChange={() => undefined}
+        status="saved"
         busy={false}
         error={null}
         onSaveUnits={() => undefined}
@@ -206,19 +242,35 @@ const CASES: SnapshotCase[] = [
     element: <PortalPreviewPanel theme={EMPTY_THEME} />,
   },
   {
-    // The Company settings merged Quotation tab (issue #429): the real sample
-    // PDF on top, the 26 editable labels below it, then the four quotation
-    // colours and the one caption naming both save paths. The fixture reuses
-    // the Template panel's served set above (one override, one cleared field)
-    // so the preview and the wording snapshot the same draft, and the stacked
-    // shape is the Portal tab's, verbatim.
+    // The Company settings Portal tab (#432): the verification page preview
+    // above the four portal colours, with the tab's own save row and the frozen
+    // sentence about the verdict colours that stay fixed.
+    name: "CompanyPortalTab",
+    element: (
+      <CompanyPortalTab
+        theme={DEFAULT_THEME}
+        onChange={() => undefined}
+        status="saved"
+        busy={false}
+        error={null}
+        onSave={() => undefined}
+      />
+    ),
+  },
+  {
+    // The Company settings merged Quotation tab (issues #429/#432): the real
+    // sample document on top, then the four quotation colours, the 26 editable
+    // labels, the tab's own save row and the two standing notes. The fixture
+    // reuses the Template panel's served set above (one override, one cleared
+    // field) so the preview and the wording snapshot the same draft, and the
+    // stacked shape is the Portal tab's, verbatim.
     //
     // What this case cannot show, stated so it is not assumed: the panel
-    // fetches the PDF bytes from the binding in an effect, and renderToString
+    // fetches the document from the binding in an effect, and renderToString
     // runs no effects — so the screenshot is the preview's pending state
-    // (header, intro, the pending rectangle, the sample note, the disabled
-    // download) above the live wording and colour stacks. The iframe the
-    // document lands in is a plain embed of those bytes, and the blur/Enter
+    // (header, intro, the pending rectangle, the sample notes, the disabled
+    // download) above the live colour, wording and save stacks. The document
+    // itself is rendered by the engine, not here, and the blur/Enter
     // re-render stays hand-driven.
     name: "CompanyQuotationTab",
     element: (
@@ -226,11 +278,16 @@ const CASES: SnapshotCase[] = [
         labels={TEMPLATE_LABELS}
         theme={EMPTY_THEME}
         refreshKey={0}
-        labelsStatus="saved"
+        wordingStatus="saved"
+        tabStatus="saved"
         labelsError={null}
         labelsNotice={null}
+        themeError={null}
+        invalid={null}
+        busy={false}
         onLabelChange={() => undefined}
         onThemeChange={() => undefined}
+        onSave={() => undefined}
         onFieldBlur={() => undefined}
         onFieldEnter={() => undefined}
       />
