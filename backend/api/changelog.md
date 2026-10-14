@@ -4,6 +4,14 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.13.1] - 2026-10-15
+
+### Changed
+
+- **Under-the-hood updates only.** The libraries the app is built on — the
+  desktop framework, the cryptography and text libraries, and the build
+  tooling — moved to their current versions. Nothing changes on screen.
+
 ## [0.13.0] - 2026-10-15
 
 ### Added
