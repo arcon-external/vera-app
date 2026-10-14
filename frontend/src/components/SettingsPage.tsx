@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChangePassword, LogoutEverywhere, MyEmailChangeRequests, RequestDeletion, RequestEmailChange, UpdateProfile } from "@backend/backend/AuthAPI";
 import { backend } from "@backend/models";
 import {
   ClearCompanyLogo,
   DownloadBackup,
+  GetCompanyLabels,
   GetCompanyLogo,
   GetCompanyProfile,
   GetCompanyUnits,
@@ -11,6 +12,7 @@ import {
   RestoreBackup,
   SetCompanyLogo,
   SetUserEmail,
+  UpdateCompanyLabels,
   UpdateCompanyProfile,
   UpdateCompanyUnits,
 } from "@backend/backend/AdminAPI";
@@ -32,6 +34,15 @@ import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { validateCompanyUnits } from "../companyUnits";
 import type { CompanyUnitOption } from "../companyUnits";
 import {
+  LABEL_SAVE_DEBOUNCE_MS,
+  labelSaveDecision,
+  patchCompanyLabel,
+  saveCompanyLabels,
+  serializeCompanyLabels,
+  type CompanyLabelEntry,
+  type CompanyLabelSaveDeps,
+} from "../companyLabels";
+import {
   EMPTY_THEME,
   extrasFromProfile,
   formFromProfile,
@@ -42,6 +53,7 @@ import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "../company"
 import type { CurrencyInfo } from "../format";
 import { useToast } from "../toast";
 import { CompanyGeneralPanel } from "./CompanyGeneralPanel";
+import { CompanyTemplatePanel } from "./CompanyTemplatePanel";
 import { CompanyThemePanel } from "./CompanyThemePanel";
 import { CompanyUnitsPanel } from "./CompanyUnitsPanel";
 import { TabBar, tabId, tabPanelId } from "./TabBar";
@@ -462,12 +474,35 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
 const COMPANY_TABS: TabItem[] = [
   { id: "general", label: "General" },
   { id: "units", label: "Units" },
+  { id: "template", label: "Template" },
   { id: "quotation", label: "Quotation" },
   { id: "portal", label: "Portal" },
 ];
 
+// What the wording autosave hands the store seam: the full-replacement call,
+// followed by the identity refresh. Both save paths below — the debounced save
+// and the unmount flush — must carry the same obligation, so it lives in one
+// place: the desktop renders its own PDFs from the identity it cached at
+// startup, and a wording change without this call keeps printing the previous
+// wording on this device until the next sign-in.
+//
+// It lives here rather than in companyLabels.ts because that module is pure —
+// the Wails bindings are the page's business. It is exported so the obligation
+// is pinned by a test rather than assumed: SettingsPage.test.tsx drives it
+// through saveCompanyLabels with the binding spied on, which is what catches a
+// refresh that is quietly dropped or turned into a no-op.
+export const LABELS_SAVE_DEPS: CompanyLabelSaveDeps = {
+  update: (rows) =>
+    UpdateCompanyLabels(
+      rows.map((row) => new backend.CompanyLabelEntry({ Key: row.Key, Value: row.Value }))
+    ),
+  refreshIdentity: () => RefreshCompanyIdentity(),
+};
+
 export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
-  const [companyTab, setCompanyTab] = useState<"general" | "units" | "quotation" | "portal">("general");
+  const [companyTab, setCompanyTab] = useState<
+    "general" | "units" | "template" | "quotation" | "portal"
+  >("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
     address: "",
@@ -484,6 +519,31 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
   const [units, setUnits] = useState<CompanyUnitOption[] | null>(null);
   const [unitsBusy, setUnitsBusy] = useState(false);
   const [unitsError, setUnitsError] = useState("");
+  // The document's editable wording (issue #339): served, never hard-coded in
+  // the client. Null while loading or on a failed fetch; the Template panel
+  // renders its own pending state. The wording keeps its own save
+  // (UpdateCompanyLabels full-replaces the override table), so — like the
+  // units list — it lives here rather than riding the whole-record profile
+  // save the colours use.
+  const [labels, setLabels] = useState<CompanyLabelEntry[] | null>(null);
+  const [labelsStatus, setLabelsStatus] = useState<"saved" | "dirty" | "saving">("saved");
+  const [labelsError, setLabelsError] = useState("");
+  const [labelsNotice, setLabelsNotice] = useState("");
+  // What the server holds, as the autosave sees it: a fingerprint of the last
+  // saved (or freshly loaded) set. An edit whose fingerprint differs from it
+  // is unsaved; a save that completes with a newer fingerprint already in
+  // state is superseded and says nothing.
+  const savedLabels = useRef("");
+  // A mirror of `labels` for the async save callbacks, which would otherwise
+  // close over the set as it was when the save started.
+  const labelsRef = useRef<CompanyLabelEntry[] | null>(null);
+  useEffect(() => {
+    labelsRef.current = labels;
+  }, [labels]);
+  // A save scheduled but not yet started. The unmount flush below reads it, so
+  // leaving Settings inside the debounce window sends the last edit rather
+  // than dropping it with the timer.
+  const pendingLabels = useRef<{ entries: CompanyLabelEntry[]; sent: string } | null>(null);
   const [theme, setTheme] = useState<CompanyTheme>(EMPTY_THEME);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -550,6 +610,20 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     } catch {
       // The Units panel shows its own empty/pending state; keep null.
       setUnits(null);
+    }
+    try {
+      // Same shape as the units fetch: the served entries are stored verbatim,
+      // and the fingerprint is taken from what was served so the autosave's
+      // first run sees a set that is already saved and does nothing.
+      const served = (await GetCompanyLabels()) as CompanyLabelEntry[];
+      const entries = served ?? [];
+      setLabels(entries);
+      savedLabels.current = serializeCompanyLabels(entries);
+      setLabelsStatus("saved");
+      setLabelsError("");
+    } catch {
+      setLabels(null);
+      setLabelsError("We couldn't load the document wording.");
     }
   }, []);
 
@@ -688,6 +762,77 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
+  // The wording autosaves. The editor is a grid of two dozen text fields with
+  // no save button of its own (the profile save below writes the colours, a
+  // different table), and a button at the bottom of a panel that long is the
+  // one button nobody finds. Each edit schedules one full replacement after a
+  // pause, skips entirely while a value is one the store would refuse, and
+  // closes with the identity refresh that stops this device's PDFs printing
+  // the previous wording (see saveCompanyLabels).
+  const persistLabels = useCallback(async (entries: CompanyLabelEntry[], sent: string) => {
+    setLabelsStatus("saving");
+    setLabelsError("");
+    setLabelsNotice("");
+    try {
+      const { refreshFailed } = await saveCompanyLabels(entries, LABELS_SAVE_DEPS);
+      // Claim the save only while the state it was sent from is still current.
+      // A keystroke during the round trip leaves a newer, unsaved set, whose
+      // own save is already scheduled by the effect below — and overwriting
+      // the field with the older response would lose that keystroke.
+      if (serializeCompanyLabels(labelsRef.current ?? []) !== sent) return;
+      savedLabels.current = sent;
+      setLabelsStatus("saved");
+      if (refreshFailed) {
+        setLabelsNotice(
+          "Saved, but this device's quotations may keep the old wording until you sign in again."
+        );
+      }
+    } catch (err: unknown) {
+      if (serializeCompanyLabels(labelsRef.current ?? []) !== sent) return;
+      setLabelsError(errorMessage(err, "We couldn't save the document wording."));
+      setLabelsStatus("dirty");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (labels === null) return;
+    const sent = serializeCompanyLabels(labels);
+    // The three-way decision is pure (labelSaveDecision) and pinned in
+    // companyLabels.test.ts: unchanged does nothing, held never sends, save
+    // schedules the replacement after a pause.
+    const decision = labelSaveDecision(labels, savedLabels.current);
+    if (decision === "unchanged") {
+      // An edit that undoes itself is not an edit: the readout returns to
+      // Saved rather than sitting on Unsaved with nothing to send.
+      setLabelsStatus("saved");
+      pendingLabels.current = null;
+      return;
+    }
+    setLabelsStatus("dirty");
+    if (decision === "held") return;
+    pendingLabels.current = { entries: labels, sent };
+    const timer = setTimeout(() => {
+      pendingLabels.current = null;
+      void persistLabels(labels, sent);
+    }, LABEL_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [labels, persistLabels]);
+
+  // Leaving Settings with a save still pending sends it. The Wails runtime
+  // outlives React, so the call lands; nobody is left to show its result, and
+  // a swallowed failure is the better trade against a silently dropped edit.
+  // A save already in flight is not pending (the ref was cleared when it
+  // started), so this never double-sends.
+  useEffect(
+    () => () => {
+      const pending = pendingLabels.current;
+      if (pending === null) return;
+      pendingLabels.current = null;
+      void saveCompanyLabels(pending.entries, LABELS_SAVE_DEPS).catch(() => undefined);
+    },
+    []
+  );
+
   const companyTabs = (
     <TabBar
       items={COMPANY_TABS}
@@ -747,6 +892,31 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
             error={unitsError === "" ? null : unitsError}
             onSaveUnits={() => void saveUnits()}
           />
+        ) : companyTab === "template" ? (
+          <div className="grid gap-6">
+            <CompanyTemplatePanel
+              labels={labels}
+              saveState={labelsStatus}
+              error={labelsError === "" ? null : labelsError}
+              notice={labelsNotice === "" ? null : labelsNotice}
+              onChange={(key, value) =>
+                setLabels((current) => (current === null ? current : patchCompanyLabel(current, key, value)))
+              }
+            />
+            {/* The four quotation colours, through the same panel the
+                Quotation tab renders: one UI over the theme columns, saved by
+                the profile save below, never a second copy of a colour. */}
+            <CompanyThemePanel
+              section="Quotation"
+              theme={theme}
+              onChange={(key, next) => setTheme((current) => ({ ...current, [key]: next }))}
+            />
+            <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
+              The same four colors the Quotation tab edits — they are saved with{" "}
+              <span className="font-medium text-ink-500">Save company profile</span>{" "}
+              below, not with the wording above.
+            </p>
+          </div>
         ) : (
           <CompanyThemePanel
             section={companyTab === "quotation" ? "Quotation" : "Portal"}

@@ -6,6 +6,7 @@ import (
 	"github.com/gpdf-dev/gpdf/document"
 
 	"vera-app/backend/currency"
+	"vera-app/backend/labels"
 )
 
 // The display list and page composition.
@@ -118,16 +119,19 @@ const (
 	metaMinW      = 240 // .quote-meta min-width
 	metaGapY      = 8
 	subjectLblPx  = 110
-	thPadPx       = 10
-	tdPadPx       = 10
-	headRowPx     = 48
-	footPadPx     = 14
-	footGapPx     = 14
-	tncMarginH3   = 8
-	tncPPGap      = 4
-	totalsGap     = 8
-	grandPadTop   = 8
-	verifyGapPx   = 18
+	// subjectLblPadPx is the subject strip label's own padding. The track above
+	// is fixed, so this is what the label's text wraps against.
+	subjectLblPadPx = 12
+	thPadPx         = 10
+	tdPadPx         = 10
+	headRowPx       = 48
+	footPadPx       = 14
+	footGapPx       = 14
+	tncMarginH3     = 8
+	tncPPGap        = 4
+	totalsGap       = 8
+	grandPadTop     = 8
+	verifyGapPx     = 18
 
 	// metaLineBox is one row of the quotation metadata card, in points. 11px at
 	// the inherited 1.45 line height is 15.95px, which the browser rounds to the
@@ -263,11 +267,22 @@ func subjectValueW(m metrics) float64 {
 	return m.innerW - px(subjectLblPx) - 2*px(1) - 2*px(cardPadX)
 }
 
-// subjectHeight is the strip's height for this subject: its content's line count
-// times the line box, plus the value's padding on both sides and the strip's
-// border.
+// subjectLabelW is the width the subject's label wraps to. The strip's label
+// track is fixed at 110px by the stylesheet's grid, and the label carries 12px
+// of padding inside it, so that is what its text wraps against -- the browser
+// wraps a long label the same way, which is why the strip's height takes the
+// label's line count rather than the value's alone (issue #339).
+func subjectLabelW(m metrics) float64 {
+	return px(subjectLblPx) - 2*px(subjectLblPadPx)
+}
+
+// subjectHeight is the strip's height for this subject: whichever of its label
+// and its value wraps to more lines, times the line box, plus the strip's
+// padding and border.
 func (e *Engine) subjectHeight(in Input, m metrics) float64 {
-	lines := len(e.Wrap(in.Subject, px(bodyPx), subjectValueW(m), true))
+	valueLines := len(e.Wrap(in.Subject, px(bodyPx), subjectValueW(m), true))
+	labelLines := len(e.Wrap(in.Labels.Subject, px(bodyPx), subjectLabelW(m), false))
+	lines := maxInt(valueLines, labelLines)
 	if lines < 1 {
 		lines = 1
 	}
@@ -359,16 +374,26 @@ func columnEdges(tableX, tableW float64, cols colLayout) [8]float64 {
 }
 
 // HeadLabels returns the item table's header cells, in track order, for one
-// currency. It is exported so the application's tests can hold the engine
-// and the HTML template to the same columns: the engine drew six while the
-// template printed seven for a whole release, and nothing compared them.
+// currency and one effective label set. It is exported so the application's
+// tests can hold the engine and the HTML template to the same columns: the
+// engine drew six while the template printed seven for a whole release, and
+// nothing compared them.
 // Kept beside the layout because the two must agree: a label list that
 // drifts out of step with the tracks puts every heading over the wrong
 // column. An unknown or empty code reads as IDR, exactly like every other
 // fallback, so the default document is byte-identical.
-func HeadLabels(currencyCode string) []string {
+//
+// The three price headers print the currency code after the label, exactly as
+// the template's "Unit Price {{.Currency}}" does: the company owns the wording,
+// the catalogue owns the code, and neither renderer invents either.
+func HeadLabels(set labels.DocumentLabels, currencyCode string) []string {
 	code := currency.Normalize(currencyCode)
-	return []string{"No.", "Description", "Qty.", "UoM", "Unit Price " + code, "After Disc. " + code, "Total " + code}
+	return []string{
+		set.ColumnNo, set.ColumnDescription, set.ColumnQty, set.ColumnUoM,
+		set.ColumnUnitPrice + " " + code,
+		set.ColumnAfterDisc + " " + code,
+		set.ColumnTotal + " " + code,
+	}
 }
 
 // itemColumns is the item table's column layout. The table has one layout:
@@ -431,11 +456,30 @@ type metrics struct {
 	verifyH      float64
 }
 
+// withEffectiveLabels completes the label set at the engine's boundary: an
+// empty field prints its built-in default rather than nothing.
+//
+// The application already hands over a complete set (see renderInput), so this
+// is a second guard on purpose: the engine is also driven directly -- by this
+// package's own layout tests, and by anything that composes an engine Input by
+// hand -- and a renderer that printed a blank title because a caller left the
+// field empty would be a renderer that took the document down over a missing
+// default.
+func withEffectiveLabels(in Input) Input {
+	in.Labels = in.Labels.WithDefaults()
+	return in
+}
+
 // derive computes the horizontal measures and the vertical flow.
 //
 // The card's box is the @page margin: Chrome writes a 36.75pt top margin for the
 // 1.3cm the stylesheet asks for, and the card runs to the bottom margin.
+//
+// The label set is completed at the door (see withEffectiveLabels): the subject
+// strip's height depends on the label's wrap, so an empty field here would move
+// the table rather than print blank.
 func (e *Engine) derive(in Input) metrics {
+	in = withEffectiveLabels(in)
 	var m metrics
 	m.cardX = pageMarginX
 	m.cardY = pageMarginY
@@ -576,6 +620,7 @@ type subLine struct {
 // would leave the table with almost a fifth of a page to fill and push rows onto
 // pages they do not belong on.
 func (e *Engine) layout(in Input) []*page {
+	in = withEffectiveLabels(in)
 	m := e.derive(in)
 	rows := e.measureRows(in, m)
 	// The table runs to the page's bottom edge rather than to the content box's.
@@ -606,7 +651,7 @@ func (e *Engine) layout(in Input) []*page {
 	for {
 		// The header row belongs to the first page only.
 		if first == 0 {
-			e.drawTableHead(cur, m, tableClip(m, tableTop, bottom, true), tableTop, in.Currency)
+			e.drawTableHead(cur, m, tableClip(m, tableTop, bottom, true), tableTop, in)
 			used += headRowH
 		}
 		placed := 0
@@ -1000,12 +1045,17 @@ func verifyHeight(in Input) float64 {
 // the template prints them. It is the one place they are listed: the card's
 // height and its drawing both read it, so a row cannot be added to one and
 // forgotten in the other.
+//
+// The labels are the seam's (issue #339), so a reworded "Quotation No." moves
+// the card's value track in the browser and here by the same amount: the
+// browser's auto grid track sizes to the widest label and this measures the
+// widest one.
 func (e *Engine) metaRows(in Input) [][2]string {
 	return [][2]string{
-		{"Quotation No.", in.QuoteNumber},
-		{"Issue Date", in.Date},
-		{"Valid Until", in.ValidUntil},
-		{"Revision", in.Revision},
+		{in.Labels.MetaQuotationNo, in.QuoteNumber},
+		{in.Labels.MetaIssueDate, in.Date},
+		{in.Labels.MetaValidUntil, in.ValidUntil},
+		{in.Labels.MetaRevision, in.Revision},
 	}
 }
 

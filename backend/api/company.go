@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"vera-app/backend"
+	"vera-app/backend/labels"
 	"vera-app/backend/store"
 )
 
@@ -154,6 +155,76 @@ func (s *Server) clearCompanyLogo(context echo.Context) error {
 	actorID := me.ID
 	_ = s.database.Audit(context.Request().Context(), &actorID, "company.logo.clear", nil, "")
 	return context.JSON(http.StatusOK, map[string]any{"hasLogo": profile.HasLogo})
+}
+
+// companyLabelsDTO renders the effective label set for the settings editor.
+//
+// Value and Default both travel: the editor shows what prints and what a
+// cleared field falls back to, and the frontend never hard-codes the
+// document's wording. MaxLength and Terms are the store's own rules, served so
+// the client does not keep a second copy of them. The order is the declaration
+// order in backend/labels, which is the order the document reads in.
+func companyLabelsDTO(effective labels.DocumentLabels) map[string]any {
+	declarations := labels.LabelDefaults()
+	rows := make([]map[string]any, 0, len(declarations))
+	for _, def := range declarations {
+		rows = append(rows, map[string]any{
+			"key":       string(def.Key),
+			"value":     effective.Get(def.Key),
+			"default":   def.Default,
+			"maxLength": def.MaxLen,
+			"terms":     def.Terms,
+		})
+	}
+	return map[string]any{"labels": rows}
+}
+
+// getCompanyLabels serves the document's effective wording to every signed-in
+// role: the labels print on customer documents, so the preview that renders
+// them has to be able to read them. The admin editor reads the same route --
+// being an admin decides who may write, not who may read what a document says.
+func (s *Server) getCompanyLabels(context echo.Context) error {
+	effective, err := s.database.GetCompanyLabels(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "load company labels"})
+	}
+	return context.JSON(http.StatusOK, companyLabelsDTO(effective))
+}
+
+// updateCompanyLabels full-replaces the company's overrides. The store
+// validates the whole set -- every key a real label, no key twice, every value
+// plain text -- so this handler only crosses the wire and maps a refused save
+// to the status the settings form shows.
+func (s *Server) updateCompanyLabels(context echo.Context) error {
+	var request struct {
+		Labels []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"labels"`
+	}
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	rows := make([]labels.CompanyLabel, 0, len(request.Labels))
+	for _, label := range request.Labels {
+		rows = append(rows, labels.CompanyLabel{Key: label.Key, Value: label.Value})
+	}
+	effective, err := s.database.UpdateCompanyLabels(context.Request().Context(), rows)
+	if err != nil {
+		// Every validation error the store raises for the label set names the
+		// label it objected to ("label \"docTitle\" is over 24 characters"),
+		// which is what separates a refused save from a broken one. Anything
+		// else is the database.
+		if strings.Contains(err.Error(), "label ") {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		}
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "replace company labels"})
+	}
+	me := sessionUser(context)
+	actorID := me.ID
+	_ = s.database.Audit(context.Request().Context(), &actorID, "company.labels.update", nil,
+		fmt.Sprintf("%d labels", len(rows)))
+	return context.JSON(http.StatusOK, companyLabelsDTO(effective))
 }
 
 // companyUnitsDTO renders the unit list as the ordered array the wire

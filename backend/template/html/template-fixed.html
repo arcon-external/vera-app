@@ -21,12 +21,12 @@
 			<img src="data:image/png;base64,{{.LogoBase64}}" alt="logo">
 		</div>
 
-		<h2 class="doc-eyebrow">QUOTATION</h2>
+		<h2 class="doc-eyebrow">{{.Labels.DocTitle}}</h2>
 
 		<main class="content">
 			<section class="recipient-row">
 				<article class="card">
-					<h3>Quotation to</h3>
+					<h3>{{.Labels.RecipientHeading}}</h3>
 					<p class="name">{{.RecipientName}}</p>
 					<p class="company">{{.RecipientCompany}}</p>
 					<p><strong>Address:</strong></p>
@@ -35,13 +35,13 @@
 
 				<div class="meta-stack">
 					<dl class="quote-meta">
-						<dt>Quotation No.</dt>
+						<dt>{{.Labels.MetaQuotationNo}}</dt>
 						<dd>{{.QuoteNumber}}</dd>
-						<dt>Issue Date</dt>
+						<dt>{{.Labels.MetaIssueDate}}</dt>
 						<dd>{{.Date}}</dd>
-						<dt>Valid Until</dt>
+						<dt>{{.Labels.MetaValidUntil}}</dt>
 						<dd>{{.ValidUntil}}</dd>
-						<dt>Revision</dt>
+						<dt>{{.Labels.MetaRevision}}</dt>
 						<dd>{{printf "%02d" .RevisionID}}</dd>
 					</dl>
 					<div class="meta-decor" aria-hidden="true"></div>
@@ -49,7 +49,7 @@
 			</section>
 
 			<section class="subject">
-				<div class="label">Subject</div>
+				<div class="label">{{.Labels.Subject}}</div>
 				<div class="value">{{.Subject}}</div>
 			</section>
 
@@ -66,13 +66,13 @@
 					</colgroup>
 					<thead>
 						<tr>
-							<th>No.</th>
-							<th>Description</th>
-							<th>Qty.</th>
-							<th>UoM</th>
-							<th>Unit Price {{.Currency}}</th>
-							<th>After Disc. {{.Currency}}</th>
-							<th>Total {{.Currency}}</th>
+							<th>{{.Labels.ColumnNo}}</th>
+							<th>{{.Labels.ColumnDescription}}</th>
+							<th>{{.Labels.ColumnQty}}</th>
+							<th>{{.Labels.ColumnUoM}}</th>
+							<th>{{.Labels.ColumnUnitPrice}} {{.Currency}}</th>
+							<th>{{.Labels.ColumnAfterDisc}} {{.Currency}}</th>
+							<th>{{.Labels.ColumnTotal}} {{.Currency}}</th>
 						</tr>
 					</thead>
 				</table>
@@ -193,17 +193,15 @@
 
 			<section class="footer">
 				<div class="tnc">
-					<h3>Terms and Conditions</h3>
-					<p>1. Payment terms agreed for this quotation is {{.PaymentTerm}} days.</p>
-					<p>2. This quotation is valid for {{.Validity}} days.</p>
-					<p>3. Lead time is {{.LeadTime}}.</p>
-					<p>4. Incoterms: {{.Incoterm}}</p>
+					<h3>{{.Labels.TermsHeading}}</h3>
+					{{range .Terms}}<p>{{.}}</p>
+					{{end}}
 				</div>
 
 				<div class="totals-stack">
 					<div class="totals">
 						<div class="line">
-							<span>Sub Total</span>
+							<span>{{.Labels.TotalSubTotal}}</span>
 							<span>{{.CurrencyPrefix}}{{.DisplaySubTotal}}{{.CurrencySuffix}}</span>
 						</div>
 						{{/* Discounts are entered per line now, so a quotation
@@ -211,15 +209,15 @@
 						     row. The row survives only for revisions that carry a
 						     whole-quotation discount, which older ones still can. */}}
 						{{if .DiscountAmount}}<div class="line discount">
-							<span>Discount ({{.DiscountPercent}}%)</span>
+							<span>{{.Labels.TotalDiscount}} ({{.DiscountPercent}}%)</span>
 							<span>{{.CurrencyPrefix}}{{.DisplayDiscountAmount}}{{.CurrencySuffix}}</span>
 						</div>{{end}}
 						{{if .PpnAmount}}<div class="line ppn">
-							<span>PPN 11%</span>
+							<span>{{.Labels.TotalPpn}}</span>
 							<span>{{.CurrencyPrefix}}{{.DisplayPpnAmount}}{{.CurrencySuffix}}</span>
 						</div>{{end}}
 						<div class="line grand">
-							<span>Grand Total</span>
+							<span>{{.Labels.TotalGrandTotal}}</span>
 							<span>{{.CurrencyPrefix}}{{.DisplayGrandTotal}}{{.CurrencySuffix}}</span>
 						</div>
 					</div>
@@ -228,9 +226,7 @@
 			</section>
 
 			<p class="closing">
-				We will be happy to supply information that you may need and trust that you call on us
-				to fill your order,
-				which will receive our prompt and careful attention.
+				{{.Labels.Closing}}
 			</p>
 
 			{{/* Layout A (approved): the verification code replaces the scanned
@@ -242,8 +238,8 @@
 			<div class="verify">
 				<div class="verify-caption">
 					<strong>{{.CompanyName}}</strong>
-					Scan to verify this quotation
-					<span class="verify-code">or enter code {{.VerifyShortID}}</span>
+					{{.Labels.VerifyScan}}
+					<span class="verify-code">{{.Labels.VerifyCode}} {{.VerifyShortID}}</span>
 				</div>
 				<div class="verify-qr">
 					<img src="data:image/png;base64,{{.VerifyQRBase64}}" alt="Verification QR code">

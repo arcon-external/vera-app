@@ -74,7 +74,15 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		ValidUntil:  in.ValidUntil,
 		Revision:    fmt.Sprintf("%02d", in.RevisionID),
 
-		Terms: termsLines(in),
+		// The application resolved the effective labels and substituted the
+		// terms sentences; this renderer prints them. It composes no wording of
+		// its own -- a second copy of a sentence is a sentence that can
+		// disagree (the #377 lesson, applied to the whole document's labels by
+		// #339). The engine completes an empty field at its own door too, so a
+		// caller that builds an engine Input directly still prints the built-in
+		// wording.
+		Labels: in.Labels,
+		Terms:  in.Terms,
 
 		Items: engineItems(in.Items),
 
@@ -89,7 +97,7 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		DiscountPercent:   strconv.Itoa(int(in.DiscountPercent)),
 		Currency:          in.Currency,
 
-		Closing:          closingText(),
+		Closing:          in.Labels.Closing,
 		VerificationCode: in.VerificationCode,
 		QRPNG:            in.QRPNG,
 	})
@@ -195,40 +203,6 @@ func stripTags(s string) string {
 	out = strings.ReplaceAll(out, "&#39;", "'")
 	out = strings.ReplaceAll(out, "&quot;", `"`)
 	return out
-}
-
-// termsLines renders the terms block. The wording matches the template exactly:
-// a change to one and not the other would make the two renderers disagree about
-// what the document says, which is the one class of difference the comparison
-// test cannot see.
-//
-// The lead time line prints the same composed sentence the template's
-// {{.LeadTime}} does -- the seam carries it as one string, so this reads it
-// rather than reassembling it from numbers.
-//
-// The service category is deliberately not printed. It decides the tax
-// treatment, but the template's .tnc block (template-fixed.html) carries four
-// hard-coded terms and no conditional, and the template is the source of truth
-// for how a quotation looks -- so the native renderer prints the same four.
-// If the category should reach the customer one day, that is a template change
-// with customer-facing wording, not a native-only line, and the guard in
-// terms_test.go will fail until both sides carry it together.
-func termsLines(in quotation.Input) []string {
-	return []string{
-		fmt.Sprintf("1. Payment terms agreed for this quotation is %d days.", in.PaymentTerm),
-		fmt.Sprintf("2. This quotation is valid for %d days.", in.Validity),
-		fmt.Sprintf("3. Lead time is %s.", in.DisplayLeadTime),
-		fmt.Sprintf("4. Incoterms: %s", in.Incoterm),
-	}
-}
-
-// closingText is the centred paragraph between the totals and the verification
-// block. The template hardcodes it, with a line break the browser collapses, so
-// the engine reproduces the same sentence as one string.
-func closingText() string {
-	return "We will be happy to supply information that you may need and trust " +
-		"that you call on us to fill your order, which will receive our prompt " +
-		"and careful attention."
 }
 
 // splitLines breaks a multi-line profile field into its lines.

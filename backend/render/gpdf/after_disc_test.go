@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"vera-app/backend/labels"
 	"vera-app/backend/render/quotation"
 )
 
@@ -19,6 +20,7 @@ func afterDiscInput() Input {
 		RecipientName: "R", RecipientCompany: "RC", RecipientAddress: "RA",
 		Subject: "S", QuoteNumber: "1", Date: "d", ValidUntil: "v",
 		Terms: []string{"1. a"}, Closing: "c",
+		Labels: labels.DefaultLabels(),
 		Items: []Item{
 			{No: 1, DescMain: "Widget", Qty: "2", UoM: "Lot",
 				UnitPrice: "120.000", Total: "216.000", Disc: "108.000"},

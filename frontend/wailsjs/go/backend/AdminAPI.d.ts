@@ -20,6 +20,8 @@ export function DeleteUser(arg1:number):Promise<string>;
 
 export function DownloadBackup():Promise<string>;
 
+export function GetCompanyLabels():Promise<Array<backend.CompanyLabelEntry>>;
+
 export function GetCompanyLogo():Promise<backend.CompanyLogo>;
 
 export function GetCompanyProfile():Promise<backend.CompanyProfile>;
@@ -51,6 +53,8 @@ export function SetUserEmail(arg1:number,arg2:string):Promise<backend.EmailChang
 export function SetUserRole(arg1:number,arg2:string):Promise<void>;
 
 export function UpdateClient(arg1:number,arg2:string,arg3:string):Promise<backend.ManagedClient>;
+
+export function UpdateCompanyLabels(arg1:Array<backend.CompanyLabelEntry>):Promise<Array<backend.CompanyLabelEntry>>;
 
 export function UpdateCompanyProfile(arg1:backend.CompanyProfile):Promise<backend.CompanyProfile>;
 

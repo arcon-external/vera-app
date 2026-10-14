@@ -1,8 +1,36 @@
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { RefreshCompanyIdentity } from "@backend/backend/Quotation";
 import { ToastProvider } from "../toast";
-import { CompanyProfileCard } from "./SettingsPage";
+import { saveCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
+import { LABELS_SAVE_DEPS, CompanyProfileCard } from "./SettingsPage";
 import { tabId, tabPanelId } from "./TabBar";
+
+// The wording autosave's one out-of-band obligation is the identity refresh:
+// the desktop renders its own PDFs from the identity it cached at startup, so a
+// wording change saved without RefreshCompanyIdentity() keeps printing the
+// previous wording on this device until the next sign-in. It runs inside a
+// debounced effect, which renderToString never runs — so the wiring itself is
+// what gets pinned: the deps object the page hands the seam, driven through
+// saveCompanyLabels with the binding spied on. Deleting the refresh, or turning
+// it into a no-op, fails here.
+vi.mock("@backend/backend/Quotation", () => ({
+  PickDirectory: vi.fn(async () => ""),
+  RefreshCompanyIdentity: vi.fn(async () => {}),
+}));
+
+// A served set in the shape GET /v1/company/labels answers: one plain label and
+// one terms sentence, which is all saveCompanyLabels looks at.
+const SERVED: CompanyLabelEntry[] = [
+  { Key: "docTitle", Value: "PROPOSAL", Default: "QUOTATION", MaxLength: 24, Terms: false },
+  {
+    Key: "termsPayment",
+    Value: "1. Payment terms agreed for this quotation is {payment} days.",
+    Default: "1. Payment terms agreed for this quotation is {payment} days.",
+    MaxLength: 300,
+    Terms: true,
+  },
+];
 
 // The suite runs in node with no DOM (see vitest.config.ts), so the component
 // is rendered to a string and asserted on as markup -- the same house pattern
@@ -44,11 +72,11 @@ function tabs(html: string): string[] {
 }
 
 describe("CompanyProfileCard sub-tabs", () => {
-  it("renders four sub-tabs labelled General, Units, Quotation and Portal, each role=tab", () => {
+  it("renders five sub-tabs labelled General, Units, Template, Quotation and Portal, each role=tab", () => {
     const html = render();
     const found = tabs(html);
-    expect(found).toHaveLength(4);
-    for (const label of ["General", "Units", "Quotation", "Portal"]) {
+    expect(found).toHaveLength(5);
+    for (const label of ["General", "Units", "Template", "Quotation", "Portal"]) {
       expect(
         found.find((segment) => segment.includes(`>${label}</button>`)),
         `expected a tab labelled ${label} in: ${html}`
@@ -62,7 +90,7 @@ describe("CompanyProfileCard sub-tabs", () => {
     const general = tabs(html).find((segment) => segment.includes(">General</button>"));
     expect(general).toBeDefined();
     expect(general).toContain('aria-selected="true"');
-    for (const label of ["Quotation", "Portal"]) {
+    for (const label of ["Template", "Quotation", "Portal"]) {
       const button = tabs(html).find((segment) => segment.includes(`>${label}</button>`));
       expect(button).toBeDefined();
       expect(button).toContain('aria-selected="false"');
@@ -73,7 +101,14 @@ describe("CompanyProfileCard sub-tabs", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
     expect(html).toContain('aria-label="Company sections"');
-    for (const [id, label] of [["general", "General"], ["units", "Units"], ["quotation", "Quotation"], ["portal", "Portal"]]) {
+    const ids: [string, string][] = [
+      ["general", "General"],
+      ["units", "Units"],
+      ["template", "Template"],
+      ["quotation", "Quotation"],
+      ["portal", "Portal"],
+    ];
+    for (const [id, label] of ids) {
       const button = tabs(html).find((segment) => segment.includes(`>${label}</button>`));
       expect(button).toBeDefined();
       expect(button).toContain(`id="${tabId("company", id)}"`);
@@ -115,5 +150,34 @@ describe("CompanyProfileCard sub-tabs", () => {
       html = render();
     }).not.toThrow();
     expect(html).toContain("Company sections");
+  });
+});
+
+describe("the wording autosave hands the seam the identity refresh", () => {
+  const refresh = vi.mocked(RefreshCompanyIdentity);
+
+  beforeEach(() => {
+    refresh.mockClear();
+  });
+
+  it("refreshes the company identity after a save the store accepted", async () => {
+    const update = vi.fn(async () => []);
+    const result = await saveCompanyLabels(SERVED, {
+      update,
+      refreshIdentity: LABELS_SAVE_DEPS.refreshIdentity,
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ refreshFailed: false });
+  });
+
+  it("does not refresh when the store refused the save", async () => {
+    const update = vi.fn(async () => {
+      throw new Error('label "docTitle" is over 24 characters');
+    });
+    await expect(
+      saveCompanyLabels(SERVED, { update, refreshIdentity: LABELS_SAVE_DEPS.refreshIdentity })
+    ).rejects.toThrow("over 24 characters");
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

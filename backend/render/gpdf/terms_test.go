@@ -2,24 +2,27 @@ package gpdf
 
 // Guard: the native terms card must be the template's terms card.
 //
-// Coupled to backend/template/html/template-fixed.html's .tnc block, which
-// hard-codes four <p> terms and no conditional. If the template gains or
-// loses a term deliberately, update the expectations here alongside it; a
-// mismatch fails naming the extra or missing term.
+// The template's .tnc block no longer carries the sentences -- #339 moved the
+// wording into backend/labels, so the template interpolates the heading and
+// prints the four sentences the seam hands it. This file therefore pins two
+// things instead of the old one:
 //
-// The template half is read from disk rather than restated blindly, so a
-// template-only change cannot pass silently. termsLines is then asserted
-// against the same four with values substituted, for every ServiceCategory
-// the application can hand it -- including the two raw enums
-// ("NonConstruction", "Construction") that once reached the customer PDF
-// as a native-only fifth term. The fifth term is gone on purpose: AGENTS.md
-// §14 names the template the source of truth, and the template prints four.
+//  1. the template's .tnc block carries no wording of its own (it reads from
+//     the seam), so a template-only change cannot pass silently, and
+//  2. the four sentences this engine prints are the ones the seam carried,
+//     substituted by the application -- including that the service category
+//     never becomes a fifth term.
+//
+// The defaults those sentences come from are pinned against the pre-#339
+// literals in backend/labels/labels_test.go, which is where a wording change
+// has to be made and therefore where it is checked.
 
 import (
 	"os"
 	"strings"
 	"testing"
 
+	"vera-app/backend/labels"
 	"vera-app/backend/render/quotation"
 )
 
@@ -28,23 +31,8 @@ import (
 // directory; layout_test.go already relies on the same with ../../assets).
 const templateTermsPath = "../../template/html/template-fixed.html"
 
-// wantTemplateTerms is the .tnc block's four terms exactly as the template
-// carries them, placeholders included.
-//
-// The lead time line prints the composed sentence -- one string built by the
-// application layer, so the template's {{.LeadTime}} and the native renderer's
-// in.DisplayLeadTime read the same words.
-func wantTemplateTerms() []string {
-	return []string{
-		"1. Payment terms agreed for this quotation is {{.PaymentTerm}} days.",
-		"2. This quotation is valid for {{.Validity}} days.",
-		"3. Lead time is {{.LeadTime}}.",
-		"4. Incoterms: {{.Incoterm}}",
-	}
-}
-
-// readTemplateTerms extracts the <p> inners of the template's .tnc block.
-func readTemplateTerms(t *testing.T) []string {
+// readTemplateTnC returns the .tnc block's inner markup.
+func readTemplateTnC(t *testing.T) string {
 	t.Helper()
 	raw, err := os.ReadFile(templateTermsPath)
 	if err != nil {
@@ -56,26 +44,107 @@ func readTemplateTerms(t *testing.T) []string {
 		t.Fatalf("template %s carries no <div class=\"tnc\"> block", templateTermsPath)
 	}
 	rest := html[start:]
-	end := strings.Index(rest, `</div>`)
+	end := strings.Index(rest, "</div>")
 	if end < 0 {
 		t.Fatalf("template %s .tnc block never closes", templateTermsPath)
 	}
-	block := rest[:end]
-	var out []string
-	for {
-		i := strings.Index(block, "<p>")
-		if i < 0 {
-			break
-		}
-		block = block[i+len("<p>"):]
-		j := strings.Index(block, "</p>")
-		if j < 0 {
-			t.Fatalf("template %s .tnc block has an unclosed <p>", templateTermsPath)
-		}
-		out = append(out, strings.TrimSpace(block[:j]))
-		block = block[j+len("</p>"):]
+	return rest[:end]
+}
+
+// TestTemplateTermsCarryNoWordingOfTheirOwn is the other half of the old
+// guard: the block must take its heading from the label set and its sentences
+// from the seam, because a sentence hard-coded back into the template would
+// print in the browser and not in this engine -- the divergence #339 exists to
+// end.
+func TestTemplateTermsCarryNoWordingOfTheirOwn(t *testing.T) {
+	block := readTemplateTnC(t)
+	if !strings.Contains(block, "{{.Labels.TermsHeading}}") {
+		t.Errorf("the .tnc block does not interpolate the terms heading from the label set:\n%s", block)
 	}
-	return out
+	if !strings.Contains(block, "{{range .Terms}}") {
+		t.Errorf("the .tnc block does not print the seam's terms sentences:\n%s", block)
+	}
+	for _, sentence := range []string{"Payment terms", "valid for", "Lead time is", "Incoterms:"} {
+		if strings.Contains(block, sentence) {
+			t.Errorf("the .tnc block hard-codes %q again; the wording lives in backend/labels", sentence)
+		}
+	}
+}
+
+// TestNativeTermsMatchTheSeam pins that this engine prints exactly the
+// sentences the seam carried: four of them, in order, with the service
+// category among them nowhere.
+func TestNativeTermsMatchTheSeam(t *testing.T) {
+	base := quotation.Input{
+		PaymentTerm:     90,
+		Validity:        30,
+		DisplayLeadTime: "60 Days",
+		Incoterm:        "FOB",
+		// The seam carries the substituted sentences, exactly as the
+		// application's renderInput builds them from the label set.
+		Terms: labels.DefaultLabels().Terms(labels.TermsValues{
+			PaymentTerm: 90,
+			Validity:    30,
+			LeadTime:    "60 Days",
+			Incoterm:    "FOB",
+		}),
+	}
+	wantNative := []string{
+		"1. Payment terms agreed for this quotation is 90 days.",
+		"2. This quotation is valid for 30 days.",
+		"3. Lead time is 60 Days.",
+		"4. Incoterms: FOB",
+	}
+	for _, category := range []string{"", "NonConstruction", "Construction"} {
+		in := base
+		in.ServiceCategory = category
+		diffTerms(t, "seam terms with ServiceCategory "+quoteCategory(category), in.Terms, wantNative)
+		for _, term := range in.Terms {
+			if strings.Contains(term, "Service category") {
+				t.Errorf("native term prints a service-category line with category %s: %q",
+					quoteCategory(category), term)
+			}
+			if strings.Contains(term, "NonConstruction") || strings.Contains(term, "Construction") {
+				t.Errorf("native term leaks a raw service-category enum with category %s: %q",
+					quoteCategory(category), term)
+			}
+		}
+	}
+}
+
+// TestRewordedTermsReachTheEngine pins the point of #339: a reworded sentence
+// on the seam prints, so a company's wording reaches the native PDF rather
+// than being replaced by this engine's own.
+func TestRewordedTermsReachTheEngine(t *testing.T) {
+	set := labels.DefaultLabels()
+	set.TermsIncoterm = "4. Trading term: {incoterm}"
+	in := sampleInput()
+	in.Terms = set.Terms(labels.TermsValues{Incoterm: "FOB"})
+	if in.Terms[3] != "4. Trading term: FOB" {
+		t.Fatalf("substituted term = %q; want the reworded sentence", in.Terms[3])
+	}
+	e := testEngine(t)
+	pages := e.layout(in)
+	var drawn []string
+	for _, pg := range pages {
+		for _, prim := range pg.prims {
+			if r, ok := prim.(run); ok {
+				drawn = append(drawn, r.text)
+			}
+		}
+	}
+	if !containsString(drawn, "4. Trading term: FOB") {
+		t.Errorf("the engine did not print the reworded term; it drew %q", drawn)
+	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // diffTerms fails naming each extra, missing, or differing term.
@@ -100,47 +169,6 @@ func diffTerms(t *testing.T, what string, got, want []string) {
 	}
 }
 
-// TestNativeTermsMatchTheTemplate pins the two renderers' terms lists as
-// agreeing, by count and by content.
-func TestNativeTermsMatchTheTemplate(t *testing.T) {
-	templateTerms := readTemplateTerms(t)
-	diffTerms(t, "template .tnc block", templateTerms, wantTemplateTerms())
-	for _, term := range templateTerms {
-		if strings.Contains(term, "Service category") || strings.Contains(term, "ServiceCategory") {
-			t.Errorf("template term reaches for the service category: %q", term)
-		}
-	}
-
-	base := quotation.Input{
-		PaymentTerm:     90,
-		Validity:        30,
-		DisplayLeadTime: "60 Days",
-		Incoterm:        "FOB",
-	}
-	wantNative := []string{
-		"1. Payment terms agreed for this quotation is 90 days.",
-		"2. This quotation is valid for 30 days.",
-		"3. Lead time is 60 Days.",
-		"4. Incoterms: FOB",
-	}
-	for _, category := range []string{"", "NonConstruction", "Construction"} {
-		in := base
-		in.ServiceCategory = category
-		got := termsLines(in)
-		diffTerms(t, "native termsLines with ServiceCategory "+quoteCategory(category), got, wantNative)
-		for _, term := range got {
-			if strings.Contains(term, "Service category") {
-				t.Errorf("native term prints a service-category line with category %s: %q",
-					quoteCategory(category), term)
-			}
-			if strings.Contains(term, "NonConstruction") || strings.Contains(term, "Construction") {
-				t.Errorf("native term leaks a raw service-category enum with category %s: %q",
-					quoteCategory(category), term)
-			}
-		}
-	}
-}
-
 func quoteCategory(s string) string {
 	if s == "" {
 		return "(empty)"
@@ -153,18 +181,24 @@ func quoteCategory(s string) string {
 // services quotation lays out exactly like a goods one.
 func TestTermsHeightIgnoresServiceCategory(t *testing.T) {
 	e := testEngine(t)
-	base := quotation.Input{
-		PaymentTerm:     90,
-		Validity:        30,
-		DisplayLeadTime: "60 Days",
-		Incoterm:        "FOB",
-	}
 	var heights []float64
 	for _, category := range []string{"", "NonConstruction", "Construction"} {
-		in := base
-		in.ServiceCategory = category
+		// The application substitutes the terms from the label set before the
+		// seam, so the engine's input carries the four sentences whatever the
+		// tax treatment was -- this is the whole reason the height cannot move
+		// with the category.
+		in := quotation.Input{
+			PaymentTerm:     90,
+			Validity:        30,
+			DisplayLeadTime: "60 Days",
+			Incoterm:        "FOB",
+			ServiceCategory: category,
+			Terms: labels.DefaultLabels().Terms(labels.TermsValues{
+				PaymentTerm: 90, Validity: 30, LeadTime: "60 Days", Incoterm: "FOB",
+			}),
+		}
 		eng := sampleInput()
-		eng.Terms = termsLines(in)
+		eng.Terms = in.Terms
 		m := e.derive(eng)
 		heights = append(heights, e.tncHeight(eng, m.footerTncW))
 	}
