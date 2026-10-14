@@ -30,10 +30,11 @@ export function GetCompanyUnits():Promise<Array<backend.CompanyUnit>>;
 
 export function GetCurrencyCatalogue():Promise<Array<currency.CurrencyInfo>>;
 
+export function GetPortalPreviewHTML(arg1:string,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
+
 export function IssuePasswordReset(arg1:number):Promise<string>;
 
 export function ListClients():Promise<Array<backend.ManagedClient>>;
-
 export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
 
 export function ListEmailChangeRequests():Promise<Array<backend.EmailChangeRow>>;

@@ -25,7 +25,9 @@ import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
+import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
+import { EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
@@ -183,6 +185,21 @@ const CASES: SnapshotCase[] = [
         onChange={() => undefined}
       />
     ),
+  },
+  {
+    // The Company settings Portal tab (issue #340): the verification page
+    // preview beside the four portal colours.
+    //
+    // What this case cannot show, stated so it is not assumed: the panel
+    // fetches the real document from the server in an effect, and
+    // renderToString runs no effects — so the screenshot is the panel's
+    // pending state (header, intro, the five state buttons, the pending
+    // rectangle, the fixed-wording note). The iframe the document lands in is
+    // the same one ReviewPanel and QuotationDetailPage already use, and the
+    // document itself is rendered by the server, not here. Seeing a real
+    // verdict in the preview stays hand-driven.
+    name: "PortalPreviewPanel",
+    element: <PortalPreviewPanel theme={EMPTY_THEME} />,
   },
 ];
 

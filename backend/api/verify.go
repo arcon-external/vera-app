@@ -237,27 +237,16 @@ func (s *Server) verifyDocument(httpContext echo.Context, lookupID string, claim
 	}
 
 	// Populate the display fields first: a mismatch still tells the reader
-	// what we hold on record, which is the whole point of the page.
-	view.QuoteNo = evidence.QuoteNumber
-	view.Revision = "Rev " + pad2(evidence.RevisionNumber)
-	view.IssueDate = evidence.CreatedAt.Format("2 January 2006")
-	view.Recipient = evidence.RecipientCompany
-	view.Issuer = evidence.IssuerName
-	view.Total = moneyWithSymbol(evidence.Currency, evidence.GrandTotal)
-	if evidence.PpnAmount > 0 {
-		view.PPN = moneyWithSymbol(evidence.Currency, evidence.PpnAmount)
-	}
+	// what we hold on record, which is the whole point of the page. The admin
+	// preview builds its view through the same helper (portal_preview.go), so
+	// the two cannot drift apart.
+	verifyDisplay(&view, evidence)
 
 	// Theme and issuer display follow the live company profile; a stored
 	// empty issuer (legacy rows predate it) falls back to the profile name.
 	// Either way the values shown are program data, never hardcoded text.
 	if profile, err := s.database.GetCompanyProfile(requestContext); err == nil {
-		view.Portal = theme.Theme{
-			Deep:   profile.ThemePDeep,
-			Accent: profile.ThemePAccent,
-			Soft:   profile.ThemePSoft,
-			Ink:    profile.ThemePInk,
-		}.ResolvePortal()
+		verifyBrand(&view, profile.ThemePDeep, profile.ThemePAccent, profile.ThemePSoft, profile.ThemePInk)
 		if view.Issuer == "" {
 			view.Issuer = profile.LegalName
 		}

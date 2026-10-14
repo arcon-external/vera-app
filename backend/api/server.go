@@ -26,6 +26,12 @@ type Server struct {
 	templates     *backend.Quotation
 	signer        *backend.Signer
 	verifyLimiter *ipRateLimiter
+	// previewLimiter bounds the admin portal preview separately from
+	// verifyLimiter. The preview is authenticated and admin-only, but it is
+	// rendered per keystroke-commit rather than per customer scan, so a shared
+	// bucket would let one admin's rebrand lock out every reader behind the
+	// same office address.
+	previewLimiter *ipRateLimiter
 	// loginLimiter bounds sign-in attempts per address.
 	//
 	// It exists because the limiter in backend/auth keys on the email in the
@@ -78,8 +84,9 @@ func (s *Server) backupDirOrDefault() string {
 // tests that never touch snapshot rendering.
 func NewServer(database *store.Store, service *auth.Service, templates *backend.Quotation) *Server {
 	server := &Server{echo: echo.New(), database: database, service: service, templates: templates,
-		verifyLimiter: newIPRateLimiter(30, time.Minute),
-		loginLimiter:  newIPRateLimiter(loginAttemptsPerMinute, time.Minute)}
+		verifyLimiter:  newIPRateLimiter(30, time.Minute),
+		previewLimiter: newIPRateLimiter(previewsPerMinute, time.Minute),
+		loginLimiter:   newIPRateLimiter(loginAttemptsPerMinute, time.Minute)}
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
 	server.echo.Renderer = &verifyRenderer{}
@@ -145,6 +152,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// preview has to render it; only an admin replaces it.
 	server.echo.GET("/v1/company/labels", server.getCompanyLabels, server.requireSession)
 	server.echo.PUT("/v1/admin/company/labels", server.updateCompanyLabels, server.requireSession, server.requireAdmin)
+	// The admin portal preview (issue #340): the verification page as it renders
+	// right now, so a rebrand is judged on all five states before it is saved.
+	// Admin-only, and its own rate-limit budget — sharing the public verifier's
+	// would let a rebranding admin starve the customers scanning real
+	// quotations from the same office address.
+	server.echo.GET("/v1/admin/company/portal-preview", server.portalPreview, server.requireSession, server.requireAdmin)
 	// Public verification surface. Deliberately registered without
 	// requireSession and with no write path: see docs in verify.go. The POST
 	// route carries a body limit so an oversized form is rejected before it
@@ -191,6 +204,11 @@ type loginRequest struct {
 // GetUserByEmail round trip. It is checked before the body is read, so a flood
 // is refused as cheaply as possible.
 const loginAttemptsPerMinute = 60
+
+// previewsPerMinute bounds the admin portal preview. One render per colour
+// commit, and a judgement session moves four sliders — so a limit far above
+// what a person does, and far below what a loop does.
+const previewsPerMinute = 120
 
 func (s *Server) login(context echo.Context) error {
 	if !s.loginLimiter.allow(clientIP(context)) {

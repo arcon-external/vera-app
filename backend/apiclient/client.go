@@ -182,6 +182,41 @@ func (c *Client) PostForm(path string, form map[string]string) (string, error) {
 	return string(body), nil
 }
 
+// GetBody sends a GET and returns the raw response body.
+//
+// The admin portal preview is the other endpoint that is neither JSON in nor
+// JSON out: it answers with the verification page itself, as HTML for the
+// settings iframe. A JSON decoder would mangle that, so the body comes back
+// whole, exactly as PostForm does for the public portal.
+func (c *Client) GetBody(path string) (string, error) {
+	request, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return "", fmt.Errorf("build API request: %w", err)
+	}
+	if token := c.token(); token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return "", fmt.Errorf("reach the quotation server: %w", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read server response: %w", err)
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		if c.OnUnauthorized != nil {
+			c.OnUnauthorized()
+		}
+		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "signed out; sign in again")}
+	}
+	if response.StatusCode != http.StatusOK {
+		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "server request failed")}
+	}
+	return string(body), nil
+}
+
 // apiErrorBody is apiError for a body already read.
 func apiErrorBody(body []byte, fallback string) string {
 	var problem struct {

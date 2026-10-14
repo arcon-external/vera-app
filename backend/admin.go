@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
@@ -294,6 +295,31 @@ func (a *AdminAPI) UpdateCompanyLabels(entries []CompanyLabelEntry) ([]CompanyLa
 		response.Labels = []CompanyLabelEntry{}
 	}
 	return NonNilList(response.Labels), nil
+}
+
+// GetPortalPreviewHTML renders the verification portal as it looks right now,
+// for the settings editor: one of the five verdicts, with the four portal
+// colours typed but not yet saved. It writes nothing, and no revision is
+// reachable through it — the document it verifies is fabricated server-side.
+func (a *AdminAPI) GetPortalPreviewHTML(verdict, deep, accent, soft, ink string) (string, error) {
+	client, err := api()
+	if err != nil {
+		return "", err
+	}
+	return client.GetBody(PortalPreviewPath(verdict, deep, accent, soft, ink))
+}
+
+// PortalPreviewPath builds the preview request path. Exported so the server's
+// accepted-parameter test asserts against the exact query the client builds:
+// a name that drifts on either side fails there rather than silently
+// returning the default palette.
+func PortalPreviewPath(verdict, deep, accent, soft, ink string) string {
+	values := url.Values{}
+	values.Set("verdict", verdict)
+	for _, pair := range [][2]string{{"deep", deep}, {"accent", accent}, {"soft", soft}, {"ink", ink}} {
+		values.Set(pair[0], pair[1])
+	}
+	return "/v1/admin/company/portal-preview?" + values.Encode()
 }
 
 // GetCompanyProfile loads the company profile.
