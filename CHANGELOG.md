@@ -4,6 +4,22 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.12.1] - 2026-10-14
+
+### Fixed
+
+- **The Quotation settings are one tab now, with the preview on top.** The wording
+  editor, the four quotation colours and the document preview live under a single
+  Quotation sub-tab, in the same shape as the Portal tab.
+- **The template preview no longer comes up blank.** The preview could mount before
+  the wording loaded and then never re-render; it now renders as soon as the wording
+  arrives, and a failed render says why instead of showing nothing.
+- **The company currency and canonical-unit dropdowns are styled** like the rest of
+  the form. Their dropdown arrows now actually paint (the arrow image was missing a
+  required attribute and rendered nothing, silently).
+- **The units editor is labelled**: each row shows "Value — stored" and "Label —
+  printed", and the row controls sit in a tidy footer on narrow windows.
+
 ## [0.12.0] - 2026-10-14
 
 ### Added
