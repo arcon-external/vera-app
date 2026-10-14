@@ -140,6 +140,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/company", server.getCompanyIdentity, server.requireSession)
 	server.echo.GET("/v1/company/units", server.getCompanyUnits, server.requireSession)
 	server.echo.PUT("/v1/admin/company/units", server.updateCompanyUnits, server.requireSession, server.requireAdmin)
+	// The document's wording follows the same split as the units: every
+	// signed-in role reads it, because it prints on customer documents and the
+	// preview has to render it; only an admin replaces it.
+	server.echo.GET("/v1/company/labels", server.getCompanyLabels, server.requireSession)
+	server.echo.PUT("/v1/admin/company/labels", server.updateCompanyLabels, server.requireSession, server.requireAdmin)
 	// Public verification surface. Deliberately registered without
 	// requireSession and with no write path: see docs in verify.go. The POST
 	// route carries a body limit so an oversized form is rejected before it

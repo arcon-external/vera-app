@@ -234,6 +234,68 @@ type CompanyUnit struct {
 	Label string
 }
 
+// CompanyLabelEntry is one editable label of the quotation document as the
+// settings editor sees it.
+//
+// Value is what the document prints today: the company's override, or the
+// built-in default when there is none. Default is the built-in, so the editor
+// can show what a cleared field falls back to -- and so the frontend never
+// hard-codes the document's wording. MaxLength and Terms are the server's own
+// rules, served rather than duplicated in the client: the cap the store
+// enforces, and whether the value may carry the four fixed placeholder tokens.
+type CompanyLabelEntry struct {
+	Key       string
+	Value     string
+	Default   string
+	MaxLength int
+	Terms     bool
+}
+
+// GetCompanyLabels loads the document's effective wording in editor order.
+// The settings editor reads it, and the quotation's identity cache reads the
+// same route so previews print the company's own words.
+func (a *AdminAPI) GetCompanyLabels() ([]CompanyLabelEntry, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Labels []CompanyLabelEntry `json:"labels"`
+	}
+	if err := client.Get("/v1/company/labels", &response); err != nil {
+		return nil, err
+	}
+	if response.Labels == nil {
+		response.Labels = []CompanyLabelEntry{}
+	}
+	return NonNilList(response.Labels), nil
+}
+
+// UpdateCompanyLabels full-replaces the company's overrides. An empty value
+// clears that label back to the built-in default; the server validates every
+// value and refuses the whole set naming the field it objects to.
+func (a *AdminAPI) UpdateCompanyLabels(entries []CompanyLabelEntry) ([]CompanyLabelEntry, error) {
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	if entries == nil {
+		entries = []CompanyLabelEntry{}
+	}
+	var response struct {
+		Labels []CompanyLabelEntry `json:"labels"`
+	}
+	if err := client.Put("/v1/admin/company/labels", map[string]any{
+		"labels": entries,
+	}, &response); err != nil {
+		return nil, err
+	}
+	if response.Labels == nil {
+		response.Labels = []CompanyLabelEntry{}
+	}
+	return NonNilList(response.Labels), nil
+}
+
 // GetCompanyProfile loads the company profile.
 func (a *AdminAPI) GetCompanyProfile() (CompanyProfile, error) {
 	client, err := api()

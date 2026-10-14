@@ -34,6 +34,10 @@ export function DownloadBackup() {
   return window['go']['backend']['AdminAPI']['DownloadBackup']();
 }
 
+export function GetCompanyLabels() {
+  return window['go']['backend']['AdminAPI']['GetCompanyLabels']();
+}
+
 export function GetCompanyLogo() {
   return window['go']['backend']['AdminAPI']['GetCompanyLogo']();
 }
@@ -96,6 +100,10 @@ export function SetUserRole(arg1, arg2) {
 
 export function UpdateClient(arg1, arg2, arg3) {
   return window['go']['backend']['AdminAPI']['UpdateClient'](arg1, arg2, arg3);
+}
+
+export function UpdateCompanyLabels(arg1) {
+  return window['go']['backend']['AdminAPI']['UpdateCompanyLabels'](arg1);
 }
 
 export function UpdateCompanyProfile(arg1) {

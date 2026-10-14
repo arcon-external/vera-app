@@ -135,7 +135,7 @@ func TestRenderersAgreeOnItemTableColumns(t *testing.T) {
 				t.Fatalf("preview: %v", err)
 			}
 			fromTemplate := templateHeadLabels(t, html)
-			fromEngine := gpdfrender.HeadLabels("IDR")
+			fromEngine := gpdfrender.HeadLabels(q.Data.Labels, "IDR")
 
 			if len(fromTemplate) != len(wantItemColumns) {
 				t.Fatalf("template printed %d columns %v; want %d %v",
@@ -229,7 +229,7 @@ func TestRenderersAgreeOnItemTableColumnsForCurrency(t *testing.T) {
 		t.Fatalf("preview: %v", err)
 	}
 	fromTemplate := templateHeadLabels(t, html)
-	fromEngine := gpdfrender.HeadLabels(q.Data.Currency)
+	fromEngine := gpdfrender.HeadLabels(q.Data.Labels, q.Data.Currency)
 	if len(fromTemplate) != len(want) {
 		t.Fatalf("template printed %d columns %v; want %d %v",
 			len(fromTemplate), fromTemplate, len(want), want)

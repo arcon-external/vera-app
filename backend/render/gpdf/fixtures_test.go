@@ -8,6 +8,10 @@ package gpdf
 // would produce. The customer name, address and terms are the ones that
 // quotation carried.
 
+import (
+	"vera-app/backend/labels"
+)
+
 func sampleInput() Input {
 	item := func(no int, desc string, subs []string, qty, uom, price string) Item {
 		return Item{
@@ -40,6 +44,11 @@ func sampleInput() Input {
 		DisplayDiscount:   "0",
 		DisplayPpn:        "76.592.203",
 		DisplayGrandTotal: "0",
+		// The effective wording. Before #339 this fixture carried its labels
+		// only implicitly -- the engine baked them -- so every measurement here
+		// was of the default document without saying so. It says so now, and
+		// the labels are the same defaults the pin in backend/labels holds.
+		Labels: labels.DefaultLabels(),
 		Terms: []string{
 			"1. Payment terms agreed for this quotation is 90 days.",
 			"2. This quotation is valid for 30 days from the date of issue.",

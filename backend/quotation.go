@@ -16,6 +16,7 @@ import (
 	"vera-app/backend/apicontract"
 	"vera-app/backend/auth"
 	"vera-app/backend/currency"
+	"vera-app/backend/labels"
 	"vera-app/backend/render"
 	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
@@ -201,10 +202,16 @@ type QuotationData struct {
 	Currency       string
 	CurrencyPrefix string
 	CurrencySuffix string
-	ThemeQDeep     string
-	ThemeQAccent   string
-	ThemeQSoft     string
-	ThemeQInk      string
+	// Labels is the document's effective wording: every customer-visible label
+	// resolved to its override or its built-in default (see backend/labels).
+	// The HTML template interpolates it and renderInput hands the same struct
+	// to the native renderer, so the preview, the snapshot and the PDF print
+	// one wording rather than two that happen to agree.
+	Labels       labels.DocumentLabels
+	ThemeQDeep   string
+	ThemeQAccent string
+	ThemeQSoft   string
+	ThemeQInk    string
 	// Palette is the theme resolved to every colour the document paints
 	// with: the four bases above plus each derived role. It is refreshed
 	// wherever the bases are set (readTemplate at startup, refreshCustomCSS
@@ -253,6 +260,11 @@ type QuotationData struct {
 	// Composed once here by FormatLeadTime, like DisplayPpnAmount, so the
 	// HTML template and the native renderer print the same words.
 	LeadTime string
+	// Terms is the four terms-and-conditions sentences with the label set's
+	// placeholders substituted. The HTML template prints these and renderInput
+	// hands the same strings to the native renderer, so a reworded sentence
+	// reaches both or neither (issue #339).
+	Terms []string
 	// The four stated units, kept beside it so the signed payload, the stored
 	// revision and the archive detail all carry the figures as entered.
 	LeadTimeYears  uint8
@@ -316,6 +328,13 @@ type CompanyIdentity struct {
 	ThemeQAccent string
 	ThemeQSoft   string
 	ThemeQInk    string
+	// Labels is the document's effective wording. It is resolved, not raw:
+	// the store and the API both hand back a complete set, so a caller never
+	// has to know which labels are overridden and which are defaults. An empty
+	// field falls back to its built-in default on the way through
+	// completeIdentity, so an offline or stale cache prints the default
+	// wording rather than a blank one.
+	Labels labels.DocumentLabels
 }
 
 // defaultUnitsMap is the shipped unit list, value = label, in the order the
@@ -346,6 +365,10 @@ func defaultUnitsMap() map[string]string {
 // shipped seed list and the canonical default "Lot". A hand-built identity
 // (unit tests) and a stale offline cache both rely on the fallback; the
 // authoritative path always carries both, so this never overrides real data.
+//
+// The label set is completed the same way and for a sharper reason: an empty
+// label field is what a cleared override looks like, and a cleared override
+// must print the built-in default rather than nothing.
 func completeIdentity(identity CompanyIdentity) CompanyIdentity {
 	if len(identity.Units) == 0 {
 		identity.Units = defaultUnitsMap()
@@ -353,6 +376,7 @@ func completeIdentity(identity CompanyIdentity) CompanyIdentity {
 	if identity.CanonicalUoM == "" {
 		identity.CanonicalUoM = "Lot"
 	}
+	identity.Labels = identity.Labels.WithDefaults()
 	return identity
 }
 
@@ -396,6 +420,23 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 	for _, unit := range units.Units {
 		unitMap[unit.Value] = unit.Label
 	}
+	// The wording travels beside the profile because the desktop renders its
+	// own PDFs: a label changed on the server has to reach the render here,
+	// not only the one in veraserver. The endpoint serves the effective set, so
+	// resolving it again is a no-op; a server that predates it answers 404 and
+	// leaves the built-in defaults in place -- the document is still valid, it
+	// is simply worded the way it always was.
+	var labelResponse struct {
+		Labels []CompanyLabelEntry `json:"labels"`
+	}
+	effective := labels.DefaultLabels()
+	if err := client.Get("/v1/company/labels", &labelResponse); err == nil {
+		overrides := make(map[string]string, len(labelResponse.Labels))
+		for _, label := range labelResponse.Labels {
+			overrides[label.Key] = label.Value
+		}
+		effective = labels.ResolveOverrides(overrides)
+	}
 	q.companyIdentity = &CompanyIdentity{
 		Name:         profile.LegalName,
 		Address:      profile.Address,
@@ -406,6 +447,7 @@ func (q *Quotation) RefreshCompanyIdentity() error {
 		ThemeQAccent: profile.ThemeQAccent,
 		ThemeQSoft:   profile.ThemeQSoft,
 		ThemeQInk:    profile.ThemeQInk,
+		Labels:       effective,
 	}
 	// The desktop preview renders from this instance's template data, so it
 	// needs the uploaded artwork too — otherwise previews would show the
@@ -444,6 +486,14 @@ func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
 		for _, unit := range units {
 			unitMap[unit.Value] = unit.Label
 		}
+		// The store resolves the wording to a complete set, exactly like the
+		// identity endpoint does for the desktop: one rule everywhere, so a
+		// document printed by the server and one printed by the desktop carry
+		// the same words.
+		effective, err := q.store.GetCompanyLabels(q.context())
+		if err != nil {
+			return CompanyIdentity{}, err
+		}
 		return completeIdentity(CompanyIdentity{
 			Name:         profile.LegalName,
 			Address:      profile.Address,
@@ -454,6 +504,7 @@ func (q *Quotation) resolveCompanyIdentity() (CompanyIdentity, error) {
 			ThemeQAccent: profile.ThemeQAccent,
 			ThemeQSoft:   profile.ThemeQSoft,
 			ThemeQInk:    profile.ThemeQInk,
+			Labels:       effective,
 		}), nil
 	}
 	if q.companyIdentity == nil {
@@ -1042,6 +1093,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.ThemeQAccent = identity.ThemeQAccent
 	q.Data.ThemeQSoft = identity.ThemeQSoft
 	q.Data.ThemeQInk = identity.ThemeQInk
+	// The wording travels with the rest of the letterhead: it is resolved once
+	// here so the preview, the snapshot and the PDF all print the same words,
+	// and both renderers read them off the seam rather than baking their own
+	// (issue #339).
+	q.Data.Labels = identity.Labels
 	// Unknown or empty codes render as the default rather than breaking a
 	// document: this is the second fallback, after the store's write-time
 	// validation.
@@ -1063,6 +1119,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.TaxType = taxType
 	q.Data.ServiceCategory = serviceCategory
 	q.Data.Incoterm = input.Incoterm
+
+	// The four terms sentences, substituted once here: the template prints them
+	// and renderInput hands the same strings to the native renderer, so a
+	// reworded sentence reaches both documents or neither (issue #339).
+	q.Data.Terms = q.termsLines()
 
 	items := buildItems(input.Items, q.Data.Currency)
 	q.Data.Items = items
@@ -1414,6 +1475,24 @@ func (q *Quotation) displayData() QuotationData {
 	return data
 }
 
+// termsLines builds the four terms sentences from the data bag: the label set
+// with the fixed placeholders substituted.
+//
+// It is called twice -- once to fill the data bag the HTML template reads, and
+// once to fill the seam the native renderer reads -- because the two documents
+// have to carry the same words, and a pure function over the same values cannot
+// make them differ. Before #339 the template held the sentences as markup and
+// the native renderer composed its own four, which is why a reworded sentence
+// could reach one and not the other.
+func (q *Quotation) termsLines() []string {
+	return q.Data.Labels.WithDefaults().Terms(labels.TermsValues{
+		PaymentTerm: q.Data.PaymentTerm,
+		Validity:    q.Data.Validity,
+		LeadTime:    q.Data.LeadTime,
+		Incoterm:    q.Data.Incoterm,
+	})
+}
+
 // build renders the customer PDF through the application's selected renderer.
 //
 // The choice itself lives in backend/render, in one line, and is a compile-time
@@ -1546,6 +1625,15 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		DisplayLeadTime: q.Data.LeadTime,
 		Incoterm:        q.Data.Incoterm,
 		ServiceCategory: q.Data.ServiceCategory,
+
+		// The wording, and the four terms sentences with the label set's
+		// placeholders substituted. Substitution happens here, once, because
+		// the template used to hold the sentences as markup with
+		// {{.PaymentTerm}} inside them: the tokens are the same values, and
+		// doing it on the application side means neither renderer can reword a
+		// sentence on its own.
+		Labels: q.Data.Labels.WithDefaults(),
+		Terms:  q.termsLines(),
 
 		Items: items,
 

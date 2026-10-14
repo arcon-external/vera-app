@@ -12,6 +12,7 @@ import (
 	"github.com/gpdf-dev/gpdf/pdf"
 	"github.com/gpdf-dev/gpdf/pdf/font"
 
+	"vera-app/backend/labels"
 	"vera-app/backend/theme"
 )
 
@@ -64,9 +65,21 @@ type Input struct {
 	ValidUntil  string
 	Revision    string
 
+	// Terms is the four terms-and-conditions sentences, substituted by the
+	// application exactly as the seam carries them. The engine prints them and
+	// composes nothing: before #339 it built its own four from its own
+	// literals, and keeping that would have made a reworded sentence print in
+	// the browser and not here.
 	Terms []string
 
 	Items []Item
+
+	// Labels is the document's effective wording. Every customer-visible
+	// string this engine prints comes from it -- the eyebrow, the card
+	// headings, the column headers, the totals labels, the closing and the
+	// verification captions -- so a company's edit reaches the native PDF by
+	// construction rather than by a second edit in this file.
+	Labels labels.DocumentLabels
 
 	// Money strings are bare, exactly as the data bag carries them: the template
 	// writes the currency affixes in front of (or behind) each one, and the

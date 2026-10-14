@@ -31,6 +31,7 @@ import (
 	"html/template"
 
 	"vera-app/backend/currency"
+	"vera-app/backend/labels"
 	chromedprender "vera-app/backend/render/chromedp"
 	gpdfrender "vera-app/backend/render/gpdf"
 	"vera-app/backend/render/quotation"
@@ -103,6 +104,61 @@ func TestRenderersAgreeOnQuotationNumber(t *testing.T) {
 		}
 		if text := pdfText(t, pdf); !strings.Contains(text, in.QuoteNumber) {
 			t.Errorf("%s render does not print the quotation number %s", tc.name, in.QuoteNumber)
+		}
+	}
+}
+
+// TestRenderersAgreeOnRewordedLabels is the #339 guard: a wording change has
+// to reach both renderers, and the only way to prove it is to render one in
+// each and read what they printed.
+//
+// The document title is the case the issue opens with -- QUOTATION renamed to
+// PROPOSAL -- and it is also the one with geometry attached: the browser fills
+// the eyebrow's row with a rule that starts after the label, so a longer or
+// shorter title moves it. Both engines have to move it the same way, or the
+// same revision becomes two different documents depending on who rendered it.
+//
+// The other assertions in this file run on the same fixture with the default
+// wording, so pagination is checked on the default document and this on a
+// reworded one: a title that broke the layout would break one of the two.
+func TestRenderersAgreeOnRewordedLabels(t *testing.T) {
+	requireChrome(t)
+	ctx := context.Background()
+	// The edit is made to the prepared data bag, before the input is built, so
+	// the browser's HTML and the native renderer's seam both read it. Editing
+	// the returned input's Labels alone would leave the HTML carrying the
+	// built-in title and compare two different documents.
+	in := equivalenceFixture(t, func(q *Quotation) {
+		q.Data.Labels.DocTitle = "PROPOSAL"
+		q.Data.Labels.Subject = "Scope"
+	})
+
+	browser, err := chromedprender.New().Render(ctx, in)
+	if err != nil {
+		t.Fatalf("browser render: %v", err)
+	}
+	native, err := gpdfrender.New().Render(ctx, in)
+	if err != nil {
+		t.Fatalf("native render: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		pdf  []byte
+	}{
+		{"browser", browser},
+		{"native", native},
+	} {
+		text := pdfText(t, tc.pdf)
+		if !strings.Contains(text, "PROPOSAL") {
+			t.Errorf("%s render does not print the reworded title PROPOSAL; "+
+				"a wording edit reached one renderer and not the other", tc.name)
+		}
+		if !strings.Contains(text, "Scope") {
+			t.Errorf("%s render does not print the reworded subject label Scope", tc.name)
+		}
+		if strings.Contains(text, "QUOTATION") {
+			t.Errorf("%s render still prints the built-in title QUOTATION", tc.name)
 		}
 	}
 }
@@ -425,6 +481,19 @@ func descHTML(f fixtureItem) string {
 // so the comparison needs no binary fixtures of its own.
 func equivalenceQuotation(t *testing.T) quotation.Input {
 	t.Helper()
+	return equivalenceFixture(t, nil)
+}
+
+// equivalenceFixture is equivalenceQuotation with an edit applied to the
+// prepared data bag before the renderer input is built from it.
+//
+// The hook exists for the wording tests (#339): a label edit has to land in the
+// data bag, because that is where the HTML template is executed from and where
+// renderInput takes the seam's copy. Editing the built input instead would
+// reword the native renderer's document and leave the browser's HTML carrying
+// the old string -- a test that then "proves" the two renderers disagree.
+func equivalenceFixture(t *testing.T, edit func(*Quotation)) quotation.Input {
+	t.Helper()
 
 	// Read the logo the way production does, from the embedded assets rather
 	// than off disk, so this fixture has no working-directory dependency of its
@@ -444,6 +513,12 @@ func equivalenceQuotation(t *testing.T) quotation.Input {
 		t.Fatalf("startup: %v", err)
 	}
 	quotationDataFromEngineInput(t, q, logo, qrPNG)
+	if edit != nil {
+		edit(q)
+		// The template reads the terms sentences off the data bag, so an edit
+		// that changes the label set has to rebuild them the way prepare does.
+		q.Data.Terms = q.termsLines()
+	}
 
 	in, err := q.renderInput()
 	if err != nil {
@@ -489,6 +564,19 @@ func quotationDataFromEngineInput(t *testing.T, q *Quotation, logo, qrPNG []byte
 	d.LeadTimeDays = 60
 	d.DiscountPercent = 5
 	d.Incoterm = "FOB"
+
+	// The wording, carried explicitly rather than left implicit. Before #339
+	// both renderers baked their own copy of every label, so this fixture
+	// printed the defaults without saying so; now it states the set it renders
+	// with, and TestRenderersAgreeOnRewordedLabels changes one of these labels
+	// to prove a wording edit reaches both engines.
+	d.Labels = labels.DefaultLabels()
+	d.Terms = d.Labels.Terms(labels.TermsValues{
+		PaymentTerm: d.PaymentTerm,
+		Validity:    d.Validity,
+		LeadTime:    d.LeadTime,
+		Incoterm:    d.Incoterm,
+	})
 
 	// The hand-built document carries its currency like Prepare would set
 	// it: an empty Currency renders "<th>Unit Price </th>" in the browser

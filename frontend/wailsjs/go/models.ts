@@ -331,6 +331,26 @@ export namespace backend {
 	        this.MustChangePassword = source["MustChangePassword"];
 	    }
 	}
+	export class CompanyLabelEntry {
+	    Key: string;
+	    Value: string;
+	    Default: string;
+	    MaxLength: number;
+	    Terms: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new CompanyLabelEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Key = source["Key"];
+	        this.Value = source["Value"];
+	        this.Default = source["Default"];
+	        this.MaxLength = source["MaxLength"];
+	        this.Terms = source["Terms"];
+	    }
+	}
 	export class CompanyLogo {
 	    LogoBase64: string;
 	    LogoMime: string;

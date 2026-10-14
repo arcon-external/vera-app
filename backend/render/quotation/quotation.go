@@ -15,6 +15,8 @@ package quotation
 import (
 	"context"
 	"io/fs"
+
+	"vera-app/backend/labels"
 )
 
 // Renderer turns a prepared quotation into the customer-facing PDF bytes.
@@ -56,6 +58,20 @@ type Input struct {
 	// each recomputing one (issue #377). The four numerics stay on the
 	// application side -- no renderer needs them.
 	DisplayLeadTime string
+	// Labels is the document's effective wording: every customer-visible label
+	// resolved to its override or its built-in default (see backend/labels).
+	// It travels on the seam for the reason DisplayLeadTime does -- the two
+	// renderers must print the same words, and the only way to guarantee that
+	// is to hand them one string each. Before #339 both renderers baked their
+	// own copy of every label, and the only thing keeping the copies equal was
+	// a test that compared them.
+	Labels labels.DocumentLabels
+	// Terms is the four terms-and-conditions sentences with the label set's
+	// placeholders already substituted ({payment}, {validity}, {leadtime},
+	// {incoterm}). Substitution happens once, on the application side, for the
+	// same reason: a renderer that substituted its own copy would be a
+	// renderer reading the sentence differently.
+	Terms []string
 	// PpnAmount is the PPN charged on top of the price, in minor units. It is
 	// the numeric the template's {{if .PpnAmount}} tests, so the native
 	// renderer decides the row from the same value the browser does rather

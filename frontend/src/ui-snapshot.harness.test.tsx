@@ -24,6 +24,8 @@ import { describe, expect, it } from "vitest";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
+import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
+import type { CompanyLabelEntry } from "./companyLabels";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
@@ -69,6 +71,56 @@ interface SnapshotCase {
   element: ReactElement;
 }
 
+// The served label set for the Template panel case: the 26 entries in document
+// order, each carrying its built-in default. Two entries are served as a
+// company would leave them after editing — one overridden, one cleared — so the
+// snapshot shows the Reset button and the Built-in badge beside the untouched
+// rows. This mirrors GET /v1/company/labels; the wording is the server's.
+function label(
+  Key: string,
+  Default: string,
+  MaxLength: number,
+  Terms = false,
+  Value = Default
+): CompanyLabelEntry {
+  return { Key, Value, Default, MaxLength, Terms };
+}
+
+const TEMPLATE_LABELS: CompanyLabelEntry[] = [
+  label("docTitle", "QUOTATION", 24, false, "PROPOSAL"),
+  label("recipientHeading", "Quotation to", 60),
+  label("termsHeading", "Terms and Conditions", 60),
+  label("metaQuotationNo", "Quotation No.", 20),
+  label("metaIssueDate", "Issue Date", 20),
+  label("metaValidUntil", "Valid Until", 20),
+  label("metaRevision", "Revision", 20),
+  label("subject", "Subject", 30),
+  label("columnNo", "No.", 20),
+  label("columnDescription", "Description", 20),
+  label("columnQty", "Qty.", 20, false, ""),
+  label("columnUoM", "UoM", 20),
+  label("columnUnitPrice", "Unit Price", 20),
+  label("columnAfterDisc", "After Disc.", 20),
+  label("columnTotal", "Total", 20),
+  label("totalSubTotal", "Sub Total", 60),
+  label("totalDiscount", "Discount", 60),
+  label("totalPpn", "PPN 11%", 60),
+  label("totalGrandTotal", "Grand Total", 60),
+  label(
+    "closing",
+    "We will be happy to supply information that you may need and trust " +
+      "that you call on us to fill your order, which will receive our prompt " +
+      "and careful attention.",
+    300
+  ),
+  label("verifyScan", "Scan to verify this quotation", 60),
+  label("verifyCode", "or enter code", 60),
+  label("termsPayment", "1. Payment terms agreed for this quotation is {payment} days.", 300, true),
+  label("termsValidity", "2. This quotation is valid for {validity} days.", 300, true),
+  label("termsLeadTime", "3. Lead time is {leadtime}.", 300, true),
+  label("termsIncoterm", "4. Incoterms: {incoterm}", 300, true),
+];
+
 const CASES: SnapshotCase[] = [
   {
     name: "DetailsPanel",
@@ -109,6 +161,26 @@ const CASES: SnapshotCase[] = [
         busy={false}
         error={null}
         onSaveUnits={() => undefined}
+      />
+    ),
+  },
+  {
+    // The Company settings Template tab (issue #339): all 26 editable labels,
+    // grouped, prefilled from the served shape. The fixture below mirrors what
+    // GET /v1/company/labels serves — the wording is the server's, copied here
+    // so the snapshot reads the real panel. Three row states are shown: an
+    // override (docTitle prints PROPOSAL, so its Reset button appears), a
+    // cleared field (columnQty is empty and marked Built-in), and untouched
+    // rows. The colour card that shares this tab is the existing
+    // CompanyThemePanel and needs no case of its own.
+    name: "CompanyTemplatePanel",
+    element: (
+      <CompanyTemplatePanel
+        labels={TEMPLATE_LABELS}
+        saveState="saved"
+        error={null}
+        notice={null}
+        onChange={() => undefined}
       />
     ),
   },

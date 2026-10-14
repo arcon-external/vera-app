@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"vera-app/backend/currency"
+	"vera-app/backend/labels"
 )
 
 // TestCurrencyHeadersFitTheirTracks proves a longer or shorter code still
@@ -15,13 +16,14 @@ import (
 func TestCurrencyHeadersFitTheirTracks(t *testing.T) {
 	e := testEngine(t)
 	edges := ColumnEdgesPx()
+	set := labels.DefaultLabels()
 	for _, code := range currency.Codes() {
-		labels := HeadLabels(code)
-		if len(labels) != 7 {
-			t.Fatalf("HeadLabels(%q) = %d labels; want 7", code, len(labels))
+		headers := HeadLabels(set, code)
+		if len(headers) != 7 {
+			t.Fatalf("HeadLabels(%q) = %d labels; want 7", code, len(headers))
 		}
 		for _, track := range []int{4, 5, 6} {
-			label := labels[track]
+			label := headers[track]
 			textW := e.Width(label, px(10), true)
 			trackW := float64(edges[track+1]-edges[track]) * ptPerPx
 			usable := trackW - 2*px(thPadPx)

@@ -26,6 +26,7 @@ import (
 	"github.com/gpdf-dev/gpdf/pdf"
 
 	"vera-app/backend/currency"
+	"vera-app/backend/labels"
 	"vera-app/backend/render/quotation"
 )
 
@@ -327,7 +328,7 @@ func minF(a, b float64) float64 {
 func (e *Engine) drawPageChrome(p *page, in Input, m metrics) {
 	e.drawRibbon(p, m)
 	e.drawBrand(p, in, m)
-	e.drawEyebrow(p, m)
+	e.drawEyebrow(p, in, m)
 	e.drawInfoRow(p, in, m)
 	e.drawSubject(p, in, m)
 }
@@ -446,30 +447,52 @@ func (e *Engine) drawBrand(p *page, in Input, m metrics) {
 // lead's closing rule landing a pixel off the heading it belongs to.
 const leadAddrFirstBaseline = 39.75
 
-// drawEyebrow paints the QUOTATION label and the rule that fills the rest of
-// its row.
-func (e *Engine) drawEyebrow(p *page, m metrics) {
+// drawEyebrow paints the document title label and the rule that fills the rest
+// of its row.
+//
+// The label is data now (issue #339), so the rule has to follow the label
+// instead of a measured constant: the browser lays the row out as a flex line
+// whose ::after takes whatever the label leaves, so a longer title pushes the
+// rule right and a shorter one pulls it left. The engine measures the title
+// with its own metrics and applies the difference from the default's measured
+// width on top of the browser's measured default -- because the engine's
+// measurement of "QUOTATION" (87.71pt tracked) is not the browser's (85.50pt),
+// and using either one alone would move the rule on a document whose title
+// nobody changed.
+func (e *Engine) drawEyebrow(p *page, in Input, m metrics) {
 	top := m.eyebrowTop
+	title := in.Labels.DocTitle
 	p.add(run{
 		x: m.innerX, baseline: top + eyebrowBaselineOffset,
-		size: px(eyebrowPx), text: "QUOTATION", bold: true,
+		size: px(eyebrowPx), text: title, bold: true,
 		color: e.pal.Deep, tracking: px(eyebrowTrack * eyebrowPx),
 	})
+	labelW := e.eyebrowLabelWidth(title)
 	// The rule starts one gap after the letterspaced label and runs to the
 	// content's right edge, which is what `flex: 1` on the ::after does. It sits
 	// centred in the eyebrow's line box, because the eyebrow is a flex
-	// container with `align-items: center`.
-	//
-	// The label's width is the browser's, not this engine's measurement of the
-	// same nine letters. The label is fixed text in a fixed template, so its width
-	// is a constant like any other, and taking it from the browser puts the rule
-	// where the browser's rule starts — a difference of a quarter of a point here
-	// is two pixels of rule starting somewhere else.
-	ruleX := m.innerX + eyebrowLabelW + px(12)
-	p.add(box{
-		x: ruleX, y: top + (eyebrowLineBox-px(1))/2,
-		w: m.innerX + m.innerW - ruleX, h: px(1), fill: e.pal.Edge,
-	})
+	// container with `align-items: center`. A title wide enough to fill the row
+	// leaves the rule nothing -- the browser's flex line gives the ::after a zero
+	// width -- so nothing is drawn rather than a box with a negative one.
+	ruleX := m.innerX + labelW + px(12)
+	if w := m.innerX + m.innerW - ruleX; w > 0 {
+		p.add(box{
+			x: ruleX, y: top + (eyebrowLineBox-px(1))/2,
+			w: w, h: px(1), fill: e.pal.Edge,
+		})
+	}
+}
+
+// eyebrowLabelWidth is the width the eyebrow's label occupies: the browser's
+// measured width of the built-in title, shifted by this engine's measurement
+// of the difference when the company has renamed it.
+func (e *Engine) eyebrowLabelWidth(title string) float64 {
+	if title == labels.DefaultLabels().DocTitle {
+		return eyebrowLabelW
+	}
+	track := px(eyebrowTrack * eyebrowPx)
+	return eyebrowLabelW + e.WidthTracked(title, px(eyebrowPx), true, track) -
+		e.WidthTracked(labels.DefaultLabels().DocTitle, px(eyebrowPx), true, track)
 }
 
 // drawInfoRow paints the recipient card and the quote-meta stack.
@@ -489,7 +512,7 @@ func (e *Engine) drawInfoRow(p *page, in Input, m metrics) {
 	// The card's baselines step by the constants infoHeight is built from, so the
 	// card is exactly as tall as it draws itself.
 	by := top + px(1) + px(cardPadY) + cardPadTop
-	p.add(run{x: ix, baseline: by, size: px(12), text: "Quotation to", bold: true, color: e.pal.Accent})
+	p.add(run{x: ix, baseline: by, size: px(12), text: in.Labels.RecipientHeading, bold: true, color: e.pal.Accent})
 	by += cardH3ToName
 	p.add(run{x: ix, baseline: by, size: px(13), text: in.RecipientName, bold: true, color: e.pal.Deep})
 	by += cardNameToCpy
@@ -602,12 +625,21 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 	// block is the strip's middle line, so it lands on the same place.
 	midY := m.subjectY + m.subjectH/2
 
-	lbl := "Subject"
-	p.add(run{
-		x:        m.innerX + px(1) + (lblW-e.Width(lbl, px(bodyPx), true))/2,
-		baseline: midY + centerBaselineOffset,
-		size:     px(bodyPx), text: lbl, bold: true, color: e.pal.Paper,
-	})
+	// The label is data (issue #339) and the browser wraps it inside its fixed
+	// 110px track, so the engine wraps it too and centres the block the same
+	// way: one line for the default "Subject", more for a longer reworded one,
+	// and a strip that grows by the lines it gains exactly as the grid does.
+	lbl := in.Labels.Subject
+	lblLines := e.Wrap(lbl, px(bodyPx), subjectLabelW(m), false)
+	lblTop := midY + centerBaselineOffset -
+		float64(len(lblLines)-1)*px(bodyPx)*bodyLH/2
+	for i, line := range lblLines {
+		p.add(run{
+			x:        m.innerX + px(1) + (lblW-e.Width(line, px(bodyPx), true))/2,
+			baseline: lblTop + float64(i)*px(bodyPx)*bodyLH,
+			size:     px(bodyPx), text: line, bold: true, color: e.pal.Paper,
+		})
+	}
 	valX := m.innerX + px(1) + lblW + px(cardPadX)
 	valW := subjectValueW(m)
 	lines := e.Wrap(in.Subject, px(bodyPx), valW, true)
@@ -630,7 +662,7 @@ func (e *Engine) drawSubject(p *page, in Input, m metrics) {
 // The table's outer corners are rounded, which is why every fill in it carries
 // the table's outline as a clip: without it the header bar and the zebra rows
 // would square off the corners.
-func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64, currencyCode string) {
+func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64, in Input) {
 	h := headRowH
 
 	p.add(box{x: m.tableX, y: top, w: m.tableW, h: h, fill: e.pal.Deep, clip: clip})
@@ -656,8 +688,8 @@ func (e *Engine) drawTableHead(p *page, m metrics, clip *clipRegion, top float64
 	// carry `border-right` and the last one has none, so nothing of theirs reaches
 	// the outside of the row.
 	tableSides(p, m, clip, top, h, e.pal.Edge)
-	labels := HeadLabels(currencyCode)
-	for i, lbl := range labels {
+	headers := HeadLabels(in.Labels, in.Currency)
+	for i, lbl := range headers {
 		p.add(run{
 			x:        m.colX[i] + (m.colX[i+1]-m.colX[i]-e.Width(lbl, px(10), true))/2,
 			baseline: top + headBaselineOffset,
@@ -1000,7 +1032,7 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	tnx := m.innerX + px(1) + px(footPadPx)
 	ty := top + px(1) + px(footPadPx)
 	p.add(run{x: tnx, baseline: ty + addrBaselineOffset,
-		size: px(12), text: "Terms and Conditions", bold: true, color: e.pal.Deep})
+		size: px(12), text: in.Labels.TermsHeading, bold: true, color: e.pal.Deep})
 	ty += px(12)*bodyLH + px(tncMarginH3)
 	for i, term := range in.Terms {
 		for _, line := range e.Wrap(term, px(bodyPx), tncW-2*px(1)-2*px(footPadPx), false) {
@@ -1100,21 +1132,26 @@ type totalRow struct {
 	grand  bool
 }
 
-// totalsRows builds the totals card's lines. The labels and the conditional PPN
-// line match the template exactly. Values decorate with the currency's symbol
-// placement, exactly as the template's prefix/suffix pair does.
+// totalsRows builds the totals card's lines. The labels come from the seam and
+// the conditional PPN line matches the template exactly. Values decorate with
+// the currency's symbol placement, exactly as the template's prefix/suffix pair
+// does.
+//
+// The discount row prints its percent beside the label, which is what the
+// template's "Discount ({{.DiscountPercent}}%)" does: the company owns the word,
+// the document owns the figure.
 func (e *Engine) totalsRows(in Input) []totalRow {
 	// Keyed, not positional. The field order here is chosen for memory layout, so
 	// an unkeyed literal would silently move a value into the wrong field when
 	// that order changes -- two of these four fields are strings, so the compiler
 	// would not catch it.
 	rows := []totalRow{
-		{label: "Sub Total", value: currency.Decorate(in.Currency, in.DisplaySubTotal)},
+		{label: in.Labels.TotalSubTotal, value: currency.Decorate(in.Currency, in.DisplaySubTotal)},
 	}
 	// Conditional exactly as the template is: no discount, no row.
 	if in.DiscountAmount > 0 {
 		rows = append(rows, totalRow{
-			label:  "Discount (" + in.DiscountPercent + "%)",
+			label:  in.Labels.TotalDiscount + " (" + in.DiscountPercent + "%)",
 			value:  currency.Decorate(in.Currency, in.DisplayDiscount),
 			colour: e.pal.Green,
 		})
@@ -1123,9 +1160,9 @@ func (e *Engine) totalsRows(in Input) []totalRow {
 	// the numeric, so a stray "0" display string with no PPN charged draws
 	// nothing (issue #377).
 	if in.PpnAmount > 0 {
-		rows = append(rows, totalRow{label: "PPN 11%", value: currency.Decorate(in.Currency, in.DisplayPpn)})
+		rows = append(rows, totalRow{label: in.Labels.TotalPpn, value: currency.Decorate(in.Currency, in.DisplayPpn)})
 	}
-	rows = append(rows, totalRow{label: "Grand Total", value: currency.Decorate(in.Currency, in.DisplayGrandTotal), grand: true})
+	rows = append(rows, totalRow{label: in.Labels.TotalGrandTotal, value: currency.Decorate(in.Currency, in.DisplayGrandTotal), grand: true})
 	return rows
 }
 
@@ -1140,6 +1177,12 @@ func (e *Engine) drawVerify(p *page, in Input, m metrics, top float64) {
 		p.add(run{x: rx - e.Width(in.CompanyName, px(11), true),
 			baseline: top + bodyBaselineOffset, size: px(11),
 			text: in.CompanyName, bold: true, color: e.pal.Accent})
+		// Deliberately not a label: this notice stands where the caption will
+		// be, before the document has a verification handle, so it prints on a
+		// preview and never on a customer document. The editable pair is the
+		// two captions the exported document carries (Labels.VerifyScan and
+		// Labels.VerifyCode); making preview-only wording editable would add a
+		// key nothing a customer ever sees depends on.
 		note := "Verification code is added when you export"
 		p.add(box{
 			x: rx - e.Width(note, px(10), false) - 2*px(cardPadX) - 2*px(1),
@@ -1201,10 +1244,13 @@ func (e *Engine) drawVerify(p *page, in Input, m metrics, top float64) {
 			baseline: nameTop + float64(i)*px(11)*1.5,
 			size:     px(11), text: line, bold: true, color: e.pal.Accent})
 	}
-	p.add(run{x: cx - e.Width("Scan to verify this quotation", px(10), false),
+	p.add(run{x: cx - e.Width(in.Labels.VerifyScan, px(10), false),
 		baseline: last - px(14.97), size: px(10),
-		text: "Scan to verify this quotation", color: e.pal.Secondary})
-	code := "or enter code " + in.VerificationCode
+		text: in.Labels.VerifyScan, color: e.pal.Secondary})
+	// The short code prints after the lead-in, exactly as the template's
+	// "or enter code {{.VerifyShortID}}" does: the company owns the words, the
+	// revision owns the code.
+	code := in.Labels.VerifyCode + " " + in.VerificationCode
 	for i, line := range e.Wrap(code, px(9), captionW, false) {
 		_ = i
 		p.add(run{x: cx - e.WidthTracked(line, px(9), false, px(0.02*9)),
