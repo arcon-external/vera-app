@@ -110,7 +110,9 @@ jobs:
           service: vera-api
           region: asia-southeast1
           image: asia-southeast1-docker.pkg.dev/vera-app-508411/vera/veraserver:sha-${{ github.sha }}
-          flags: --min-instances=0 --max-instances=2
+          flags: --min-instances=1 --max-instances=2
+        # --min-instances=1 keeps one instance warm: the 2026-10-15 rollout
+        # window had none, and a cold start timed a user's sign-in out (#437).
         # Env vars (incl. DB credentials) persist from the live revision;
         # this step updates the image only and never sees secrets.
 
