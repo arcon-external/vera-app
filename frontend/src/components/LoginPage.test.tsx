@@ -39,7 +39,12 @@ const UPDATED = {
   latest: "0.13.1",
   downloadURL: NEWER.DownloadURL,
   notesURL: NEWER.NotesURL,
+  required: false,
 };
+
+// The same served check with the build below the server's minimum supported
+// version (backend/update.go: Required is the Go side's verdict).
+const REQUIRED: backend.UpdateInfo = { ...NEWER, Required: true };
 
 // The binding, mocked: LoginPage imports it for the mount effect, and a test
 // that imports the page must supply every export it imports.
@@ -54,6 +59,7 @@ function renderNotice(props: {
   latest: string;
   downloadURL: string;
   notesURL: string;
+  required: boolean;
 }): string {
   return renderToString(<LoginUpdateNotice {...props} />);
 }
@@ -117,6 +123,24 @@ describe("LoginUpdateNotice markup", () => {
     expect(html).toContain('role="status"');
   });
 
+  it("states the lock-out as danger, in UpdateBanner's words, when the build is below the minimum supported version", () => {
+    // The Judge's finding on #436: the login page is the only surface for a
+    // staff member who cannot sign in, so the unsupported-build state must
+    // not read as the mild "is available" suggestion. Tone, wording and the
+    // Download button all come with it — the button is the way out, so it
+    // stays in both states.
+    //
+    // Rendered through loginUpdateNotice, not hand-written props: the plumbing
+    // (Required → required) is what makes this red if it is dropped again.
+    const html = renderNotice(loginUpdateNotice(REQUIRED)!);
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("bg-danger-50 text-danger-700");
+    expect(html).toContain(
+      "This Vera (v<!-- -->0.12.1<!-- -->) is below the minimum supported version. Please update to v<!-- -->0.13.1<!-- --> to keep working."
+    );
+    expect(html).toContain(">Download update</button>");
+  });
+
   it("falls back to the release notes when the server names no installer", () => {
     // An unknown platform gets no DownloadURL: the button reads as what it
     // does and aims at the notes URL.
@@ -125,6 +149,7 @@ describe("LoginUpdateNotice markup", () => {
       latest: "0.13.1",
       downloadURL: "",
       notesURL: NEWER.NotesURL,
+      required: false,
     });
     expect(html).toContain(">See what&#x27;s new</button>");
     expect(updateLinkTarget("", NEWER.NotesURL)).toBe(NEWER.NotesURL);

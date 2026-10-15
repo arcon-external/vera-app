@@ -308,6 +308,24 @@ const CASES: SnapshotCase[] = [
         latest="0.13.1"
         downloadURL="https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe"
         notesURL="https://api.arconpentapersada.co.id/v1/app/changelog"
+        required={false}
+      />
+    ),
+  },
+  {
+    // The state the login page exists for (#436's follow-up): the build is
+    // below the server's minimum supported version, so the notice takes
+    // UpdateBanner's danger tone and its wording instead of the mild "is
+    // available" copy. That sentence is the longer of the two, so the 360
+    // render here is the more informative one.
+    name: "LoginUpdateNoticeRequired",
+    element: (
+      <LoginUpdateNotice
+        current="0.12.1"
+        latest="0.13.1"
+        downloadURL="https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe"
+        notesURL="https://api.arconpentapersada.co.id/v1/app/changelog"
+        required
       />
     ),
   },
