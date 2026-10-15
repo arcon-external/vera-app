@@ -1,17 +1,23 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { backend } from "@backend/models";
+import { Login } from "@backend/backend/AuthAPI";
 import {
+  LoginPage,
   LoginUpdateNotice,
   fetchLoginUpdateNotice,
   loginUpdateNotice,
+  signInDeps,
+  submitSignIn,
   updateLinkTarget,
 } from "./LoginPage";
+import type { SignedInUser } from "./LoginPage";
 
-// Issue #436: the sign-in page's update notice. The suite runs in node with no
-// DOM (the house pattern — SettingsPage.test.tsx), so the notice is pinned as
-// markup through renderToString and the mount check is pinned as the pure
-// functions the effect delegates to, driven with the binding mocked:
+// Issues #436 and #434: the sign-in page's update notice, and the
+// keep-me-signed-in checkbox. The suite runs in node with no DOM (the house
+// pattern — SettingsPage.test.tsx), so each surface is pinned as markup
+// through renderToString and the behaviour behind it is pinned as the pure
+// functions the component delegates to, driven with the bindings mocked:
 // CheckForUpdates answers for a newer build, for an up-to-date build, and with
 // a rejection.
 //
@@ -46,12 +52,22 @@ const UPDATED = {
 // version (backend/update.go: Required is the Go side's verdict).
 const REQUIRED: backend.UpdateInfo = { ...NEWER, Required: true };
 
-// The binding, mocked: LoginPage imports it for the mount effect, and a test
-// that imports the page must supply every export it imports.
-const mocked = vi.hoisted(() => ({ CheckForUpdates: vi.fn() }));
+// The bindings, mocked: LoginPage imports CheckForUpdates for the mount
+// effect and Login/RedeemInvite for the sign-in submit, and a test that
+// imports the page must supply every export it imports.
+const mocked = vi.hoisted(() => ({
+  CheckForUpdates: vi.fn(),
+  Login: vi.fn(),
+  RedeemInvite: vi.fn(),
+}));
 
 vi.mock("@backend/backend/UpdateAPI", () => ({
   CheckForUpdates: mocked.CheckForUpdates,
+}));
+
+vi.mock("@backend/backend/AuthAPI", () => ({
+  Login: mocked.Login,
+  RedeemInvite: mocked.RedeemInvite,
 }));
 
 function renderNotice(props: {
@@ -160,5 +176,157 @@ describe("LoginUpdateNotice markup", () => {
     // The 360px login column: the copy must wrap, so the row is flex-wrap.
     const html = renderNotice(loginUpdateNotice(NEWER)!);
     expect(html).toContain("flex flex-wrap items-center gap-x-3 gap-y-2");
+  });
+});
+
+// Issue #434: the keep-me-signed-in checkbox. The suite runs in node with no
+// DOM (the house pattern — there are no DOM tests in this repo), so the
+// checkbox's default and its copy are pinned as markup through
+// renderToString, and the choice's journey to the server is pinned through
+// the two functions the component's submit delegates to: signInDeps carries
+// the real Login binding, and submitSignIn passes the flag as that binding's
+// third argument.
+//
+// What this test does NOT prove, stated so it is not assumed: effects never
+// run and renderToString fires no events, so the click that submits the
+// form — the component's own submit wiring the checkbox state into that
+// third argument — stays hand-driven; so does checking the box.
+
+// The answer the binding gives for a good sign-in, shaped as the Go DTO the
+// desktop hands on.
+const SIGNED_IN: SignedInUser = {
+  ID: 7,
+  Email: "staff@example.com",
+  DisplayName: "Staff",
+  Role: "staff",
+};
+
+function signInSpies() {
+  return {
+    onSignedIn: vi.fn(),
+    setBusy: vi.fn(),
+    setError: vi.fn(),
+  };
+}
+
+describe("the keep-me-signed-in checkbox", () => {
+  it("sits between the password field and the submit button, and defaults to unchecked", () => {
+    const html = renderToString(<LoginPage onSignedIn={() => undefined} />);
+    expect(html).toContain('type="checkbox"');
+    // React omits the attribute when checked is false, so its absence is the
+    // default: a shared machine gets the 8-hour session unless someone asks.
+    expect(html).not.toContain('checked=""');
+    const password = html.indexOf('type="password"');
+    const checkbox = html.indexOf('type="checkbox"');
+    const submit = html.indexOf(">Sign in</button>");
+    expect(password).toBeGreaterThan(-1);
+    expect(checkbox).toBeGreaterThan(password);
+    expect(checkbox).toBeLessThan(submit);
+  });
+
+  it("prints the frozen copy, the helper in the caption ink", () => {
+    const html = renderToString(<LoginPage onSignedIn={() => undefined} />);
+    expect(html).toContain("Keep me signed in on this device");
+    expect(html).toContain(
+      "Stays signed in for 30 days. On a shared device, leave this unchecked."
+    );
+    // The helper's classes, pinned exactly as the issue froze them: a class
+    // that compiles to nothing still looks right in source, so the built CSS
+    // is what proves text-caption and text-ink-500 exist.
+    expect(html).toContain('class="text-caption text-ink-500"');
+  });
+
+  it("names the choice in the sign-in form only — the password field it follows exists only there", () => {
+    // The checkbox lives inside the sign-in branch, after the password
+    // label; setup mode renders no password field and no checkbox. The
+    // ordering assertion above is what holds this true.
+    const html = renderToString(<LoginPage onSignedIn={() => undefined} />);
+    expect(html).toContain("Activate with an invite code");
+    expect(html.split('type="checkbox"').length - 1).toBe(1);
+  });
+});
+
+describe("submitSignIn passes the checkbox state as Login's third argument", () => {
+  beforeEach(() => {
+    mocked.Login.mockReset();
+    mocked.Login.mockResolvedValue(SIGNED_IN);
+  });
+
+  it("sends false when the box is unchecked", async () => {
+    const spies = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "  staff@example.com  ", password: "correct horse", remember: false },
+      { login: mocked.Login, ...spies }
+    );
+    expect(mocked.Login).toHaveBeenCalledWith("staff@example.com", "correct horse", false);
+    expect(spies.onSignedIn).toHaveBeenCalledWith(SIGNED_IN);
+  });
+
+  it("sends true when the box is checked", async () => {
+    const spies = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "correct horse", remember: true },
+      { login: mocked.Login, ...spies }
+    );
+    expect(mocked.Login).toHaveBeenCalledWith("staff@example.com", "correct horse", true);
+    expect(spies.onSignedIn).toHaveBeenCalledWith(SIGNED_IN);
+  });
+
+  it("drives the busy and error state around the call", async () => {
+    const spies = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "correct horse", remember: false },
+      { login: mocked.Login, ...spies }
+    );
+    expect(spies.setBusy.mock.calls).toEqual([[true], [false]]);
+    expect(spies.setError).toHaveBeenCalledTimes(1);
+    expect(spies.setError).toHaveBeenCalledWith("");
+  });
+
+  it("does nothing while a sign-in is already running", async () => {
+    const spies = signInSpies();
+    await submitSignIn(
+      { busy: true, email: "staff@example.com", password: "correct horse", remember: true },
+      { login: mocked.Login, ...spies }
+    );
+    expect(mocked.Login).not.toHaveBeenCalled();
+    expect(spies.setBusy).not.toHaveBeenCalled();
+    expect(spies.onSignedIn).not.toHaveBeenCalled();
+  });
+
+  it("puts a server refusal string on the banner and a generic sentence for anything else", async () => {
+    mocked.Login.mockRejectedValue("invalid credentials");
+    const refused = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "wrong", remember: true },
+      { login: mocked.Login, ...refused }
+    );
+    expect(refused.setError).toHaveBeenCalledWith("invalid credentials");
+    expect(refused.onSignedIn).not.toHaveBeenCalled();
+    // The button always comes back: a failed sign-in must not wedge the form.
+    expect(refused.setBusy).toHaveBeenLastCalledWith(false);
+
+    mocked.Login.mockRejectedValue(new Error("dial tcp 10.0.0.1:443: connection refused"));
+    const broken = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "x", remember: false },
+      { login: mocked.Login, ...broken }
+    );
+    expect(broken.setError).toHaveBeenCalledWith("We couldn't sign you in. Try again.");
+    expect(broken.onSignedIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("signInDeps wires the real Login binding", () => {
+  it("hands the binding over unchanged, so the third argument is the Go method's third argument", () => {
+    const deps = signInDeps({
+      onSignedIn: () => undefined,
+      setBusy: () => undefined,
+      setError: () => undefined,
+    });
+    expect(deps.login).toBe(Login);
+    // The module is mocked in this suite, so "the real binding" is the mock:
+    // if the component stopped calling Login here, this fails.
+    expect(deps.login).toBe(mocked.Login);
   });
 });

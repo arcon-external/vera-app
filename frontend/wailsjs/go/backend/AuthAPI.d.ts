@@ -8,7 +8,7 @@ export function CurrentUser():Promise<backend.AuthUserDTO>;
 
 export function GetCompany():Promise<backend.CompanyProfile>;
 
-export function Login(arg1:string,arg2:string):Promise<backend.AuthUserDTO>;
+export function Login(arg1:string,arg2:string,arg3:boolean):Promise<backend.AuthUserDTO>;
 
 export function Logout():Promise<void>;
 

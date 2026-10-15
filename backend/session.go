@@ -15,15 +15,55 @@ var (
 	sessionToken string
 )
 
-// SetSessionToken remembers a session token in memory and the OS keychain.
+// The OS-keychain calls this file makes, indirected through package-level
+// vars so a test can swap them for recorders. Which of them ran is the whole
+// difference between a remembered sign-in and an unremembered one — a
+// remembered login writes the keychain, an unremembered one must delete what
+// an earlier remembered login left there — and a CI machine has no keychain
+// to ask.
+var (
+	keyringSave   = auth.SaveSessionToken
+	keyringLoad   = auth.LoadSessionToken
+	keyringDelete = auth.DeleteSessionToken
+)
+
+// keyringDisabled reports whether VERA_NO_KEYRING=1 keeps every path in
+// memory, as it does on a machine with no keychain.
+func keyringDisabled() bool {
+	return os.Getenv("VERA_NO_KEYRING") == "1"
+}
+
+// SetSessionToken remembers a session token in memory and the OS keychain,
+// so the session survives a restart. This is the remembered path: the user
+// asked to stay signed in, so the token earns a home beyond this process.
 func SetSessionToken(token string) error {
+	setSessionTokenMemory(token)
+	if keyringDisabled() {
+		return nil
+	}
+	return keyringSave(token)
+}
+
+// setSessionTokenMemory stores the token for this process only: no keychain
+// write, and no keychain delete either. It is the storage half of an
+// unremembered sign-in, and the caller must pair it with
+// forgetKeyringToken — on its own it leaves any previously remembered
+// token sitting in the keychain, where the next launch's SessionToken
+// fallback would restore it.
+func setSessionTokenMemory(token string) {
 	sessionMu.Lock()
 	sessionToken = token
 	sessionMu.Unlock()
-	if os.Getenv("VERA_NO_KEYRING") == "1" {
+}
+
+// forgetKeyringToken deletes whatever token the OS keychain still holds, so
+// the keychain cannot outlive the session it belongs to.
+// VERA_NO_KEYRING=1 keeps everything memory-only, so there is nothing there.
+func forgetKeyringToken() error {
+	if keyringDisabled() {
 		return nil
 	}
-	return auth.SaveSessionToken(token)
+	return keyringDelete()
 }
 
 // SessionToken returns the in-memory session token, falling back to the OS
@@ -35,10 +75,10 @@ func SessionToken() string {
 	if token != "" {
 		return token
 	}
-	if os.Getenv("VERA_NO_KEYRING") == "1" {
+	if keyringDisabled() {
 		return ""
 	}
-	stored, err := auth.LoadSessionToken()
+	stored, err := keyringLoad()
 	if err != nil || stored == "" {
 		return ""
 	}
@@ -50,11 +90,9 @@ func SessionToken() string {
 
 // ClearSessionToken forgets the session in memory and the OS keychain.
 func ClearSessionToken() error {
-	sessionMu.Lock()
-	sessionToken = ""
-	sessionMu.Unlock()
-	if os.Getenv("VERA_NO_KEYRING") == "1" {
+	setSessionTokenMemory("")
+	if keyringDisabled() {
 		return nil
 	}
-	return auth.DeleteSessionToken()
+	return keyringDelete()
 }
