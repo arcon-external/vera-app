@@ -9,13 +9,19 @@
 # happened to v0.4.0: it shipped, the installers were on the bucket, and the app
 # went on offering v0.3.5 until a user said so.
 #
+# When that service cannot be reached at all -- it scales to zero, and an
+# outage hides every update -- the app falls back to latest.json on the same
+# public bucket. This script writes both, from the same computed values, so the
+# offline path can never describe a different release than the online one.
+#
 # This script is that step, and it is deliberately ordered so the app is only
 # told about a release that is already downloadable:
 #
 #   1. guard against a downgrade           -- fail before touching anything
 #   2. check the release has all 3 assets  -- no announcement without files
 #   3. download and verify checksums       -- the mirror is of known bytes
-#   4. mirror to the bucket, then verify   -- public URLs must serve before 5
+#   4. mirror to the bucket, then verify   -- installers *and* latest.json;
+#                                             public URLs must serve before 5
 #   5. set the six variables               -- preserve min_supported from live
 #   6. verify /v1/app/latest               -- fail if the app still cannot see it
 #
@@ -97,6 +103,14 @@ ASSETS=(
   "Vera-CLI-${VERSION}-windows-arm64.exe"
 )
 BUCKET_BASE="https://storage.googleapis.com/${BUCKET}"
+
+# Everything the announcement publishes, in one place: the variables set in
+# step 5 and the manifest written in step 4 both read these, so a URL can never
+# be right in one and wrong in the other.
+NOTES_URL="https://github.com/${REPO}/releases/tag/${VERSION}"
+WINDOWS_URL="${BUCKET_BASE}/Vera-${VERSION}-windows-amd64-installer.exe"
+WINDOWS_ARM64_URL="${BUCKET_BASE}/Vera-${VERSION}-windows-arm64-installer.exe"
+MACOS_URL="${BUCKET_BASE}/Vera-${VERSION}-macos-universal.dmg"
 
 step()  { printf '\n== %s\n' "$*"; }
 fail()  { printf 'announce-release: %s\n' "$*" >&2; exit 1; }
@@ -213,6 +227,10 @@ step "4/6  mirror to gs://${BUCKET} and prove the public URLs serve"
 # The bucket is the only download route the app is allowed to hand out: every
 # URL below is proven to serve before anything is announced, and the bucket
 # does not depend on the repository's visibility.
+#
+# latest.json is in that proof on purpose. It is the release state the app
+# reads when /v1/app/latest cannot be reached, so it is not a nice-to-have: a
+# manifest that 404s is as invisible as no manifest at all.
 # ---------------------------------------------------------------------------
 if [ "$DRY_RUN" = true ]; then
   note "dry run: would upload ${#ASSETS[@]} files to gs://${BUCKET}/"
@@ -233,9 +251,73 @@ else
   note "uploaded $(( ${#ASSETS[@]} * 2 )) files (installers and checksums)"
 fi
 
-for asset in "${ASSETS[@]}" "${ASSETS[@]/%/.sha256}"; do
+# latest.json -- the same release state the API serves at /v1/app/latest,
+# written where an API outage cannot reach it.
+#
+# The API is the app's first source; this file is what it falls back to when
+# that check fails, which is what left the 2026-10-15 rollout window with no
+# update path anywhere. The bucket survives it.
+#
+# The keys below are the /v1/app/latest contract, built with jq so the quoting
+# is structural rather than a hand-escaped string. They are pinned to
+# serverRelease in backend/update.go by TestAnnounceManifestMatchesServerRelease
+# -- rename one there without renaming it here and the test says so.
+MANIFEST_NAME="latest.json"
+MANIFEST_URL="${BUCKET_BASE}/${MANIFEST_NAME}"
+MANIFEST_PROGRAM='{downloads: {"windows": $windows, "windows-arm64": $windowsArm64, "macos": $macos}, latest: $latest, minSupported: $minSupported, notesUrl: $notesUrl}'
+MANIFEST_JSON=$(jq -n \
+  --arg latest "$VERSION" \
+  --arg minSupported "$LIVE_MIN" \
+  --arg notesUrl "$NOTES_URL" \
+  --arg windows "$WINDOWS_URL" \
+  --arg windowsArm64 "$WINDOWS_ARM64_URL" \
+  --arg macos "$MACOS_URL" \
+  "$MANIFEST_PROGRAM")
+
+# The upload, once, as an array: the run executes it and the dry run prints
+# it, so what a dry run reports about the metadata is what the run actually
+# sets. A separate copy of these flags in the print would only prove the
+# printer.
+MANIFEST_CONTENT_TYPE="application/json"
+MANIFEST_CACHE_CONTROL="no-cache"
+MANIFEST_UPLOAD=(
+  gcloud storage cp "$WORKDIR/$MANIFEST_NAME" "gs://${BUCKET}/${MANIFEST_NAME}"
+  --project="$PROJECT" --quiet
+  --content-type="$MANIFEST_CONTENT_TYPE" --cache-control="$MANIFEST_CACHE_CONTROL"
+)
+
+if [ "$DRY_RUN" = true ]; then
+  note "dry run: would write $MANIFEST_URL, by running"
+  printf '     %s\n' "${MANIFEST_UPLOAD[*]}"
+  printf '%s\n' "$MANIFEST_JSON" | sed 's/^/      /'
+else
+  printf '%s\n' "$MANIFEST_JSON" > "$WORKDIR/$MANIFEST_NAME"
+  # no-cache is the point: a release must be visible to the next update check,
+  # not to the one after a CDN TTL has expired. The content type matters for
+  # the same reason -- a bucket default of application/octet-stream is offered
+  # as a file to download rather than read as JSON.
+  "${MANIFEST_UPLOAD[@]}" >/dev/null 2>&1 \
+    || fail "could not write $MANIFEST_URL; VERA_APP_LATEST left at $LIVE_LATEST.
+   The offline update path is what the app reads when $PUBLIC_API cannot
+   answer, so a release without it is a release that disappears the moment
+   the API does. Mirror it by hand from a machine with bucket write access,
+   then re-run this job with --failed."
+  note "wrote $MANIFEST_NAME (Content-Type: $MANIFEST_CONTENT_TYPE, Cache-Control: $MANIFEST_CACHE_CONTROL)"
+fi
+
+for asset in "${ASSETS[@]}" "${ASSETS[@]/%/.sha256}" "$MANIFEST_NAME"; do
   remote=$(gcloud storage ls "gs://${BUCKET}/${asset}" --project="$PROJECT" 2>/dev/null | grep -c . || true)
-  [ "$remote" -ge 1 ] || fail "gs://${BUCKET}/${asset} is missing after upload"
+  if [ "$remote" -lt 1 ]; then
+    # A dry run writes nothing, so a missing manifest is only ever true before
+    # the first release that carried one -- a fact about the bucket, not about
+    # this release, and the real path writes it before it proves it. Every
+    # other missing file is fatal either way.
+    if [ "$DRY_RUN" = true ] && [ "$asset" = "$MANIFEST_NAME" ]; then
+      note "$asset is not on the bucket yet; a real run writes it first"
+      continue
+    fi
+    fail "gs://${BUCKET}/${asset} is missing after upload"
+  fi
   code=$(http_code "${BUCKET_BASE}/${asset}")
   case "$code" in
     200|206) note "$(printf '%-46s HTTP %s' "$asset" "$code")" ;;
@@ -248,10 +330,10 @@ step "5/6  set the six updater variables on ${SERVICE}"
 # ---------------------------------------------------------------------------
 ENV_VARS="VERA_APP_LATEST=${VERSION}"
 ENV_VARS="${ENV_VARS},VERA_APP_MIN_SUPPORTED=${LIVE_MIN}"
-ENV_VARS="${ENV_VARS},VERA_APP_NOTES_URL=https://github.com/${REPO}/releases/tag/${VERSION}"
-ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_WINDOWS=${BUCKET_BASE}/Vera-${VERSION}-windows-amd64-installer.exe"
-ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_WINDOWS_ARM64=${BUCKET_BASE}/Vera-${VERSION}-windows-arm64-installer.exe"
-ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_MACOS=${BUCKET_BASE}/Vera-${VERSION}-macos-universal.dmg"
+ENV_VARS="${ENV_VARS},VERA_APP_NOTES_URL=${NOTES_URL}"
+ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_WINDOWS=${WINDOWS_URL}"
+ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_WINDOWS_ARM64=${WINDOWS_ARM64_URL}"
+ENV_VARS="${ENV_VARS},VERA_APP_DOWNLOAD_MACOS=${MACOS_URL}"
 
 if [ "$DRY_RUN" = true ]; then
   note "dry run: would run"

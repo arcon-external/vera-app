@@ -787,6 +787,9 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
      never from GitHub release assets;
    - proves each public URL serves before anything is announced, so the app is
      never told to offer a 404;
+   - writes `latest.json` — the same release state `/v1/app/latest` serves —
+     to the same bucket, because the app's update check falls back to it when
+     the API is unreachable (the 2026-10-15 rollout window is why);
    - sets the six `VERA_APP_*` variables on `vera-api`, carrying
      `VERA_APP_MIN_SUPPORTED` forward from the live revision rather than
      hard-coding a floor;
