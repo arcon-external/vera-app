@@ -65,12 +65,25 @@ func updatesCommand() *command {
 				if err != nil {
 					return err
 				}
-				var latest struct {
-					Latest       string            `json:"latest"`
-					MinSupported string            `json:"minSupported"`
-					NotesURL     string            `json:"notesUrl"`
-					Downloads    map[string]string `json:"downloads"`
-				}
+				// The release contract is backend's: this decodes the same
+				// struct the desktop does, so a renamed key cannot break one
+				// reader and leave the other parsing a release that no longer
+				// exists (the #437 shape pin covers the announce script, not a
+				// second private copy of these keys in here).
+				//
+				// The transport stays the CLI's own. Its StatusError is what
+				// exitCodeFor turns into the documented exit codes, and the
+				// shared decode flattens a status to prose: a 429 routed
+				// through it would lose both its exit code and the server's
+				// message.
+				//
+				// The static manifest the desktop falls back to is
+				// deliberately absent: this command answers "what does the
+				// server I was pointed at say", and a bucket is not that
+				// server. An operator who cannot reach the API retries, or
+				// reads the desktop's notice, which has the fallback for
+				// exactly that outage.
+				var latest backend.ServerRelease
 				if err := client.Get("/v1/app/latest", &latest); err != nil {
 					return err
 				}
