@@ -9,11 +9,16 @@ import (
 )
 
 const (
-	// IdleTimeout signs the user out after inactivity (e.g. overnight).
-	IdleTimeout = 8 * time.Hour
-	// AbsoluteLifetime bounds a session even with continuous use.
-	AbsoluteLifetime = 7 * 24 * time.Hour
-	tokenBytes       = 32
+	// SessionLifetimeStandard is how long a session lasts when the user did
+	// not ask to be remembered: one working day, so an unattended machine
+	// signs itself out overnight.
+	SessionLifetimeStandard = 8 * time.Hour
+	// SessionLifetimeRemembered is how long a remembered session lasts:
+	// thirty days, fixed. The expiry is stamped once at issuance and never
+	// extended, so "keep me signed in" buys a month without re-login and
+	// nothing beyond it.
+	SessionLifetimeRemembered = 30 * 24 * time.Hour
+	tokenBytes                = 32
 )
 
 // NewSessionToken generates a random session token and returns the token

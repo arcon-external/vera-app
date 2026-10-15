@@ -461,6 +461,18 @@ func (s *Store) RedeemInviteToken(ctx context.Context, token, passwordHash strin
 		WHERE id = $1`, s.configSchema()), userID, passwordHash); err != nil {
 		return 0, fmt.Errorf("set redeemed password: %w", err)
 	}
+	// The old password authorized every session alive right now; after
+	// the reset it must authorize none of them. The revocation rides the
+	// same transaction, so a redeemed password can never coexist with a
+	// session the old one issued. (RevokeUserSessions is this statement on
+	// the pool; inside a transaction it has to run on the transaction.)
+	// A brand-new account's invite has no sessions to kill, so the one
+	// code path covers activation and reset alike.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.sessions SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL`, s.configSchema()), userID); err != nil {
+		return 0, fmt.Errorf("revoke sessions on redeem: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit invite redeem: %w", err)
 	}

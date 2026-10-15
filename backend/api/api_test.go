@@ -9,6 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vera-app/backend/auth"
 	"vera-app/backend/store"
@@ -134,6 +137,74 @@ func TestProtectedRoutesRejectMissingToken(t *testing.T) {
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s without token = %d; want 401", target.method, target.path, recorder.Code)
 		}
+	}
+}
+
+// sessionExpiryAfterLogin signs in with the given wire body and reads the
+// expiry the server stamped on the session it issued, straight from the
+// sessions row: the value under test is the one the database keeps.
+func sessionExpiryAfterLogin(t *testing.T, server *Server, schema, body string) time.Time {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("login = %d; want 200 (%s)", recorder.Code, recorder.Body.String())
+	}
+	var result struct {
+		Token string
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode login: %v", err)
+	}
+	pool, err := pgxpool.New(context.Background(),
+		strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")))
+	if err != nil {
+		t.Fatalf("connect to read session expiry: %v", err)
+	}
+	defer pool.Close()
+	var expiresAt time.Time
+	if err := pool.QueryRow(context.Background(),
+		`SELECT expires_at FROM "`+strings.ReplaceAll(schema, `"`, `""`)+`".sessions WHERE token_hash = $1`,
+		auth.HashSessionToken(result.Token)).Scan(&expiresAt); err != nil {
+		t.Fatalf("read session expiry: %v", err)
+	}
+	return expiresAt
+}
+
+// TestLoginRememberSelectsTheSessionLifetime pins the wire: the remember
+// field picks the remembered lifetime, and its absence — the payload every
+// older client sends — keeps the standard one.
+func TestLoginRememberSelectsTheSessionLifetime(t *testing.T) {
+	server, _, _ := adminTestSetup(t, "vera_api_login_remember")
+	const email = "api-admin@example.com"
+
+	for _, tc := range []struct {
+		name string
+		body string
+		want time.Duration
+	}{
+		// The values are written out, not the auth package's constants:
+		// the assertion is about what a client can expect on the wire.
+		{"absent remember field keeps the standard lifetime",
+			`{"email":"` + email + `","password":"test-password"}`, 8 * time.Hour},
+		{"remember false keeps the standard lifetime",
+			`{"email":"` + email + `","password":"test-password","remember":false}`, 8 * time.Hour},
+		{"remember true buys the remembered lifetime",
+			`{"email":"` + email + `","password":"test-password","remember":true}`, 30 * 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expiresAt := sessionExpiryAfterLogin(t, server, "vera_api_login_remember", tc.body)
+			// The server signs it at issuance with the real clock, so the
+			// lifetime is checked as the span between now and the expiry.
+			got := expiresAt.Sub(time.Now())
+			const tolerance = 2 * time.Minute
+			if got < tc.want-tolerance || got > tc.want+tolerance {
+				t.Errorf("session lives %s; want %s (±%s): expires_at %s",
+					got.Round(time.Second), tc.want, tolerance, expiresAt.Format(time.RFC3339))
+			}
+		})
 	}
 }
 

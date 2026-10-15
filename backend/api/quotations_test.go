@@ -43,7 +43,7 @@ func testQuotationServer(t *testing.T, schema string) (*Server, string) {
 	server := NewServer(database, service, templates)
 	seedQuotationClient(t, database, 2, "Test Customer")
 
-	token, _, err := service.Login(ctx, "api-quote@example.com", "test-password")
+	token, _, err := service.Login(ctx, "api-quote@example.com", "test-password", false)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -409,7 +409,7 @@ func staffLogin(t *testing.T, server *Server, schema string) string {
 		t.Fatalf("create staff: %v", err)
 	}
 	service := auth.NewService(database)
-	token, _, err := service.Login(ctx, "api-staff@example.com", "staff-password")
+	token, _, err := service.Login(ctx, "api-staff@example.com", "staff-password", false)
 	if err != nil {
 		t.Fatalf("staff login: %v", err)
 	}

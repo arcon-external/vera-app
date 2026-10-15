@@ -22,7 +22,7 @@ func emailStaff(t *testing.T, server *Server, database *store.Store, email strin
 		t.Fatalf("seed staff: %v", err)
 	}
 	service := auth.NewService(database)
-	token, _, err := service.Login(context.Background(), email, "staff-password")
+	token, _, err := service.Login(context.Background(), email, "staff-password", false)
 	if err != nil {
 		t.Fatalf("staff login: %v", err)
 	}
@@ -43,10 +43,10 @@ func TestAdminSetsUserEmailDirectly(t *testing.T) {
 	}
 	// Old address is dead, new address logs in.
 	service := auth.NewService(database)
-	if _, _, err := service.Login(context.Background(), "email-target@example.com", "staff-password"); err == nil {
+	if _, _, err := service.Login(context.Background(), "email-target@example.com", "staff-password", false); err == nil {
 		t.Error("login with old email succeeded; want failure")
 	}
-	if _, _, err := service.Login(context.Background(), "email-renamed@example.com", "staff-password"); err != nil {
+	if _, _, err := service.Login(context.Background(), "email-renamed@example.com", "staff-password", false); err != nil {
 		t.Errorf("login with new email failed: %v", err)
 	}
 
@@ -123,10 +123,10 @@ func TestStaffEmailChangeRequestFlow(t *testing.T) {
 		t.Errorf("status = %v; want approved", decided["status"])
 	}
 	service := auth.NewService(database)
-	if _, _, err := service.Login(context.Background(), "email-staff@example.com", "staff-password"); err == nil {
+	if _, _, err := service.Login(context.Background(), "email-staff@example.com", "staff-password", false); err == nil {
 		t.Error("login with old email succeeded after approval; want failure")
 	}
-	if _, _, err := service.Login(context.Background(), "email-proposed@example.com", "staff-password"); err != nil {
+	if _, _, err := service.Login(context.Background(), "email-proposed@example.com", "staff-password", false); err != nil {
 		t.Errorf("login with approved email failed: %v", err)
 	}
 	// Re-deciding is a 404 (already-decided maps there, like deletions).
@@ -153,7 +153,7 @@ func TestStaffEmailChangeReject(t *testing.T) {
 		t.Errorf("status = %v; want rejected", decided["status"])
 	}
 	service := auth.NewService(database)
-	if _, _, err := service.Login(context.Background(), "email-reject@example.com", "staff-password"); err != nil {
+	if _, _, err := service.Login(context.Background(), "email-reject@example.com", "staff-password", false); err != nil {
 		t.Errorf("original login broken by reject: %v", err)
 	}
 }

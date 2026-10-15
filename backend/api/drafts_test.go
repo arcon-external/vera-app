@@ -31,7 +31,7 @@ func draftTestServer(t *testing.T, schema string) (*Server, string, string, *sto
 	}
 	// An admin on purpose: the point is that the role buys no reach here.
 	intruderToken, _, err := auth.NewService(database).Login(context.Background(),
-		"draft-intruder@example.com", "draft-intruder-password")
+		"draft-intruder@example.com", "draft-intruder-password", false)
 	if err != nil {
 		t.Fatalf("intruder login: %v", err)
 	}
