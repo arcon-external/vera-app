@@ -50,8 +50,16 @@ func toAuthUserDTO(user serverUser) AuthUserDTO {
 	}
 }
 
-// Login signs in with email and password and remembers the session.
-func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
+// Login signs in with email and password.
+//
+// remember asks the server for a 30-day session instead of the 8-hour one
+// and persists the token in the OS keychain, so the session survives a
+// restart. Without it the token lives in this process only — and any token
+// an earlier remembered sign-in left in the keychain is deleted right here,
+// or the next launch restores that stale 30-day session through
+// SessionToken's keychain fallback: "keep me signed in" unchecked would
+// still leave the machine signed in, on a token this sign-in never issued.
+func (a *AuthAPI) Login(email, password string, remember bool) (AuthUserDTO, error) {
 	client, err := api()
 	if err != nil {
 		return AuthUserDTO{}, err
@@ -60,16 +68,24 @@ func (a *AuthAPI) Login(email, password string) (AuthUserDTO, error) {
 		Token string     `json:"token"`
 		User  serverUser `json:"user"`
 	}
-	if err := client.Post("/v1/auth/login", map[string]string{
+	if err := client.Post("/v1/auth/login", map[string]any{
 		"email":    email,
 		"password": password,
+		"remember": remember,
 	}, &response); err != nil {
 		return AuthUserDTO{}, err
 	}
 	if response.Token == "" {
 		return AuthUserDTO{}, fmt.Errorf("sign in failed")
 	}
-	if err := SetSessionToken(response.Token); err != nil {
+	if remember {
+		if err := SetSessionToken(response.Token); err != nil {
+			return AuthUserDTO{}, err
+		}
+		return toAuthUserDTO(response.User), nil
+	}
+	setSessionTokenMemory(response.Token)
+	if err := forgetKeyringToken(); err != nil {
 		return AuthUserDTO{}, err
 	}
 	return toAuthUserDTO(response.User), nil

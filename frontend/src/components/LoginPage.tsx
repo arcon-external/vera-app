@@ -14,6 +14,53 @@ export interface SignedInUser {
   AvatarURL?: string;
 }
 
+/** What the sign-in submit needs: the Login binding and the three state
+ *  transitions the form's lifecycle owns. */
+export interface SignInDeps {
+  login: (email: string, password: string, remember: boolean) => Promise<SignedInUser>;
+  onSignedIn: (user: SignedInUser) => void;
+  setBusy: (busy: boolean) => void;
+  setError: (message: string) => void;
+}
+
+/** The component's deps, with the real Login binding wired in — the one
+ *  place the page calls it. Exported so the wiring is pinned rather than
+ *  assumed: LoginPage.test.tsx mocks the binding and asserts this object
+ *  carries it, which is what proves the third argument crosses to the Go
+ *  method in the order it takes it. */
+export function signInDeps(deps: {
+  onSignedIn: (user: SignedInUser) => void;
+  setBusy: (busy: boolean) => void;
+  setError: (message: string) => void;
+}): SignInDeps {
+  return {
+    login: Login,
+    ...deps,
+  };
+}
+
+/** The sign-in form's submit, extracted from the component so a test can
+ *  drive it without a DOM (the house pattern — SettingsPage's saves and
+ *  companySaves.ts; there are no DOM tests in this repo). The remember flag
+ *  is the checkbox state, and it rides along as Login's third argument:
+ *  false is the 8-hour, memory-only session; true asks the server for the
+ *  30-day one, which the Go side then writes to the OS keychain. */
+export async function submitSignIn(
+  state: { busy: boolean; email: string; password: string; remember: boolean },
+  deps: SignInDeps
+): Promise<void> {
+  if (state.busy) return;
+  deps.setBusy(true);
+  deps.setError("");
+  try {
+    deps.onSignedIn(await deps.login(state.email.trim(), state.password, state.remember));
+  } catch (err: unknown) {
+    deps.setError(typeof err === "string" ? err : "We couldn't sign you in. Try again.");
+  } finally {
+    deps.setBusy(false);
+  }
+}
+
 const inputClass =
   "w-full rounded-md border border-rule bg-white px-3 py-2.5 text-body text-ink-900 outline-hidden transition placeholder:text-ink-300 hover:border-ink-300 focus:border-accent-400 focus:ring-2 focus:ring-accent-500/20";
 
@@ -216,6 +263,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
   const [confirmPassword, setConfirmPassword] = useState("");
   const [activatedEmail, setActivatedEmail] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [remember, setRemember] = useState(false);
   const [updateNotice, setUpdateNotice] = useState<LoginUpdateNoticeProps | null>(null);
 
   // One check per mount, fire-and-forget: the form never awaits it and a
@@ -234,17 +282,10 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const user = (await Login(email.trim(), password)) as SignedInUser;
-      onSignedIn(user);
-    } catch (err: unknown) {
-      setError(typeof err === "string" ? err : "We couldn't sign you in. Try again.");
-    } finally {
-      setBusy(false);
-    }
+    await submitSignIn(
+      { busy, email, password, remember },
+      signInDeps({ onSignedIn, setBusy, setError })
+    );
   };
 
   const switchMode = (next: "signin" | "setup") => {
@@ -366,6 +407,29 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
               {capsOn ? (
                 <span className="text-caption text-ink-500">Caps Lock is on.</span>
               ) : null}
+            </label>
+            {/* The remember-me choice (issue #434). Unchecked by default: a
+                shared machine stays on the 8-hour session unless someone
+                asks for the 30-day one out loud. The Go side keeps that
+                choice — memory only when unchecked, the OS keychain when
+                checked — so this box is the whole decision. Sign-in mode
+                only; activation and password reset sign nobody in. */}
+            <label className="flex items-start gap-2.5">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => setRemember(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded-sm border-rule accent-accent-600"
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-caption font-medium text-ink-600">
+                  Keep me signed in on this device
+                </span>
+                <span className="text-caption text-ink-500">
+                  Stays signed in for 30 days. On a shared device, leave this
+                  unchecked.
+                </span>
+              </span>
             </label>
             <Button type="submit" variant="dark" disabled={busy} className="mt-1 w-full">
               {busy ? "Signing in…" : "Sign in"}

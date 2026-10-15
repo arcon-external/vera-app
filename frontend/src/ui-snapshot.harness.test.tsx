@@ -28,7 +28,7 @@ import { CompanyPortalTab } from "./components/CompanyPortalTab";
 import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
-import { LoginUpdateNotice } from "./components/LoginPage";
+import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -328,6 +328,22 @@ const CASES: SnapshotCase[] = [
         required
       />
     ),
+  },
+  {
+    // The assembled sign-in page (issue #434): the logo, the form, and the
+    // keep-me-signed-in checkbox in its default unchecked state, so the
+    // whole surface finally has render evidence at both widths — the
+    // checkbox sits between the password field and the submit button, and
+    // its helper copy is the longest sentence in the narrow 360 column.
+    //
+    // What this case cannot show, stated so it is not assumed: the update
+    // notice never appears here, because the mount effect that resolves it
+    // runs in the browser only and renderToString runs no effects — this is
+    // the page as a staff member sees it when the update check is silent
+    // (up to date, or unreachable). The notice itself is the two cases
+    // above. Checking the box, typing, and submitting stay hand-driven.
+    name: "LoginPage",
+    element: <LoginPage onSignedIn={() => undefined} />,
   },
 ];
 
