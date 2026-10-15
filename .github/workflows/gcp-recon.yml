@@ -1,0 +1,187 @@
+name: Cloud Run recon
+
+# Read-only recon of vera-api, for when the dev box cannot help. During the
+# 2026-10-15 incident no machine at hand had gcloud credentials (gcloud auth
+# list showed none, and Application Default Credentials were unset), so recon
+# stopped at "the API answers from here". This workflow authenticates with the
+# same WIF secrets the announce job in desktop.yml already uses and runs a
+# fixed menu of reads -- describe, revisions, logs -- from anywhere, via the
+# Actions UI or `gh workflow run gcp-recon.yml -f command=all`.
+#
+# It is deliberately not a remote shell. The inputs only select between three
+# literal gcloud invocations, and nothing here writes: no run update, no
+# deploy, no `gcloud services`, no IAM. Raising min-instances is #437's ops
+# step, scoped and explicit on its own, not a branch of this menu.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Which read to run. 'all' runs the three in order.
+        required: true
+        default: all
+        type: choice
+        options:
+          - describe
+          - revisions
+          - logs
+          - all
+      freshness:
+        description: How far back `logs` looks, e.g. 2d, 6h, 30m -- a number then s, m, h or d.
+        required: false
+        default: "2d"
+        type: string
+      limit:
+        description: Maximum log entries `logs` reads (1-1000).
+        required: false
+        default: 100
+        type: number
+
+jobs:
+  recon:
+    name: Read-only recon
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same least privilege as the announce job: mint a WIF token, read the
+    # repository. The contents grant stays even though nothing checks out --
+    # tight and unused beats implied write permission a future edit grows.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check the WIF credentials are configured
+        env:
+          GCP_WIF_PROVIDER: ${{ secrets.GCP_WIF_PROVIDER }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        run: |
+          # Fails here rather than letting the auth action report an empty
+          # provider URL later -- the same loud failure the announce job makes
+          # when a release cannot be announced.
+          for secret in GCP_WIF_PROVIDER GCP_SERVICE_ACCOUNT; do
+            if [ -z "${!secret}" ]; then
+              echo "::error::$secret is not set, so recon cannot authenticate. The reads are read-only, but they still need a credential."
+              echo "See docs/api-deploy.md for the one-time WIF setup."
+              exit 1
+            fi
+          done
+
+      # Copied verbatim from the announce job in desktop.yml (lines 368-373):
+      # same provider secret, same service account secret, same action version.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Validate the inputs
+        env:
+          VERA_COMMAND: ${{ inputs.command }}
+          VERA_FRESHNESS: ${{ inputs.freshness }}
+          VERA_LIMIT: ${{ inputs.limit }}
+        run: |
+          set -euo pipefail
+          # The inputs arrive here as environment variables, never interpolated
+          # into this script: ${{ }} expansion happens before the shell starts
+          # and quoting does not stop it, so a pattern check is only worth
+          # something on a value the shell itself received. What passes is
+          # re-exported through $GITHUB_ENV, so the next step reads values this
+          # step has already checked and nothing else.
+          case "$VERA_COMMAND" in
+            describe|revisions|logs|all) ;;
+            *)
+              echo "unknown command: $VERA_COMMAND"
+              exit 1
+              ;;
+          esac
+          if ! [[ "$VERA_FRESHNESS" =~ ^[0-9]+[smhd]$ ]]; then
+            echo "::error::freshness must be a number followed by one of s, m, h or d -- got '$VERA_FRESHNESS'"
+            exit 1
+          fi
+          if ! [[ "$VERA_LIMIT" =~ ^[0-9]+$ ]]; then
+            echo "::error::limit must be a whole number -- got '$VERA_LIMIT'"
+            exit 1
+          fi
+          if [ "$VERA_LIMIT" -lt 1 ] || [ "$VERA_LIMIT" -gt 1000 ]; then
+            echo "::error::limit must be between 1 and 1000 -- got '$VERA_LIMIT'"
+            exit 1
+          fi
+          {
+            echo "VERA_RECON_COMMAND=$VERA_COMMAND"
+            echo "VERA_RECON_FRESHNESS=$VERA_FRESHNESS"
+            echo "VERA_RECON_LIMIT=$VERA_LIMIT"
+          } >> "$GITHUB_ENV"
+
+      - name: Run the read-only recon menu
+        run: |
+          set -euo pipefail
+          # Reads only what the validate step exported. If a future edit drops
+          # that step, this fails here rather than running off a raw input.
+          : "${VERA_RECON_COMMAND:?the validate step did not export it}"
+          : "${VERA_RECON_FRESHNESS:?the validate step did not export it}"
+          : "${VERA_RECON_LIMIT:?the validate step did not export it}"
+
+          project=vera-app-508411
+          region=asia-southeast1
+          service=vera-api
+          # Falls back to /dev/null so this same script can be exercised by
+          # hand outside a run.
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+          vera_status=0
+
+          note() { printf '%s\n' "$*" | tee -a "$summary"; }
+
+          # Title, the command as run, then its output -- to the step log and
+          # to the run summary. A failing read is recorded and carried to the
+          # end rather than aborting the menu: recon that stopped at the first
+          # error is recon that hid the evidence it was dispatched for.
+          recon() {
+            local title="$1"; shift
+            note "### $title"
+            note '```text'
+            note "\$ $*"
+            if ! "$@" 2>&1 | tee -a "$summary"; then
+              echo "::error::$* failed -- see the output above"
+              vera_status=1
+            fi
+            note '```'
+            note ""
+          }
+
+          # The whole menu, one place. Every branch is a literal gcloud call
+          # with fixed arguments; the only values that vary are the validated
+          # limit and freshness, and each arrives as a single argument.
+          menu() {
+            case "$1" in
+              describe)
+                recon 'Service configuration' \
+                  gcloud run services describe "$service" --region="$region" --project="$project"
+                ;;
+              revisions)
+                recon 'Revision history' \
+                  gcloud run revisions list --service="$service" --region="$region" --project="$project"
+                ;;
+              logs)
+                recon 'Recent logs' \
+                  gcloud logging read \
+                    'resource.type=cloud_run_revision AND resource.labels.service_name=vera-api' \
+                    --limit="$VERA_RECON_LIMIT" --freshness="$VERA_RECON_FRESHNESS" \
+                    --project="$project"
+                ;;
+              *)
+                echo "unknown command: $1"
+                exit 1
+                ;;
+            esac
+          }
+
+          case "$VERA_RECON_COMMAND" in
+            all)
+              for vera_command in describe revisions logs; do
+                menu "$vera_command"
+              done
+              ;;
+            *)
+              menu "$VERA_RECON_COMMAND"
+              ;;
+          esac
+
+          exit "$vera_status"
