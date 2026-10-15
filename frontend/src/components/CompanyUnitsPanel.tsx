@@ -32,7 +32,7 @@ import { Badge, Button, Card, SaveRow, SectionHeading, type SaveState, fieldClas
 // a background image is parsed in image mode, which has no HTML parser to
 // imply the SVG namespace — without the attribute Chrome paints nothing at all,
 // silently (verified in the ui-snapshot container: the same SVG with and
-// without it). ItemEditor's copy of this idiom is missing it; see the report.
+// without it). ItemEditor's copy now carries it too (#430).
 const canonicalChevronStyle = {
   backgroundImage:
     "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767469' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
