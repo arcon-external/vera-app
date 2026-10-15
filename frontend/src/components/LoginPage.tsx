@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Login, RedeemInvite } from "@backend/backend/AuthAPI";
+import { CheckForUpdates } from "@backend/backend/UpdateAPI";
+import { backend } from "@backend/models";
+import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { Button, Card, StatusBanner } from "./ui";
 import { VeraLogo } from "./VeraLogo";
 
@@ -101,6 +104,84 @@ function EyeIcon({ off }: { off: boolean }) {
   );
 }
 
+export interface LoginUpdateNoticeProps {
+  current: string;
+  latest: string;
+  downloadURL: string;
+  notesURL: string;
+}
+
+// UpdateBanner's rule, verbatim: the installer the server names for this
+// platform, the release notes otherwise. An unknown platform gets no URL, so
+// the button points at the notes instead of a wrong binary.
+export function updateLinkTarget(downloadURL: string, notesURL: string): string {
+  return downloadURL || notesURL;
+}
+
+// What the login page shows for a resolved check, or null when nothing may
+// appear: up to date means silent. Pure so the three states are pinned
+// without a DOM (the mount effect never runs under renderToString).
+export function loginUpdateNotice(
+  info: backend.UpdateInfo
+): LoginUpdateNoticeProps | null {
+  if (!info.UpdateAvailable) return null;
+  return {
+    current: info.Current,
+    latest: info.Latest,
+    downloadURL: info.DownloadURL,
+    notesURL: info.NotesURL,
+  };
+}
+
+// The mount check: fire-and-forget, and silent on every failure. A staff
+// member locked out by a rollout must be able to sign in and see the fix, so
+// the login screen must never show an error because the update check could
+// not run, and nothing here may block or delay the form — a rejection
+// resolves to null, the same as "no update".
+export async function fetchLoginUpdateNotice(
+  checkForUpdates: () => Promise<backend.UpdateInfo>
+): Promise<LoginUpdateNoticeProps | null> {
+  try {
+    return loginUpdateNotice(await checkForUpdates());
+  } catch {
+    return null;
+  }
+}
+
+// The sign-in page's update surface, above the form card. Never blocking and
+// never an error: the version you are on, the version that fixes it, one
+// action to fetch it. Pure markup — no effects — so the snapshot harness can
+// render it and the failure paths stay invisible.
+export function LoginUpdateNotice({
+  current,
+  latest,
+  downloadURL,
+  notesURL,
+}: LoginUpdateNoticeProps) {
+  const target = updateLinkTarget(downloadURL, notesURL);
+  const openDownload = () => {
+    try {
+      if (target) BrowserOpenURL(target);
+    } catch {
+      // Opening the browser must never break sign-in.
+    }
+  };
+  return (
+    <div className="mb-6" role="status">
+      <StatusBanner tone="info">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span>
+            Vera v{latest} is available — you're on v{current}.
+          </span>
+          <Button variant="primary" size="sm" onClick={openDownload}>
+            {downloadURL ? "Download update" : "See what's new"}
+          </Button>
+        </span>
+      </StatusBanner>
+    </div>
+  );
+}
+
 export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => void }) {
   const [mode, setMode] = useState<"signin" | "setup">("signin");
   const [email, setEmail] = useState("");
@@ -114,6 +195,21 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
   const [confirmPassword, setConfirmPassword] = useState("");
   const [activatedEmail, setActivatedEmail] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [updateNotice, setUpdateNotice] = useState<LoginUpdateNoticeProps | null>(null);
+
+  // One check per mount, fire-and-forget: the form never awaits it and a
+  // failure resolves to null, so a broken or unreachable update service
+  // cannot delay, block, or put an error on the sign-in screen. The guard
+  // drops the answer when the user signs in before it lands.
+  useEffect(() => {
+    let live = true;
+    void fetchLoginUpdateNotice(CheckForUpdates).then((notice) => {
+      if (live) setUpdateNotice(notice);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -201,6 +297,9 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
             Quotation Generator · PT Arcon Penta Persada
           </p>
         </div>
+        {mode === "signin" && updateNotice !== null ? (
+          <LoginUpdateNotice {...updateNotice} />
+        ) : null}
         <Card className="p-6">
           {mode === "signin" ? (
           <form onSubmit={submit} className="flex flex-col gap-4">
