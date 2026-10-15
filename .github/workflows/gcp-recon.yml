@@ -12,6 +12,11 @@ name: Cloud Run recon
 # literal gcloud invocations, and nothing here writes: no run update, no
 # deploy, no `gcloud services`, no IAM. Raising min-instances is #437's ops
 # step, scoped and explicit on its own, not a branch of this menu.
+#
+# Editor's note: GitHub evaluates double-brace expressions everywhere in this
+# file, comments included -- an empty one fails the entire workflow at
+# dispatch (found by the first live dispatch, 2026-10-15). Never write one
+# literally; say "expression expansion" in prose instead.
 on:
   workflow_dispatch:
     inputs:
@@ -80,8 +85,8 @@ jobs:
         run: |
           set -euo pipefail
           # The inputs arrive here as environment variables, never interpolated
-          # into this script: ${{ }} expansion happens before the shell starts
-          # and quoting does not stop it, so a pattern check is only worth
+          # into this script: expression expansion happens before the shell
+          # starts and quoting does not stop it, so a pattern check is only worth
           # something on a value the shell itself received. What passes is
           # re-exported through $GITHUB_ENV, so the next step reads values this
           # step has already checked and nothing else.
