@@ -28,6 +28,7 @@ import { CompanyPortalTab } from "./components/CompanyPortalTab";
 import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
+import { LoginUpdateNotice } from "./components/LoginPage";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -290,6 +291,23 @@ const CASES: SnapshotCase[] = [
         onSave={() => undefined}
         onFieldBlur={() => undefined}
         onFieldEnter={() => undefined}
+      />
+    ),
+  },
+  {
+    // The sign-in page's update notice (issue #436): the only surface a staff
+    // member locked out by a rollout has to find the fix. Fixed props in the
+    // shape CheckForUpdates answers — 0.12.1 running, 0.13.1 available, the
+    // windows installer resolved by the Go side — so the 360 render shows the
+    // copy wrapping beside the Download button inside the narrowest column it
+    // ever sits in. Pure markup: no effect runs, which is the point.
+    name: "LoginUpdateNotice",
+    element: (
+      <LoginUpdateNotice
+        current="0.12.1"
+        latest="0.13.1"
+        downloadURL="https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe"
+        notesURL="https://api.arconpentapersada.co.id/v1/app/changelog"
       />
     ),
   },
