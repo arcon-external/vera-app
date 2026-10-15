@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -147,27 +148,63 @@ func (s *Server) restoreBackup(context echo.Context) error {
 			"error": fmt.Sprintf("verify after restore: %v (safety snapshot: %s; restore output: %s)", err, snapshotRef, restoreWarnings),
 		})
 	}
+	// A restored dump resurrects the sessions captured inside it: tokens
+	// that were live when the backup was taken validate against the
+	// restored rows, and nothing in pg_restore revokes them. The restore
+	// UI promises everyone is signed out, so every session of every
+	// restored user dies here, before the response claims success.
+	var sessionWarning string
+	if err := s.revokeRestoredSessions(requestCtx); err != nil {
+		// The data is already back; failing the request would misreport a
+		// successful restore. But sign-everyone-out is the promise, so a
+		// revocation that failed has to be visible rather than silent.
+		sessionWarning = fmt.Sprintf("restore succeeded but sessions could not all be revoked: %v", err)
+	}
 
 	actorID := me.ID
 	details := fmt.Sprintf("safety snapshot %s; quotations=%d revisions=%d", snapshotRef, quotations, revisions)
 	if restoreWarnings != "" {
 		details += "; restore warnings: " + restoreWarnings
 	}
+	if sessionWarning != "" {
+		details += "; " + sessionWarning
+	}
+	auditWarning := ""
 	if err := s.database.Audit(requestCtx, &actorID, "backup.restore", nil, details); err != nil {
 		// The restore itself succeeded; a missing audit entry must not
 		// masquerade as a restore failure, but it must be visible.
-		return context.JSON(http.StatusOK, withRestoreWarnings(map[string]any{
-			"safetySnapshot": snapshotRef,
-			"quotations":     quotations,
-			"revisions":      revisions,
-			"auditWarning":   "restore succeeded but the audit entry could not be written",
-		}, restoreWarnings))
+		auditWarning = "restore succeeded but the audit entry could not be written"
 	}
-	return context.JSON(http.StatusOK, withRestoreWarnings(map[string]any{
+	response := map[string]any{
 		"safetySnapshot": snapshotRef,
 		"quotations":     quotations,
 		"revisions":      revisions,
-	}, restoreWarnings))
+	}
+	if auditWarning != "" {
+		response["auditWarning"] = auditWarning
+	}
+	if sessionWarning != "" {
+		response["sessionWarning"] = sessionWarning
+	}
+	return context.JSON(http.StatusOK, withRestoreWarnings(response, restoreWarnings))
+}
+
+// revokeRestoredSessions signs out every user the restored dump brought
+// back. It composes ListUsers + RevokeUserSessions rather than adding a
+// store method: every session row's user_id references a user, and the
+// users table is exactly what pg_restore recreated, so the pair covers
+// every session there is.
+func (s *Server) revokeRestoredSessions(ctx context.Context) error {
+	users, err := s.database.ListUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("list users: %w", err)
+	}
+	for _, user := range users {
+		if err := s.database.RevokeUserSessions(ctx, user.ID); err != nil {
+			return fmt.Errorf("revoke sessions for user %d: %w", user.ID, err)
+		}
+	}
+	return nil
 }
 
 // withRestoreWarnings attaches the capped pg_restore output to a success

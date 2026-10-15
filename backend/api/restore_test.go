@@ -230,6 +230,44 @@ func TestRestoreHappyPathRollsBackMarkerRow(t *testing.T) {
 	}
 }
 
+// TestRestoreRevokesTheSessionsTheDumpBroughtBack pins the promise the
+// restore UI makes: "everyone has been signed out". A dump carries the
+// sessions that were live when it was taken, so without an explicit
+// revocation the restored database honors tokens the server can no longer
+// account for — and a remembered one lives a month.
+func TestRestoreRevokesTheSessionsTheDumpBroughtBack(t *testing.T) {
+	requireBinaries(t)
+	server, database, token := adminTestSetup(t, "vera_api_restore_sessions")
+	backupDir := t.TempDir()
+	server.SetBackupDir(backupDir)
+	server.SetDSN(database.DSN())
+
+	// A genuine dump of the current test database, with the admin session
+	// from adminTestSetup inside it: a restore resurrects that row.
+	dumpPath := filepath.Join(t.TempDir(), "source.dump")
+	if out, err := exec.Command(pgDumpBin, "-Fc", "-f", dumpPath, "-d", database.DSN()).CombinedOutput(); err != nil {
+		t.Fatalf("pg_dump source: %v (%s)", err, firstLine(out))
+	}
+	dumpBytes, err := os.ReadFile(dumpPath)
+	if err != nil {
+		t.Fatalf("read source dump: %v", err)
+	}
+
+	body, contentType := multipartDump(t, "dump", "restore.dump", dumpBytes)
+	code, response := postRestore(t, server, token, body, contentType)
+	if code != http.StatusOK {
+		t.Fatalf("restore = %d; want 200 (%v)", code, response["error"])
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/v1/auth/me", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("GET /v1/auth/me after restore = %d; want 401 (the session the dump restored must be revoked)", recorder.Code)
+	}
+}
+
 // fakeBackupSink records snapshot uploads in memory, optionally failing.
 type fakeBackupSink struct {
 	files map[string][]byte

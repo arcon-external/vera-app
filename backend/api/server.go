@@ -197,6 +197,10 @@ func (s *Server) healthz(context echo.Context) error {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// Remember asks for a SessionLifetimeRemembered session instead of a
+	// standard one. The field is absent in every older client's payload,
+	// which decodes as false — they keep the 8-hour session.
+	Remember bool `json:"remember"`
 }
 
 // loginAttemptsPerMinute is deliberately generous.
@@ -229,7 +233,7 @@ func (s *Server) login(context echo.Context) error {
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	token, user, err := s.service.Login(context.Request().Context(), request.Email, request.Password)
+	token, user, err := s.service.Login(context.Request().Context(), request.Email, request.Password, request.Remember)
 	if err != nil {
 		return context.JSON(http.StatusUnauthorized, map[string]string{"error": err.Error()})
 	}

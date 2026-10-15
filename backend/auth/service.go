@@ -52,8 +52,10 @@ func (s *Service) Bootstrap(ctx context.Context, email, displayName, password st
 }
 
 // Login verifies credentials and issues a session token. Failures return a
-// generic error that does not reveal whether the email exists.
-func (s *Service) Login(ctx context.Context, email, password string) (string, store.AuthUser, error) {
+// generic error that does not reveal whether the email exists. A remembered
+// session lasts SessionLifetimeRemembered; every other one lasts
+// SessionLifetimeStandard, which is what a client that omits the flag gets.
+func (s *Service) Login(ctx context.Context, email, password string, remember bool) (string, store.AuthUser, error) {
 	now := s.now()
 	key := strings.ToLower(strings.TrimSpace(email))
 	if s.limiter.Blocked(key, now) {
@@ -79,7 +81,13 @@ func (s *Service) Login(ctx context.Context, email, password string) (string, st
 	if err != nil {
 		return "", store.AuthUser{}, err
 	}
-	if err := s.store.CreateSession(ctx, user.ID, tokenHash, now.Add(IdleTimeout)); err != nil {
+	// The lifetime is fixed at issuance and never extended, so a remembered
+	// session is a calendar month and a standard one a working day.
+	lifetime := SessionLifetimeStandard
+	if remember {
+		lifetime = SessionLifetimeRemembered
+	}
+	if err := s.store.CreateSession(ctx, user.ID, tokenHash, now.Add(lifetime)); err != nil {
 		return "", store.AuthUser{}, err
 	}
 	if err := s.store.TouchLogin(ctx, user.ID, now); err != nil {
@@ -132,7 +140,7 @@ func (s *Service) setStaticForTest(user store.AuthUser, err error) {
 // LoginAndRemember logs in and makes the session the active one for this
 // single-user desktop instance, persisting the token in the OS keychain.
 func (s *Service) LoginAndRemember(ctx context.Context, email, password string) (store.AuthUser, error) {
-	token, user, err := s.Login(ctx, email, password)
+	token, user, err := s.Login(ctx, email, password, true)
 	if err != nil {
 		return store.AuthUser{}, err
 	}
