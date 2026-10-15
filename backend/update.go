@@ -27,6 +27,23 @@ type serverRelease struct {
 	NotesURL     string            `json:"notesUrl"`
 }
 
+// ServerRelease is the release contract under its exported name, so a reader
+// outside this package -- the CLI's `updates check` -- decodes the release
+// with the same struct the desktop does. An alias rather than a second
+// definition: the contract lives in one place, and a field or json tag
+// renamed here breaks every reader at once instead of leaving the CLI
+// quietly parsing a shape the server no longer serves.
+type ServerRelease = serverRelease
+
+// FetchServerRelease reads one endpoint of the release contract: the status
+// check, the decode and the error wording of fetchServerRelease, under the
+// exported name the CLI shares with the desktop's update check and its
+// static-manifest fallback. It exists so no caller outside this package ever
+// needs its own struct to read a release.
+func FetchServerRelease(client *http.Client, endpoint string) (ServerRelease, error) {
+	return fetchServerRelease(client, endpoint)
+}
+
 // updateHTTPClient times out fast: version checks must never hang startup.
 var updateHTTPClient = &http.Client{Timeout: 15 * time.Second}
 
