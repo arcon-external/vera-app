@@ -915,6 +915,8 @@ one in logs.
   (The repo has been public since 2026-10-12, so the old private-repo reason
   no longer applies.) Mirror new installers there at release time; the backups
   bucket stays private.
+- Cloud Run recon (describe/revisions/logs, read-only) runs via the `gcp-recon`
+  workflow dispatch — no local gcloud needed; it authenticates over WIF.
 
 ## 18. Cursor / Copilot Rules Status
 
