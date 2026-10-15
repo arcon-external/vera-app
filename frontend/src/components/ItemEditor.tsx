@@ -571,9 +571,14 @@ const subCellClass =
 const miniButtonClass =
   "inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40";
 
+// The xmlns attribute is load-bearing, not decoration: a data-URI SVG used as
+// a background image is parsed in image mode, which has no HTML parser to
+// imply the SVG namespace — without the attribute Chrome paints nothing at
+// all, silently (verified in the ui-snapshot container: the same SVG with
+// and without it). This was the one copy of the idiom that lacked it (#430).
 const uomChevronStyle = {
   backgroundImage:
-    "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767469' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
+    "url(\"data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23767469' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\")",
 } as const;
 
 /**

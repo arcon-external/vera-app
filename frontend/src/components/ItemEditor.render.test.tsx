@@ -66,6 +66,17 @@ function uomSelect(html: string): string {
   return html.slice(selectStart, selectEnd);
 }
 
+/** Returns the decoded background-image data URI out of a markup segment's
+ *  inline style: React SSR escapes both the attribute's double quotes and the
+ *  URI's single quotes as entities, so they are undone before decoding. The
+ *  same helper as the Company panels' chevron pins (#429). */
+function decodedChevron(segment: string): string {
+  const match = segment.match(/background-image:url\((.*?)\)/);
+  expect(match, `expected a background-image url in: ${segment}`).toBeDefined();
+  const escaped = (match as RegExpMatchArray)[1].replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
+  return decodeURIComponent(escaped);
+}
+
 describe("ItemEditor served UoM dropdown", () => {
   it("offers exactly the options it is handed, and selects the stored unit", () => {
     const select = uomSelect(render());
@@ -96,5 +107,58 @@ describe("ItemEditor served UoM dropdown", () => {
     const select = uomSelect(render({ uomOptions: [], uomPendingLabel: "Units unavailable" }));
     expect(select).toContain("Units unavailable");
     expect(select).toContain('disabled=""');
+  });
+});
+
+// Issue #430: the chevron is a data-URI SVG drawn as a CSS background. Parsed
+// in image mode nothing implies the SVG namespace, so without an explicit
+// xmlns the browser paints nothing at all — silently, with no console error —
+// and every select using this idiom loses its arrow. The pin decodes the URI
+// (the same bytes the browser parses, so an escaped or misplaced attribute
+// cannot pass) and asserts the xmlns is present and nothing else moved: only
+// the attribute was added to the broken copy.
+describe("ItemEditor UoM chevron (#430)", () => {
+  const ITEM_WITH_SUBITEM: EditorItem = {
+    ...ITEM,
+    key: 1,
+    description: "Installation",
+    subItems: [
+      {
+        id: 1,
+        description: "Cable tray",
+        qty: "10",
+        uom: "m",
+        unitCost: "5000",
+        marginEnabled: false,
+        marginPercent: "0",
+        discountEnabled: false,
+        discountPercent: "0",
+        bullets: [],
+      },
+    ],
+  };
+
+  it("draws the chevron from an image-mode SVG carrying its xmlns, on every select that uses it", () => {
+    // One plain line, plus one line whose panel is open with a sub-item, so
+    // both UoMSelect call sites — the line row and the sub-item row — are on
+    // the page and both are pinned by the same assertions.
+    const html = render({ items: [ITEM, ITEM_WITH_SUBITEM] });
+    const selects = html.split("<select").slice(1).map((segment) => segment.split("</select>")[0]);
+    expect(selects.length).toBe(2);
+    for (const select of selects) {
+      expect(select).toContain("background-image");
+      expect(select).toContain("data:image/svg+xml");
+      // The decoded URI must carry an svg element that names its namespace:
+      // this is the assertion the broken copy fails.
+      expect(decodedChevron(select)).toContain("<svg xmlns='http://www.w3.org/2000/svg'");
+      // …and byte-for-byte the intended SVG, so nothing else may move with
+      // it: the path, size, position and encoding are pinned by the same
+      // assertion. The only difference from the broken copy is the xmlns.
+      expect(decodedChevron(select)).toContain(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' " +
+          "fill='none' stroke='#767469' stroke-width='2' stroke-linecap='round'>" +
+          "<path d='m6 9 6 6 6-6'/></svg>"
+      );
+    }
   });
 });

@@ -23,6 +23,8 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
+import type { EditorItem } from "./components/ItemEditor";
+import { ItemEditor } from "./components/ItemEditor";
 import { CompanyGeneralPanel } from "./components/CompanyGeneralPanel";
 import { CompanyPortalTab } from "./components/CompanyPortalTab";
 import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
@@ -76,6 +78,54 @@ interface SnapshotCase {
   name: string;
   element: ReactElement;
 }
+
+// The line-item editor fixture (issue #430): the proof surface for the UoM
+// select's background chevron. One plain line (its own UoM select) plus one
+// line whose panel is open with a sub-item, so both UoMSelect call sites — the
+// line row and the sub-item row — are on the page.
+const EDITOR_ITEMS: EditorItem[] = [
+  {
+    key: 0,
+    description: "Widget",
+    bullets: [],
+    qty: "1",
+    uom: "Pc",
+    unitPrice: "1000",
+    marginEnabled: false,
+    marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    subItems: [],
+    showSubPrices: false,
+  },
+  {
+    key: 1,
+    description: "Installation",
+    bullets: [],
+    qty: "1",
+    uom: "Lot",
+    unitPrice: "0",
+    marginEnabled: false,
+    marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    showSubPrices: false,
+    subItems: [
+      {
+        id: 1,
+        description: "Cable tray",
+        qty: "10",
+        uom: "m",
+        unitCost: "5000",
+        marginEnabled: false,
+        marginPercent: "0",
+        discountEnabled: false,
+        discountPercent: "0",
+        bullets: [],
+      },
+    ],
+  },
+];
 
 // The served label set for the Template panel case: the 26 entries in document
 // order, each carrying its built-in default. Two entries are served as a
@@ -344,6 +394,48 @@ const CASES: SnapshotCase[] = [
     // above. Checking the box, typing, and submitting stay hand-driven.
     name: "LoginPage",
     element: <LoginPage onSignedIn={() => undefined} />,
+  },
+  {
+    // The line-item editor (issue #430): the proof surface for the UoM
+    // select's background chevron. The fixture above renders one plain line
+    // and one line with an open sub-item panel, so both UoMSelect call sites
+    // are on the page and the screenshot shows whether the arrow paints —
+    // the defect was a data-URI SVG drawn without its xmlns, which Chrome
+    // paints as nothing at all, silently.
+    //
+    // What this case cannot show, stated so it is not assumed: grid
+    // navigation, paste handling and every other interaction stay
+    // hand-driven — this is the initial render with a representative
+    // fixture and the served unit list resolved.
+    name: "ItemEditor",
+    element: (
+      <ItemEditor
+        items={EDITOR_ITEMS}
+        uomOptions={[
+          { value: "Lot", label: "Lot" },
+          { value: "Pc", label: "Pc" },
+          { value: "m", label: "m" },
+          { value: "m2", label: "m²" },
+        ]}
+        onAddItem={() => undefined}
+        onRemoveItem={() => undefined}
+        onChange={() => undefined}
+        onAddBullet={() => undefined}
+        onRemoveBullet={() => undefined}
+        onBulletChange={() => undefined}
+        onEnableSubItems={() => undefined}
+        onDisableSubItems={() => undefined}
+        onAddSubRow={() => undefined}
+        onRemoveSubRow={() => undefined}
+        onPatchSubRow={() => undefined}
+        onMoveSubRow={() => undefined}
+        onPasteSubRows={() => undefined}
+        onAddSubBullet={() => undefined}
+        onRemoveSubBullet={() => undefined}
+        onSubBulletChange={() => undefined}
+        onPasteItems={() => undefined}
+      />
+    ),
   },
 ];
 
