@@ -4,6 +4,31 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.0] - 2026-10-15
+
+### Added
+
+- **"Keep me signed in" is now a choice at sign-in.** A checkbox on the sign-in
+  form: ticked, the session lasts **30 days** and survives restarts; unticked
+  (the default), it lasts one working day and the app asks again on the next
+  launch — and a previously remembered session is signed out for good rather
+  than quietly restored. Changing a password or restoring a backup signs out
+  every session, so a long-lived session never outlives its owner's control.
+
+- **The sign-in screen now shows when a new version is ready.** If a newer Vera
+  exists, the login page itself says so, with a Download button — because the
+  one moment you cannot open the update screen is the moment sign-in is what
+  is broken. A build below the minimum supported version is stated as such.
+  And when the server is unreachable, the check reads a copy kept outside it,
+  so an outage cannot hide an update.
+
+### Fixed
+
+- **The dropdown arrows in the line-item editor paint again.** The chevron on
+  the unit-of-measure selects was silently invisible (a missing attribute in
+  the arrow image); it is back, with a test that fails if it ever goes missing
+  again.
+
 ## [0.13.1] - 2026-10-15
 
 ### Changed
