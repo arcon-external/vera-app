@@ -109,6 +109,11 @@ export interface LoginUpdateNoticeProps {
   latest: string;
   downloadURL: string;
   notesURL: string;
+  // Required is the Go side's verdict (backend/update.go: the running build is
+  // below the server's minimum supported version), not a version comparison
+  // repeated here. It is the state the login page must never understate: this
+  // is the one surface a staff member locked out by a rollout ever sees.
+  required: boolean;
 }
 
 // UpdateBanner's rule, verbatim: the installer the server names for this
@@ -130,6 +135,7 @@ export function loginUpdateNotice(
     latest: info.Latest,
     downloadURL: info.DownloadURL,
     notesURL: info.NotesURL,
+    required: info.Required,
   };
 }
 
@@ -150,13 +156,17 @@ export async function fetchLoginUpdateNotice(
 
 // The sign-in page's update surface, above the form card. Never blocking and
 // never an error: the version you are on, the version that fixes it, one
-// action to fetch it. Pure markup — no effects — so the snapshot harness can
-// render it and the failure paths stay invisible.
+// action to fetch it. A build below the minimum supported version is the one
+// state that must not read as a suggestion — UpdateBanner's wording and its
+// danger tone are reused verbatim, because the login page is the only surface
+// for the user who cannot sign in at all. Pure markup — no effects — so the
+// snapshot harness can render it and the failure paths stay invisible.
 export function LoginUpdateNotice({
   current,
   latest,
   downloadURL,
   notesURL,
+  required,
 }: LoginUpdateNoticeProps) {
   const target = updateLinkTarget(downloadURL, notesURL);
   const openDownload = () => {
@@ -168,12 +178,23 @@ export function LoginUpdateNotice({
   };
   return (
     <div className="mb-6" role="status">
-      <StatusBanner tone="info">
+      <StatusBanner tone={required ? "danger" : "info"}>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span>
-            Vera v{latest} is available — you're on v{current}.
+            {required ? (
+              <>
+                This Vera (v{current}) is below the minimum supported
+                version. Please update to v{latest} to keep working.
+              </>
+            ) : (
+              <>Vera v{latest} is available — you're on v{current}.</>
+            )}
           </span>
-          <Button variant="primary" size="sm" onClick={openDownload}>
+          <Button
+            variant={required ? "danger" : "primary"}
+            size="sm"
+            onClick={openDownload}
+          >
             {downloadURL ? "Download update" : "See what's new"}
           </Button>
         </span>
