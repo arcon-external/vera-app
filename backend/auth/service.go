@@ -12,14 +12,13 @@ import (
 
 // Service orchestrates authentication over the Postgres store.
 type Service struct {
-	staticErr    error
-	store        *store.Store
-	limiter      *RateLimiter
-	now          func() time.Time
-	staticUser   *store.AuthUser
-	currentToken string
-	mu           sync.Mutex
-	hasStatic    bool
+	staticErr  error
+	store      *store.Store
+	limiter    *RateLimiter
+	now        func() time.Time
+	staticUser *store.AuthUser
+	mu         sync.Mutex
+	hasStatic  bool
 }
 
 func NewService(database *store.Store) *Service {
@@ -137,60 +136,14 @@ func (s *Service) setStaticForTest(user store.AuthUser, err error) {
 	s.hasStatic = true
 }
 
-// LoginAndRemember logs in and makes the session the active one for this
-// single-user desktop instance, persisting the token in the OS keychain.
-func (s *Service) LoginAndRemember(ctx context.Context, email, password string) (store.AuthUser, error) {
-	token, user, err := s.Login(ctx, email, password, true)
-	if err != nil {
-		return store.AuthUser{}, err
-	}
-	s.mu.Lock()
-	s.currentToken = token
-	s.mu.Unlock()
-	if err := SaveSessionToken(token); err != nil {
-		return store.AuthUser{}, err
-	}
-	return user, nil
-}
-
-// Restore validates the keychain-stored session, if any, and makes it active.
-func (s *Service) Restore(ctx context.Context) (store.AuthUser, error) {
-	token, err := LoadSessionToken()
-	if err != nil {
-		return store.AuthUser{}, err
-	}
-	if strings.TrimSpace(token) == "" {
-		return store.AuthUser{}, fmt.Errorf("no saved session")
-	}
-	user, err := s.Validate(ctx, token)
-	if err != nil {
-		_ = DeleteSessionToken()
-		return store.AuthUser{}, err
-	}
-	s.mu.Lock()
-	s.currentToken = token
-	s.mu.Unlock()
-	return user, nil
-}
-
-// LogoutCurrent revokes the active session and clears the keychain.
-func (s *Service) LogoutCurrent(ctx context.Context) error {
-	s.mu.Lock()
-	token := s.currentToken
-	s.currentToken = ""
-	s.mu.Unlock()
-	if strings.TrimSpace(token) != "" {
-		if err := s.Logout(ctx, token); err != nil {
-			return err
-		}
-	}
-	return DeleteSessionToken()
-}
-
-// currentUser resolves the active session to its user.
+// currentUser resolves the injected static user, when one is set. A real
+// session is never resolved here: the desktop resolves it through
+// backend/session.go, and the API server through the request token. So a
+// Service only ever carries the test identity injected by setStaticForTest,
+// and without one the caller is simply not signed in.
 func (s *Service) currentUser(ctx context.Context) (store.AuthUser, error) {
 	s.mu.Lock()
-	hasStatic, staticUser, staticErr, token := s.hasStatic, s.staticUser, s.staticErr, s.currentToken
+	staticUser, staticErr, hasStatic := s.staticUser, s.staticErr, s.hasStatic
 	s.mu.Unlock()
 	if hasStatic {
 		if staticErr != nil {
@@ -201,10 +154,7 @@ func (s *Service) currentUser(ctx context.Context) (store.AuthUser, error) {
 		}
 		return *staticUser, nil
 	}
-	if strings.TrimSpace(token) == "" {
-		return store.AuthUser{}, fmt.Errorf("not signed in")
-	}
-	return s.Validate(ctx, token)
+	return store.AuthUser{}, fmt.Errorf("not signed in")
 }
 
 // RequireUser returns the signed-in user or an error.
