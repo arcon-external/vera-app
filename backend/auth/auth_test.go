@@ -27,6 +27,36 @@ func TestVerifyPasswordUsesStoredParameters(t *testing.T) {
 	}
 }
 
+func TestVerifyPasswordRejectsExcessiveParameters(t *testing.T) {
+	encoded := oldParameterHash("old password")
+	for _, param := range []string{
+		"m=4294967295,t=1,p=4",
+		"m=1048577,t=1,p=4",
+		"m=65536,t=4294967295,p=4",
+		"m=65536,t=17,p=4",
+		"m=65536,t=1,p=17",
+	} {
+		t.Run(param, func(t *testing.T) {
+			bad := strings.Replace(encoded, "m=65536,t=1,p=4", param, 1)
+			_, _, _, _, _, err := decodeHash(bad)
+			if err == nil || !strings.Contains(err.Error(), "unsupported password hash format") {
+				t.Fatalf("decodeHash(%q) error = %v; want unsupported format", param, err)
+			}
+		})
+	}
+}
+
+func TestVerifyPasswordAcceptsLargerForeignParameters(t *testing.T) {
+	const password = "foreign password"
+	salt := []byte("fixed-test-salt!")
+	hash := argon2.IDKey([]byte(password), salt, 3, 128*1024, 4, argonKeyLen)
+	encoded := fmt.Sprintf("$argon2id$v=%d$m=131072,t=3,p=4$%s$%s", argon2.Version,
+		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(hash))
+	if err := VerifyPassword(encoded, password); err != nil {
+		t.Fatalf("foreign hash rejected: %v", err)
+	}
+}
+
 func TestNeedsRehash(t *testing.T) {
 	if !NeedsRehash(oldParameterHash("old password")) {
 		t.Fatal("old Argon2 parameters should require rehash")

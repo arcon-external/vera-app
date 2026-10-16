@@ -216,3 +216,45 @@ func TestEmailWritesNormalizeAndLegacyMigration(t *testing.T) {
 		t.Fatalf("migrated email = %q, %v; want normalized", user.Email, err)
 	}
 }
+
+func TestMigration028SkipsCollidingEmails(t *testing.T) {
+	ctx := context.Background()
+	database := openTestSchema(t, "vera_test_email_collision")
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both legacy spellings are legal under the unique LOWER(email) index.
+	legacy := []struct {
+		email string
+		want  string
+	}{
+		{" a@x.com", " a@x.com"},
+		{"a@x.com", "a@x.com"},
+		{" MiXeD@y.com ", "mixed@y.com"},
+	}
+	ids := make([]int64, len(legacy))
+	for i, row := range legacy {
+		if err := pool.QueryRow(ctx, fmt.Sprintf(`INSERT INTO %s.users (email, display_name, password_hash, role)
+			VALUES ($1, $2, 'test-hash', 'staff') RETURNING id`, database.configSchema()), row.email, fmt.Sprintf("Legacy %d", i)).Scan(&ids[i]); err != nil {
+			t.Fatalf("seed %q: %v", row.email, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`DELETE FROM %s.schema_migrations WHERE version = 28`, database.configSchema())); err != nil {
+		t.Fatalf("mark migration pending: %v", err)
+	}
+	for run := 1; run <= 2; run++ {
+		if err := database.Migrate(ctx); err != nil {
+			t.Fatalf("migration run %d: %v", run, err)
+		}
+	}
+	for i, row := range legacy {
+		var got string
+		if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT email FROM %s.users WHERE id = $1`, database.configSchema()), ids[i]).Scan(&got); err != nil {
+			t.Fatalf("read row %d: %v", i, err)
+		}
+		if got != row.want {
+			t.Errorf("row %d email = %q; want %q", i, got, row.want)
+		}
+	}
+}
