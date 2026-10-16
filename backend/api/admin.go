@@ -17,6 +17,8 @@ import (
 
 const inviteTTL = time.Hour
 
+var hashPassword = auth.HashPassword
+
 func userDTO(id int64, email, displayName, role string, active, mustChange bool, lastLogin string) map[string]any {
 	return map[string]any{
 		"id":                 id,
@@ -230,7 +232,7 @@ func (s *Server) redeemInvite(context echo.Context) error {
 	if !live {
 		return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired invite token"})
 	}
-	hash, err := auth.HashPassword(request.NewPassword)
+	hash, err := hashPassword(request.NewPassword)
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "redeem invite"})
 	}

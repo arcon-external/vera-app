@@ -16,6 +16,9 @@ const (
 	argonThreads = 4
 	argonKeyLen  = 32
 	saltLen      = 16
+	maxMemory    = 1024 * 1024 // KiB (1 GiB)
+	maxTime      = 16
+	maxThreads   = 16
 )
 
 // HashPassword hashes a password with Argon2id and returns the PHC-encoded
@@ -60,6 +63,9 @@ func decodeHash(encoded string) (salt, hash []byte, memory, iterations uint32, t
 	}
 	if _, err = fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads); err != nil || memory == 0 || iterations == 0 || threads == 0 || parts[3] != fmt.Sprintf("m=%d,t=%d,p=%d", memory, iterations, threads) {
 		return nil, nil, 0, 0, 0, fmt.Errorf("invalid password hash parameters")
+	}
+	if memory > maxMemory || iterations > maxTime || threads > maxThreads {
+		return nil, nil, 0, 0, 0, fmt.Errorf("unsupported password hash format")
 	}
 	salt, err = base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {

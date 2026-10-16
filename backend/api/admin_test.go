@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -250,6 +251,25 @@ func TestRedeemLimiterAndDeadToken(t *testing.T) {
 		`{"token":"unknown","newPassword":"long-enough-password"}`)
 	if code != http.StatusTooManyRequests || body["error"] == "" {
 		t.Fatalf("11th attempt = %d %v; want 429 with error", code, body)
+	}
+}
+
+func TestRedeemDeadTokenNeverHashesPassword(t *testing.T) {
+	server, _, _ := adminTestSetup(t, "vera_api_redeem_no_hash")
+	previous := hashPassword
+	hashed := false
+	hashPassword = func(string) (string, error) {
+		hashed = true
+		return "", fmt.Errorf("dead token reached password hash")
+	}
+	t.Cleanup(func() { hashPassword = previous })
+	code, _ := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",
+		`{"token":"unknown","newPassword":"long-enough-password"}`)
+	if hashed {
+		t.Fatal("dead invite token reached password hashing")
+	}
+	if code != http.StatusUnauthorized {
+		t.Fatalf("dead invite token = %d; want 401", code)
 	}
 }
 
