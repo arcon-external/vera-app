@@ -22,6 +22,9 @@ func (s *Server) setUserEmail(context echo.Context) error {
 	if err := context.Bind(&request); err != nil || strings.TrimSpace(request.Email) == "" {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "a new email address is required"})
 	}
+	if !validLoginEmail(strings.TrimSpace(request.Email)) {
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "invalid email address"})
+	}
 	oldEmail, newEmail, err := s.database.SetUserEmail(context.Request().Context(), id, request.Email)
 	if err != nil {
 		switch {
@@ -50,6 +53,9 @@ func (s *Server) requestEmailChange(context echo.Context) error {
 	}
 	if err := context.Bind(&request); err != nil || strings.TrimSpace(request.ProposedEmail) == "" {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "a proposed email address is required"})
+	}
+	if !validLoginEmail(strings.TrimSpace(request.ProposedEmail)) {
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "invalid email address"})
 	}
 	record, err := s.database.RequestEmailChange(context.Request().Context(), me.ID, request.ProposedEmail)
 	if err != nil {

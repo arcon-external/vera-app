@@ -65,7 +65,7 @@ func (s *Service) Login(ctx context.Context, email, password string, remember bo
 		return "", store.AuthUser{}, fmt.Errorf("invalid email or password")
 	}
 
-	user, err := s.store.GetUserByEmail(ctx, email)
+	user, err := s.store.GetUserByEmail(ctx, strings.TrimSpace(email))
 	if err != nil {
 		return fail()
 	}
@@ -74,6 +74,15 @@ func (s *Service) Login(ctx context.Context, email, password string, remember bo
 	}
 	if err := VerifyPassword(user.PasswordHash, password); err != nil {
 		return fail()
+	}
+	if NeedsRehash(user.PasswordHash) {
+		if hash, err := HashPassword(password); err == nil {
+			// Best effort: a failed update must not deny a valid login; the next
+			// login will retry. A concurrent reset is protected by the old hash.
+			if updated, err := s.store.RehashPassword(ctx, user.ID, user.PasswordHash, hash); err == nil && updated {
+				user.PasswordHash = hash
+			}
+		}
 	}
 
 	token, tokenHash, err := NewSessionToken()

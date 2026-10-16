@@ -37,6 +37,7 @@ func (s *Store) CreateUser(ctx context.Context, email, displayName, passwordHash
 	if strings.TrimSpace(passwordHash) == "" {
 		return AuthUser{}, fmt.Errorf("password hash is required: email/password is the only login method")
 	}
+	email = strings.ToLower(strings.TrimSpace(email))
 	var user AuthUser
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.users (email, display_name, password_hash, role)
@@ -148,6 +149,21 @@ func (s *Store) CreateSession(ctx context.Context, userID int64, tokenHash strin
 		return fmt.Errorf("create session: %w", err)
 	}
 	return nil
+}
+
+// DeleteStaleSessions retains ended sessions for 30 days for audit. Callers
+// supply the cutoff so the cleanup schedule does not depend on database time.
+func (s *Store) DeleteStaleSessions(ctx context.Context, before time.Time) (int64, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return 0, err
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`DELETE FROM %s.sessions
+		WHERE COALESCE(revoked_at, expires_at) < $1`, s.configSchema()), before)
+	if err != nil {
+		return 0, fmt.Errorf("delete stale sessions: %w", err)
+	}
+	return command.RowsAffected(), nil
 }
 
 // GetSessionUser returns the active user for a live session token hash.
@@ -431,6 +447,25 @@ func (s *Store) IssueInviteToken(ctx context.Context, userID int64, expiresAt ti
 // RedeemInviteToken consumes a valid invite token: it marks the token used,
 // sets the new password hash, and clears the must-change flag. Reuse,
 // expiry, and unknown tokens all fail.
+// InviteTokenIsLive cheaply rejects dead tokens before the caller spends CPU
+// hashing a new password. RedeemInviteToken rechecks inside its transaction.
+func (s *Store) InviteTokenIsLive(ctx context.Context, token string, now time.Time) (bool, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return false, err
+	}
+	sum := sha256.Sum256([]byte(token))
+	var live bool
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT EXISTS (SELECT 1 FROM %s.invite_tokens
+		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > $2)`, s.configSchema()),
+		hex.EncodeToString(sum[:]), now).Scan(&live)
+	if err != nil {
+		return false, fmt.Errorf("check invite token: %w", err)
+	}
+	return live, nil
+}
+
 func (s *Store) RedeemInviteToken(ctx context.Context, token, passwordHash string, now time.Time) (int64, error) {
 	pool, err := s.poolOrError()
 	if err != nil {
@@ -499,4 +534,23 @@ func (s *Store) SetPassword(ctx context.Context, userID int64, passwordHash stri
 		return fmt.Errorf("user %d not found", userID)
 	}
 	return nil
+}
+
+// RehashPassword replaces only the verified hash, leaving the must-change flag
+// untouched. The old-hash condition prevents a concurrent reset being overwritten.
+func (s *Store) RehashPassword(ctx context.Context, userID int64, oldHash, newHash string) (bool, error) {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(newHash) == "" {
+		return false, fmt.Errorf("password hash is required")
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.users SET password_hash = $3
+		WHERE id = $1 AND password_hash = $2`, s.configSchema()), userID, oldHash, newHash)
+	if err != nil {
+		return false, fmt.Errorf("rehash password: %w", err)
+	}
+	return command.RowsAffected() != 0, nil
 }

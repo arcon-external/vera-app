@@ -29,6 +29,10 @@ func main() {
 	if apiBase == "" {
 		apiBase = "https://api.arconpentapersada.co.id"
 	}
+	if err := apiclient.ValidateBaseURL(apiBase); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid VERA_API_URL: %v\n", err)
+		os.Exit(1)
+	}
 	client := apiclient.New(apiBase, backend.SessionToken)
 	client.OnUnauthorized = func() {
 		_ = backend.ClearSessionToken()

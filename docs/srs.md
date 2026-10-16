@@ -24,9 +24,9 @@ Managed Postgres (Neon, Singapore, PG18, schema `vera`)
 
 - **Desktop** (`vera-app.app` / `vera-app.exe`): quotation form, PDF rendering (local),
   archive browser, admin screens. Holds **no database credentials** — only a
-  short-lived session token in the OS keychain.
+  remembered session token in the OS keychain; unremembered tokens stay in memory.
 - **API** (`cmd/veraserver`, Echo/Go): the sole trust boundary. Owns auth
-  (Argon2id, 8h-idle/7d-absolute sessions, login rate limit 5 failures →
+  (Argon2id, 8h standard / 30d remembered fixed-lifetime sessions, login rate limit 5 failures →
   cooldown), user admin, quotation numbering, archive, backup download/restore,
   audit log. Stateless: all state is in Postgres.
 - **Database**: Neon project `vera-app`, region AWS Singapore, Postgres 18,
@@ -100,7 +100,7 @@ only**, never in images, repos, or logs.
   `exec format error`). Ships `postgresql-client-18` (PGDG) for the
   backup/restore endpoints; no other OS packages.
 - **Runtime:** single container, `restart: unless-stopped`. Horizontally
-  scalable (stateless); one replica is enough at current scale.
+  scalable (stateless); Cloud Run deploys with `--min-instances=1 --max-instances=2`.
 - **Listens:** `$VERA_API_ADDR` (default `:8080`, all interfaces).
 - **Boot sequence (fail-fast, in order):** read config → ping Postgres →
   run migrations → ensure bootstrap admin (only if email+password provided,
@@ -137,7 +137,9 @@ only**, never in images, repos, or logs.
   *More info → Run anyway*; WebView2 `download` strategy assumed (staff are
   online by definition).
 - **Config:** exactly one variable, `VERA_API_URL` (compiled default = public
-  staff URL; env overrides for dev/personal). No secrets, no DB access.
+  staff URL; env overrides for dev/personal; plain HTTP is loopback-only).
+  No secrets, no DB access. An update check falls back to the public static
+  `latest.json` manifest in `vera-downloads-508411` if the API is unreachable.
 - **Distribution:** portable binaries, no installer needed.
 
 ## 6. Configuration reference (all environment variables)
@@ -208,6 +210,8 @@ previous image tag until the new one is verified.
   tiers asleep; wakes cost money).
 - Review: container restarts (`docker ps`), disk use, backup-log freshness
   (a missing nightly line is an alert by itself), `auth_audit` anomalies.
+- For read-only Cloud Run describe/revision/log reconnaissance, dispatch
+  `.github/workflows/gcp-recon.yml` (WIF; no local gcloud required).
 - Page on: healthz down >5 min, no backup in 26h, disk >80%.
 
 ## 10. Security requirements
@@ -215,7 +219,8 @@ previous image tag until the new one is verified.
 - Internet exposure is limited to the staff HTTPS URL; the database accepts
   no inbound host ports anywhere.
 - Passwords: Argon2id, ≥10 chars on setup; rate-limited login; sessions
-  8h idle / 7d absolute, revocation-checked per request.
+  8h standard / 30d remembered, fixed at issuance and revocation-checked per
+  request. Logout revokes server-side; remembered tokens live in the OS keychain.
 - Abuse posture today is adequate for a team app behind no public signup;
   revisit before any public/exposed-contract use (WAF, lockout review).
 - Desktop distribution stays unsigned until the $99 Apple decision; document

@@ -85,6 +85,52 @@ func TestAuthLoginLogoutFlow(t *testing.T) {
 	}
 }
 
+func TestLoginTrimsEmail(t *testing.T) {
+	database := testStore(t, "vera_auth_test_trim")
+	ctx := context.Background()
+	service := NewService(database)
+	if _, err := service.Bootstrap(ctx, "staff@example.com", "Staff", "password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, " staff@example.com ", "password", false); err != nil {
+		t.Fatalf("pasted email with surrounding whitespace failed login: %v", err)
+	}
+}
+
+func TestLoginUpgradesOldPasswordHashOnce(t *testing.T) {
+	database := testStore(t, "vera_auth_test_rehash")
+	ctx := context.Background()
+	service := NewService(database)
+	oldHash := oldParameterHash("old password")
+	created, err := database.CreateUser(ctx, "old@example.com", "Old", oldHash, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Login(ctx, created.Email, "old password", false); err != nil {
+		t.Fatalf("old hash login failed: %v", err)
+	}
+	upgraded, err := database.GetUserByID(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgraded.PasswordHash == oldHash || NeedsRehash(upgraded.PasswordHash) {
+		t.Fatal("first login did not persist the current Argon2 parameters")
+	}
+	if upgraded.MustChangePassword != created.MustChangePassword {
+		t.Fatal("rehash changed the must-change-password flag")
+	}
+	if _, _, err := service.Login(ctx, created.Email, "old password", false); err != nil {
+		t.Fatalf("second login failed: %v", err)
+	}
+	again, err := database.GetUserByID(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.PasswordHash != upgraded.PasswordHash {
+		t.Fatal("second login rehashed an already-current password")
+	}
+}
+
 func TestAuthRejectsBadCredentialsGenerically(t *testing.T) {
 	database := testStore(t, "vera_auth_test_reject")
 	ctx := context.Background()

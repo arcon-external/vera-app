@@ -236,3 +236,84 @@ func TestInviteTokenExpiry(t *testing.T) {
 		t.Fatalf("redeem of expired token = %d; want 401", code)
 	}
 }
+
+func TestRedeemLimiterAndDeadToken(t *testing.T) {
+	server, _, _ := adminTestSetup(t, "vera_api_redeem_limit")
+	for i := 0; i < 10; i++ {
+		code, _ := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",
+			`{"token":"unknown","newPassword":"long-enough-password"}`)
+		if code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d = %d; want 401", i+1, code)
+		}
+	}
+	code, body := doAdminRequest(t, server, "", http.MethodPost, "/v1/auth/redeem",
+		`{"token":"unknown","newPassword":"long-enough-password"}`)
+	if code != http.StatusTooManyRequests || body["error"] == "" {
+		t.Fatalf("11th attempt = %d %v; want 429 with error", code, body)
+	}
+}
+
+func TestRedeemLimitBeforeBodyRead(t *testing.T) {
+	server := NewServer(nil, nil, nil)
+	for i := 0; i < redeemAttemptsPerMinute; i++ {
+		server.redeemLimiter.allow("203.0.113.7")
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/redeem", nil)
+	request.Header.Set("X-Forwarded-For", "203.0.113.7")
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("empty body from exhausted IP = %d; want 429", recorder.Code)
+	}
+}
+
+func TestCreateUserRejectsInvalidEmail(t *testing.T) {
+	server, _, token := adminTestSetup(t, "vera_api_create_email")
+	for _, email := range []string{"x", "foo@bar", "a b@c"} {
+		code, _ := doAdminRequest(t, server, token, http.MethodPost, "/v1/admin/users",
+			`{"email":`+strconv.Quote(email)+`,"displayName":"Staff","role":"staff"}`)
+		if code != http.StatusUnprocessableEntity {
+			t.Errorf("create %q = %d; want 422", email, code)
+		}
+	}
+	code, body := doAdminRequest(t, server, token, http.MethodPost, "/v1/admin/users",
+		`{"email":"  MiXeD@Example.COM  ","displayName":"Staff","role":"staff"}`)
+	if code != http.StatusCreated || body["email"] != "mixed@example.com" {
+		t.Fatalf("mixed-case create = %d %v; want normalized email", code, body)
+	}
+}
+
+// Compare BenchmarkRedeemUnknownToken against BenchmarkPasswordHash to
+// measure the cost avoided for a dead token (not a timing assertion).
+func BenchmarkRedeemUnknownToken(b *testing.B) {
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		b.Skip("set VERA_POSTGRES_TEST_DSN to benchmark redeem")
+	}
+	database, err := store.Open(context.Background(), store.Config{DSN: dsn, Schema: "vera_api_bench_redeem"})
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(database.Close)
+	server := NewServer(database, nil, nil)
+	server.redeemLimiter = newIPRateLimiter(b.N+1, time.Minute)
+	body := `{"token":"unknown","newPassword":"long-enough-password"}`
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		request := httptest.NewRequest(http.MethodPost, "/v1/auth/redeem", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnauthorized {
+			b.Fatalf("redeem = %d; want 401", recorder.Code)
+		}
+	}
+}
+
+func BenchmarkPasswordHash(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		if _, err := auth.HashPassword("long-enough-password"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

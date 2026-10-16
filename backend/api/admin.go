@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +91,9 @@ func (s *Server) createUser(context echo.Context) error {
 	request.DisplayName = strings.TrimSpace(request.DisplayName)
 	if request.Email == "" || request.DisplayName == "" {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "email and display name are required"})
+	}
+	if !validLoginEmail(request.Email) {
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "invalid email address"})
 	}
 	if request.Role != "staff" && request.Role != "admin" {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "role must be staff or admin"})
@@ -207,12 +211,24 @@ func (s *Server) resetUser(context echo.Context) error {
 }
 
 func (s *Server) redeemInvite(context echo.Context) error {
+	if !s.redeemLimiter.allow(clientIP(context)) {
+		return context.JSON(http.StatusTooManyRequests, map[string]string{
+			"error": "too many invite attempts; try again shortly",
+		})
+	}
 	var request struct {
 		Token       string `json:"token"`
 		NewPassword string `json:"newPassword"`
 	}
 	if err := context.Bind(&request); err != nil || request.Token == "" || len(request.NewPassword) < 10 {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": "valid token and a password of at least 10 characters are required"})
+	}
+	live, err := s.database.InviteTokenIsLive(context.Request().Context(), request.Token, time.Now())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "redeem invite"})
+	}
+	if !live {
+		return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired invite token"})
 	}
 	hash, err := auth.HashPassword(request.NewPassword)
 	if err != nil {
@@ -227,4 +243,15 @@ func (s *Server) redeemInvite(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "redeem invite"})
 	}
 	return context.JSON(http.StatusOK, map[string]string{"status": "ok", "email": user.Email})
+}
+
+// ParseAddress alone accepts single-label domains such as foo@bar; login
+// identities require a fully qualified domain as well as one bare address.
+func validLoginEmail(email string) bool {
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email {
+		return false
+	}
+	_, domain, ok := strings.Cut(email, "@")
+	return ok && strings.Contains(domain, ".")
 }

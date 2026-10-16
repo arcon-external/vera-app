@@ -1,12 +1,55 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 )
+
+func TestMustChangePasswordBlocksOtherRoutes(t *testing.T) {
+	server, database, _ := adminTestSetup(t, "vera_api_must_change")
+	seedStaff(t, database, "flagged@example.com", "staff-password")
+	user, err := database.GetUserByEmail(context.Background(), "flagged@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := doLogin(t, server, user.Email, "staff-password")
+	if err := database.SetMustChangePassword(context.Background(), user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/clients", "")
+	if code != http.StatusForbidden || body["code"] != "must_change_password" {
+		t.Fatalf("flagged clients = %d %v; want coded 403", code, body)
+	}
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/auth/me"},
+		{http.MethodPatch, "/v1/auth/password"},
+		{http.MethodPost, "/v1/auth/logout-everywhere"},
+	} {
+		// Password without a body returns validation 422, not the gate's 403.
+		// Logout-everywhere revokes the session, so run that last.
+		code, _ := doAdminRequest(t, server, token, tc.method, tc.path, "")
+		if code == http.StatusForbidden || code == http.StatusUnauthorized {
+			t.Errorf("allowed %s %s = %d", tc.method, tc.path, code)
+		}
+	}
+	if err := database.SetMustChangePassword(context.Background(), user.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	fresh := doLogin(t, server, user.Email, "staff-password")
+	if code, _ := doAdminRequest(t, server, fresh, http.MethodGet, "/v1/clients", ""); code != http.StatusOK {
+		t.Fatalf("after flag clears = %d; want 200", code)
+	}
+	if err := database.SetMustChangePassword(context.Background(), user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := doAdminRequest(t, server, fresh, http.MethodPost, "/v1/auth/logout", ""); code != http.StatusNoContent {
+		t.Fatalf("flagged logout = %d; want 204", code)
+	}
+}
 
 func TestChangePasswordRequiresCurrent(t *testing.T) {
 	server, _ := testServer(t, "vera_api_settings_password")

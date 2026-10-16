@@ -40,7 +40,7 @@ func (s *Store) SetUserEmail(ctx context.Context, userID int64, email string) (o
 	if err != nil {
 		return "", "", err
 	}
-	trimmed := strings.TrimSpace(email)
+	trimmed := strings.ToLower(strings.TrimSpace(email))
 	if !validEmailFormat(trimmed) {
 		return "", "", fmt.Errorf("invalid email address")
 	}
@@ -88,7 +88,7 @@ func (s *Store) RequestEmailChange(ctx context.Context, userID int64, proposedEm
 	if err != nil {
 		return EmailChangeRequest{}, err
 	}
-	trimmed := strings.TrimSpace(proposedEmail)
+	trimmed := strings.ToLower(strings.TrimSpace(proposedEmail))
 	if !validEmailFormat(trimmed) {
 		return EmailChangeRequest{}, fmt.Errorf("invalid email address")
 	}
@@ -229,6 +229,7 @@ func (s *Store) DecideEmailChange(ctx context.Context, requestID int64, deciderI
 		status = "approved"
 	}
 	if approve {
+		request.ProposedEmail = strings.ToLower(strings.TrimSpace(request.ProposedEmail))
 		var taken bool
 		if err := tx.QueryRow(ctx, fmt.Sprintf(
 			`SELECT EXISTS (SELECT 1 FROM %s.users WHERE LOWER(email) = LOWER($1) AND id <> $2)`,

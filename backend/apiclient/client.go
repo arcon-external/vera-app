@@ -84,6 +84,25 @@ func New(baseURL string, token func() string) *Client {
 	}
 }
 
+// ValidateBaseURL rejects cleartext credentials sent to remote hosts.
+func ValidateBaseURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return fmt.Errorf("%q is not a usable API URL", raw)
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme == "http" {
+		host := parsed.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+		return fmt.Errorf("%s is plain http on a remote host; use https so passwords and tokens do not cross the network in clear", raw)
+	}
+	return fmt.Errorf("%q is not a usable HTTP(S) API URL", raw)
+}
+
 func (c *Client) do(method, path string, body any, out any) error {
 	var reader io.Reader
 	if body != nil {
