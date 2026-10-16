@@ -4,6 +4,27 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.1] - 2026-10-16
+
+### Security
+
+- **Sign-in is hardened end to end.** Passwords are hashed with stronger
+  settings, and each stored password now carries its own settings — so a
+  future upgrade can never lock anyone out, and an old password quietly
+  upgrades itself the next time it is used. Pasting an email address with
+  stray spaces no longer fails a valid sign-in.
+- **Invitation codes can no longer be used to tie up the server.** Redeeming
+  a code now rejects unknown or expired codes immediately, before any
+  expensive work, and refuses floods of attempts.
+- **A temporary password must be changed before anything else.** An account
+  flagged to change its password can no longer use the rest of the app until
+  it does.
+- **Sign-in addresses are validated and stored consistently**, and the
+  existing directory was tidied the same way — without merging or deleting
+  any account.
+- **Stale sessions are cleared daily**, and the desktop app refuses to send
+  credentials unencrypted to a remote server.
+
 ## [0.14.0] - 2026-10-15
 
 ### Added
