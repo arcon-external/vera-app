@@ -274,6 +274,8 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   resolution, and peek validation all read the client directory (server via
   store, desktop via fetched cache). Codes are immutable once created.
   Codes 02-06 were seeded by migration 011 from the retired hard-coded maps.
+- **Email is a sign-in identifier, not a delivery channel:** nothing is sent to it;
+  if any feature delivers credentials or links by email, verification must gate it first.
 - **Verification:** every revision is signed at export (Ed25519, key from
   `VERA_SIGNING_KEY`, never in source or the database) over a canonical field
   set pinned by `backend/signing.go`'s format test. The public portal at
@@ -444,10 +446,10 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `opencode-go/step-5-preview-free#high`, fallbacks `opencode/big-pickle` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Worker** | `openai/gpt-6-sol`, fallbacks `opencode-go/step-5-preview-free#high` then `opencode/big-pickle` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
 | **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
-| **Judge** | `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| **Judge** | `openai/gpt-6.1-sol#max`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
@@ -458,11 +460,14 @@ when the model before it times out or errors at dispatch, and a dispatch that fa
 back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule survives this table — the Advisor is Muse Spark, the Judge is DeepSeek.
-What it costs is stated plainly: the Judge shares a family with the orchestrator and
-with the Riddler's fallback, and the Advisor shares one with the Worker's last
-fallback (the primary Worker and the Riddler are trial models). The Riddler is not a
-reviewer, so the pairing rule does not bind it. If a future run shows correlated
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule holds — the Advisor is Muse Spark, the Judge is GPT-6.1 Sol.
+What it costs is stated plainly: the Judge shares a family with the Worker (both
+OpenAI — Sol and 6.1 Sol are different model lines but one lab), and the Advisor
+shares one with the Worker's last fallback; the Judge's fallback shares one with the
+orchestrator. The Riddler is not a reviewer, so the pairing rule does not bind it.
+The Worker and the Judge are **trial models on a ChatGPT Plus subscription**: their
+limits are unmeasured, a quota wall falls back per the chain, and a dispatch that
+falls back says so in its report. If a future run shows correlated
 misses between a reviewer and its family-mate, re-deal the families rather than
 defending the table.
 

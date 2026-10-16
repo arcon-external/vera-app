@@ -170,3 +170,49 @@ func TestEmailChangeRejectLeavesIdentity(t *testing.T) {
 		t.Errorf("pending = %d; want empty after reject", len(pending))
 	}
 }
+
+func TestEmailWritesNormalizeAndLegacyMigration(t *testing.T) {
+	ctx := context.Background()
+	database := openTestSchema(t, "vera_test_email_normalize")
+	created, err := database.CreateUser(ctx, "  MiXeD@Example.COM  ", "Mixed", "test-hash", "staff")
+	if err != nil || created.Email != "mixed@example.com" {
+		t.Fatalf("create email = %q, %v; want normalized", created.Email, err)
+	}
+	_, changed, err := database.SetUserEmail(ctx, created.ID, "  ReNaMeD@Example.COM ")
+	if err != nil || changed != "renamed@example.com" {
+		t.Fatalf("direct change = %q, %v; want normalized", changed, err)
+	}
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Mimic a row written before migration 028; then execute the embedded
+	// migration twice to prove normalization and idempotence.
+	if _, err := pool.Exec(ctx, fmt.Sprintf("UPDATE %s.users SET email = $1 WHERE id = $2", database.configSchema()),
+		"  LeGaCy@Example.COM  ", created.ID); err != nil {
+		t.Fatal(err)
+	}
+	migrations, err := loadMigrations(database.config.Schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var normalizeSQL string
+	for _, migration := range migrations {
+		if migration.version == 28 {
+			normalizeSQL = migration.sql
+			break
+		}
+	}
+	if normalizeSQL == "" {
+		t.Fatal("migration 028 missing")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := pool.Exec(ctx, normalizeSQL); err != nil {
+			t.Fatalf("migration 028 run %d: %v", i+1, err)
+		}
+	}
+	user, err := database.GetUserByID(ctx, created.ID)
+	if err != nil || user.Email != "legacy@example.com" {
+		t.Fatalf("migrated email = %q, %v; want normalized", user.Email, err)
+	}
+}

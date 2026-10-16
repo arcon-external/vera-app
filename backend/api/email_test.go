@@ -10,6 +10,45 @@ import (
 	"vera-app/backend/store"
 )
 
+func TestEmailChangeRequestRejectsInvalidEmailAndNormalizes(t *testing.T) {
+	server, database, adminToken := adminTestSetup(t, "vera_api_email_validate")
+	staffID, staffToken := emailStaff(t, server, database, "email-validate@example.com")
+	for _, email := range []string{"x", "foo@bar", "a b@c"} {
+		for _, tc := range []struct{ token, method, path, key string }{
+			{staffToken, http.MethodPost, "/v1/auth/email-change-request", "proposedEmail"},
+			{adminToken, http.MethodPatch, "/v1/admin/users/" + strconv.FormatInt(staffID, 10) + "/email", "email"},
+		} {
+			code, _ := doAdminRequest(t, server, tc.token, tc.method, tc.path,
+				`{"`+tc.key+`":`+strconv.Quote(email)+`}`)
+			if code != http.StatusUnprocessableEntity {
+				t.Errorf("%s %q = %d; want 422", tc.path, email, code)
+			}
+		}
+	}
+	code, _ := doAdminRequest(t, server, staffToken, http.MethodPost, "/v1/auth/email-change-request",
+		`{"proposedEmail":"  MiXeD@Example.COM  "}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("mixed-case request = %d; want 202", code)
+	}
+	code, queue := doAdminRequest(t, server, adminToken, http.MethodGet, "/v1/admin/email-change-requests", "")
+	if code != http.StatusOK {
+		t.Fatalf("queue = %d; want 200", code)
+	}
+	row := queue["requests"].([]any)[0].(map[string]any)
+	if row["proposedEmail"] != "mixed@example.com" {
+		t.Errorf("pending email = %v; want normalized", row["proposedEmail"])
+	}
+	id := int64(row["id"].(float64))
+	if code, _ := doAdminRequest(t, server, adminToken, http.MethodPost,
+		"/v1/admin/email-change-requests/"+strconv.FormatInt(id, 10)+"/approve", ""); code != http.StatusOK {
+		t.Fatalf("approve = %d; want 200", code)
+	}
+	user, err := database.GetUserByID(context.Background(), staffID)
+	if err != nil || user.Email != "mixed@example.com" {
+		t.Fatalf("approved email = %q, %v; want normalized", user.Email, err)
+	}
+}
+
 // emailStaff seeds a staff user and returns its ID plus bearer token.
 func emailStaff(t *testing.T, server *Server, database *store.Store, email string) (int64, string) {
 	t.Helper()

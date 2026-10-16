@@ -43,6 +43,10 @@ func run() error {
 		return err
 	}
 	defer database.Close()
+	// Session rows remain for 30 days after their expiry or revocation for audit.
+	// Cleanup is best-effort: an outage must not prevent the API from starting.
+	cleanStaleSessions(ctx, database)
+	go cleanupSessionsDaily(ctx, database)
 
 	bootstrapName := os.Getenv("VERA_BOOTSTRAP_ADMIN_NAME")
 	bootstrapEmail := os.Getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
@@ -90,6 +94,27 @@ func run() error {
 		return httpServer.Shutdown(shutdown)
 	case err := <-stopped:
 		return err
+	}
+}
+
+func cleanStaleSessions(ctx context.Context, database *store.Store) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := database.DeleteStaleSessions(cleanupCtx, time.Now().Add(-30*24*time.Hour)); err != nil {
+		fmt.Fprintf(os.Stderr, "veraserver: session cleanup failed: %v\n", err)
+	}
+}
+
+func cleanupSessionsDaily(ctx context.Context, database *store.Store) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cleanStaleSessions(ctx, database)
+		}
 	}
 }
 

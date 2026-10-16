@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	argonTime    = 1
+	argonTime    = 2
 	argonMemory  = 64 * 1024
 	argonThreads = 4
 	argonKeyLen  = 32
@@ -35,29 +35,42 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword reports whether the password matches the stored hash using a
 // constant-time comparison.
 func VerifyPassword(encodedHash, password string) error {
-	salt, hash, err := decodeHash(encodedHash)
+	salt, hash, memory, iterations, threads, err := decodeHash(encodedHash)
 	if err != nil {
 		return err
 	}
-	other := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, uint32(len(hash)))
+	other := argon2.IDKey([]byte(password), salt, iterations, memory, threads, uint32(len(hash)))
 	if subtle.ConstantTimeCompare(hash, other) != 1 {
 		return fmt.Errorf("invalid email or password")
 	}
 	return nil
 }
 
-func decodeHash(encoded string) (salt, hash []byte, err error) {
+// NeedsRehash reports whether a stored hash uses different Argon2 parameters.
+// An invalid hash cannot be verified and is treated as needing replacement.
+func NeedsRehash(encoded string) bool {
+	_, _, memory, iterations, threads, err := decodeHash(encoded)
+	return err != nil || memory != argonMemory || iterations != argonTime || threads != argonThreads
+}
+
+func decodeHash(encoded string) (salt, hash []byte, memory, iterations uint32, threads uint8, err error) {
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
-		return nil, nil, fmt.Errorf("unsupported password hash format")
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" || parts[2] != fmt.Sprintf("v=%d", argon2.Version) {
+		return nil, nil, 0, 0, 0, fmt.Errorf("unsupported password hash format")
+	}
+	if _, err = fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &threads); err != nil || memory == 0 || iterations == 0 || threads == 0 || parts[3] != fmt.Sprintf("m=%d,t=%d,p=%d", memory, iterations, threads) {
+		return nil, nil, 0, 0, 0, fmt.Errorf("invalid password hash parameters")
 	}
 	salt, err = base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode password salt: %w", err)
+		return nil, nil, 0, 0, 0, fmt.Errorf("decode password salt: %w", err)
 	}
 	hash, err = base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
-		return nil, nil, fmt.Errorf("decode password hash: %w", err)
+		return nil, nil, 0, 0, 0, fmt.Errorf("decode password hash: %w", err)
 	}
-	return salt, hash, nil
+	if len(salt) == 0 || len(hash) == 0 {
+		return nil, nil, 0, 0, 0, fmt.Errorf("invalid password hash encoding")
+	}
+	return salt, hash, memory, iterations, threads, nil
 }

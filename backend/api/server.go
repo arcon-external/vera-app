@@ -38,9 +38,10 @@ type Server struct {
 	// request body -- a value the caller chooses. That protects a specific
 	// account, but it cannot bound the endpoint: a flood of distinct addresses
 	// passes straight through it, and each one costs a database round trip.
-	loginLimiter *ipRateLimiter
-	backupDir    string
-	dsn          string
+	loginLimiter  *ipRateLimiter
+	redeemLimiter *ipRateLimiter
+	backupDir     string
+	dsn           string
 }
 
 // SetSigner attaches the revision signer. Without it, exports store unsigned
@@ -86,7 +87,8 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server := &Server{echo: echo.New(), database: database, service: service, templates: templates,
 		verifyLimiter:  newIPRateLimiter(30, time.Minute),
 		previewLimiter: newIPRateLimiter(previewsPerMinute, time.Minute),
-		loginLimiter:   newIPRateLimiter(loginAttemptsPerMinute, time.Minute)}
+		loginLimiter:   newIPRateLimiter(loginAttemptsPerMinute, time.Minute),
+		redeemLimiter:  newIPRateLimiter(redeemAttemptsPerMinute, time.Minute)}
 	server.echo.HideBanner = true
 	server.echo.HidePort = true
 	server.echo.Renderer = &verifyRenderer{}
@@ -216,6 +218,7 @@ type loginRequest struct {
 // GetUserByEmail round trip. It is checked before the body is read, so a flood
 // is refused as cheaply as possible.
 const loginAttemptsPerMinute = 60
+const redeemAttemptsPerMinute = 10
 
 // previewsPerMinute bounds the admin portal preview. One render per colour
 // commit, and a judgement session moves four sliders — so a limit far above
@@ -283,6 +286,15 @@ func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired session"})
 		}
 		context.Set("user", user)
+		if user.MustChangePassword {
+			switch context.Path() {
+			case "/v1/auth/password", "/v1/auth/logout", "/v1/auth/logout-everywhere", "/v1/auth/me":
+			default:
+				return context.JSON(http.StatusForbidden, map[string]string{
+					"error": "change your password to continue", "code": "must_change_password",
+				})
+			}
+		}
 		return next(context)
 	}
 }
