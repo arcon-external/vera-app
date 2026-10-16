@@ -446,10 +446,10 @@ without validation.
 
 | Role | Model | Job |
 | --- | --- | --- |
-| **Worker** | `openai/gpt-6-sol`, fallbacks `opencode-go/step-5-preview-free#high` then `opencode/big-pickle` then `opencode-go/muse-spark-1.3-contributor` | Writes code, writes and runs tests. |
+| **Worker** | `opencode-go/muse-spark-1.3-contributor#xhigh`, fallbacks `openai/gpt-6-sol` then `opencode/big-pickle` | Writes code, writes and runs tests. |
 | **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
-| **Judge** | `openai/gpt-6.1-sol#max`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| **Judge** | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
@@ -461,12 +461,14 @@ back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
 The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule holds — the Advisor is Muse Spark, the Judge is GPT-6.1 Sol.
-What it costs is stated plainly: the Judge shares a family with the Worker (both
-OpenAI — Sol and 6.1 Sol are different model lines but one lab), and the Advisor
-shares one with the Worker's last fallback; the Judge's fallback shares one with the
-orchestrator. The Riddler is not a reviewer, so the pairing rule does not bind it.
-The Worker and the Judge are **trial models on a ChatGPT Plus subscription**: their
-limits are unmeasured, a quota wall falls back per the chain, and a dispatch that
+What it costs is stated plainly: the Worker now shares a family with the Advisor
+(both Muse Spark — the executor and the advisor share blind spots, a pairing the
+rule does not bind but the one to watch), and the Judge shares one with the Worker's
+first fallback; the Judge's fallback shares one with the orchestrator. The Riddler is
+not a reviewer, so the pairing rule does not bind it. The Worker and the Judge are
+**trial models on a billed OpenAI API account** — the ChatGPT Plus subscription does
+not fund them (the first dispatch proved it: `credit_balance_exhausted`) — and their
+limits are unmeasured: a quota wall falls back per the chain, and a dispatch that
 falls back says so in its report. If a future run shows correlated
 misses between a reviewer and its family-mate, re-deal the families rather than
 defending the table.
@@ -564,6 +566,11 @@ cannot be separated, **a closed set of files owned by one worker and no other**.
 rule exists so that no two workers own the same file, not so that a worker may never
 touch two.
 
+Slices are deliberately **smaller than atomic** wherever that earns a parallel
+dispatch: one concern, one file set, one exit condition. The decomposition duty is
+stated in §12.4 — a task that bundles three concerns into one worker is a task the
+orchestrator has not finished.
+
 **Scope changes mid-flight are normal, and they are recorded rather than absorbed.**
 When something is added or removed while a wave is running:
 
@@ -576,9 +583,17 @@ When something is added or removed while a wave is running:
    during #338: a change to the customer document arrived mid-flight and was queued
    behind the running issue instead of being absorbed into it.
 
-### 12.4 Parallelism has a condition, not an aspiration
+### 12.4 Parallelism is the default — the orchestrator decomposes to earn it
 
-Workers run concurrently **only** when both of these hold:
+**Decomposition is the orchestrator's hardest job.** Work is sliced **smaller than
+atomic** — one concern per slice, one file and its test wherever that is possible —
+so that **several workers run at once**, each carrying less context and less to get
+wrong. A worker holding one file, one test, and one exit condition lands better
+results than a worker holding five of each; the smaller brief is not just faster, it
+is better. When a wave runs with a single worker, the orchestrator says why in the
+report — one worker is the exception a plan justifies, never the default.
+
+Workers run concurrently when both hold:
 
 1. **Each owns a disjoint set of files.** Two workers editing one file collide, and
    a worker that removes a line another depends on breaks it silently until a
@@ -587,13 +602,12 @@ Workers run concurrently **only** when both of these hold:
    brief — prop names, signatures, exported types. A worker cannot verify against an
    interface that does not exist yet.
 
-Otherwise, serialize. **The ceiling on parallelism is set by how well the work is
-factored, not by how small the tasks are.** A 1,500-line component with shared
-state cannot be split arbitrarily; the way to earn parallelism is to **extract the
-files first, then dispatch**. In #338 that pressure produced `company.ts`,
-`TabBar`, `ThemeColorField` and the panels — which is exactly what the two issues
-after it needed. Decomposition is the orchestrator's hardest job, not the
-dispatching.
+When those conditions do not hold yet, the answer is **to decompose further, not to
+serialize**: extract the shared file, freeze the interface, split the concern — then
+dispatch the pieces together. In #338 that pressure produced `company.ts`, `TabBar`,
+`ThemeColorField` and the panels, and those extractions are what let the next two
+issues run as parallel waves. Serialize only when decomposition genuinely cannot
+earn a second worker, and say so in the report.
 
 While workers run in parallel:
 
@@ -603,6 +617,10 @@ While workers run in parallel:
   build` writes `frontend/dist`, which `backend/**` embeds.
 - **Nobody edits a file another worker owns.** If a task needs a change in someone
   else's file, it waits for the next wave.
+- **One tree, or a worktree per branch.** Workers share the working tree and never
+  commit; when a task needs its own branch while another worker holds the tree — or
+  a long build would collide — give it a worktree (`worktree_create`) instead of
+  serializing.
 
 ### 12.5 Verification rules — the ones that caught real defects
 
