@@ -953,3 +953,23 @@ Checked paths:
 - `.github/copilot-instructions.md`
 
 Status: none present. If added later, read and follow them before making changes.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues in `arcon-external/vera-app`, via the `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles map to `needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, `wontfix`.
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root (created lazily
+by `/domain-modeling`). See `docs/agents/domain.md`.
