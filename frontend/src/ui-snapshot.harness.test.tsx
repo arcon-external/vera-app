@@ -36,7 +36,10 @@ import {
   PurchaseOrderPlaceholderPage,
 } from "./components/DocumentHomePage";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
-import { PurchaseOrderEditorView } from "./components/PurchaseOrderEditor";
+import {
+  PurchaseOrderDiscardPrompt,
+  PurchaseOrderEditorView,
+} from "./components/PurchaseOrderEditor";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import type { ArchivedQuotation } from "./archive";
 import type { CurrencyInfo } from "./format";
@@ -221,7 +224,7 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   QuotationID: 12,
   SourceRevision: 2,
   CustomerID: 2,
-  PaymentTermsDays: 45,
+  PaymentTerms: "45 days",
 };
 const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
   PO_EDITOR_ORDER,
@@ -677,6 +680,24 @@ const CASES: SnapshotCase[] = [
         onCancel={() => undefined}
         onDiscard={() => undefined}
       />
+    ),
+  },
+  {
+    // #468 wave 2: the tab-navigation discard prompt App shows when a dirty PO
+    // editor would be unmounted. Same copy as the inline Cancel panel, in a
+    // modal layer, so both widths must keep both choices readable.
+    name: "PurchaseOrderTabDiscard",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The purchase order editor sits behind the prompt.
+        </p>
+        <PurchaseOrderDiscardPrompt
+          overlay
+          onKeepEditing={() => undefined}
+          onDiscard={() => undefined}
+        />
+      </div>
     ),
   },
   {

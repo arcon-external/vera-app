@@ -33,8 +33,18 @@ CREATE TABLE IF NOT EXISTS {{schema}}.purchase_orders (
     po_date DATE NULL,
     received_date DATE NOT NULL,
     requested_delivery_date DATE NULL,
-    payment_terms_days SMALLINT NOT NULL DEFAULT 0
-        CHECK (payment_terms_days BETWEEN 0 AND 3650),
+    -- Free text, not a day count: the agreed commercial wording is often
+    -- "50% advance" or "30 days after delivery", which a SMALLINT cannot
+    -- represent. A draft may leave it empty until the terms are agreed.
+    --
+    -- Edit in place, 2026-10-20: 030 had never been deployed beyond
+    -- disposable test schemas (the sprint integration branch is unreleased),
+    -- so this is the migration's first shipped shape. A separate 031 would
+    -- leave a fresh schema holding the wrong column underneath. Test schemas
+    -- that already applied the old 030 are recreated by the existing schema
+    -- reset (resetTestSchema drops the schema first).
+    payment_terms TEXT NOT NULL DEFAULT ''
+        CHECK (char_length(payment_terms) <= 500),
     incoterms TEXT NOT NULL DEFAULT '',
     currency TEXT NOT NULL,
     tax_zone TEXT NOT NULL,

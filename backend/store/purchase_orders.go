@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,11 @@ const (
 // Every quantity travels as an integer count of 1/10000 units so no float and
 // no locale-dependent decimal string enters the database.
 const QuantityScale int64 = 10000
+
+// maxPaymentTermsLength bounds the free-text terms to what the migration's
+// CHECK accepts. Long enough for a real commercial sentence, short enough that
+// a paste cannot store a page of text in a header field.
+const maxPaymentTermsLength = 500
 
 var (
 	// ErrPurchaseOrderNotFound also answers a PO owned by another
@@ -83,7 +89,7 @@ type PurchaseOrder struct {
 	QuotationID           int64
 	SourceRevision        int16
 	CustomerID            int64
-	PaymentTermsDays      int16
+	PaymentTerms          string
 	CreatedBy             int64
 	UpdatedBy             int64
 	PODate                *time.Time
@@ -115,7 +121,7 @@ type PurchaseOrderUpdate struct {
 	PONumber              string
 	Incoterms             string
 	UpdatedBy             int64
-	PaymentTermsDays      int16
+	PaymentTerms          string
 	PODate                *time.Time
 	ReceivedDate          *time.Time
 	RequestedDeliveryDate *time.Time
@@ -162,8 +168,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 
 	received := normalizeDate(input.ReceivedDate)
 	if received.IsZero() {
-		today := time.Now()
-		received = normalizeDate(&today)
+		received = companyToday(time.Now())
 	}
 
 	var id int64
@@ -173,13 +178,13 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			org_id, quotation_id, source_revision, state, customer_id,
 			customer_name, billing_address, delivery_address, ship_to_code,
 			contact_email, contact_phone, po_number, po_date, received_date,
-			requested_delivery_date, payment_terms_days, incoterms, currency,
+			requested_delivery_date, payment_terms, incoterms, currency,
 			tax_zone, tax_category, created_by, updated_by
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,$10,$11,$12,$13,$14,$15,$15)
 		RETURNING id, uuid::text`, schema),
 		org.ID, input.QuotationID, input.RevisionNumber, PurchaseOrderStateDraft,
 		source.CustomerID, source.CustomerName, source.BillingAddress,
-		source.BillingAddress, received, source.PaymentTermsDays,
+		source.BillingAddress, received, source.PaymentTerms,
 		source.Incoterm, source.Currency, source.TaxZone, source.TaxCategory,
 		input.CreatedBy,
 	).Scan(&id, &uuid)
@@ -232,8 +237,10 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if input.ID < 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
-	if input.PaymentTermsDays < 0 || input.PaymentTermsDays > 3650 {
-		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be between 0 and 3650 days", ErrPurchaseOrderInvalid)
+	input.PaymentTerms = strings.TrimSpace(input.PaymentTerms)
+	if len(input.PaymentTerms) > maxPaymentTermsLength {
+		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be at most %d characters",
+			ErrPurchaseOrderInvalid, maxPaymentTermsLength)
 	}
 	for index, item := range input.Items {
 		if item.QuantityScaled <= 0 {
@@ -291,7 +298,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			po_date = $9,
 			received_date = COALESCE($10, received_date),
 			requested_delivery_date = $11,
-			payment_terms_days = $12,
+			payment_terms = $12,
 			incoterms = $13,
 			updated_by = $14,
 			updated_at = NOW()
@@ -300,7 +307,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		input.ShipToCode, input.ContactEmail, input.ContactPhone,
 		nilIfEmptyString(input.PONumber), dateOrNil(input.PODate),
 		dateOrNil(input.ReceivedDate), dateOrNil(input.RequestedDeliveryDate),
-		input.PaymentTermsDays, input.Incoterms, input.UpdatedBy,
+		input.PaymentTerms, input.Incoterms, input.UpdatedBy,
 	); err != nil {
 		return PurchaseOrder{}, fmt.Errorf("update purchase order %d: %w", input.ID, err)
 	}
@@ -319,16 +326,16 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 }
 
 type purchaseOrderSource struct {
-	QuoteNumber      string
-	CustomerName     string
-	BillingAddress   string
-	Incoterm         string
-	Currency         string
-	TaxZone          string
-	TaxCategory      string
-	CustomerID       int64
-	RevisionID       int64
-	PaymentTermsDays int16
+	QuoteNumber    string
+	CustomerName   string
+	BillingAddress string
+	Incoterm       string
+	Currency       string
+	TaxZone        string
+	TaxCategory    string
+	CustomerID     int64
+	RevisionID     int64
+	PaymentTerms   string
 }
 
 // loadPurchaseOrderSource reads the exact issued revision and the snapshots a
@@ -336,6 +343,7 @@ type purchaseOrderSource struct {
 // draft never reaches quotation_revisions, so it can never become a source.
 func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (purchaseOrderSource, error) {
 	var source purchaseOrderSource
+	var paymentTermDays int16
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.quote_number, c.id, c.legal_name, r.id, r.recipient_address,
 		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency
@@ -351,7 +359,7 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 		&source.RevisionID,
 		&source.BillingAddress,
 		&source.Incoterm,
-		&source.PaymentTermsDays,
+		&paymentTermDays,
 		&source.TaxZone,
 		&source.TaxCategory,
 		&source.Currency,
@@ -362,7 +370,23 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 	if err != nil {
 		return purchaseOrderSource{}, fmt.Errorf("load purchase order source %d/%d: %w", quotationID, revision, err)
 	}
+	source.PaymentTerms = quotationPaymentTerms(paymentTermDays)
 	return source, nil
+}
+
+// quotationPaymentTerms renders the issued revision's payment term as the
+// wording a PO starts from. A Quotation stores a day count, so the seed is
+// that count in words ("45 days"); the PO field itself is free text because
+// the commercial wording can be "50% advance" or "30 days after delivery" and
+// a day count cannot represent either. The draft is editable from there.
+func quotationPaymentTerms(days int16) string {
+	if days <= 0 {
+		return ""
+	}
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
 }
 
 type purchaseOrderSourceSub struct {
@@ -569,7 +593,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.customer_name, po.billing_address, po.delivery_address,
 		       po.ship_to_code, po.contact_email, po.contact_phone,
 		       COALESCE(po.po_number, ''), po.po_date, po.received_date,
-		       po.requested_delivery_date, po.payment_terms_days, po.incoterms,
+		       po.requested_delivery_date, po.payment_terms, po.incoterms,
 		       po.currency, po.tax_zone, po.tax_category, po.created_by,
 		       po.updated_by, po.created_at, po.updated_at
 		FROM %s.purchase_orders po
@@ -593,7 +617,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&poDate,
 		&order.ReceivedDate,
 		&requestedDelivery,
-		&order.PaymentTermsDays,
+		&order.PaymentTerms,
 		&order.Incoterms,
 		&order.Currency,
 		&order.TaxZone,

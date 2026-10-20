@@ -44,11 +44,11 @@ type purchaseOrderRow struct {
 		UoM             string `json:"uom"`
 		UnitPriceMinor  int64  `json:"unitPriceMinor"`
 	} `json:"items"`
-	ID               int64 `json:"id"`
-	QuotationID      int64 `json:"quotationId"`
-	SourceRevision   int16 `json:"sourceRevision"`
-	CustomerID       int64 `json:"customerId"`
-	PaymentTermsDays int16 `json:"paymentTermsDays"`
+	ID             int64  `json:"id"`
+	QuotationID    int64  `json:"quotationId"`
+	SourceRevision int16  `json:"sourceRevision"`
+	CustomerID     int64  `json:"customerId"`
+	PaymentTerms   string `json:"paymentTerms"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
@@ -95,7 +95,8 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_draft")
 	quotationID, quoteNumber := exportForSelector(t, server, token, quotationInput())
 
-	today := time.Now().Format("2006-01-02")
+	// The API defaults the received date in the company date context (WIB).
+	today := time.Now().In(time.FixedZone("WIB", 7*60*60)).Format("2006-01-02")
 	code, body := createPODraft(t, server, token, quotationID, 0, nil)
 	if code != http.StatusCreated {
 		t.Fatalf("create = %d; want 201 (%v)", code, body)
@@ -112,9 +113,9 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	// The issued revision copied its customer-facing basis, not the live
 	// company currency: this quotation was issued in IDR.
 	if draft.Currency != "IDR" || draft.TaxZone != "FTZ" ||
-		draft.PaymentTermsDays != 30 || draft.Incoterms != "EXW" {
-		t.Errorf("basis = %s/%s/%d/%s; want IDR/FTZ/30/EXW",
-			draft.Currency, draft.TaxZone, draft.PaymentTermsDays, draft.Incoterms)
+		draft.PaymentTerms != "30 days" || draft.Incoterms != "EXW" {
+		t.Errorf("basis = %s/%s/%q/%s; want IDR/FTZ/%q/EXW",
+			draft.Currency, draft.TaxZone, draft.PaymentTerms, draft.Incoterms, "30 days")
 	}
 	if draft.ReceivedDate != today {
 		t.Errorf("received date = %q; want today", draft.ReceivedDate)
@@ -165,7 +166,7 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 			"poDate":                "2026-10-01",
 			"receivedDate":          "2026-10-02",
 			"requestedDeliveryDate": "2026-11-20",
-			"paymentTermsDays":      60,
+			"paymentTerms":          "50% advance",
 			"incoterms":             "FOB",
 			"items": []map[string]any{
 				{
@@ -189,7 +190,7 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	}
 	updated := decodePurchaseOrder(t, body)
 	if updated.PONumber != "PO-9001" || updated.ShipToCode != "SHIP-1" ||
-		updated.ContactEmail != "buyer@example.com" || updated.PaymentTermsDays != 60 ||
+		updated.ContactEmail != "buyer@example.com" || updated.PaymentTerms != "50% advance" ||
 		updated.Incoterms != "FOB" || *updated.PODate != "2026-10-01" ||
 		updated.ReceivedDate != "2026-10-02" || *updated.RequestedDeliveryDate != "2026-11-20" {
 		t.Errorf("updated header = %+v", updated)
@@ -258,7 +259,7 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 
 	// A line naming an item the source revision never carried is refused.
 	code, response := doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTermsDays": 30,
+		"paymentTerms": "30 days after delivery",
 		"items": []map[string]any{{
 			"quotationItemNo": 99,
 			"description":     "Bogus",
@@ -272,7 +273,7 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 	}
 
 	code, response = doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTermsDays": 30,
+		"paymentTerms": "30 days after delivery",
 		"items": []map[string]any{{
 			"description":    "Zero quantity",
 			"quantityScaled": 0,
@@ -287,7 +288,7 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 	// A finalized record is not writable through the draft endpoint.
 	setPurchaseOrderStateForTest(t, "vera_api_po_invalid", draft.ID, "saved")
 	code, response = doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTermsDays": 30,
+		"paymentTerms": "30 days after delivery",
 	})
 	if code != http.StatusConflict {
 		t.Errorf("saved update = %d; want 409 (%v)", code, response)

@@ -1244,7 +1244,7 @@ export namespace backend {
 	    QuotationID: number;
 	    SourceRevision: number;
 	    CustomerID: number;
-	    PaymentTermsDays: number;
+	    PaymentTerms: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
@@ -1276,7 +1276,7 @@ export namespace backend {
 	        this.QuotationID = source["QuotationID"];
 	        this.SourceRevision = source["SourceRevision"];
 	        this.CustomerID = source["CustomerID"];
-	        this.PaymentTermsDays = source["PaymentTermsDays"];
+	        this.PaymentTerms = source["PaymentTerms"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1332,7 +1332,7 @@ export namespace backend {
 	    ReceivedDate: string;
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
-	    PaymentTermsDays: number;
+	    PaymentTerms: string;
 	    Items: PurchaseOrderItemInput[];
 	
 	    static createFrom(source: any = {}) {
@@ -1352,7 +1352,7 @@ export namespace backend {
 	        this.ReceivedDate = source["ReceivedDate"];
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
-	        this.PaymentTermsDays = source["PaymentTermsDays"];
+	        this.PaymentTerms = source["PaymentTerms"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	    }
 	

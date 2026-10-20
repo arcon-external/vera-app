@@ -52,7 +52,7 @@ export interface PurchaseOrderDTO {
   QuotationID: number;
   SourceRevision: number;
   CustomerID: number;
-  PaymentTermsDays: number;
+  PaymentTerms: string;
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */
@@ -77,7 +77,7 @@ export interface PurchaseOrderHeader {
   poDate: string;
   receivedDate: string;
   requestedDeliveryDate: string;
-  paymentTermsDays: string;
+  paymentTerms: string;
   incoterms: string;
 }
 
@@ -133,7 +133,7 @@ export interface PurchaseOrderUpdateInput {
   ReceivedDate: string;
   RequestedDeliveryDate: string;
   Incoterms: string;
-  PaymentTermsDays: number;
+  PaymentTerms: string;
   Items: PurchaseOrderItemInput[];
 }
 
@@ -191,15 +191,8 @@ export function formatUnitPriceMinor(
   return formatMoney(currency, minor);
 }
 
-/** Parses the payment-terms field. Empty is 0 (not agreed yet). */
-export function parsePaymentTermsDays(raw: string): number | null {
-  const text = raw.trim();
-  if (text === "") return 0;
-  if (!/^\d+$/.test(text)) return null;
-  const value = Number(text);
-  if (!Number.isSafeInteger(value) || value > 3650) return null;
-  return value;
-}
+/** The server's maximum free-text length for payment terms. */
+export const MAX_PAYMENT_TERMS_LENGTH = 500;
 
 /** True for a blank field or a real YYYY-MM-DD calendar date. */
 export function validDateField(raw: string): boolean {
@@ -229,7 +222,7 @@ function headerFromOrder(order: PurchaseOrderDTO): PurchaseOrderHeader {
     poDate: order.PODate ?? "",
     receivedDate: order.ReceivedDate,
     requestedDeliveryDate: order.RequestedDeliveryDate ?? "",
-    paymentTermsDays: String(order.PaymentTermsDays),
+    paymentTerms: order.PaymentTerms,
     incoterms: order.Incoterms,
   };
 }
@@ -320,11 +313,14 @@ export function buildPurchaseOrderUpdate(
       error: "Requested delivery date must be YYYY-MM-DD.",
     };
   }
-  const paymentTerms = parsePaymentTermsDays(state.header.paymentTermsDays);
-  if (paymentTerms === null) {
+  // Commercial wording, not a day count: "50% advance" and
+  // "30 days after delivery" are both real terms. Only the length is bounded,
+  // by the same 500 the schema's CHECK enforces.
+  const paymentTerms = state.header.paymentTerms.trim();
+  if (paymentTerms.length > MAX_PAYMENT_TERMS_LENGTH) {
     return {
       input: null,
-      error: "Payment terms must be a whole number of days between 0 and 3650.",
+      error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
     };
   }
 
@@ -368,7 +364,7 @@ export function buildPurchaseOrderUpdate(
       ReceivedDate: state.header.receivedDate,
       RequestedDeliveryDate: state.header.requestedDeliveryDate,
       Incoterms: state.header.incoterms,
-      PaymentTermsDays: paymentTerms,
+      PaymentTerms: paymentTerms,
       Items: items,
     },
     error: null,

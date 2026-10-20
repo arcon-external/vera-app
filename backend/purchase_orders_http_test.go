@@ -32,7 +32,7 @@ func TestCreatePurchaseOrderDraftPostsTheExactPairAndMapsTheDraft(t *testing.T) 
 			ShipToCode: "SHIP", ContactEmail: "buyer@example.com", ContactPhone: "+62",
 			PONumber: "PO-1", ReceivedDate: "2026-10-20", Incoterms: "CIF",
 			Currency: "USD", TaxZone: "NonFTZ", TaxCategory: "SupplyInstall",
-			PaymentTermsDays: 45, CreatedAt: "2026-10-20T10:00:00Z",
+			PaymentTerms: "45 days", CreatedAt: "2026-10-20T10:00:00Z",
 			UpdatedAt: "2026-10-20T10:00:00Z",
 			Items: []apicontract.PurchaseOrderItemRow{{
 				LineNumber: 1, Description: "Widget", QuantityScaled: 25000,
@@ -49,7 +49,7 @@ func TestCreatePurchaseOrderDraftPostsTheExactPairAndMapsTheDraft(t *testing.T) 
 		t.Fatalf("CreatePurchaseOrderDraft failed: %v", err)
 	}
 	if draft.ID != 7 || draft.State != "draft" || draft.SourceRevision != 0 ||
-		draft.Currency != "USD" || draft.PaymentTermsDays != 45 ||
+		draft.Currency != "USD" || draft.PaymentTerms != "45 days" ||
 		draft.CustomerName != "PT. Buyer" {
 		t.Errorf("draft = %+v; want the full mapped header", draft)
 	}
@@ -91,7 +91,7 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 		}
 		if body["billingAddress"] != "Jl. Edited" || body["poNumber"] != "PO-9" ||
 			body["receivedDate"] != "2026-10-02" || body["poDate"] != "2026-10-01" ||
-			body["paymentTermsDays"] != float64(60) {
+			body["paymentTerms"] != "50% advance" {
 			t.Errorf("header payload = %v", body)
 		}
 		items, _ := body["items"].([]any)
@@ -111,12 +111,12 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 	itemNo := 1
 	q := newTestQuotation()
 	draft, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
-		ID:               7,
-		BillingAddress:   "Jl. Edited",
-		PONumber:         "PO-9",
-		PODate:           "2026-10-01",
-		ReceivedDate:     "2026-10-02",
-		PaymentTermsDays: 60,
+		ID:             7,
+		BillingAddress: "Jl. Edited",
+		PONumber:       "PO-9",
+		PODate:         "2026-10-01",
+		ReceivedDate:   "2026-10-02",
+		PaymentTerms:   "50% advance",
 		Items: []PurchaseOrderItemInput{{
 			QuotationItemNo: &itemNo,
 			Description:     "Widget",
