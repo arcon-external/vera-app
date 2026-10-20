@@ -1357,6 +1357,69 @@ func requirePGConstraint(t *testing.T, err error, constraint string) {
 	}
 }
 
+// TestPurchaseOrderMigration031RefusesAnEmptyReasonForANonzeroAdjustment pins
+// the empty string at the real constraint. The blank class is negated, and a
+// negated "+" matches the empty string: the explained-adjustment CHECK then
+// passed for a nonzero adjustment with no reason at all, while Go's
+// strings.TrimSpace and the editor both refused the same input (issue #470,
+// wave 4). The class must be "*" so "no reason" is blank, not content.
+func TestPurchaseOrderMigration031RefusesAnEmptyReasonForANonzeroAdjustment(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_empty_reason")
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Empty reason")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if draft.SubtotalMinor <= 1 {
+		t.Fatalf("draft subtotal = %d; want a positive base for the adjustment", draft.SubtotalMinor)
+	}
+
+	// writeReason is the hand-written path the CHECK exists for: the Go store
+	// would have normalised the reason, so only direct SQL can reach it.
+	writeReason := func(amount int64, reason string) error {
+		t.Helper()
+		_, err := pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET adjustment_minor = $1,
+			    adjustment_reason = $2,
+			    grand_total_minor = subtotal_minor - discount_minor + ppn_minor + $1
+			WHERE id = $3`, schema), amount, reason, draft.ID)
+		return err
+	}
+
+	// The regression: nonzero with no reason at all.
+	requirePGConstraint(t, writeReason(1, ""), "purchase_orders_adjustment_explained_check")
+	requirePGConstraint(t, writeReason(-1, ""), "purchase_orders_adjustment_explained_check")
+
+	// Whitespace-only was already refused; keep it beside the empty case so a
+	// future rewrite of the class cannot trade one for the other.
+	requirePGConstraint(t, writeReason(1, "\t"), "purchase_orders_adjustment_explained_check")
+	requirePGConstraint(t, writeReason(1, "\u00a0"), "purchase_orders_adjustment_explained_check")
+
+	// A real reason is what the column is for.
+	if err := writeReason(1, "Match the printed total"); err != nil {
+		t.Fatalf("a real reason was refused: %v", err)
+	}
+
+	// A zero adjustment carries no reason, and that stays legal: it is how
+	// every ordinary draft is stored.
+	if err := writeReason(0, ""); err != nil {
+		t.Fatalf("a zero adjustment with no reason was refused: %v", err)
+	}
+}
+
 func TestPurchaseOrderLinesMatchNestedQuotationSubItems(t *testing.T) {
 	database := openTestSchema(t, "vera_po_calc_nested")
 	quotation := seedPOQuotation(t, database, "PT. Buyer", "Nested")

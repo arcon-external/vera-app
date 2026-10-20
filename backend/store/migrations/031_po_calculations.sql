@@ -209,7 +209,13 @@ ALTER TABLE {{schema}}.purchase_orders
             -- trimAdjustmentReason mirrors: ASCII whitespace plus NEL, NBSP,
             -- U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F and U+3000.
             -- U+FEFF (a BOM) is deliberately content, as it is for Go.
-            OR adjustment_reason !~ '^[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$'
+            --
+            -- The class is starred, not plussed: "*" also matches the empty
+            -- string, so a nonzero adjustment with no reason at all fails
+            -- here. A negated "+" matches "" trivially, which let a direct
+            -- UPDATE store an unexplained adjustment that Go and the editor
+            -- both refuse (issue #470, wave 4).
+            OR adjustment_reason !~ '^[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]*$'
         );
 
 -- No new index: every read is by purchase_order_items.purchase_order_id, which
