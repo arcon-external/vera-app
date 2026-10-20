@@ -954,6 +954,10 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 		saved.SavedAt == nil || saved.SavedBy == nil || !saved.PdfAbsentConfirmed {
 		t.Errorf("saved = %+v; want a trimmed number and recorded identity", saved)
 	}
+	// This fixture entered no difference, so the order's own arithmetic happens
+	// to reproduce the printed total. The equality is arithmetic, not a rule:
+	// the store's TestFinalizePurchaseOrderKeepsThePurchaseOrdersOwnTotal covers
+	// a total that deliberately differs from the quotation.
 	if saved.GrandTotalMinor != review.Source.PrintedGrandTotalMinor {
 		t.Errorf("saved grand = %d; want the printed %d",
 			saved.GrandTotalMinor, review.Source.PrintedGrandTotalMinor)

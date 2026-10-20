@@ -27,6 +27,7 @@ import {
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
   type PurchaseOrderLineCalculation,
+  type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import {
   PurchaseOrderDifferenceReviewView,
@@ -751,6 +752,12 @@ export function PurchaseOrderEditorPage({
   const [acknowledgedMissing, setAcknowledgedMissing] = useState<string[]>([]);
   const [acknowledgedExtra, setAcknowledgedExtra] = useState<number[]>([]);
   const [documentConfirmed, setDocumentConfirmed] = useState(false);
+  // The applied payload the confirmation displays and Final save submits. It is
+  // built once when Continue is pressed, from the applied choices -- never from
+  // the stored record, which may still hold an identifier the editor replaced.
+  const [confirmPayload, setConfirmPayload] = useState<PurchaseOrderUpdateInput | null>(
+    null
+  );
   const [finalSaving, setFinalSaving] = useState(false);
 
   // The dirty flag is lifted, not duplicated: the editor still owns the
@@ -896,16 +903,34 @@ export function PurchaseOrderEditorPage({
           })
         }
         onBack={() => setView("entry")}
-        onContinue={() => setView("confirm")}
+        onContinue={() => {
+          if (evaluation === null) return;
+          const applied = buildPurchaseOrderUpdate(evaluation.applied, currency);
+          if (applied.input === null) {
+            dispatch({
+              type: "saveFailed",
+              error: applied.error ?? "The purchase order is incomplete.",
+            });
+            return;
+          }
+          setConfirmPayload(applied.input);
+          setView("confirm");
+        }}
       />
     );
   }
 
-  if (view === "confirm" && review !== null && evaluation !== null) {
+  if (
+    view === "confirm" &&
+    review !== null &&
+    evaluation !== null &&
+    confirmPayload !== null
+  ) {
     return (
       <PurchaseOrderFinalConfirmationView
         review={review}
         evaluation={evaluation}
+        payload={confirmPayload}
         currency={currency}
         documentConfirmed={documentConfirmed}
         onToggleDocumentConfirmed={() => setDocumentConfirmed((current) => !current)}

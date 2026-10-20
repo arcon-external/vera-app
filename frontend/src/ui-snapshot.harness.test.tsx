@@ -64,6 +64,7 @@ import {
 } from "./poList";
 import type { POListRowDTO, POListState } from "./poList";
 import {
+  buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
   initialPurchaseOrderEditorState,
 } from "./purchaseOrder";
@@ -935,6 +936,7 @@ const CASES: SnapshotCase[] = [
       <PurchaseOrderFinalConfirmationView
         review={PO_REVIEW_DTO}
         evaluation={PO_REVIEW_EVALUATION}
+        payload={buildPurchaseOrderUpdate(PO_REVIEW_EVALUATION.applied, PO_EDITOR_USD).input!}
         currency={PO_EDITOR_USD}
         documentConfirmed={false}
         onToggleDocumentConfirmed={() => undefined}

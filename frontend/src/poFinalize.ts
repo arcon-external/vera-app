@@ -8,7 +8,10 @@
 //
 // None of this recalculates money differently from #470: applying a quotation
 // value writes the source's own value into the editor, and the resulting
-// totals come from the same calculatePurchaseOrder the entry screen uses.
+// totals come from the same calculatePurchaseOrder the entry screen uses. The
+// saved total is the purchase order's own calculation -- the quotation's
+// printed grand total is reference evidence, never a target that any value must
+// be reversed to reach.
 
 import { formatMoney, type CurrencyInfo } from "./format";
 import type {
@@ -22,7 +25,6 @@ import {
   calculatePurchaseOrder,
   formatQuantityScaled,
   formatUnitPriceMinor,
-  parseAdjustmentMinor,
   parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
@@ -389,13 +391,12 @@ export interface POReviewEvaluation {
   acknowledgedExtra: number[];
   totals: ReturnType<typeof calculatePurchaseOrder>["totals"];
   calculationError: string | null;
-  /** Grand total before the signed adjustment, from the applied values. */
-  preAdjustmentMinor: number | null;
-  /** printed grand - (subtotal - discount + PPN); the adjustment that covers it. */
-  requiredAdjustmentMinor: number | null;
-  /** printed grand - calculated grand; zero means the printed total is reproduced. */
-  differenceMinor: number | null;
-  covered: boolean;
+  /**
+   * Printed grand total minus the applied calculated total. This is reference
+   * information only: the saved grand total belongs to the purchase order, so
+   * any value here is allowed and never blocks the save.
+   */
+  printedDifferenceMinor: number | null;
   blockers: string[];
   canContinue: boolean;
 }
@@ -448,33 +449,15 @@ export function evaluateReview(
   }
 
   const calculation = calculatePurchaseOrder(applied, currency);
-  let requiredAdjustmentMinor: number | null = null;
-  let differenceMinor: number | null = null;
-  let covered = false;
-  const currentAdjustment = parseAdjustmentMinor(currency, applied.header.adjustment);
+  let printedDifferenceMinor: number | null = null;
   if (calculation.totals !== null) {
-    requiredAdjustmentMinor =
-      source.PrintedGrandTotalMinor -
-      (calculation.totals.afterDiscountMinor + calculation.totals.ppnMinor);
-    differenceMinor = source.PrintedGrandTotalMinor - calculation.totals.grandTotalMinor;
-    covered =
-      currentAdjustment !== null &&
-      currentAdjustment === requiredAdjustmentMinor &&
-      differenceMinor === 0;
-    if (!covered) {
-      blockers.push(
-        differenceMinor === 0
-          ? "The signed adjustment must be cleared: the lines already reproduce the printed total."
-          : `The calculated total differs from the quotation's printed total by ${formatMoney(
-              currency,
-              differenceMinor
-            )}. Correct the lines or record an adjustment of ${formatMoney(
-              currency,
-              requiredAdjustmentMinor
-            )} with a reason.`
-      );
-    }
-  } else if (calculation.error !== null) {
+    printedDifferenceMinor =
+      source.PrintedGrandTotalMinor - calculation.totals.grandTotalMinor;
+  }
+  if (calculation.error !== null) {
+    // A calculation refusal always blocks: an unparseable field, an adjustment
+    // without its reason, or a negative total. The last one still has totals to
+    // show beside its error, so this is checked separately from `totals`.
     blockers.push(calculation.error);
   }
 
@@ -486,13 +469,7 @@ export function evaluateReview(
     acknowledgedExtra,
     totals: calculation.totals,
     calculationError: calculation.error,
-    preAdjustmentMinor:
-      calculation.totals === null
-        ? null
-        : calculation.totals.afterDiscountMinor + calculation.totals.ppnMinor,
-    requiredAdjustmentMinor,
-    differenceMinor,
-    covered,
+    printedDifferenceMinor,
     blockers,
     canContinue: blockers.length === 0,
   };
@@ -524,8 +501,9 @@ export interface PurchaseOrderFinalizeInput {
 /**
  * Builds the final-save payload. It refuses exactly what the server refuses:
  * the minimum identity, the review's explicit decisions, the line
- * acknowledgements and the printed-total explanation (plus the no-PDF
- * confirmation while that branch applies).
+ * acknowledgements and the no-PDF confirmation while that branch applies. The
+ * saved total is the purchase order's own calculation, so no printed-total
+ * target appears here.
  */
 export function buildFinalizeInput(
   state: PurchaseOrderEditorState,

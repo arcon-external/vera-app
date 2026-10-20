@@ -290,40 +290,6 @@ func TestValidatePurchaseOrderDecisionsAcceptsExactAcknowledgements(t *testing.T
 	}
 }
 
-func TestPurchaseOrderRequiredAdjustmentCoversThePrintedTotalGap(t *testing.T) {
-	calc := PurchaseOrderCalc{
-		SubtotalMinor:   300000,
-		DiscountMinor:   15000,
-		PpnMinor:        31350,
-		AdjustmentMinor: 0,
-		GrandTotalMinor: 316350,
-	}
-	required, err := PurchaseOrderRequiredAdjustment(316350, calc)
-	if err != nil {
-		t.Fatalf("required adjustment: %v", err)
-	}
-	if required != 0 {
-		t.Errorf("required = %d; want 0 when the totals already agree", required)
-	}
-
-	required, err = PurchaseOrderRequiredAdjustment(300000, calc)
-	if err != nil {
-		t.Fatalf("required adjustment: %v", err)
-	}
-	if required != -16350 {
-		t.Errorf("required = %d; want -16350", required)
-	}
-
-	// An out-of-range printed total is refused rather than wrapped.
-	if _, err := PurchaseOrderRequiredAdjustment(0, PurchaseOrderCalc{
-		SubtotalMinor:   MaxExactMinor,
-		AdjustmentMinor: MaxExactMinor,
-		PpnMinor:        MaxExactMinor,
-	}); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("out-of-range error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-}
-
 func TestComparePurchaseOrderRefusesTwoLinesForOneSourceLine(t *testing.T) {
 	state := matchedReviewState()
 	state.Lines[1].QuotationItemNo = intPointer(1)

@@ -72,11 +72,6 @@ var (
 	// holds a differing value with no explicit choice, a missing or extra line
 	// with no acknowledgement, or two lines claiming one quotation line.
 	ErrPurchaseOrderUnresolvedDifference = errors.New("purchase order differences are unresolved")
-	// ErrPurchaseOrderTotalMismatch means the calculated total does not equal
-	// the source document's printed total and the signed adjustment does not
-	// cover the gap. The adjustment is the only place a different printed
-	// total may be explained (parent story 46).
-	ErrPurchaseOrderTotalMismatch = errors.New("purchase order total is not explained against the quotation")
 	// ErrPurchaseOrderPDFConfirmationRequired is the deliberate confirmation a
 	// final save needs while no customer PDF is attached (#472 has not
 	// shipped). It is not asked of drafts.
