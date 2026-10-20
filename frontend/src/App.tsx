@@ -52,6 +52,10 @@ import {
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
+import {
+  DocumentHomePage,
+  PurchaseOrderPlaceholderPage,
+} from "./components/DocumentHomePage";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
@@ -428,9 +432,13 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 function App() {
+  // The document home (#466) is the landing page after sign-in and session
+  // restore: "home" holds the four destinations, "po" the honest Purchase
+  // Order placeholder until the entry workspace lands. The Quotation pages
+  // ("create", "drafts", "archive", "detail") keep their existing meanings.
   const [page, setPage] = useState<
-    "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
-  >("create");
+    "home" | "po" | "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
+  >("home");
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -691,7 +699,7 @@ function App() {
     } finally {
       setUser(null);
       resetForm();
-      setPage("create");
+      setPage("home");
     }
   }, [resetForm]);
 
@@ -709,7 +717,7 @@ function App() {
           if (message.startsWith("reach the quotation server")) return;
           setUser(null);
           resetForm();
-          setPage("create");
+          setPage("home");
           pushToast(
             "error",
             "You've been signed out. Contact your administrator if this was unexpected."
@@ -1623,6 +1631,7 @@ function App() {
       ) : null}
       <AppShell
       page={page}
+      onOpenHome={() => setPage("home")}
       onOpenEditor={() => setPage("create")}
       onOpenDrafts={() => setPage("drafts")}
       onOpenArchive={() => setPage("archive")}
@@ -1740,6 +1749,15 @@ function App() {
         ) : null
       }
     >
+      {page === "home" ? (
+        <DocumentHomePage
+          onOpenQuotation={() => setPage("create")}
+          onOpenPurchaseOrder={() => setPage("po")}
+        />
+      ) : null}
+
+      {page === "po" ? <PurchaseOrderPlaceholderPage /> : null}
+
       {page === "create" ? (
         <div className="flex flex-col gap-6">
           {status.type !== "idle" ? (
