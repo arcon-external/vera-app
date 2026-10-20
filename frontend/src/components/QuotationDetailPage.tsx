@@ -53,6 +53,8 @@ interface QuotationDetailPageProps {
   revision: number;
   onBack: () => void;
   onEdit: (quotation: ArchivedQuotation) => void;
+  /** Second PO entry path (#467): opens the shared source selector. */
+  onAddPurchaseOrder: () => void;
   /** The live profile entry: the initial render's currency only. Once the
    * revision loads, every figure renders in its REVISION currency
    * (quotation.Currency) resolved below; the live entry is then just the
@@ -60,11 +62,91 @@ interface QuotationDetailPageProps {
   currency?: CurrencyInfo;
 }
 
+export interface QuotationDetailHeaderProps {
+  quotation: ArchivedQuotation;
+  activeRevision: number;
+  revisionOptions: { value: number; label: string }[];
+  onRevisionChange: (revision: number) => void;
+  onBack: () => void;
+  onEdit: () => void;
+  onAddPurchaseOrder: () => void;
+}
+
+// The issued-Quotation header, exported so its two entry actions can be
+// rendered without a DOM: the page itself fetches in an effect and prints a
+// loading skeleton to SSR.
+export function QuotationDetailHeader({
+  quotation,
+  activeRevision,
+  revisionOptions,
+  onRevisionChange,
+  onBack,
+  onEdit,
+  onAddPurchaseOrder,
+}: QuotationDetailHeaderProps) {
+  return (
+    <header>
+      <button
+        type="button"
+        onClick={onBack}
+        className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M10 3.5L5.5 8 10 12.5" />
+        </svg>
+        Archive
+      </button>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <h1
+            id="quotation-detail-heading"
+            className="tnum text-display font-semibold text-ink-950"
+          >
+            {quotation.QuoteNumber}
+          </h1>
+          {revisionOptions.length > 1 ? (
+            <div className="w-[220px]">
+              <Select
+                value={activeRevision}
+                options={revisionOptions}
+                ariaLabel="Quotation revision"
+                onChange={(next) => onRevisionChange(Number(next))}
+              />
+            </div>
+          ) : (
+            <Badge tone="accent">
+              <span className="tnum">
+                Revision {padRevision(quotation.RevisionNumber)}
+              </span>
+            </Badge>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            aria-label="Add Purchase Order from a Quotation"
+            onClick={onAddPurchaseOrder}
+          >
+            Add Purchase Order from a Quotation
+          </Button>
+          <Button variant="primary" onClick={onEdit}>
+            Edit revision {padRevision(quotation.RevisionNumber)}
+          </Button>
+        </div>
+      </div>
+      <p className="mt-2 max-w-3xl text-body text-ink-500">
+        {quotation.CustomerName} — {quotation.Subject}
+      </p>
+    </header>
+  );
+}
+
 export function QuotationDetailPage({
   quotationID,
   revision,
   onBack,
   onEdit,
+  onAddPurchaseOrder,
   currency = IDR_ENTRY,
 }: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
@@ -171,50 +253,15 @@ export function QuotationDetailPage({
         switching ? "opacity-60" : "opacity-100"
       }`}
     >
-      <header>
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 py-1.5 text-small text-ink-500 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
-        >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M10 3.5L5.5 8 10 12.5" />
-          </svg>
-          Archive
-        </button>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1
-              id="quotation-detail-heading"
-              className="tnum text-display font-semibold text-ink-950"
-            >
-              {quotation.QuoteNumber}
-            </h1>
-            {revisionOptions.length > 1 ? (
-              <div className="w-[220px]">
-                <Select
-                  value={activeRevision}
-                  options={revisionOptions}
-                  ariaLabel="Quotation revision"
-                  onChange={(next) => setActiveRevision(Number(next))}
-                />
-              </div>
-            ) : (
-              <Badge tone="accent">
-                <span className="tnum">
-                  Revision {padRevision(quotation.RevisionNumber)}
-                </span>
-              </Badge>
-            )}
-          </div>
-          <Button variant="primary" onClick={() => onEdit(quotation)}>
-            Edit revision {padRevision(quotation.RevisionNumber)}
-          </Button>
-        </div>
-        <p className="mt-2 max-w-3xl text-body text-ink-500">
-          {quotation.CustomerName} — {quotation.Subject}
-        </p>
-      </header>
+      <QuotationDetailHeader
+        quotation={quotation}
+        activeRevision={activeRevision}
+        revisionOptions={revisionOptions}
+        onRevisionChange={(next) => setActiveRevision(Number(next))}
+        onBack={onBack}
+        onEdit={() => onEdit(quotation)}
+        onAddPurchaseOrder={onAddPurchaseOrder}
+      />
 
       <Card className="border-internal-200 bg-internal-50/40 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

@@ -70,9 +70,13 @@ const (
 // its issued revision count. Unsaved drafts are absent by construction: they
 // live in quotation_drafts and never become a quotation until export.
 //
-// Search is case-insensitive and covers the Quotation number, subject,
-// customer name, and the item and sub-item descriptions of the selected
-// (latest issued) revision. The total is the unpaged match count.
+// Search is case-insensitive and covers the Quotation number, the customer
+// name, and the subject plus item and sub-item descriptions of every issued
+// revision. Every revision is selectable in step two, so every revision's text
+// must be findable: an item that only revision 0 ever carried still locates
+// its Quotation. The row itself keeps showing the latest issued revision. The
+// total is the unpaged match count, computed from the same predicate as the
+// page.
 //
 // hasActivePO is a placeholder for #468: no PO table exists yet, so every row
 // is eligible. hideUsed therefore filters nothing today, but it is honoured on
@@ -88,9 +92,9 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	}
 	schema := s.configSchema()
 
-	// The latest revision is chosen once per Quotation and reused by both the
-	// row and the description search, so a quotation is never searched
-	// against a revision that is not the one the row shows.
+	// The latest revision supplies the row's subject and revision number. The
+	// search is not tied to it: the EXISTS clauses below reach every revision
+	// of the Quotation, matching step two's full revision list.
 	from := fmt.Sprintf(`
 		FROM %s.quotations q
 		JOIN LATERAL (
@@ -114,18 +118,23 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 		where += fmt.Sprintf(`
 			AND (
 				q.quote_number ILIKE $2 ESCAPE '\'
-				OR l.subject ILIKE $2 ESCAPE '\'
+				OR EXISTS (
+					SELECT 1 FROM %s.quotation_revisions sr
+					WHERE sr.quotation_id = q.id AND sr.subject ILIKE $2 ESCAPE '\'
+				)
 				OR c.legal_name ILIKE $2 ESCAPE '\'
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_items i
-					WHERE i.revision_id = l.id AND i.description ILIKE $2 ESCAPE '\'
+					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
+					WHERE sr.quotation_id = q.id AND i.description ILIKE $2 ESCAPE '\'
 				)
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_sub_items si
 					JOIN %s.quotation_revision_items i ON i.id = si.revision_item_id
-					WHERE i.revision_id = l.id AND si.description ILIKE $2 ESCAPE '\'
+					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
+					WHERE sr.quotation_id = q.id AND si.description ILIKE $2 ESCAPE '\'
 				)
-			)`, schema, schema, schema)
+			)`, schema, schema, schema, schema, schema, schema)
 		args = append(args, pattern)
 	}
 

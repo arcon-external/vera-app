@@ -223,6 +223,7 @@ func TestPOSourceSearchCoversNumberSubjectCustomerAndItemText(t *testing.T) {
 	})
 	exportForSelector(t, server, token, poSourcePackageInput("Cooling package", "Chiller compressor"))
 	exportForSelector(t, server, token, poSourceInput("Discount 5% for early payment", "Percent item"))
+	exportForSelector(t, server, token, poSourceInput("Underscore_check subject", "Underscore item"))
 
 	cases := []struct {
 		name  string
@@ -235,6 +236,7 @@ func TestPOSourceSearchCoversNumberSubjectCustomerAndItemText(t *testing.T) {
 		{"quotation number", "?search=" + electricalNumber, 1},
 		{"customer name", "?search=oilfield", 1},
 		{"literal percent, not a wildcard", "?search=%25", 1},
+		{"literal underscore, not a wildcard", "?search=_", 1},
 		{"no match", "?search=zzzz-nothing", 0},
 	}
 	for _, tc := range cases {
@@ -250,21 +252,58 @@ func TestPOSourceSearchCoversNumberSubjectCustomerAndItemText(t *testing.T) {
 	}
 }
 
-func TestPOSourceSearchReadsTheSelectedRevisionOnly(t *testing.T) {
-	server, token := testQuotationServer(t, "vera_api_po_sources_search_latest")
+func TestPOSourceSearchCoversEveryIssuedRevision(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_sources_search_revisions")
 
-	_, number := exportForSelector(t, server, token, poSourceInput("Gearbox supply", "Obsolete gearbox"))
+	id, number := exportForSelector(t, server, token, poSourceInput("Gearbox supply", "Obsolete gearbox"))
 	exportNextRevision(t, server, token, number, 1, poSourceInput("Gearbox supply", "Replacement pump housing"))
 
-	if got := listPOSources(t, server, token, "?search=obsolete"); len(got.Quotations) != 0 {
-		t.Errorf("search found %d rows in a superseded revision; the latest revision is the selected one", len(got.Quotations))
-	}
-	got := listPOSources(t, server, token, "?search=replacement%20pump")
+	// The item text exists only in revision 0. Revision 0 is selectable in
+	// step two, so searching every issued revision is what makes it findable;
+	// latest-only search would answer zero rows here.
+	got := listPOSources(t, server, token, "?search=obsolete")
 	if len(got.Quotations) != 1 {
-		t.Fatalf("search in the latest revision rows = %d; want 1", len(got.Quotations))
+		t.Fatalf("search in an earlier revision rows = %d; want 1 (%v)", len(got.Quotations), got.Quotations)
 	}
-	if got.Quotations[0].LatestRevision != 1 {
-		t.Errorf("selected revision = %d; want 1", got.Quotations[0].LatestRevision)
+	if got.Total != 1 {
+		t.Errorf("search in an earlier revision total = %d; want 1", got.Total)
+	}
+	row := got.Quotations[0]
+	if row.ID != id {
+		t.Errorf("row id = %d; want %d", row.ID, id)
+	}
+	// One row per Quotation: the match came from revision 0, but the row
+	// still describes the latest issued revision.
+	if row.LatestRevision != 1 || row.Subject != "Gearbox supply" {
+		t.Errorf("row = %+v; want the latest revision (1) with its subject", row)
+	}
+
+	// Searching the latest revision still works, and still yields one row.
+	latest := listPOSources(t, server, token, "?search=replacement%20pump")
+	if len(latest.Quotations) != 1 || latest.Quotations[0].LatestRevision != 1 {
+		t.Fatalf("latest-revision search = %+v; want one row at revision 1", latest.Quotations)
+	}
+
+	// The revision list still offers 0: searchable and selectable describe the
+	// same set of revisions.
+	code, body := doJSON(t, server, http.MethodGet, "/v1/po-sources/"+strconv.FormatInt(id, 10)+"/revisions", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("revisions = %d; want 200 (%v)", code, body)
+	}
+	var detail struct {
+		Revisions []struct {
+			Revision int16 `json:"revision"`
+		} `json:"revisions"`
+	}
+	encodeDecode(t, body, &detail)
+	foundZero := false
+	for _, revision := range detail.Revisions {
+		if revision.Revision == 0 {
+			foundZero = true
+		}
+	}
+	if !foundZero {
+		t.Errorf("revisions = %+v; want revision 0 offered for selection", detail.Revisions)
 	}
 }
 
@@ -382,6 +421,19 @@ func TestPOSourceSelectionRevalidatesAtConfirmTime(t *testing.T) {
 		t.Errorf("validated revision = %v; want 1", body["revisionNumber"])
 	}
 
+	// Revision 0 is a real revision, not a missing value: supplied as zero it
+	// must revalidate like any other issued revision.
+	code, body = doJSON(t, server, http.MethodPost, "/v1/po-sources/validate", token, map[string]any{
+		"quotationId":    id,
+		"revisionNumber": 0,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("validate revision 0 = %d; want 200 (%v)", code, body)
+	}
+	if valid, _ := body["valid"].(bool); !valid {
+		t.Errorf("issued revision 0 rejected: %v", body)
+	}
+
 	code, body = doJSON(t, server, http.MethodPost, "/v1/po-sources/validate", token, map[string]any{
 		"quotationId":    id,
 		"revisionNumber": 9,
@@ -424,6 +476,55 @@ func TestPOSourceSelectionRevalidatesAtConfirmTime(t *testing.T) {
 	})
 	if code != http.StatusBadRequest {
 		t.Errorf("malformed validation = %d; want 400", code)
+	}
+}
+
+func TestPOSourceRevalidationRequiresAnExplicitRevision(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_sources_validate_explicit")
+
+	id, _ := exportForSelector(t, server, token, poSourceInput("Explicit revision", "Item"))
+
+	cases := []struct {
+		name string
+		body map[string]any
+	}{
+		{"absent revision", map[string]any{"quotationId": id}},
+		{"null revision", map[string]any{"quotationId": id, "revisionNumber": nil}},
+		{"negative revision", map[string]any{"quotationId": id, "revisionNumber": -1}},
+		{"absent quotation", map[string]any{"revisionNumber": 0}},
+		{"zero quotation", map[string]any{"quotationId": 0, "revisionNumber": 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := doJSON(t, server, http.MethodPost, "/v1/po-sources/validate", token, tc.body)
+			if code != http.StatusBadRequest {
+				t.Fatalf("validate %v = %d; want 400 (%v)", tc.body, code, body)
+			}
+		})
+	}
+
+	// Missing rows are answers, not malformed requests: they keep the 200
+	// contract the confirm screen renders.
+	code, body := doJSON(t, server, http.MethodPost, "/v1/po-sources/validate", token, map[string]any{
+		"quotationId":    99999999,
+		"revisionNumber": 0,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("missing quotation = %d; want 200 (%v)", code, body)
+	}
+	if reason, _ := body["reason"].(string); reason != "quotation_not_found" {
+		t.Errorf("missing quotation reason = %q; want quotation_not_found", reason)
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, "/v1/po-sources/validate", token, map[string]any{
+		"quotationId":    id,
+		"revisionNumber": 9,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("missing revision = %d; want 200 (%v)", code, body)
+	}
+	if reason, _ := body["reason"].(string); reason != "revision_not_found" {
+		t.Errorf("missing revision reason = %q; want revision_not_found", reason)
 	}
 }
 

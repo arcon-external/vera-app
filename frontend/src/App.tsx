@@ -1560,6 +1560,10 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // The PO source selector owns the keyboard while it is open: its dialog
+      // handles Escape and contains Tab, and no global shortcut may act on
+      // the page behind the modal.
+      if (poSelectorOpen) return;
       if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const inGrid = (event.target as HTMLElement).closest?.("[data-grid-cell]");
         if (inGrid) return;
@@ -1623,7 +1627,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew]);
+  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen]);
 
   // PO source selector loaders (#467). The modal owns the three steps; these
   // callbacks are its only transport, so the component stays free of hidden
@@ -2023,6 +2027,7 @@ function App() {
             revision={selectedQuotation.revision}
             onBack={() => setPage("archive")}
             onEdit={handleEditQuotation}
+            onAddPurchaseOrder={() => setPOSelectorOpen(true)}
           />
         )
       ) : null}

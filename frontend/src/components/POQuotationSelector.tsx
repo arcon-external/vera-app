@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
+import type { KeyboardEvent, RefObject } from "react";
 import {
   canConfirm,
   canContinue,
   initialPOSourceSelectorState,
+  poSourceQueryDelay,
   poSourceSelectorReducer,
   selectionOf,
+  tabStopIndex,
   visibleRows,
 } from "../poSelector";
 import type {
@@ -45,7 +48,22 @@ export interface POQuotationSelectorViewProps {
   dispatch: (action: POSourceSelectorAction) => void;
   onClose: () => void;
   onConfirm: () => void;
+  /** The dialog element: the programmatic focus target on open. */
+  dialogRef?: RefObject<HTMLDivElement | null>;
+  /** Escape and Tab containment, owned by the container. */
+  onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
 }
+
+// Everything the modal can focus. Disabled buttons (used Quotation rows) are
+// deliberately absent: Tab skips what a pointer cannot use.
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
 
 function errorText(error: unknown): string {
   if (error instanceof Error && error.message.trim() !== "") return error.message;
@@ -133,12 +151,13 @@ function StepOne({
           {rows.map((row) => {
             const used = row.hasActivePO;
             return (
-              <li key={row.id}>
+              <li key={row.id} className="grid gap-1">
                 <button
                   type="button"
                   disabled={used}
                   aria-disabled={used ? "true" : undefined}
                   aria-label={`Quotation ${row.quoteNumber}, ${row.customerName}`}
+                  aria-describedby={used ? `po-source-used-${row.id}` : undefined}
                   onClick={() => dispatch({ type: "quotationSelected", quotation: row })}
                   className={`grid w-full gap-1 rounded-lg border px-4 py-3 text-left transition ${
                     used
@@ -157,12 +176,18 @@ function StepOne({
                   </span>
                   <span className="text-small">{row.customerName}</span>
                   <span className="text-small text-ink-500">{row.subject}</span>
-                  {used ? (
-                    <span className="text-caption font-medium text-danger-600">
-                      Already has a purchase order
-                    </span>
-                  ) : null}
                 </button>
+                {/* The reason sits outside the disabled button: a disabled
+                    control's descendants are not uniformly exposed, so the
+                    description is a sibling the button points at. */}
+                {used ? (
+                  <p
+                    id={`po-source-used-${row.id}`}
+                    className="px-1 text-caption font-medium text-danger-600"
+                  >
+                    Already has a purchase order
+                  </p>
+                ) : null}
               </li>
             );
           })}
@@ -286,6 +311,8 @@ export function POQuotationSelectorView({
   dispatch,
   onClose,
   onConfirm,
+  dialogRef,
+  onKeyDown,
 }: POQuotationSelectorViewProps) {
   const confirming = state.confirming;
   return (
@@ -295,10 +322,13 @@ export function POQuotationSelectorView({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Select a quotation for the purchase order"
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-rule bg-white shadow-card"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-rule bg-white shadow-card outline-none"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-rule px-6 py-4">
@@ -375,6 +405,10 @@ export function POQuotationSelector({
     poSourceSelectorReducer,
     initialPOSourceSelectorState
   );
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // The search term behind the last request. Only a changed term is paused;
+  // page and filter changes keep this value and query immediately.
+  const lastSearch = useRef(state.search);
 
   // Loaders are kept in refs: App may pass fresh closures each render, and a
   // loader identity in the dependency list would refetch on every keystroke
@@ -392,6 +426,48 @@ export function POQuotationSelector({
     }
   }, [open]);
 
+  // Keyboard modality: opening moves focus into the dialog, closing returns
+  // it to whatever opened the modal. The dialog is the programmatic target
+  // (tabIndex -1), so its label is announced before the first control.
+  useEffect(() => {
+    if (!open) return;
+    const opener =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => {
+      if (opener !== null && document.contains(opener)) opener.focus();
+    };
+  }, [open]);
+
+  // Escape closes; Tab and Shift+Tab wrap inside the dialog. The view passes
+  // this to the dialog, and App ignores global shortcuts while the modal is
+  // open, so a keypress cannot act on the page behind it.
+  const handleDialogKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (dialog === null) return;
+      const stops = Array.from(
+        dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+      );
+      const current = stops.indexOf(document.activeElement as HTMLElement);
+      const target = tabStopIndex(stops.length, current, event.shiftKey);
+      if (target === -1) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      stops[target].focus();
+    },
+    [onClose]
+  );
+
   useEffect(() => {
     if (!open || state.step !== 1) return;
     let stale = false;
@@ -399,8 +475,10 @@ export function POQuotationSelector({
     // A search is typed one character at a time; without a pause the modal
     // would send a request per keystroke. The list keeps its previous rows
     // visible while the answer is in flight, so the pause is not a blank
-    // screen. Clearing the box, and paging/filtering, query immediately.
-    const delay = state.search.trim() === "" ? 0 : 250;
+    // screen. Paging, filtering, the first render and clearing the box are
+    // explicit actions and query immediately.
+    const delay = poSourceQueryDelay(lastSearch.current, state.search);
+    lastSearch.current = state.search;
     const timer = setTimeout(() => {
       pageLoader
         .current({ page: state.page, search: state.search, hideUsed: state.hideUsed })
@@ -466,6 +544,8 @@ export function POQuotationSelector({
       dispatch={dispatch}
       onClose={onClose}
       onConfirm={() => void confirm()}
+      dialogRef={dialogRef}
+      onKeyDown={handleDialogKeyDown}
     />
   );
 }

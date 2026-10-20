@@ -130,9 +130,13 @@ type POSourceRevisionsResponse struct {
 
 // POSourceValidateRequest is the confirm-time revalidation: the exact pair the
 // selector is about to return.
+//
+// RevisionNumber is a pointer because revision 0 is a real revision: an
+// absent or null field cannot mean zero, so nil is what tells the handler the
+// request is incomplete (400). A pointer lets `{revisionNumber: 0}` stay valid.
 type POSourceValidateRequest struct {
-	QuotationID    int64 `json:"quotationId"`
-	RevisionNumber int16 `json:"revisionNumber"`
+	QuotationID    int64  `json:"quotationId"`
+	RevisionNumber *int16 `json:"revisionNumber"`
 }
 
 // POSourceValidationResponse answers whether the pair still exists and is

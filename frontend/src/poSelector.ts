@@ -156,6 +156,40 @@ export function visibleRows(
   return hideUsed ? rows.filter((row) => !row.hasActivePO) : rows;
 }
 
+/** The first step's typing pause, in milliseconds. */
+export const PO_SOURCE_SEARCH_PAUSE_MS = 250;
+
+/**
+ * How long the first step waits before querying. Only a changed, non-empty
+ * search is paused: typing would otherwise send one request per keystroke.
+ * Paging, the used filter, the first render and clearing the box are explicit
+ * actions and query immediately. `previousSearch` is the term behind the last
+ * request (or "" on first render).
+ */
+export function poSourceQueryDelay(
+  previousSearch: string,
+  search: string
+): number {
+  if (previousSearch === search) return 0;
+  return search.trim() === "" ? 0 : PO_SOURCE_SEARCH_PAUSE_MS;
+}
+
+/**
+ * The focus stop a Tab press lands on, wrapping at the dialog's edges.
+ * Returns -1 when the dialog has no focusable control. `current` is -1 when
+ * the dialog container itself holds focus (or the active element left the
+ * list), which sends forward Tab to the first stop and Shift+Tab to the last.
+ */
+export function tabStopIndex(
+  count: number,
+  current: number,
+  shift: boolean
+): number {
+  if (count < 1) return -1;
+  if (current < 0 || current >= count) return shift ? count - 1 : 0;
+  return shift ? (current - 1 + count) % count : (current + 1) % count;
+}
+
 export function poSourceSelectorReducer(
   state: POSourceSelectorState,
   action: POSourceSelectorAction
