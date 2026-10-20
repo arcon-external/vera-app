@@ -97,6 +97,8 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
 		})
 	}
 	requestContext, err := s.organizationContext(context.Request().Context())
@@ -119,6 +121,9 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 		Incoterms:             request.Incoterms,
 		UpdatedBy:             user.ID,
 		Items:                 items,
+		DiscountPercent:       request.DiscountPercent,
+		AdjustmentMinor:       request.AdjustmentMinor,
+		AdjustmentReason:      request.AdjustmentReason,
 	})
 	if err != nil {
 		return purchaseOrderError(context, err)
@@ -153,30 +158,42 @@ func purchaseOrderError(context echo.Context, err error) error {
 
 func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 	row := apicontract.PurchaseOrderRow{
-		ID:                    order.ID,
-		UUID:                  order.UUID,
-		State:                 order.State,
-		QuotationID:           order.QuotationID,
-		SourceRevision:        order.SourceRevision,
-		QuoteNumber:           order.QuoteNumber,
-		CustomerID:            order.CustomerID,
-		CustomerName:          order.CustomerName,
-		BillingAddress:        order.BillingAddress,
-		DeliveryAddress:       order.DeliveryAddress,
-		ShipToCode:            order.ShipToCode,
-		ContactEmail:          order.ContactEmail,
-		ContactPhone:          order.ContactPhone,
-		PONumber:              order.PONumber,
-		PODate:                formatPurchaseOrderDate(order.PODate),
-		ReceivedDate:          order.ReceivedDate.Format("2006-01-02"),
-		RequestedDeliveryDate: formatPurchaseOrderDate(order.RequestedDeliveryDate),
-		PaymentTerms:          order.PaymentTerms,
-		Incoterms:             order.Incoterms,
-		Currency:              order.Currency,
-		TaxZone:               order.TaxZone,
-		TaxCategory:           order.TaxCategory,
-		CreatedAt:             order.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:             order.UpdatedAt.Format(time.RFC3339),
+		ID:                     order.ID,
+		UUID:                   order.UUID,
+		State:                  order.State,
+		QuotationID:            order.QuotationID,
+		SourceRevision:         order.SourceRevision,
+		QuoteNumber:            order.QuoteNumber,
+		CustomerID:             order.CustomerID,
+		CustomerName:           order.CustomerName,
+		BillingAddress:         order.BillingAddress,
+		DeliveryAddress:        order.DeliveryAddress,
+		ShipToCode:             order.ShipToCode,
+		ContactEmail:           order.ContactEmail,
+		ContactPhone:           order.ContactPhone,
+		PONumber:               order.PONumber,
+		PODate:                 formatPurchaseOrderDate(order.PODate),
+		ReceivedDate:           order.ReceivedDate.Format("2006-01-02"),
+		RequestedDeliveryDate:  formatPurchaseOrderDate(order.RequestedDeliveryDate),
+		PaymentTerms:           order.PaymentTerms,
+		Incoterms:              order.Incoterms,
+		Currency:               order.Currency,
+		TaxZone:                order.TaxZone,
+		TaxCategory:            order.TaxCategory,
+		DiscountPercent:        order.DiscountPercent,
+		SubtotalMinor:          order.SubtotalMinor,
+		DiscountMinor:          order.DiscountMinor,
+		PpnBps:                 order.PpnBps,
+		PpnMinor:               order.PpnMinor,
+		AdjustmentMinor:        order.AdjustmentMinor,
+		AdjustmentReason:       order.AdjustmentReason,
+		GrandTotalMinor:        order.GrandTotalMinor,
+		PrintedSubtotalMinor:   order.PrintedSubtotalMinor,
+		PrintedDiscountMinor:   order.PrintedDiscountMinor,
+		PrintedPpnMinor:        order.PrintedPpnMinor,
+		PrintedGrandTotalMinor: order.PrintedGrandTotalMinor,
+		CreatedAt:              order.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:              order.UpdatedAt.Format(time.RFC3339),
 	}
 	row.Items = make([]apicontract.PurchaseOrderItemRow, 0, len(order.Items))
 	for _, item := range order.Items {
@@ -188,6 +205,11 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+			GrossMinor:      item.GrossMinor,
+			DiscountMinor:   item.DiscountMinor,
+			NetMinor:        item.NetMinor,
 		})
 	}
 	return row

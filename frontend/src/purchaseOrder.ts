@@ -24,6 +24,19 @@ export interface PurchaseOrderDTOItem {
   QuantityScaled: number;
   UoM: string;
   UnitPriceMinor: number;
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
+  GrossMinor: number;
+  DiscountMinor: number;
+  NetMinor: number;
+}
+
+/** The printed source figures the quotation revision carried (issue #470). */
+export interface PurchaseOrderPrintedTotals {
+  subtotalMinor: number;
+  discountMinor: number;
+  ppnMinor: number;
+  grandTotalMinor: number;
 }
 
 /** One PO draft as the desktop binding returns it. */
@@ -45,6 +58,7 @@ export interface PurchaseOrderDTO {
   Currency: string;
   TaxZone: string;
   TaxCategory: string;
+  AdjustmentReason: string;
   CreatedAt: string;
   UpdatedAt: string;
   Items: PurchaseOrderDTOItem[];
@@ -53,6 +67,17 @@ export interface PurchaseOrderDTO {
   SourceRevision: number;
   CustomerID: number;
   PaymentTerms: string;
+  DiscountPercent: number;
+  PpnBps: number;
+  SubtotalMinor: number;
+  DiscountMinor: number;
+  PpnMinor: number;
+  AdjustmentMinor: number;
+  GrandTotalMinor: number;
+  PrintedSubtotalMinor: number;
+  PrintedDiscountMinor: number;
+  PrintedPpnMinor: number;
+  PrintedGrandTotalMinor: number;
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */
@@ -62,6 +87,8 @@ export interface PurchaseOrderLine {
   quantity: string;
   uom: string;
   unitPrice: string;
+  discountEnabled: boolean;
+  discountPercent: string;
   quotationItemNo: number | null;
   quotationSubNo: number | null;
 }
@@ -79,6 +106,11 @@ export interface PurchaseOrderHeader {
   requestedDeliveryDate: string;
   paymentTerms: string;
   incoterms: string;
+  /** Whole-PO discount, in percent. The row discounts live on the lines. */
+  discountPercent: string;
+  /** Signed adjustment in the PO currency, as typed. Empty means none. */
+  adjustment: string;
+  adjustmentReason: string;
 }
 
 export interface PurchaseOrderEditorState {
@@ -91,6 +123,10 @@ export interface PurchaseOrderEditorState {
   taxCategory: string;
   header: PurchaseOrderHeader;
   lines: PurchaseOrderLine[];
+  /** The customer-facing PPN rate resolved from the frozen tax basis. */
+  ppnBps: number;
+  /** What the source revision printed, kept separate from the calculation. */
+  printedTotals: PurchaseOrderPrintedTotals;
   /** Canonical snapshot of the last loaded/saved values, for dirtiness. */
   baseline: string;
   nextKey: number;
@@ -115,6 +151,8 @@ export interface PurchaseOrderItemInput {
   QuantityScaled: number;
   UoM: string;
   UnitPriceMinor: number;
+  DiscountEnabled: boolean;
+  DiscountPercent: number;
 }
 
 /** The update payload (PascalCase = Wails binding). */
@@ -131,7 +169,10 @@ export interface PurchaseOrderUpdateInput {
   RequestedDeliveryDate: string;
   Incoterms: string;
   PaymentTerms: string;
+  AdjustmentReason: string;
   Items: PurchaseOrderItemInput[];
+  DiscountPercent: number;
+  AdjustmentMinor: number;
 }
 
 /**
@@ -188,6 +229,255 @@ export function formatUnitPriceMinor(
   return formatMoney(currency, minor);
 }
 
+/** The ceiling on a row or whole-PO discount; mirrors MaxDiscountPercent in Go. */
+export const MAX_DISCOUNT_PERCENT = 100;
+
+/** The supported money range, the same int64 bound the Go calculator checks. */
+const MAX_MONEY_MINOR = BigInt("9223372036854775807");
+
+/**
+ * Parses a discount field as a whole percentage from 0 to 100. Empty means no
+ * discount. A decimal ("10.5") is refused rather than rounded, because the
+ * stored column is an integer percentage and a silent round would print a
+ * different discount from the one entered.
+ */
+export function parseDiscountPercent(raw: string): number | null {
+  const text = raw.trim();
+  if (text === "") return 0;
+  if (!/^\d+$/.test(text)) return null;
+  const percent = Number(text);
+  if (!Number.isSafeInteger(percent)) return null;
+  if (percent < 0 || percent > MAX_DISCOUNT_PERCENT) return null;
+  return percent;
+}
+
+/**
+ * Parses the signed adjustment in the PO's own currency. Empty means none;
+ * a leading minus is a real, signed reduction. Null means the text cannot be
+ * money, so the editor can name the field instead of storing zero.
+ */
+export function parseAdjustmentMinor(
+  currency: CurrencyInfo,
+  raw: string
+): number | null {
+  const text = raw.trim();
+  if (text === "") return 0;
+  const parsed = tryParseMoneyInput(currency, text);
+  if (parsed === null || !Number.isSafeInteger(parsed)) return null;
+  return parsed;
+}
+
+/** One row's exact figures: what it costs before and after its own discount. */
+export interface PurchaseOrderLineCalculation {
+  grossMinor: number;
+  discountMinor: number;
+  netMinor: number;
+}
+
+/** Every stage of the calculation, so the editor can show where a total came from. */
+export interface PurchaseOrderTotals {
+  /** Sum of row gross figures, before any row discount. */
+  grossMinor: number;
+  /** Sum of row discounts. */
+  rowDiscountMinor: number;
+  /** Sum of row nets: the base of the whole-PO discount. */
+  subtotalMinor: number;
+  /** Whole-PO discount amount, truncated to a whole minor unit. */
+  discountMinor: number;
+  afterDiscountMinor: number;
+  ppnMinor: number;
+  adjustmentMinor: number;
+  grandTotalMinor: number;
+}
+
+export interface PurchaseOrderCalculation {
+  /** One entry per line; null when that line cannot be parsed yet. */
+  lines: Array<PurchaseOrderLineCalculation | null>;
+  totals: PurchaseOrderTotals;
+  /** The first problem, named for the field or line it belongs to. */
+  error: string | null;
+}
+
+const EMPTY_TOTALS: PurchaseOrderTotals = {
+  grossMinor: 0,
+  rowDiscountMinor: 0,
+  subtotalMinor: 0,
+  discountMinor: 0,
+  afterDiscountMinor: 0,
+  ppnMinor: 0,
+  adjustmentMinor: 0,
+  grandTotalMinor: 0,
+};
+
+function toMoney(value: bigint): number | null {
+  if (value < 0n || value > MAX_MONEY_MINOR) return null;
+  return Number(value);
+}
+
+/**
+ * Exact `quantity × price ÷ 10^4` with the half-away-from-zero rounding the Go
+ * calculator uses. A big-int intermediate is what makes an overflowing line
+ * detectable instead of silently wrapped.
+ */
+function lineGrossMinor(
+  quantityScaled: number,
+  unitPriceMinor: number
+): number | null {
+  const product = BigInt(quantityScaled) * BigInt(unitPriceMinor);
+  const divisor = BigInt(QUANTITY_SCALE);
+  const quotient = product / divisor;
+  const remainder = product % divisor;
+  const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
+  return toMoney(rounded);
+}
+
+/** `amount × percent ÷ 100`, truncated, exactly as the quotation does it. */
+function percentageMinor(amount: number, percent: number): number | null {
+  return toMoney((BigInt(amount) * BigInt(percent)) / 100n);
+}
+
+/** `amount × basis points ÷ 10000`, truncated, exactly as calcTax does it. */
+function basisPointsMinor(amount: number, bps: number): number | null {
+  return toMoney((BigInt(amount) * BigInt(bps)) / 10000n);
+}
+
+/**
+ * The explained customer-facing calculation, mirroring CalculatePurchaseOrder
+ * in backend/store/po_calc.go stage for stage:
+ *
+ *   1. line gross    half away from zero(quantity × unit price ÷ 10^4)
+ *   2. row discount  truncate(gross × percent ÷ 100); net = gross − discount
+ *   3. subtotal      sum of row nets
+ *   4. PO discount   truncate(subtotal × percent ÷ 100)
+ *   5. PPN           truncate(after × bps ÷ 10000), added on top
+ *   6. adjustment    signed, added last, reason required
+ *   7. grand total   after + PPN + adjustment, never negative
+ *
+ * Internal cost, margin, PPH22 and profit have no place in this module: a PO is
+ * compared against customer-facing figures only.
+ */
+export function calculatePurchaseOrder(
+  state: PurchaseOrderEditorState,
+  currency: CurrencyInfo
+): PurchaseOrderCalculation {
+  const lineResults: Array<PurchaseOrderLineCalculation | null> = [];
+  let grossTotal = 0;
+  let rowDiscountTotal = 0;
+  let subtotal = 0;
+  let firstError: string | null = null;
+
+  for (let index = 0; index < state.lines.length; index++) {
+    const line = state.lines[index];
+    const quantity = parseQuantityScaled(line.quantity);
+    if (quantity === null) {
+      lineResults.push(null);
+      firstError ??= `Line ${index + 1}: quantity must be positive with up to 4 decimal places.`;
+      continue;
+    }
+    const price = parseUnitPriceMinor(currency, line.unitPrice);
+    if (price === null) {
+      lineResults.push(null);
+      firstError ??= `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount.`;
+      continue;
+    }
+    const percent = parseDiscountPercent(line.discountPercent);
+    if (percent === null) {
+      lineResults.push(null);
+      firstError ??= `Line ${index + 1}: discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`;
+      continue;
+    }
+    const gross = lineGrossMinor(quantity, price);
+    if (gross === null) {
+      lineResults.push(null);
+      firstError ??= `Line ${index + 1}: the line total exceeds the supported amount range.`;
+      continue;
+    }
+    const discount = line.discountEnabled ? percentageMinor(gross, percent) : 0;
+    if (discount === null) {
+      lineResults.push(null);
+      firstError ??= `Line ${index + 1}: the line discount exceeds the supported amount range.`;
+      continue;
+    }
+    const net = gross - discount;
+    lineResults.push({ grossMinor: gross, discountMinor: discount, netMinor: net });
+    grossTotal += gross;
+    rowDiscountTotal += discount;
+    subtotal += net;
+  }
+
+  const wholePercent = parseDiscountPercent(state.header.discountPercent);
+  if (wholePercent === null) {
+    return {
+      lines: lineResults,
+      totals: EMPTY_TOTALS,
+      error:
+        firstError ??
+        `Whole-PO discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
+    };
+  }
+  const adjustment = parseAdjustmentMinor(currency, state.header.adjustment);
+  if (adjustment === null) {
+    return {
+      lines: lineResults,
+      totals: EMPTY_TOTALS,
+      error:
+        firstError ??
+        `Adjustment must be a signed ${currency.code} amount.`,
+    };
+  }
+
+  const discount = percentageMinor(subtotal, wholePercent);
+  if (discount === null) {
+    return {
+      lines: lineResults,
+      totals: EMPTY_TOTALS,
+      error: firstError ?? "The whole-PO discount exceeds the supported amount range.",
+    };
+  }
+  const afterDiscount = subtotal - discount;
+  const ppn = basisPointsMinor(afterDiscount, state.ppnBps);
+  if (ppn === null) {
+    return {
+      lines: lineResults,
+      totals: EMPTY_TOTALS,
+      error: firstError ?? "PPN exceeds the supported amount range.",
+    };
+  }
+  const grand = afterDiscount + ppn + adjustment;
+  // The arithmetic is still shown while a rule blocks saving: an unexplained
+  // adjustment or a negative total is an error beside the figures, not a
+  // reason to blank them out.
+  let error = firstError;
+  if (
+    error === null &&
+    adjustment !== 0 &&
+    state.header.adjustmentReason.trim() === ""
+  ) {
+    error = "An adjustment requires a reason.";
+  }
+  if (error === null && grand < 0) {
+    error = "The adjustment would make the purchase order total negative.";
+  }
+  if (error === null && grand > Number(MAX_MONEY_MINOR)) {
+    error = "The purchase order total exceeds the supported amount range.";
+  }
+
+  return {
+    lines: lineResults,
+    totals: {
+      grossMinor: grossTotal,
+      rowDiscountMinor: rowDiscountTotal,
+      subtotalMinor: subtotal,
+      discountMinor: discount,
+      afterDiscountMinor: afterDiscount,
+      ppnMinor: ppn,
+      adjustmentMinor: adjustment,
+      grandTotalMinor: grand,
+    },
+    error,
+  };
+}
+
 /** The server's maximum free-text length for payment terms. */
 export const MAX_PAYMENT_TERMS_LENGTH = 500;
 
@@ -218,7 +508,10 @@ export function validDateField(raw: string): boolean {
   );
 }
 
-function headerFromOrder(order: PurchaseOrderDTO): PurchaseOrderHeader {
+function headerFromOrder(
+  order: PurchaseOrderDTO,
+  currency: CurrencyInfo
+): PurchaseOrderHeader {
   return {
     billingAddress: order.BillingAddress,
     deliveryAddress: order.DeliveryAddress,
@@ -231,13 +524,20 @@ function headerFromOrder(order: PurchaseOrderDTO): PurchaseOrderHeader {
     requestedDeliveryDate: order.RequestedDeliveryDate ?? "",
     paymentTerms: order.PaymentTerms,
     incoterms: order.Incoterms,
+    discountPercent: String(order.DiscountPercent ?? 0),
+    adjustment:
+      order.AdjustmentMinor === 0 ? "" : formatMoney(currency, order.AdjustmentMinor),
+    adjustmentReason: order.AdjustmentReason,
   };
 }
 
 /**
  * Builds the editor state from a stored draft. Money re-renders in the PO's
  * currency, and quantities re-render as decimals, so a saved 2.5000 reads
- * back as "2.5" rather than as a raw integer.
+ * back as "2.5" rather than as a raw integer. The stored calculation's inputs
+ * (discounts, adjustment) restore exactly; the stored figures themselves are
+ * not copied into the editor, because the editor recalculates as the user
+ * types and must agree with what the server will store.
  */
 export function initialPurchaseOrderEditorState(
   order: PurchaseOrderDTO,
@@ -249,6 +549,8 @@ export function initialPurchaseOrderEditorState(
     quantity: formatQuantityScaled(item.QuantityScaled),
     uom: item.UoM,
     unitPrice: formatUnitPriceMinor(currency, item.UnitPriceMinor),
+    discountEnabled: item.DiscountEnabled ?? false,
+    discountPercent: String(item.DiscountPercent ?? 0),
     quotationItemNo: item.QuotationItemNo ?? null,
     quotationSubNo: item.QuotationSubNo ?? null,
   }));
@@ -260,8 +562,15 @@ export function initialPurchaseOrderEditorState(
     currency: order.Currency,
     taxZone: order.TaxZone,
     taxCategory: order.TaxCategory,
-    header: headerFromOrder(order),
+    header: headerFromOrder(order, currency),
     lines,
+    ppnBps: order.PpnBps ?? 0,
+    printedTotals: {
+      subtotalMinor: order.PrintedSubtotalMinor ?? 0,
+      discountMinor: order.PrintedDiscountMinor ?? 0,
+      ppnMinor: order.PrintedPpnMinor ?? 0,
+      grandTotalMinor: order.PrintedGrandTotalMinor ?? 0,
+    },
     baseline: "",
     nextKey: lines.length,
     saving: false,
@@ -286,6 +595,8 @@ export function serializePurchaseOrderEditor(
       quantity: line.quantity,
       uom: line.uom,
       unitPrice: line.unitPrice,
+      discountEnabled: line.discountEnabled,
+      discountPercent: line.discountPercent,
       quotationItemNo: line.quotationItemNo,
       quotationSubNo: line.quotationSubNo,
     })),
@@ -347,6 +658,13 @@ export function buildPurchaseOrderUpdate(
         error: `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount.`,
       };
     }
+    const discountPercent = parseDiscountPercent(line.discountPercent);
+    if (discountPercent === null) {
+      return {
+        input: null,
+        error: `Line ${index + 1}: discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
+      };
+    }
     items.push({
       QuotationItemNo: line.quotationItemNo,
       QuotationSubNo: line.quotationSubNo,
@@ -354,7 +672,33 @@ export function buildPurchaseOrderUpdate(
       QuantityScaled: quantity,
       UoM: line.uom,
       UnitPriceMinor: price,
+      DiscountEnabled: line.discountEnabled,
+      DiscountPercent: discountPercent,
     });
+  }
+  const discountPercent = parseDiscountPercent(state.header.discountPercent);
+  if (discountPercent === null) {
+    return {
+      input: null,
+      error: `Whole-PO discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
+    };
+  }
+  const adjustment = parseAdjustmentMinor(currency, state.header.adjustment);
+  if (adjustment === null) {
+    return {
+      input: null,
+      error: `Adjustment must be a signed ${currency.code} amount.`,
+    };
+  }
+  const adjustmentReason = state.header.adjustmentReason.trim();
+
+  // The calculation is also the save-time guard: an unexplained adjustment, a
+  // negative total, or one out of range is named here rather than after a round
+  // trip. The reason rule lives in one place, so it cannot diverge between the
+  // live totals panel and the payload.
+  const calculation = calculatePurchaseOrder(state, currency);
+  if (calculation.error !== null) {
+    return { input: null, error: calculation.error };
   }
 
   return {
@@ -371,7 +715,10 @@ export function buildPurchaseOrderUpdate(
       RequestedDeliveryDate: state.header.requestedDeliveryDate,
       Incoterms: state.header.incoterms,
       PaymentTerms: paymentTerms,
+      AdjustmentReason: adjustment === 0 ? "" : adjustmentReason,
       Items: items,
+      DiscountPercent: discountPercent,
+      AdjustmentMinor: adjustment,
     },
     error: null,
   };
@@ -406,6 +753,8 @@ export function purchaseOrderEditorReducer(
             quantity: "1",
             uom: action.uom,
             unitPrice: "0",
+            discountEnabled: false,
+            discountPercent: "0",
             quotationItemNo: null,
             quotationSubNo: null,
           },

@@ -157,6 +157,10 @@ type POSourceValidationResponse struct {
 // QuotationSubNo are null for an extra line the source revision never carried.
 // QuantityScaled is an exact count of 1/10000 units; UnitPriceMinor is in the
 // PO currency's minor units.
+//
+// GrossMinor, DiscountMinor and NetMinor are the stored result of this row's
+// own calculation. They are returned, not recomputed, so a reopened order shows
+// the arithmetic it was saved with.
 type PurchaseOrderItemRow struct {
 	QuotationItemNo *int   `json:"quotationItemNo"`
 	QuotationSubNo  *int   `json:"quotationSubNo"`
@@ -165,36 +169,59 @@ type PurchaseOrderItemRow struct {
 	QuantityScaled  int64  `json:"quantityScaled"`
 	UoM             string `json:"uom"`
 	UnitPriceMinor  int64  `json:"unitPriceMinor"`
+	DiscountEnabled bool   `json:"discountEnabled"`
+	DiscountPercent int16  `json:"discountPercent"`
+	GrossMinor      int64  `json:"grossMinor"`
+	DiscountMinor   int64  `json:"discountMinor"`
+	NetMinor        int64  `json:"netMinor"`
 }
 
-// PurchaseOrderRow is one PO draft. Dates are plain YYYY-MM-DD; the optional
-// customer PO date and requested delivery date are null when unset.
+// PurchaseOrderRow is one PO draft or saved record. Dates are plain
+// YYYY-MM-DD; the optional customer PO date and requested delivery date are
+// null when unset.
+//
+// The calculated figures (SubtotalMinor .. GrandTotalMinor) and the printed
+// source figures are separate on purpose: the first pair is Vera's arithmetic,
+// the second is what the issued quotation printed. A PO never overwrites the
+// evidence it is checked against.
 type PurchaseOrderRow struct {
-	PODate                *string                `json:"poDate"`
-	RequestedDeliveryDate *string                `json:"requestedDeliveryDate"`
-	UUID                  string                 `json:"uuid"`
-	State                 string                 `json:"state"`
-	QuoteNumber           string                 `json:"quoteNumber"`
-	CustomerName          string                 `json:"customerName"`
-	BillingAddress        string                 `json:"billingAddress"`
-	DeliveryAddress       string                 `json:"deliveryAddress"`
-	ShipToCode            string                 `json:"shipToCode"`
-	ContactEmail          string                 `json:"contactEmail"`
-	ContactPhone          string                 `json:"contactPhone"`
-	PONumber              string                 `json:"poNumber"`
-	ReceivedDate          string                 `json:"receivedDate"`
-	Incoterms             string                 `json:"incoterms"`
-	Currency              string                 `json:"currency"`
-	TaxZone               string                 `json:"taxZone"`
-	TaxCategory           string                 `json:"taxCategory"`
-	CreatedAt             string                 `json:"createdAt"`
-	UpdatedAt             string                 `json:"updatedAt"`
-	Items                 []PurchaseOrderItemRow `json:"items"`
-	ID                    int64                  `json:"id"`
-	QuotationID           int64                  `json:"quotationId"`
-	SourceRevision        int16                  `json:"sourceRevision"`
-	CustomerID            int64                  `json:"customerId"`
-	PaymentTerms          string                 `json:"paymentTerms"`
+	PODate                 *string                `json:"poDate"`
+	RequestedDeliveryDate  *string                `json:"requestedDeliveryDate"`
+	UUID                   string                 `json:"uuid"`
+	State                  string                 `json:"state"`
+	QuoteNumber            string                 `json:"quoteNumber"`
+	CustomerName           string                 `json:"customerName"`
+	BillingAddress         string                 `json:"billingAddress"`
+	DeliveryAddress        string                 `json:"deliveryAddress"`
+	ShipToCode             string                 `json:"shipToCode"`
+	ContactEmail           string                 `json:"contactEmail"`
+	ContactPhone           string                 `json:"contactPhone"`
+	PONumber               string                 `json:"poNumber"`
+	ReceivedDate           string                 `json:"receivedDate"`
+	Incoterms              string                 `json:"incoterms"`
+	Currency               string                 `json:"currency"`
+	TaxZone                string                 `json:"taxZone"`
+	TaxCategory            string                 `json:"taxCategory"`
+	AdjustmentReason       string                 `json:"adjustmentReason"`
+	CreatedAt              string                 `json:"createdAt"`
+	UpdatedAt              string                 `json:"updatedAt"`
+	Items                  []PurchaseOrderItemRow `json:"items"`
+	ID                     int64                  `json:"id"`
+	QuotationID            int64                  `json:"quotationId"`
+	SourceRevision         int16                  `json:"sourceRevision"`
+	CustomerID             int64                  `json:"customerId"`
+	PaymentTerms           string                 `json:"paymentTerms"`
+	DiscountPercent        int16                  `json:"discountPercent"`
+	PpnBps                 int16                  `json:"ppnBps"`
+	SubtotalMinor          int64                  `json:"subtotalMinor"`
+	DiscountMinor          int64                  `json:"discountMinor"`
+	PpnMinor               int64                  `json:"ppnMinor"`
+	AdjustmentMinor        int64                  `json:"adjustmentMinor"`
+	GrandTotalMinor        int64                  `json:"grandTotalMinor"`
+	PrintedSubtotalMinor   int64                  `json:"printedSubtotalMinor"`
+	PrintedDiscountMinor   int64                  `json:"printedDiscountMinor"`
+	PrintedPpnMinor        int64                  `json:"printedPpnMinor"`
+	PrintedGrandTotalMinor int64                  `json:"printedGrandTotalMinor"`
 }
 
 // PurchaseOrderCreateRequest starts a draft from one exact issued revision.
@@ -208,7 +235,8 @@ type PurchaseOrderCreateRequest struct {
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. LineNumber is assigned by
-// the server from array order, so drafts always carry 1..n without gaps.
+// the server from array order, so drafts always carry 1..n without gaps. A row
+// discount mirrors the quotation's: a flag plus a 0-100 percentage.
 type PurchaseOrderItemInput struct {
 	QuotationItemNo *int   `json:"quotationItemNo"`
 	QuotationSubNo  *int   `json:"quotationSubNo"`
@@ -216,6 +244,8 @@ type PurchaseOrderItemInput struct {
 	QuantityScaled  int64  `json:"quantityScaled"`
 	UoM             string `json:"uom"`
 	UnitPriceMinor  int64  `json:"unitPriceMinor"`
+	DiscountEnabled bool   `json:"discountEnabled"`
+	DiscountPercent int16  `json:"discountPercent"`
 }
 
 // PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
@@ -231,8 +261,11 @@ type PurchaseOrderUpdateRequest struct {
 	PONumber              string                   `json:"poNumber"`
 	ReceivedDate          string                   `json:"receivedDate,omitempty"`
 	Incoterms             string                   `json:"incoterms"`
+	AdjustmentReason      string                   `json:"adjustmentReason"`
 	Items                 []PurchaseOrderItemInput `json:"items"`
 	PaymentTerms          string                   `json:"paymentTerms"`
+	DiscountPercent       int16                    `json:"discountPercent"`
+	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.

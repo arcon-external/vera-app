@@ -2,16 +2,20 @@ import { useEffect, useReducer, useRef } from "react";
 import { UpdatePurchaseOrderDraft } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
-import type { CurrencyInfo } from "../format";
+import { formatMoney, type CurrencyInfo } from "../format";
 import {
   buildPurchaseOrderUpdate,
+  calculatePurchaseOrder,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
+  parseDiscountPercent,
   purchaseOrderEditorReducer,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
+  type PurchaseOrderLineCalculation,
 } from "../purchaseOrder";
+import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
@@ -20,9 +24,11 @@ import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from ".
 // commercial details stay editable; the lines are the customer's order, with
 // quantity as a 4-decimal string and money in the PO's own currency.
 //
-// No totals, differences, PDF or confirmation number render here: those are
-// #470/#471/#472/#474. A draft is deliberately unfinished, so Save draft only
-// stores what was entered.
+// The calculation (#470) is shown beside the entry: row and whole-PO discounts,
+// customer-facing PPN, one explained adjustment, and the grand total. The source
+// quotation's printed figures stay in their own group. Differences, PDF and
+// confirmation number belong to #471/#472/#474. A draft is deliberately
+// unfinished, so Save draft only stores what was entered.
 
 export interface PurchaseOrderEditorViewProps {
   state: PurchaseOrderEditorState;
@@ -258,17 +264,25 @@ function TextAreaField({
   );
 }
 
-function LineRow({
+/**
+ * One line's entry controls: the customer's description, quantity, UoM and
+ * unit price, then the row's own discount and the exact line total it
+ * produces. Exported so the snapshot harness can show this row at 360/1280 --
+ * the full editor page pushes it below the fold.
+ */
+export function PurchaseOrderLineRow({
   line,
   index,
   currency,
   uomOptions,
+  calculation,
   dispatch,
 }: {
   line: PurchaseOrderEditorState["lines"][number];
   index: number;
   currency: CurrencyInfo;
   uomOptions: CompanyUnitOption[];
+  calculation: PurchaseOrderLineCalculation | null;
   dispatch: (action: PurchaseOrderEditorAction) => void;
 }) {
   return (
@@ -352,6 +366,50 @@ function LineRow({
       >
         Remove
       </Button>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-2 sm:col-span-5">
+        <label className="flex items-center gap-2 text-small text-ink-700">
+          <input
+            type="checkbox"
+            aria-label={`Line ${index + 1} discount enabled`}
+            checked={line.discountEnabled}
+            onChange={(event) =>
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { discountEnabled: event.target.checked },
+              })
+            }
+          />
+          Row discount
+        </label>
+        <div className="flex items-center gap-1">
+          <input
+            inputMode="decimal"
+            aria-label={`Line ${index + 1} discount percent`}
+            className={`${fieldClass} w-20`}
+            value={line.discountPercent}
+            disabled={!line.discountEnabled}
+            onChange={(event) =>
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { discountPercent: event.target.value },
+              })
+            }
+          />
+          <span className="text-small text-ink-500">%</span>
+        </div>
+        <span className="ml-auto tnum whitespace-nowrap text-small text-ink-700">
+          {calculation === null
+            ? "Line total —"
+            : `Line total ${formatMoney(currency, calculation.netMinor)}`}
+        </span>
+        {calculation !== null && calculation.discountMinor > 0 ? (
+          <span className="tnum whitespace-nowrap text-caption text-ink-500">
+            Discount {formatMoney(currency, -calculation.discountMinor)}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -366,6 +424,10 @@ export function PurchaseOrderEditorView({
   onCancel,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
+  // The panel and the save guard read the same pure calculation, so the number
+  // on screen is the number the payload will carry.
+  const calculation = calculatePurchaseOrder(state, currency);
+  const wholeDiscountPercent = parseDiscountPercent(state.header.discountPercent);
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -513,18 +575,100 @@ export function PurchaseOrderEditorView({
             </p>
           ) : (
             state.lines.map((line, index) => (
-              <LineRow
+              <PurchaseOrderLineRow
                 key={line.key}
                 line={line}
                 index={index}
                 currency={currency}
                 uomOptions={uomOptions}
+                calculation={calculation.lines[index] ?? null}
                 dispatch={dispatch}
               />
             ))
           )}
         </div>
       </div>
+
+      <Card className="p-4">
+        <SectionHeading
+          title="Discounts and adjustment"
+          hint="Explained separately from the line prices"
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">
+              Whole-PO discount (%)
+            </span>
+            <input
+              inputMode="decimal"
+              aria-label="Whole-PO discount"
+              className={fieldClass}
+              value={state.header.discountPercent}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { discountPercent: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">
+              Adjustment ({currency.code})
+            </span>
+            <input
+              inputMode="decimal"
+              aria-label="Adjustment"
+              className={fieldClass}
+              placeholder="Signed, e.g. -12.50"
+              value={state.header.adjustment}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { adjustment: event.target.value },
+                })
+              }
+            />
+          </label>
+          <label className="grid gap-1.5 sm:col-span-2">
+            <span className="text-small font-medium text-ink-700">
+              Adjustment reason
+            </span>
+            <input
+              aria-label="Adjustment reason"
+              className={fieldClass}
+              placeholder="Required when the adjustment is not zero"
+              value={state.header.adjustmentReason}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { adjustmentReason: event.target.value },
+                })
+              }
+            />
+          </label>
+        </div>
+        <p className="mt-3 text-caption text-ink-500">
+          Row discounts come off each line first, then the whole-PO discount.
+          PPN is charged on the discounted subtotal and printed separately. The
+          signed adjustment is added last and never changes a row price or
+          disguises a discount or tax entry.
+        </p>
+      </Card>
+
+      {calculation.error !== null ? (
+        <StatusBanner tone="danger">{calculation.error}</StatusBanner>
+      ) : null}
+
+      <PurchaseOrderTotals
+        totals={calculation.totals}
+        currency={currency}
+        discountPercent={wholeDiscountPercent}
+        ppnBps={state.ppnBps}
+        adjustmentReason={state.header.adjustmentReason.trim()}
+        printedTotals={state.printedTotals}
+        sourceRevision={state.sourceRevision}
+      />
 
       {state.error !== null ? (
         <StatusBanner tone="danger">{state.error}</StatusBanner>

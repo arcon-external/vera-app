@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -722,5 +724,500 @@ func TestPurchaseOrderPaymentTermsBoundaryCountsCharacters(t *testing.T) {
 	), strings.Repeat("界", maxPaymentTermsLength+1), draft.ID)
 	if err == nil {
 		t.Fatal("schema accepted 501 characters; char_length boundary is wrong")
+	}
+}
+
+// Issue #470: the explained calculation. A draft stores the inputs it was
+// given and the exact figures those inputs produce, so reopening it shows the
+// same arithmetic even if the calculator is later corrected.
+
+// seedPOQuotationTax is seedPOQuotation with an explicit customer-facing tax
+// basis, so PPN (Non-FTZ goods) and no-PPN (FTZ, services) are both reachable.
+func seedPOQuotationTax(t *testing.T, database *Store, zone, category string, taxRateBps int16) QuotationRecord {
+	t.Helper()
+	ctx := context.Background()
+	record, err := database.SaveRevision(ctx, RevisionDraft{
+		CustomerCode:     2,
+		CustomerName:     "PT. Buyer",
+		CustomerAddress:  "Jl. Billing 1",
+		RecipientName:    "Budi Santoso",
+		RecipientAddress: "Jl. Recipient 9",
+		Subject:          "Taxed supply",
+		Incoterm:         "CIF",
+		ValidityDays:     30,
+		PaymentTermDays:  45,
+		LeadTimeDays:     10,
+		TaxZone:          zone,
+		TaxCategory:      category,
+		TaxRateBps:       taxRateBps,
+		Currency:         "USD",
+		HTMLSnapshot:     "<html>snapshot</html>",
+		Items: []RevisionItem{{
+			ItemNo:                1,
+			Description:           "Taxed widget",
+			Qty:                   1,
+			UoM:                   "Pc",
+			UnitPrice:             1000,
+			MarginalizedUnitPrice: 1000,
+			MarginalizedTotal:     1000,
+			ListUnitPrice:         1000,
+			OriginalTotal:         1000,
+		}},
+		Totals: RevisionTotals{
+			OriginalSubtotal:     1000,
+			OriginalGrand:        1000,
+			MarginalizedSubtotal: 1000,
+			MarginalizedGrand:    1000,
+			PpnAmount:            0,
+			CustomerGrandTotal:   1000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed taxed quotation: %v", err)
+	}
+	return record
+}
+
+// poCalculationLines reads back only the persisted calculation, so an
+// assertion names the money it expects rather than the whole item struct.
+func poCalculationLines(items []PurchaseOrderItem) [][3]int64 {
+	out := make([][3]int64, 0, len(items))
+	for _, item := range items {
+		out = append(out, [3]int64{item.GrossMinor, item.DiscountMinor, item.NetMinor})
+	}
+	return out
+}
+
+func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_persist")
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Calculated")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Creation copies customer-facing prices, so the whole order is its lines:
+	// 3 x 650 + 2 x 420 + 1 x 450 = 3240, with no discount and no PPN.
+	if got := poCalculationLines(draft.Items); !reflect.DeepEqual(got, [][3]int64{
+		{1950, 0, 1950}, {840, 0, 840}, {450, 0, 450},
+	}) {
+		t.Errorf("created lines = %v; want gross/discount/net 1950/840/450", got)
+	}
+	if draft.SubtotalMinor != 3240 || draft.DiscountMinor != 0 ||
+		draft.PpnBps != 0 || draft.PpnMinor != 0 ||
+		draft.AdjustmentMinor != 0 || draft.AdjustmentReason != "" ||
+		draft.GrandTotalMinor != 3240 {
+		t.Errorf("created totals = %+v; want subtotal/grand 3240 and no PPN", draft)
+	}
+	// The source document's printed figures are evidence, copied once. The
+	// seeded revision printed 3050 after its own discount basis, 0 PPN and a
+	// customer grand of 3111 -- none of which the PO calculation overwrites.
+	if draft.PrintedSubtotalMinor != 3050 || draft.PrintedDiscountMinor != 0 ||
+		draft.PrintedPpnMinor != 0 || draft.PrintedGrandTotalMinor != 3111 {
+		t.Errorf("printed snapshot = %d/%d/%d/%d; want 3050/0/0/3111",
+			draft.PrintedSubtotalMinor, draft.PrintedDiscountMinor,
+			draft.PrintedPpnMinor, draft.PrintedGrandTotalMinor)
+	}
+
+	// Now enter a row discount, a whole-PO discount and a signed adjustment.
+	itemNo1, itemNo2 := 1, 2
+	subNo1, subNo2 := 1, 2
+	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID:               draft.ID,
+		UpdatedBy:        user.ID,
+		PaymentTerms:     "45 days",
+		DiscountPercent:  10,
+		AdjustmentMinor:  -26,
+		AdjustmentReason: "Match the printed total",
+		Items: []PurchaseOrderItem{
+			{
+				QuotationItemNo: &itemNo1, QuantityScaled: 25000, UoM: "Pc",
+				Description: "Plain widget", UnitPriceMinor: 650,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
+			{
+				QuotationItemNo: &itemNo2, QuotationSubNo: &subNo1, QuantityScaled: 20000,
+				UoM: "Unit", Description: "Mounting", UnitPriceMinor: 420,
+			},
+			{
+				QuotationItemNo: &itemNo2, QuotationSubNo: &subNo2, QuantityScaled: 10000,
+				UoM: "Lot", Description: "Commissioning", UnitPriceMinor: 450,
+				DiscountEnabled: true, DiscountPercent: 50,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("update with calculation: %v", err)
+	}
+
+	// 2.5 x 650 = 1625, 10% is 162.5 and truncates to 162 -> net 1463.
+	// 2 x 420 = 840. 1 x 450 = 450, 50% = 225 -> net 225.
+	// Subtotal 2528; 10% whole discount is 252.8 -> 252; after 2276.
+	// SupplyInstall carries no PPN, so the adjustment is the only signed part.
+	wantLines := [][3]int64{{1625, 162, 1463}, {840, 0, 840}, {450, 225, 225}}
+	if got := poCalculationLines(updated.Items); !reflect.DeepEqual(got, wantLines) {
+		t.Errorf("updated lines = %v; want %v", got, wantLines)
+	}
+	if updated.SubtotalMinor != 2528 || updated.DiscountMinor != 252 ||
+		updated.PpnBps != 0 || updated.PpnMinor != 0 ||
+		updated.AdjustmentMinor != -26 || updated.AdjustmentReason != "Match the printed total" ||
+		updated.GrandTotalMinor != 2250 {
+		t.Errorf("updated totals = %+v; want 2528/252/0/0/-26/2250", updated)
+	}
+	// The printed source figures did not move with the PO's own numbers.
+	if updated.PrintedSubtotalMinor != 3050 || updated.PrintedGrandTotalMinor != 3111 {
+		t.Errorf("printed snapshot moved: %d/%d; want 3050/3111",
+			updated.PrintedSubtotalMinor, updated.PrintedGrandTotalMinor)
+	}
+
+	// Reopening returns the stored figures, not a recomputation: a later
+	// calculator change must not rewrite an entered PO.
+	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if !reflect.DeepEqual(poCalculationLines(reopened.Items), wantLines) ||
+		reopened.SubtotalMinor != 2528 || reopened.DiscountMinor != 252 ||
+		reopened.AdjustmentMinor != -26 || reopened.GrandTotalMinor != 2250 {
+		t.Errorf("reopened calculation = %+v; want the stored figures", reopened)
+	}
+}
+
+func TestPurchaseOrderPPNIsStoredForNonFTZGoodsOnly(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_ppn")
+	quotation := seedPOQuotationTax(t, database, "NonFTZ", "SupplyOnly", 1100)
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// 1000 goods, 11% PPN on top: the customer pays 1110 and the tax is a
+	// separate printed figure, never part of the discounted subtotal.
+	if draft.PpnBps != 1100 || draft.PpnMinor != 110 ||
+		draft.SubtotalMinor != 1000 || draft.GrandTotalMinor != 1110 {
+		t.Errorf("PPN totals = %+v; want 1100 bps / 110 / subtotal 1000 / grand 1110", draft)
+	}
+
+	// A whole discount is taken before PPN: 1000 - 10% = 900, PPN 99, 999.
+	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID:              draft.ID,
+		UpdatedBy:       user.ID,
+		PaymentTerms:    "45 days",
+		DiscountPercent: 10,
+		Items:           draft.Items,
+	})
+	if err != nil {
+		t.Fatalf("update discount: %v", err)
+	}
+	if updated.DiscountMinor != 100 || updated.PpnMinor != 99 ||
+		updated.GrandTotalMinor != 999 {
+		t.Errorf("discounted PPN totals = %+v; want discount 100 / PPN 99 / grand 999", updated)
+	}
+}
+
+func TestPurchaseOrderUpdateRefusesUnexplainedAdjustmentsAndInvalidTotals(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_guard")
+	quotation := seedPOQuotationTax(t, database, "NonFTZ", "SupplyOnly", 1100)
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	update := func(patch PurchaseOrderUpdate) (PurchaseOrder, error) {
+		patch.ID = draft.ID
+		patch.UpdatedBy = user.ID
+		patch.PaymentTerms = "45 days"
+		patch.Items = draft.Items
+		return database.UpdatePurchaseOrderDraft(ctx, patch)
+	}
+
+	if _, err := update(PurchaseOrderUpdate{AdjustmentMinor: -1}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("unexplained adjustment error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+	if _, err := update(PurchaseOrderUpdate{
+		AdjustmentMinor: -1111, AdjustmentReason: "Too far",
+	}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("negative grand total error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+	if _, err := update(PurchaseOrderUpdate{DiscountPercent: 101}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("discount above 100 error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+	if _, err := update(PurchaseOrderUpdate{DiscountPercent: -1}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("negative discount error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+
+	// Nothing refused above may have been persisted.
+	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if reopened.DiscountMinor != 0 || reopened.AdjustmentMinor != 0 ||
+		reopened.GrandTotalMinor != 1110 {
+		t.Errorf("a refused update changed the stored PO: %+v", reopened)
+	}
+}
+
+func TestPurchaseOrderUpdateRefusesOverflowWithoutWritingHalfACalculation(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_overflow")
+	quotation := seedPOQuotationTax(t, database, "FTZ", "", 0)
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
+		Items: []PurchaseOrderItem{{
+			Description: "Impossible", QuantityScaled: math.MaxInt64,
+			UoM: "Pc", UnitPriceMinor: math.MaxInt64,
+		}},
+	})
+	if !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Fatalf("overflow error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if len(reopened.Items) != 1 || reopened.Items[0].Description != "Taxed widget" ||
+		reopened.SubtotalMinor != 1000 || reopened.GrandTotalMinor != 1000 {
+		t.Errorf("an overflowing update persisted part of itself: %+v", reopened)
+	}
+}
+
+func TestPurchaseOrderLinesMatchNestedQuotationSubItems(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_nested")
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Nested")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	itemNo, subNo := 2, 2
+	// Item 2.2 is a line of the frozen revision; 2.3 is not.
+	accepted, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
+		Items: []PurchaseOrderItem{{
+			Description: "Commissioning", QuotationItemNo: &itemNo, QuotationSubNo: &subNo,
+			QuantityScaled: 10000, UoM: "Lot", UnitPriceMinor: 450,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("item 2.2 rejected: %v", err)
+	}
+	if len(accepted.Items) != 1 || *accepted.Items[0].QuotationSubNo != 2 {
+		t.Errorf("accepted line = %+v; want item 2.2", accepted.Items)
+	}
+	if accepted.SubtotalMinor != 450 || accepted.GrandTotalMinor != 450 {
+		t.Errorf("nested line totals = %d/%d; want 450/450",
+			accepted.SubtotalMinor, accepted.GrandTotalMinor)
+	}
+
+	missing := 3
+	if _, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
+		Items: []PurchaseOrderItem{{
+			Description: "Missing", QuotationItemNo: &itemNo, QuotationSubNo: &missing,
+			QuantityScaled: 10000, UoM: "Lot", UnitPriceMinor: 450,
+		}},
+	}); !errors.Is(err, ErrPurchaseOrderBadReference) {
+		t.Errorf("item 2.3 error = %v; want ErrPurchaseOrderBadReference", err)
+	}
+}
+
+func TestPurchaseOrderMigration031DeclaresTheCalculation(t *testing.T) {
+	migrations, err := loadMigrations("vera_test")
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var sql string
+	for _, migration := range migrations {
+		if migration.version == 31 {
+			sql = migration.sql
+		}
+	}
+	if sql == "" {
+		t.Fatal("migration 031 is missing")
+	}
+	for _, expected := range []string{
+		`"vera_test".purchase_orders`,
+		`"vera_test".purchase_order_items`,
+		"discount_percent SMALLINT NOT NULL DEFAULT 0",
+		"subtotal_minor BIGINT NOT NULL",
+		"discount_minor BIGINT NOT NULL",
+		"ppn_bps SMALLINT NOT NULL",
+		"ppn_minor BIGINT NOT NULL",
+		"adjustment_minor BIGINT NOT NULL",
+		"adjustment_reason TEXT NOT NULL",
+		"char_length(adjustment_reason) <= 200",
+		"grand_total_minor BIGINT NOT NULL",
+		"printed_subtotal_minor BIGINT NOT NULL",
+		"printed_discount_minor BIGINT NOT NULL",
+		"printed_ppn_minor BIGINT NOT NULL",
+		"printed_grand_total_minor BIGINT NOT NULL",
+		"quantity_scaled::numeric * unit_price_minor / 10000",
+		"purchase_orders_grand_formula_check",
+		"purchase_orders_adjustment_explained_check",
+		"purchase_order_items_net_formula_check",
+	} {
+		if !strings.Contains(sql, expected) {
+			t.Errorf("migration 031 missing %q", expected)
+		}
+	}
+}
+
+// TestPurchaseOrderMigration031BackfillsAPreCalculationDraft exercises the
+// embedded backfill against a row shaped like a #468 draft: entered lines, no
+// discounts, no adjustment, no stored calculation. The integration branch is
+// unreleased, so no production row can be pre-031 -- but the migration must
+// still leave a disposable schema's draft correct rather than reading zero.
+//
+// It runs the migration's own UPDATE statements (not a copy) after zeroing the
+// calculated columns, so a change to the embedded SQL is what this test reads.
+func TestPurchaseOrderMigration031BackfillsAPreCalculationDraft(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_backfill")
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Backfill")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+
+	// Reshape the lines to two rounding boundaries the backfill must match the
+	// Go calculator on: 0.5000 x 1 = 0.5 -> 1 (half away from zero), and
+	// 0.3333 x 300 = 99.99 -> 100.
+	lines := []struct {
+		qty   int64
+		price int64
+	}{
+		{5000, 1},
+		{3333, 300},
+	}
+	for index, line := range lines {
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_order_items
+			SET quantity_scaled = $1, unit_price_minor = $2,
+			    gross_minor = 0, discount_minor = 0, net_minor = 0
+			WHERE purchase_order_id = $3 AND line_number = $4`, schema),
+			line.qty, line.price, draft.ID, index+1); err != nil {
+			t.Fatalf("reshape line %d: %v", index+1, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		DELETE FROM %s.purchase_order_items
+		WHERE purchase_order_id = $1 AND line_number > $2`, schema),
+		draft.ID, len(lines)); err != nil {
+		t.Fatalf("drop extra lines: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_orders
+		SET subtotal_minor = 0, discount_minor = 0, ppn_bps = 0, ppn_minor = 0,
+		    adjustment_minor = 0, adjustment_reason = '', grand_total_minor = 0,
+		    printed_subtotal_minor = 0, printed_discount_minor = 0,
+		    printed_ppn_minor = 0, printed_grand_total_minor = 0
+		WHERE id = $1`, schema), draft.ID); err != nil {
+		t.Fatalf("zero the calculation: %v", err)
+	}
+
+	// loadMigrations quotes the schema itself, so hand it the bare name.
+	migrations, err := loadMigrations("vera_po_calc_backfill")
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	var migrationSQL string
+	for _, migration := range migrations {
+		if migration.version == 31 {
+			migrationSQL = migration.sql
+		}
+	}
+	start := strings.Index(migrationSQL, "-- Drafts created before this migration")
+	end := strings.Index(migrationSQL, "-- The two totals invariants")
+	if start < 0 || end < 0 || end <= start {
+		t.Fatal("cannot locate the backfill block in migration 031")
+	}
+	// The backfill runs before 031 adds its total invariants, so the
+	// simulation removes them first and re-adds the migration's own block
+	// afterwards -- otherwise a legitimate intermediate state (subtotal set,
+	// grand still zero) would be refused by a constraint that did not exist
+	// when the backfill was written.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		ALTER TABLE %s.purchase_orders
+			DROP CONSTRAINT purchase_orders_grand_formula_check,
+			DROP CONSTRAINT purchase_orders_discount_bound_check,
+			DROP CONSTRAINT purchase_orders_adjustment_explained_check;
+		ALTER TABLE %s.purchase_order_items
+			DROP CONSTRAINT purchase_order_items_net_formula_check,
+			DROP CONSTRAINT purchase_order_items_discount_bound_check;`,
+		schema, schema)); err != nil {
+		t.Fatalf("drop the calculation constraints: %v", err)
+	}
+	if _, err := pool.Exec(ctx, migrationSQL[start:end]); err != nil {
+		t.Fatalf("run migration 031 backfill: %v", err)
+	}
+	if _, err := pool.Exec(ctx, migrationSQL[end:]); err != nil {
+		t.Fatalf("re-add the calculation constraints: %v", err)
+	}
+
+	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen after backfill: %v", err)
+	}
+	if got := poCalculationLines(reopened.Items); !reflect.DeepEqual(got, [][3]int64{
+		{1, 0, 1}, {100, 0, 100},
+	}) {
+		t.Errorf("backfilled lines = %v; want 1/1 and 100/100", got)
+	}
+	// FTZ goods in the seed carry no PPN; the printed figures come back from
+	// the source revision the draft was created from.
+	if reopened.SubtotalMinor != 101 || reopened.PpnBps != 0 ||
+		reopened.PpnMinor != 0 || reopened.GrandTotalMinor != 101 {
+		t.Errorf("backfilled totals = %+v; want subtotal/grand 101 and no PPN", reopened)
+	}
+	if reopened.PrintedSubtotalMinor != 3050 || reopened.PrintedGrandTotalMinor != 3111 {
+		t.Errorf("backfilled printed totals = %d/%d; want 3050/3111",
+			reopened.PrintedSubtotalMinor, reopened.PrintedGrandTotalMinor)
 	}
 }

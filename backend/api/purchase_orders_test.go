@@ -43,12 +43,29 @@ type purchaseOrderRow struct {
 		QuantityScaled  int64  `json:"quantityScaled"`
 		UoM             string `json:"uom"`
 		UnitPriceMinor  int64  `json:"unitPriceMinor"`
+		DiscountEnabled bool   `json:"discountEnabled"`
+		DiscountPercent int16  `json:"discountPercent"`
+		GrossMinor      int64  `json:"grossMinor"`
+		DiscountMinor   int64  `json:"discountMinor"`
+		NetMinor        int64  `json:"netMinor"`
 	} `json:"items"`
-	ID             int64  `json:"id"`
-	QuotationID    int64  `json:"quotationId"`
-	SourceRevision int16  `json:"sourceRevision"`
-	CustomerID     int64  `json:"customerId"`
-	PaymentTerms   string `json:"paymentTerms"`
+	DiscountPercent        int16  `json:"discountPercent"`
+	PpnBps                 int16  `json:"ppnBps"`
+	AdjustmentReason       string `json:"adjustmentReason"`
+	ID                     int64  `json:"id"`
+	QuotationID            int64  `json:"quotationId"`
+	SourceRevision         int16  `json:"sourceRevision"`
+	CustomerID             int64  `json:"customerId"`
+	PaymentTerms           string `json:"paymentTerms"`
+	SubtotalMinor          int64  `json:"subtotalMinor"`
+	DiscountMinor          int64  `json:"discountMinor"`
+	PpnMinor               int64  `json:"ppnMinor"`
+	AdjustmentMinor        int64  `json:"adjustmentMinor"`
+	GrandTotalMinor        int64  `json:"grandTotalMinor"`
+	PrintedSubtotalMinor   int64  `json:"printedSubtotalMinor"`
+	PrintedDiscountMinor   int64  `json:"printedDiscountMinor"`
+	PrintedPpnMinor        int64  `json:"printedPpnMinor"`
+	PrintedGrandTotalMinor int64  `json:"printedGrandTotalMinor"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
@@ -335,5 +352,206 @@ func TestPurchaseOrderEndpointsRequireASession(t *testing.T) {
 		if code != http.StatusUnauthorized {
 			t.Errorf("%s %s without token = %d; want 401", target.method, target.path, code)
 		}
+	}
+}
+
+// Issue #470: the explained calculation over the authenticated API. These
+// assertions are the HTTP-visible contract the desktop binds to: every stage
+// of the calculation, the printed source snapshot, and the refusal codes.
+
+func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_calc")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	// The source revision printed 290000 before its own 10% discount and 261000
+	// after it (FTZ, no PPN). The PO starts from the customer-facing list
+	// prices, with no discount of its own.
+	_, body := createPODraft(t, server, token, quotationID, 0, nil)
+	draft := decodePurchaseOrder(t, body)
+	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 290000 ||
+		draft.DiscountMinor != 0 || draft.PpnBps != 0 || draft.PpnMinor != 0 {
+		t.Fatalf("created calculation = %+v; want subtotal/grand 290000 and no tax", draft)
+	}
+	if draft.PrintedSubtotalMinor != 290000 || draft.PrintedDiscountMinor != 29000 ||
+		draft.PrintedPpnMinor != 0 || draft.PrintedGrandTotalMinor != 261000 {
+		t.Errorf("printed snapshot = %d/%d/%d/%d; want 290000/29000/0/261000",
+			draft.PrintedSubtotalMinor, draft.PrintedDiscountMinor,
+			draft.PrintedPpnMinor, draft.PrintedGrandTotalMinor)
+	}
+
+	code, body := doJSON(t, server, http.MethodPut,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, map[string]any{
+			"paymentTerms":     "45 days",
+			"discountPercent":  5,
+			"adjustmentMinor":  -700,
+			"adjustmentReason": "Match the printed total",
+			"items": []map[string]any{
+				{
+					"quotationItemNo": 1, "description": "Test item",
+					"quantityScaled": 20000, "uom": "Lot", "unitPriceMinor": 120000,
+					"discountEnabled": true, "discountPercent": 10,
+				},
+				{
+					"description": "Extra freight", "quantityScaled": 10000,
+					"uom": "Lot", "unitPriceMinor": 50000,
+				},
+			},
+		})
+	if code != http.StatusOK {
+		t.Fatalf("update = %d; want 200 (%v)", code, body)
+	}
+	updated := decodePurchaseOrder(t, body)
+
+	// 2 x 120000 = 240000, 10% is 24000 -> net 216000. 1 x 50000 = 50000.
+	// Subtotal 266000; 5% whole is 13300 -> 252700; adjustment -700 -> 252000.
+	if len(updated.Items) != 2 {
+		t.Fatalf("lines = %d; want 2", len(updated.Items))
+	}
+	first, second := updated.Items[0], updated.Items[1]
+	if first.GrossMinor != 240000 || first.DiscountMinor != 24000 || first.NetMinor != 216000 ||
+		!first.DiscountEnabled || first.DiscountPercent != 10 {
+		t.Errorf("line 1 calculation = %+v; want 240000/24000/216000 at 10%%", first)
+	}
+	if second.GrossMinor != 50000 || second.DiscountMinor != 0 || second.NetMinor != 50000 {
+		t.Errorf("line 2 calculation = %+v; want 50000/0/50000", second)
+	}
+	if updated.SubtotalMinor != 266000 || updated.DiscountPercent != 5 ||
+		updated.DiscountMinor != 13300 || updated.AdjustmentMinor != -700 ||
+		updated.AdjustmentReason != "Match the printed total" ||
+		updated.GrandTotalMinor != 252000 {
+		t.Errorf("updated totals = %+v; want 266000/5/13300/-700/252000", updated)
+	}
+
+	// GET returns the stored calculation, not a fresh one.
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen = %d; want 200 (%v)", code, body)
+	}
+	reopened := decodePurchaseOrder(t, body)
+	if reopened.SubtotalMinor != updated.SubtotalMinor ||
+		reopened.DiscountMinor != updated.DiscountMinor ||
+		reopened.AdjustmentMinor != updated.AdjustmentMinor ||
+		reopened.GrandTotalMinor != updated.GrandTotalMinor ||
+		reopened.Items[0].NetMinor != 216000 {
+		t.Errorf("reopened calculation = %+v; want the stored figures", reopened)
+	}
+}
+
+func TestPurchaseOrderPPNIsCustomerFacingOnlyOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_ppn")
+	input := poSourceInput("Taxed goods", "Widget")
+	input["TaxZone"] = "NonFTZ"
+	input["TaxCategory"] = "SupplyOnly"
+	quotationID, _ := exportForSelector(t, server, token, input)
+
+	_, body := createPODraft(t, server, token, quotationID, 0, nil)
+	draft := decodePurchaseOrder(t, body)
+	// One widget at 100000, Non-FTZ goods: PPN 11% is added on top and shown
+	// separately, so the customer pays 111000.
+	if draft.PpnBps != 1100 || draft.PpnMinor != 11000 ||
+		draft.SubtotalMinor != 100000 || draft.GrandTotalMinor != 111000 {
+		t.Errorf("PPN calculation = %+v; want 1100 bps / 11000 / grand 111000", draft)
+	}
+	if draft.PrintedGrandTotalMinor != 111000 {
+		t.Errorf("printed source grand = %d; want 111000 (the quotation printed PPN)",
+			draft.PrintedGrandTotalMinor)
+	}
+
+	// PPH22 never reaches a PO: services carry no customer-facing tax at all.
+	services := poSourceInput("Installation services", "Installation")
+	services["TaxZone"] = "NonFTZ"
+	services["TaxCategory"] = "SupplyInstall"
+	servicesID, _ := exportForSelector(t, server, token, services)
+	_, body = createPODraft(t, server, token, servicesID, 0, nil)
+	servicePO := decodePurchaseOrder(t, body)
+	if servicePO.PpnBps != 0 || servicePO.PpnMinor != 0 ||
+		servicePO.GrandTotalMinor != 100000 {
+		t.Errorf("services PO = %+v; want no PPN and grand 100000", servicePO)
+	}
+}
+
+func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_calc_invalid")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	_, body := createPODraft(t, server, token, quotationID, 0, nil)
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	validItem := map[string]any{
+		"description": "Widget", "quantityScaled": 10000,
+		"uom": "Pc", "unitPriceMinor": 100000,
+	}
+
+	cases := []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{
+			name: "whole discount above 100",
+			body: map[string]any{
+				"paymentTerms": "45 days", "discountPercent": 101,
+				"items": []map[string]any{validItem},
+			},
+			field: "discount",
+		},
+		{
+			name: "row discount above 100",
+			body: map[string]any{
+				"paymentTerms": "45 days",
+				"items": []map[string]any{{
+					"description": "Widget", "quantityScaled": 10000, "uom": "Pc",
+					"unitPriceMinor": 100000, "discountEnabled": true, "discountPercent": 101,
+				}},
+			},
+			field: "discount",
+		},
+		{
+			name: "unexplained adjustment",
+			body: map[string]any{
+				"paymentTerms": "45 days", "adjustmentMinor": -1,
+				"items": []map[string]any{validItem},
+			},
+			field: "reason",
+		},
+		{
+			name: "adjustment below zero total",
+			body: map[string]any{
+				"paymentTerms": "45 days", "adjustmentMinor": -100001,
+				"adjustmentReason": "Too far",
+				"items":            []map[string]any{validItem},
+			},
+			field: "negative",
+		},
+		{
+			name: "overflowing line",
+			body: map[string]any{
+				"paymentTerms": "45 days",
+				"items": []map[string]any{{
+					"description": "Impossible", "quantityScaled": int64(9223372036854775807),
+					"uom": "Pc", "unitPriceMinor": int64(9223372036854775807),
+				}},
+			},
+			field: "range",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			code, response := doJSON(t, server, http.MethodPut, path, token, testCase.body)
+			if code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d; want 422 (%v)", code, response)
+			}
+			message, _ := response["error"].(string)
+			if !strings.Contains(strings.ToLower(message), testCase.field) {
+				t.Errorf("error = %q; want it to name %q", message, testCase.field)
+			}
+		})
+	}
+
+	// Nothing refused may have been stored.
+	_, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	reopened := decodePurchaseOrder(t, body)
+	if reopened.GrandTotalMinor != 290000 || reopened.DiscountMinor != 0 {
+		t.Errorf("a refused update changed the PO: %+v", reopened)
 	}
 }

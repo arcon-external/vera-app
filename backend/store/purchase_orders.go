@@ -59,6 +59,11 @@ var (
 // PurchaseOrderItem is one entered line. QuotationItemNo/QuotationSubNo are
 // references by number into the frozen source revision; both are nil for an
 // extra line the Quotation never carried.
+//
+// GrossMinor, DiscountMinor and NetMinor are the stored results of the row's
+// own calculation (issue #470): the input is quantity, unit price and the row
+// discount, and the three figures are persisted beside them so a reopened PO
+// keeps saying what it said. They are not recomputed on read.
 type PurchaseOrderItem struct {
 	QuotationItemNo *int
 	QuotationSubNo  *int
@@ -68,38 +73,57 @@ type PurchaseOrderItem struct {
 	QuantityScaled  int64
 	UoM             string
 	UnitPriceMinor  int64
+	DiscountEnabled bool
+	DiscountPercent int16
+	GrossMinor      int64
+	DiscountMinor   int64
+	NetMinor        int64
 }
 
-// PurchaseOrder is a draft or finalized header plus its lines.
+// PurchaseOrder is a draft or finalized header plus its lines and the explained
+// calculation those lines produce. The calculation is stored, not derived:
+// see backend/store/po_calc.go for the stage order and rounding.
 type PurchaseOrder struct {
-	UUID                  string
-	OrgID                 string
-	QuoteNumber           string
-	State                 string
-	CustomerName          string
-	BillingAddress        string
-	DeliveryAddress       string
-	ShipToCode            string
-	ContactEmail          string
-	ContactPhone          string
-	PONumber              string
-	Incoterms             string
-	Currency              string
-	TaxZone               string
-	TaxCategory           string
-	Items                 []PurchaseOrderItem
-	ID                    int64
-	QuotationID           int64
-	SourceRevision        int16
-	CustomerID            int64
-	PaymentTerms          string
-	CreatedBy             int64
-	UpdatedBy             int64
-	PODate                *time.Time
-	RequestedDeliveryDate *time.Time
-	ReceivedDate          time.Time
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
+	UUID                   string
+	OrgID                  string
+	QuoteNumber            string
+	State                  string
+	CustomerName           string
+	BillingAddress         string
+	DeliveryAddress        string
+	ShipToCode             string
+	ContactEmail           string
+	ContactPhone           string
+	PONumber               string
+	Incoterms              string
+	Currency               string
+	TaxZone                string
+	TaxCategory            string
+	AdjustmentReason       string
+	Items                  []PurchaseOrderItem
+	PrintedSubtotalMinor   int64
+	PrintedDiscountMinor   int64
+	PrintedPpnMinor        int64
+	PrintedGrandTotalMinor int64
+	SubtotalMinor          int64
+	DiscountMinor          int64
+	PpnMinor               int64
+	GrandTotalMinor        int64
+	AdjustmentMinor        int64
+	ID                     int64
+	QuotationID            int64
+	SourceRevision         int16
+	CustomerID             int64
+	PaymentTerms           string
+	CreatedBy              int64
+	UpdatedBy              int64
+	DiscountPercent        int16
+	PpnBps                 int16
+	PODate                 *time.Time
+	RequestedDeliveryDate  *time.Time
+	ReceivedDate           time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 // PurchaseOrderCreate is the server-side creation input: the exact source pair
@@ -112,8 +136,9 @@ type PurchaseOrderCreate struct {
 	CreatedBy      int64
 }
 
-// PurchaseOrderUpdate replaces the editable draft header and every line. The
-// source link, snapshots, currency and tax basis are not editable here.
+// PurchaseOrderUpdate replaces the editable draft header, the whole-order
+// discount and adjustment, and every line. The source link, snapshots, currency
+// and tax basis are not editable here.
 type PurchaseOrderUpdate struct {
 	ID                    int64
 	BillingAddress        string
@@ -123,12 +148,15 @@ type PurchaseOrderUpdate struct {
 	ContactPhone          string
 	PONumber              string
 	Incoterms             string
+	AdjustmentReason      string
 	UpdatedBy             int64
 	PaymentTerms          string
 	PODate                *time.Time
 	ReceivedDate          *time.Time
 	RequestedDeliveryDate *time.Time
 	Items                 []PurchaseOrderItem
+	DiscountPercent       int16
+	AdjustmentMinor       int64
 }
 
 type purchaseOrderQuerier interface {
@@ -174,6 +202,15 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		received = companyToday(time.Now())
 	}
 
+	lines, err := copyPurchaseOrderLines(ctx, tx, schema, source.RevisionID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	lines, calculation, err := calculatePurchaseOrderLines(lines, 0, 0, "", source.TaxZone, source.TaxCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+
 	var id int64
 	var uuid string
 	err = tx.QueryRow(ctx, fmt.Sprintf(`
@@ -182,14 +219,26 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			customer_name, billing_address, delivery_address, ship_to_code,
 			contact_email, contact_phone, po_number, po_date, received_date,
 			requested_delivery_date, payment_terms, incoterms, currency,
-			tax_zone, tax_category, created_by, updated_by
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,$10,$11,$12,$13,$14,$15,$15)
+			tax_zone, tax_category, discount_percent, subtotal_minor,
+			discount_minor, ppn_bps, ppn_minor, adjustment_minor,
+			adjustment_reason, grand_total_minor, printed_subtotal_minor,
+			printed_discount_minor, printed_ppn_minor, printed_grand_total_minor,
+			created_by, updated_by
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,
+			$10,$11,$12,$13,$14,
+			0,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+			$26,$26)
 		RETURNING id, uuid::text`, schema),
 		org.ID, input.QuotationID, input.RevisionNumber, PurchaseOrderStateDraft,
 		source.CustomerID, source.CustomerName, source.BillingAddress,
 		source.BillingAddress, received, source.PaymentTerms,
 		source.Incoterm, source.Currency, source.TaxZone, source.TaxCategory,
-		input.CreatedBy,
+		calculation.SubtotalMinor, calculation.DiscountMinor,
+		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
+		calculation.AdjustmentReason, calculation.GrandTotalMinor,
+		source.PrintedSubtotal, source.PrintedDiscount, source.PrintedPpn,
+		source.PrintedGrand, input.CreatedBy,
 	).Scan(&id, &uuid)
 	if err != nil {
 		if isActivePurchaseOrderConflict(err) {
@@ -198,10 +247,6 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, fmt.Errorf("insert purchase order: %w", err)
 	}
 
-	lines, err := copyPurchaseOrderLines(ctx, tx, schema, source.RevisionID)
-	if err != nil {
-		return PurchaseOrder{}, err
-	}
 	if err := replacePurchaseOrderItems(ctx, tx, schema, id, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -229,9 +274,10 @@ func (s *Store) GetPurchaseOrder(ctx context.Context, id int64) (PurchaseOrder, 
 	return getPurchaseOrder(ctx, pool, s.configSchema(), org.ID, id)
 }
 
-// UpdatePurchaseOrderDraft replaces the editable header and every line of a
-// draft. Only drafts may be written; a saved record is immutable here because
-// its corrections belong to the explicit correction slice (#473).
+// UpdatePurchaseOrderDraft replaces the editable header, the whole-order
+// discount and adjustment, and every line of a draft. The exact calculation is
+// recomputed from the new inputs and stored with them; only drafts may be
+// written, because a saved record's corrections belong to #473.
 func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrderUpdate) (PurchaseOrder, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
@@ -272,11 +318,13 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	var state string
 	var quotationID int64
 	var sourceRevision int16
+	var taxZone, taxCategory string
 	err = tx.QueryRow(ctx, fmt.Sprintf(`
-		SELECT state, quotation_id, source_revision
+		SELECT state, quotation_id, source_revision, tax_zone, tax_category
 		FROM %s.purchase_orders
 		WHERE id = $1 AND org_id = $2
-		FOR UPDATE`, schema), input.ID, org.ID).Scan(&state, &quotationID, &sourceRevision)
+		FOR UPDATE`, schema), input.ID, org.ID).Scan(
+		&state, &quotationID, &sourceRevision, &taxZone, &taxCategory)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
@@ -287,6 +335,12 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
+	lines, calculation, err := calculatePurchaseOrderLines(
+		input.Items, input.DiscountPercent, input.AdjustmentMinor,
+		input.AdjustmentReason, taxZone, taxCategory)
+	if err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -304,6 +358,14 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			payment_terms = $12,
 			incoterms = $13,
 			updated_by = $14,
+			discount_percent = $15,
+			subtotal_minor = $16,
+			discount_minor = $17,
+			ppn_bps = $18,
+			ppn_minor = $19,
+			adjustment_minor = $20,
+			adjustment_reason = $21,
+			grand_total_minor = $22,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
 		input.ID, org.ID, input.BillingAddress, input.DeliveryAddress,
@@ -311,10 +373,14 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		nilIfEmptyString(input.PONumber), dateOrNil(input.PODate),
 		dateOrNil(input.ReceivedDate), dateOrNil(input.RequestedDeliveryDate),
 		input.PaymentTerms, input.Incoterms, input.UpdatedBy,
+		input.DiscountPercent, calculation.SubtotalMinor,
+		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
+		calculation.AdjustmentMinor, calculation.AdjustmentReason,
+		calculation.GrandTotalMinor,
 	); err != nil {
 		return PurchaseOrder{}, fmt.Errorf("update purchase order %d: %w", input.ID, err)
 	}
-	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, input.Items); err != nil {
+	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -329,32 +395,46 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 }
 
 type purchaseOrderSource struct {
-	QuoteNumber    string
-	CustomerName   string
-	BillingAddress string
-	Incoterm       string
-	Currency       string
-	TaxZone        string
-	TaxCategory    string
-	CustomerID     int64
-	RevisionID     int64
-	PaymentTerms   string
+	QuoteNumber     string
+	CustomerName    string
+	BillingAddress  string
+	Incoterm        string
+	Currency        string
+	TaxZone         string
+	TaxCategory     string
+	CustomerID      int64
+	RevisionID      int64
+	PaymentTerms    string
+	PrintedSubtotal int64
+	PrintedDiscount int64
+	PrintedPpn      int64
+	PrintedGrand    int64
 }
 
 // loadPurchaseOrderSource reads the exact issued revision and the snapshots a
 // new PO inherits. Only stored revisions exist here: an unsaved Quotation
 // draft never reaches quotation_revisions, so it can never become a source.
+//
+// The printed totals are the revision's customer-facing figures. They are
+// copied once, as evidence of what the source document said, and never
+// recalculated: a PO that disagrees with them is a difference to review (#471),
+// not a reason to overwrite the document (parent story 45).
 func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (purchaseOrderSource, error) {
 	var source purchaseOrderSource
 	var paymentTermDays int16
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.quote_number, c.id, c.legal_name, r.id, r.recipient_address,
-		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency
+		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency,
+		       COALESCE(t.marginalized_subtotal, 0),
+		       COALESCE(t.marginalized_discount, 0),
+		       COALESCE(t.ppn_amount, 0),
+		       COALESCE(t.customer_grand_total, 0)
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r
 		  ON r.quotation_id = q.id AND r.revision_number = $2
-		WHERE q.id = $1`, schema, schema, schema),
+		LEFT JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
+		WHERE q.id = $1`, schema, schema, schema, schema),
 		quotationID, revision).Scan(
 		&source.QuoteNumber,
 		&source.CustomerID,
@@ -366,6 +446,10 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 		&source.TaxZone,
 		&source.TaxCategory,
 		&source.Currency,
+		&source.PrintedSubtotal,
+		&source.PrintedDiscount,
+		&source.PrintedPpn,
+		&source.PrintedGrand,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return purchaseOrderSource{}, ErrPurchaseOrderSourceNotFound
@@ -566,6 +650,43 @@ func validatePurchaseOrderReferences(ctx context.Context, q purchaseOrderQuerier
 	return nil
 }
 
+// calculatePurchaseOrderLines runs the exact calculator (po_calc.go) over the
+// entered rows and returns those rows with their stored money figures filled,
+// alongside the header totals. The inputs are mutated in place-ish (a new slice
+// is returned) so the caller can persist exactly what was calculated; nothing
+// here recalculates on read.
+func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int16, adjustment int64, reason, taxZone, taxCategory string) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
+	input := PurchaseOrderCalcInput{
+		Lines:            make([]PurchaseOrderCalcLine, len(items)),
+		DiscountPercent:  discountPercent,
+		TaxZone:          taxZone,
+		TaxCategory:      taxCategory,
+		AdjustmentMinor:  adjustment,
+		AdjustmentReason: reason,
+	}
+	for index, item := range items {
+		input.Lines[index] = PurchaseOrderCalcLine{
+			QuantityScaled:  item.QuantityScaled,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+		}
+	}
+	calculation, err := CalculatePurchaseOrder(input)
+	if err != nil {
+		return nil, PurchaseOrderCalc{}, err
+	}
+	lines := make([]PurchaseOrderItem, len(items))
+	for index, item := range items {
+		calculated := calculation.Lines[index]
+		item.GrossMinor = calculated.GrossMinor
+		item.DiscountMinor = calculated.DiscountMinor
+		item.NetMinor = calculated.NetMinor
+		lines[index] = item
+	}
+	return lines, calculation, nil
+}
+
 func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, schema string, orderID int64, items []PurchaseOrderItem) error {
 	if _, err := q.Exec(ctx, fmt.Sprintf(
 		"DELETE FROM %s.purchase_order_items WHERE purchase_order_id = $1", schema), orderID); err != nil {
@@ -576,10 +697,14 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 		if _, err := q.Exec(ctx, fmt.Sprintf(`
 			INSERT INTO %s.purchase_order_items (
 				purchase_order_id, line_number, description, quotation_item_no,
-				quotation_sub_no, quantity_scaled, uom, unit_price_minor
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, schema),
+				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
+				discount_enabled, discount_percent, gross_minor,
+				discount_minor, net_minor
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, schema),
 			orderID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
+			item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
+			item.DiscountMinor, item.NetMinor,
 		); err != nil {
 			return fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
 		}
@@ -598,7 +723,12 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       COALESCE(po.po_number, ''), po.po_date, po.received_date,
 		       po.requested_delivery_date, po.payment_terms, po.incoterms,
 		       po.currency, po.tax_zone, po.tax_category, po.created_by,
-		       po.updated_by, po.created_at, po.updated_at
+		       po.updated_by, po.created_at, po.updated_at,
+		       po.subtotal_minor, po.discount_minor, po.ppn_bps, po.ppn_minor,
+		       po.adjustment_minor, po.adjustment_reason, po.grand_total_minor,
+		       po.discount_percent, po.printed_subtotal_minor,
+		       po.printed_discount_minor, po.printed_ppn_minor,
+		       po.printed_grand_total_minor
 		FROM %s.purchase_orders po
 		JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
@@ -629,6 +759,18 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&order.UpdatedBy,
 		&order.CreatedAt,
 		&order.UpdatedAt,
+		&order.SubtotalMinor,
+		&order.DiscountMinor,
+		&order.PpnBps,
+		&order.PpnMinor,
+		&order.AdjustmentMinor,
+		&order.AdjustmentReason,
+		&order.GrandTotalMinor,
+		&order.DiscountPercent,
+		&order.PrintedSubtotalMinor,
+		&order.PrintedDiscountMinor,
+		&order.PrintedPpnMinor,
+		&order.PrintedGrandTotalMinor,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
@@ -647,7 +789,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 
 	rows, err := q.Query(ctx, fmt.Sprintf(`
 		SELECT id, line_number, description, quotation_item_no, quotation_sub_no,
-		       quantity_scaled, uom, unit_price_minor
+		       quantity_scaled, uom, unit_price_minor, discount_enabled,
+		       discount_percent, gross_minor, discount_minor, net_minor
 		FROM %s.purchase_order_items
 		WHERE purchase_order_id = $1
 		ORDER BY line_number`, schema), id)
@@ -660,7 +803,9 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		var item PurchaseOrderItem
 		var itemNo, subNo pgtype.Int4
 		if err := rows.Scan(&item.ID, &item.LineNumber, &item.Description, &itemNo,
-			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor); err != nil {
+			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
+			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
+			&item.DiscountMinor, &item.NetMinor); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
 		}
 		if itemNo.Valid {

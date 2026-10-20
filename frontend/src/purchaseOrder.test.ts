@@ -2,16 +2,20 @@ import { describe, expect, it } from "vitest";
 import type { CurrencyInfo } from "./format";
 import {
   buildPurchaseOrderUpdate,
+  calculatePurchaseOrder,
   formatQuantityScaled,
   formatUnitPriceMinor,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
   MAX_PAYMENT_TERMS_LENGTH,
+  parseAdjustmentMinor,
+  parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
   purchaseOrderEditorReducer,
   validDateField,
   type PurchaseOrderDTO,
+  type PurchaseOrderEditorState,
 } from "./purchaseOrder";
 
 // Issue #468: the draft editor's pure decisions. The suite drives the exact
@@ -68,6 +72,11 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
         QuantityScaled: 25000,
         UoM: "Pc",
         UnitPriceMinor: 125050,
+        DiscountEnabled: true,
+        DiscountPercent: 10,
+        GrossMinor: 312625,
+        DiscountMinor: 31262,
+        NetMinor: 281363,
       },
       {
         QuotationItemNo: 2,
@@ -77,6 +86,11 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
         QuantityScaled: 10000,
         UoM: "Unit",
         UnitPriceMinor: 42000,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+        GrossMinor: 42000,
+        DiscountMinor: 0,
+        NetMinor: 42000,
       },
     ],
     ID: 7,
@@ -84,6 +98,18 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     SourceRevision: 1,
     CustomerID: 2,
     PaymentTerms: "45 days",
+    DiscountPercent: 5,
+    PpnBps: 1100,
+    SubtotalMinor: 323363,
+    DiscountMinor: 16168,
+    PpnMinor: 33791,
+    AdjustmentMinor: -250,
+    AdjustmentReason: "Printed total rounding",
+    GrandTotalMinor: 340736,
+    PrintedSubtotalMinor: 323363,
+    PrintedDiscountMinor: 16168,
+    PrintedPpnMinor: 33791,
+    PrintedGrandTotalMinor: 340736,
     ...overrides,
   };
 }
@@ -102,7 +128,16 @@ describe("PO quantity parsing (issue #468)", () => {
   });
 
   it("refuses zero, negatives, more than four places and junk", () => {
-    for (const raw of ["0", "0.0000", "-1", "1.23456", "abc", "", "1.2.3", "1,2,3"]) {
+    for (const raw of [
+      "0",
+      "0.0000",
+      "-1",
+      "1.23456",
+      "abc",
+      "",
+      "1.2.3",
+      "1,2,3",
+    ]) {
       expect(parseQuantityScaled(raw), raw).toBeNull();
     }
   });
@@ -208,6 +243,11 @@ describe("PO editor dirty-cancel guard (issue #468)", () => {
             QuantityScaled: 25000,
             UoM: "Pc",
             UnitPriceMinor: 125050,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+            GrossMinor: 312625,
+            DiscountMinor: 0,
+            NetMinor: 312625,
           },
         ],
       }),
@@ -239,6 +279,8 @@ describe("PO draft update payload (issue #468)", () => {
       QuantityScaled: 25000,
       UoM: "Pc",
       UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
     });
     expect(input.Items[1].QuotationSubNo).toBe(1);
   });
@@ -260,7 +302,7 @@ describe("PO draft update payload (issue #468)", () => {
       patch: { unitPrice: "not money" },
     });
     expect(buildPurchaseOrderUpdate(badPrice, USD).error).toBe(
-      "Line 1: unit price must be a nonnegative USD amount."
+      "Line 1: unit price must be a nonnegative USD amount.",
     );
   });
 
@@ -269,7 +311,9 @@ describe("PO draft update payload (issue #468)", () => {
       type: "headerChanged",
       patch: { receivedDate: "" },
     });
-    expect(buildPurchaseOrderUpdate(missing, USD).error).toContain("Received date");
+    expect(buildPurchaseOrderUpdate(missing, USD).error).toContain(
+      "Received date",
+    );
 
     const badPO = purchaseOrderEditorReducer(initial(), {
       type: "headerChanged",
@@ -282,7 +326,7 @@ describe("PO draft update payload (issue #468)", () => {
       patch: { requestedDeliveryDate: "next week" },
     });
     expect(buildPurchaseOrderUpdate(badRequested, USD).error).toContain(
-      "Requested delivery date"
+      "Requested delivery date",
     );
   });
 
@@ -292,7 +336,7 @@ describe("PO draft update payload (issue #468)", () => {
       patch: { paymentTerms: "50% advance" },
     });
     expect(buildPurchaseOrderUpdate(wording, USD).input?.PaymentTerms).toBe(
-      "50% advance"
+      "50% advance",
     );
 
     const second = purchaseOrderEditorReducer(initial(), {
@@ -300,7 +344,7 @@ describe("PO draft update payload (issue #468)", () => {
       patch: { paymentTerms: "30 days after delivery" },
     });
     expect(buildPurchaseOrderUpdate(second, USD).input?.PaymentTerms).toBe(
-      "30 days after delivery"
+      "30 days after delivery",
     );
 
     // A draft may leave the terms unagreed; only the length is bounded.
@@ -327,7 +371,7 @@ describe("PO draft update payload (issue #468)", () => {
           type: "headerChanged",
           patch: { paymentTerms: terms },
         }),
-        USD
+        USD,
       );
     const overLimit = {
       input: null,
@@ -359,5 +403,319 @@ describe("PO draft update payload (issue #468)", () => {
     expect(validDateField("2026-02-28")).toBe(true);
     expect(validDateField("2026-02-29")).toBe(false);
     expect(validDateField("")).toBe(true);
+  });
+});
+
+// Issue #470: the exact calculation, mirrored from the Go pipeline. Expectations
+// are worked literals, never a second call of the same formula.
+
+describe("PO discount and adjustment parsing (issue #470)", () => {
+  it("accepts whole percentages from 0 to 100 and nothing else", () => {
+    expect(parseDiscountPercent("0")).toBe(0);
+    expect(parseDiscountPercent("10")).toBe(10);
+    expect(parseDiscountPercent("100")).toBe(100);
+    expect(parseDiscountPercent("")).toBe(0);
+    expect(parseDiscountPercent(" 25 ")).toBe(25);
+  });
+
+  it("refuses decimals, signs and out-of-range percentages", () => {
+    for (const raw of ["10.5", "-5", "101", "abc", "1e2", "1,5"]) {
+      expect(parseDiscountPercent(raw), raw).toBeNull();
+    }
+  });
+
+  it("reads the signed adjustment in the PO currency and keeps empty as none", () => {
+    expect(parseAdjustmentMinor(USD, "")).toBe(0);
+    expect(parseAdjustmentMinor(USD, "0.00")).toBe(0);
+    expect(parseAdjustmentMinor(USD, "-2.50")).toBe(-250);
+    expect(parseAdjustmentMinor(USD, "$-2.50")).toBe(-250);
+    expect(parseAdjustmentMinor(USD, "2.50")).toBe(250);
+    expect(parseAdjustmentMinor(IDR, "-1.500")).toBe(-1500);
+    expect(parseAdjustmentMinor(USD, "abc")).toBeNull();
+  });
+});
+
+describe("PO explained calculation (issue #470)", () => {
+  function stateWith(
+    lines: Array<{
+      quantity: string;
+      unitPrice: string;
+      discountEnabled?: boolean;
+      discountPercent?: string;
+    }>,
+    header: Partial<PurchaseOrderEditorState["header"]> = {},
+    ppnBps = 0,
+  ): PurchaseOrderEditorState {
+    const base = initial();
+    return {
+      ...base,
+      ppnBps,
+      header: {
+        ...base.header,
+        discountPercent: "0",
+        adjustment: "",
+        adjustmentReason: "",
+        ...header,
+      },
+      lines: lines.map((line, index) => ({
+        key: index,
+        description: `Line ${index + 1}`,
+        quantity: line.quantity,
+        uom: "Pc",
+        unitPrice: line.unitPrice,
+        discountEnabled: line.discountEnabled ?? false,
+        discountPercent: line.discountPercent ?? "0",
+        quotationItemNo: null,
+        quotationSubNo: null,
+      })),
+    };
+  }
+
+  it("rounds a fractional line half away from zero and truncates discounts", () => {
+    const calculation = calculatePurchaseOrder(
+      stateWith([
+        { quantity: "0.5", unitPrice: "0.01" },
+        { quantity: "1666.9999", unitPrice: "0" },
+      ]),
+      USD,
+    );
+    expect(calculation.lines[0]).toEqual({
+      grossMinor: 1,
+      discountMinor: 0,
+      netMinor: 1,
+    });
+    expect(calculation.lines[1]).toEqual({
+      grossMinor: 0,
+      discountMinor: 0,
+      netMinor: 0,
+    });
+
+    // 2.5 x 650 = 1625; 10% is 162.5 and truncates to 162.
+    const discounted = calculatePurchaseOrder(
+      stateWith(
+        [
+          {
+            quantity: "2.5",
+            unitPrice: "6.50",
+            discountEnabled: true,
+            discountPercent: "10",
+          },
+          { quantity: "2", unitPrice: "4.20" },
+          {
+            quantity: "1",
+            unitPrice: "4.50",
+            discountEnabled: true,
+            discountPercent: "50",
+          },
+        ],
+        { discountPercent: "10" },
+      ),
+      USD,
+    );
+    expect(discounted.lines).toEqual([
+      { grossMinor: 1625, discountMinor: 162, netMinor: 1463 },
+      { grossMinor: 840, discountMinor: 0, netMinor: 840 },
+      { grossMinor: 450, discountMinor: 225, netMinor: 225 },
+    ]);
+    // Subtotal 2528; 10% whole discount is 252.8 -> 252; no PPN.
+    expect(discounted.totals).toMatchObject({
+      grossMinor: 2915,
+      rowDiscountMinor: 387,
+      subtotalMinor: 2528,
+      discountMinor: 252,
+      afterDiscountMinor: 2276,
+      ppnMinor: 0,
+      adjustmentMinor: 0,
+      grandTotalMinor: 2276,
+    });
+    expect(discounted.error).toBeNull();
+  });
+
+  it("takes tax on the discounted subtotal and adds it separately", () => {
+    const calculation = calculatePurchaseOrder(
+      stateWith(
+        [{ quantity: "1", unitPrice: "10.00" }],
+        { discountPercent: "10" },
+        1100,
+      ),
+      USD,
+    );
+    expect(calculation.totals).toMatchObject({
+      subtotalMinor: 1000,
+      discountMinor: 100,
+      afterDiscountMinor: 900,
+      ppnMinor: 99,
+      grandTotalMinor: 999,
+    });
+  });
+
+  it("adds the signed adjustment last, without touching rows or tax", () => {
+    const calculation = calculatePurchaseOrder(
+      stateWith(
+        [{ quantity: "1", unitPrice: "10.00" }],
+        {
+          adjustment: "-0.10",
+          adjustmentReason: "Printed total",
+        },
+        1100,
+      ),
+      USD,
+    );
+    expect(calculation.totals.ppnMinor).toBe(110);
+    expect(calculation.totals.adjustmentMinor).toBe(-10);
+    expect(calculation.totals.grandTotalMinor).toBe(1100);
+    expect(calculation.lines[0]).toEqual({
+      grossMinor: 1000,
+      discountMinor: 0,
+      netMinor: 1000,
+    });
+
+    const positive = calculatePurchaseOrder(
+      stateWith(
+        [{ quantity: "1", unitPrice: "10.00" }],
+        {
+          adjustment: "0.25",
+          adjustmentReason: "Freight",
+        },
+        1100,
+      ),
+      USD,
+    );
+    expect(positive.totals.grandTotalMinor).toBe(1135);
+  });
+
+  it("marks an unexplained adjustment and a negative total as errors", () => {
+    const unexplained = calculatePurchaseOrder(
+      stateWith([{ quantity: "1", unitPrice: "10.00" }], { adjustment: "-0.10" }),
+      USD,
+    );
+    expect(unexplained.error).toContain("reason");
+
+    const negative = calculatePurchaseOrder(
+      stateWith(
+        [{ quantity: "1", unitPrice: "1.00" }],
+        {
+          adjustment: "-1.12",
+          adjustmentReason: "Too far",
+        },
+        1100,
+      ),
+      USD,
+    );
+    expect(negative.error).toContain("negative");
+  });
+
+  it("leaves an unparseable line out of the totals and says which one", () => {
+    const calculation = calculatePurchaseOrder(
+      stateWith([
+        { quantity: "2", unitPrice: "1.00" },
+        { quantity: "1.23456", unitPrice: "1.00" },
+      ]),
+      USD,
+    );
+    expect(calculation.lines[1]).toBeNull();
+    expect(calculation.totals.subtotalMinor).toBe(200);
+    expect(calculation.error).toBe(
+      "Line 2: quantity must be positive with up to 4 decimal places.",
+    );
+  });
+
+  it("refuses amounts that would overflow the supported money range", () => {
+    const calculation = calculatePurchaseOrder(
+      stateWith([{ quantity: "900000000000", unitPrice: "900000000000" }]),
+      USD,
+    );
+    expect(calculation.error).toContain("range");
+  });
+});
+
+describe("PO calculation in the saved payload (issue #470)", () => {
+  it("sends the row and whole-order discounts and the signed adjustment", () => {
+    const state = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: {
+        discountPercent: "10",
+        adjustment: "-0.26",
+        adjustmentReason: "Match the printed total",
+      },
+    });
+    const withRow = purchaseOrderEditorReducer(state, {
+      type: "lineChanged",
+      key: 0,
+      patch: { discountEnabled: true, discountPercent: "10" },
+    });
+    const result = buildPurchaseOrderUpdate(withRow, USD);
+    expect(result.error).toBeNull();
+    const input = result.input!;
+    expect(input.DiscountPercent).toBe(10);
+    expect(input.AdjustmentMinor).toBe(-26);
+    expect(input.AdjustmentReason).toBe("Match the printed total");
+    expect(input.Items[0].DiscountEnabled).toBe(true);
+    expect(input.Items[0].DiscountPercent).toBe(10);
+    expect(input.Items[1].DiscountEnabled).toBe(false);
+  });
+
+  it("names the bad percentage, the missing reason and the negative total", () => {
+    const badRow = purchaseOrderEditorReducer(initial(), {
+      type: "lineChanged",
+      key: 1,
+      patch: { discountEnabled: true, discountPercent: "101" },
+    });
+    expect(buildPurchaseOrderUpdate(badRow, USD)).toEqual({
+      input: null,
+      error: "Line 2: discount must be between 0 and 100.",
+    });
+
+    const missingReason = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { adjustment: "-0.10", adjustmentReason: "" },
+    });
+    expect(buildPurchaseOrderUpdate(missingReason, USD).error).toBe(
+      "An adjustment requires a reason.",
+    );
+
+    const negative = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: {
+        discountPercent: "100",
+        adjustment: "-0.01",
+        adjustmentReason: "Too far",
+      },
+    });
+    expect(buildPurchaseOrderUpdate(negative, USD).error).toContain("negative");
+  });
+
+  it("tracks the calculation fields as unsaved changes", () => {
+    const base = initial();
+    expect(isPurchaseOrderDirty(base)).toBe(false);
+
+    const discount = purchaseOrderEditorReducer(base, {
+      type: "headerChanged",
+      patch: { discountPercent: "6" },
+    });
+    expect(isPurchaseOrderDirty(discount)).toBe(true);
+
+    const row = purchaseOrderEditorReducer(base, {
+      type: "lineChanged",
+      key: 0,
+      patch: { discountPercent: "15" },
+    });
+    expect(isPurchaseOrderDirty(row)).toBe(true);
+
+    const adjustment = purchaseOrderEditorReducer(base, {
+      type: "headerChanged",
+      patch: { adjustmentReason: "Changed" },
+    });
+    expect(isPurchaseOrderDirty(adjustment)).toBe(true);
+  });
+
+  it("restores the stored discounts and the tax rate from a saved order", () => {
+    const state = initial();
+    expect(state.ppnBps).toBe(1100);
+    expect(state.header.discountPercent).toBe("5");
+    expect(state.lines[0].discountEnabled).toBe(true);
+    expect(state.lines[0].discountPercent).toBe("10");
+    expect(state.lines[1].discountEnabled).toBe(false);
+    expect(state.printedTotals.grandTotalMinor).toBe(340736);
   });
 });

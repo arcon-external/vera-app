@@ -1203,6 +1203,11 @@ export namespace backend {
 	    QuantityScaled: number;
 	    UoM: string;
 	    UnitPriceMinor: number;
+	    DiscountEnabled: boolean;
+	    DiscountPercent: number;
+	    GrossMinor: number;
+	    DiscountMinor: number;
+	    NetMinor: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemDTO(source);
@@ -1217,6 +1222,11 @@ export namespace backend {
 	        this.QuantityScaled = source["QuantityScaled"];
 	        this.UoM = source["UoM"];
 	        this.UnitPriceMinor = source["UnitPriceMinor"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.GrossMinor = source["GrossMinor"];
+	        this.DiscountMinor = source["DiscountMinor"];
+	        this.NetMinor = source["NetMinor"];
 	    }
 	}
 	export class PurchaseOrderDTO {
@@ -1237,6 +1247,7 @@ export namespace backend {
 	    Currency: string;
 	    TaxZone: string;
 	    TaxCategory: string;
+	    AdjustmentReason: string;
 	    CreatedAt: string;
 	    UpdatedAt: string;
 	    Items: PurchaseOrderItemDTO[];
@@ -1245,6 +1256,17 @@ export namespace backend {
 	    SourceRevision: number;
 	    CustomerID: number;
 	    PaymentTerms: string;
+	    DiscountPercent: number;
+	    PpnBps: number;
+	    SubtotalMinor: number;
+	    DiscountMinor: number;
+	    PpnMinor: number;
+	    AdjustmentMinor: number;
+	    GrandTotalMinor: number;
+	    PrintedSubtotalMinor: number;
+	    PrintedDiscountMinor: number;
+	    PrintedPpnMinor: number;
+	    PrintedGrandTotalMinor: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
@@ -1269,6 +1291,7 @@ export namespace backend {
 	        this.Currency = source["Currency"];
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxCategory = source["TaxCategory"];
+	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.UpdatedAt = source["UpdatedAt"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemDTO);
@@ -1277,6 +1300,17 @@ export namespace backend {
 	        this.SourceRevision = source["SourceRevision"];
 	        this.CustomerID = source["CustomerID"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.PpnBps = source["PpnBps"];
+	        this.SubtotalMinor = source["SubtotalMinor"];
+	        this.DiscountMinor = source["DiscountMinor"];
+	        this.PpnMinor = source["PpnMinor"];
+	        this.AdjustmentMinor = source["AdjustmentMinor"];
+	        this.GrandTotalMinor = source["GrandTotalMinor"];
+	        this.PrintedSubtotalMinor = source["PrintedSubtotalMinor"];
+	        this.PrintedDiscountMinor = source["PrintedDiscountMinor"];
+	        this.PrintedPpnMinor = source["PrintedPpnMinor"];
+	        this.PrintedGrandTotalMinor = source["PrintedGrandTotalMinor"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1305,6 +1339,8 @@ export namespace backend {
 	    QuantityScaled: number;
 	    UoM: string;
 	    UnitPriceMinor: number;
+	    DiscountEnabled: boolean;
+	    DiscountPercent: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemInput(source);
@@ -1318,6 +1354,8 @@ export namespace backend {
 	        this.QuantityScaled = source["QuantityScaled"];
 	        this.UoM = source["UoM"];
 	        this.UnitPriceMinor = source["UnitPriceMinor"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	    }
 	}
 	export class PurchaseOrderUpdateInput {
@@ -1333,7 +1371,10 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    AdjustmentReason: string;
 	    Items: PurchaseOrderItemInput[];
+	    DiscountPercent: number;
+	    AdjustmentMinor: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderUpdateInput(source);
@@ -1353,7 +1394,10 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
