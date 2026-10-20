@@ -51,6 +51,7 @@ export interface PurchaseOrderSourceDTO {
   Currency: string;
   PaymentTerms: string;
   Incoterms: string;
+  DiscountPercent: number;
   Lines: PurchaseOrderSourceLineDTO[];
   PrintedSubtotalMinor: number;
   PrintedDiscountMinor: number;
@@ -211,6 +212,17 @@ export function comparePurchaseOrder(
 
   addText("header:paymentTerms", "Payment terms", state.header.paymentTerms, source.PaymentTerms);
   addText("header:incoterms", "Incoterms", state.header.incoterms, source.Incoterms);
+  const wholeDiscount = parseDiscountPercent(state.header.discountPercent);
+  if (wholeDiscount === null) {
+    blocking.push("Whole-PO discount must be between 0 and 100.");
+  } else {
+    addValue(
+      "header:discountPercent",
+      "Whole-PO discount",
+      `${wholeDiscount}%`,
+      `${source.DiscountPercent}%`
+    );
+  }
 
   state.lines.forEach((line, index) => {
     const lineNumber = index + 1;
@@ -332,6 +344,10 @@ export function applyReviewChoices(
     }
     if (difference.key === "header:incoterms") {
       header.incoterms = source.Incoterms;
+      continue;
+    }
+    if (difference.key === "header:discountPercent") {
+      header.discountPercent = String(source.DiscountPercent);
       continue;
     }
     const match = /^line:(\d+):(description|quantity|uom|unitPrice|discount)$/.exec(

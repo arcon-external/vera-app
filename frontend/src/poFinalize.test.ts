@@ -114,6 +114,7 @@ const SOURCE: PurchaseOrderSourceDTO = {
   Currency: "USD",
   PaymentTerms: "45 days",
   Incoterms: "CIF",
+  DiscountPercent: 0,
   Lines: [
     {
       QuotationItemNo: 1,
@@ -288,6 +289,7 @@ describe("purchase order matching", () => {
       order({
         PaymentTerms: "30 days",
         Incoterms: "FOB",
+        DiscountPercent: 5,
         Items: [
           {
             ...base.Items[0],
@@ -305,6 +307,7 @@ describe("purchase order matching", () => {
     expect(keys).toEqual([
       "header:paymentTerms",
       "header:incoterms",
+      "header:discountPercent",
       "line:1:description",
       "line:1:uom",
       "line:1:quantity",
@@ -325,6 +328,7 @@ describe("difference choices", () => {
     const state = stateFrom(
       order({
         PaymentTerms: "30 days",
+        DiscountPercent: 5,
         Items: [
           {
             ...base.Items[0],
@@ -338,17 +342,20 @@ describe("difference choices", () => {
     const comparison = comparePurchaseOrder(state, SOURCE, USD);
     expect(comparison.differences.map((difference) => difference.key)).toEqual([
       "header:paymentTerms",
+      "header:discountPercent",
       "line:1:quantity",
       "line:1:unitPrice",
     ]);
 
     const decisions: POReviewDecisions = {
       "header:paymentTerms": "quotation",
+      "header:discountPercent": "quotation",
       "line:1:quantity": "quotation",
       "line:1:unitPrice": "po",
     };
     const applied = applyReviewChoices(state, SOURCE, comparison, decisions, USD);
     expect(applied.header.paymentTerms).toBe("45 days");
+    expect(applied.header.discountPercent).toBe("0");
     expect(applied.lines[0].quantity).toBe("2");
     // The unit price kept its explicit PO choice, so it stays at 110.
     expect(applied.lines[0].unitPrice).toBe("$110.00");

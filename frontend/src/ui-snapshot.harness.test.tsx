@@ -291,6 +291,7 @@ const PO_REVIEW_SOURCE: PurchaseOrderSourceDTO = {
   Currency: "USD",
   PaymentTerms: "60 days from delivery",
   Incoterms: "FOB",
+  DiscountPercent: 5,
   Lines: [
     {
       QuotationItemNo: 1,

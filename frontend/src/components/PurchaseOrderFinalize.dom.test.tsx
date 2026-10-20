@@ -140,6 +140,7 @@ const REVIEW: PurchaseOrderReviewDTO = {
     Currency: "USD",
     PaymentTerms: "45 days",
     Incoterms: "CIF",
+    DiscountPercent: 0,
     PrintedSubtotalMinor: 24500,
     PrintedDiscountMinor: 0,
     PrintedPpnMinor: 0,

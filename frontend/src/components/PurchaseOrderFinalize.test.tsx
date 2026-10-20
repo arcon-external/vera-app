@@ -115,6 +115,7 @@ const SOURCE: PurchaseOrderSourceDTO = {
   Currency: "USD",
   PaymentTerms: "45 days",
   Incoterms: "CIF",
+  DiscountPercent: 0,
   Lines: [
     {
       QuotationItemNo: 1,
@@ -228,7 +229,9 @@ describe("PurchaseOrderDifferenceReviewView (issue #471)", () => {
     expect(html).toContain("Acknowledge line 1 as extra");
     expect(html).toContain("Acknowledge line 3 as extra");
     expect(html).toContain("Line 1 quotation match");
+    expect(html).toContain("Line 2 quotation match");
     expect(html).toContain("Line 3 quotation match");
+    expect(html).toContain("Currently quotation line 3");
     expect(html).toContain("Quotation match");
   });
 

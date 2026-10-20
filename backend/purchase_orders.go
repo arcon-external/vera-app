@@ -101,6 +101,7 @@ type PurchaseOrderSourceDTO struct {
 	Currency               string
 	PaymentTerms           string
 	Incoterms              string
+	DiscountPercent        int16
 	Lines                  []PurchaseOrderSourceLineDTO
 	PrintedSubtotalMinor   int64
 	PrintedDiscountMinor   int64
@@ -427,6 +428,7 @@ func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseO
 			Currency:               row.Source.Currency,
 			PaymentTerms:           row.Source.PaymentTerms,
 			Incoterms:              row.Source.Incoterms,
+			DiscountPercent:        row.Source.DiscountPercent,
 			PrintedSubtotalMinor:   row.Source.PrintedSubtotalMinor,
 			PrintedDiscountMinor:   row.Source.PrintedDiscountMinor,
 			PrintedPpnMinor:        row.Source.PrintedPpnMinor,

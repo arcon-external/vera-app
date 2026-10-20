@@ -1595,6 +1595,7 @@ export namespace backend {
 	    Currency: string;
 	    PaymentTerms: string;
 	    Incoterms: string;
+	    DiscountPercent: number;
 	    Lines: PurchaseOrderSourceLineDTO[];
 	    PrintedSubtotalMinor: number;
 	    PrintedDiscountMinor: number;
@@ -1615,6 +1616,7 @@ export namespace backend {
 	        this.Currency = source["Currency"];
 	        this.PaymentTerms = source["PaymentTerms"];
 	        this.Incoterms = source["Incoterms"];
+	        this.DiscountPercent = source["DiscountPercent"];
 	        this.Lines = this.convertValues(source["Lines"], PurchaseOrderSourceLineDTO);
 	        this.PrintedSubtotalMinor = source["PrintedSubtotalMinor"];
 	        this.PrintedDiscountMinor = source["PrintedDiscountMinor"];

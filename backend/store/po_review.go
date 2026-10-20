@@ -94,9 +94,10 @@ type PurchaseOrderSource struct {
 // the values a final save would store, so the review and the saved row cannot
 // disagree.
 type PurchaseOrderReviewState struct {
-	PaymentTerms string
-	Incoterms    string
-	Lines        []PurchaseOrderItem
+	PaymentTerms    string
+	Incoterms       string
+	DiscountPercent int16
+	Lines           []PurchaseOrderItem
 }
 
 // PurchaseOrderDifference is one named value the review must decide. Key is
@@ -181,6 +182,8 @@ func ComparePurchaseOrder(source PurchaseOrderSource, entered PurchaseOrderRevie
 		entered.PaymentTerms, source.PaymentTerms)
 	comparison.addTextDifference("header:incoterms", "Incoterms",
 		entered.Incoterms, source.Incoterms)
+	comparison.addValueDifference("header:discountPercent", "Whole-PO discount",
+		fmt.Sprintf("%d%%", entered.DiscountPercent), fmt.Sprintf("%d%%", source.DiscountPercent))
 
 	for _, pair := range pairs {
 		sourceLine := source.Lines[pair.sourceIndex]
@@ -568,9 +571,10 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	}
 
 	comparison := ComparePurchaseOrder(source, PurchaseOrderReviewState{
-		PaymentTerms: input.PaymentTerms,
-		Incoterms:    input.Incoterms,
-		Lines:        lines,
+		PaymentTerms:    input.PaymentTerms,
+		Incoterms:       input.Incoterms,
+		DiscountPercent: input.DiscountPercent,
+		Lines:           lines,
 	})
 	if err := ValidatePurchaseOrderDecisions(
 		comparison, input.Decisions, input.AcknowledgedMissing, input.AcknowledgedExtra); err != nil {

@@ -401,6 +401,7 @@ func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.Purcha
 			Currency:               source.Currency,
 			PaymentTerms:           source.PaymentTerms,
 			Incoterms:              source.Incoterms,
+			DiscountPercent:        source.DiscountPercent,
 			PrintedSubtotalMinor:   source.PrintedSubtotalMinor,
 			PrintedDiscountMinor:   source.PrintedDiscountMinor,
 			PrintedPpnMinor:        source.PrintedPpnMinor,

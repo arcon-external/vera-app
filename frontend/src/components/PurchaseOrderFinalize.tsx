@@ -186,105 +186,125 @@ export function PurchaseOrderDifferenceReviewView({
         </p>
       </Card>
 
-      {comparison.missing.length > 0 || comparison.extraLineNumbers.length > 0 ? (
-        <Card className="p-4">
-          <SectionHeading
-            title="Lines that do not pair"
-            hint="Reviewed explicitly, never inferred from position"
-          />
-          <div className="mt-3 grid gap-4">
-            {comparison.missing.length > 0 ? (
-              <fieldset className="grid gap-2">
-                <legend className="text-small font-medium text-ink-700">
-                  On the quotation, not on this purchase order
-                </legend>
-                {comparison.missing.map((line) => (
-                  <label
-                    key={line.LineLabel}
-                    className="flex items-start gap-2 text-small text-ink-700"
-                  >
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 accent-accent-700"
-                      aria-label={`Acknowledge omission of quotation line ${line.LineLabel}`}
-                      checked={acknowledgedMissing.includes(line.LineLabel)}
-                      onChange={() => onToggleMissing(line.LineLabel)}
-                    />
-                    <span>
-                      Quotation line {line.LineLabel} — {line.Description || "(no description)"}
-                    </span>
-                  </label>
-                ))}
-              </fieldset>
-            ) : null}
+      <Card className="p-4">
+        <SectionHeading
+          title="Line matches"
+          hint="Matched by reference, not by position"
+        />
+        <p className="mt-2 text-caption text-ink-500">
+          Every line keeps its customer line number. Correct any match that
+          follows a different quotation line; a corrected match is saved on the
+          purchase order line.
+        </p>
+        <div className="mt-3 grid gap-2">
+          {state.lines.map((line, index) => {
+            const lineNumber = index + 1;
+            const current = matchedByLineKey.get(line.key);
+            const suggestion = comparison.suggestions.find(
+              (candidate) => candidate.lineNumber === lineNumber
+            );
+            return (
+              <div
+                key={line.key}
+                className="grid gap-2 rounded-lg border border-rule p-3 sm:grid-cols-2 sm:items-end"
+              >
+                <div className="grid gap-1">
+                  <p className="text-small font-medium text-ink-900">
+                    Line {lineNumber} — {line.description || "(no description)"}
+                  </p>
+                  <p className="text-caption text-ink-500">
+                    {current === undefined
+                      ? "Currently extra (no quotation match)"
+                      : `Currently quotation line ${current.LineLabel}`}
+                  </p>
+                  {suggestion !== undefined ? (
+                    <p className="text-caption text-ink-500">
+                      Suggested: quotation line {suggestion.source.LineLabel}.{" "}
+                      <button
+                        type="button"
+                        className="font-medium text-accent-700 underline"
+                        aria-label={`Use suggested match for line ${lineNumber}`}
+                        onClick={() => onMatchChange(line.key, suggestion.source)}
+                      >
+                        Use suggestion
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+                <div className="grid gap-1.5">
+                  <span className="text-small font-medium text-ink-700">
+                    Quotation match
+                  </span>
+                  <Select
+                    ariaLabel={`Line ${lineNumber} quotation match`}
+                    value={current?.LineLabel ?? ""}
+                    options={sourceOptions}
+                    onChange={(value) => {
+                      const label = String(value);
+                      const chosen =
+                        source.Lines.find((candidate) => candidate.LineLabel === label) ?? null;
+                      onMatchChange(line.key, chosen);
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-            {comparison.extraLineNumbers.length > 0 ? (
-              <fieldset className="grid gap-2">
-                <legend className="text-small font-medium text-ink-700">
-                  On this purchase order, not on the quotation
-                </legend>
-                {comparison.extraLineNumbers.map((lineNumber) => {
-                  const line = state.lines[lineNumber - 1];
-                  const suggestion = comparison.suggestions.find(
-                    (candidate) => candidate.lineNumber === lineNumber
-                  );
-                  return (
-                    <div
-                      key={lineNumber}
-                      className="grid gap-2 rounded-lg border border-rule p-3 sm:grid-cols-2"
-                    >
-                      <div className="grid gap-1">
-                        <label className="flex items-start gap-2 text-small text-ink-700">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 h-4 w-4 accent-accent-700"
-                            aria-label={`Acknowledge line ${lineNumber} as extra`}
-                            checked={acknowledgedExtra.includes(lineNumber)}
-                            onChange={() => onToggleExtra(lineNumber)}
-                          />
-                          <span>
-                            Line {lineNumber} — {line.description || "(no description)"}
-                          </span>
-                        </label>
-                        {suggestion !== undefined ? (
-                          <p className="text-caption text-ink-500">
-                            Suggested match: quotation line{" "}
-                            {suggestion.source.LineLabel}.{" "}
-                            <button
-                              type="button"
-                              className="font-medium text-accent-700 underline"
-                              aria-label={`Use suggested match for line ${lineNumber}`}
-                              onClick={() => onMatchChange(line.key, suggestion.source)}
-                            >
-                              Use suggestion
-                            </button>
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="grid gap-1.5">
-                        <span className="text-small font-medium text-ink-700">
-                          Quotation match
-                        </span>
-                        <Select
-                          ariaLabel={`Line ${lineNumber} quotation match`}
-                          value={matchedByLineKey.get(line.key)?.LineLabel ?? ""}
-                          options={sourceOptions}
-                          onChange={(value) => {
-                            const label = String(value);
-                            const chosen =
-                              source.Lines.find((candidate) => candidate.LineLabel === label) ?? null;
-                            onMatchChange(line.key, chosen);
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </fieldset>
-            ) : null}
-          </div>
-        </Card>
-      ) : null}
+        {comparison.missing.length > 0 ? (
+          <fieldset className="mt-4 grid gap-2 border-t border-rule pt-3">
+            <legend className="text-small font-medium text-ink-700">
+              On the quotation, not on this purchase order
+            </legend>
+            {comparison.missing.map((line) => (
+              <label
+                key={line.LineLabel}
+                className="flex items-start gap-2 text-small text-ink-700"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 accent-accent-700"
+                  aria-label={`Acknowledge omission of quotation line ${line.LineLabel}`}
+                  checked={acknowledgedMissing.includes(line.LineLabel)}
+                  onChange={() => onToggleMissing(line.LineLabel)}
+                />
+                <span>
+                  Quotation line {line.LineLabel} — {line.Description || "(no description)"}
+                </span>
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
+
+        {comparison.extraLineNumbers.length > 0 ? (
+          <fieldset className="mt-4 grid gap-2 border-t border-rule pt-3">
+            <legend className="text-small font-medium text-ink-700">
+              On this purchase order, not on the quotation
+            </legend>
+            {comparison.extraLineNumbers.map((lineNumber) => {
+              const line = state.lines[lineNumber - 1];
+              return (
+                <label
+                  key={lineNumber}
+                  className="flex items-start gap-2 text-small text-ink-700"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-accent-700"
+                    aria-label={`Acknowledge line ${lineNumber} as extra`}
+                    checked={acknowledgedExtra.includes(lineNumber)}
+                    onChange={() => onToggleExtra(lineNumber)}
+                  />
+                  <span>
+                    Line {lineNumber} — {line.description || "(no description)"}
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+        ) : null}
+      </Card>
 
       {comparison.duplicateLineNumbers.length > 0 ? (
         <StatusBanner tone="danger">

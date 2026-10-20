@@ -257,6 +257,7 @@ type PurchaseOrderSourceRow struct {
 	Currency               string                       `json:"currency"`
 	PaymentTerms           string                       `json:"paymentTerms"`
 	Incoterms              string                       `json:"incoterms"`
+	DiscountPercent        int16                        `json:"discountPercent"`
 	Lines                  []PurchaseOrderSourceLineRow `json:"lines"`
 	PrintedSubtotalMinor   int64                        `json:"printedSubtotalMinor"`
 	PrintedDiscountMinor   int64                        `json:"printedDiscountMinor"`
