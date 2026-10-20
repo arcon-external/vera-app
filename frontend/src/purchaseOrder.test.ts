@@ -12,6 +12,8 @@ import {
   parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
+  MAX_ADJUSTMENT_REASON_LENGTH,
+  MAX_EXACT_MINOR,
   purchaseOrderEditorReducer,
   validDateField,
   type PurchaseOrderDTO,
@@ -149,6 +151,15 @@ describe("PO quantity parsing (issue #468)", () => {
     expect(parseQuantityScaled("2.500")).toBe(parseQuantityScaled("2.5"));
   });
 
+  it("refuses a scaled quantity beyond the exact transport range", () => {
+    // 2^53-1 is the same ceiling the Go store and the schema enforce; beyond
+    // it a number cannot name every minor unit.
+    expect(MAX_EXACT_MINOR).toBe(Number.MAX_SAFE_INTEGER);
+    expect(parseQuantityScaled("900719925474.0991")).toBe(MAX_EXACT_MINOR);
+    expect(parseQuantityScaled("900719925474.0992")).toBeNull();
+    expect(parseQuantityScaled("900719925475")).toBeNull();
+  });
+
   it("formats the stored scale back to the shortest decimal", () => {
     expect(formatQuantityScaled(10000)).toBe("1");
     expect(formatQuantityScaled(25000)).toBe("2.5");
@@ -170,6 +181,18 @@ describe("PO unit-price parsing (issue #468)", () => {
     expect(parseUnitPriceMinor(USD, "")).toBeNull();
     expect(parseUnitPriceMinor(USD, "-5.00")).toBeNull();
     expect(parseUnitPriceMinor(USD, "1.234")).toBeNull();
+  });
+
+  it("refuses a unit price or adjustment beyond the exact transport range", () => {
+    expect(parseUnitPriceMinor(USD, "90,071,992,547,409.91")).toBe(
+      MAX_EXACT_MINOR
+    );
+    expect(parseUnitPriceMinor(USD, "90,071,992,547,409.92")).toBeNull();
+    expect(parseAdjustmentMinor(USD, "-90,071,992,547,409.91")).toBe(
+      -MAX_EXACT_MINOR
+    );
+    expect(parseAdjustmentMinor(USD, "-90,071,992,547,409.92")).toBeNull();
+    expect(parseAdjustmentMinor(USD, "90,071,992,547,409.92")).toBeNull();
   });
 
   it("treats redundant decimal formatting as the same amount", () => {
@@ -307,7 +330,8 @@ describe("PO draft update payload (issue #468)", () => {
     });
     expect(buildPurchaseOrderUpdate(badQuantity, USD)).toEqual({
       input: null,
-      error: "Line 2: quantity must be positive with up to 4 decimal places.",
+      error:
+        "Line 2: quantity must be positive with up to 4 decimal places and within the supported range.",
     });
 
     const badPrice = purchaseOrderEditorReducer(initial(), {
@@ -316,7 +340,7 @@ describe("PO draft update payload (issue #468)", () => {
       patch: { unitPrice: "not money" },
     });
     expect(buildPurchaseOrderUpdate(badPrice, USD).error).toBe(
-      "Line 1: unit price must be a nonnegative USD amount.",
+      "Line 1: unit price must be a nonnegative USD amount within the supported range.",
     );
   });
 
@@ -575,9 +599,10 @@ describe("PO explained calculation (issue #470)", () => {
       ),
       USD,
     );
-    expect(calculation.totals.ppnMinor).toBe(110);
-    expect(calculation.totals.adjustmentMinor).toBe(-10);
-    expect(calculation.totals.grandTotalMinor).toBe(1100);
+    expect(calculation.totals).not.toBeNull();
+    expect(calculation.totals!.ppnMinor).toBe(110);
+    expect(calculation.totals!.adjustmentMinor).toBe(-10);
+    expect(calculation.totals!.grandTotalMinor).toBe(1100);
     expect(calculation.lines[0]).toEqual({
       grossMinor: 1000,
       discountMinor: 0,
@@ -595,7 +620,8 @@ describe("PO explained calculation (issue #470)", () => {
       ),
       USD,
     );
-    expect(positive.totals.grandTotalMinor).toBe(1135);
+    expect(positive.totals).not.toBeNull();
+    expect(positive.totals!.grandTotalMinor).toBe(1135);
   });
 
   it("marks an unexplained adjustment and a negative total as errors", () => {
@@ -619,7 +645,7 @@ describe("PO explained calculation (issue #470)", () => {
     expect(negative.error).toContain("negative");
   });
 
-  it("leaves an unparseable line out of the totals and says which one", () => {
+  it("publishes no totals while a line cannot be parsed", () => {
     const calculation = calculatePurchaseOrder(
       stateWith([
         { quantity: "2", unitPrice: "1.00" },
@@ -627,11 +653,48 @@ describe("PO explained calculation (issue #470)", () => {
       ]),
       USD,
     );
+    expect(calculation.lines[0]).toEqual({
+      grossMinor: 200,
+      discountMinor: 0,
+      netMinor: 200,
+    });
     expect(calculation.lines[1]).toBeNull();
-    expect(calculation.totals.subtotalMinor).toBe(200);
+    // A subtotal of only the parsable lines would understate the order, so no
+    // totals are published at all until the bad line is fixed.
+    expect(calculation.totals).toBeNull();
     expect(calculation.error).toBe(
-      "Line 2: quantity must be positive with up to 4 decimal places.",
+      "Line 2: quantity must be positive with up to 4 decimal places and within the supported range.",
     );
+  });
+
+  it("refuses the judge's counterexample instead of publishing an inexact total", () => {
+    // 3 x 9_007_199_254_740_991 is 27_021_597_764_222_973 in Go; a JS number
+    // reads the same figure back one minor unit lower, so it must be refused.
+    const calculation = calculatePurchaseOrder(
+      stateWith([{ quantity: "3", unitPrice: "90,071,992,547,409.91" }]),
+      USD,
+    );
+    expect(calculation.lines[0]).toBeNull();
+    expect(calculation.totals).toBeNull();
+    expect(calculation.error).toBe(
+      "Line 1: the line total exceeds the supported amount range.",
+    );
+  });
+
+  it("accepts an amount at the exact bound and refuses one above it", () => {
+    const atBound = calculatePurchaseOrder(
+      stateWith([{ quantity: "1", unitPrice: "90,071,992,547,409.91" }]),
+      USD,
+    );
+    expect(atBound.error).toBeNull();
+    expect(atBound.totals?.grandTotalMinor).toBe(MAX_EXACT_MINOR);
+
+    const above = calculatePurchaseOrder(
+      stateWith([{ quantity: "1", unitPrice: "90,071,992,547,409.92" }]),
+      USD,
+    );
+    expect(above.error).toContain("range");
+    expect(above.totals).toBeNull();
   });
 
   it("refuses amounts that would overflow the supported money range", () => {
@@ -640,6 +703,97 @@ describe("PO explained calculation (issue #470)", () => {
       USD,
     );
     expect(calculation.error).toContain("range");
+    expect(calculation.totals).toBeNull();
+  });
+
+  it("publishes no totals while a header field cannot be parsed", () => {
+    const badAdjustment = calculatePurchaseOrder(
+      stateWith([{ quantity: "1", unitPrice: "10.00" }], {
+        adjustment: "not money",
+      }),
+      USD,
+    );
+    expect(badAdjustment.totals).toBeNull();
+    expect(badAdjustment.error).toBe("Adjustment must be a signed USD amount.");
+
+    const badDiscount = calculatePurchaseOrder(
+      stateWith([{ quantity: "1", unitPrice: "10.00" }], {
+        discountPercent: "10.5",
+      }),
+      USD,
+    );
+    expect(badDiscount.totals).toBeNull();
+    expect(badDiscount.error).toBe("Whole-PO discount must be between 0 and 100.");
+  });
+});
+
+describe("PO adjustment reason agreement (issue #470 wave 2)", () => {
+  function reasonState(reason: string, adjustment = "-0.10") {
+    const base = initial();
+    return purchaseOrderEditorReducer(base, {
+      type: "headerChanged",
+      patch: { adjustment, adjustmentReason: reason },
+    });
+  }
+
+  it("bounds the reason by Unicode code points, not UTF-16 units", () => {
+    expect(MAX_ADJUSTMENT_REASON_LENGTH).toBe(200);
+
+    const ideographs = "界".repeat(MAX_ADJUSTMENT_REASON_LENGTH);
+    const accepted = buildPurchaseOrderUpdate(reasonState(ideographs), USD);
+    expect(accepted.error).toBeNull();
+    expect(accepted.input?.AdjustmentReason).toBe(ideographs);
+
+    const over = buildPurchaseOrderUpdate(
+      reasonState(ideographs + "界"),
+      USD,
+    );
+    expect(over.input).toBeNull();
+    expect(over.error).toBe("Adjustment reason must be 200 characters or fewer.");
+
+    // Astral text: each emoji is two UTF-16 units but one code point, so 200
+    // must fit where `.length` would count 400.
+    const emoji = "😀".repeat(MAX_ADJUSTMENT_REASON_LENGTH);
+    expect(Array.from(emoji)).toHaveLength(MAX_ADJUSTMENT_REASON_LENGTH);
+    expect(buildPurchaseOrderUpdate(reasonState(emoji), USD).input).not.toBeNull();
+    expect(
+      buildPurchaseOrderUpdate(reasonState(emoji + "😀"), USD).error,
+    ).toBe("Adjustment reason must be 200 characters or fewer.");
+  });
+
+  it("requires a reason that is not whitespace-only", () => {
+    for (const reason of ["", "   ", "\t", "\n", "\r", "\f", "\v", " \t\n\r\f\v "]) {
+      const result = buildPurchaseOrderUpdate(reasonState(reason), USD);
+      expect(result.input, JSON.stringify(reason)).toBeNull();
+      expect(result.error, JSON.stringify(reason)).toBe(
+        "An adjustment requires a reason.",
+      );
+    }
+  });
+
+  it("trims the stored reason and drops it when the adjustment is zero", () => {
+    const trimmed = buildPurchaseOrderUpdate(
+      reasonState("  Match the printed total  "),
+      USD,
+    );
+    expect(trimmed.input?.AdjustmentReason).toBe("Match the printed total");
+
+    const noAmount = buildPurchaseOrderUpdate(
+      reasonState("typed before the amount", ""),
+      USD,
+    );
+    expect(noAmount.error).toBeNull();
+    expect(noAmount.input?.AdjustmentReason).toBe("");
+
+    // A too-long reason is refused even with no amount, exactly as the Go
+    // store checks length before it drops an empty adjustment's reason.
+    const noAmountTooLong = buildPurchaseOrderUpdate(
+      reasonState("x".repeat(MAX_ADJUSTMENT_REASON_LENGTH + 1), ""),
+      USD,
+    );
+    expect(noAmountTooLong.error).toBe(
+      "Adjustment reason must be 200 characters or fewer.",
+    );
   });
 });
 

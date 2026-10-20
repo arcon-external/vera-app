@@ -189,11 +189,13 @@ export function parseQuantityScaled(raw: string): number | null {
   if (!match) return null;
   const whole = Number(match[1]);
   const fraction = Number((match[3] ?? "").padEnd(4, "0"));
-  if (!Number.isSafeInteger(whole) || whole > Number.MAX_SAFE_INTEGER / QUANTITY_SCALE) {
+  if (!Number.isSafeInteger(whole) || whole > MAX_EXACT_MINOR / QUANTITY_SCALE) {
     return null;
   }
   const scaled = whole * QUANTITY_SCALE + fraction;
-  if (!Number.isSafeInteger(scaled) || scaled <= 0) return null;
+  if (!Number.isSafeInteger(scaled) || scaled <= 0 || scaled > MAX_EXACT_MINOR) {
+    return null;
+  }
   return scaled;
 }
 
@@ -217,7 +219,14 @@ export function parseUnitPriceMinor(
   raw: string
 ): number | null {
   const parsed = tryParseMoneyInput(currency, raw);
-  if (parsed === null || parsed < 0 || !Number.isSafeInteger(parsed)) return null;
+  if (
+    parsed === null ||
+    parsed < 0 ||
+    !Number.isSafeInteger(parsed) ||
+    parsed > MAX_EXACT_MINOR
+  ) {
+    return null;
+  }
   return parsed;
 }
 
@@ -232,8 +241,21 @@ export function formatUnitPriceMinor(
 /** The ceiling on a row or whole-PO discount; mirrors MaxDiscountPercent in Go. */
 export const MAX_DISCOUNT_PERCENT = 100;
 
-/** The supported money range, the same int64 bound the Go calculator checks. */
-const MAX_MONEY_MINOR = BigInt("9223372036854775807");
+/**
+ * The supported money range: 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER.
+ *
+ * Every amount crosses JSON as a `number`, which can only name every integer up
+ * to this bound. Go's int64 is wider, but 27_021_597_764_222_973 reads back one
+ * minor unit lower, so the store, the schema CHECK and this module all refuse
+ * anything above it rather than display an inexact total. The Go constant is
+ * MaxExactMinor in backend/store/po_calc.go.
+ */
+export const MAX_EXACT_MINOR = Number.MAX_SAFE_INTEGER;
+
+/** The Go store's bound on an adjustment reason, in Unicode code points. */
+export const MAX_ADJUSTMENT_REASON_LENGTH = 200;
+
+const MAX_EXACT_MINOR_BIGINT = BigInt(MAX_EXACT_MINOR);
 
 /**
  * Parses a discount field as a whole percentage from 0 to 100. Empty means no
@@ -263,7 +285,13 @@ export function parseAdjustmentMinor(
   const text = raw.trim();
   if (text === "") return 0;
   const parsed = tryParseMoneyInput(currency, text);
-  if (parsed === null || !Number.isSafeInteger(parsed)) return null;
+  if (
+    parsed === null ||
+    !Number.isSafeInteger(parsed) ||
+    Math.abs(parsed) > MAX_EXACT_MINOR
+  ) {
+    return null;
+  }
   return parsed;
 }
 
@@ -293,24 +321,19 @@ export interface PurchaseOrderTotals {
 export interface PurchaseOrderCalculation {
   /** One entry per line; null when that line cannot be parsed yet. */
   lines: Array<PurchaseOrderLineCalculation | null>;
-  totals: PurchaseOrderTotals;
+  /**
+   * The full calculation, or null while any input cannot be parsed. A partial
+   * sum would understate the order, and zero must never stand in for a
+   * calculation that did not happen; the panel renders an explicit pending
+   * state instead.
+   */
+  totals: PurchaseOrderTotals | null;
   /** The first problem, named for the field or line it belongs to. */
   error: string | null;
 }
 
-const EMPTY_TOTALS: PurchaseOrderTotals = {
-  grossMinor: 0,
-  rowDiscountMinor: 0,
-  subtotalMinor: 0,
-  discountMinor: 0,
-  afterDiscountMinor: 0,
-  ppnMinor: 0,
-  adjustmentMinor: 0,
-  grandTotalMinor: 0,
-};
-
 function toMoney(value: bigint): number | null {
-  if (value < 0n || value > MAX_MONEY_MINOR) return null;
+  if (value < 0n || value > MAX_EXACT_MINOR_BIGINT) return null;
   return Number(value);
 }
 
@@ -361,9 +384,12 @@ export function calculatePurchaseOrder(
   currency: CurrencyInfo
 ): PurchaseOrderCalculation {
   const lineResults: Array<PurchaseOrderLineCalculation | null> = [];
-  let grossTotal = 0;
-  let rowDiscountTotal = 0;
-  let subtotal = 0;
+  // BigInt accumulators keep the sum exact even when two individually valid
+  // lines add up past the safe-number bound; a Number sum would lose a unit
+  // before the range check could see it.
+  let grossTotal = 0n;
+  let rowDiscountTotal = 0n;
+  let subtotal = 0n;
   let firstError: string | null = null;
 
   for (let index = 0; index < state.lines.length; index++) {
@@ -371,13 +397,13 @@ export function calculatePurchaseOrder(
     const quantity = parseQuantityScaled(line.quantity);
     if (quantity === null) {
       lineResults.push(null);
-      firstError ??= `Line ${index + 1}: quantity must be positive with up to 4 decimal places.`;
+      firstError ??= `Line ${index + 1}: quantity must be positive with up to 4 decimal places and within the supported range.`;
       continue;
     }
     const price = parseUnitPriceMinor(currency, line.unitPrice);
     if (price === null) {
       lineResults.push(null);
-      firstError ??= `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount.`;
+      firstError ??= `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount within the supported range.`;
       continue;
     }
     const percent = parseDiscountPercent(line.discountPercent);
@@ -400,16 +426,16 @@ export function calculatePurchaseOrder(
     }
     const net = gross - discount;
     lineResults.push({ grossMinor: gross, discountMinor: discount, netMinor: net });
-    grossTotal += gross;
-    rowDiscountTotal += discount;
-    subtotal += net;
+    grossTotal += BigInt(gross);
+    rowDiscountTotal += BigInt(discount);
+    subtotal += BigInt(net);
   }
 
   const wholePercent = parseDiscountPercent(state.header.discountPercent);
   if (wholePercent === null) {
     return {
       lines: lineResults,
-      totals: EMPTY_TOTALS,
+      totals: null,
       error:
         firstError ??
         `Whole-PO discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
@@ -419,55 +445,93 @@ export function calculatePurchaseOrder(
   if (adjustment === null) {
     return {
       lines: lineResults,
-      totals: EMPTY_TOTALS,
+      totals: null,
       error:
         firstError ??
         `Adjustment must be a signed ${currency.code} amount.`,
     };
   }
+  const adjustmentReason = state.header.adjustmentReason.trim();
 
-  const discount = percentageMinor(subtotal, wholePercent);
+  // The reason rule lives here so the panel and the payload cannot disagree:
+  // Unicode code points, and a nonzero adjustment needs more than whitespace.
+  // The length is checked even with no amount, exactly as the Go store does.
+  let error = firstError;
+  if (error === null && characterCount(adjustmentReason) > MAX_ADJUSTMENT_REASON_LENGTH) {
+    error = `Adjustment reason must be ${MAX_ADJUSTMENT_REASON_LENGTH} characters or fewer.`;
+  }
+  if (error === null && adjustment !== 0 && adjustmentReason === "") {
+    error = "An adjustment requires a reason.";
+  }
+  // No totals while an input is unparseable: a partial sum would understate the
+  // order, and zero is not a calculation.
+  if (error !== null) {
+    return { lines: lineResults, totals: null, error };
+  }
+
+  const grossTotalMinor = toMoney(grossTotal);
+  if (grossTotalMinor === null) {
+    return {
+      lines: lineResults,
+      totals: null,
+      error: "The line totals exceed the supported amount range.",
+    };
+  }
+  const rowDiscountTotalMinor = toMoney(rowDiscountTotal);
+  if (rowDiscountTotalMinor === null) {
+    return {
+      lines: lineResults,
+      totals: null,
+      error: "The row discounts exceed the supported amount range.",
+    };
+  }
+  const subtotalMinor = toMoney(subtotal);
+  if (subtotalMinor === null) {
+    return {
+      lines: lineResults,
+      totals: null,
+      error: "The subtotal exceeds the supported amount range.",
+    };
+  }
+
+  const discount = percentageMinor(subtotalMinor, wholePercent);
   if (discount === null) {
     return {
       lines: lineResults,
-      totals: EMPTY_TOTALS,
-      error: firstError ?? "The whole-PO discount exceeds the supported amount range.",
+      totals: null,
+      error: "The whole-PO discount exceeds the supported amount range.",
     };
   }
-  const afterDiscount = subtotal - discount;
+  const afterDiscount = subtotalMinor - discount;
   const ppn = basisPointsMinor(afterDiscount, state.ppnBps);
   if (ppn === null) {
     return {
       lines: lineResults,
-      totals: EMPTY_TOTALS,
-      error: firstError ?? "PPN exceeds the supported amount range.",
+      totals: null,
+      error: "PPN exceeds the supported amount range.",
     };
   }
-  const grand = afterDiscount + ppn + adjustment;
-  // The arithmetic is still shown while a rule blocks saving: an unexplained
-  // adjustment or a negative total is an error beside the figures, not a
-  // reason to blank them out.
-  let error = firstError;
-  if (
-    error === null &&
-    adjustment !== 0 &&
-    state.header.adjustmentReason.trim() === ""
-  ) {
-    error = "An adjustment requires a reason.";
+  const grandBig = BigInt(afterDiscount) + BigInt(ppn) + BigInt(adjustment);
+  if (grandBig < -MAX_EXACT_MINOR_BIGINT || grandBig > MAX_EXACT_MINOR_BIGINT) {
+    return {
+      lines: lineResults,
+      totals: null,
+      error: "The purchase order total exceeds the supported amount range.",
+    };
   }
-  if (error === null && grand < 0) {
+  const grand = Number(grandBig);
+  // The arithmetic is still shown while a rule blocks saving: a negative total
+  // is an error beside the figures, not a reason to blank them out.
+  if (grand < 0) {
     error = "The adjustment would make the purchase order total negative.";
-  }
-  if (error === null && grand > Number(MAX_MONEY_MINOR)) {
-    error = "The purchase order total exceeds the supported amount range.";
   }
 
   return {
     lines: lineResults,
     totals: {
-      grossMinor: grossTotal,
-      rowDiscountMinor: rowDiscountTotal,
-      subtotalMinor: subtotal,
+      grossMinor: grossTotalMinor,
+      rowDiscountMinor: rowDiscountTotalMinor,
+      subtotalMinor,
       discountMinor: discount,
       afterDiscountMinor: afterDiscount,
       ppnMinor: ppn,
@@ -648,14 +712,14 @@ export function buildPurchaseOrderUpdate(
     if (quantity === null) {
       return {
         input: null,
-        error: `Line ${index + 1}: quantity must be positive with up to 4 decimal places.`,
+        error: `Line ${index + 1}: quantity must be positive with up to 4 decimal places and within the supported range.`,
       };
     }
     const price = parseUnitPriceMinor(currency, line.unitPrice);
     if (price === null) {
       return {
         input: null,
-        error: `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount.`,
+        error: `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount within the supported range.`,
       };
     }
     const discountPercent = parseDiscountPercent(line.discountPercent);

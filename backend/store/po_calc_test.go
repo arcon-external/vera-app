@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -194,7 +193,7 @@ func TestPurchaseOrderAdjustmentIsSignedAndRequiresAReason(t *testing.T) {
 		t.Errorf("adjustment moved the calculation: %+v", calculation)
 	}
 
-	for _, reason := range []string{"", "   ", "\t\n"} {
+	for _, reason := range []string{"", "   ", "\t\n", "\v\f\r", " \t\n\r\f\v "} {
 		missing := base
 		missing.AdjustmentMinor = -10
 		missing.AdjustmentReason = reason
@@ -286,17 +285,21 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 		stage string
 	}{
 		{
-			// The line product is 10^4 times an int64, so only a big-integer
-			// intermediate can decide -- a direct int64 multiply wraps.
+			// Both inputs are inside the exact bound, but the line product is
+			// 10^4 times an int64, so only a big-integer intermediate can
+			// decide -- a direct int64 multiply wraps.
 			name:  "line gross",
-			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{line(math.MaxInt64, math.MaxInt64)}},
+			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{line(MaxExactMinor, MaxExactMinor)}},
 			stage: "line 1 gross",
 		},
 		{
-			// Two individually valid lines whose subtotal exceeds int64.
+			// Two individually valid amounts whose subtotal exceeds the
+			// exact transport bound (each line is 5 x 10^15, below it).
 			name: "subtotal",
 			input: PurchaseOrderCalcInput{
-				Lines: []PurchaseOrderCalcLine{line(10000, math.MaxInt64/2+1), line(10000, math.MaxInt64/2+1)},
+				Lines: []PurchaseOrderCalcLine{
+					line(10000, 5000000000000000), line(10000, 5000000000000000),
+				},
 			},
 			stage: "subtotal",
 		},
@@ -304,8 +307,8 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 			// The adjustment is added after tax, so it is checked there too.
 			name: "grand total",
 			input: PurchaseOrderCalcInput{
-				Lines:            []PurchaseOrderCalcLine{line(10000, math.MaxInt64)},
-				AdjustmentMinor:  math.MaxInt64,
+				Lines:            []PurchaseOrderCalcLine{line(10000, MaxExactMinor)},
+				AdjustmentMinor:  MaxExactMinor,
 				AdjustmentReason: "Overflow",
 			},
 			stage: "grand total",
@@ -322,6 +325,88 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 				t.Errorf("error = %v; want %q named as out of range", err, testCase.stage)
 			}
 		})
+	}
+}
+
+// TestPurchaseOrderCalculationRefusesAmountsBeyondExactTransportRange pins the
+// one range every layer shares: 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER.
+// The int64 range is larger, but an amount above this cannot cross JSON into
+// the browser without losing minor units, so it is refused rather than emitted.
+//
+// The first case is the Judge's counterexample: 3 x 9_007_199_254_740_991 is
+// 27_021_597_764_222_973 in Go and 27_021_597_764_222_972 in a JS number.
+func TestPurchaseOrderCalculationRefusesAmountsBeyondExactTransportRange(t *testing.T) {
+	if MaxExactMinor != 9007199254740991 {
+		t.Fatalf("MaxExactMinor = %d; want 2^53-1 (Number.MAX_SAFE_INTEGER)", MaxExactMinor)
+	}
+	cases := []struct {
+		name  string
+		input PurchaseOrderCalcInput
+		stage string
+	}{
+		{
+			name: "the judge's counterexample",
+			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{
+				line(30000, 9007199254740991),
+			}},
+			stage: "line 1 gross",
+		},
+		{
+			name: "unit price above the bound",
+			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{
+				line(10000, MaxExactMinor+1),
+			}},
+			stage: "line 1 unit price",
+		},
+		{
+			name: "scaled quantity above the bound",
+			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{
+				line(MaxExactMinor+1, 1),
+			}},
+			stage: "line 1 quantity",
+		},
+		{
+			name: "adjustment above the bound",
+			input: PurchaseOrderCalcInput{
+				Lines:            []PurchaseOrderCalcLine{line(10000, 100)},
+				AdjustmentMinor:  MaxExactMinor + 1,
+				AdjustmentReason: "Too large",
+			},
+			stage: "adjustment",
+		},
+		{
+			name: "adjustment below the bound",
+			input: PurchaseOrderCalcInput{
+				Lines:            []PurchaseOrderCalcLine{line(10000, 100)},
+				AdjustmentMinor:  -MaxExactMinor - 1,
+				AdjustmentReason: "Too large",
+			},
+			stage: "adjustment",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := CalculatePurchaseOrder(testCase.input)
+			if !errors.Is(err, ErrPurchaseOrderInvalid) {
+				t.Fatalf("error = %v; want ErrPurchaseOrderInvalid", err)
+			}
+			if !strings.Contains(err.Error(), testCase.stage) ||
+				!strings.Contains(err.Error(), "exceeds the supported amount range") {
+				t.Errorf("error = %v; want %q named as out of range", err, testCase.stage)
+			}
+		})
+	}
+
+	// The bound itself is representable: one unit at the ceiling is accepted.
+	atBound, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
+		Lines: []PurchaseOrderCalcLine{line(10000, MaxExactMinor)},
+	})
+	if err != nil {
+		t.Fatalf("amount at the bound: %v", err)
+	}
+	if atBound.GrandTotalMinor != MaxExactMinor ||
+		atBound.Lines[0].GrossMinor != MaxExactMinor {
+		t.Errorf("at-bound calculation = %+v; want %d", atBound, MaxExactMinor)
 	}
 }
 

@@ -81,6 +81,38 @@ ALTER TABLE {{schema}}.purchase_order_items
     ADD CONSTRAINT purchase_order_items_discount_bound_check
         CHECK (discount_minor <= gross_minor);
 
+-- Every amount this feature stores is bounded to 2^53-1, JavaScript's
+-- Number.MAX_SAFE_INTEGER. The columns are BIGINT, but each figure travels to
+-- the desktop as a JSON number, which cannot name every minor unit above this
+-- bound: 27_021_597_764_222_973 reads back as ...972. The Go calculator and the
+-- editor refuse the same range; these constraints are the backstop for a
+-- hand-written statement or a future caller that forgets.
+--
+-- The bound covers both the PO's own money and the printed source totals it
+-- copies as evidence. The adjustment is signed, so it is bounded on both
+-- sides; every other amount is nonnegative.
+ALTER TABLE {{schema}}.purchase_orders
+    ADD CONSTRAINT purchase_orders_exact_range_check CHECK (
+        subtotal_minor BETWEEN 0 AND 9007199254740991
+        AND discount_minor BETWEEN 0 AND 9007199254740991
+        AND ppn_minor BETWEEN 0 AND 9007199254740991
+        AND adjustment_minor BETWEEN -9007199254740991 AND 9007199254740991
+        AND grand_total_minor BETWEEN 0 AND 9007199254740991
+        AND printed_subtotal_minor BETWEEN 0 AND 9007199254740991
+        AND printed_discount_minor BETWEEN 0 AND 9007199254740991
+        AND printed_ppn_minor BETWEEN 0 AND 9007199254740991
+        AND printed_grand_total_minor BETWEEN 0 AND 9007199254740991
+    );
+
+ALTER TABLE {{schema}}.purchase_order_items
+    ADD CONSTRAINT purchase_order_items_exact_range_check CHECK (
+        quantity_scaled BETWEEN 1 AND 9007199254740991
+        AND unit_price_minor BETWEEN 0 AND 9007199254740991
+        AND gross_minor BETWEEN 0 AND 9007199254740991
+        AND discount_minor BETWEEN 0 AND 9007199254740991
+        AND net_minor BETWEEN 0 AND 9007199254740991
+    );
+
 -- Drafts created before this migration have no discounts and no adjustment, so
 -- their calculation follows from the entered quantity and price alone. The
 -- printed snapshot comes from the source revision they were created from.
@@ -147,7 +179,10 @@ ALTER TABLE {{schema}}.purchase_orders
     ADD CONSTRAINT purchase_orders_grand_formula_check
         CHECK (grand_total_minor = subtotal_minor - discount_minor + ppn_minor + adjustment_minor),
     ADD CONSTRAINT purchase_orders_adjustment_explained_check
-        CHECK (adjustment_minor = 0 OR char_length(btrim(adjustment_reason)) > 0);
+        CHECK (
+            adjustment_minor = 0
+            OR btrim(adjustment_reason, E' \t\n\r\f\v') <> ''
+        );
 
 -- No new index: every read is by purchase_order_items.purchase_order_id, which
 -- the existing UNIQUE (purchase_order_id, line_number) already serves, and no

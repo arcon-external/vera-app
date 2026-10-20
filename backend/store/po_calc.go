@@ -53,6 +53,18 @@ const (
 	// characters, the unit the schema's char_length CHECK uses.
 	MaxAdjustmentReasonLength = 200
 
+	// MaxExactMinor is the largest minor-unit amount this feature accepts,
+	// stores or emits: 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER.
+	//
+	// int64 is wider, but every figure crosses JSON into the desktop's JS
+	// runtime as a `number`, which can only name every integer up to this
+	// bound. Above it, 27_021_597_764_222_973 reads back as ...972, and a PO
+	// total that is one minor unit wrong is worse than a refusal. The bound is
+	// enforced on every entered amount, every calculated stage, every printed
+	// source total, and by a schema CHECK; the big.Int intermediate still
+	// decides whether a product overflows before the bound is applied.
+	MaxExactMinor int64 = 1<<53 - 1
+
 	// ppnRateBps is the customer-facing PPN rate for Non-FTZ goods, in basis
 	// points. It mirrors ppnRateBps in backend/tax.go; a test pins the two
 	// together rather than letting the pair drift.
@@ -127,9 +139,19 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 			return PurchaseOrderCalc{}, fmt.Errorf(
 				"%w: line %d quantity must be positive", ErrPurchaseOrderInvalid, index+1)
 		}
+		if item.QuantityScaled > MaxExactMinor {
+			return PurchaseOrderCalc{}, fmt.Errorf(
+				"%w: line %d quantity exceeds the supported amount range",
+				ErrPurchaseOrderInvalid, index+1)
+		}
 		if item.UnitPriceMinor < 0 {
 			return PurchaseOrderCalc{}, fmt.Errorf(
 				"%w: line %d unit price must not be negative", ErrPurchaseOrderInvalid, index+1)
+		}
+		if item.UnitPriceMinor > MaxExactMinor {
+			return PurchaseOrderCalc{}, fmt.Errorf(
+				"%w: line %d unit price exceeds the supported amount range",
+				ErrPurchaseOrderInvalid, index+1)
 		}
 		if item.DiscountPercent < 0 || item.DiscountPercent > MaxDiscountPercent {
 			return PurchaseOrderCalc{}, fmt.Errorf(
@@ -281,6 +303,10 @@ func normalizePurchaseOrderAdjustment(amount int64, reason string) (int64, strin
 		return 0, "", fmt.Errorf("%w: adjustment reason must be at most %d characters",
 			ErrPurchaseOrderInvalid, MaxAdjustmentReasonLength)
 	}
+	if amount > MaxExactMinor || amount < -MaxExactMinor {
+		return 0, "", fmt.Errorf("%w: adjustment exceeds the supported amount range",
+			ErrPurchaseOrderInvalid)
+	}
 	if amount == 0 {
 		return 0, "", nil
 	}
@@ -315,10 +341,15 @@ func poMulDiv(left, right, denominator int64, halfUp bool) (int64, error) {
 	return poCheckedInt64(quotient, "amount")
 }
 
-// poCheckedInt64 refuses a value outside int64 with the stage that produced it
-// named, so an overflow reports "line 2 gross" rather than a bare range error.
+// poCheckedInt64 refuses a value outside the exact transport range with the
+// stage that produced it named, so an overflow reports "line 2 gross" rather
+// than a bare range error. The int64 test comes first because a product whose
+// intermediate exceeds int64 may also compare outside the narrower bound; both
+// are the same refusal to the caller.
 func poCheckedInt64(value *big.Int, stage string) (int64, error) {
-	if !value.IsInt64() {
+	if !value.IsInt64() ||
+		value.Cmp(big.NewInt(MaxExactMinor)) > 0 ||
+		value.Cmp(big.NewInt(-MaxExactMinor)) < 0 {
 		return 0, fmt.Errorf("%w: %s exceeds the supported amount range",
 			ErrPurchaseOrderInvalid, stage)
 	}

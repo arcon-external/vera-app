@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -534,6 +535,58 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 			},
 			field: "range",
 		},
+		{
+			// The Judge's counterexample: exact in Go, one unit short after a
+			// JS number round-trip. The API refuses it with a named range
+			// error instead of returning a total the client cannot read.
+			name: "the judge's exact-transport counterexample",
+			body: map[string]any{
+				"paymentTerms": "45 days",
+				"items": []map[string]any{{
+					"description": "Precise", "quantityScaled": 30000,
+					"uom": "Pc", "unitPriceMinor": int64(9007199254740991),
+				}},
+			},
+			field: "range",
+		},
+		{
+			name: "scaled quantity above the exact range",
+			body: map[string]any{
+				"paymentTerms": "45 days",
+				"items": []map[string]any{{
+					"description": "Precise", "quantityScaled": int64(9007199254740992),
+					"uom": "Pc", "unitPriceMinor": 1,
+				}},
+			},
+			field: "range",
+		},
+		{
+			name: "adjustment reason over 200 characters",
+			body: map[string]any{
+				"paymentTerms": "45 days", "adjustmentMinor": -1,
+				"adjustmentReason": strings.Repeat("界", 201),
+				"items":            []map[string]any{validItem},
+			},
+			field: "200",
+		},
+		{
+			name: "adjustment above the exact range",
+			body: map[string]any{
+				"paymentTerms": "45 days", "adjustmentMinor": int64(9007199254740992),
+				"adjustmentReason": "Too large",
+				"items":            []map[string]any{validItem},
+			},
+			field: "adjustment",
+		},
+		{
+			name: "whitespace-only adjustment reason",
+			body: map[string]any{
+				"paymentTerms": "45 days", "adjustmentMinor": -1,
+				"adjustmentReason": " \t\n\r\f\v ",
+				"items":            []map[string]any{validItem},
+			},
+			field: "reason",
+		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -553,5 +606,96 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 	reopened := decodePurchaseOrder(t, body)
 	if reopened.GrandTotalMinor != 290000 || reopened.DiscountMinor != 0 {
 		t.Errorf("a refused update changed the PO: %+v", reopened)
+	}
+}
+
+// purchaseOrderTestExec runs one statement against the disposable schema a test
+// server owns. The API has no endpoint that can damage a source revision, so a
+// deliberately incomplete/out-of-range source is arranged directly.
+func purchaseOrderTestExec(t *testing.T, schema, statement string, args ...any) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect for fixture change: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(), statement, args...); err != nil {
+		t.Fatalf("fixture statement: %v", err)
+	}
+}
+
+// TestPurchaseOrderCreationRefusesAnIncompleteSource: a revision with no
+// totals row has no printed evidence, so creation is refused rather than
+// inventing a printed grand total of zero.
+func TestPurchaseOrderCreationRefusesAnIncompleteSource(t *testing.T) {
+	const schema = "vera_api_po_source_totals"
+	server, token := testQuotationServer(t, schema)
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	purchaseOrderTestExec(t, schema, fmt.Sprintf(`
+		DELETE FROM %s.quotation_revision_totals
+		WHERE revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE quotation_id = $1 AND revision_number = 0
+		)`, quoteIdentForTest(schema), quoteIdentForTest(schema)), quotationID)
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("create = %d; want 422 (%v)", code, body)
+	}
+	if body["code"] != "po_source_incomplete" {
+		t.Errorf("code = %v; want po_source_incomplete", body["code"])
+	}
+	if message, _ := body["error"].(string); !strings.Contains(strings.ToLower(message), "total") {
+		t.Errorf("error = %q; want it to name the missing totals", message)
+	}
+
+	var count int
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect to count drafts: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.QueryRow(context.Background(), fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s.purchase_orders WHERE quotation_id = $1`,
+		quoteIdentForTest(schema)), quotationID).Scan(&count); err != nil {
+		t.Fatalf("count purchase orders: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("purchase orders = %d; want none", count)
+	}
+}
+
+// TestPurchaseOrderCreationRefusesAnOutOfRangeSource: printed figures above
+// 2^53-1 cannot travel to the editor exactly, so the PO is refused instead of
+// storing a total that reads back wrong.
+func TestPurchaseOrderCreationRefusesAnOutOfRangeSource(t *testing.T) {
+	const schema = "vera_api_po_source_range"
+	server, token := testQuotationServer(t, schema)
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	purchaseOrderTestExec(t, schema, fmt.Sprintf(`
+		UPDATE %s.quotation_revision_totals
+		SET customer_grand_total = $1
+		WHERE revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE quotation_id = $2 AND revision_number = 0
+		)`, quoteIdentForTest(schema), quoteIdentForTest(schema)),
+		9007199254740992, quotationID)
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("create = %d; want 422 (%v)", code, body)
+	}
+	if body["code"] != "po_source_out_of_range" {
+		t.Errorf("code = %v; want po_source_out_of_range", body["code"])
+	}
+	if message, _ := body["error"].(string); !strings.Contains(strings.ToLower(message), "range") {
+		t.Errorf("error = %q; want it to name the supported range", message)
 	}
 }
