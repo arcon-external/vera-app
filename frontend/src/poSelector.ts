@@ -6,6 +6,12 @@
 // Keeping the transitions pure is what lets the state machine be tested
 // without a DOM, and it is the contract #468 resumes work against.
 
+/** The active Purchase Order occupying a Quotation (issue #468). */
+export interface POSourceActivePO {
+  id: number;
+  state: "draft" | "saved";
+}
+
 /** One selectable Quotation, as GET /v1/po-sources answers it. */
 export interface POSourceQuotation {
   id: number;
@@ -14,8 +20,8 @@ export interface POSourceQuotation {
   customerName: string;
   latestRevision: number;
   issuedRevisionCount: number;
-  /** Eligibility: true once a PO occupies this Quotation (#468). */
-  hasActivePO: boolean;
+  /** The PO that occupies this Quotation, or null when it is free. */
+  activePO: POSourceActivePO | null;
 }
 
 /** One page of the first step. PageSize is the server's fixed 15. */
@@ -148,12 +154,19 @@ export function selectionOf(
   };
 }
 
-/** Rows the first step draws: used Quotations are hidden only when asked. */
+/** Rows the first step draws: occupied Quotations are hidden only when asked. */
 export function visibleRows(
   rows: POSourceQuotation[],
   hideUsed: boolean
 ): POSourceQuotation[] {
-  return hideUsed ? rows.filter((row) => !row.hasActivePO) : rows;
+  return hideUsed ? rows.filter((row) => row.activePO === null) : rows;
+}
+
+/** A draft already occupies the Quotation and can be reopened. */
+export function draftOf(row: POSourceQuotation): POSourceActivePO | null {
+  return row.activePO !== null && row.activePO.state === "draft"
+    ? row.activePO
+    : null;
 }
 
 /** The first step's typing pause, in milliseconds. */
@@ -224,9 +237,10 @@ export function poSourceSelectorReducer(
     case "hideUsedChanged":
       return { ...state, hideUsed: action.hideUsed, page: 1 };
     case "quotationSelected":
-      // A used row is non-interactive in the view; the reducer refuses it too,
-      // so a mis-dispatched click cannot create a second active PO.
-      if (state.step !== 1 || action.quotation.hasActivePO) return state;
+      // An occupied Quotation is non-interactive in the view; the reducer
+      // refuses it too, so a mis-dispatched click cannot create a second
+      // active PO. A draft is reopened through its own action instead.
+      if (state.step !== 1 || action.quotation.activePO !== null) return state;
       return {
         ...state,
         step: 2,

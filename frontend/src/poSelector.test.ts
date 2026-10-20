@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canConfirm,
   canContinue,
+  draftOf,
   initialPOSourceSelectorState,
   PO_SOURCE_SEARCH_PAUSE_MS,
   poSourceQueryDelay,
@@ -33,7 +34,7 @@ function quotation(overrides: Partial<POSourceQuotation> = {}): POSourceQuotatio
     customerName: "PT. Infineon Technologies Batam",
     latestRevision: 1,
     issuedRevisionCount: 2,
-    hasActivePO: false,
+    activePO: null,
     ...overrides,
   };
 }
@@ -187,19 +188,36 @@ describe("PO source selector state machine (issue #467)", () => {
     expect(backToQuotations.revisions).toEqual([]);
   });
 
-  it("refuses to select a Quotation that already has an active PO", () => {
-    const used = quotation({ hasActivePO: true });
-    const state = run([
-      { type: "rowsLoaded", page: pageOf(used) },
-      { type: "quotationSelected", quotation: used },
-    ]);
-    expect(state.step).toBe(1);
-    expect(state.selected).toBeNull();
+  it("refuses to select a Quotation occupied by a draft or a saved PO", () => {
+    for (const activePO of [
+      { id: 20, state: "draft" as const },
+      { id: 21, state: "saved" as const },
+    ]) {
+      const used = quotation({ activePO });
+      const state = run([
+        { type: "rowsLoaded", page: pageOf(used) },
+        { type: "quotationSelected", quotation: used },
+      ]);
+      expect(state.step).toBe(1);
+      expect(state.selected).toBeNull();
+    }
   });
 
-  it("filters used rows only when the filter is on, and always hides them from selection", () => {
+  it("offers the draft action but never for a saved record", () => {
+    expect(draftOf(quotation({ activePO: { id: 20, state: "draft" } }))).toEqual({
+      id: 20,
+      state: "draft",
+    });
+    expect(draftOf(quotation({ activePO: { id: 21, state: "saved" } }))).toBeNull();
+    expect(draftOf(quotation())).toBeNull();
+  });
+
+  it("filters occupied rows only when the filter is on, and always hides them from selection", () => {
     const available = quotation({ id: 1, quoteNumber: "1502260001" });
-    const used = quotation({ id: 2, quoteNumber: "1502260002", hasActivePO: true });
+    const used = quotation({ id: 2, quoteNumber: "1502260002", activePO: { id: 20, state: "saved" } });
+    const draft = quotation({ id: 3, quoteNumber: "1502260003", activePO: { id: 21, state: "draft" } });
+    expect(visibleRows([available, used, draft], false)).toEqual([available, used, draft]);
+    expect(visibleRows([available, used, draft], true)).toEqual([available]);
     expect(visibleRows([available, used], false)).toEqual([available, used]);
     expect(visibleRows([available, used], true)).toEqual([available]);
     // The filter is a view convenience; eligibility is still enforced on the

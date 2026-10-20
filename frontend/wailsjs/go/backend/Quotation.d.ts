@@ -8,6 +8,8 @@ export function ClearDraftContext():Promise<void>;
 
 export function ClearRevisionContext():Promise<void>;
 
+export function CreatePurchaseOrderDraft(arg1:backend.PurchaseOrderCreateInput):Promise<backend.PurchaseOrderDTO>;
+
 export function CustomerID():Promise<number>;
 
 export function DeleteDraft(arg1:number):Promise<void>;
@@ -27,6 +29,8 @@ export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
 
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
+
+export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
 
 export function GetQuotation(arg1:number):Promise<backend.ArchivedQuotation>;
 
@@ -69,6 +73,8 @@ export function SetRevisionContext(arg1:string,arg2:number):Promise<void>;
 export function SetStore(arg1:store.Store):Promise<void>;
 
 export function SetVerifyURL(arg1:string):Promise<void>;
+
+export function UpdatePurchaseOrderDraft(arg1:backend.PurchaseOrderUpdateInput):Promise<backend.PurchaseOrderDTO>;
 
 export function ValidatePOSource(arg1:backend.POSourceSelection):Promise<backend.POSourceValidationDTO>;
 

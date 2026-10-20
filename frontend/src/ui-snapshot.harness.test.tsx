@@ -36,13 +36,20 @@ import {
   PurchaseOrderPlaceholderPage,
 } from "./components/DocumentHomePage";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
+import { PurchaseOrderEditorView } from "./components/PurchaseOrderEditor";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import type { ArchivedQuotation } from "./archive";
+import type { CurrencyInfo } from "./format";
 import {
   initialPOSourceSelectorState,
   poSourceSelectorReducer,
 } from "./poSelector";
 import type { POSourceQuotation } from "./poSelector";
+import {
+  initialPurchaseOrderEditorState,
+  purchaseOrderEditorReducer,
+} from "./purchaseOrder";
+import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -103,7 +110,7 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     customerName: "PT. Infineon Technologies Batam",
     latestRevision: 2,
     issuedRevisionCount: 3,
-    hasActivePO: false,
+    activePO: null,
   },
   {
     id: 11,
@@ -112,7 +119,7 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     customerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
     latestRevision: 0,
     issuedRevisionCount: 1,
-    hasActivePO: false,
+    activePO: { id: 20, state: "draft" },
   },
   {
     id: 10,
@@ -121,7 +128,7 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     customerName: "PT. Datalec Global Solution",
     latestRevision: 1,
     issuedRevisionCount: 2,
-    hasActivePO: true,
+    activePO: { id: 21, state: "saved" },
   },
 ];
 const PO_SELECTOR_STEP_ONE = {
@@ -154,6 +161,86 @@ const PO_SELECTOR_STEP_THREE = poSourceSelectorReducer(
   }),
   { type: "continue" }
 );
+
+// The manual PO draft editor (issue #468): the copied quotation lines, the
+// editable header fields and the dirty-cancel state. Currency is the PO's own
+// snapshot (USD here) rather than the live profile, so the money fields prove
+// denomination follows the document.
+const PO_EDITOR_USD: CurrencyInfo = {
+  code: "USD",
+  exponent: 2,
+  symbol: "$",
+  position: "before",
+  groupSep: ",",
+  decimalSep: ".",
+  symbolSpaced: false,
+};
+const PO_EDITOR_ORDER: PurchaseOrderDTO = {
+  PODate: "2026-10-01",
+  RequestedDeliveryDate: "2026-11-20",
+  UUID: "uuid-po-7",
+  State: "draft",
+  QuoteNumber: "1502260012",
+  CustomerName: "PT. Infineon Technologies Batam",
+  BillingAddress:
+    "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+  DeliveryAddress:
+    "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+  ShipToCode: "SHIP-317",
+  ContactEmail: "buyer@infineon.example",
+  ContactPhone: "+62 778 123 456",
+  PONumber: "PO-INF-2026-091",
+  ReceivedDate: "2026-10-02",
+  Incoterms: "CIF",
+  Currency: "USD",
+  TaxZone: "NonFTZ",
+  TaxCategory: "SupplyInstall",
+  CreatedAt: "2026-10-02T10:00:00Z",
+  UpdatedAt: "2026-10-02T10:00:00Z",
+  Items: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Supply and installation of electrical panels",
+      QuantityScaled: 25000,
+      UoM: "Lot",
+      UnitPriceMinor: 125050,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineNumber: 2,
+      Description: "Mounting and cable termination",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 42000,
+    },
+  ],
+  ID: 7,
+  QuotationID: 12,
+  SourceRevision: 2,
+  CustomerID: 2,
+  PaymentTermsDays: 45,
+};
+const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
+  PO_EDITOR_ORDER,
+  PO_EDITOR_USD
+);
+const PO_EDITOR_DISCARD = purchaseOrderEditorReducer(
+  purchaseOrderEditorReducer(PO_EDITOR_INITIAL, {
+    type: "lineChanged",
+    key: 0,
+    patch: { quantity: "3" },
+  }),
+  { type: "cancelRequested" }
+);
+const PO_EDITOR_UOM_OPTIONS = [
+  { value: "Lot", label: "Lot" },
+  { value: "Unit", label: "Unit" },
+  { value: "Pc", label: "Pc" },
+];
+
 
 // The issued-Quotation detail header (#467 wave 2): the second PO entry path
 // beside Edit, with the revision picker present because this quotation has
@@ -521,6 +608,7 @@ const CASES: SnapshotCase[] = [
         dispatch={() => undefined}
         onClose={() => undefined}
         onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
       />
     ),
   },
@@ -534,6 +622,7 @@ const CASES: SnapshotCase[] = [
         dispatch={() => undefined}
         onClose={() => undefined}
         onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
       />
     ),
   },
@@ -547,6 +636,46 @@ const CASES: SnapshotCase[] = [
         dispatch={() => undefined}
         onClose={() => undefined}
         onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
+      />
+    ),
+  },
+  {
+    // The manual PO draft editor (issue #468): header snapshot and copied
+    // lines in the PO's own USD currency. At 360 this is the case that says
+    // whether the five-field line grid reflows instead of overflowing.
+    //
+    // What this case cannot show: typing, Select behaviour, saving, and the
+    // click that opens the discard confirmation stay hand-driven.
+    name: "PurchaseOrderEditor",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_EDITOR_INITIAL}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onDiscard={() => undefined}
+      />
+    ),
+  },
+  {
+    // The dirty-cancel guard (issue #468): Cancel on an edited draft asks
+    // before discarding, with both choices real enabled buttons. The reducer
+    // produced this state, not hand-written markup.
+    name: "PurchaseOrderEditorDiscard",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_EDITOR_DISCARD}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onDiscard={() => undefined}
       />
     ),
   },

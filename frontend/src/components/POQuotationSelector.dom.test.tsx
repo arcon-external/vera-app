@@ -30,7 +30,7 @@ const QUOTATION = {
   customerName: "PT. Infineon Technologies Batam",
   latestRevision: 1,
   issuedRevisionCount: 2,
-  hasActivePO: false,
+  activePO: null,
 };
 
 const OTHER = {
@@ -40,7 +40,7 @@ const OTHER = {
   customerName: "PT. H-Tech Oilfield Equipment",
   latestRevision: 0,
   issuedRevisionCount: 1,
-  hasActivePO: false,
+  activePO: null,
 };
 
 const TWO_REVISIONS: POSourceRevision[] = [

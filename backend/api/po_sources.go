@@ -37,8 +37,12 @@ func (s *Server) listPOSources(context echo.Context) error {
 		hideUsed = parsed
 	}
 
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
 	quotations, total, err := s.database.ListPOSourceQuotations(
-		context.Request().Context(), page, context.QueryParam("search"), hideUsed)
+		requestContext, page, context.QueryParam("search"), hideUsed)
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "list quotation sources"})
 	}
@@ -63,15 +67,21 @@ func (s *Server) listPOSources(context echo.Context) error {
 }
 
 func mapPOSourceQuotation(quotation store.POSourceQuotation) apicontract.POSourceQuotationRow {
-	return apicontract.POSourceQuotationRow{
+	row := apicontract.POSourceQuotationRow{
 		ID:                  quotation.ID,
 		QuoteNumber:         quotation.QuoteNumber,
 		Subject:             quotation.Subject,
 		CustomerName:        quotation.CustomerName,
 		LatestRevision:      quotation.LatestRevision,
 		IssuedRevisionCount: quotation.IssuedRevisionCount,
-		HasActivePO:         quotation.HasActivePO,
 	}
+	if quotation.ActivePO != nil {
+		row.ActivePO = &apicontract.POSourceActivePORow{
+			ID:    quotation.ActivePO.ID,
+			State: quotation.ActivePO.State,
+		}
+	}
+	return row
 }
 
 // listPOSourceRevisions serves the selector's second step. Every stored

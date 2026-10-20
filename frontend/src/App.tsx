@@ -16,6 +16,8 @@ import {
   ListPOSourceQuotations,
   ListPOSourceRevisions,
   ValidatePOSource,
+  CreatePurchaseOrderDraft,
+  GetPurchaseOrder,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { AppShell } from "./components/AppShell";
@@ -67,6 +69,8 @@ import type {
   POSourceSelection,
   POSourceValidation,
 } from "./poSelector";
+import { PurchaseOrderEditorPage } from "./components/PurchaseOrderEditor";
+import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
@@ -458,6 +462,9 @@ function App() {
   // the exact pair it returned; #468 opens PO entry with it.
   const [poSelectorOpen, setPOSelectorOpen] = useState(false);
   const [poSource, setPOSource] = useState<POSourceSelection | null>(null);
+  // The draft the PO workspace is editing (#468). Null means the entry page:
+  // the selector's two paths create or reopen a draft and set this.
+  const [poDraft, setPODraft] = useState<PurchaseOrderDTO | null>(null);
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
     revision: number;
@@ -612,6 +619,18 @@ function App() {
   const liveEntry: CurrencyInfo | null = useMemo(
     () => resolveLiveEntry(currencyCatalogue, companyCurrency, IDR_FALLBACK_ENTRY),
     [currencyCatalogue, companyCurrency]
+  );
+
+  // The PO's own currency, resolved from its snapshot rather than the live
+  // profile (#390's rule applied to the new surface): an IDR default over a
+  // USD PO would be wrong by a factor of 100. Null gates the editor's money
+  // fields until the catalogue can name the denomination.
+  const poEntry = useMemo(
+    () =>
+      poDraft === null
+        ? null
+        : resolveLiveEntry(currencyCatalogue, poDraft.Currency, IDR_FALLBACK_ENTRY),
+    [currencyCatalogue, poDraft]
   );
 
   // The resolved canonical unit every default falls back to: the profile's
@@ -1647,7 +1666,13 @@ function App() {
           customerName: row.CustomerName,
           latestRevision: row.LatestRevision,
           issuedRevisionCount: row.IssuedRevisionCount,
-          hasActivePO: row.HasActivePO,
+          activePO:
+            row.ActivePO === null || row.ActivePO === undefined
+              ? null
+              : {
+                  id: row.ActivePO.ID,
+                  state: row.ActivePO.State === "saved" ? "saved" : "draft",
+                },
         })),
         page: page.Page,
         pageSize: page.PageSize,
@@ -1691,14 +1716,33 @@ function App() {
       <POQuotationSelector
         open={poSelectorOpen}
         onClose={() => setPOSelectorOpen(false)}
-        onConfirm={(selection) => {
+        onConfirm={async (selection) => {
+          const draft = await CreatePurchaseOrderDraft({
+            QuotationID: selection.quotationId,
+            RevisionNumber: selection.revisionNumber,
+            ReceivedDate: "",
+          });
           setPOSource(selection);
+          setPODraft(draft);
           setPOSelectorOpen(false);
           setPage("po");
           pushToast(
             "success",
-            `Source selected: quotation ${selection.quotationId}, revision ${selection.revisionNumber}.`
+            `Purchase order draft created from quotation ${draft.QuoteNumber}, revision ${draft.SourceRevision}.`
           );
+        }}
+        onOpenDraft={async (activePO) => {
+          try {
+            const draft = await GetPurchaseOrder(activePO.id);
+            setPODraft(draft);
+            setPOSelectorOpen(false);
+            setPage("po");
+          } catch (error) {
+            pushToast(
+              "error",
+              getErrorMessage(error, "The purchase order draft could not be opened.")
+            );
+          }
         }}
         loadPage={loadPOSourcePage}
         loadRevisions={loadPOSourceRevisions}
@@ -1843,10 +1887,34 @@ function App() {
       ) : null}
 
       {page === "po" ? (
-        <PurchaseOrderPlaceholderPage
-          onAddFromQuotation={() => setPOSelectorOpen(true)}
-          selectedSource={poSource}
-        />
+        poDraft === null ? (
+          <PurchaseOrderPlaceholderPage
+            onAddFromQuotation={() => setPOSelectorOpen(true)}
+            selectedSource={poSource}
+          />
+        ) : poEntry === null ? (
+          <StatusBanner tone="danger">
+            The purchase order's currency ({poDraft.Currency}) is not in the
+            loaded currency catalogue, so money cannot be edited safely yet.
+          </StatusBanner>
+        ) : (
+          <PurchaseOrderEditorPage
+            key={poDraft.ID}
+            order={poDraft}
+            currency={poEntry}
+            uomOptions={storedUoMs ?? []}
+            incotermOptions={INCOTERM_OPTIONS}
+            onSaved={(updated) => {
+              setPODraft(updated);
+              pushToast("success", "Purchase order draft saved.");
+            }}
+            onCancel={() => {
+              setPODraft(null);
+              setPOSource(null);
+              setPage("home");
+            }}
+          />
+        )
       ) : null}
 
       {page === "create" ? (

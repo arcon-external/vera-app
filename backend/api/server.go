@@ -117,6 +117,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/po-sources", server.listPOSources, server.requireSession)
 	server.echo.GET("/v1/po-sources/:id/revisions", server.listPOSourceRevisions, server.requireSession)
 	server.echo.POST("/v1/po-sources/validate", server.validatePOSource, server.requireSession)
+	// Manual Purchase Order drafts (issue #468). Creating is the server-side
+	// revalidation of the selector's exact pair; reading reopens a draft;
+	// updating replaces the editable draft header and lines.
+	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
+	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
