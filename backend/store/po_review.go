@@ -597,7 +597,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	}
 
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+	tag, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET
 			state = $3,
 			po_number = $4,
@@ -634,11 +634,18 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.DiscountPercent, calculation.SubtotalMinor, calculation.DiscountMinor,
 		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
 		calculation.AdjustmentReason, calculation.GrandTotalMinor, input.UpdatedBy,
-	); err != nil {
+	)
+	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {
 			return PurchaseOrder{}, ErrPurchaseOrderNumberTaken
 		}
 		return PurchaseOrder{}, fmt.Errorf("save purchase order %d: %w", input.ID, err)
+	}
+	// The row lock makes a zero-row update impossible; checking anyway means a
+	// future change to the predicate cannot silently leave a draft draft while
+	// its lines are replaced.
+	if tag.RowsAffected() != 1 {
+		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
 	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
