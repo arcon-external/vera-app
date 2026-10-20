@@ -24,6 +24,8 @@ export function Export(arg1:string):Promise<void>;
 
 export function ExportTo(arg1:string):Promise<void>;
 
+export function FinalizePurchaseOrder(arg1:backend.PurchaseOrderFinalizeInput):Promise<backend.PurchaseOrderDTO>;
+
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 
 export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
@@ -31,6 +33,8 @@ export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
 export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
+
+export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrderReviewDTO>;
 
 export function GetQuotation(arg1:number):Promise<backend.ArchivedQuotation>;
 

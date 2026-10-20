@@ -474,9 +474,14 @@ func TestPurchaseOrderDraftUpdateRefusesANonDraft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
+	// A saved row must carry its final identity (migration 032); this test is
+	// about the draft-only write guard, so it seeds that identity directly.
 	if _, err := pool.Exec(ctx, fmt.Sprintf(
-		"UPDATE %s.purchase_orders SET state = 'saved' WHERE id = $1", database.configSchema()),
-		draft.ID); err != nil {
+		`UPDATE %s.purchase_orders
+		 SET state = 'saved', po_number = 'PO-LEGACY', po_number_key = 'po-legacy',
+		     saved_at = NOW(), saved_by = $2
+		 WHERE id = $1`, database.configSchema()),
+		draft.ID, user.ID); err != nil {
 		t.Fatalf("mark saved: %v", err)
 	}
 
@@ -806,18 +811,20 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Creation copies customer-facing prices, so the whole order is its lines:
-	// 3 x 650 + 2 x 420 + 1 x 450 = 3240, with no discount and no PPN.
+	// Creation copies customer-facing prices, so the whole order is its lines.
+	// The seeded first line carries a 5% row discount, and #471 copies it too:
+	// starting from the list price alone would raise the PO above the printed
+	// row. 1950 less its 97 discount, plus 840 plus 450 = 3143.
 	if got := poCalculationLines(draft.Items); !reflect.DeepEqual(got, [][3]int64{
-		{1950, 0, 1950}, {840, 0, 840}, {450, 0, 450},
+		{1950, 97, 1853}, {840, 0, 840}, {450, 0, 450},
 	}) {
-		t.Errorf("created lines = %v; want gross/discount/net 1950/840/450", got)
+		t.Errorf("created lines = %v; want gross/discount/net 1950/97/1853, 840, 450", got)
 	}
-	if draft.SubtotalMinor != 3240 || draft.DiscountMinor != 0 ||
+	if draft.SubtotalMinor != 3143 || draft.DiscountMinor != 0 ||
 		draft.PpnBps != 0 || draft.PpnMinor != 0 ||
 		draft.AdjustmentMinor != 0 || draft.AdjustmentReason != "" ||
-		draft.GrandTotalMinor != 3240 {
-		t.Errorf("created totals = %+v; want subtotal/grand 3240 and no PPN", draft)
+		draft.GrandTotalMinor != 3143 {
+		t.Errorf("created totals = %+v; want subtotal/grand 3143 and no PPN", draft)
 	}
 	// The source document's printed figures are evidence, copied once. The
 	// seeded revision printed 3050 after its own discount basis, 0 PPN and a

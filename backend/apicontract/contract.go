@@ -222,6 +222,75 @@ type PurchaseOrderRow struct {
 	PrintedDiscountMinor   int64                  `json:"printedDiscountMinor"`
 	PrintedPpnMinor        int64                  `json:"printedPpnMinor"`
 	PrintedGrandTotalMinor int64                  `json:"printedGrandTotalMinor"`
+	// Finalization (#471). SavedAt/SavedBy are null on a draft; they are set
+	// exactly once by the draft -> saved transition. PdfAbsentConfirmed records
+	// the deliberate confirmation a save needs while no customer PDF exists.
+	SavedAt            *string `json:"savedAt"`
+	SavedBy            *int64  `json:"savedBy"`
+	PdfAbsentConfirmed bool    `json:"pdfAbsentConfirmed"`
+}
+
+// PurchaseOrderSourceLineRow is one customer-facing line of the exact source
+// revision. LineLabel is how the customer document numbers it: "3" for an
+// item, "3.1" for a priced part of a package.
+type PurchaseOrderSourceLineRow struct {
+	QuotationItemNo int    `json:"quotationItemNo"`
+	QuotationSubNo  *int   `json:"quotationSubNo"`
+	LineLabel       string `json:"lineLabel"`
+	Description     string `json:"description"`
+	UoM             string `json:"uom"`
+	QuantityScaled  int64  `json:"quantityScaled"`
+	UnitPriceMinor  int64  `json:"unitPriceMinor"`
+	DiscountEnabled bool   `json:"discountEnabled"`
+	DiscountPercent int16  `json:"discountPercent"`
+}
+
+// PurchaseOrderSourceRow is the exact source revision the review compares
+// against. It is read from the frozen revision on every review, never from a
+// cache, so a corrected match is always checked against the issued document.
+type PurchaseOrderSourceRow struct {
+	QuotationID            int64                        `json:"quotationId"`
+	RevisionNumber         int16                        `json:"revisionNumber"`
+	QuoteNumber            string                       `json:"quoteNumber"`
+	CustomerID             int64                        `json:"customerId"`
+	CustomerName           string                       `json:"customerName"`
+	Currency               string                       `json:"currency"`
+	PaymentTerms           string                       `json:"paymentTerms"`
+	Incoterms              string                       `json:"incoterms"`
+	DiscountPercent        int16                        `json:"discountPercent"`
+	Lines                  []PurchaseOrderSourceLineRow `json:"lines"`
+	PrintedSubtotalMinor   int64                        `json:"printedSubtotalMinor"`
+	PrintedDiscountMinor   int64                        `json:"printedDiscountMinor"`
+	PrintedPpnMinor        int64                        `json:"printedPpnMinor"`
+	PrintedGrandTotalMinor int64                        `json:"printedGrandTotalMinor"`
+}
+
+// PurchaseOrderReviewRow is one record beside its source plus the document
+// branch the final save is in. DocumentState is "none" while no attachment
+// exists (#472 adds "attached"); the client shows the no-PDF confirmation only
+// in that branch.
+type PurchaseOrderReviewRow struct {
+	Order         PurchaseOrderRow       `json:"order"`
+	Source        PurchaseOrderSourceRow `json:"source"`
+	DocumentState string                 `json:"documentState"`
+}
+
+// PurchaseOrderDecisionRequest is one explicit final-save choice. Choice is
+// "po" or "quotation"; neither is preselected by the client.
+type PurchaseOrderDecisionRequest struct {
+	Key    string `json:"key"`
+	Choice string `json:"choice"`
+}
+
+// PurchaseOrderFinalizeRequest replaces the editable fields exactly as a draft
+// save does, and adds the difference-review decisions, the explicit
+// missing/extra acknowledgements, and the document confirmation.
+type PurchaseOrderFinalizeRequest struct {
+	PurchaseOrderUpdateRequest
+	Decisions           []PurchaseOrderDecisionRequest `json:"decisions"`
+	AcknowledgedMissing []string                       `json:"acknowledgedMissing"`
+	AcknowledgedExtra   []int                          `json:"acknowledgedExtra"`
+	DocumentConfirmed   bool                           `json:"documentConfirmed"`
 }
 
 // PurchaseOrderCreateRequest starts a draft from one exact issued revision.

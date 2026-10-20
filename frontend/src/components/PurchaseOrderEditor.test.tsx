@@ -119,6 +119,8 @@ function render(state = initialPurchaseOrderEditorState(ORDER, USD)): string {
       incotermOptions={INCOTERMS}
       onSave={() => {}}
       onCancel={() => {}}
+      onFinalSave={() => {}}
+      finalSaving={false}
     />
   ).replace(/<!-- -->/g, "");
 }

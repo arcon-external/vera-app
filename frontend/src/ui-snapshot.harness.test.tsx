@@ -39,6 +39,16 @@ import {
   PurchaseOrderEditorView,
   PurchaseOrderLineRow,
 } from "./components/PurchaseOrderEditor";
+import {
+  PurchaseOrderDifferenceReviewView,
+  PurchaseOrderFinalConfirmationView,
+  PurchaseOrderSavedView,
+} from "./components/PurchaseOrderFinalize";
+import {
+  evaluateReview,
+  type PurchaseOrderReviewDTO,
+  type PurchaseOrderSourceDTO,
+} from "./poFinalize";
 import { PurchaseOrderTotals } from "./components/PurchaseOrderTotals";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import type { ArchivedQuotation } from "./archive";
@@ -266,6 +276,101 @@ const PO_EDITOR_UOM_OPTIONS = [
   { value: "Unit", label: "Unit" },
   { value: "Pc", label: "Pc" },
 ];
+
+// The final-save review (issue #471): the exact source revision beside the
+// entered PO. Two differing values (payment terms and the first line's price),
+// one source line the PO omits, and one extra PO line, so the screenshot shows
+// both choices unpressed, the missing/extra review, and the printed-total
+// check with its unexplained remainder.
+const PO_REVIEW_SOURCE: PurchaseOrderSourceDTO = {
+  QuotationID: 12,
+  RevisionNumber: 2,
+  QuoteNumber: "1502260012",
+  CustomerID: 2,
+  CustomerName: "PT. Infineon Technologies Batam",
+  Currency: "USD",
+  PaymentTerms: "60 days from delivery",
+  Incoterms: "FOB",
+  DiscountPercent: 5,
+  Lines: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineLabel: "1",
+      Description: "Supply and installation of electrical panels",
+      UoM: "Lot",
+      QuantityScaled: 25000,
+      UnitPriceMinor: 118000,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineLabel: "2.1",
+      Description: "Mounting and cable termination",
+      UoM: "Unit",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+    },
+    {
+      QuotationItemNo: 3,
+      QuotationSubNo: null,
+      LineLabel: "3",
+      Description: "Electrical commissioning report",
+      UoM: "Lot",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 0,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+    },
+  ],
+  PrintedSubtotalMinor: 339690,
+  PrintedDiscountMinor: 16984,
+  PrintedPpnMinor: 35500,
+  PrintedGrandTotalMinor: 358205,
+};
+const PO_REVIEW_ORDER: PurchaseOrderDTO = {
+  ...PO_EDITOR_ORDER,
+  PaymentTerms: "45 days",
+  Items: [
+    PO_EDITOR_ORDER.Items[0],
+    PO_EDITOR_ORDER.Items[1],
+    {
+      QuotationItemNo: null,
+      QuotationSubNo: null,
+      LineNumber: 3,
+      Description: "Freight and insurance",
+      QuantityScaled: 10000,
+      UoM: "Lot",
+      UnitPriceMinor: 12500,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 12500,
+      DiscountMinor: 0,
+      NetMinor: 12500,
+    },
+  ],
+};
+const PO_REVIEW_STATE = initialPurchaseOrderEditorState(
+  PO_REVIEW_ORDER,
+  PO_EDITOR_USD
+);
+const PO_REVIEW_DTO: PurchaseOrderReviewDTO = {
+  Order: PO_REVIEW_ORDER,
+  Source: PO_REVIEW_SOURCE,
+  DocumentState: "none",
+};
+const PO_REVIEW_EVALUATION = evaluateReview(
+  PO_REVIEW_STATE,
+  PO_REVIEW_SOURCE,
+  PO_EDITOR_USD,
+  {},
+  [],
+  []
+);
 
 // The PO archive (issue #469): a mixed page of drafts and a saved record, one
 // row without a customer PO number, the customer multi-select and the 31-row
@@ -790,6 +895,66 @@ const CASES: SnapshotCase[] = [
         incotermOptions={INCOTERM_OPTIONS}
         onSave={() => undefined}
         onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // The final-save difference review (issue #471): every differing value
+    // with both choices unpressed, the fixed currency statement, one omitted
+    // source line, two extra PO lines (one with a suggestion), the corrected
+    // match picker and the recalculated totals. At 360 this is the case that
+    // says whether the two-choice row stacks instead of overflowing.
+    name: "PurchaseOrderDifferenceReview",
+    element: (
+      <PurchaseOrderDifferenceReviewView
+        state={PO_REVIEW_STATE}
+        source={PO_REVIEW_SOURCE}
+        currency={PO_EDITOR_USD}
+        quoteNumber="1502260012"
+        documentState="none"
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    ),
+  },
+  {
+    // The required final confirmation when no customer PDF exists (#471).
+    // The checkbox is unchecked and Final save is disabled: the deliberate
+    // acknowledgement must be given, not assumed.
+    name: "PurchaseOrderFinalConfirmation",
+    element: (
+      <PurchaseOrderFinalConfirmationView
+        review={PO_REVIEW_DTO}
+        evaluation={PO_REVIEW_EVALUATION}
+        currency={PO_EDITOR_USD}
+        documentConfirmed={false}
+        onToggleDocumentConfirmed={() => undefined}
+        onBack={() => undefined}
+        onFinalSave={() => undefined}
+        saving={false}
+        error={null}
+      />
+    ),
+  },
+  {
+    // A saved record (issue #471): read-only, the stored values and totals, the
+    // printed source figures beside them, and the recorded no-PDF confirmation.
+    // There is deliberately no editable control in this page.
+    name: "PurchaseOrderSaved",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
       />
     ),
   },

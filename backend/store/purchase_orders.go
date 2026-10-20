@@ -60,7 +60,44 @@ var (
 	// ErrPurchaseOrderInvalid refuses values the schema may not express
 	// meaningfully (a zero quantity, a negative price, a malformed date).
 	ErrPurchaseOrderInvalid = errors.New("purchase order draft is invalid")
+	// ErrPurchaseOrderIncomplete is the final-save minimum: a source revision,
+	// customer PO number, received date, customer, currency and at least one
+	// valid item. A draft may be missing any of them; a saved record may not.
+	ErrPurchaseOrderIncomplete = errors.New("purchase order is not ready to be saved")
+	// ErrPurchaseOrderNumberTaken is the per-customer uniqueness refusal. The
+	// partial unique index is what decides it under concurrency; the store
+	// maps that violation here.
+	ErrPurchaseOrderNumberTaken = errors.New("this customer already has a purchase order with that number")
+	// ErrPurchaseOrderUnresolvedDifference means the final-save review still
+	// holds a differing value with no explicit choice, a missing or extra line
+	// with no acknowledgement, or two lines claiming one quotation line.
+	ErrPurchaseOrderUnresolvedDifference = errors.New("purchase order differences are unresolved")
+	// ErrPurchaseOrderTotalMismatch means the calculated total does not equal
+	// the source document's printed total and the signed adjustment does not
+	// cover the gap. The adjustment is the only place a different printed
+	// total may be explained (parent story 46).
+	ErrPurchaseOrderTotalMismatch = errors.New("purchase order total is not explained against the quotation")
+	// ErrPurchaseOrderPDFConfirmationRequired is the deliberate confirmation a
+	// final save needs while no customer PDF is attached (#472 has not
+	// shipped). It is not asked of drafts.
+	ErrPurchaseOrderPDFConfirmationRequired = errors.New("confirm saving the purchase order without its customer PDF")
+	// ErrPurchaseOrderSourceCurrencyMismatch refuses a comparison whose two
+	// sides are not in one currency. The PO's currency is copied from the
+	// source revision and cannot be edited, so this can only mean a broken
+	// source link -- never a conversion.
+	ErrPurchaseOrderSourceCurrencyMismatch = errors.New("purchase order currency does not match its source revision")
+	// ErrPurchaseOrderSourceMismatch means the stored record no longer agrees
+	// with the revision it names (a customer, for instance). Like the currency
+	// refusal, it is a broken link rather than something staff entered.
+	ErrPurchaseOrderSourceMismatch = errors.New("purchase order source does not match the record")
 )
+
+// PurchaseOrderDecision is one explicit difference-review choice for a review
+// key. Choice is PurchaseOrderChoicePO or PurchaseOrderChoiceQuotation.
+type PurchaseOrderDecision struct {
+	Key    string
+	Choice string
+}
 
 // PurchaseOrderItem is one entered line. QuotationItemNo/QuotationSubNo are
 // references by number into the frozen source revision; both are nil for an
@@ -130,6 +167,41 @@ type PurchaseOrder struct {
 	ReceivedDate           time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	// Finalization (#471). SavedAt/SavedBy are set exactly once, by the
+	// transition from draft to saved. PDFAbsentConfirmed records the deliberate
+	// confirmation a save needs while no customer PDF exists.
+	SavedAt            *time.Time
+	SavedBy            *int64
+	PDFAbsentConfirmed bool
+}
+
+// PurchaseOrderReview is one draft or saved record beside the exact source
+// revision it is checked against. DocumentState says which document branch the
+// review is in; today every record is without its customer PDF because #472
+// has not shipped. The final save asks for the no-PDF confirmation only in
+// that branch, so #472 can add an "attached" branch without rewriting it.
+type PurchaseOrderReview struct {
+	Order         PurchaseOrder
+	Source        PurchaseOrderSource
+	DocumentState string
+}
+
+// The document-state values the review understands. "none" is the only one
+// this slice can produce: there is no attachment table yet.
+const (
+	PurchaseOrderDocumentNone     = "none"
+	PurchaseOrderDocumentAttached = "attached"
+)
+
+// PurchaseOrderFinalize is the final-save request: the same replaced values a
+// draft save carries, plus the difference-review decisions, the explicit
+// missing/extra acknowledgements, and the document confirmation.
+type PurchaseOrderFinalize struct {
+	PurchaseOrderUpdate
+	Decisions           []PurchaseOrderDecision
+	AcknowledgedMissing []string
+	AcknowledgedExtra   []int
+	DocumentConfirmed   bool
 }
 
 // PurchaseOrderCreate is the server-side creation input: the exact source pair
@@ -208,7 +280,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		received = companyToday(time.Now())
 	}
 
-	lines, err := copyPurchaseOrderLines(ctx, tx, schema, source.RevisionID)
+	lines, err := loadPurchaseOrderSourceLines(ctx, tx, schema, source.RevisionID)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -217,7 +289,11 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	lines, calculation, err := calculatePurchaseOrderLines(lines, 0, 0, "", ppnBps)
+	items := make([]PurchaseOrderItem, len(lines))
+	for index, line := range lines {
+		items[index] = line.PurchaseOrderItem()
+	}
+	items, calculation, err := calculatePurchaseOrderLines(items, source.DiscountPercent, 0, "", ppnBps)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -238,18 +314,19 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,
 			$10,$11,$12,$13,$14,
-			0,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-			$26,$26)
+			$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,
+			$27,$27)
 		RETURNING id, uuid::text`, schema),
 		org.ID, input.QuotationID, input.RevisionNumber, PurchaseOrderStateDraft,
 		source.CustomerID, source.CustomerName, source.BillingAddress,
 		source.BillingAddress, received, source.PaymentTerms,
-		source.Incoterm, source.Currency, source.TaxZone, source.TaxCategory,
-		calculation.SubtotalMinor, calculation.DiscountMinor,
-		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
-		calculation.AdjustmentReason, calculation.GrandTotalMinor,
-		source.PrintedSubtotal, source.PrintedDiscount, source.PrintedPpn,
-		source.PrintedGrand, input.CreatedBy,
+		source.Incoterms, source.Currency, source.TaxZone, source.TaxCategory,
+		source.DiscountPercent, calculation.SubtotalMinor,
+		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
+		calculation.AdjustmentMinor, calculation.AdjustmentReason,
+		calculation.GrandTotalMinor, source.PrintedSubtotalMinor,
+		source.PrintedDiscountMinor, source.PrintedPpnMinor,
+		source.PrintedGrandTotalMinor, input.CreatedBy,
 	).Scan(&id, &uuid)
 	if err != nil {
 		if isActivePurchaseOrderConflict(err) {
@@ -258,7 +335,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, fmt.Errorf("insert purchase order: %w", err)
 	}
 
-	if err := replacePurchaseOrderItems(ctx, tx, schema, id, lines); err != nil {
+	if err := replacePurchaseOrderItems(ctx, tx, schema, id, items); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -297,6 +374,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if input.ID < 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
+	input.PONumber = strings.TrimSpace(input.PONumber)
 	input.PaymentTerms = strings.TrimSpace(input.PaymentTerms)
 	if utf8.RuneCountInString(input.PaymentTerms) > maxPaymentTermsLength {
 		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be at most %d characters",
@@ -363,6 +441,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			contact_email = $6,
 			contact_phone = $7,
 			po_number = $8,
+			po_number_key = NULL,
 			po_date = $9,
 			received_date = COALESCE($10, received_date),
 			requested_delivery_date = $11,
@@ -405,25 +484,6 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	return updated, nil
 }
 
-type purchaseOrderSource struct {
-	QuoteNumber     string
-	CustomerName    string
-	BillingAddress  string
-	Incoterm        string
-	Currency        string
-	TaxZone         string
-	TaxCategory     string
-	TaxType         string
-	ServiceCategory string
-	CustomerID      int64
-	RevisionID      int64
-	PaymentTerms    string
-	PrintedSubtotal int64
-	PrintedDiscount int64
-	PrintedPpn      int64
-	PrintedGrand    int64
-}
-
 // loadPurchaseOrderSource reads the exact issued revision and the snapshots a
 // new PO inherits. Only stored revisions exist here: an unsaved Quotation
 // draft never reaches quotation_revisions, so it can never become a source.
@@ -432,14 +492,14 @@ type purchaseOrderSource struct {
 // copied once, as evidence of what the source document said, and never
 // recalculated: a PO that disagrees with them is a difference to review (#471),
 // not a reason to overwrite the document (parent story 45).
-func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (purchaseOrderSource, error) {
-	var source purchaseOrderSource
+func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (PurchaseOrderSource, error) {
+	source := PurchaseOrderSource{QuotationID: quotationID, RevisionNumber: revision}
 	var paymentTermDays int16
 	var printedSubtotal, printedDiscount, printedPpn, printedGrand pgtype.Int8
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.quote_number, c.id, c.legal_name, r.id, r.recipient_address,
 		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency,
-		       r.tax_type, r.service_category,
+		       r.tax_type, r.service_category, r.discount_percent,
 		       t.marginalized_subtotal,
 		       t.marginalized_discount,
 		       t.ppn_amount,
@@ -456,44 +516,45 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 		&source.CustomerName,
 		&source.RevisionID,
 		&source.BillingAddress,
-		&source.Incoterm,
+		&source.Incoterms,
 		&paymentTermDays,
 		&source.TaxZone,
 		&source.TaxCategory,
 		&source.Currency,
 		&source.TaxType,
 		&source.ServiceCategory,
+		&source.DiscountPercent,
 		&printedSubtotal,
 		&printedDiscount,
 		&printedPpn,
 		&printedGrand,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return purchaseOrderSource{}, ErrPurchaseOrderSourceNotFound
+		return PurchaseOrderSource{}, ErrPurchaseOrderSourceNotFound
 	}
 	if err != nil {
-		return purchaseOrderSource{}, fmt.Errorf("load purchase order source %d/%d: %w", quotationID, revision, err)
+		return PurchaseOrderSource{}, fmt.Errorf("load purchase order source %d/%d: %w", quotationID, revision, err)
 	}
 	if !printedSubtotal.Valid || !printedDiscount.Valid || !printedPpn.Valid || !printedGrand.Valid {
-		return purchaseOrderSource{}, fmt.Errorf(
+		return PurchaseOrderSource{}, fmt.Errorf(
 			"%w: revision %d has no printed totals to copy",
 			ErrPurchaseOrderSourceIncomplete, revision)
 	}
-	source.PrintedSubtotal = printedSubtotal.Int64
-	source.PrintedDiscount = printedDiscount.Int64
-	source.PrintedPpn = printedPpn.Int64
-	source.PrintedGrand = printedGrand.Int64
+	source.PrintedSubtotalMinor = printedSubtotal.Int64
+	source.PrintedDiscountMinor = printedDiscount.Int64
+	source.PrintedPpnMinor = printedPpn.Int64
+	source.PrintedGrandTotalMinor = printedGrand.Int64
 	for _, printed := range []struct {
 		name  string
 		value int64
 	}{
-		{"subtotal", source.PrintedSubtotal},
-		{"discount", source.PrintedDiscount},
-		{"PPN", source.PrintedPpn},
-		{"grand total", source.PrintedGrand},
+		{"subtotal", source.PrintedSubtotalMinor},
+		{"discount", source.PrintedDiscountMinor},
+		{"PPN", source.PrintedPpnMinor},
+		{"grand total", source.PrintedGrandTotalMinor},
 	} {
 		if printed.value < 0 || printed.value > MaxExactMinor {
-			return purchaseOrderSource{}, fmt.Errorf(
+			return PurchaseOrderSource{}, fmt.Errorf(
 				"%w: printed %s %d is outside 0..%d",
 				ErrPurchaseOrderSourceOutOfRange, printed.name, printed.value, MaxExactMinor)
 		}
@@ -518,21 +579,26 @@ func quotationPaymentTerms(days int16) string {
 }
 
 type purchaseOrderSourceSub struct {
-	Description    string
-	UoM            string
-	SubNo          int
-	Quantity       int64
-	UnitPriceMinor int64
+	Description     string
+	UoM             string
+	Quantity        int64
+	UnitPriceMinor  int64
+	SubNo           int
+	DiscountPercent int16
+	DiscountEnabled bool
 }
 
-// copyPurchaseOrderLines turns the customer-facing composition of one issued
-// revision into starting lines. A package line whose parts are printed
-// (show_sub_prices) becomes one line per part; every other line is copied as
-// itself. Prices are the frozen list prices the customer document shows, not
-// a recalculation -- exact PO maths is #470's slice.
-func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema string, revisionID int64) ([]PurchaseOrderItem, error) {
+// loadPurchaseOrderSourceLines turns the customer-facing composition of one
+// issued revision into its lines. A package line whose parts are printed
+// (show_sub_prices) becomes one line per part; every other line is itself.
+// Prices are the frozen list prices the customer document shows, not a
+// recalculation. Row discounts come across too, because the printed row's net
+// is the list price less its discount, and starting from the list alone would
+// silently raise the PO above the quotation.
+func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, schema string, revisionID int64) ([]PurchaseOrderSourceLine, error) {
 	rows, err := q.Query(ctx, fmt.Sprintf(`
-		SELECT id, item_no, description, qty, uom, list_unit_price, show_sub_prices
+		SELECT id, item_no, description, qty, uom, list_unit_price, show_sub_prices,
+		       discount_enabled, discount_percent
 		FROM %s.quotation_revision_items
 		WHERE revision_id = $1
 		ORDER BY item_no`, schema), revisionID)
@@ -542,19 +608,22 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 	defer rows.Close()
 
 	type sourceItem struct {
-		Description    string
-		UoM            string
-		ID             int64
-		ItemNo         int
-		Quantity       int64
-		UnitPriceMinor int64
-		ShowSubPrices  bool
+		Description     string
+		UoM             string
+		ID              int64
+		ItemNo          int
+		Quantity        int64
+		UnitPriceMinor  int64
+		DiscountPercent int16
+		ShowSubPrices   bool
+		DiscountEnabled bool
 	}
 	var items []sourceItem
 	for rows.Next() {
 		var item sourceItem
 		if err := rows.Scan(&item.ID, &item.ItemNo, &item.Description, &item.Quantity,
-			&item.UoM, &item.UnitPriceMinor, &item.ShowSubPrices); err != nil {
+			&item.UoM, &item.UnitPriceMinor, &item.ShowSubPrices,
+			&item.DiscountEnabled, &item.DiscountPercent); err != nil {
 			return nil, fmt.Errorf("scan purchase order source item: %w", err)
 		}
 		if err := checkSourceUnitPrice(item.UnitPriceMinor); err != nil {
@@ -567,7 +636,8 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 	}
 
 	subRows, err := q.Query(ctx, fmt.Sprintf(`
-		SELECT s.revision_item_id, s.sub_no, s.description, s.qty, s.uom, s.list_unit_price
+		SELECT s.revision_item_id, s.sub_no, s.description, s.qty, s.uom,
+		       s.list_unit_price, s.discount_enabled, s.discount_percent
 		FROM %s.quotation_revision_sub_items s
 		JOIN %s.quotation_revision_items i ON i.id = s.revision_item_id
 		WHERE i.revision_id = $1
@@ -581,7 +651,7 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 		var itemID int64
 		var sub purchaseOrderSourceSub
 		if err := subRows.Scan(&itemID, &sub.SubNo, &sub.Description, &sub.Quantity,
-			&sub.UoM, &sub.UnitPriceMinor); err != nil {
+			&sub.UoM, &sub.UnitPriceMinor, &sub.DiscountEnabled, &sub.DiscountPercent); err != nil {
 			return nil, fmt.Errorf("scan purchase order source sub-item: %w", err)
 		}
 		if err := checkSourceUnitPrice(sub.UnitPriceMinor); err != nil {
@@ -593,7 +663,7 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 		return nil, fmt.Errorf("iterate purchase order source sub-items: %w", err)
 	}
 
-	lines := make([]PurchaseOrderItem, 0, len(items))
+	lines := make([]PurchaseOrderSourceLine, 0, len(items))
 	for _, item := range items {
 		if item.ShowSubPrices && len(subs[item.ID]) > 0 {
 			for _, sub := range subs[item.ID] {
@@ -601,14 +671,16 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 				if err != nil {
 					return nil, err
 				}
-				itemNo, subNo := item.ItemNo, sub.SubNo
-				lines = append(lines, PurchaseOrderItem{
-					Description:     sub.Description,
-					QuotationItemNo: &itemNo,
+				subNo := sub.SubNo
+				lines = append(lines, PurchaseOrderSourceLine{
+					QuotationItemNo: item.ItemNo,
 					QuotationSubNo:  &subNo,
+					Description:     sub.Description,
 					QuantityScaled:  quantity,
 					UoM:             sub.UoM,
 					UnitPriceMinor:  sub.UnitPriceMinor,
+					DiscountEnabled: sub.DiscountEnabled,
+					DiscountPercent: sub.DiscountPercent,
 				})
 			}
 			continue
@@ -617,16 +689,52 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 		if err != nil {
 			return nil, err
 		}
-		itemNo := item.ItemNo
-		lines = append(lines, PurchaseOrderItem{
+		lines = append(lines, PurchaseOrderSourceLine{
+			QuotationItemNo: item.ItemNo,
 			Description:     item.Description,
-			QuotationItemNo: &itemNo,
 			QuantityScaled:  quantity,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
 		})
 	}
 	return lines, nil
+}
+
+// loadPurchaseOrderSourceDetail is the review's source: the header wording and
+// printed totals plus the exact customer-facing lines.
+func loadPurchaseOrderSourceDetail(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (PurchaseOrderSource, error) {
+	source, err := loadPurchaseOrderSource(ctx, q, schema, quotationID, revision)
+	if err != nil {
+		return PurchaseOrderSource{}, err
+	}
+	source.Lines, err = loadPurchaseOrderSourceLines(ctx, q, schema, source.RevisionID)
+	if err != nil {
+		return PurchaseOrderSource{}, err
+	}
+	return source, nil
+}
+
+// PurchaseOrderItem is the starting line a fresh draft stores. The match
+// reference is the source line's own item/sub number, so a draft begins
+// explicitly matched rather than inferred from position.
+func (line PurchaseOrderSourceLine) PurchaseOrderItem() PurchaseOrderItem {
+	itemNo := line.QuotationItemNo
+	item := PurchaseOrderItem{
+		QuotationItemNo: &itemNo,
+		Description:     line.Description,
+		QuantityScaled:  line.QuantityScaled,
+		UoM:             line.UoM,
+		UnitPriceMinor:  line.UnitPriceMinor,
+		DiscountEnabled: line.DiscountEnabled,
+		DiscountPercent: line.DiscountPercent,
+	}
+	if line.QuotationSubNo != nil {
+		subNo := *line.QuotationSubNo
+		item.QuotationSubNo = &subNo
+	}
+	return item
 }
 
 func scaledQuantity(quantity int64) (int64, error) {
@@ -775,6 +883,8 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, id int64) (PurchaseOrder, error) {
 	var order PurchaseOrder
 	var poDate, requestedDelivery pgtype.Date
+	var savedAt pgtype.Timestamptz
+	var savedBy pgtype.Int8
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT po.id, po.uuid::text, po.org_id::text, po.quotation_id,
 		       po.source_revision, q.quote_number, po.state, po.customer_id,
@@ -788,7 +898,9 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.adjustment_minor, po.adjustment_reason, po.grand_total_minor,
 		       po.discount_percent, po.printed_subtotal_minor,
 		       po.printed_discount_minor, po.printed_ppn_minor,
-		       po.printed_grand_total_minor
+		       po.printed_grand_total_minor, po.saved_at, po.saved_by,
+		       (po.pdf_absent_confirmed_at IS NOT NULL
+		        AND po.pdf_absent_confirmed_by IS NOT NULL)
 		FROM %s.purchase_orders po
 		JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
@@ -831,12 +943,23 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&order.PrintedDiscountMinor,
 		&order.PrintedPpnMinor,
 		&order.PrintedGrandTotalMinor,
+		&savedAt,
+		&savedBy,
+		&order.PDFAbsentConfirmed,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
 	if err != nil {
 		return PurchaseOrder{}, fmt.Errorf("load purchase order %d: %w", id, err)
+	}
+	if savedAt.Valid {
+		value := savedAt.Time
+		order.SavedAt = &value
+	}
+	if savedBy.Valid {
+		value := savedBy.Int64
+		order.SavedBy = &value
 	}
 	if poDate.Valid {
 		value := poDate.Time

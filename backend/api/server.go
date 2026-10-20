@@ -126,6 +126,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
 	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)
+	// Finalization (issue #471): the review reads the exact source revision,
+	// and the final save is the one-way draft -> saved transition.
+	server.echo.GET("/v1/purchase-orders/:id/review", server.getPurchaseOrderReview, server.requireSession)
+	server.echo.POST("/v1/purchase-orders/:id/finalize", server.finalizePurchaseOrder, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)

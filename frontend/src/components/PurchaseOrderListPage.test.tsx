@@ -163,7 +163,7 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     expect(html).toContain("2 purchase orders");
   });
 
-  it("opens drafts and refuses saved rows until a saved view exists", () => {
+  it("opens drafts into the editor and saved records into the read-only view", () => {
     const html = render({
       state: state({
         rows: [row(), row({ ID: 8, State: "saved", PONumber: "PO-SAVED" })],
@@ -173,10 +173,13 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     });
     const draft = buttonTagFor(html, "Open purchase order PO-INF-2026-091");
     expect(draft).not.toContain(" disabled=");
+    expect(draft).toContain("Open this draft");
 
+    // #471 enabled saved rows: the record opens, and the title says the view is
+    // read-only rather than pretending the row is unavailable.
     const saved = buttonTagFor(html, "Open purchase order PO-SAVED");
-    expect(saved).toContain(" disabled=");
-    expect(saved).toContain("Saved purchase orders open in a later release.");
+    expect(saved).not.toContain(" disabled=");
+    expect(saved).toContain("Open this saved purchase order (read-only)");
   });
 
   it("renders a Source missing badge only when the row carries the flag", () => {

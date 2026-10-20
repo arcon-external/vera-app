@@ -71,6 +71,8 @@ import {
   PurchaseOrderDiscardPrompt,
   PurchaseOrderEditorPage,
 } from "./components/PurchaseOrderEditor";
+import { PurchaseOrderSavedView } from "./components/PurchaseOrderFinalize";
+import { isSavedPurchaseOrder } from "./poFinalize";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
@@ -1942,6 +1944,17 @@ function App() {
             The purchase order's currency ({poDraft.Currency}) is not in the
             loaded currency catalogue, so money cannot be edited safely yet.
           </StatusBanner>
+        ) : isSavedPurchaseOrder(poDraft) ? (
+          // #471: a saved record opens read-only. Editing waits for the
+          // correction workflow (#473), so no field here is an input.
+          <PurchaseOrderSavedView
+            order={poDraft}
+            currency={poEntry}
+            onBack={() => {
+              poLeave.setDirty(false);
+              setPODraft(null);
+            }}
+          />
         ) : (
           <PurchaseOrderEditorPage
             key={poDraft.ID}
@@ -1952,7 +1965,12 @@ function App() {
             onDirtyChange={poLeave.setDirty}
             onSaved={(updated) => {
               setPODraft(updated);
-              pushToast("success", "Purchase order draft saved.");
+              pushToast(
+                "success",
+                updated.State === "saved"
+                  ? "Purchase order saved and finalized."
+                  : "Purchase order draft saved."
+              );
             }}
             onCancel={() => {
               // Cancel is the same discard decision as a tab click: the guard

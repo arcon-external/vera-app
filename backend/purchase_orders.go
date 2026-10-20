@@ -71,6 +71,83 @@ type PurchaseOrderDTO struct {
 	PrintedDiscountMinor   int64
 	PrintedPpnMinor        int64
 	PrintedGrandTotalMinor int64
+	SavedAt                *string
+	SavedBy                *int64
+	PdfAbsentConfirmed     bool
+}
+
+// PurchaseOrderSourceLineDTO is one customer-facing line of the exact source
+// revision. LineLabel is the customer document's number: "3" or "3.1".
+type PurchaseOrderSourceLineDTO struct {
+	QuotationItemNo int
+	QuotationSubNo  *int
+	LineLabel       string
+	Description     string
+	UoM             string
+	QuantityScaled  int64
+	UnitPriceMinor  int64
+	DiscountEnabled bool
+	DiscountPercent int16
+}
+
+// PurchaseOrderSourceDTO is the exact revision the final-save review compares
+// against, read fresh on every review.
+type PurchaseOrderSourceDTO struct {
+	QuotationID            int64
+	RevisionNumber         int16
+	QuoteNumber            string
+	CustomerID             int64
+	CustomerName           string
+	Currency               string
+	PaymentTerms           string
+	Incoterms              string
+	DiscountPercent        int16
+	Lines                  []PurchaseOrderSourceLineDTO
+	PrintedSubtotalMinor   int64
+	PrintedDiscountMinor   int64
+	PrintedPpnMinor        int64
+	PrintedGrandTotalMinor int64
+}
+
+// PurchaseOrderReviewDTO is one record beside its source plus the document
+// branch. DocumentState is "none" until #472 can attach a PDF.
+type PurchaseOrderReviewDTO struct {
+	Order         PurchaseOrderDTO
+	Source        PurchaseOrderSourceDTO
+	DocumentState string
+}
+
+// PurchaseOrderDecisionInput is one explicit difference choice ("po" or
+// "quotation"). Neither is preselected.
+type PurchaseOrderDecisionInput struct {
+	Key    string
+	Choice string
+}
+
+// PurchaseOrderFinalizeInput carries the same values a draft save replaces plus
+// the review decisions, the explicit line acknowledgements and the document
+// confirmation.
+type PurchaseOrderFinalizeInput struct {
+	ID                    int64
+	BillingAddress        string
+	DeliveryAddress       string
+	ShipToCode            string
+	ContactEmail          string
+	ContactPhone          string
+	PONumber              string
+	PODate                string
+	ReceivedDate          string
+	RequestedDeliveryDate string
+	Incoterms             string
+	PaymentTerms          string
+	AdjustmentReason      string
+	Items                 []PurchaseOrderItemInput
+	Decisions             []PurchaseOrderDecisionInput
+	AcknowledgedMissing   []string
+	AcknowledgedExtra     []int
+	DiscountPercent       int16
+	AdjustmentMinor       int64
+	DocumentConfirmed     bool
 }
 
 // PurchaseOrderCreateInput is the selector's confirmed pair plus an optional
@@ -236,6 +313,9 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		PrintedDiscountMinor:   row.PrintedDiscountMinor,
 		PrintedPpnMinor:        row.PrintedPpnMinor,
 		PrintedGrandTotalMinor: row.PrintedGrandTotalMinor,
+		SavedAt:                row.SavedAt,
+		SavedBy:                row.SavedBy,
+		PdfAbsentConfirmed:     row.PdfAbsentConfirmed,
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}
@@ -257,4 +337,117 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		})
 	}
 	return dto
+}
+
+// GetPurchaseOrderReview reads one record beside the exact source revision for
+// the final-save difference review.
+func (q *Quotation) GetPurchaseOrderReview(id int64) (PurchaseOrderReviewDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	var response apicontract.PurchaseOrderReviewRow
+	if err := client.Get("/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/review", &response); err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	return mapPurchaseOrderReviewDTO(response), nil
+}
+
+// FinalizePurchaseOrder is the one-way draft -> saved save.
+func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (PurchaseOrderDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
+	for _, item := range input.Items {
+		items = append(items, apicontract.PurchaseOrderItemInput{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+		})
+	}
+	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
+	for _, decision := range input.Decisions {
+		decisions = append(decisions, apicontract.PurchaseOrderDecisionRequest{
+			Key:    decision.Key,
+			Choice: decision.Choice,
+		})
+	}
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/finalize",
+		apicontract.PurchaseOrderFinalizeRequest{
+			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
+				BillingAddress:        input.BillingAddress,
+				DeliveryAddress:       input.DeliveryAddress,
+				ShipToCode:            input.ShipToCode,
+				ContactEmail:          input.ContactEmail,
+				ContactPhone:          input.ContactPhone,
+				PONumber:              input.PONumber,
+				PODate:                input.PODate,
+				ReceivedDate:          input.ReceivedDate,
+				RequestedDeliveryDate: input.RequestedDeliveryDate,
+				PaymentTerms:          input.PaymentTerms,
+				Incoterms:             input.Incoterms,
+				Items:                 items,
+				DiscountPercent:       input.DiscountPercent,
+				AdjustmentMinor:       input.AdjustmentMinor,
+				AdjustmentReason:      input.AdjustmentReason,
+			},
+			Decisions:           decisions,
+			AcknowledgedMissing: input.AcknowledgedMissing,
+			AcknowledgedExtra:   input.AcknowledgedExtra,
+			DocumentConfirmed:   input.DocumentConfirmed,
+		}, &response); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	return mapPurchaseOrderDTO(response), nil
+}
+
+func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseOrderReviewDTO {
+	review := PurchaseOrderReviewDTO{
+		Order:         mapPurchaseOrderDTO(row.Order),
+		DocumentState: row.DocumentState,
+		Source: PurchaseOrderSourceDTO{
+			QuotationID:            row.Source.QuotationID,
+			RevisionNumber:         row.Source.RevisionNumber,
+			QuoteNumber:            row.Source.QuoteNumber,
+			CustomerID:             row.Source.CustomerID,
+			CustomerName:           row.Source.CustomerName,
+			Currency:               row.Source.Currency,
+			PaymentTerms:           row.Source.PaymentTerms,
+			Incoterms:              row.Source.Incoterms,
+			DiscountPercent:        row.Source.DiscountPercent,
+			PrintedSubtotalMinor:   row.Source.PrintedSubtotalMinor,
+			PrintedDiscountMinor:   row.Source.PrintedDiscountMinor,
+			PrintedPpnMinor:        row.Source.PrintedPpnMinor,
+			PrintedGrandTotalMinor: row.Source.PrintedGrandTotalMinor,
+			Lines:                  make([]PurchaseOrderSourceLineDTO, 0, len(row.Source.Lines)),
+		},
+	}
+	for _, line := range row.Source.Lines {
+		review.Source.Lines = append(review.Source.Lines, PurchaseOrderSourceLineDTO{
+			QuotationItemNo: line.QuotationItemNo,
+			QuotationSubNo:  line.QuotationSubNo,
+			LineLabel:       line.LineLabel,
+			Description:     line.Description,
+			UoM:             line.UoM,
+			QuantityScaled:  line.QuantityScaled,
+			UnitPriceMinor:  line.UnitPriceMinor,
+			DiscountEnabled: line.DiscountEnabled,
+			DiscountPercent: line.DiscountPercent,
+		})
+	}
+	return review
 }

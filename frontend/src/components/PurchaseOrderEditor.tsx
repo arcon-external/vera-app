@@ -1,8 +1,21 @@
-import { useEffect, useReducer, useRef } from "react";
-import { UpdatePurchaseOrderDraft } from "@backend/backend/Quotation";
+import { useEffect, useReducer, useRef, useState } from "react";
+import {
+  FinalizePurchaseOrder,
+  GetPurchaseOrderReview,
+  UpdatePurchaseOrderDraft,
+} from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
 import { formatMoney, type CurrencyInfo } from "../format";
+import {
+  buildFinalizeInput,
+  evaluateReview,
+  initialFinalizeReviewState,
+  type POReviewChoice,
+  type POReviewDecisions,
+  type PurchaseOrderReviewDTO,
+  type PurchaseOrderSourceLineDTO,
+} from "../poFinalize";
 import {
   buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
@@ -15,6 +28,10 @@ import {
   type PurchaseOrderEditorState,
   type PurchaseOrderLineCalculation,
 } from "../purchaseOrder";
+import {
+  PurchaseOrderDifferenceReviewView,
+  PurchaseOrderFinalConfirmationView,
+} from "./PurchaseOrderFinalize";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
@@ -38,6 +55,10 @@ export interface PurchaseOrderEditorViewProps {
   incotermOptions: { value: string; label: string }[];
   onSave: () => void;
   onCancel: () => void;
+  /** Opens the final-save difference review (#471). */
+  onFinalSave: () => void;
+  /** True while the review's exact source is being loaded. */
+  finalSaving: boolean;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -422,6 +443,8 @@ export function PurchaseOrderEditorView({
   incotermOptions,
   onSave,
   onCancel,
+  onFinalSave,
+  finalSaving,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   // The panel and the save guard read the same pure calculation, so the number
@@ -676,19 +699,27 @@ export function PurchaseOrderEditorView({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <span className="text-caption text-ink-500">
-          {dirty ? "Unsaved changes" : "All changes saved"}
+          {dirty ? "Unsaved changes" : "All changes saved"} · Final Save reviews
+          every difference against the exact quotation revision.
         </span>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button aria-label="Cancel draft" onClick={onCancel}>
             Cancel
           </Button>
           <Button
-            variant="primary"
             aria-label="Save draft"
-            disabled={state.saving}
+            disabled={state.saving || finalSaving}
             onClick={onSave}
           >
             {state.saving ? "Saving…" : "Save draft"}
+          </Button>
+          <Button
+            variant="primary"
+            aria-label="Final Save"
+            disabled={state.saving || finalSaving}
+            onClick={onFinalSave}
+          >
+            {finalSaving ? "Loading review…" : "Final Save"}
           </Button>
         </div>
       </div>
@@ -710,6 +741,17 @@ export function PurchaseOrderEditorPage({
     undefined,
     () => initialPurchaseOrderEditorState(order, currency)
   );
+  // The final-save flow is a view of this page, not a separate route: the
+  // review reads the exact source from the server, and every choice edits the
+  // one editor state, so the totals on screen are the totals that will be sent.
+  const [view, setView] = useState<"entry" | "review" | "confirm">("entry");
+  const [review, setReview] = useState<PurchaseOrderReviewDTO | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [decisions, setDecisions] = useState<POReviewDecisions>({});
+  const [acknowledgedMissing, setAcknowledgedMissing] = useState<string[]>([]);
+  const [acknowledgedExtra, setAcknowledgedExtra] = useState<number[]>([]);
+  const [documentConfirmed, setDocumentConfirmed] = useState(false);
+  const [finalSaving, setFinalSaving] = useState(false);
 
   // The dirty flag is lifted, not duplicated: the editor still owns the
   // baseline comparison, and App only consumes the answer so it can ask
@@ -741,9 +783,140 @@ export function PurchaseOrderEditorPage({
     }
   };
 
+  const startReview = async () => {
+    const result = buildPurchaseOrderUpdate(state, currency);
+    if (result.input === null) {
+      dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
+      return;
+    }
+    setReviewLoading(true);
+    try {
+      const loaded = await GetPurchaseOrderReview(order.ID);
+      const initial = initialFinalizeReviewState();
+      setReview(loaded);
+      setDecisions(initial.decisions);
+      setAcknowledgedMissing(initial.acknowledgedMissing);
+      setAcknowledgedExtra(initial.acknowledgedExtra);
+      setDocumentConfirmed(initial.documentConfirmed);
+      setView("review");
+    } catch (error) {
+      dispatch({ type: "saveFailed", error: errorText(error) });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  const finalSave = async () => {
+    if (review === null) return;
+    const result = buildFinalizeInput(
+      state,
+      review.Source,
+      currency,
+      review.DocumentState,
+      decisions,
+      acknowledgedMissing,
+      acknowledgedExtra,
+      documentConfirmed
+    );
+    if (result.input === null) {
+      dispatch({ type: "saveFailed", error: result.error ?? "The purchase order cannot be saved yet." });
+      setView("confirm");
+      return;
+    }
+    setFinalSaving(true);
+    try {
+      const saved = await FinalizePurchaseOrder(
+        new backend.PurchaseOrderFinalizeInput(result.input)
+      );
+      dispatch({ type: "saveSucceeded", order: saved, currency });
+      onSaved(saved);
+      setReview(null);
+      setView("entry");
+    } catch (error) {
+      dispatch({ type: "saveFailed", error: errorText(error) });
+    } finally {
+      setFinalSaving(false);
+    }
+  };
+
+  const evaluation =
+    review === null
+      ? null
+      : evaluateReview(
+          state,
+          review.Source,
+          currency,
+          decisions,
+          acknowledgedMissing,
+          acknowledgedExtra
+        );
+
   // Cancel hands the whole decision to App's guard: there is no separate
   // editor confirmation, so Cancel followed by a tab click replaces one
-  // pending action instead of opening a second dialog.
+  // pending action instead of opening a second dialog. Leaving the review
+  // with Back to entry keeps the entry values, including any Use Quotation
+  // choice already applied.
+  if (view === "review" && review !== null) {
+    return (
+      <PurchaseOrderDifferenceReviewView
+        state={state}
+        source={review.Source}
+        currency={currency}
+        quoteNumber={order.QuoteNumber}
+        documentState={review.DocumentState}
+        decisions={decisions}
+        acknowledgedMissing={acknowledgedMissing}
+        acknowledgedExtra={acknowledgedExtra}
+        onDecision={(key: string, choice: POReviewChoice) =>
+          setDecisions((current) => ({ ...current, [key]: choice }))
+        }
+        onToggleMissing={(label) =>
+          setAcknowledgedMissing((current) =>
+            current.includes(label)
+              ? current.filter((value) => value !== label)
+              : [...current, label]
+          )
+        }
+        onToggleExtra={(lineNumber) =>
+          setAcknowledgedExtra((current) =>
+            current.includes(lineNumber)
+              ? current.filter((value) => value !== lineNumber)
+              : [...current, lineNumber]
+          )
+        }
+        onMatchChange={(lineKey, source: PurchaseOrderSourceLineDTO | null) =>
+          dispatch({
+            type: "lineChanged",
+            key: lineKey,
+            patch: {
+              quotationItemNo: source === null ? null : source.QuotationItemNo,
+              quotationSubNo:
+                source === null ? null : (source.QuotationSubNo ?? null),
+            },
+          })
+        }
+        onBack={() => setView("entry")}
+        onContinue={() => setView("confirm")}
+      />
+    );
+  }
+
+  if (view === "confirm" && review !== null && evaluation !== null) {
+    return (
+      <PurchaseOrderFinalConfirmationView
+        review={review}
+        evaluation={evaluation}
+        currency={currency}
+        documentConfirmed={documentConfirmed}
+        onToggleDocumentConfirmed={() => setDocumentConfirmed((current) => !current)}
+        onBack={() => setView("review")}
+        onFinalSave={() => void finalSave()}
+        saving={finalSaving}
+        error={state.error}
+      />
+    );
+  }
+
   return (
     <PurchaseOrderEditorView
       state={state}
@@ -753,6 +926,8 @@ export function PurchaseOrderEditorPage({
       incotermOptions={incotermOptions}
       onSave={() => void save()}
       onCancel={onCancel}
+      onFinalSave={() => void startReview()}
+      finalSaving={reviewLoading}
     />
   );
 }

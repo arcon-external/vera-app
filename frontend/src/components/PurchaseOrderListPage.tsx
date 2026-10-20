@@ -88,7 +88,8 @@ export function PurchaseOrderListView({
           </h1>
           <p className="mt-1 max-w-2xl text-body text-ink-500">
             Find a purchase order by its customer PO number, quotation number,
-            or customer. Open a draft to continue entry.
+            or customer. Open a draft to continue entry, or a saved record to
+            read it. Saved records are read-only in this release.
           </p>
         </div>
         <Button
@@ -356,9 +357,9 @@ export function PurchaseOrderListView({
                           aria-label={`Open purchase order ${poNumberLabel(row)}`}
                           disabled={!openable}
                           title={
-                            openable
+                            row.State === "draft"
                               ? "Open this draft"
-                              : "Saved purchase orders open in a later release."
+                              : "Open this saved purchase order (read-only)"
                           }
                           onClick={() => onOpen(row.ID)}
                         >
