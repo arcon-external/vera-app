@@ -289,3 +289,33 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 		}
 	}
 }
+
+// TestPurchaseOrderSurfacesCarryNoInternalEconomics mirrors
+// TestCustomerPreviewCarriesNoInternalEconomics for the PO: supplier cost,
+// margin, PPH22 and profit must never appear on any PO surface a customer
+// comparison could read. A field added with one of those names fails here.
+func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
+	forbidden := []string{"cost", "margin", "pph22", "profit", "nett"}
+	surfaces := []reflect.Type{
+		reflect.TypeOf(store.PurchaseOrder{}),
+		reflect.TypeOf(store.PurchaseOrderItem{}),
+		reflect.TypeOf(store.PurchaseOrderCalcInput{}),
+		reflect.TypeOf(store.PurchaseOrderCalc{}),
+		reflect.TypeOf(apicontract.PurchaseOrderRow{}),
+		reflect.TypeOf(apicontract.PurchaseOrderItemRow{}),
+		reflect.TypeOf(PurchaseOrderDTO{}),
+		reflect.TypeOf(PurchaseOrderItemDTO{}),
+	}
+	for _, surface := range surfaces {
+		for index := 0; index < surface.NumField(); index++ {
+			field := surface.Field(index)
+			lower := strings.ToLower(field.Name)
+			for _, word := range forbidden {
+				if strings.Contains(lower, word) {
+					t.Errorf("%s.%s carries internal economics (%q)",
+						surface.Name(), field.Name, word)
+				}
+			}
+		}
+	}
+}

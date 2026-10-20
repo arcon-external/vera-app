@@ -142,6 +142,13 @@ describe("PO quantity parsing (issue #468)", () => {
     }
   });
 
+  it("treats redundant decimal formatting as the same number", () => {
+    // Comparison and storage are numeric: "1.0" and "1.00" are one unit, not
+    // two different quantities.
+    expect(parseQuantityScaled("1.0")).toBe(parseQuantityScaled("1.00"));
+    expect(parseQuantityScaled("2.500")).toBe(parseQuantityScaled("2.5"));
+  });
+
   it("formats the stored scale back to the shortest decimal", () => {
     expect(formatQuantityScaled(10000)).toBe("1");
     expect(formatQuantityScaled(25000)).toBe("2.5");
@@ -163,6 +170,13 @@ describe("PO unit-price parsing (issue #468)", () => {
     expect(parseUnitPriceMinor(USD, "")).toBeNull();
     expect(parseUnitPriceMinor(USD, "-5.00")).toBeNull();
     expect(parseUnitPriceMinor(USD, "1.234")).toBeNull();
+  });
+
+  it("treats redundant decimal formatting as the same amount", () => {
+    expect(parseUnitPriceMinor(USD, "1.0")).toBe(parseUnitPriceMinor(USD, "1.00"));
+    expect(parseAdjustmentMinor(USD, "-1.0")).toBe(
+      parseAdjustmentMinor(USD, "-1.00")
+    );
   });
 
   it("formats a stored amount back into its money input", () => {
