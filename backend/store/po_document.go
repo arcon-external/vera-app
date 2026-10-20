@@ -55,7 +55,13 @@ var (
 //     top-level integer objects, so a forward reference is resolved before the
 //     structure pass. Content is isolated exactly when that length is
 //     resolvable and agrees with the file; otherwise the scanner falls back to
-//     the first endstream marker;
+//     the first endstream marker. That harvest runs before any length is
+//     known, so it can stop at an endstream drawn inside content and miss a
+//     later integer object; a readable document that depends on that object
+//     can then be refused as malformed. This is a bounded-parser limit, not a
+//     security hole: /Root and /Encrypt are read only from the dictionary
+//     startxref points at, in the trailer or xref stream, never from stream
+//     content directly;
 //  5. the last startxref, which must be an integer offset in the file and must
 //     point at a classic xref table or a /Type /XRef object;
 //  6. the /Root reference in the real trailer or xref-stream dictionary — never
@@ -69,7 +75,8 @@ var (
 // object is accepted only when an /ObjStm header lists it. A /FlateDecode (or
 // /Fl, or single-element [/FlateDecode]) header is decompressed to read that
 // index; any other filter is a named rejection, and the catalog dictionary
-// itself is never decompressed.
+// itself is never decompressed. An indirect /Filter reference is not resolved,
+// even when it names /FlateDecode, and is refused as neither a name nor a list.
 func ValidatePurchaseOrderPDF(data []byte) error {
 	if int64(len(data)) > MaxPurchaseOrderDocumentBytes {
 		return ErrPurchaseOrderDocumentTooLarge

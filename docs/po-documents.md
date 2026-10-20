@@ -62,6 +62,9 @@ them, so the correction history can show the earlier evidence.
   to an integer object. A first pass harvests the file's top-level integer
   objects, so a `/Length` defined *later* than the stream — a forward
   reference, which real writers emit — is resolved before the structure pass.
+  That harvest runs before any length is known, so it isolates a stream only
+  at its first `endstream` marker and can miss a later integer object when
+  content draws an `endstream`; the limits below state the consequence.
   When a `/Length` cannot be resolved, or the bytes at that offset are not
   followed by `endstream`, the scanner falls back to the first `endstream`
   marker and content past that point is scanned as structure, so exact
@@ -80,10 +83,12 @@ them, so the correction history can show the earlier evidence.
   compressed catalog dictionary itself is not decompressed, so this is
   membership, not a catalog type check — a documented gap. Only
   `/Filter /FlateDecode`, its `/Fl` abbreviation, or a single-element
-  `[/FlateDecode]` array is supported for that header. An object stream that
-  would be needed to resolve the catalog but uses any other filter, or cannot
-  be decompressed, is a named rejection that names the filter; it is never a
-  silent "catalog object is missing" and never a crash.
+  `[/FlateDecode]` array (or `[/Fl]`) is supported for that header. An indirect
+  `/Filter 12 0 R` is not resolved even when object 12 is `/FlateDecode`; it is
+  refused with an error saying the `/Filter` is neither a name nor a list. An
+  object stream that would be needed to resolve the catalog but uses any other
+  filter, or cannot be decompressed, is a named rejection that names the
+  filter; it is never a silent "catalog object is missing" and never a crash.
 - **encryption** from the real trailer or xref-stream dictionary only. Both an
   indirect `/Encrypt N G R` and an inline `/Encrypt << ... >>` dictionary are
   detected, and name escapes are decoded (`/En#63rypt` is `/Encrypt`). An
@@ -109,7 +114,8 @@ pinned without binary fixtures.
 ## What the structure check does not do
 
 These are deliberate limits, stated so nobody reads more into a stored file
-than the check actually proved:
+than the check actually proved. This is a bounded structural check, not a
+conforming PDF parser: it reads the structure described above and nothing else.
 
 - **Incremental updates are not followed.** Only the last `startxref` and the
   trailer or xref stream it points at are read; `/Prev` chains are ignored. A
@@ -120,9 +126,29 @@ than the check actually proved:
   entry that points into content does not create one. What is checked is that
   the table parses and that the last `startxref` offset lands on the table (or
   on the `/Type /XRef` object). A file with a stale entry is still accepted.
+- **The first-pass harvest can be stopped by stream content, so a readable
+  file can be refused.** The harvest runs before any `/Length` is known, so it
+  isolates a stream only at its first `endstream` marker. Content that itself
+  draws an `endstream`, followed by bytes that do not parse as structure, ends
+  that stream early in the harvest pass, and an object after it — including
+  the integer object a forward `/Length` names — can then be missed. The
+  structure pass resolves `/Length` only from the harvested set, so it cannot
+  recover the missing length and falls back to that same marker; the file is
+  then refused as `po_document_invalid` even though a reader would open it.
+  The paired direct/forward test pins the case where the harvest succeeds, not
+  this one. This is the cost of a bounded single-pass harvest, not a security
+  hole: `/Root` and `/Encrypt` are still read only from the dictionary
+  `startxref` points at, in the trailer or xref stream, never from stream
+  content directly.
 - **A compressed catalog is checked for membership only.** The `/ObjStm`
   header is decoded (see above), but the catalog dictionary's own bytes are
   not, so its `/Type /Catalog` is not re-read from inside the object stream.
+- **An indirect `/Filter` is not resolved.** The object stream's filter must be
+  a name (`/FlateDecode`, `/Fl`) or a single-element array of names
+  (`[/FlateDecode]`, `[/Fl]`). A reference such as `/Filter 12 0 R` is refused
+  even when object 12 is `/FlateDecode`, with an error that says the `/Filter`
+  is neither a name nor a list. A longer filter chain is refused by name
+  rather than guessed at.
 - **Rendering is not checked.** Page trees, fonts, images and whether a reader
   would display the file are out of scope; the question is whether the bytes
   are a document rather than a bag of tokens that resembles one.
