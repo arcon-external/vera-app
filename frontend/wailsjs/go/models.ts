@@ -1179,6 +1179,116 @@ export namespace backend {
 	        this.Valid = source["Valid"];
 	    }
 	}
+	export class PurchaseOrderListQuery {
+	    Search: string;
+	    State: string;
+	    CustomerIDs: number[];
+	    ReceivedFrom: string;
+	    ReceivedTo: string;
+	    SourceMissing: string;
+	    Page: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderListQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Search = source["Search"];
+	        this.State = source["State"];
+	        this.CustomerIDs = source["CustomerIDs"];
+	        this.ReceivedFrom = source["ReceivedFrom"];
+	        this.ReceivedTo = source["ReceivedTo"];
+	        this.SourceMissing = source["SourceMissing"];
+	        this.Page = source["Page"];
+	    }
+	}
+	export class PurchaseOrderListRowDTO {
+	    UUID: string;
+	    State: string;
+	    PONumber: string;
+	    QuoteNumber: string;
+	    CustomerName: string;
+	    ReceivedDate: string;
+	    Currency: string;
+	    ID: number;
+	    CustomerID: number;
+	    SourceRevision: number;
+	    SourceMissing: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderListRowDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.UUID = source["UUID"];
+	        this.State = source["State"];
+	        this.PONumber = source["PONumber"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.ReceivedDate = source["ReceivedDate"];
+	        this.Currency = source["Currency"];
+	        this.ID = source["ID"];
+	        this.CustomerID = source["CustomerID"];
+	        this.SourceRevision = source["SourceRevision"];
+	        this.SourceMissing = source["SourceMissing"];
+	    }
+	}
+	export class PurchaseOrderListCustomerDTO {
+	    Name: string;
+	    ID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderListCustomerDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.ID = source["ID"];
+	    }
+	}
+	export class PurchaseOrderListPageDTO {
+	    PurchaseOrders: PurchaseOrderListRowDTO[];
+	    Customers: PurchaseOrderListCustomerDTO[];
+	    Page: number;
+	    PageSize: number;
+	    Total: number;
+	    TotalPages: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderListPageDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.PurchaseOrders = this.convertValues(source["PurchaseOrders"], PurchaseOrderListRowDTO);
+	        this.Customers = this.convertValues(source["Customers"], PurchaseOrderListCustomerDTO);
+	        this.Page = source["Page"];
+	        this.PageSize = source["PageSize"];
+	        this.Total = source["Total"];
+	        this.TotalPages = source["TotalPages"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PurchaseOrderCreateInput {
 	    ReceivedDate: string;
 	    QuotationID: number;

@@ -86,6 +86,10 @@ export function ListPOSourceRevisions(arg1) {
   return window['go']['backend']['Quotation']['ListPOSourceRevisions'](arg1);
 }
 
+export function ListPurchaseOrders(arg1) {
+  return window['go']['backend']['Quotation']['ListPurchaseOrders'](arg1);
+}
+
 export function ListQuotations() {
   return window['go']['backend']['Quotation']['ListQuotations']();
 }

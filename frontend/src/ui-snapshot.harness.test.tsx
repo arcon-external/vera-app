@@ -31,10 +31,8 @@ import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
-import {
-  DocumentHomePage,
-  PurchaseOrderPlaceholderPage,
-} from "./components/DocumentHomePage";
+import { DocumentHomePage } from "./components/DocumentHomePage";
+import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
@@ -48,6 +46,11 @@ import {
   poSourceSelectorReducer,
 } from "./poSelector";
 import type { POSourceQuotation } from "./poSelector";
+import {
+  initialPOListFilters,
+  initialPOListState,
+} from "./poList";
+import type { POListRowDTO, POListState } from "./poList";
 import { initialPurchaseOrderEditorState } from "./purchaseOrder";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
@@ -232,6 +235,80 @@ const PO_EDITOR_UOM_OPTIONS = [
   { value: "Unit", label: "Unit" },
   { value: "Pc", label: "Pc" },
 ];
+
+// The PO archive (issue #469): a mixed page of drafts and a saved record, one
+// row without a customer PO number, the customer multi-select and the 31-row
+// pagination. The Source missing badge is deliberately absent: no record can
+// carry it until deletion ships, and a fixture that shows it would imply the
+// feature exists.
+const PO_LIST_ROWS: POListRowDTO[] = [
+  {
+    UUID: "uuid-po-9",
+    State: "draft",
+    PONumber: "PO-INF-2026-091",
+    QuoteNumber: "1502260012",
+    CustomerName: "PT. Infineon Technologies Batam",
+    ReceivedDate: "2026-10-02",
+    Currency: "USD",
+    ID: 9,
+    CustomerID: 2,
+    SourceRevision: 2,
+    SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-8",
+    State: "saved",
+    PONumber: "",
+    QuoteNumber: "1503260004",
+    CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    ReceivedDate: "2026-09-30",
+    Currency: "IDR",
+    ID: 8,
+    CustomerID: 3,
+    SourceRevision: 0,
+    SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-7",
+    State: "draft",
+    PONumber: "PO-DAT-2026-14",
+    QuoteNumber: "1504260007",
+    CustomerName: "PT. Datalec Global Solution",
+    ReceivedDate: "2026-09-24",
+    Currency: "IDR",
+    ID: 7,
+    CustomerID: 4,
+    SourceRevision: 1,
+    SourceMissing: false,
+  },
+];
+const PO_LIST_CUSTOMERS = [
+  { ID: 2, Name: "PT. Infineon Technologies Batam" },
+  { ID: 3, Name: "PT. H-Tech Oilfield Equipment, NOV XL Systems" },
+  { ID: 4, Name: "PT. Datalec Global Solution" },
+];
+const PO_LIST_ARCHIVE: POListState = {
+  ...initialPOListState,
+  rows: PO_LIST_ROWS,
+  customers: PO_LIST_CUSTOMERS,
+  page: 1,
+  pageSize: 15,
+  total: 31,
+  totalPages: 3,
+};
+const PO_LIST_NO_MATCH: POListState = {
+  ...initialPOListState,
+  filters: {
+    ...initialPOListFilters,
+    search: "datalec",
+    customerIds: [2],
+    receivedFrom: "2026-10-01",
+    state: "saved",
+  },
+  customers: PO_LIST_CUSTOMERS,
+  total: 0,
+  totalPages: 1,
+};
 
 
 // The issued-Quotation detail header (#467 wave 2): the second PO entry path
@@ -580,11 +657,40 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The honest Purchase Order surface for #466: no list, no rows, no
-    // totals -- the screenshot should show a page that states entry is not
-    // yet available and pretends nothing else exists.
-    name: "PurchaseOrderPlaceholder",
-    element: <PurchaseOrderPlaceholderPage onAddFromQuotation={() => undefined} />,
+    // The Purchase Order archive (issue #469): search, the customer
+    // multi-select, the inclusive received range, the stored Draft/Saved
+    // state, the disabled Source missing filter with its honest note, a mixed
+    // page of rows and the server pager. At 360 the table scrolls inside its
+    // card, like the Quotation archive; the filter grid stacks.
+    //
+    // What this case cannot show: typing, opening a row, the fetch effect,
+    // focus order and the real scrollbar stay hand-driven.
+    name: "PurchaseOrderArchive",
+    element: (
+      <PurchaseOrderListView
+        state={PO_LIST_ARCHIVE}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // The filtered empty state (issue #469): four active filter dimensions,
+    // no match, and the enabled Reset filters action. It is the case that
+    // proves an empty page is not the unfiltered "No purchase orders yet"
+    // message.
+    name: "PurchaseOrderArchiveNoMatch",
+    element: (
+      <PurchaseOrderListView
+        state={PO_LIST_NO_MATCH}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
   },
   {
     // The PO source selector, step 1 (issue #467): search, the checked
