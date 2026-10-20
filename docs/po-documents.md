@@ -57,21 +57,33 @@ them, so the correction history can show the earlier evidence.
 - a real `%PDF-` header and the `%%EOF` marker, allowing trailing whitespace and
   NUL padding.
 - **a structural walk, not a substring scan.** The file is tokenized into
-  objects, dictionaries and arrays; every stream body is skipped from `stream`
-  to its `endstream`, using `/Length` when it is a direct integer or a
-  reference to an integer object already seen. A literal `trailer`, `/Root` or
-  `/Encrypt` inside page content is therefore never read as document
-  structure.
+  objects, dictionaries and arrays. Every stream body is skipped from `stream`
+  to its `endstream` using `/Length` when it is a direct integer or a reference
+  to an integer object. A first pass harvests the file's top-level integer
+  objects, so a `/Length` defined *later* than the stream — a forward
+  reference, which real writers emit — is resolved before the structure pass.
+  When a `/Length` cannot be resolved, or the bytes at that offset are not
+  followed by `endstream`, the scanner falls back to the first `endstream`
+  marker and content past that point is scanned as structure, so exact
+  isolation depends on a resolvable `/Length` that agrees with the file. The
+  paired direct/forward tests pin the resolved case. The trailer and the `/Root` it names are
+  read only from the dictionary `<startxref>` points at, never from a substring.
 - the **last `startxref`** must be an integer offset inside the file and must
   point at either a classic `xref` table (followed by its `trailer`) or an
   object whose dictionary is `/Type /XRef` — compact `/Type/XRef` and spaced
   `/Type /XRef` are both accepted.
 - the **`/Root` reference in that real trailer or xref-stream dictionary** must
   name a `/Type /Catalog` object that exists as a plain object. If the catalog
-  is compressed, it is accepted only when an `/ObjStm` stream's own header
-  lists that object number (generation 0). The compressed dictionary is not
-  decompressed, so this is membership, not a catalog type check — the one
-  documented gap in the check. An absent object is always rejected.
+  is compressed into an `/ObjStm`, that object stream's header is decompressed
+  to read `/N`, `/First` and the object-number pairs, and the catalog is
+  accepted only when the index lists its object number (generation 0). The
+  compressed catalog dictionary itself is not decompressed, so this is
+  membership, not a catalog type check — a documented gap. Only
+  `/Filter /FlateDecode`, its `/Fl` abbreviation, or a single-element
+  `[/FlateDecode]` array is supported for that header. An object stream that
+  would be needed to resolve the catalog but uses any other filter, or cannot
+  be decompressed, is a named rejection that names the filter; it is never a
+  silent "catalog object is missing" and never a crash.
 - **encryption** from the real trailer or xref-stream dictionary only. Both an
   indirect `/Encrypt N G R` and an inline `/Encrypt << ... >>` dictionary are
   detected, and name escapes are decoded (`/En#63rypt` is `/Encrypt`). An
@@ -82,12 +94,38 @@ Garbage, truncated, header-only, no-root, no-EOF, `startxref banana`, a forged
 trailer with no xref section, and a `/Root` that names nothing are refused with
 `po_document_invalid`. An encrypted document (including a real AES xref-stream
 PDF) is refused with `po_document_encrypted`; an oversized file with
-`po_document_too_large`.
+`po_document_too_large`; an object stream with an unsupported filter with
+`po_document_invalid` naming that filter.
 
 The real fixture files the structural tests pin live in `backend/testdata/pdf/`:
 a MuPDF PDF with a classic literal trailer (accepted), and two PyMuPDF
 AES-encrypted xref-stream PDFs, one with a literal `/Encrypt` and one with the
-escaped `/En#63rypt` key (both refused as encrypted).
+escaped `/En#63rypt` key (both refused as encrypted). The paired
+direct/forward-`/Length` documents, whose content draws an `endstream` plus a
+fake object header, and the unfiltered/Flate-compressed `/ObjStm` catalogs are
+built by the tests in `backend/store/pdf_structure_test.go`, so those rules are
+pinned without binary fixtures.
+
+## What the structure check does not do
+
+These are deliberate limits, stated so nobody reads more into a stored file
+than the check actually proved:
+
+- **Incremental updates are not followed.** Only the last `startxref` and the
+  trailer or xref stream it points at are read; `/Prev` chains are ignored. A
+  latest trailer that omits `/Root` is refused, even when an earlier trailer in
+  the same file carries one.
+- **Classic xref entry offsets are not validated.** Object lookup is
+  scan-based: an entry whose offset is wrong does not hide an object, and an
+  entry that points into content does not create one. What is checked is that
+  the table parses and that the last `startxref` offset lands on the table (or
+  on the `/Type /XRef` object). A file with a stale entry is still accepted.
+- **A compressed catalog is checked for membership only.** The `/ObjStm`
+  header is decoded (see above), but the catalog dictionary's own bytes are
+  not, so its `/Type /Catalog` is not re-read from inside the object stream.
+- **Rendering is not checked.** Page trees, fonts, images and whether a reader
+  would display the file are out of scope; the question is whether the bytes
+  are a document rather than a bag of tokens that resembles one.
 
 ## HTTP API
 
