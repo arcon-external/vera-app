@@ -24,6 +24,10 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderReview: (...args: unknown[]) => reviewMock(...args),
   FinalizePurchaseOrder: (...args: unknown[]) => finalizeMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
+  GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
+  AttachPurchaseOrderDocument: vi.fn(),
+  GetActivePurchaseOrderDocumentContent: vi.fn(),
+  RemovePurchaseOrderDocument: vi.fn(),
 }));
 
 vi.mock("@backend/models", () => ({

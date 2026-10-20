@@ -404,12 +404,22 @@ func (s *Store) GetPurchaseOrderReview(ctx context.Context, id int64) (PurchaseO
 	}, nil
 }
 
-// purchaseOrderDocumentState answers which document branch a record is in.
-// Today there is no Purchase Order attachment table (#472 has not shipped), so
-// every record is deliberately without its PDF. #472 replaces this body with
-// one lookup and the final save below already asks for the confirmation only
-// in the "none" branch, so the flow does not need rewriting then.
+// purchaseOrderDocumentState answers which document branch a record is in:
+// "attached" when one active customer PO PDF exists, "none" otherwise. The
+// final save asks for the no-PDF confirmation only in the "none" branch.
 func purchaseOrderDocumentState(ctx context.Context, q purchaseOrderQuerier, schema string, purchaseOrderID int64) (string, error) {
+	var attached bool
+	err := q.QueryRow(ctx, fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1 FROM %s.purchase_order_documents
+			WHERE purchase_order_id = $1 AND active
+		)`, schema), purchaseOrderID).Scan(&attached)
+	if err != nil {
+		return "", fmt.Errorf("read purchase order %d document state: %w", purchaseOrderID, err)
+	}
+	if attached {
+		return PurchaseOrderDocumentAttached, nil
+	}
 	return PurchaseOrderDocumentNone, nil
 }
 
@@ -566,7 +576,11 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if documentState == PurchaseOrderDocumentNone && !input.DocumentConfirmed {
+	// The confirmation is only for a save that genuinely has no PDF. An
+	// attached save leaves the absence fields null even if the client sent the
+	// checkbox, so a stray flag cannot record a missing document that exists.
+	recordAbsence := documentState == PurchaseOrderDocumentNone
+	if recordAbsence && !input.DocumentConfirmed {
 		return PurchaseOrder{}, ErrPurchaseOrderPDFConfirmationRequired
 	}
 
@@ -596,8 +610,8 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 			grand_total_minor = $23,
 			saved_at = NOW(),
 			saved_by = $24,
-			pdf_absent_confirmed_at = NOW(),
-			pdf_absent_confirmed_by = $24,
+			pdf_absent_confirmed_at = CASE WHEN $25::boolean THEN NOW() ELSE NULL::timestamptz END,
+			pdf_absent_confirmed_by = CASE WHEN $25::boolean THEN $26::bigint ELSE NULL::bigint END,
 			updated_by = $24,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2 AND state = 'draft'`, schema),
@@ -608,6 +622,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.DiscountPercent, calculation.SubtotalMinor, calculation.DiscountMinor,
 		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
 		calculation.AdjustmentReason, calculation.GrandTotalMinor, input.UpdatedBy,
+		recordAbsence, input.UpdatedBy,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {

@@ -14,6 +14,10 @@
 // be reversed to reach.
 
 import { formatMoney, type CurrencyInfo } from "./format";
+import {
+  finalSaveNeedsConfirmation,
+  finalSaveSendsAbsenceConfirmation,
+} from "./purchaseOrderDocument";
 import type {
   PurchaseOrderDTO,
   PurchaseOrderEditorState,
@@ -518,7 +522,10 @@ export function buildFinalizeInput(
   if (state.header.poNumber.trim() === "") {
     return { input: null, error: "A customer PO number is required before the PO can be saved." };
   }
-  if (documentState === "none" && !documentConfirmed) {
+  // An unknown branch is treated as "none": asking for the confirmation again
+  // is safe, while silently assuming a PDF exists is not.
+  const branch = documentState === "attached" ? "attached" : "none";
+  if (finalSaveNeedsConfirmation(branch, documentConfirmed)) {
     return {
       input: null,
       error: "Confirm that this purchase order is saved without its customer PDF.",
@@ -551,7 +558,7 @@ export function buildFinalizeInput(
       })),
       AcknowledgedMissing: evaluation.comparison.missing.map((line) => sourceLabel(line)),
       AcknowledgedExtra: [...evaluation.comparison.extraLineNumbers],
-      DocumentConfirmed: documentConfirmed,
+      DocumentConfirmed: finalSaveSendsAbsenceConfirmation(branch, documentConfirmed),
     },
     error: null,
   };

@@ -275,6 +275,42 @@ type PurchaseOrderReviewRow struct {
 	DocumentState string                 `json:"documentState"`
 }
 
+// PurchaseOrderDocumentRow is one stored version of the single customer PO
+// PDF. Active is true for the one current document; ReplacedAt marks a version
+// superseded by a newer upload, and RemovedAt/RemovedBy mark a deliberate
+// removal. The bytes are never part of this row: content is served by its own
+// endpoint so a history listing cannot copy every version into memory.
+type PurchaseOrderDocumentRow struct {
+	UUID             string  `json:"uuid"`
+	SHA256           string  `json:"sha256"`
+	ContentType      string  `json:"contentType"`
+	OriginalFilename string  `json:"originalFilename"`
+	UploadedAt       string  `json:"uploadedAt"`
+	ReplacedAt       *string `json:"replacedAt"`
+	RemovedAt        *string `json:"removedAt"`
+	RemovedBy        *int64  `json:"removedBy"`
+	ID               int64   `json:"id"`
+	PurchaseOrderID  int64   `json:"purchaseOrderId"`
+	Version          int32   `json:"version"`
+	SizeBytes        int64   `json:"sizeBytes"`
+	UploadedBy       int64   `json:"uploadedBy"`
+	Active           bool    `json:"active"`
+}
+
+// PurchaseOrderDocumentStateRow is the current document plus retained history,
+// newest first. Document is null when no PDF is attached; Versions is empty
+// then, not null.
+type PurchaseOrderDocumentStateRow struct {
+	Document *PurchaseOrderDocumentRow  `json:"document"`
+	Versions []PurchaseOrderDocumentRow `json:"versions"`
+}
+
+// PurchaseOrderDocumentRemovalRequest is the deliberate removal. Confirmed
+// must be true; an empty body is not consent.
+type PurchaseOrderDocumentRemovalRequest struct {
+	Confirmed bool `json:"confirmed"`
+}
+
 // PurchaseOrderDecisionRequest is one explicit final-save choice. Choice is
 // "po" or "quotation"; neither is preselected by the client.
 type PurchaseOrderDecisionRequest struct {

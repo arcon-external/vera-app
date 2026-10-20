@@ -153,7 +153,8 @@ function reviewState(overrides: Partial<PurchaseOrderDTO> = {}) {
 
 function reviewElement(
   state = reviewState({ PaymentTerms: "30 days" }),
-  decisions: Record<string, "po" | "quotation"> = {}
+  decisions: Record<string, "po" | "quotation"> = {},
+  documentState: "none" | "attached" = "none"
 ) {
   return (
     <PurchaseOrderDifferenceReviewView
@@ -161,7 +162,7 @@ function reviewElement(
       source={SOURCE}
       currency={USD}
       quoteNumber="1502260042"
-      documentState="none"
+      documentState={documentState}
       decisions={decisions}
       acknowledgedMissing={[]}
       acknowledgedExtra={[]}
@@ -247,6 +248,12 @@ describe("PurchaseOrderDifferenceReviewView (issue #471)", () => {
     expect(html).toContain("No customer PO PDF is attached");
     expect(html).toContain("not a business approval");
   });
+
+  it("shows the attached branch without asking for the no-PDF confirmation", () => {
+    const html = markup(reviewElement(undefined, {}, "attached"));
+    expect(html).toContain("customer PO PDF is attached and stays with this record");
+    expect(html).not.toContain("No customer PO PDF is attached");
+  });
 });
 
 describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
@@ -323,6 +330,7 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
         order={order({ State: "saved", PdfAbsentConfirmed: true })}
         currency={USD}
         onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
       />
     );
     expect(html).toContain("Saved");
@@ -332,8 +340,12 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     expect(html).toContain("Widget");
     expect(html).toContain("Quotation 1");
     expect(html).toContain("No customer PO PDF attached");
-    expect(html).not.toContain("<input");
+    // #472 attaches the one customer PO PDF from a saved record too, so the
+    // hidden file input is the only input. No PO field became editable.
+    expect(html).toContain('aria-label="Customer PO PDF file"');
     expect(html).not.toContain("<textarea");
+    expect(html).not.toContain('type="text"');
+    expect(html).not.toContain('type="date"');
     expect(html).not.toContain("Save draft");
     expect(html).not.toContain("Final Save");
     expect(html).not.toContain("Add line");

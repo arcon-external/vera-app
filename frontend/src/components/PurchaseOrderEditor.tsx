@@ -29,6 +29,7 @@ import {
   type PurchaseOrderLineCalculation,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
+import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import {
   PurchaseOrderDifferenceReviewView,
   PurchaseOrderFinalConfirmationView,
@@ -870,7 +871,7 @@ export function PurchaseOrderEditorPage({
         source={review.Source}
         currency={currency}
         quoteNumber={order.QuoteNumber}
-        documentState={review.DocumentState}
+        documentState={review.DocumentState === "attached" ? "attached" : "none"}
         decisions={decisions}
         acknowledgedMissing={acknowledgedMissing}
         acknowledgedExtra={acknowledgedExtra}
@@ -943,16 +944,19 @@ export function PurchaseOrderEditorPage({
   }
 
   return (
-    <PurchaseOrderEditorView
-      state={state}
-      dispatch={dispatch}
-      currency={currency}
-      uomOptions={uomOptions}
-      incotermOptions={incotermOptions}
-      onSave={() => void save()}
-      onCancel={onCancel}
-      onFinalSave={() => void startReview()}
-      finalSaving={reviewLoading}
-    />
+    <div className="flex flex-col gap-6">
+      <PurchaseOrderDocumentPanel purchaseOrderId={order.ID} />
+      <PurchaseOrderEditorView
+        state={state}
+        dispatch={dispatch}
+        currency={currency}
+        uomOptions={uomOptions}
+        incotermOptions={incotermOptions}
+        onSave={() => void save()}
+        onCancel={onCancel}
+        onFinalSave={() => void startReview()}
+        finalSaving={reviewLoading}
+      />
+    </div>
   );
 }

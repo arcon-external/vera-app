@@ -4,6 +4,8 @@ import {backend} from '../models';
 import {store} from '../models';
 import {auth} from '../models';
 
+export function AttachPurchaseOrderDocument(arg1:backend.PurchaseOrderDocumentUploadInput):Promise<backend.PurchaseOrderDocumentDTO>;
+
 export function ClearDraftContext():Promise<void>;
 
 export function ClearRevisionContext():Promise<void>;
@@ -26,6 +28,8 @@ export function ExportTo(arg1:string):Promise<void>;
 
 export function FinalizePurchaseOrder(arg1:backend.PurchaseOrderFinalizeInput):Promise<backend.PurchaseOrderDTO>;
 
+export function GetActivePurchaseOrderDocumentContent(arg1:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
+
 export function GetCustomerPreview():Promise<backend.CustomerPreview>;
 
 export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
@@ -33,6 +37,10 @@ export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
 export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
+
+export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.PurchaseOrderDocumentStateDTO>;
+
+export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
 
 export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrderReviewDTO>;
 
@@ -63,6 +71,8 @@ export function PreviewTemplateDocument(arg1:Array<backend.CompanyLabelEntry>,ar
 export function PreviewTemplateHTML(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
 export function RefreshCompanyIdentity():Promise<void>;
+
+export function RemovePurchaseOrderDocument(arg1:number,arg2:boolean):Promise<backend.PurchaseOrderDocumentDTO>;
 
 export function RenderPDF():Promise<Array<number>>;
 

@@ -130,6 +130,14 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// and the final save is the one-way draft -> saved transition.
 	server.echo.GET("/v1/purchase-orders/:id/review", server.getPurchaseOrderReview, server.requireSession)
 	server.echo.POST("/v1/purchase-orders/:id/finalize", server.finalizePurchaseOrder, server.requireSession)
+	// The one optional customer PO PDF (issue #472): upload/replace, the
+	// active document's metadata and retained versions, byte content for the
+	// active document or one version, and deliberate removal.
+	server.echo.POST("/v1/purchase-orders/:id/document", server.uploadPurchaseOrderDocument, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/document", server.getPurchaseOrderDocument, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/document/content", server.getPurchaseOrderDocumentContent, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/documents/:version/content", server.getPurchaseOrderDocumentVersionContent, server.requireSession)
+	server.echo.DELETE("/v1/purchase-orders/:id/document", server.removePurchaseOrderDocument, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
