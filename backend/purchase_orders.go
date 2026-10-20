@@ -1,14 +1,15 @@
 package backend
 
 import (
+	"encoding/base64"
 	"fmt"
 	"mime"
-	"os"
 	"path"
 	"strconv"
 	"strings"
 
 	"vera-app/backend/apicontract"
+	"vera-app/backend/store"
 )
 
 // Issue #468: desktop bindings for a manual Purchase Order draft. Both PO
@@ -148,10 +149,16 @@ type PurchaseOrderDocumentStateDTO struct {
 	Versions []PurchaseOrderDocumentDTO
 }
 
-// PurchaseOrderDocumentContentDTO is the raw PDF bytes and the headers that
-// identify which version was served.
+// PurchaseOrderDocumentContentDTO is the PDF content, base64-encoded, and the
+// headers that identify which version was served.
+//
+// Base64 is explicit rather than an implicit []byte because the two sides
+// disagreed once already: Wails serializes []byte as base64 text, while the
+// generated TypeScript called it number[] and the panel built a zero-length
+// array. A string field makes the representation part of the contract, and
+// frontend/src/purchaseOrderDocument.ts is the only decoder.
 type PurchaseOrderDocumentContentDTO struct {
-	Data        []byte
+	DataBase64  string
 	ContentType string
 	Filename    string
 	SHA256      string
@@ -159,14 +166,12 @@ type PurchaseOrderDocumentContentDTO struct {
 }
 
 // PurchaseOrderDocumentUploadInput attaches or replaces the one customer PO
-// PDF. The desktop may pass the bytes it read from a file input (Data +
-// Filename) or a local path (FilePath); Data wins when both are set. This
-// mirrors DraftRevision's dual bytes/path convention while keeping the
-// original display name.
+// PDF. The editor uses its file picker, reads the file, and sends the bytes
+// base64-encoded; there is no path variant, because the desktop picker never
+// supplied one and a path the panel does not use is a second untested input.
 type PurchaseOrderDocumentUploadInput struct {
 	PurchaseOrderID int64
-	Data            []byte
-	FilePath        string
+	DataBase64      string
 	Filename        string
 }
 
@@ -469,8 +474,9 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 }
 
 // AttachPurchaseOrderDocument stores the one customer PO PDF as the next
-// version. It accepts bytes (Data, with Filename) or a local path (FilePath);
-// bytes win when both are present.
+// version. DataBase64 is the exact file the editor read; the decoded bytes are
+// bounded again here so a hand-built caller cannot push more than the server
+// and schema allow.
 func (q *Quotation) AttachPurchaseOrderDocument(input PurchaseOrderDocumentUploadInput) (PurchaseOrderDocumentDTO, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return PurchaseOrderDocumentDTO{}, err
@@ -479,18 +485,11 @@ func (q *Quotation) AttachPurchaseOrderDocument(input PurchaseOrderDocumentUploa
 	if err != nil {
 		return PurchaseOrderDocumentDTO{}, err
 	}
-	data := input.Data
-	filename := strings.TrimSpace(input.Filename)
-	if len(data) == 0 && strings.TrimSpace(input.FilePath) != "" {
-		loaded, readErr := os.ReadFile(input.FilePath)
-		if readErr != nil {
-			return PurchaseOrderDocumentDTO{}, fmt.Errorf("read the customer PO PDF: %w", readErr)
-		}
-		data = loaded
-		if filename == "" {
-			filename = path.Base(strings.ReplaceAll(input.FilePath, "\\", "/"))
-		}
+	data, err := decodePurchaseOrderPDFBase64(input.DataBase64)
+	if err != nil {
+		return PurchaseOrderDocumentDTO{}, err
 	}
+	filename := strings.TrimSpace(input.Filename)
 	if len(data) == 0 {
 		return PurchaseOrderDocumentDTO{}, fmt.Errorf("choose a PDF to attach")
 	}
@@ -564,7 +563,7 @@ func (q *Quotation) getPurchaseOrderDocumentContent(endpoint string) (PurchaseOr
 		return PurchaseOrderDocumentContentDTO{}, err
 	}
 	content := PurchaseOrderDocumentContentDTO{
-		Data:        data,
+		DataBase64:  base64.StdEncoding.EncodeToString(data),
 		ContentType: header.Get("Content-Type"),
 		Filename:    "customer-po.pdf",
 		SHA256:      header.Get("X-Document-SHA256"),
@@ -601,6 +600,30 @@ func (q *Quotation) RemovePurchaseOrderDocument(id int64, confirmed bool) (Purch
 		return PurchaseOrderDocumentDTO{}, err
 	}
 	return mapPurchaseOrderDocumentDTO(response), nil
+}
+
+// decodePurchaseOrderPDFBase64 turns the wire value back into bytes. The bound
+// is applied to the encoded length before decoding, so an oversized string is
+// refused without first materializing its decoded copy.
+func decodePurchaseOrderPDFBase64(encoded string) ([]byte, error) {
+	trimmed := strings.TrimSpace(encoded)
+	if trimmed == "" {
+		return nil, nil
+	}
+	// EncodedLen is the exact text length of a file at the bound, so a longer
+	// string cannot decode to an accepted size. DecodedLen would over-count
+	// the padding and refuse a file of exactly 20 MiB.
+	if int64(len(trimmed)) > int64(base64.StdEncoding.EncodedLen(int(store.MaxPurchaseOrderDocumentBytes))) {
+		return nil, fmt.Errorf("the customer PO PDF is larger than 20 MB")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(trimmed)
+	if err != nil {
+		return nil, fmt.Errorf("the customer PO PDF content is not valid base64: %w", err)
+	}
+	if int64(len(decoded)) > store.MaxPurchaseOrderDocumentBytes {
+		return nil, fmt.Errorf("the customer PO PDF is larger than 20 MB")
+	}
+	return decoded, nil
 }
 
 func mapPurchaseOrderDocumentDTO(row apicontract.PurchaseOrderDocumentRow) PurchaseOrderDocumentDTO {

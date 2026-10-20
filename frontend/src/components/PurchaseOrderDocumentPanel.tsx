@@ -7,6 +7,8 @@ import {
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import {
+  base64ToBytes,
+  bytesToBase64,
   documentErrorMessage,
   documentStateOf,
   documentVersionLabel,
@@ -311,8 +313,7 @@ export function PurchaseOrderDocumentPanel({
       await AttachPurchaseOrderDocument(
         new backend.PurchaseOrderDocumentUploadInput({
           PurchaseOrderID: purchaseOrderId,
-          Data: Array.from(new Uint8Array(buffer)),
-          FilePath: "",
+          DataBase64: bytesToBase64(new Uint8Array(buffer)),
           Filename: file.name,
         })
       );
@@ -335,7 +336,7 @@ export function PurchaseOrderDocumentPanel({
         setError("This build cannot open a PDF preview. The document is still attached.");
         return;
       }
-      const blob = new Blob([new Uint8Array(content.Data)], {
+      const blob = new Blob([base64ToBytes(content.DataBase64)], {
         type: content.ContentType || "application/pdf",
       });
       const url = URL.createObjectURL(blob);

@@ -1,13 +1,16 @@
 package backend
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"vera-app/backend/apicontract"
@@ -69,7 +72,7 @@ func TestAttachPurchaseOrderDocumentSendsBytesOrAPath(t *testing.T) {
 		q := newTestQuotation()
 		document, err := q.AttachPurchaseOrderDocument(PurchaseOrderDocumentUploadInput{
 			PurchaseOrderID: 7,
-			Data:            data,
+			DataBase64:      base64.StdEncoding.EncodeToString(data),
 			Filename:        "Customer PO.pdf",
 		})
 		if err != nil {
@@ -79,38 +82,6 @@ func TestAttachPurchaseOrderDocumentSendsBytesOrAPath(t *testing.T) {
 			document.OriginalFilename != "Customer PO.pdf" ||
 			document.UploadedAt != "2026-10-21T10:00:00Z" {
 			t.Errorf("document = %+v; want the mapped metadata", document)
-		}
-	})
-
-	t.Run("path", func(t *testing.T) {
-		data := documentTestBytes("path")
-		filePath := filepath.Join(t.TempDir(), "from-disk.pdf")
-		if err := os.WriteFile(filePath, data, 0o644); err != nil {
-			t.Fatalf("write fixture: %v", err)
-		}
-		stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
-			filename, received := readMultipartDocument(t, request)
-			if filename != "from-disk.pdf" {
-				t.Errorf("filename = %q; want the path's base name", filename)
-			}
-			if string(received) != string(data) {
-				t.Error("uploaded bytes differ from the file on disk")
-			}
-			writer.WriteHeader(http.StatusCreated)
-			_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderDocumentRow{
-				ID: 4, PurchaseOrderID: 7, Version: 1, Active: true,
-			})
-		})
-		q := newTestQuotation()
-		document, err := q.AttachPurchaseOrderDocument(PurchaseOrderDocumentUploadInput{
-			PurchaseOrderID: 7,
-			FilePath:        filePath,
-		})
-		if err != nil {
-			t.Fatalf("attach from path: %v", err)
-		}
-		if document.ID != 4 {
-			t.Errorf("document = %+v; want id 4", document)
 		}
 	})
 
@@ -172,7 +143,8 @@ func TestGetPurchaseOrderDocumentContentMapsHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("content: %v", err)
 	}
-	if string(content.Data) != string(data) || content.Version != 2 ||
+	decoded, decodeErr := base64.StdEncoding.DecodeString(content.DataBase64)
+	if decodeErr != nil || string(decoded) != string(data) || content.Version != 2 ||
 		content.SHA256 != "sha-content" || content.Filename != "Customer PO.pdf" ||
 		content.ContentType != "application/pdf" {
 		t.Errorf("content = %+v; want bytes with version 2 headers", content)
@@ -208,3 +180,115 @@ func TestRemovePurchaseOrderDocumentSendsTheConfirmation(t *testing.T) {
 
 func int64Ptr(value int64) *int64    { return &value }
 func stringPtr(value string) *string { return &value }
+
+// Problem: Wails serializes a Go []byte as base64 *text*, but the generated
+// TypeScript declared number[] and the panel built a zero-length array from
+// it. The wire representation is therefore made explicit as a base64 string on
+// both directions, and these tests pin the JSON shapes rather than the Go
+// fields, because the JSON shape is what crosses the boundary.
+const pdfHeaderBase64 = "JVBERi0xLjcK" // %PDF-1.7\n
+
+func TestPurchaseOrderDocumentContentWireValueIsBase64(t *testing.T) {
+	encoded, err := json.Marshal(PurchaseOrderDocumentContentDTO{DataBase64: pdfHeaderBase64})
+	if err != nil {
+		t.Fatalf("marshal content DTO: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("decode content DTO: %v", err)
+	}
+	if got := string(fields["DataBase64"]); got != `"`+pdfHeaderBase64+`"` {
+		t.Errorf("DataBase64 = %s; want the base64 text %q", got, pdfHeaderBase64)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(pdfHeaderBase64)
+	if err != nil || string(decoded) != "%PDF-1.7\n" {
+		t.Fatalf("the pinned wire literal does not decode to the PDF header (%v)", err)
+	}
+}
+
+func TestPurchaseOrderDocumentContentWireFieldIsBase64(t *testing.T) {
+	encoded, err := json.Marshal(PurchaseOrderDocumentContentDTO{})
+	if err != nil {
+		t.Fatalf("marshal content DTO: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("decode content DTO: %v", err)
+	}
+	if _, ok := fields["Data"]; ok {
+		t.Errorf("content DTO still exposes Data (the raw-byte field Wails encodes as base64 anyway)")
+	}
+	if _, ok := fields["DataBase64"]; !ok {
+		t.Errorf("content DTO has no DataBase64 field; fields = %v", keysOf(fields))
+	}
+}
+
+func TestDecodePurchaseOrderPDFBase64(t *testing.T) {
+	decoded, err := decodePurchaseOrderPDFBase64(pdfHeaderBase64)
+	if err != nil || string(decoded) != "%PDF-1.7\n" {
+		t.Fatalf("decode header = %q (%v); want %%PDF-1.7\n", decoded, err)
+	}
+	if decoded, err := decodePurchaseOrderPDFBase64("   "); err != nil || decoded != nil {
+		t.Errorf("blank input = %q (%v); want nil and no error", decoded, err)
+	}
+	if _, err := decodePurchaseOrderPDFBase64("not base64!"); err == nil ||
+		!strings.Contains(err.Error(), "base64") {
+		t.Fatalf("malformed base64 error = %v; want a decode refusal", err)
+	}
+	// The boundary belongs to the accepted side: a file of exactly 20 MiB is
+	// encoded, accepted, and decoded intact.
+	exactData := bytes.Repeat([]byte("A"), int(20<<20))
+	exact := base64.StdEncoding.EncodeToString(exactData)
+	decodedExact, err := decodePurchaseOrderPDFBase64(exact)
+	if err != nil || len(decodedExact) != len(exactData) {
+		t.Fatalf("exactly 20 MiB base64 = %d bytes (%v); want %d", len(decodedExact), err, len(exactData))
+	}
+	// The encoded bound is checked before decoding, so an oversized string is
+	// refused without first building its decoded copy.
+	oversized := base64.StdEncoding.EncodeToString(make([]byte, int(20<<20)+1))
+	if _, err := decodePurchaseOrderPDFBase64(oversized); err == nil ||
+		!strings.Contains(err.Error(), "20 MB") {
+		t.Fatalf("oversized base64 error = %v; want the 20 MB refusal", err)
+	}
+}
+
+func TestPurchaseOrderDocumentUploadAcceptsTheBase64JSONShape(t *testing.T) {
+	data := documentTestBytes("base64-wire")
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		filename, received := readMultipartDocument(t, request)
+		if filename != "Customer PO.pdf" {
+			t.Errorf("filename = %q; want Customer PO.pdf", filename)
+		}
+		if string(received) != string(data) {
+			t.Errorf("uploaded %q; want %q", received, data)
+		}
+		writer.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderDocumentRow{
+			ID: 5, PurchaseOrderID: 7, Version: 1, Active: true,
+		})
+	})
+	// The exact JSON a Wails client sends for the argument struct.
+	wire := fmt.Sprintf(`{"PurchaseOrderID":7,"DataBase64":%q,"Filename":"Customer PO.pdf"}`,
+		base64.StdEncoding.EncodeToString(data))
+	var input PurchaseOrderDocumentUploadInput
+	if err := json.Unmarshal([]byte(wire), &input); err != nil {
+		t.Fatalf("decode upload input: %v", err)
+	}
+	q := newTestQuotation()
+	document, err := q.AttachPurchaseOrderDocument(input)
+	if err != nil {
+		t.Fatalf("attach from base64: %v", err)
+	}
+	if document.ID != 5 {
+		t.Errorf("document = %+v; want id 5", document)
+	}
+}
+
+func keysOf(fields map[string]json.RawMessage) []string {
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
