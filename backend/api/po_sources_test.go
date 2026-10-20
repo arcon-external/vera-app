@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -188,6 +189,54 @@ func TestPOSourceListPaginatesIssuedQuotationsFifteenPerPage(t *testing.T) {
 	}
 	if row.ActivePO != nil {
 		t.Errorf("row claims an active PO before one exists")
+	}
+}
+
+// TestPOSourceListRejectsAnUnrepresentablePage is the regression for a page
+// whose (page-1)*15 offset overflows a signed 64-bit integer. The handler used
+// to accept it and Postgres answered the negative OFFSET with an error,
+// turning malformed input into a 500. 614891469123651722 is
+// floor(MaxInt64/15)+2: one past the largest page with a representable offset.
+func TestPOSourceListRejectsAnUnrepresentablePage(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_sources_page_overflow")
+
+	const page = "614891469123651722"
+	code, body := doJSON(t, server, http.MethodGet, "/v1/po-sources?page="+page, token, nil)
+	if code != http.StatusBadRequest {
+		t.Fatalf("GET page=%s = %d; want 400, never 500 (%v)", page, code, body)
+	}
+}
+
+// TestPOSourceListAcceptsTheLargestRepresentablePage pins the other side of
+// that boundary, including the exact page echo. The guard must reject only the
+// pages whose offset cannot be represented; a page past the end stays an empty
+// page, not a 404 or a clamp.
+func TestPOSourceListAcceptsTheLargestRepresentablePage(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_sources_page_boundary")
+
+	// floor(MaxInt64/15)+1. Decode the typed body directly rather than through
+	// doJSON: that helper's intermediate map[string]any turns the page into a
+	// float64, so a 19-digit value would be rounded before the echo comparison.
+	const page = int64(614891469123651721)
+	request := httptest.NewRequest(http.MethodGet, "/v1/po-sources?page="+strconv.FormatInt(page, 10), nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET page=%d = %d; want 200 (%s)", page, recorder.Code, recorder.Body.String())
+	}
+	var list poSourceList
+	if err := json.Unmarshal(recorder.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode response: %v (%s)", err, recorder.Body.String())
+	}
+	if int64(list.Page) != page {
+		t.Errorf("page echo = %d; want exactly %d", list.Page, page)
+	}
+	if len(list.Quotations) != 0 {
+		t.Errorf("rows = %d; want an empty page past the end", len(list.Quotations))
+	}
+	if list.PageSize != 15 || list.TotalPages < 1 {
+		t.Errorf("page meta = %+v; want page size 15 and at least one total page", list)
 	}
 }
 

@@ -43,6 +43,11 @@ func (s *Server) listPOSources(context echo.Context) error {
 	}
 	quotations, total, err := s.database.ListPOSourceQuotations(
 		requestContext, page, context.QueryParam("search"), hideUsed)
+	if errors.Is(err, store.ErrPOSourceInvalid) {
+		// A page whose offset cannot be represented is malformed input, not a
+		// server failure (issue #483).
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid page"})
+	}
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "list quotation sources"})
 	}
@@ -51,7 +56,13 @@ func (s *Server) listPOSources(context echo.Context) error {
 	for _, quotation := range quotations {
 		rows = append(rows, mapPOSourceQuotation(quotation))
 	}
-	totalPages := (total + store.POSourcePageSize - 1) / store.POSourcePageSize
+	// Divide before adding: `total + 14` is the same add-before-divide class
+	// as the old offset. COUNT(*) cannot reach MaxInt-14 in a real table, but
+	// the safe form costs nothing and leaves no wrapping arithmetic here.
+	totalPages := total / store.POSourcePageSize
+	if total%store.POSourcePageSize != 0 {
+		totalPages++
+	}
 	if totalPages < 1 {
 		// One empty page, not "page 1 of 0": the selector still shows its
 		// empty state with working pagination controls.
