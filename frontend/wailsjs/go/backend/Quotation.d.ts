@@ -46,6 +46,8 @@ export function ListPOSourceQuotations(arg1:backend.POSourceQuery):Promise<backe
 
 export function ListPOSourceRevisions(arg1:number):Promise<backend.POSourceRevisionsDTO>;
 
+export function ListPurchaseOrders(arg1:backend.PurchaseOrderListQuery):Promise<backend.PurchaseOrderListPageDTO>;
+
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
 
 export function PickDirectory():Promise<string>;

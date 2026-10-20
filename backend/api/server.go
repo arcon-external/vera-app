@@ -120,6 +120,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// Manual Purchase Order drafts (issue #468). Creating is the server-side
 	// revalidation of the selector's exact pair; reading reopens a draft;
 	// updating replaces the editable draft header and lines.
+	// The archive (issue #469) is the one GET collection route: 15 rows per
+	// page, org-scoped, with search and filters.
+	server.echo.GET("/v1/purchase-orders", server.listPurchaseOrders, server.requireSession)
 	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
 	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)

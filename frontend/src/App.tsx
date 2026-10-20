@@ -57,10 +57,8 @@ import {
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
-import {
-  DocumentHomePage,
-  PurchaseOrderPlaceholderPage,
-} from "./components/DocumentHomePage";
+import { DocumentHomePage } from "./components/DocumentHomePage";
+import { PurchaseOrderListPage } from "./components/PurchaseOrderListPage";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
   POSourcePage,
@@ -73,7 +71,7 @@ import {
   PurchaseOrderDiscardPrompt,
   PurchaseOrderEditorPage,
 } from "./components/PurchaseOrderEditor";
-import { usePurchaseOrderLeaveGuard } from "./poLeaveGuard";
+import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
@@ -461,18 +459,24 @@ function App() {
   // #468 wave 2: the PO editor owns its reducer state, so a tab that unmounts
   // it loses unsaved work. The editor lifts only its dirty flag; this gate
   // asks through the same discard panel before any navigation leaves it.
-  const poLeave = usePurchaseOrderLeaveGuard(page, setPage);
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
   } | null>(null);
-  // The PO source selector (#467) is shared by both entry paths. poSource is
-  // the exact pair it returned; #468 opens PO entry with it.
+  // The PO source selector (#467) is shared by both PO entry paths.
   const [poSelectorOpen, setPOSelectorOpen] = useState(false);
-  const [poSource, setPOSource] = useState<POSourceSelection | null>(null);
-  // The draft the PO workspace is editing (#468). Null means the entry page:
-  // the selector's two paths create or reopen a draft and set this.
+  // The draft the PO workspace is editing (#468). Null means the PO page is
+  // the archive (#469): the selector's two paths create or reopen a draft and
+  // set this.
   const [poDraft, setPODraft] = useState<PurchaseOrderDTO | null>(null);
+  // Leaving the PO page clears the edited draft, so returning to the PO surface
+  // shows the archive rather than a stale editor. The leave guard owns the
+  // dirty-check before this runs.
+  const navigatePage = useCallback((next: AppPage) => {
+    if (next !== "po") setPODraft(null);
+    setPage(next);
+  }, []);
+  const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage);
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
     revision: number;
@@ -500,6 +504,25 @@ function App() {
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
   const { pushToast } = useToast();
+  // #469: a row opens the exact stored draft by id through the #468 route.
+  // The list already knows the id; the server is the authority on the record,
+  // so it is fetched rather than passed in from the row.
+  const openPurchaseOrder = useCallback(
+    async (id: number) => {
+      try {
+        const draft = await GetPurchaseOrder(id);
+        poLeave.setDirty(false);
+        setPODraft(draft);
+        setPage("po");
+      } catch (error) {
+        pushToast(
+          "error",
+          getErrorMessage(error, "The purchase order could not be opened.")
+        );
+      }
+    },
+    [poLeave, pushToast]
+  );
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
@@ -1742,7 +1765,6 @@ function App() {
             RevisionNumber: selection.revisionNumber,
             ReceivedDate: "",
           });
-          setPOSource(selection);
           poLeave.setDirty(false);
           setPODraft(draft);
           setPOSelectorOpen(false);
@@ -1911,9 +1933,9 @@ function App() {
 
       {page === "po" ? (
         poDraft === null ? (
-          <PurchaseOrderPlaceholderPage
-            onAddFromQuotation={() => setPOSelectorOpen(true)}
-            selectedSource={poSource}
+          <PurchaseOrderListPage
+            onAdd={() => setPOSelectorOpen(true)}
+            onOpen={(id) => void openPurchaseOrder(id)}
           />
         ) : poEntry === null ? (
           <StatusBanner tone="danger">
@@ -1935,13 +1957,11 @@ function App() {
             onCancel={() => {
               // Cancel is the same discard decision as a tab click: the guard
               // owns the one dialog, and this cleanup runs only once it is
-              // allowed. A Cancel followed by a tab replaces the pending
-              // action instead of opening a second confirmation.
+              // allowed. The page stays "po", so a clean Cancel lands back on
+              // the archive; a dirty one asks first.
               poLeave.request("home", () => {
                 poLeave.setDirty(false);
                 setPODraft(null);
-                setPOSource(null);
-                setPage("home");
               });
             }}
           />
