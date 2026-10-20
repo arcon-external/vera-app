@@ -1179,28 +1179,197 @@ export namespace backend {
 	        this.Valid = source["Valid"];
 	    }
 	}
-	export class PurchaseOrderListQuery {
-	    Search: string;
-	    State: string;
-	    CustomerIDs: number[];
-	    ReceivedFrom: string;
-	    ReceivedTo: string;
-	    SourceMissing: string;
-	    Page: number;
+	export class PurchaseOrderCreateInput {
+	    ReceivedDate: string;
+	    QuotationID: number;
+	    RevisionNumber: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderListQuery(source);
+	        return new PurchaseOrderCreateInput(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Search = source["Search"];
+	        this.ReceivedDate = source["ReceivedDate"];
+	        this.QuotationID = source["QuotationID"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	    }
+	}
+	export class PurchaseOrderItemDTO {
+	    QuotationItemNo?: number;
+	    QuotationSubNo?: number;
+	    LineNumber: number;
+	    Description: string;
+	    QuantityScaled: number;
+	    UoM: string;
+	    UnitPriceMinor: number;
+	    DiscountEnabled: boolean;
+	    DiscountPercent: number;
+	    GrossMinor: number;
+	    DiscountMinor: number;
+	    NetMinor: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderItemDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationItemNo = source["QuotationItemNo"];
+	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.LineNumber = source["LineNumber"];
+	        this.Description = source["Description"];
+	        this.QuantityScaled = source["QuantityScaled"];
+	        this.UoM = source["UoM"];
+	        this.UnitPriceMinor = source["UnitPriceMinor"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.GrossMinor = source["GrossMinor"];
+	        this.DiscountMinor = source["DiscountMinor"];
+	        this.NetMinor = source["NetMinor"];
+	    }
+	}
+	export class PurchaseOrderDTO {
+	    PODate?: string;
+	    RequestedDeliveryDate?: string;
+	    UUID: string;
+	    State: string;
+	    QuoteNumber: string;
+	    CustomerName: string;
+	    BillingAddress: string;
+	    DeliveryAddress: string;
+	    ShipToCode: string;
+	    ContactEmail: string;
+	    ContactPhone: string;
+	    PONumber: string;
+	    ReceivedDate: string;
+	    Incoterms: string;
+	    Currency: string;
+	    TaxZone: string;
+	    TaxCategory: string;
+	    AdjustmentReason: string;
+	    CreatedAt: string;
+	    UpdatedAt: string;
+	    Items: PurchaseOrderItemDTO[];
+	    ID: number;
+	    QuotationID: number;
+	    SourceRevision: number;
+	    CustomerID: number;
+	    PaymentTerms: string;
+	    DiscountPercent: number;
+	    PpnBps: number;
+	    SubtotalMinor: number;
+	    DiscountMinor: number;
+	    PpnMinor: number;
+	    AdjustmentMinor: number;
+	    GrandTotalMinor: number;
+	    PrintedSubtotalMinor: number;
+	    PrintedDiscountMinor: number;
+	    PrintedPpnMinor: number;
+	    PrintedGrandTotalMinor: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.PODate = source["PODate"];
+	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
+	        this.UUID = source["UUID"];
 	        this.State = source["State"];
-	        this.CustomerIDs = source["CustomerIDs"];
-	        this.ReceivedFrom = source["ReceivedFrom"];
-	        this.ReceivedTo = source["ReceivedTo"];
-	        this.SourceMissing = source["SourceMissing"];
-	        this.Page = source["Page"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.BillingAddress = source["BillingAddress"];
+	        this.DeliveryAddress = source["DeliveryAddress"];
+	        this.ShipToCode = source["ShipToCode"];
+	        this.ContactEmail = source["ContactEmail"];
+	        this.ContactPhone = source["ContactPhone"];
+	        this.PONumber = source["PONumber"];
+	        this.ReceivedDate = source["ReceivedDate"];
+	        this.Incoterms = source["Incoterms"];
+	        this.Currency = source["Currency"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxCategory = source["TaxCategory"];
+	        this.AdjustmentReason = source["AdjustmentReason"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemDTO);
+	        this.ID = source["ID"];
+	        this.QuotationID = source["QuotationID"];
+	        this.SourceRevision = source["SourceRevision"];
+	        this.CustomerID = source["CustomerID"];
+	        this.PaymentTerms = source["PaymentTerms"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.PpnBps = source["PpnBps"];
+	        this.SubtotalMinor = source["SubtotalMinor"];
+	        this.DiscountMinor = source["DiscountMinor"];
+	        this.PpnMinor = source["PpnMinor"];
+	        this.AdjustmentMinor = source["AdjustmentMinor"];
+	        this.GrandTotalMinor = source["GrandTotalMinor"];
+	        this.PrintedSubtotalMinor = source["PrintedSubtotalMinor"];
+	        this.PrintedDiscountMinor = source["PrintedDiscountMinor"];
+	        this.PrintedPpnMinor = source["PrintedPpnMinor"];
+	        this.PrintedGrandTotalMinor = source["PrintedGrandTotalMinor"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class PurchaseOrderItemInput {
+	    QuotationItemNo?: number;
+	    QuotationSubNo?: number;
+	    Description: string;
+	    QuantityScaled: number;
+	    UoM: string;
+	    UnitPriceMinor: number;
+	    DiscountEnabled: boolean;
+	    DiscountPercent: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderItemInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationItemNo = source["QuotationItemNo"];
+	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.Description = source["Description"];
+	        this.QuantityScaled = source["QuantityScaled"];
+	        this.UoM = source["UoM"];
+	        this.UnitPriceMinor = source["UnitPriceMinor"];
+	        this.DiscountEnabled = source["DiscountEnabled"];
+	        this.DiscountPercent = source["DiscountPercent"];
+	    }
+	}
+	export class PurchaseOrderListCustomerDTO {
+	    Name: string;
+	    ID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderListCustomerDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Name = source["Name"];
+	        this.ID = source["ID"];
 	    }
 	}
 	export class PurchaseOrderListRowDTO {
@@ -1233,20 +1402,6 @@ export namespace backend {
 	        this.CustomerID = source["CustomerID"];
 	        this.SourceRevision = source["SourceRevision"];
 	        this.SourceMissing = source["SourceMissing"];
-	    }
-	}
-	export class PurchaseOrderListCustomerDTO {
-	    Name: string;
-	    ID: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderListCustomerDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Name = source["Name"];
-	        this.ID = source["ID"];
 	    }
 	}
 	export class PurchaseOrderListPageDTO {
@@ -1289,147 +1444,31 @@ export namespace backend {
 		    return a;
 		}
 	}
-	export class PurchaseOrderCreateInput {
-	    ReceivedDate: string;
-	    QuotationID: number;
-	    RevisionNumber: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderCreateInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.ReceivedDate = source["ReceivedDate"];
-	        this.QuotationID = source["QuotationID"];
-	        this.RevisionNumber = source["RevisionNumber"];
-	    }
-	}
-	export class PurchaseOrderItemDTO {
-	    QuotationItemNo?: number;
-	    QuotationSubNo?: number;
-	    LineNumber: number;
-	    Description: string;
-	    QuantityScaled: number;
-	    UoM: string;
-	    UnitPriceMinor: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderItemDTO(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.QuotationItemNo = source["QuotationItemNo"];
-	        this.QuotationSubNo = source["QuotationSubNo"];
-	        this.LineNumber = source["LineNumber"];
-	        this.Description = source["Description"];
-	        this.QuantityScaled = source["QuantityScaled"];
-	        this.UoM = source["UoM"];
-	        this.UnitPriceMinor = source["UnitPriceMinor"];
-	    }
-	}
-	export class PurchaseOrderDTO {
-	    PODate?: string;
-	    RequestedDeliveryDate?: string;
-	    UUID: string;
+	export class PurchaseOrderListQuery {
+	    Search: string;
 	    State: string;
-	    QuoteNumber: string;
-	    CustomerName: string;
-	    BillingAddress: string;
-	    DeliveryAddress: string;
-	    ShipToCode: string;
-	    ContactEmail: string;
-	    ContactPhone: string;
-	    PONumber: string;
-	    ReceivedDate: string;
-	    Incoterms: string;
-	    Currency: string;
-	    TaxZone: string;
-	    TaxCategory: string;
-	    CreatedAt: string;
-	    UpdatedAt: string;
-	    Items: PurchaseOrderItemDTO[];
-	    ID: number;
-	    QuotationID: number;
-	    SourceRevision: number;
-	    CustomerID: number;
-	    PaymentTerms: string;
+	    CustomerIDs: number[];
+	    ReceivedFrom: string;
+	    ReceivedTo: string;
+	    SourceMissing: string;
+	    Page: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderDTO(source);
+	        return new PurchaseOrderListQuery(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.PODate = source["PODate"];
-	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
-	        this.UUID = source["UUID"];
+	        this.Search = source["Search"];
 	        this.State = source["State"];
-	        this.QuoteNumber = source["QuoteNumber"];
-	        this.CustomerName = source["CustomerName"];
-	        this.BillingAddress = source["BillingAddress"];
-	        this.DeliveryAddress = source["DeliveryAddress"];
-	        this.ShipToCode = source["ShipToCode"];
-	        this.ContactEmail = source["ContactEmail"];
-	        this.ContactPhone = source["ContactPhone"];
-	        this.PONumber = source["PONumber"];
-	        this.ReceivedDate = source["ReceivedDate"];
-	        this.Incoterms = source["Incoterms"];
-	        this.Currency = source["Currency"];
-	        this.TaxZone = source["TaxZone"];
-	        this.TaxCategory = source["TaxCategory"];
-	        this.CreatedAt = source["CreatedAt"];
-	        this.UpdatedAt = source["UpdatedAt"];
-	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemDTO);
-	        this.ID = source["ID"];
-	        this.QuotationID = source["QuotationID"];
-	        this.SourceRevision = source["SourceRevision"];
-	        this.CustomerID = source["CustomerID"];
-	        this.PaymentTerms = source["PaymentTerms"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-	
-	export class PurchaseOrderItemInput {
-	    QuotationItemNo?: number;
-	    QuotationSubNo?: number;
-	    Description: string;
-	    QuantityScaled: number;
-	    UoM: string;
-	    UnitPriceMinor: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new PurchaseOrderItemInput(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.QuotationItemNo = source["QuotationItemNo"];
-	        this.QuotationSubNo = source["QuotationSubNo"];
-	        this.Description = source["Description"];
-	        this.QuantityScaled = source["QuantityScaled"];
-	        this.UoM = source["UoM"];
-	        this.UnitPriceMinor = source["UnitPriceMinor"];
+	        this.CustomerIDs = source["CustomerIDs"];
+	        this.ReceivedFrom = source["ReceivedFrom"];
+	        this.ReceivedTo = source["ReceivedTo"];
+	        this.SourceMissing = source["SourceMissing"];
+	        this.Page = source["Page"];
 	    }
 	}
+	
 	export class PurchaseOrderUpdateInput {
 	    ID: number;
 	    BillingAddress: string;
@@ -1443,7 +1482,10 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    AdjustmentReason: string;
 	    Items: PurchaseOrderItemInput[];
+	    DiscountPercent: number;
+	    AdjustmentMinor: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderUpdateInput(source);
@@ -1463,7 +1505,10 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.DiscountPercent = source["DiscountPercent"];
+	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

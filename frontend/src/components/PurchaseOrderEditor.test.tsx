@@ -58,6 +58,11 @@ const ORDER: PurchaseOrderDTO = {
       QuantityScaled: 25000,
       UoM: "Pc",
       UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+      GrossMinor: 312625,
+      DiscountMinor: 31262,
+      NetMinor: 281363,
     },
     {
       QuotationItemNo: 2,
@@ -67,6 +72,11 @@ const ORDER: PurchaseOrderDTO = {
       QuantityScaled: 10000,
       UoM: "Unit",
       UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
     },
   ],
   ID: 7,
@@ -74,6 +84,18 @@ const ORDER: PurchaseOrderDTO = {
   SourceRevision: 1,
   CustomerID: 2,
   PaymentTerms: "45 days",
+  AdjustmentReason: "Round to the printed total",
+  DiscountPercent: 5,
+  PpnBps: 0,
+  SubtotalMinor: 323363,
+  DiscountMinor: 16168,
+  PpnMinor: 0,
+  AdjustmentMinor: -250,
+  GrandTotalMinor: 306945,
+  PrintedSubtotalMinor: 305000,
+  PrintedDiscountMinor: 0,
+  PrintedPpnMinor: 0,
+  PrintedGrandTotalMinor: 305000,
 };
 
 const UOM_OPTIONS = [
@@ -150,16 +172,50 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain('value="$420.00"');
   });
 
-  it("offers Save draft and Cancel but no final-save, totals or PDF surface", () => {
+  it("offers Save draft and Cancel, with the calculation but no final actions", () => {
     const html = render();
     expect(buttonTagFor(html, "Save draft")).not.toContain(" disabled=");
     expect(buttonTagFor(html, "Cancel draft")).not.toContain(" disabled=");
     expect(buttonTagFor(html, "Add line")).not.toContain(" disabled=");
-    // Later slices own these; a draft must not pretend they exist.
-    expect(html).not.toContain("Grand total");
-    expect(html).not.toContain("Subtotal");
+    // #470 owns the explained calculation; later slices own the rest, and a
+    // draft must not pretend they exist.
+    expect(html).toContain("Grand total");
+    expect(html).toContain("Subtotal");
+    expect(html).toContain("$3,069.45");
     expect(html).not.toContain("Upload PDF");
     expect(html).not.toContain("Confirm and save");
+  });
+
+  it("shows the row discount controls and the whole-PO calculation inputs", () => {
+    const html = render();
+    expect(html).toContain('aria-label="Line 1 discount enabled"');
+    expect(html).toContain('aria-label="Line 1 discount percent"');
+    expect(html).toContain('aria-label="Line 2 discount percent"');
+    expect(html).toContain('aria-label="Whole-PO discount"');
+    expect(html).toContain('aria-label="Adjustment"');
+    expect(html).toContain('aria-label="Adjustment reason"');
+    expect(html).toContain("Whole-PO discount (5%)");
+    expect(html).toContain("Round to the printed total");
+    // The line's own figures are visible beside its inputs.
+    expect(html).toContain("Line total $2,813.63");
+    expect(html).toContain("Discount $-312.62");
+  });
+
+  it("prints PPN separately only when the frozen basis charges it", () => {
+    const services = render();
+    expect(services).not.toContain("PPN (11%)");
+
+    const goods: PurchaseOrderDTO = {
+      ...ORDER,
+      TaxCategory: "SupplyOnly",
+      PpnBps: 1100,
+    };
+    const html = render(initialPurchaseOrderEditorState(goods, USD));
+    expect(html).toContain("PPN (11%)");
+    expect(html).toContain("Charged on top");
+    // The customer-facing grand total includes PPN on top of the price.
+    expect(html).toContain("$3,407.36");
+    expect(html).toContain("Printed on quotation revision 1");
   });
 });
 

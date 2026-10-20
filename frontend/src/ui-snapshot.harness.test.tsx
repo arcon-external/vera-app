@@ -37,7 +37,9 @@ import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
   PurchaseOrderEditorView,
+  PurchaseOrderLineRow,
 } from "./components/PurchaseOrderEditor";
+import { PurchaseOrderTotals } from "./components/PurchaseOrderTotals";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import type { ArchivedQuotation } from "./archive";
 import type { CurrencyInfo } from "./format";
@@ -51,7 +53,10 @@ import {
   initialPOListState,
 } from "./poList";
 import type { POListRowDTO, POListState } from "./poList";
-import { initialPurchaseOrderEditorState } from "./purchaseOrder";
+import {
+  calculatePurchaseOrder,
+  initialPurchaseOrderEditorState,
+} from "./purchaseOrder";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
@@ -197,7 +202,8 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   Incoterms: "CIF",
   Currency: "USD",
   TaxZone: "NonFTZ",
-  TaxCategory: "SupplyInstall",
+  TaxCategory: "SupplyOnly",
+  AdjustmentReason: "Round to the printed total",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",
   Items: [
@@ -209,6 +215,11 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
       QuantityScaled: 25000,
       UoM: "Lot",
       UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+      GrossMinor: 312625,
+      DiscountMinor: 31262,
+      NetMinor: 281363,
     },
     {
       QuotationItemNo: 2,
@@ -218,6 +229,11 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
       QuantityScaled: 10000,
       UoM: "Unit",
       UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
     },
   ],
   ID: 7,
@@ -225,9 +241,24 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   SourceRevision: 2,
   CustomerID: 2,
   PaymentTerms: "45 days",
+  DiscountPercent: 5,
+  PpnBps: 1100,
+  SubtotalMinor: 323363,
+  DiscountMinor: 16168,
+  PpnMinor: 33791,
+  AdjustmentMinor: -250,
+  GrandTotalMinor: 340736,
+  PrintedSubtotalMinor: 325000,
+  PrintedDiscountMinor: 0,
+  PrintedPpnMinor: 35750,
+  PrintedGrandTotalMinor: 360750,
 };
 const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
   PO_EDITOR_ORDER,
+  PO_EDITOR_USD
+);
+const PO_EDITOR_CALCULATION = calculatePurchaseOrder(
+  PO_EDITOR_INITIAL,
   PO_EDITOR_USD
 );
 const PO_EDITOR_UOM_OPTIONS = [
@@ -739,9 +770,13 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The manual PO draft editor (issue #468): header snapshot and copied
-    // lines in the PO's own USD currency. At 360 this is the case that says
-    // whether the five-field line grid reflows instead of overflowing.
+    // The manual PO draft editor (issue #468/#470): header snapshot, copied
+    // lines in the PO's own USD currency, each line's own discount controls,
+    // and the calculation inputs. At 360 this is the case that says whether
+    // the five-field line grid reflows instead of overflowing.
+    //
+    // The totals panel sits below the 900px viewport, so it has its own case
+    // (PurchaseOrderTotals) rather than being cropped out of this one.
     //
     // What this case cannot show: typing, Select behaviour, saving, and the
     // click that opens the discard confirmation stay hand-driven.
@@ -755,6 +790,50 @@ const CASES: SnapshotCase[] = [
         incotermOptions={INCOTERM_OPTIONS}
         onSave={() => undefined}
         onCancel={() => undefined}
+      />
+    ),
+  },
+  {
+    // One PO line with its row discount (issue #470). The editor page pushes
+    // the lines below the fold at 360, so this is the case that shows whether
+    // the discount controls and the line total reflow at the narrow width.
+    name: "PurchaseOrderLineDiscount",
+    element: (
+      <div className="grid gap-3">
+        <PurchaseOrderLineRow
+          line={PO_EDITOR_INITIAL.lines[0]}
+          index={0}
+          currency={PO_EDITOR_USD}
+          uomOptions={PO_EDITOR_UOM_OPTIONS}
+          calculation={PO_EDITOR_CALCULATION.lines[0] ?? null}
+          dispatch={() => undefined}
+        />
+        <PurchaseOrderLineRow
+          line={PO_EDITOR_INITIAL.lines[1]}
+          index={1}
+          currency={PO_EDITOR_USD}
+          uomOptions={PO_EDITOR_UOM_OPTIONS}
+          calculation={PO_EDITOR_CALCULATION.lines[1] ?? null}
+          dispatch={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The explained calculation (issue #470): every stage from line totals to
+    // the grand total, the PPN printed separately, the signed adjustment with
+    // its reason, and the source document's printed figures in their own
+    // group. Rendered alone because the editor page pushes it below the fold.
+    name: "PurchaseOrderTotals",
+    element: (
+      <PurchaseOrderTotals
+        totals={PO_EDITOR_CALCULATION.totals}
+        currency={PO_EDITOR_USD}
+        discountPercent={5}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
       />
     ),
   },

@@ -11,7 +11,9 @@ import (
 // desktop free of HTTP shape knowledge and give Wails one typed surface.
 
 // PurchaseOrderItemDTO is one entered line. QuantityScaled is an exact count
-// of 1/10000 units; unit prices are minor units of the PO currency.
+// of 1/10000 units; unit prices are minor units of the PO currency. The three
+// money fields are the row's stored calculation, returned rather than
+// recomputed.
 type PurchaseOrderItemDTO struct {
 	QuotationItemNo *int
 	QuotationSubNo  *int
@@ -20,35 +22,55 @@ type PurchaseOrderItemDTO struct {
 	QuantityScaled  int64
 	UoM             string
 	UnitPriceMinor  int64
+	DiscountEnabled bool
+	DiscountPercent int16
+	GrossMinor      int64
+	DiscountMinor   int64
+	NetMinor        int64
 }
 
-// PurchaseOrderDTO is a draft or saved PO with its editable header and lines.
+// PurchaseOrderDTO is a draft or saved PO with its editable header, its
+// explained calculation, and the source document's printed figures. The two
+// sets of totals are deliberately separate: the calculated ones are Vera's
+// arithmetic, the printed ones are evidence.
 type PurchaseOrderDTO struct {
-	PODate                *string
-	RequestedDeliveryDate *string
-	UUID                  string
-	State                 string
-	QuoteNumber           string
-	CustomerName          string
-	BillingAddress        string
-	DeliveryAddress       string
-	ShipToCode            string
-	ContactEmail          string
-	ContactPhone          string
-	PONumber              string
-	ReceivedDate          string
-	Incoterms             string
-	Currency              string
-	TaxZone               string
-	TaxCategory           string
-	CreatedAt             string
-	UpdatedAt             string
-	Items                 []PurchaseOrderItemDTO
-	ID                    int64
-	QuotationID           int64
-	SourceRevision        int16
-	CustomerID            int64
-	PaymentTerms          string
+	PODate                 *string
+	RequestedDeliveryDate  *string
+	UUID                   string
+	State                  string
+	QuoteNumber            string
+	CustomerName           string
+	BillingAddress         string
+	DeliveryAddress        string
+	ShipToCode             string
+	ContactEmail           string
+	ContactPhone           string
+	PONumber               string
+	ReceivedDate           string
+	Incoterms              string
+	Currency               string
+	TaxZone                string
+	TaxCategory            string
+	AdjustmentReason       string
+	CreatedAt              string
+	UpdatedAt              string
+	Items                  []PurchaseOrderItemDTO
+	ID                     int64
+	QuotationID            int64
+	SourceRevision         int16
+	CustomerID             int64
+	PaymentTerms           string
+	DiscountPercent        int16
+	PpnBps                 int16
+	SubtotalMinor          int64
+	DiscountMinor          int64
+	PpnMinor               int64
+	AdjustmentMinor        int64
+	GrandTotalMinor        int64
+	PrintedSubtotalMinor   int64
+	PrintedDiscountMinor   int64
+	PrintedPpnMinor        int64
+	PrintedGrandTotalMinor int64
 }
 
 // PurchaseOrderCreateInput is the selector's confirmed pair plus an optional
@@ -60,7 +82,8 @@ type PurchaseOrderCreateInput struct {
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. Line numbers come from
-// array order.
+// array order; a row discount is a flag plus a 0-100 percentage, mirroring the
+// quotation.
 type PurchaseOrderItemInput struct {
 	QuotationItemNo *int
 	QuotationSubNo  *int
@@ -68,9 +91,12 @@ type PurchaseOrderItemInput struct {
 	QuantityScaled  int64
 	UoM             string
 	UnitPriceMinor  int64
+	DiscountEnabled bool
+	DiscountPercent int16
 }
 
-// PurchaseOrderUpdateInput replaces the editable draft header and every line.
+// PurchaseOrderUpdateInput replaces the editable draft header, the
+// whole-order discount and adjustment, and every line.
 type PurchaseOrderUpdateInput struct {
 	ID                    int64
 	BillingAddress        string
@@ -84,7 +110,10 @@ type PurchaseOrderUpdateInput struct {
 	RequestedDeliveryDate string
 	Incoterms             string
 	PaymentTerms          string
+	AdjustmentReason      string
 	Items                 []PurchaseOrderItemInput
+	DiscountPercent       int16
+	AdjustmentMinor       int64
 }
 
 // CreatePurchaseOrderDraft creates the one active PO for a Quotation from the
@@ -143,6 +172,8 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
 		})
 	}
 	var response apicontract.PurchaseOrderRow
@@ -160,6 +191,9 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			PaymentTerms:          input.PaymentTerms,
 			Incoterms:             input.Incoterms,
 			Items:                 items,
+			DiscountPercent:       input.DiscountPercent,
+			AdjustmentMinor:       input.AdjustmentMinor,
+			AdjustmentReason:      input.AdjustmentReason,
 		}, &response); err != nil {
 		return PurchaseOrderDTO{}, err
 	}
@@ -168,30 +202,42 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 
 func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 	dto := PurchaseOrderDTO{
-		ID:                    row.ID,
-		UUID:                  row.UUID,
-		State:                 row.State,
-		QuotationID:           row.QuotationID,
-		SourceRevision:        row.SourceRevision,
-		QuoteNumber:           row.QuoteNumber,
-		CustomerID:            row.CustomerID,
-		CustomerName:          row.CustomerName,
-		BillingAddress:        row.BillingAddress,
-		DeliveryAddress:       row.DeliveryAddress,
-		ShipToCode:            row.ShipToCode,
-		ContactEmail:          row.ContactEmail,
-		ContactPhone:          row.ContactPhone,
-		PONumber:              row.PONumber,
-		PODate:                row.PODate,
-		ReceivedDate:          row.ReceivedDate,
-		RequestedDeliveryDate: row.RequestedDeliveryDate,
-		PaymentTerms:          row.PaymentTerms,
-		Incoterms:             row.Incoterms,
-		Currency:              row.Currency,
-		TaxZone:               row.TaxZone,
-		TaxCategory:           row.TaxCategory,
-		CreatedAt:             row.CreatedAt,
-		UpdatedAt:             row.UpdatedAt,
+		ID:                     row.ID,
+		UUID:                   row.UUID,
+		State:                  row.State,
+		QuotationID:            row.QuotationID,
+		SourceRevision:         row.SourceRevision,
+		QuoteNumber:            row.QuoteNumber,
+		CustomerID:             row.CustomerID,
+		CustomerName:           row.CustomerName,
+		BillingAddress:         row.BillingAddress,
+		DeliveryAddress:        row.DeliveryAddress,
+		ShipToCode:             row.ShipToCode,
+		ContactEmail:           row.ContactEmail,
+		ContactPhone:           row.ContactPhone,
+		PONumber:               row.PONumber,
+		PODate:                 row.PODate,
+		ReceivedDate:           row.ReceivedDate,
+		RequestedDeliveryDate:  row.RequestedDeliveryDate,
+		PaymentTerms:           row.PaymentTerms,
+		Incoterms:              row.Incoterms,
+		Currency:               row.Currency,
+		TaxZone:                row.TaxZone,
+		TaxCategory:            row.TaxCategory,
+		DiscountPercent:        row.DiscountPercent,
+		PpnBps:                 row.PpnBps,
+		SubtotalMinor:          row.SubtotalMinor,
+		DiscountMinor:          row.DiscountMinor,
+		PpnMinor:               row.PpnMinor,
+		AdjustmentMinor:        row.AdjustmentMinor,
+		AdjustmentReason:       row.AdjustmentReason,
+		GrandTotalMinor:        row.GrandTotalMinor,
+		PrintedSubtotalMinor:   row.PrintedSubtotalMinor,
+		PrintedDiscountMinor:   row.PrintedDiscountMinor,
+		PrintedPpnMinor:        row.PrintedPpnMinor,
+		PrintedGrandTotalMinor: row.PrintedGrandTotalMinor,
+		CreatedAt:              row.CreatedAt,
+		UpdatedAt:              row.UpdatedAt,
 	}
 	dto.Items = make([]PurchaseOrderItemDTO, 0, len(row.Items))
 	for _, item := range row.Items {
@@ -203,6 +249,11 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+			GrossMinor:      item.GrossMinor,
+			DiscountMinor:   item.DiscountMinor,
+			NetMinor:        item.NetMinor,
 		})
 	}
 	return dto
