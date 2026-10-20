@@ -1102,7 +1102,13 @@ const CASES: SnapshotCase[] = [
     // attachment reference and a recovered draft, each with reason, actor,
     // time, versions, replaced lines and totals.
     name: "PurchaseOrderHistory",
-    element: <PurchaseOrderHistoryPanel entries={PO_HISTORY} currency={PO_EDITOR_USD} />,
+    element: (
+      <PurchaseOrderHistoryPanel
+        entries={PO_HISTORY}
+        currency={PO_EDITOR_USD}
+        expandPreviousValues
+      />
+    ),
   },
   {
     // The final-save difference review (issue #471): every differing value

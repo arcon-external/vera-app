@@ -19,6 +19,12 @@ export interface PurchaseOrderHistoryPanelProps {
   currency: CurrencyInfo;
   loading?: boolean;
   error?: string | null;
+  /**
+   * Opens every "Previous values" disclosure on first render. The snapshot
+   * harness uses it so the evidence shows the retained values; the app leaves
+   * it closed so a long history stays scannable.
+   */
+  expandPreviousValues?: boolean;
 }
 
 function historyTime(iso: string): string {
@@ -31,6 +37,7 @@ export function PurchaseOrderHistoryPanel({
   currency,
   loading = false,
   error = null,
+  expandPreviousValues = false,
 }: PurchaseOrderHistoryPanelProps) {
   return (
     <Card className="p-4" data-po-history>
@@ -60,8 +67,8 @@ export function PurchaseOrderHistoryPanel({
 
       <ol className="mt-3 grid gap-3">
         {entries.map((entry) => (
-          <li key={entry.UUID}>
-            <div className="rounded-lg border border-rule bg-paper-subtle/40 p-3">
+          <li key={entry.UUID} className="min-w-0">
+            <div className="min-w-0 rounded-lg border border-rule bg-paper-subtle/40 p-3">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone={entry.Kind === "draft_overwrite" ? "neutral" : "accent"}>
                   {correctionKindLabel(entry.Kind)}
@@ -82,7 +89,7 @@ export function PurchaseOrderHistoryPanel({
                 {attachmentReferenceLabel(entry.Attachment)}
               </p>
 
-              <details className="mt-2">
+              <details className="mt-2" open={expandPreviousValues}>
                 <summary className="cursor-pointer text-small font-medium text-accent-700">
                   Previous values
                 </summary>
@@ -116,7 +123,7 @@ export function PurchaseOrderHistoryPanel({
                   ) : null}
                 </dl>
 
-                <div className="mt-3 overflow-x-auto scroll-thin">
+                <div className="mt-3 max-w-full overflow-x-auto scroll-thin">
                   <table className="w-full min-w-[560px] text-left text-body">
                     <caption className="sr-only">
                       Lines replaced by this correction
