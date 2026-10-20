@@ -83,6 +83,69 @@ type QuotationSummaryRow struct {
 	RevisionNumber int16  `json:"revision"`
 }
 
+// POSourceQuotationRow is one selectable Quotation in the PO source selector
+// (issue #467). A row always describes the latest issued revision, with the
+// number of issued revisions beside it so the second step knows whether a
+// choice exists.
+//
+// HasActivePO is the eligibility answer: false until PO persistence exists
+// (#468 swaps the placeholder for the real query). It travels in the contract
+// now so the selector and both PO entry paths share one shape.
+type POSourceQuotationRow struct {
+	ID                  int64  `json:"id"`
+	QuoteNumber         string `json:"quoteNumber"`
+	Subject             string `json:"subject"`
+	CustomerName        string `json:"customerName"`
+	LatestRevision      int16  `json:"latestRevision"`
+	IssuedRevisionCount int    `json:"issuedRevisionCount"`
+	HasActivePO         bool   `json:"hasActivePO"`
+}
+
+// POSourceListResponse is one page of the selector's first step. PageSize is
+// fixed by the contract (15), not chosen by the caller.
+type POSourceListResponse struct {
+	Quotations []POSourceQuotationRow `json:"quotations"`
+	Page       int                    `json:"page"`
+	PageSize   int                    `json:"pageSize"`
+	Total      int                    `json:"total"`
+	TotalPages int                    `json:"totalPages"`
+}
+
+// POSourceRevisionRow is one issued revision of the selected Quotation.
+type POSourceRevisionRow struct {
+	Revision int16  `json:"revision"`
+	IssuedAt string `json:"issuedAt"`
+}
+
+// POSourceRevisionsResponse is the second step's data: issued revisions only,
+// newest first. A list of one is the sole-revision case the selector
+// auto-selects.
+type POSourceRevisionsResponse struct {
+	QuotationID  int64                 `json:"quotationId"`
+	QuoteNumber  string                `json:"quoteNumber"`
+	Subject      string                `json:"subject"`
+	CustomerName string                `json:"customerName"`
+	Revisions    []POSourceRevisionRow `json:"revisions"`
+}
+
+// POSourceValidateRequest is the confirm-time revalidation: the exact pair the
+// selector is about to return.
+type POSourceValidateRequest struct {
+	QuotationID    int64 `json:"quotationId"`
+	RevisionNumber int16 `json:"revisionNumber"`
+}
+
+// POSourceValidationResponse answers whether the pair still exists and is
+// issued. A well-formed request always answers 200; the outcome is Valid, and
+// Reason names why not when it is false.
+type POSourceValidationResponse struct {
+	Quotation      *POSourceQuotationRow `json:"quotation,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	QuotationID    int64                 `json:"quotationId"`
+	RevisionNumber int16                 `json:"revisionNumber"`
+	Valid          bool                  `json:"valid"`
+}
+
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.
 type QuotationItemRow struct {
 	DisplayOriginalUnit      string                `json:"displayOriginalUnit"`

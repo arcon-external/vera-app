@@ -70,6 +70,14 @@ export function ListDrafts() {
   return window['go']['backend']['Quotation']['ListDrafts']();
 }
 
+export function ListPOSourceQuotations(arg1) {
+  return window['go']['backend']['Quotation']['ListPOSourceQuotations'](arg1);
+}
+
+export function ListPOSourceRevisions(arg1) {
+  return window['go']['backend']['Quotation']['ListPOSourceRevisions'](arg1);
+}
+
 export function ListQuotations() {
   return window['go']['backend']['Quotation']['ListQuotations']();
 }
@@ -124,6 +132,10 @@ export function SetStore(arg1) {
 
 export function SetVerifyURL(arg1) {
   return window['go']['backend']['Quotation']['SetVerifyURL'](arg1);
+}
+
+export function ValidatePOSource(arg1) {
+  return window['go']['backend']['Quotation']['ValidatePOSource'](arg1);
 }
 
 export function VerifyURL() {

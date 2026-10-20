@@ -90,14 +90,35 @@ describe("DocumentHomePage destinations (issue #466)", () => {
   });
 });
 
-describe("PurchaseOrderPlaceholderPage (issue #466)", () => {
+describe("PurchaseOrderPlaceholderPage (issues #466, #467)", () => {
   it("is an honest not-yet-available surface with no fake data", () => {
-    const html = renderToString(<PurchaseOrderPlaceholderPage />);
+    const html = renderToString(
+      <PurchaseOrderPlaceholderPage onAddFromQuotation={() => {}} />
+    );
     expect(html).toContain("Purchase Order");
     expect(html).toContain("not yet available");
     // No list, no rows, no totals: the surface must not pretend later
     // slices exist.
     expect(html).not.toContain("<table");
     expect(html).not.toContain("Grand Total");
+  });
+
+  it("offers the real source-selection entry point and shows a confirmed pair", () => {
+    const empty = renderToString(
+      <PurchaseOrderPlaceholderPage onAddFromQuotation={() => {}} />
+    );
+    const action = buttonTagFor(empty, "Add Purchase Order from a Quotation");
+    expect(action).not.toContain(" disabled=");
+    expect(empty).not.toContain("Source selected");
+
+    const chosen = renderToString(
+      <PurchaseOrderPlaceholderPage
+        onAddFromQuotation={() => {}}
+        selectedSource={{ quotationId: 12, revisionNumber: 1 }}
+      />
+    ).replace(/<!-- -->/g, "");
+    expect(chosen).toContain("Source selected");
+    expect(chosen).toContain("Quotation 12");
+    expect(chosen).toContain("revision 1");
   });
 });
