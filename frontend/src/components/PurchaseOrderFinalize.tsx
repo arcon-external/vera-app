@@ -17,6 +17,11 @@ import {
   type PurchaseOrderLine,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
+import type {
+  PurchaseOrderDocumentState,
+  PurchaseOrderDocumentStateDTO,
+} from "../purchaseOrderDocument";
+import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -27,8 +32,9 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 //      Use PO entry / Use Quotation choice (none preselected), missing and
 //      extra lines are acknowledged, matches can be corrected, and the totals
 //      are recalculated after every choice;
-//   2. the final confirmation, which is the deliberate no-PDF acknowledgement
-//      while #472 has not shipped (the attached branch needs no checkbox);
+//   2. the final confirmation, which asks for the deliberate no-PDF
+//      acknowledgement only when no attachment exists; an attached save needs
+//      no checkbox and never records an absence (#472);
 //   3. the saved record, shown read-only until the correction workflow (#473)
 //      ships.
 //
@@ -47,8 +53,8 @@ export interface PurchaseOrderDifferenceReviewViewProps {
   source: PurchaseOrderSourceDTO;
   currency: CurrencyInfo;
   quoteNumber: string;
-  /** "none" today; #472 adds "attached" without changing this flow. */
-  documentState: string;
+  /** "none" or "attached"; the final confirmation follows this branch. */
+  documentState: PurchaseOrderDocumentState;
   decisions: POReviewDecisions;
   acknowledgedMissing: string[];
   acknowledgedExtra: number[];
@@ -370,12 +376,17 @@ export function PurchaseOrderDifferenceReviewView({
           adjustment to reverse it. Record a signed adjustment with a reason
           only to reconcile what the customer's PO document actually printed.
         </p>
-        {documentState === "none" ? (
+        {documentState === "attached" ? (
+          <p className="mt-1 text-caption text-ink-500">
+            The customer PO PDF is attached and stays with this record. This
+            save does not change it.
+          </p>
+        ) : (
           <p className="mt-1 text-caption text-ink-500">
             No customer PO PDF is attached. The final confirmation after this
             review records that deliberately.
           </p>
-        ) : null}
+        )}
       </Card>
 
       {evaluation.blockers.length > 0 ? (
@@ -437,7 +448,7 @@ export function PurchaseOrderFinalConfirmationView({
   error,
 }: PurchaseOrderFinalConfirmationViewProps) {
   const { Order: order, DocumentState: documentState } = review;
-  const noDocument = documentState === "none";
+  const noDocument = documentState !== "attached";
   const ready = !saving && (!noDocument || documentConfirmed);
   return (
     <div className="flex flex-col gap-5">
@@ -535,9 +546,8 @@ export function PurchaseOrderFinalConfirmationView({
             />
             <span>
               I confirm this purchase order is saved without its customer PO PDF.
-              No PDF can be attached yet; the requirement to attach one arrives
-              with that feature, and this confirmation is recorded so the missing
-              evidence is deliberate rather than silent.
+              You can attach one before saving; this confirmation records that
+              the missing evidence is deliberate rather than silent.
             </span>
           </label>
         ) : (
@@ -570,6 +580,13 @@ export interface PurchaseOrderSavedViewProps {
   order: PurchaseOrderDTO;
   currency: CurrencyInfo;
   onBack: () => void;
+  /**
+   * The server's document state when the parent already has it. Omitted in the
+   * app so the panel fetches; supplied by the SSR snapshot so the attached and
+   * empty branches are both visible without a browser effect.
+   */
+  documentInitialState?: PurchaseOrderDocumentStateDTO | null;
+  onDocumentStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
 }
 
 /**
@@ -582,6 +599,8 @@ export function PurchaseOrderSavedView({
   order,
   currency,
   onBack,
+  documentInitialState,
+  onDocumentStateChange,
 }: PurchaseOrderSavedViewProps) {
   const state = initialPurchaseOrderEditorState(order, currency);
   // A saved record displays its stored figures. Recalculating would let a
@@ -626,8 +645,9 @@ export function PurchaseOrderSavedView({
         approval.
       </StatusBanner>
       <StatusBanner tone="info">
-        This saved purchase order is read-only in this release. Corrections
-        arrive with the correction workflow.
+        This saved purchase order's fields are read-only in this release. The
+        customer PO PDF can still be attached, replaced or removed; field
+        corrections arrive with the correction workflow.
       </StatusBanner>
 
       <Card className="p-4">
@@ -738,14 +758,12 @@ export function PurchaseOrderSavedView({
         sourceRevision={order.SourceRevision}
       />
 
-      <Card className="p-4">
-        <SectionHeading title="Customer PO PDF" hint="Evidence for this record" />
-        <p className="mt-2 text-small text-ink-700">
-          {order.PdfAbsentConfirmed === true
-            ? "No customer PO PDF attached. The final save recorded that confirmation."
-            : "No customer PO PDF attached."}
-        </p>
-      </Card>
+      <PurchaseOrderDocumentPanel
+        purchaseOrderId={order.ID}
+        initialState={documentInitialState}
+        absenceConfirmed={order.PdfAbsentConfirmed === true}
+        onStateChange={onDocumentStateChange}
+      />
 
       <div className="border-t border-rule pt-4">
         <Button aria-label="Back to purchase orders" onClick={onBack}>

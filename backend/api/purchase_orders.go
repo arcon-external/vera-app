@@ -289,6 +289,31 @@ func purchaseOrderError(context echo.Context, err error) error {
 		})
 	case errors.Is(err, store.ErrPurchaseOrderInvalid):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrPurchaseOrderDocumentNotFound):
+		return context.JSON(http.StatusNotFound, map[string]string{
+			"error": "customer PO document not found",
+			"code":  "po_document_not_found",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDocumentTooLarge):
+		return context.JSON(http.StatusRequestEntityTooLarge, map[string]string{
+			"error": err.Error(),
+			"code":  "po_document_too_large",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDocumentEncrypted):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_document_encrypted",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDocumentInvalid):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_document_invalid",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDocumentRemovalNotConfirmed):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": "confirm removing the customer PO PDF",
+			"code":  "po_document_removal_unconfirmed",
+		})
 	default:
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "purchase order operation failed"})
 	}

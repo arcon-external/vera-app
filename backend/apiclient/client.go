@@ -280,6 +280,12 @@ func (c *Client) Delete(path string, out any) error {
 	return c.do(http.MethodDelete, path, nil, out)
 }
 
+// DeleteWithBody performs an authenticated DELETE carrying a JSON body, for a
+// destructive action whose confirmation must travel with the request.
+func (c *Client) DeleteWithBody(path string, body, out any) error {
+	return c.do(http.MethodDelete, path, body, out)
+}
+
 // Upload posts a multipart file field and decodes the JSON response into
 // out (may be nil). It is used for admin backup restores.
 func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) error {
@@ -326,36 +332,47 @@ func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) 
 	return nil
 }
 
-// Download performs an authenticated GET returning raw bytes and the
-// filename from Content-Disposition (falling back to defaultName).
-func (c *Client) Download(path, defaultName string) (filename string, data []byte, err error) {
+// GetBytes performs an authenticated GET and returns the raw response body
+// plus its headers. It exists for document content, where the caller needs the
+// version/SHA headers as well as the bytes.
+func (c *Client) GetBytes(path string) (data []byte, header http.Header, err error) {
 	request, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("build API request: %w", err)
+		return nil, nil, fmt.Errorf("build API request: %w", err)
 	}
 	if token := c.token(); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return "", nil, fmt.Errorf("reach the quotation server: %w", err)
+		return nil, nil, fmt.Errorf("reach the quotation server: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
 		if c.OnUnauthorized != nil {
 			c.OnUnauthorized()
 		}
-		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
+		return nil, nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode != http.StatusOK {
-		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
+		return nil, nil, &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, 512<<20))
 	if err != nil {
-		return "", nil, fmt.Errorf("read download: %w", err)
+		return nil, nil, fmt.Errorf("read download: %w", err)
+	}
+	return data, response.Header.Clone(), nil
+}
+
+// Download performs an authenticated GET returning raw bytes and the
+// filename from Content-Disposition (falling back to defaultName).
+func (c *Client) Download(path, defaultName string) (filename string, data []byte, err error) {
+	data, header, err := c.GetBytes(path)
+	if err != nil {
+		return "", nil, err
 	}
 	filename = defaultName
-	if _, params, err := mime.ParseMediaType(response.Header.Get("Content-Disposition")); err == nil {
+	if _, params, err := mime.ParseMediaType(header.Get("Content-Disposition")); err == nil {
 		if name := params["filename"]; name != "" {
 			filename = filepath.Base(name)
 		}

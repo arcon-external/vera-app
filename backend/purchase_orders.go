@@ -1,7 +1,12 @@
 package backend
 
 import (
+	"fmt"
+	"mime"
+	"os"
+	"path"
 	"strconv"
+	"strings"
 
 	"vera-app/backend/apicontract"
 )
@@ -115,6 +120,54 @@ type PurchaseOrderReviewDTO struct {
 	Order         PurchaseOrderDTO
 	Source        PurchaseOrderSourceDTO
 	DocumentState string
+}
+
+// PurchaseOrderDocumentDTO is one stored version of the optional customer PO
+// PDF. It is metadata only; the bytes come from a content call.
+type PurchaseOrderDocumentDTO struct {
+	UUID             string
+	SHA256           string
+	ContentType      string
+	OriginalFilename string
+	UploadedAt       string
+	ReplacedAt       *string
+	RemovedAt        *string
+	RemovedBy        *int64
+	ID               int64
+	PurchaseOrderID  int64
+	Version          int32
+	SizeBytes        int64
+	UploadedBy       int64
+	Active           bool
+}
+
+// PurchaseOrderDocumentStateDTO is the active PDF plus retained history,
+// newest first. Document is nil when no PDF is attached.
+type PurchaseOrderDocumentStateDTO struct {
+	Document *PurchaseOrderDocumentDTO
+	Versions []PurchaseOrderDocumentDTO
+}
+
+// PurchaseOrderDocumentContentDTO is the raw PDF bytes and the headers that
+// identify which version was served.
+type PurchaseOrderDocumentContentDTO struct {
+	Data        []byte
+	ContentType string
+	Filename    string
+	SHA256      string
+	Version     int32
+}
+
+// PurchaseOrderDocumentUploadInput attaches or replaces the one customer PO
+// PDF. The desktop may pass the bytes it read from a file input (Data +
+// Filename) or a local path (FilePath); Data wins when both are set. This
+// mirrors DraftRevision's dual bytes/path convention while keeping the
+// original display name.
+type PurchaseOrderDocumentUploadInput struct {
+	PurchaseOrderID int64
+	Data            []byte
+	FilePath        string
+	Filename        string
 }
 
 // PurchaseOrderDecisionInput is one explicit difference choice ("po" or
@@ -413,6 +466,160 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 		return PurchaseOrderDTO{}, err
 	}
 	return mapPurchaseOrderDTO(response), nil
+}
+
+// AttachPurchaseOrderDocument stores the one customer PO PDF as the next
+// version. It accepts bytes (Data, with Filename) or a local path (FilePath);
+// bytes win when both are present.
+func (q *Quotation) AttachPurchaseOrderDocument(input PurchaseOrderDocumentUploadInput) (PurchaseOrderDocumentDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	data := input.Data
+	filename := strings.TrimSpace(input.Filename)
+	if len(data) == 0 && strings.TrimSpace(input.FilePath) != "" {
+		loaded, readErr := os.ReadFile(input.FilePath)
+		if readErr != nil {
+			return PurchaseOrderDocumentDTO{}, fmt.Errorf("read the customer PO PDF: %w", readErr)
+		}
+		data = loaded
+		if filename == "" {
+			filename = path.Base(strings.ReplaceAll(input.FilePath, "\\", "/"))
+		}
+	}
+	if len(data) == 0 {
+		return PurchaseOrderDocumentDTO{}, fmt.Errorf("choose a PDF to attach")
+	}
+	if filename == "" || filename == "." || filename == "/" {
+		filename = "customer-po.pdf"
+	}
+	var response apicontract.PurchaseOrderDocumentRow
+	if err := client.Upload(
+		"/v1/purchase-orders/"+strconv.FormatInt(input.PurchaseOrderID, 10)+"/document",
+		"document", filename, data, &response); err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	return mapPurchaseOrderDocumentDTO(response), nil
+}
+
+// GetPurchaseOrderDocumentState reads the active PDF metadata and its retained
+// versions.
+func (q *Quotation) GetPurchaseOrderDocumentState(id int64) (PurchaseOrderDocumentStateDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDocumentStateDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDocumentStateDTO{}, err
+	}
+	var response apicontract.PurchaseOrderDocumentStateRow
+	if err := client.Get(
+		"/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/document", &response); err != nil {
+		return PurchaseOrderDocumentStateDTO{}, err
+	}
+	state := PurchaseOrderDocumentStateDTO{
+		Versions: make([]PurchaseOrderDocumentDTO, 0, len(response.Versions)),
+	}
+	if response.Document != nil {
+		active := mapPurchaseOrderDocumentDTO(*response.Document)
+		state.Document = &active
+	}
+	for _, document := range response.Versions {
+		state.Versions = append(state.Versions, mapPurchaseOrderDocumentDTO(document))
+	}
+	return state, nil
+}
+
+// GetActivePurchaseOrderDocumentContent returns the current PDF bytes.
+func (q *Quotation) GetActivePurchaseOrderDocumentContent(id int64) (PurchaseOrderDocumentContentDTO, error) {
+	return q.getPurchaseOrderDocumentContent(
+		"/v1/purchase-orders/" + strconv.FormatInt(id, 10) + "/document/content")
+}
+
+// GetPurchaseOrderDocumentVersionContent returns one retained version, so a
+// replaced or removed PDF can still be inspected.
+func (q *Quotation) GetPurchaseOrderDocumentVersionContent(id int64, version int32) (PurchaseOrderDocumentContentDTO, error) {
+	if version < 1 {
+		return PurchaseOrderDocumentContentDTO{}, fmt.Errorf("document version must be positive")
+	}
+	return q.getPurchaseOrderDocumentContent(
+		"/v1/purchase-orders/" + strconv.FormatInt(id, 10) + "/documents/" +
+			strconv.FormatInt(int64(version), 10) + "/content")
+}
+
+func (q *Quotation) getPurchaseOrderDocumentContent(endpoint string) (PurchaseOrderDocumentContentDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDocumentContentDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDocumentContentDTO{}, err
+	}
+	data, header, err := client.GetBytes(endpoint)
+	if err != nil {
+		return PurchaseOrderDocumentContentDTO{}, err
+	}
+	content := PurchaseOrderDocumentContentDTO{
+		Data:        data,
+		ContentType: header.Get("Content-Type"),
+		Filename:    "customer-po.pdf",
+		SHA256:      header.Get("X-Document-SHA256"),
+	}
+	if content.ContentType == "" {
+		content.ContentType = "application/pdf"
+	}
+	if version, parseErr := strconv.ParseInt(header.Get("X-Document-Version"), 10, 32); parseErr == nil {
+		content.Version = int32(version)
+	}
+	if _, params, parseErr := mime.ParseMediaType(header.Get("Content-Disposition")); parseErr == nil {
+		if name := params["filename"]; name != "" {
+			content.Filename = path.Base(strings.ReplaceAll(name, "\\", "/"))
+		}
+	}
+	return content, nil
+}
+
+// RemovePurchaseOrderDocument removes the current PDF after the caller's
+// explicit confirmation. The removed version stays retrievable.
+func (q *Quotation) RemovePurchaseOrderDocument(id int64, confirmed bool) (PurchaseOrderDocumentDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	var response apicontract.PurchaseOrderDocumentRow
+	if err := client.DeleteWithBody(
+		"/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/document",
+		apicontract.PurchaseOrderDocumentRemovalRequest{Confirmed: confirmed},
+		&response); err != nil {
+		return PurchaseOrderDocumentDTO{}, err
+	}
+	return mapPurchaseOrderDocumentDTO(response), nil
+}
+
+func mapPurchaseOrderDocumentDTO(row apicontract.PurchaseOrderDocumentRow) PurchaseOrderDocumentDTO {
+	return PurchaseOrderDocumentDTO{
+		ID:               row.ID,
+		UUID:             row.UUID,
+		PurchaseOrderID:  row.PurchaseOrderID,
+		Version:          row.Version,
+		SHA256:           row.SHA256,
+		SizeBytes:        row.SizeBytes,
+		ContentType:      row.ContentType,
+		OriginalFilename: row.OriginalFilename,
+		UploadedBy:       row.UploadedBy,
+		UploadedAt:       row.UploadedAt,
+		Active:           row.Active,
+		ReplacedAt:       row.ReplacedAt,
+		RemovedAt:        row.RemovedAt,
+		RemovedBy:        row.RemovedBy,
+	}
 }
 
 func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseOrderReviewDTO {

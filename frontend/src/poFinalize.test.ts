@@ -597,6 +597,21 @@ describe("final-save payload", () => {
     expect(result.input?.DocumentConfirmed).toBe(false);
   });
 
+  it("never claims an absence for an attached save, even if the box was checked", () => {
+    const result = buildFinalizeInput(
+      stateFrom(order()),
+      SOURCE,
+      USD,
+      "attached",
+      {},
+      [],
+      [],
+      true
+    );
+    expect(result.input).not.toBeNull();
+    expect(result.input?.DocumentConfirmed).toBe(false);
+  });
+
   it("refuses to build a payload with unresolved differences", () => {
     const state = stateFrom(order({ PaymentTerms: "30 days" }));
     const result = buildFinalizeInput(state, SOURCE, USD, "none", {}, [], [], true);

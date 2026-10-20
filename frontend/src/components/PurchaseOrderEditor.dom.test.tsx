@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "../poLeaveGuard";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
@@ -24,6 +24,17 @@ import {
 // App's own composition: AppShell + the editor + the shared leave-guard hook
 // and the shared discard prompt. App supplies only the one-line wiring this
 // harness copies.
+
+// The editor page now mounts the document panel, which reads the one optional
+// customer PO PDF through the desktop binding (#472). This suite is about tab
+// navigation, so the document read is a stable empty state.
+vi.mock("@backend/backend/Quotation", () => ({
+  GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
+  AttachPurchaseOrderDocument: vi.fn(),
+  GetActivePurchaseOrderDocumentContent: vi.fn(),
+  RemovePurchaseOrderDocument: vi.fn(),
+  UpdatePurchaseOrderDraft: vi.fn(),
+}));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;

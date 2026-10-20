@@ -33,6 +33,7 @@ import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
+import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
@@ -69,6 +70,7 @@ import {
   initialPurchaseOrderEditorState,
 } from "./purchaseOrder";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
+import type { PurchaseOrderDocumentStateDTO } from "./purchaseOrderDocument";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -277,6 +279,59 @@ const PO_EDITOR_UOM_OPTIONS = [
   { value: "Unit", label: "Unit" },
   { value: "Pc", label: "Pc" },
 ];
+
+// The single optional customer PO PDF (issue #472), shown in both branches:
+// empty, attached with one retained prior version, and the inline removal
+// confirmation. The bytes are irrelevant to the panel; only the metadata is
+// rendered.
+const PO_DOCUMENT_NONE: PurchaseOrderDocumentStateDTO = {
+  Document: null,
+  Versions: [],
+};
+const PO_DOCUMENT_ATTACHED: PurchaseOrderDocumentStateDTO = {
+  Document: {
+    UUID: "doc-2",
+    SHA256: "d2f4a6c8e0b1",
+    ContentType: "application/pdf",
+    OriginalFilename: "Customer PO 4500098123.pdf",
+    UploadedAt: "2026-10-20T09:15:00Z",
+    ID: 2,
+    PurchaseOrderID: 7,
+    Version: 2,
+    SizeBytes: 1_536_000,
+    UploadedBy: 4,
+    Active: true,
+  },
+  Versions: [
+    {
+      UUID: "doc-2",
+      SHA256: "d2f4a6c8e0b1",
+      ContentType: "application/pdf",
+      OriginalFilename: "Customer PO 4500098123.pdf",
+      UploadedAt: "2026-10-20T09:15:00Z",
+      ID: 2,
+      PurchaseOrderID: 7,
+      Version: 2,
+      SizeBytes: 1_536_000,
+      UploadedBy: 4,
+      Active: true,
+    },
+    {
+      UUID: "doc-1",
+      SHA256: "a1b2c3d4e5f6",
+      ContentType: "application/pdf",
+      OriginalFilename: "Customer PO scanned.pdf",
+      UploadedAt: "2026-10-18T14:40:00Z",
+      ID: 1,
+      PurchaseOrderID: 7,
+      Version: 1,
+      SizeBytes: 2_048_000,
+      UploadedBy: 4,
+      Active: false,
+      ReplacedAt: "2026-10-20T09:15:00Z",
+    },
+  ],
+};
 
 // The final-save review (issue #471): the exact source revision beside the
 // entered PO. Two differing values (payment terms and the first line's price),
@@ -948,15 +1003,65 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // A saved record (issue #471): read-only, the stored values and totals, the
-    // printed source figures beside them, and the recorded no-PDF confirmation.
-    // There is deliberately no editable control in this page.
+    // A saved record (issue #471/#472): read-only PO fields and totals, the
+    // printed source figures beside them, the recorded no-PDF confirmation and
+    // the attachment panel's empty state. The document metadata is supplied so
+    // the SSR snapshot shows the settled state rather than a loading line.
     name: "PurchaseOrderSaved",
     element: (
       <PurchaseOrderSavedView
         order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+      />
+    ),
+  },
+  {
+    // The attachment panel with no PDF (#472): the exact empty-state sentence,
+    // Attach, and the visibly disabled Extract and compare action with its
+    // reason. At 360 this says whether the action row wraps instead of
+    // overflowing.
+    name: "PurchaseOrderDocumentNone",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_NONE}
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // The attachment panel with version 2 active and version 1 retained
+    // (#472): filename, size, "Version 2 of 2", View, Replace and Remove.
+    name: "PurchaseOrderDocumentAttached",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_ATTACHED}
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // Removal's own confirmation (#472): no second dialog exists elsewhere,
+    // and the copy says the prior versions remain in correction history.
+    name: "PurchaseOrderDocumentRemovalConfirmation",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_ATTACHED}
+        pendingRemoval
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
       />
     ),
   },
