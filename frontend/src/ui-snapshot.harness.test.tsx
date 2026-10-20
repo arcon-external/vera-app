@@ -31,6 +31,10 @@ import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
+import {
+  DocumentHomePage,
+  PurchaseOrderPlaceholderPage,
+} from "./components/DocumentHomePage";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -394,6 +398,30 @@ const CASES: SnapshotCase[] = [
     // above. Checking the box, typing, and submitting stay hand-driven.
     name: "LoginPage",
     element: <LoginPage onSignedIn={() => undefined} />,
+  },
+  {
+    // The document home (issue #466): the four destinations staff land on
+    // after sign-in. Quotation and Purchase Order are enabled; Delivery Order
+    // and Invoice render disabled with their Coming later badges, so the
+    // screenshot shows unavailable features are not misleading.
+    //
+    // What this case cannot show, stated so it is not assumed: the clicks
+    // behind the two enabled buttons, keyboard order, and focus visibility
+    // stay hand-driven.
+    name: "DocumentHome",
+    element: (
+      <DocumentHomePage
+        onOpenQuotation={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+      />
+    ),
+  },
+  {
+    // The honest Purchase Order surface for #466: no list, no rows, no
+    // totals -- the screenshot should show a page that states entry is not
+    // yet available and pretends nothing else exists.
+    name: "PurchaseOrderPlaceholder",
+    element: <PurchaseOrderPlaceholderPage />,
   },
   {
     // The line-item editor (issue #430): the proof surface for the UoM

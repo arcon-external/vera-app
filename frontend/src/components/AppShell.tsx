@@ -6,6 +6,8 @@ import type { SignedInUser } from "./LoginPage";
 
 interface AppShellProps {
   page:
+    | "home"
+    | "po"
     | "create"
     | "drafts"
     | "archive"
@@ -13,6 +15,7 @@ interface AppShellProps {
     | "users"
     | "clients"
     | "settings";
+  onOpenHome?: () => void;
   onOpenEditor: () => void;
   onOpenDrafts: () => void;
   onOpenArchive: () => void;
@@ -29,10 +32,12 @@ interface AppShellProps {
   onSignOut?: () => void;
 }
 
+// Home sits first: it is the landing page every other tab returns to (#466).
 // Drafts sit next to the Editor because that is the relationship: a draft is
 // unfinished editor work, not a quotation. Before the Archive keeps work in
 // progress and work done in the order they happen.
 const tabs = [
+  { id: "home", label: "Home" },
   { id: "create", label: "Editor" },
   { id: "drafts", label: "Drafts" },
   { id: "archive", label: "Archive" },
@@ -48,6 +53,7 @@ function initials(name: string): string {
 }
 
 function isTabActive(tab: string, page: string): boolean {
+  if (tab === "home") return page === "home";
   if (tab === "create") return page === "create";
   if (tab === "drafts") return page === "drafts";
   if (tab === "archive") return page === "archive" || page === "detail";
@@ -57,6 +63,7 @@ function isTabActive(tab: string, page: string): boolean {
 
 export function AppShell({
   page,
+  onOpenHome,
   onOpenEditor,
   onOpenDrafts,
   onOpenArchive,
@@ -97,7 +104,9 @@ export function AppShell({
               .map((tab) => {
                 const active = isTabActive(tab.id, page);
                 const open =
-                  tab.id === "create"
+                  tab.id === "home"
+                    ? onOpenHome
+                    : tab.id === "create"
                     ? onOpenEditor
                     : tab.id === "drafts"
                       ? onOpenDrafts
