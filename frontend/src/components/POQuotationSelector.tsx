@@ -410,6 +410,15 @@ export function POQuotationSelector({
   // page and filter changes keep this value and query immediately.
   const lastSearch = useRef(state.search);
 
+  // Read by the confirm continuation after its await. A prop update is not
+  // synchronous, so the ref records "still open" at render time.
+  const openRef = useRef(open);
+  openRef.current = open;
+  // Advances whenever an outstanding confirmation must be ignored: open,
+  // close, cancel, unmount, or any step/selection change. A resolution that
+  // no longer owns the current token never reaches onConfirm.
+  const confirmToken = useRef(0);
+
   // Loaders are kept in refs: App may pass fresh closures each render, and a
   // loader identity in the dependency list would refetch on every keystroke
   // elsewhere in the page.
@@ -432,12 +441,57 @@ export function POQuotationSelector({
   useEffect(() => {
     if (!open) return;
     const opener =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.focus();
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body
+        ? document.activeElement
+        : null;
     return () => {
       if (opener !== null && document.contains(opener)) opener.focus();
     };
   }, [open]);
+
+  // Focus has to survive every commit, not just the open transition. Choosing
+  // a Quotation removes the row that held focus, and continuing removes the
+  // Continue button; without this the active element falls back to <body> and
+  // Escape never reaches the dialog's handler. A control that becomes
+  // disabled under focus (a used row, the busy Confirm button) is treated the
+  // same way: focus returns to the dialog rather than to a dead control.
+  // A control the user deliberately focused stays untouched.
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (dialog === null) return;
+    const active = document.activeElement;
+    const abandoned =
+      active === null ||
+      active === document.body ||
+      !dialog.contains(active) ||
+      (active instanceof HTMLElement &&
+        (active as HTMLButtonElement).disabled === true);
+    if (abandoned) dialog.focus();
+  });
+
+  // Every one of these makes an in-flight confirmation stale. `confirm` also
+  // bumps the token when it starts, so a resolution only matches the request
+  // it belongs to.
+  useEffect(() => {
+    confirmToken.current += 1;
+  }, [open, state.step, state.selected?.id, state.selectedRevision]);
+
+  useEffect(
+    () => () => {
+      confirmToken.current += 1;
+    },
+    []
+  );
+
+  // Cancel, Escape and the backdrop all close through here, so the token is
+  // invalidated in the same click that closes the modal rather than waiting
+  // for the next commit.
+  const handleClose = useCallback(() => {
+    confirmToken.current += 1;
+    onClose();
+  }, [onClose]);
 
   // Escape closes; Tab and Shift+Tab wrap inside the dialog. The view passes
   // this to the dialog, and App ignores global shortcuts while the modal is
@@ -447,7 +501,7 @@ export function POQuotationSelector({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        handleClose();
         return;
       }
       if (event.key !== "Tab") return;
@@ -465,7 +519,7 @@ export function POQuotationSelector({
       event.preventDefault();
       stops[target].focus();
     },
-    [onClose]
+    [handleClose]
   );
 
   useEffect(() => {
@@ -524,15 +578,20 @@ export function POQuotationSelector({
   const confirm = useCallback(async () => {
     const selection = selectionOf(state);
     if (!canConfirm(state) || selection === null) return;
+    const token = ++confirmToken.current;
     dispatch({ type: "confirmStarted" });
     try {
       const outcome = await validator.current(selection);
+      // Cancel, close, unmount, or a step/selection change invalidates this
+      // request while it was in flight. Its answer must not select anything.
+      if (token !== confirmToken.current || !openRef.current) return;
       if (!outcome.valid) {
         dispatch({ type: "confirmFailed", error: validationMessage(outcome.reason) });
         return;
       }
       onConfirm(selection);
     } catch (error) {
+      if (token !== confirmToken.current || !openRef.current) return;
       dispatch({ type: "confirmFailed", error: errorText(error) });
     }
   }, [state, onConfirm]);
@@ -542,7 +601,7 @@ export function POQuotationSelector({
     <POQuotationSelectorView
       state={state}
       dispatch={dispatch}
-      onClose={onClose}
+      onClose={handleClose}
       onConfirm={() => void confirm()}
       dialogRef={dialogRef}
       onKeyDown={handleDialogKeyDown}
