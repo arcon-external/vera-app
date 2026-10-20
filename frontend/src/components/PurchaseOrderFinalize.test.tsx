@@ -261,7 +261,8 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     documentConfirmed: boolean,
     documentState = "none",
     state = reviewState(),
-    stored: PurchaseOrderDTO = order()
+    stored: PurchaseOrderDTO = order(),
+    assignConfirmation = false
   ) {
     const evaluation = evaluateReview(state, SOURCE, USD, {}, [], []);
     const payload = buildPurchaseOrderUpdate(evaluation.applied, USD).input!;
@@ -273,6 +274,8 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
         currency={USD}
         documentConfirmed={documentConfirmed}
         onToggleDocumentConfirmed={() => undefined}
+        assignConfirmation={assignConfirmation}
+        onToggleAssignConfirmation={() => undefined}
         onBack={() => undefined}
         onFinalSave={() => undefined}
         saving={false}
@@ -321,6 +324,26 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     expect(html).toContain("30 days");
     expect(html).toContain("The details below are the values this save will store.");
   });
+
+  it("offers the optional confirmation number unchecked and explains manual submission", () => {
+    const defaultHtml = markup(confirmationElement(true));
+    expect(defaultHtml).toContain('aria-label="Assign confirmation number"');
+    // Unchecked by default: a customer that does not require a number must not
+    // consume one just because the final save opened.
+    expect(defaultHtml).not.toMatch(
+      /aria-label="Assign confirmation number"[^>]*checked/
+    );
+    expect(defaultHtml).toContain("Not assigned");
+    expect(defaultHtml).toContain("manual submission to the customer");
+    expect(defaultHtml).toContain("Vera does not submit it");
+    expect(defaultHtml).not.toContain("Submitted");
+
+    const requested = markup(confirmationElement(true, "none", reviewState(), order(), true));
+    expect(requested).toMatch(
+      /aria-label="Assign confirmation number"[^>]*checked/
+    );
+    expect(requested).toContain("Assigned when saved");
+  });
 });
 
 describe("PurchaseOrderSavedView (issue #471)", () => {
@@ -357,5 +380,43 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     );
     expect(html).toContain("Printed on quotation revision 1");
     expect(html).toContain("Printed grand total");
+  });
+
+  it("shows Not assigned with a later Assign action, and no number input", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved" })}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(html).toContain("Confirmation number");
+    expect(html).toContain("Not assigned");
+    expect(html).toContain('aria-label="Assign confirmation number"');
+    expect(html).toContain("Vera does not submit it");
+    expect(html).not.toContain('aria-label="Copy confirmation number"');
+    // The identifier is never an editable field, even before assignment.
+    expect(html).not.toContain("ConfirmationNumber");
+  });
+
+  it("shows an issued confirmation number read-only with Copy", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({
+          State: "saved",
+          ConfirmationNumber: "2302260007",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+        })}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(html).toContain("2302260007");
+    expect(html).toContain('aria-label="Copy confirmation number"');
+    expect(html).not.toContain('aria-label="Assign confirmation number"');
+    expect(html).not.toContain("Not assigned");
+    expect(html).toContain("cannot be edited, cleared or regenerated");
   });
 });

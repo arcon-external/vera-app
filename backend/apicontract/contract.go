@@ -19,6 +19,21 @@ func FormatQuoteNumber(customerCode, yy int, seq int64) string {
 	return fmt.Sprintf("15%02d%02d%04d", customerCode, yy, seq)
 }
 
+// POConfirmationNumberPrefix replaces the quotation's "15" with "23". It is
+// the only part of the number that is not shared with the quotation format.
+const POConfirmationNumberPrefix = "23"
+
+// FormatPOConfirmationNumber renders a purchase order's optional
+// customer-system confirmation reference: 23 + 2-digit customer code +
+// 2-digit assignment year + sequence. The normal width is 10 digits
+// (0001-9999); past 9999 the sequence widens to 5 digits instead of wrapping,
+// so an overflow cycle prints 11 digits. The quotation's prefix and
+// independent customer-year counter are what keep the two series apart; the
+// customer code, year rule and warning threshold are shared.
+func FormatPOConfirmationNumber(customerCode, yy int, seq int64) string {
+	return fmt.Sprintf("%s%02d%02d%04d", POConfirmationNumberPrefix, customerCode, yy, seq)
+}
+
 // This file defines the shared HTTP contract between veraserver and the
 // desktop client. Field names are stable API; the desktop code-generates or
 // mirrors these shapes in #80.
@@ -228,6 +243,12 @@ type PurchaseOrderRow struct {
 	SavedAt            *string `json:"savedAt"`
 	SavedBy            *int64  `json:"savedBy"`
 	PdfAbsentConfirmed bool    `json:"pdfAbsentConfirmed"`
+	// The optional customer-system confirmation reference (#474). It is null
+	// until assigned, and then immutable. ConfirmationWarn turns true once the
+	// customer-year cycle reaches the shared 8000 warning threshold.
+	ConfirmationNumber     *string `json:"confirmationNumber"`
+	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
+	ConfirmationWarn       bool    `json:"confirmationWarn"`
 }
 
 // PurchaseOrderSourceLineRow is one customer-facing line of the exact source
@@ -327,6 +348,11 @@ type PurchaseOrderFinalizeRequest struct {
 	AcknowledgedMissing []string                       `json:"acknowledgedMissing"`
 	AcknowledgedExtra   []int                          `json:"acknowledgedExtra"`
 	DocumentConfirmed   bool                           `json:"documentConfirmed"`
+	// AssignConfirmationNumber asks the server to allocate the optional
+	// customer-system reference inside the same transaction as the save. The
+	// client never sends the number itself: only the server allocates, and an
+	// already-assigned value is never regenerated (#474).
+	AssignConfirmationNumber bool `json:"assignConfirmationNumber"`
 }
 
 // PurchaseOrderCreateRequest starts a draft from one exact issued revision.

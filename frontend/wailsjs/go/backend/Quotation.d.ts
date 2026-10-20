@@ -4,6 +4,8 @@ import {backend} from '../models';
 import {store} from '../models';
 import {auth} from '../models';
 
+export function AssignPurchaseOrderConfirmationNumber(arg1:number):Promise<backend.PurchaseOrderDTO>;
+
 export function AttachPurchaseOrderDocument(arg1:backend.PurchaseOrderDocumentUploadInput):Promise<backend.PurchaseOrderDocumentDTO>;
 
 export function ClearDraftContext():Promise<void>;

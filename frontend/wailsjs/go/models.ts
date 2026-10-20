@@ -1270,6 +1270,9 @@ export namespace backend {
 	    SavedAt?: string;
 	    SavedBy?: number;
 	    PdfAbsentConfirmed: boolean;
+	    ConfirmationNumber?: string;
+	    ConfirmationAssignedAt?: string;
+	    ConfirmationWarn: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
@@ -1317,6 +1320,9 @@ export namespace backend {
 	        this.SavedAt = source["SavedAt"];
 	        this.SavedBy = source["SavedBy"];
 	        this.PdfAbsentConfirmed = source["PdfAbsentConfirmed"];
+	        this.ConfirmationNumber = source["ConfirmationNumber"];
+	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
+	        this.ConfirmationWarn = source["ConfirmationWarn"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1504,6 +1510,7 @@ export namespace backend {
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
 	    DocumentConfirmed: boolean;
+	    AssignConfirmationNumber: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderFinalizeInput(source);
@@ -1531,6 +1538,7 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.DocumentConfirmed = source["DocumentConfirmed"];
+	        this.AssignConfirmationNumber = source["AssignConfirmationNumber"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

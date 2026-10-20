@@ -6,6 +6,7 @@ import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
 import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
+import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 
 // Issue #471: the final-save flow in a real DOM. These are the interactions the
 // SSR suite cannot reach: opening the review, choosing a side, watching the
@@ -15,14 +16,17 @@ import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
 // The bindings are replaced at their module boundary, which is what the
 // desktop provides; everything inside the editor and the review is real.
 
-const { reviewMock, finalizeMock } = vi.hoisted(() => ({
+const { reviewMock, finalizeMock, assignConfirmationMock } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
   finalizeMock: vi.fn(),
+  assignConfirmationMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderReview: (...args: unknown[]) => reviewMock(...args),
   FinalizePurchaseOrder: (...args: unknown[]) => finalizeMock(...args),
+  AssignPurchaseOrderConfirmationNumber: (...args: unknown[]) =>
+    assignConfirmationMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
   GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
   AttachPurchaseOrderDocument: vi.fn(),
@@ -182,6 +186,7 @@ let root: Root;
 beforeEach(() => {
   reviewMock.mockReset();
   finalizeMock.mockReset();
+  assignConfirmationMock.mockReset();
   reviewMock.mockResolvedValue(REVIEW);
   finalizeMock.mockResolvedValue({
     ...ORDER,
@@ -390,5 +395,101 @@ describe("final save from the editor (issue #471)", () => {
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.PONumber).toBe("UNSAVED-NEW");
     expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the confirmation number unchecked and sends the opt-in only when ticked", async () => {
+    render();
+    await act(async () => {
+      button("Final Save").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Line 1 unit price").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Payment terms").click();
+    });
+    await act(async () => {
+      button("Continue final save").click();
+    });
+
+    // Optional means unchecked: a save that never touches it must send false.
+    expect(checkbox("Assign confirmation number").checked).toBe(false);
+    expect(document.body.textContent).toContain("Not assigned");
+
+    await act(async () => {
+      checkbox("Assign confirmation number").click();
+    });
+    expect(checkbox("Assign confirmation number").checked).toBe(true);
+    expect(document.body.textContent).toContain("Assigned when saved");
+    expect(document.body.textContent).toContain("Vera does not submit it");
+
+    await act(async () => {
+      checkbox("Confirm saving without the customer PDF").click();
+    });
+    await act(async () => {
+      button("Final save").click();
+    });
+    expect(finalizeMock).toHaveBeenCalledTimes(1);
+    const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.AssignConfirmationNumber).toBe(true);
+    expect(payload).not.toHaveProperty("ConfirmationNumber");
+  });
+});
+
+describe("confirmation number on a saved record (issue #474)", () => {
+  const SAVED: PurchaseOrderDTO = {
+    ...ORDER,
+    State: "saved",
+    ConfirmationNumber: null,
+  };
+
+  it("assigns later, shows the number read-only and copies it", async () => {
+    const assigned: PurchaseOrderDTO = {
+      ...SAVED,
+      ConfirmationNumber: "2302260001",
+      ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+    };
+    assignConfirmationMock.mockResolvedValue(assigned);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const onAssigned = vi.fn();
+
+    act(() =>
+      root.render(
+        <PurchaseOrderSavedView
+          order={SAVED}
+          currency={USD}
+          onBack={() => undefined}
+          onAssigned={onAssigned}
+          documentInitialState={{ Document: null, Versions: [] }}
+        />
+      )
+    );
+    expect(document.body.textContent).toContain("Not assigned");
+    expect(document.querySelector('button[aria-label="Copy confirmation number"]')).toBeNull();
+
+    await act(async () => {
+      button("Assign confirmation number").click();
+    });
+    expect(assignConfirmationMock).toHaveBeenCalledWith(7);
+    expect(document.body.textContent).toContain("2302260001");
+    expect(document.body.textContent).not.toContain("Not assigned");
+    expect(
+      document.querySelector('button[aria-label="Assign confirmation number"]')
+    ).toBeNull();
+    expect(onAssigned).toHaveBeenCalledWith(assigned);
+
+    await act(async () => {
+      button("Copy confirmation number").click();
+    });
+    expect(writeText).toHaveBeenCalledWith("2302260001");
+    expect(document.body.textContent).toContain("Confirmation number copied.");
+
+    // The only write a saved record exposes is assignment; the number is not
+    // an editable control, and a second assignment is not offered.
+    expect(document.querySelectorAll('input[aria-label*="confirmation" i]')).toHaveLength(0);
   });
 });

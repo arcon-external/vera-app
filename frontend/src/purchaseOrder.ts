@@ -83,6 +83,14 @@ export interface PurchaseOrderDTO {
   SavedBy?: number | null;
   /** The deliberate no-PDF confirmation recorded by the final save (#471). */
   PdfAbsentConfirmed?: boolean;
+  /**
+   * The optional customer-system confirmation reference (#474). Null until
+   * staff assign it; after that it is immutable. ConfirmationWarn follows the
+   * stored customer-year sequence.
+   */
+  ConfirmationNumber?: string | null;
+  ConfirmationAssignedAt?: string | null;
+  ConfirmationWarn?: boolean;
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */
@@ -721,6 +729,32 @@ export function serializePurchaseOrderEditor(
 /** Whether the editor holds changes that Cancel would discard. */
 export function isPurchaseOrderDirty(state: PurchaseOrderEditorState): boolean {
   return serializePurchaseOrderEditor(state) !== state.baseline;
+}
+
+/** The display value for an absent confirmation number. Zero is never used. */
+export const CONFIRMATION_NUMBER_NOT_ASSIGNED = "Not assigned";
+
+/**
+ * The stored confirmation number, or "" when the record is unassigned. The
+ * schema stores null, never an empty issued value; trimming here only guards a
+ * value that crossed a boundary with padding.
+ */
+export function confirmationNumberOf(order: PurchaseOrderDTO): string {
+  return (order.ConfirmationNumber ?? "").trim();
+}
+
+/** What the saved view shows in its identifier slot. */
+export function confirmationNumberLabel(order: PurchaseOrderDTO): string {
+  const number = confirmationNumberOf(order);
+  return number === "" ? CONFIRMATION_NUMBER_NOT_ASSIGNED : number;
+}
+
+/**
+ * A later Assign action is available only on a saved record with no number.
+ * Once assigned, the identifier is read-only; a draft never carries one.
+ */
+export function canAssignConfirmationNumber(order: PurchaseOrderDTO): boolean {
+  return order.State === "saved" && confirmationNumberOf(order) === "";
 }
 
 /**

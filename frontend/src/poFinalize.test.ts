@@ -379,6 +379,8 @@ describe("purchase order matching", () => {
 describe("difference choices", () => {
   it("preselects nothing", () => {
     expect(initialFinalizeReviewState().decisions).toEqual({});
+    // #474: the confirmation number is an explicit opt-in too.
+    expect(initialFinalizeReviewState().assignConfirmation).toBe(false);
   });
 
   it("applies only Use Quotation choices", () => {
@@ -610,6 +612,33 @@ describe("final-save payload", () => {
     );
     expect(result.input).not.toBeNull();
     expect(result.input?.DocumentConfirmed).toBe(false);
+  });
+
+  it("sends the confirmation opt-in only when it was requested", () => {
+    const off = buildFinalizeInput(
+      stateFrom(order()),
+      SOURCE,
+      USD,
+      "attached",
+      {},
+      [],
+      [],
+      false
+    );
+    expect(off.input?.AssignConfirmationNumber).toBe(false);
+
+    const on = buildFinalizeInput(
+      stateFrom(order()),
+      SOURCE,
+      USD,
+      "attached",
+      {},
+      [],
+      [],
+      false,
+      true
+    );
+    expect(on.input?.AssignConfirmationNumber).toBe(true);
   });
 
   it("refuses to build a payload with unresolved differences", () => {

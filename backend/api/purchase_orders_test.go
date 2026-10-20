@@ -71,6 +71,9 @@ type purchaseOrderRow struct {
 	SavedAt                *string `json:"savedAt"`
 	SavedBy                *int64  `json:"savedBy"`
 	PdfAbsentConfirmed     bool    `json:"pdfAbsentConfirmed"`
+	ConfirmationNumber     *string `json:"confirmationNumber"`
+	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
+	ConfirmationWarn       bool    `json:"confirmationWarn"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
@@ -1083,10 +1086,190 @@ func TestPurchaseOrderReviewAndFinalizeRequireASession(t *testing.T) {
 	}{
 		{http.MethodGet, "/v1/purchase-orders/1/review"},
 		{http.MethodPost, "/v1/purchase-orders/1/finalize"},
+		{http.MethodPost, "/v1/purchase-orders/1/confirmation-number"},
 	} {
 		code, _ := doJSON(t, server, request.method, request.path, "", map[string]any{})
 		if code != http.StatusUnauthorized {
 			t.Errorf("%s %s = %d; want 401", request.method, request.path, code)
 		}
 	}
+}
+
+// finalizePOOverAPI saves one draft and returns the decoded record, failing the
+// test on any refusal.
+func finalizePOOverAPI(t *testing.T, server *Server, token string, draft purchaseOrderRow,
+	number string, assign bool) purchaseOrderRow {
+	t.Helper()
+	body := finalizeBody(draft, number)
+	if assign {
+		body["assignConfirmationNumber"] = true
+	}
+	code, response := doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/finalize", token, body)
+	if code != http.StatusOK {
+		t.Fatalf("finalize %q = %d (%v)", number, code, response)
+	}
+	return decodePurchaseOrder(t, response)
+}
+
+// checkPOConfirmationNumber asserts the wire format independently of the Go
+// formatter: 23, the customer code, a two-digit year and the sequence.
+func checkPOConfirmationNumber(t *testing.T, row purchaseOrderRow, customerCode, sequence string) {
+	t.Helper()
+	if row.ConfirmationNumber == nil {
+		t.Fatalf("confirmation number is null; want customer %s sequence %s", customerCode, sequence)
+	}
+	number := *row.ConfirmationNumber
+	if len(number) < 10 || len(number) > 11 {
+		t.Fatalf("confirmation number %q has length %d; want 10 or 11", number, len(number))
+	}
+	if number[0:2] != "23" || number[2:4] != customerCode || number[6:] != sequence {
+		t.Fatalf("confirmation number = %q; want 23%s<yy>%s", number, customerCode, sequence)
+	}
+	for _, digit := range number[4:6] {
+		if digit < '0' || digit > '9' {
+			t.Fatalf("confirmation year %q is not two digits", number[4:6])
+		}
+	}
+}
+
+func TestPurchaseOrderConfirmationNumbersOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_confirmation")
+	firstID, _ := exportForSelector(t, server, token, quotationInput())
+	secondInput := quotationInput()
+	secondInput["Subject"] = "Confirmation second"
+	secondID, _ := exportForSelector(t, server, token, secondInput)
+	otherInput := quotationInput()
+	otherInput["Subject"] = "Confirmation other customer"
+	otherInput["CustomerID"] = 3
+	otherID, _ := exportForSelector(t, server, token, otherInput)
+
+	first := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, firstID))
+	second := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, secondID))
+	other := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, otherID))
+
+	// The default is unassigned: the option was not requested, no sequence is
+	// consumed, and the API reports null rather than zero or an empty string.
+	firstSaved := finalizePOOverAPI(t, server, token, first, "PO-CONF-1", false)
+	if firstSaved.ConfirmationNumber != nil || firstSaved.ConfirmationAssignedAt != nil {
+		t.Errorf("unrequested save = %v / %v; want null", firstSaved.ConfirmationNumber, firstSaved.ConfirmationAssignedAt)
+	}
+
+	// Later assignment issues the first number for this customer-year cycle.
+	path := "/v1/purchase-orders/" + strconv.FormatInt(firstSaved.ID, 10) + "/confirmation-number"
+	code, body := doJSON(t, server, http.MethodPost, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("assign = %d (%v)", code, body)
+	}
+	assigned := decodePurchaseOrder(t, body)
+	checkPOConfirmationNumber(t, assigned, "02", "0001")
+	if assigned.ConfirmationAssignedAt == nil {
+		t.Error("assigned record has no assignment time")
+	}
+
+	// The endpoint is idempotent: the same number comes back, not a second one.
+	code, body = doJSON(t, server, http.MethodPost, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("second assign = %d (%v)", code, body)
+	}
+	again := decodePurchaseOrder(t, body)
+	if again.ConfirmationNumber == nil || assigned.ConfirmationNumber == nil ||
+		*again.ConfirmationNumber != *assigned.ConfirmationNumber {
+		t.Errorf("second assign = %v; want %v", again.ConfirmationNumber, assigned.ConfirmationNumber)
+	}
+
+	// The final save can assign too, continuing the same customer cycle.
+	secondSaved := finalizePOOverAPI(t, server, token, second, "PO-CONF-2", true)
+	checkPOConfirmationNumber(t, secondSaved, "02", "0002")
+
+	// Another customer starts at 0001; the customer code is the directory's.
+	otherSaved := finalizePOOverAPI(t, server, token, other, "PO-CONF-3", true)
+	checkPOConfirmationNumber(t, otherSaved, "03", "0001")
+
+	// A client cannot supply the number: the field is not part of the request
+	// shape, and a save that does not request assignment stores null.
+	thirdInput := quotationInput()
+	thirdInput["Subject"] = "Confirmation client supplied"
+	thirdID, _ := exportForSelector(t, server, token, thirdInput)
+	third := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, thirdID))
+	thirdBody := finalizeBody(third, "PO-CONF-4")
+	thirdBody["confirmationNumber"] = "2302999999"
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(third.ID, 10)+"/finalize", token, thirdBody)
+	if code != http.StatusOK {
+		t.Fatalf("client-supplied finalize = %d (%v)", code, body)
+	}
+	thirdSaved := decodePurchaseOrder(t, body)
+	if thirdSaved.ConfirmationNumber != nil {
+		t.Errorf("client-supplied number was stored: %v", thirdSaved.ConfirmationNumber)
+	}
+
+	// A draft is refused: an issued identifier never lands on entry that is
+	// still changing. The refusal consumes no sequence.
+	fourthInput := quotationInput()
+	fourthInput["Subject"] = "Confirmation draft refused"
+	fourthID, _ := exportForSelector(t, server, token, fourthInput)
+	draft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, fourthID))
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/confirmation-number", token, nil)
+	if code != http.StatusConflict || body["code"] != "po_not_saved" {
+		t.Fatalf("assign to draft = %d %v; want 409 po_not_saved", code, body)
+	}
+
+	// The 8000 warning threshold travels with the record.
+	purchaseOrderTestExec(t, "vera_api_po_confirmation", fmt.Sprintf(`
+		INSERT INTO %s.sequence_counters (name, next_value)
+		VALUES ($1, 8000)
+		ON CONFLICT (name) DO UPDATE SET next_value = 8000`,
+		quoteIdentForTest("vera_api_po_confirmation")),
+		"po-confirmation:default:02:"+fmt.Sprintf("%02d",
+			time.Now().In(time.FixedZone("WIB", 7*60*60)).Year()%100))
+	fifthInput := quotationInput()
+	fifthInput["Subject"] = "Confirmation warning"
+	fifthID, _ := exportForSelector(t, server, token, fifthInput)
+	fifth := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, fifthID))
+	warned := finalizePOOverAPI(t, server, token, fifth, "PO-CONF-5", true)
+	checkPOConfirmationNumber(t, warned, "02", "8000")
+	if !warned.ConfirmationWarn {
+		t.Error("sequence 8000 did not report the warning")
+	}
+
+	// Exhaustion is a refusal, not a wrap, and it maps to a named API error.
+	purchaseOrderTestExec(t, "vera_api_po_confirmation", fmt.Sprintf(`
+		INSERT INTO %s.sequence_counters (name, next_value)
+		VALUES ($1, 100000)
+		ON CONFLICT (name) DO UPDATE SET next_value = 100000`,
+		quoteIdentForTest("vera_api_po_confirmation")),
+		"po-confirmation:default:03:"+fmt.Sprintf("%02d",
+			time.Now().In(time.FixedZone("WIB", 7*60*60)).Year()%100))
+	exhaustedInput := quotationInput()
+	exhaustedInput["Subject"] = "Confirmation exhausted customer"
+	exhaustedInput["CustomerID"] = 3
+	exhaustedID, _ := exportForSelector(t, server, token, exhaustedInput)
+	exhaustedDraft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, exhaustedID))
+	exhaustedSaved := finalizePOOverAPI(t, server, token, exhaustedDraft, "PO-CONF-6", false)
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(exhaustedSaved.ID, 10)+"/confirmation-number", token, nil)
+	if code != http.StatusConflict || body["code"] != "po_confirmation_exhausted" {
+		t.Fatalf("exhausted assignment = %d %v; want 409 po_confirmation_exhausted", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(exhaustedSaved.ID, 10), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload exhausted record = %d (%v)", code, body)
+	}
+	if reloaded := decodePurchaseOrder(t, body); reloaded.ConfirmationNumber != nil {
+		t.Errorf("a refused exhaustion left a number: %v", reloaded.ConfirmationNumber)
+	}
+}
+
+// mustCreatePODraft creates the one draft for a quotation and fails the test on
+// refusal.
+func mustCreatePODraft(t *testing.T, server *Server, token string, quotationID int64) map[string]any {
+	t.Helper()
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create draft = %d (%v)", code, body)
+	}
+	return body
 }

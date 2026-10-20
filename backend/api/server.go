@@ -130,6 +130,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// and the final save is the one-way draft -> saved transition.
 	server.echo.GET("/v1/purchase-orders/:id/review", server.getPurchaseOrderReview, server.requireSession)
 	server.echo.POST("/v1/purchase-orders/:id/finalize", server.finalizePurchaseOrder, server.requireSession)
+	// #474: the optional customer-system confirmation number. POST with no body:
+	// the client asks for assignment and never supplies the identifier.
+	server.echo.POST("/v1/purchase-orders/:id/confirmation-number", server.assignPurchaseOrderConfirmation, server.requireSession)
 	// The one optional customer PO PDF (issue #472): upload/replace, the
 	// active document's metadata and retained versions, byte content for the
 	// active document or one version, and deliberate removal.

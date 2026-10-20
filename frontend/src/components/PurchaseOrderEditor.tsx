@@ -753,6 +753,8 @@ export function PurchaseOrderEditorPage({
   const [acknowledgedMissing, setAcknowledgedMissing] = useState<string[]>([]);
   const [acknowledgedExtra, setAcknowledgedExtra] = useState<number[]>([]);
   const [documentConfirmed, setDocumentConfirmed] = useState(false);
+  // #474: optional and unchecked until staff ask for it on the final save.
+  const [assignConfirmation, setAssignConfirmation] = useState(false);
   // The applied payload the confirmation displays and Final save submits. It is
   // built once when Continue is pressed, from the applied choices -- never from
   // the stored record, which may still hold an identifier the editor replaced.
@@ -806,6 +808,7 @@ export function PurchaseOrderEditorPage({
       setAcknowledgedMissing(initial.acknowledgedMissing);
       setAcknowledgedExtra(initial.acknowledgedExtra);
       setDocumentConfirmed(initial.documentConfirmed);
+      setAssignConfirmation(initial.assignConfirmation);
       setView("review");
     } catch (error) {
       dispatch({ type: "saveFailed", error: errorText(error) });
@@ -824,7 +827,8 @@ export function PurchaseOrderEditorPage({
       decisions,
       acknowledgedMissing,
       acknowledgedExtra,
-      documentConfirmed
+      documentConfirmed,
+      assignConfirmation
     );
     if (result.input === null) {
       dispatch({ type: "saveFailed", error: result.error ?? "The purchase order cannot be saved yet." });
@@ -935,6 +939,10 @@ export function PurchaseOrderEditorPage({
         currency={currency}
         documentConfirmed={documentConfirmed}
         onToggleDocumentConfirmed={() => setDocumentConfirmed((current) => !current)}
+        assignConfirmation={assignConfirmation}
+        onToggleAssignConfirmation={() =>
+          setAssignConfirmation((current) => !current)
+        }
         onBack={() => setView("review")}
         onFinalSave={() => void finalSave()}
         saving={finalSaving}

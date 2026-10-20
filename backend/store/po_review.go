@@ -640,6 +640,16 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		return PurchaseOrder{}, err
 	}
 
+	// #474: when staff ask for a confirmation number, allocate it in this same
+	// transaction, after the record is saved. A later refusal or commit failure
+	// rolls the counter back with the save, so a failed attempt leaves no gap.
+	if input.AssignConfirmationNumber {
+		if err := allocatePurchaseOrderConfirmationTx(
+			ctx, tx, schema, org.ID, input.ID, input.UpdatedBy, time.Now()); err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+
 	saved, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
 		return PurchaseOrder{}, err

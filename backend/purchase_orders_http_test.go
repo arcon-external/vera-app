@@ -184,6 +184,90 @@ func TestPurchaseOrderBindingsRequireSignIn(t *testing.T) {
 	if _, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{ID: 1}); err == nil {
 		t.Error("UpdatePurchaseOrderDraft without a session succeeded; want refusal")
 	}
+	if _, err := q.AssignPurchaseOrderConfirmationNumber(1); err == nil {
+		t.Error("AssignPurchaseOrderConfirmationNumber without a session succeeded; want refusal")
+	}
+}
+
+// TestAssignPurchaseOrderConfirmationNumberPostsAndMapsTheNumber covers the
+// desktop side of #474: the request is a bodiless POST that asks the server to
+// assign, and every value the saved view renders survives the mapping.
+func TestAssignPurchaseOrderConfirmationNumberPostsAndMapsTheNumber(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/confirmation-number" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/confirmation-number",
+				request.Method, request.URL.Path)
+		}
+		number := "2302260001"
+		assignedAt := "2026-10-21T09:00:00Z"
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "saved", ReceivedDate: "2026-10-20",
+			ConfirmationNumber:     &number,
+			ConfirmationAssignedAt: &assignedAt,
+			ConfirmationWarn:       true,
+			Items:                  []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	order, err := q.AssignPurchaseOrderConfirmationNumber(7)
+	if err != nil {
+		t.Fatalf("AssignPurchaseOrderConfirmationNumber failed: %v", err)
+	}
+	if order.ConfirmationNumber == nil || *order.ConfirmationNumber != "2302260001" {
+		t.Errorf("number = %v; want 2302260001", order.ConfirmationNumber)
+	}
+	if order.ConfirmationAssignedAt == nil || *order.ConfirmationAssignedAt != "2026-10-21T09:00:00Z" {
+		t.Errorf("assigned at = %v; want the server time", order.ConfirmationAssignedAt)
+	}
+	if !order.ConfirmationWarn {
+		t.Error("confirmation warning was not mapped")
+	}
+}
+
+// TestFinalizePurchaseOrderSendsTheAssignmentRequest proves the checkbox
+// travels as a request field and that the returned identifier is mapped. The
+// desktop never sends the number itself.
+func TestFinalizePurchaseOrderSendsTheAssignmentRequest(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/finalize" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/finalize",
+				request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["assignConfirmationNumber"] != true {
+			t.Errorf("assignConfirmationNumber = %v; want true", body["assignConfirmationNumber"])
+		}
+		if _, sent := body["confirmationNumber"]; sent {
+			t.Error("the client sent a confirmation number; only the server may allocate one")
+		}
+		number := "2302260003"
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "saved", PONumber: "PO-7", ReceivedDate: "2026-10-20",
+			ConfirmationNumber: &number,
+			Items:              []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	saved, err := q.FinalizePurchaseOrder(PurchaseOrderFinalizeInput{
+		ID:                       7,
+		PONumber:                 "PO-7",
+		ReceivedDate:             "2026-10-20",
+		DocumentConfirmed:        true,
+		AssignConfirmationNumber: true,
+	})
+	if err != nil {
+		t.Fatalf("FinalizePurchaseOrder failed: %v", err)
+	}
+	if saved.ConfirmationNumber == nil || *saved.ConfirmationNumber != "2302260003" {
+		t.Errorf("number = %v; want 2302260003", saved.ConfirmationNumber)
+	}
 }
 
 // TestPurchaseOrderPPNRateMatchesQuotationTaxResolution pins the PO calculator
@@ -260,6 +344,7 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 		{"PurchaseOrderCreateInput", PurchaseOrderCreateInput{}},
 		{"PurchaseOrderItemInput", PurchaseOrderItemInput{}},
 		{"PurchaseOrderUpdateInput", PurchaseOrderUpdateInput{}},
+		{"PurchaseOrderFinalizeInput", PurchaseOrderFinalizeInput{}},
 	}
 	for _, target := range targets {
 		start := strings.Index(source, "export class "+target.name+" {")

@@ -6,6 +6,9 @@ import type { CurrencyInfo } from "./format";
 import {
   buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
+  canAssignConfirmationNumber,
+  confirmationNumberLabel,
+  confirmationNumberOf,
   formatQuantityScaled,
   formatUnitPriceMinor,
   initialPurchaseOrderEditorState,
@@ -1043,5 +1046,38 @@ describe("PO calculation in the saved payload (issue #470)", () => {
     expect(state.lines[0].discountPercent).toBe("10");
     expect(state.lines[1].discountEnabled).toBe(false);
     expect(state.printedTotals.grandTotalMinor).toBe(340736);
+  });
+});
+
+// Issue #474: the confirmation number is optional. Absence is null and is
+// displayed as "Not assigned"; zero never stands in for an issued identifier.
+describe("confirmation number decisions (issue #474)", () => {
+  it("renders absence as Not assigned, never as zero or an empty field", () => {
+    expect(confirmationNumberOf(order())).toBe("");
+    expect(confirmationNumberLabel(order())).toBe("Not assigned");
+    expect(confirmationNumberLabel(order({ ConfirmationNumber: null }))).toBe(
+      "Not assigned"
+    );
+    expect(confirmationNumberLabel(order({ ConfirmationNumber: "  " }))).toBe(
+      "Not assigned"
+    );
+    expect(confirmationNumberLabel(order({ ConfirmationNumber: "2302260001" }))).toBe(
+      "2302260001"
+    );
+  });
+
+  it("offers a later assignment only on a saved record with no number", () => {
+    expect(canAssignConfirmationNumber(order({ State: "draft" }))).toBe(false);
+    expect(canAssignConfirmationNumber(order({ State: "saved" }))).toBe(true);
+    expect(
+      canAssignConfirmationNumber(
+        order({ State: "saved", ConfirmationNumber: "2302260001" })
+      )
+    ).toBe(false);
+    // An empty string from a hand-built payload is absence, not an issued
+    // identifier, so the action is still offered.
+    expect(
+      canAssignConfirmationNumber(order({ State: "saved", ConfirmationNumber: "" }))
+    ).toBe(true);
   });
 });
