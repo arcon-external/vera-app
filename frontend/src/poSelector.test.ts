@@ -3,8 +3,11 @@ import {
   canConfirm,
   canContinue,
   initialPOSourceSelectorState,
+  PO_SOURCE_SEARCH_PAUSE_MS,
+  poSourceQueryDelay,
   poSourceSelectorReducer,
   selectionOf,
+  tabStopIndex,
   visibleRows,
 } from "./poSelector";
 import type {
@@ -265,5 +268,31 @@ describe("PO source selector state machine (issue #467)", () => {
     ]);
     const closed = poSourceSelectorReducer(dirty, { type: "reset" });
     expect(closed).toEqual(initialPOSourceSelectorState);
+  });
+});
+
+describe("PO source selector request timing and focus order (issue #467)", () => {
+  it("queries immediately for paging and filtering, and pauses only while typing", () => {
+    // First render and page/filter changes keep the search unchanged: there
+    // is nothing to debounce, so the request is immediate.
+    expect(poSourceQueryDelay("", "")).toBe(0);
+    expect(poSourceQueryDelay("infineon", "infineon")).toBe(0);
+    // Typing a filter term pauses once, so each keystroke does not query.
+    expect(poSourceQueryDelay("inf", "infi")).toBe(PO_SOURCE_SEARCH_PAUSE_MS);
+    // Clearing, or typing only whitespace, is an immediate query as well.
+    expect(poSourceQueryDelay("infi", "")).toBe(0);
+    expect(poSourceQueryDelay("", "   ")).toBe(0);
+  });
+
+  it("wraps Tab and Shift+Tab through the dialog's stops", () => {
+    expect(tabStopIndex(0, -1, false)).toBe(-1);
+    expect(tabStopIndex(3, -1, false)).toBe(0);
+    expect(tabStopIndex(3, -1, true)).toBe(2);
+    expect(tabStopIndex(3, 0, false)).toBe(1);
+    expect(tabStopIndex(3, 2, false)).toBe(0);
+    expect(tabStopIndex(3, 0, true)).toBe(2);
+    expect(tabStopIndex(3, 2, true)).toBe(1);
+    // An active element the list no longer contains falls back to the edge.
+    expect(tabStopIndex(3, 7, false)).toBe(0);
   });
 });

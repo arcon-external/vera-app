@@ -113,12 +113,17 @@ function render(state: POSourceSelectorState): string {
   ).replace(/<!-- -->/g, "");
 }
 
-function buttonTagFor(html: string, label: string): string {
+function buttonElementFor(html: string, label: string): string {
   const button = html
     .split("<button")
     .slice(1)
     .find((chunk) => chunk.slice(0, chunk.indexOf(">")).includes(`aria-label="${label}"`));
   if (!button) throw new Error(`no <button aria-label="${label}"> in: ${html}`);
+  return button.slice(0, button.indexOf("</button>") + "</button>".length);
+}
+
+function buttonTagFor(html: string, label: string): string {
+  const button = buttonElementFor(html, label);
   return button.slice(0, button.indexOf(">") + 1);
 }
 
@@ -140,16 +145,37 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
 
   it("makes a used Quotation non-interactive with a reason and the disabled cursor", () => {
     const html = render(stepOneState());
-    const used = buttonTagFor(html, "Quotation 1502260002, PT. H-Tech Oilfield Equipment");
-    expect(used).toContain(" disabled=");
-    expect(used).toContain('aria-disabled="true"');
-    expect(used).toContain("cursor-not-allowed");
+    const usedTag = buttonTagFor(html, "Quotation 1502260002, PT. H-Tech Oilfield Equipment");
+    expect(usedTag).toContain(" disabled=");
+    expect(usedTag).toContain('aria-disabled="true"');
+    expect(usedTag).toContain("cursor-not-allowed");
+
+    // A disabled button's descendants are not uniformly exposed, so the
+    // reason lives outside the button and the button points at it.
+    const describedBy = /aria-describedby="([^"]+)"/.exec(usedTag)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(html).toContain(`id="${describedBy}"`);
     expect(html).toContain("Already has a purchase order");
+    const usedElement = buttonElementFor(
+      html,
+      "Quotation 1502260002, PT. H-Tech Oilfield Equipment"
+    );
+    expect(usedElement).not.toContain("Already has a purchase order");
 
     // The available row is the contrast that makes the guard meaningful.
     const available = buttonTagFor(html, "Quotation 1502260001, PT. Infineon Technologies Batam");
     expect(available).not.toContain(" disabled=");
     expect(available).not.toContain("cursor-not-allowed");
+    expect(available).not.toContain("aria-describedby=");
+  });
+
+  it("puts keyboard focus on a dialog the trap can own", () => {
+    const html = render(stepOneState());
+    // The container is a programmatic focus target (negative tabindex), so
+    // opening the modal moves focus into it; the Tab handler keeps it there.
+    const dialogTag = /<div[^>]*role="dialog"[^>]*>/.exec(html)?.[0];
+    expect(dialogTag).toBeTruthy();
+    expect(dialogTag).toContain('tabindex="-1"');
   });
 
   it("hides used rows when the filter is on, and shows the checked filter", () => {

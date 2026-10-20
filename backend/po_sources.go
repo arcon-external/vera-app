@@ -161,10 +161,11 @@ func (q *Quotation) ValidatePOSource(selection POSourceSelection) (POSourceValid
 	if err != nil {
 		return POSourceValidationDTO{}, err
 	}
+	revisionNumber := selection.RevisionNumber
 	var response apicontract.POSourceValidationResponse
 	if err := client.Post("/v1/po-sources/validate", apicontract.POSourceValidateRequest{
 		QuotationID:    selection.QuotationID,
-		RevisionNumber: selection.RevisionNumber,
+		RevisionNumber: &revisionNumber,
 	}, &response); err != nil {
 		return POSourceValidationDTO{}, err
 	}

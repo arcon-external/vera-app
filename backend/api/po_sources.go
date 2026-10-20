@@ -114,11 +114,14 @@ func (s *Server) validatePOSource(context echo.Context) error {
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	if request.QuotationID < 1 || request.RevisionNumber < 0 {
+	// Revision 0 is issued revision zero, not a missing value: an absent or
+	// null field arrives as nil and is rejected rather than read as zero.
+	if request.QuotationID < 1 || request.RevisionNumber == nil || *request.RevisionNumber < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation source"})
 	}
+	revisionNumber := *request.RevisionNumber
 	validation, err := s.database.ValidatePOSource(
-		context.Request().Context(), request.QuotationID, request.RevisionNumber)
+		context.Request().Context(), request.QuotationID, revisionNumber)
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "validate quotation source"})
 	}
@@ -126,7 +129,7 @@ func (s *Server) validatePOSource(context echo.Context) error {
 		Valid:          validation.Valid,
 		Reason:         validation.Reason,
 		QuotationID:    request.QuotationID,
-		RevisionNumber: request.RevisionNumber,
+		RevisionNumber: revisionNumber,
 	}
 	if validation.Quotation.ID > 0 {
 		row := mapPOSourceQuotation(validation.Quotation)

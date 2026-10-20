@@ -98,7 +98,7 @@ func TestValidatePOSourcePostsTheExactPair(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Errorf("decode body: %v", err)
 		}
-		if body.QuotationID != 12 || body.RevisionNumber != 2 {
+		if body.QuotationID != 12 || body.RevisionNumber == nil || *body.RevisionNumber != 2 {
 			t.Errorf("body = %+v; want 12/2", body)
 		}
 		_ = json.NewEncoder(writer).Encode(apicontract.POSourceValidationResponse{
