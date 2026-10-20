@@ -134,16 +134,17 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
     await flush();
 
     expect(attachMock).toHaveBeenCalledTimes(1);
+    // The real wire shape: a base64 string, not a numeric array. The constant
+    // is the exact value the Go binding test pins for "%PDF-1.7\n".
     const payload = attachMock.mock.calls[0][0] as {
       PurchaseOrderID: number;
       Filename: string;
-      FilePath: string;
-      Data: number[];
+      DataBase64: string;
     };
     expect(payload.PurchaseOrderID).toBe(7);
     expect(payload.Filename).toBe("Customer PO.pdf");
-    expect(payload.FilePath).toBe("");
-    expect(payload.Data.length).toBeGreaterThan(0);
+    expect(payload.DataBase64).toBe("JVBERi0xLjcK");
+    expect("Data" in payload).toBe(false);
     expect(stateMock).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Customer PO 1.pdf");
     expect(container.textContent).toContain("Version 1 of 1");
@@ -244,13 +245,17 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
   it("opens the current PDF in a preview and closes it", async () => {
     stateMock.mockResolvedValueOnce(stateWith(1));
     contentMock.mockResolvedValueOnce({
-      Data: [37, 80, 68, 70],
+      DataBase64: "JVBERi0xLjcK",
       ContentType: "application/pdf",
       Filename: "Customer PO 1.pdf",
       SHA256: "sha-1",
       Version: 1,
     });
-    const createObjectURL = vi.fn(() => "blob:po-pdf");
+    let previewBlob: Blob | null = null;
+    const createObjectURL = vi.fn((blob: Blob) => {
+      previewBlob = blob;
+      return "blob:po-pdf";
+    });
     const revokeObjectURL = vi.fn();
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectURL });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectURL });
@@ -263,6 +268,12 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
     });
 
     expect(contentMock).toHaveBeenCalledWith(7);
+    // The preview must hold the exact decoded bytes, not an empty array.
+    expect(previewBlob).not.toBeNull();
+    const previewBytes = new Uint8Array(await previewBlob!.arrayBuffer());
+    expect(Array.from(previewBytes)).toEqual(
+      Array.from(new TextEncoder().encode("%PDF-1.7\n"))
+    );
     const frame = container.querySelector<HTMLIFrameElement>(
       'iframe[title="Customer PO PDF preview"]'
     );

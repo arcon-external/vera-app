@@ -49,12 +49,19 @@ var (
 //
 //  1. the byte bound, before any parsing work;
 //  2. the PDF header at the first byte;
-//  3. at least one object header and its end marker;
-//  4. a cross-reference pointer, a trailer or xref-stream dictionary, and a
-//     document catalog (/Root), so a header-and-EOF forgery is refused;
-//  5. the end-of-file marker, reached through trailing whitespace;
-//  6. encryption, read from the trailer or xref-stream dictionary only, so a
-//     literal /Encrypt inside page content does not reject a valid file.
+//  3. the end-of-file marker, reached through trailing whitespace;
+//  4. the object skeleton, skipping every stream body so page content is never
+//     read as structure;
+//  5. the last startxref, which must be an integer offset in the file and must
+//     point at a classic xref table or a /Type /XRef object;
+//  6. the /Root reference in the real trailer or xref-stream dictionary, which
+//     must name a /Type /Catalog object that exists in the file;
+//  7. encryption, read from that same dictionary only, so a literal /Encrypt
+//     inside page content does not reject a valid file.
+//
+// The structure checks live in pdf_structure.go. The accepted object-stream
+// policy is documented in docs/po-documents.md: a catalog that is not a plain
+// object is accepted only when an /ObjStm header lists it.
 func ValidatePurchaseOrderPDF(data []byte) error {
 	if int64(len(data)) > MaxPurchaseOrderDocumentBytes {
 		return ErrPurchaseOrderDocumentTooLarge
@@ -67,69 +74,17 @@ func ValidatePurchaseOrderPDF(data []byte) error {
 		data[7] < '0' || data[7] > '9' {
 		return fmt.Errorf("%w: it does not start with a PDF header", ErrPurchaseOrderDocumentInvalid)
 	}
-	if !pdfHasObjectHeader(data) || !bytes.Contains(data, []byte("endobj")) {
-		return fmt.Errorf("%w: it contains no PDF objects", ErrPurchaseOrderDocumentInvalid)
-	}
-
-	tailStart := 0
-	if len(data) > 64<<10 {
-		tailStart = len(data) - 64<<10
-	}
-	tail := data[tailStart:]
-	if !bytes.Contains(tail, []byte("/Root")) {
-		return fmt.Errorf("%w: it has no document catalog", ErrPurchaseOrderDocumentInvalid)
-	}
-	if !bytes.Contains(tail, []byte("startxref")) {
-		return fmt.Errorf("%w: it has no cross-reference pointer", ErrPurchaseOrderDocumentInvalid)
-	}
-	if !pdfHasTrailerOrXrefStream(tail) {
-		return fmt.Errorf("%w: it has no trailer", ErrPurchaseOrderDocumentInvalid)
-	}
 	if !pdfEndsWithEOF(data) {
 		return fmt.Errorf("%w: it has no end-of-file marker", ErrPurchaseOrderDocumentInvalid)
 	}
-	if pdfHasEncryptionDictionary(tail) {
+	encrypted, err := inspectPDFStructure(data)
+	if err != nil {
+		return err
+	}
+	if encrypted {
 		return ErrPurchaseOrderDocumentEncrypted
 	}
 	return nil
-}
-
-// pdfHasObjectHeader looks for the "N G obj" shape at a token boundary,
-// rather than the bare substring "obj" that any text could contain.
-func pdfHasObjectHeader(data []byte) bool {
-	search := 0
-	for {
-		index := bytes.Index(data[search:], []byte(" obj"))
-		if index < 0 {
-			return false
-		}
-		position := search + index
-		cursor := position - 1
-		for cursor >= 0 && (data[cursor] == ' ' || data[cursor] == '\t') {
-			cursor--
-		}
-		generationEnd := cursor
-		for cursor >= 0 && data[cursor] >= '0' && data[cursor] <= '9' {
-			cursor--
-		}
-		if cursor == generationEnd {
-			search = position + 4
-			continue
-		}
-		if cursor < 0 || (data[cursor] != ' ' && data[cursor] != '\t' && data[cursor] != '\n' && data[cursor] != '\r') {
-			search = position + 4
-			continue
-		}
-		cursor--
-		objectEnd := cursor
-		for cursor >= 0 && data[cursor] >= '0' && data[cursor] <= '9' {
-			cursor--
-		}
-		if cursor < objectEnd {
-			return true
-		}
-		search = position + 4
-	}
 }
 
 // pdfEndsWithEOF trims the whitespace PDF permits after %%EOF. NUL is included
@@ -137,173 +92,6 @@ func pdfHasObjectHeader(data []byte) bool {
 func pdfEndsWithEOF(data []byte) bool {
 	trimmed := bytes.TrimRight(data, " \t\r\n\f\v\x00")
 	return bytes.HasSuffix(trimmed, []byte("%%EOF"))
-}
-
-// pdfHasTrailerOrXrefStream reports whether the tail carries either the
-// classic trailer dictionary or a cross-reference stream dictionary.
-func pdfHasTrailerOrXrefStream(tail []byte) bool {
-	search := 0
-	for {
-		index := bytes.Index(tail[search:], []byte("trailer"))
-		if index < 0 {
-			break
-		}
-		position := search + index
-		if _, _, ok := pdfDictionaryAfter(tail, position+len("trailer")); ok {
-			return true
-		}
-		search = position + len("trailer")
-	}
-	return pdfHasDictionaryNamed(tail, "Type", "XRef")
-}
-
-// pdfHasEncryptionDictionary looks only at dictionary objects in the tail. A
-// trailer or xref stream must carry /Encrypt for an encrypted document; a page
-// content stream that happens to draw the word does not.
-func pdfHasEncryptionDictionary(tail []byte) bool {
-	search := 0
-	for {
-		index := bytes.Index(tail[search:], []byte("trailer"))
-		if index < 0 {
-			break
-		}
-		position := search + index
-		if start, end, ok := pdfDictionaryAfter(tail, position+len("trailer")); ok {
-			if pdfDictionaryHasName(tail[start:end], "Encrypt") {
-				return true
-			}
-		}
-		search = position + len("trailer")
-	}
-	return pdfHasDictionaryNamed(tail, "Type", "XRef", "Encrypt")
-}
-
-// pdfHasDictionaryNamed walks every dictionary in the tail and reports whether
-// one carries all the named keys. It is used for the two xref-stream shapes:
-// /Type /XRef alone, and /Type /XRef with /Encrypt.
-func pdfHasDictionaryNamed(tail []byte, names ...string) bool {
-	search := 0
-	for {
-		index := bytes.Index(tail[search:], []byte("<<"))
-		if index < 0 {
-			return false
-		}
-		position := search + index
-		start, end, ok := pdfDictionaryAfter(tail, position)
-		if !ok {
-			search = position + 2
-			continue
-		}
-		dictionary := tail[start:end]
-		matches := true
-		for _, name := range names {
-			if !pdfDictionaryHasName(dictionary, name) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return true
-		}
-		search = position + 2
-	}
-}
-
-// pdfDictionaryAfter skips whitespace after a keyword and parses a balanced
-// dictionary. Literal strings and comments are skipped so their contents
-// cannot unbalance the nesting.
-func pdfDictionaryAfter(data []byte, from int) (start, end int, ok bool) {
-	cursor := from
-	for cursor < len(data) && pdfWhitespace(data[cursor]) {
-		cursor++
-	}
-	if cursor+1 >= len(data) || data[cursor] != '<' || data[cursor+1] != '<' {
-		return 0, 0, false
-	}
-	start = cursor
-	depth := 0
-	for cursor < len(data) {
-		switch {
-		case data[cursor] == '(':
-			cursor = pdfSkipString(data, cursor+1)
-			continue
-		case data[cursor] == '%':
-			for cursor < len(data) && data[cursor] != '\n' && data[cursor] != '\r' {
-				cursor++
-			}
-			continue
-		case data[cursor] == '<' && cursor+1 < len(data) && data[cursor+1] == '<':
-			depth++
-			cursor += 2
-			continue
-		case data[cursor] == '>' && cursor+1 < len(data) && data[cursor+1] == '>':
-			depth--
-			cursor += 2
-			if depth == 0 {
-				return start, cursor, true
-			}
-			continue
-		default:
-			cursor++
-		}
-	}
-	return 0, 0, false
-}
-
-func pdfSkipString(data []byte, from int) int {
-	cursor := from
-	depth := 1
-	for cursor < len(data) {
-		switch data[cursor] {
-		case '\\':
-			cursor += 2
-			continue
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return cursor + 1
-			}
-		}
-		cursor++
-	}
-	return cursor
-}
-
-func pdfWhitespace(value byte) bool {
-	return value == ' ' || value == '\t' || value == '\r' || value == '\n' || value == '\f' || value == '\v' || value == 0
-}
-
-// pdfDictionaryHasName reports whether /Name appears as a dictionary key or a
-// value reference. The preceding byte must be whitespace or the opening of a
-// dictionary/array, which excludes a longer name like /NotEncrypt and text
-// inside a literal string.
-func pdfDictionaryHasName(dictionary []byte, name string) bool {
-	token := []byte("/" + name)
-	search := 0
-	for {
-		index := bytes.Index(dictionary[search:], token)
-		if index < 0 {
-			return false
-		}
-		position := search + index
-		before := byte(0)
-		if position > 0 {
-			before = dictionary[position-1]
-		}
-		after := byte(0)
-		if position+len(token) < len(dictionary) {
-			after = dictionary[position+len(token)]
-		}
-		preceded := position == 0 || pdfWhitespace(before) || before == '<' || before == '[' || before == '>'
-		followed := position+len(token) == len(dictionary) || pdfWhitespace(after) ||
-			after == '/' || after == '<' || after == '[' || after == '>' || after == '%'
-		if preceded && followed {
-			return true
-		}
-		search = position + len(token)
-	}
 }
 
 // ParsePurchaseOrderDocumentVersion is the small parser the API uses for a

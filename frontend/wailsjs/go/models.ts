@@ -1352,7 +1352,7 @@ export namespace backend {
 	    }
 	}
 	export class PurchaseOrderDocumentContentDTO {
-	    Data: number[];
+	    DataBase64: string;
 	    ContentType: string;
 	    Filename: string;
 	    SHA256: string;
@@ -1364,7 +1364,7 @@ export namespace backend {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Data = source["Data"];
+	        this.DataBase64 = source["DataBase64"];
 	        this.ContentType = source["ContentType"];
 	        this.Filename = source["Filename"];
 	        this.SHA256 = source["SHA256"];
@@ -1443,8 +1443,7 @@ export namespace backend {
 	}
 	export class PurchaseOrderDocumentUploadInput {
 	    PurchaseOrderID: number;
-	    Data: number[];
-	    FilePath: string;
+	    DataBase64: string;
 	    Filename: string;
 	
 	    static createFrom(source: any = {}) {
@@ -1454,8 +1453,7 @@ export namespace backend {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.PurchaseOrderID = source["PurchaseOrderID"];
-	        this.Data = source["Data"];
-	        this.FilePath = source["FilePath"];
+	        this.DataBase64 = source["DataBase64"];
 	        this.Filename = source["Filename"];
 	    }
 	}

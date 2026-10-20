@@ -30,9 +30,16 @@ export interface PurchaseOrderDocumentStateDTO {
   Versions: PurchaseOrderDocumentDTO[];
 }
 
-/** The uploaded PDF's bytes and the headers identifying the version served. */
+/**
+ * The uploaded PDF and the headers identifying the version served.
+ *
+ * DataBase64 is the explicit wire representation: Wails serializes a Go []byte
+ * as base64 text, so a number[] declaration (the generated binding's first
+ * shape) described a value that never arrived. The panel decodes this string
+ * with base64ToBytes, and those are the only bytes it previews.
+ */
 export interface PurchaseOrderDocumentContentDTO {
-  Data: number[];
+  DataBase64: string;
   ContentType: string;
   Filename: string;
   SHA256: string;
@@ -42,8 +49,7 @@ export interface PurchaseOrderDocumentContentDTO {
 /** The attach/replace payload (PascalCase = Wails binding). */
 export interface PurchaseOrderDocumentUploadInput {
   PurchaseOrderID: number;
-  Data: number[];
-  FilePath: string;
+  DataBase64: string;
   Filename: string;
 }
 
@@ -55,6 +61,91 @@ export const MAX_PURCHASE_ORDER_DOCUMENT_BYTES = 20 * 1024 * 1024;
 
 /** The exact empty-state sentence staff see, pinned by tests. */
 export const NO_DOCUMENT_TEXT = "No customer PO PDF attached";
+
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const BASE64_VALUES = new Int16Array(128).fill(-1);
+for (let index = 0; index < BASE64_ALPHABET.length; index += 1) {
+  BASE64_VALUES[BASE64_ALPHABET.charCodeAt(index)] = index;
+}
+
+/**
+ * Encodes file bytes for the binding. Chunked so a 20 MB attachment does not
+ * build its base64 text by one-character string concatenation.
+ */
+export function bytesToBase64(bytes: Uint8Array): string {
+  const chunks: string[] = [];
+  let chunk = "";
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const hasSecond = index + 1 < bytes.length;
+    const hasThird = index + 2 < bytes.length;
+    const second = hasSecond ? bytes[index + 1] : 0;
+    const third = hasThird ? bytes[index + 2] : 0;
+    chunk += BASE64_ALPHABET[first >> 2];
+    chunk += BASE64_ALPHABET[((first & 0x03) << 4) | (second >> 4)];
+    chunk += hasSecond ? BASE64_ALPHABET[((second & 0x0f) << 2) | (third >> 6)] : "=";
+    chunk += hasThird ? BASE64_ALPHABET[third & 0x3f] : "=";
+    if (chunk.length >= 8192) {
+      chunks.push(chunk);
+      chunk = "";
+    }
+  }
+  if (chunk.length > 0 || chunks.length === 0) chunks.push(chunk);
+  return chunks.join("");
+}
+
+/**
+ * Decodes the binding's base64 text into the exact bytes. Padding is required
+ * and must be at the end: silently accepting a short or malformed value would
+ * preview a truncated PDF as if it were the stored one.
+ */
+export function base64ToBytes(value: string): Uint8Array<ArrayBuffer> {
+  if (typeof value !== "string") {
+    throw new Error("the customer PO PDF content is not base64 text");
+  }
+  const clean = value.replace(/[\r\n\t ]/g, "");
+  if (clean.length === 0) return new Uint8Array(0);
+  if (clean.length % 4 !== 0) {
+    throw new Error("the customer PO PDF content is not valid base64");
+  }
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  const dataLength = clean.length - padding;
+  const bytes = new Uint8Array((clean.length / 4) * 3 - padding);
+  let cursor = 0;
+  for (let index = 0; index < clean.length; index += 4) {
+    const values = [0, 0, 0, 0];
+    for (let offset = 0; offset < 4; offset += 1) {
+      const character = clean[index + offset];
+      const position = index + offset;
+      if (position >= dataLength) {
+        if (character !== "=") {
+          throw new Error("the customer PO PDF content is not valid base64");
+        }
+        continue;
+      }
+      if (character === "=") {
+        throw new Error("the customer PO PDF content is not valid base64");
+      }
+      const code = character.charCodeAt(0);
+      const decoded = code < 128 ? BASE64_VALUES[code] : -1;
+      if (decoded < 0) {
+        throw new Error("the customer PO PDF content is not valid base64");
+      }
+      values[offset] = decoded;
+    }
+    bytes[cursor] = (values[0] << 2) | (values[1] >> 4);
+    cursor += 1;
+    if (cursor < bytes.length) {
+      bytes[cursor] = ((values[1] & 0x0f) << 4) | (values[2] >> 2);
+      cursor += 1;
+    }
+    if (cursor < bytes.length) {
+      bytes[cursor] = ((values[2] & 0x03) << 6) | values[3];
+      cursor += 1;
+    }
+  }
+  return bytes;
+}
 
 /** Reads the branch from the server state. */
 export function documentStateOf(
@@ -145,6 +236,9 @@ export function documentErrorMessage(error: unknown): string {
   }
   if (lower.includes("larger than 20 mb") || lower.includes("too large")) {
     return "This PDF is larger than 20 MB. Choose a smaller file.";
+  }
+  if (lower.includes("base64")) {
+    return "The attached PDF could not be opened. Attach it again.";
   }
   if (lower.includes("not a valid pdf") || lower.includes("valid pdf")) {
     return "This file is not a valid PDF. Choose a PDF that opens in a PDF reader.";

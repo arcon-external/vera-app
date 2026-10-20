@@ -39,11 +39,44 @@ type purchaseOrderDocumentStateRow struct {
 	Versions []purchaseOrderDocumentRow `json:"versions"`
 }
 
+// documentTestPDF builds a structurally real classic PDF. The xref offsets are
+// computed, and startxref points at the table, because the store validator now
+// follows the pointer instead of trusting a trailer-shaped token sequence.
 func documentTestPDF(suffix string) []byte {
-	return []byte("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
-		"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n" +
-		"3 0 obj\n<< /Type /Metadata /Label (" + suffix + ") >>\nendobj\n" +
-		"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n200\n%%EOF\n")
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [] /Count 0 >>",
+		"<< /Type /Metadata /Label (" + suffix + ") >>",
+	}
+	var buffer bytes.Buffer
+	buffer.WriteString("%PDF-1.7\n")
+	offsets := make([]int, 0, len(objects))
+	for index, object := range objects {
+		offsets = append(offsets, buffer.Len())
+		fmt.Fprintf(&buffer, "%d 0 obj\n%s\nendobj\n", index+1, object)
+	}
+	xrefOffset := buffer.Len()
+	fmt.Fprintf(&buffer, "xref\n0 %d\n", len(objects)+1)
+	buffer.WriteString("0000000000 65535 f \n")
+	for _, offset := range offsets {
+		fmt.Fprintf(&buffer, "%010d 00000 n \n", offset)
+	}
+	fmt.Fprintf(&buffer, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n",
+		len(objects)+1, xrefOffset)
+	return buffer.Bytes()
+}
+
+// encryptedDocumentTestPDF is documentTestPDF with /Encrypt in its real trailer.
+func encryptedDocumentTestPDF() []byte {
+	plain := documentTestPDF("encrypted")
+	trailer := bytes.Index(plain, []byte("/Root 1 0 R >>"))
+	if trailer < 0 {
+		panic("test fixture trailer not found")
+	}
+	encrypted := append([]byte{}, plain[:trailer]...)
+	encrypted = append(encrypted, []byte("/Root 1 0 R /Encrypt 9 0 R >>")...)
+	encrypted = append(encrypted, plain[trailer+len("/Root 1 0 R >>"):]...)
+	return encrypted
 }
 
 func uploadPurchaseOrderDocument(t *testing.T, server *Server, token string, id int64, filename string, data []byte) (int, map[string]any) {
@@ -230,7 +263,7 @@ func TestPurchaseOrderDocumentUploadRefusesInvalidEncryptedAndOversized(t *testi
 		wantMessage string
 	}{
 		{"garbage", []byte("not a pdf"), http.StatusUnprocessableEntity, "po_document_invalid", "valid PDF"},
-		{"encrypted", []byte("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Root 1 0 R >>\nendobj\ntrailer\n<< /Size 2 /Root 1 0 R /Encrypt 9 0 R >>\nstartxref\n9\n%%EOF\n"), http.StatusUnprocessableEntity, "po_document_encrypted", "unlocked"},
+		{"encrypted", encryptedDocumentTestPDF(), http.StatusUnprocessableEntity, "po_document_encrypted", "unlocked"},
 		{"oversized", bytes.Repeat([]byte("x"), int(20<<20)+1), http.StatusRequestEntityTooLarge, "po_document_too_large", "20 MB"},
 	}
 	for _, tc := range cases {

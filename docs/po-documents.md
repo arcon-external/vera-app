@@ -49,21 +49,45 @@ them, so the correction history can show the earlier evidence.
 
 ## Validation
 
-`ValidatePurchaseOrderPDF` in `backend/store/po_document.go` enforces:
+`ValidatePurchaseOrderPDF` in `backend/store/po_document.go` (with the parser in
+`backend/store/pdf_structure.go`) enforces:
 
-- **20 MiB bound** (`MaxPurchaseOrderDocumentBytes`), on the wire and again on
-  the decoded bytes, plus the schema `CHECK`.
-- a real `%PDF-` header, at least one PDF object, and `endobj`;
-- a document catalog (`/Root`), a `startxref` pointer, and a trailer or xref
-  stream;
-- the `%%EOF` marker, allowing trailing whitespace;
-- **encryption detection** from the trailer/xref-stream dictionary only, so a
-  literal `/Encrypt` in page content does not reject a valid file. An encrypted
-  PDF is refused with an explicit request for an unlocked copy; passwords are
-  never asked for, transported or stored.
+- **20 MiB bound** (`MaxPurchaseOrderDocumentBytes`), on the wire, again on the
+  decoded bytes, and in the schema `CHECK`.
+- a real `%PDF-` header and the `%%EOF` marker, allowing trailing whitespace and
+  NUL padding.
+- **a structural walk, not a substring scan.** The file is tokenized into
+  objects, dictionaries and arrays; every stream body is skipped from `stream`
+  to its `endstream`, using `/Length` when it is a direct integer or a
+  reference to an integer object already seen. A literal `trailer`, `/Root` or
+  `/Encrypt` inside page content is therefore never read as document
+  structure.
+- the **last `startxref`** must be an integer offset inside the file and must
+  point at either a classic `xref` table (followed by its `trailer`) or an
+  object whose dictionary is `/Type /XRef` — compact `/Type/XRef` and spaced
+  `/Type /XRef` are both accepted.
+- the **`/Root` reference in that real trailer or xref-stream dictionary** must
+  name a `/Type /Catalog` object that exists as a plain object. If the catalog
+  is compressed, it is accepted only when an `/ObjStm` stream's own header
+  lists that object number (generation 0). The compressed dictionary is not
+  decompressed, so this is membership, not a catalog type check — the one
+  documented gap in the check. An absent object is always rejected.
+- **encryption** from the real trailer or xref-stream dictionary only. Both an
+  indirect `/Encrypt N G R` and an inline `/Encrypt << ... >>` dictionary are
+  detected, and name escapes are decoded (`/En#63rypt` is `/Encrypt`). An
+  encrypted PDF is refused with an explicit request for an unlocked copy;
+  passwords are never asked for, transported or stored.
 
-Garbage, truncated and oversized files are refused with named errors
-(`po_document_invalid`, `po_document_encrypted`, `po_document_too_large`).
+Garbage, truncated, header-only, no-root, no-EOF, `startxref banana`, a forged
+trailer with no xref section, and a `/Root` that names nothing are refused with
+`po_document_invalid`. An encrypted document (including a real AES xref-stream
+PDF) is refused with `po_document_encrypted`; an oversized file with
+`po_document_too_large`.
+
+The real fixture files the structural tests pin live in `backend/testdata/pdf/`:
+a MuPDF PDF with a classic literal trailer (accepted), and two PyMuPDF
+AES-encrypted xref-stream PDFs, one with a literal `/Encrypt` and one with the
+escaped `/En#63rypt` key (both refused as encrypted).
 
 ## HTTP API
 
@@ -84,9 +108,8 @@ PO, or one outside the caller's organization, answers 404.
 ```go
 type PurchaseOrderDocumentUploadInput struct {
     PurchaseOrderID int64
-    Data            []byte   // bytes read by the editor
-    FilePath        string   // or a local path; Data wins when both are set
-    Filename        string   // display name; defaults to the path's base
+    DataBase64      string // the file the editor read, base64-encoded
+    Filename        string // display name
 }
 
 func (q *Quotation) AttachPurchaseOrderDocument(input PurchaseOrderDocumentUploadInput) (PurchaseOrderDocumentDTO, error)
@@ -98,7 +121,21 @@ func (q *Quotation) RemovePurchaseOrderDocument(id int64, confirmed bool) (Purch
 
 `PurchaseOrderDocumentDTO` carries id, UUID, PO id, version, SHA-256, size,
 content type, original filename, uploader/time, active flag, and the
-replaced/removed markers. The content DTO adds `Data []byte`.
+replaced/removed markers. The content DTO adds `DataBase64 string`.
+
+**The base64 representation is explicit, in both directions.** Wails serializes
+a Go `[]byte` as base64 text, so an earlier `Data []byte` silently crossed the
+boundary as a string while the generated TypeScript declared `number[]`; the
+panel then built a zero-length array and previewed an empty PDF. Both DTOs now
+say `DataBase64`, the generated `frontend/wailsjs/go/models.ts` declares
+`DataBase64: string`, and `frontend/src/purchaseOrderDocument.ts` owns the only
+encoder/decoder (`bytesToBase64` / `base64ToBytes`). The Go wrapper bounds the
+decoded upload at 20 MiB before decoding; the desktop editor always uses its
+file picker and reads the bytes itself — there is no path variant, because no
+client supplied one. `TestGeneratedModelsExposeTheBase64DocumentFields` (root
+package) fails if the committed generated models drift; a Go JSON test pins the
+wire value, and the matching TypeScript test decodes the same base64 literal to
+the exact `%PDF-1.7` bytes.
 
 ## Final-save confirmation state machine
 

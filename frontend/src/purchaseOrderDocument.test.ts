@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  base64ToBytes,
+  bytesToBase64,
   documentErrorMessage,
   documentStateOf,
   documentVersionLabel,
@@ -122,6 +124,12 @@ describe("document validation messages", () => {
     ).toBe("This file is not a valid PDF. Choose a PDF that opens in a PDF reader.");
   });
 
+  it("names an unreadable base64 payload", () => {
+    expect(
+      documentErrorMessage(new Error("the customer PO PDF content is not valid base64"))
+    ).toBe("The attached PDF could not be opened. Attach it again.");
+  });
+
   it("keeps an unknown server message rather than hiding it", () => {
     expect(documentErrorMessage(new Error("purchase order operation failed"))).toBe(
       "purchase order operation failed"
@@ -139,5 +147,45 @@ describe("document size formatting", () => {
     expect(formatDocumentSize(1024 * 1024)).toBe("1 MB");
     expect(formatDocumentSize(1024 * 1024 + 524288)).toBe("1.5 MB");
     expect(formatDocumentSize(20 * 1024 * 1024)).toBe("20 MB");
+  });
+});
+
+// Problem: Wails serializes a Go []byte as base64 text, while the generated
+// TypeScript said number[]; the panel therefore previewed zero bytes. The
+// binding now carries an explicit base64 string, and these helpers are the only
+// encode/decode path the panel uses.
+//
+// The literal below is the exact value a Go test pins:
+// backend/po_documents_http_test.go's TestPurchaseOrderDocumentContentWireShape
+// marshals %PDF-1.7\n and requires "JVBERi0xLjcK".
+describe("base64 binding codec", () => {
+  const pdfHeader = new TextEncoder().encode("%PDF-1.7\n");
+
+  it("decodes the wire value the Go binding emits to the exact PDF bytes", () => {
+    expect(Array.from(base64ToBytes("JVBERi0xLjcK"))).toEqual(Array.from(pdfHeader));
+    expect(new TextDecoder().decode(base64ToBytes("JVBERi0xLjcK"))).toBe("%PDF-1.7\n");
+  });
+
+  it("encodes the exact bytes the Go side decodes", () => {
+    expect(bytesToBase64(pdfHeader)).toBe("JVBERi0xLjcK");
+    expect(bytesToBase64(new Uint8Array(0))).toBe("");
+  });
+
+  it("handles padding for every remainder", () => {
+    expect(Array.from(base64ToBytes("AA=="))).toEqual([0]);
+    expect(Array.from(base64ToBytes("AAA="))).toEqual([0, 0]);
+    expect(Array.from(base64ToBytes("AAEC"))).toEqual([0, 1, 2]);
+  });
+
+  it("round-trips every byte value", () => {
+    const all = new Uint8Array(256);
+    for (let value = 0; value < 256; value += 1) all[value] = value;
+    expect(Array.from(base64ToBytes(bytesToBase64(all)))).toEqual(Array.from(all));
+  });
+
+  it("refuses malformed base64 instead of silently returning nothing", () => {
+    expect(() => base64ToBytes("JVBERi0xLjc")).toThrow();
+    expect(() => base64ToBytes("JVBERi0xLjc$")).toThrow();
+    expect(() => base64ToBytes("J=BERi0xLjcK")).toThrow();
   });
 });
