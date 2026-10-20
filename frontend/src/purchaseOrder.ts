@@ -255,6 +255,55 @@ export const MAX_EXACT_MINOR = Number.MAX_SAFE_INTEGER;
 /** The Go store's bound on an adjustment reason, in Unicode code points. */
 export const MAX_ADJUSTMENT_REASON_LENGTH = 200;
 
+/**
+ * The code points Go's `strings.TrimSpace` removes, mirrored exactly.
+ *
+ * The editor, the store and the schema's CHECK must agree on what "blank"
+ * means, or an invisible reason passes one layer and fails another. This is
+ * deliberately not `String.prototype.trim()`: JavaScript also strips U+FEFF
+ * (which Go and Postgres keep as content) and does not strip U+0085 (which both
+ * remove). The SQL backstop lists the same set.
+ */
+function isAdjustmentReasonWhitespace(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x0009 && codePoint <= 0x000d) ||
+    codePoint === 0x0020 ||
+    codePoint === 0x0085 ||
+    codePoint === 0x00a0 ||
+    codePoint === 0x1680 ||
+    (codePoint >= 0x2000 && codePoint <= 0x200a) ||
+    codePoint === 0x2028 ||
+    codePoint === 0x2029 ||
+    codePoint === 0x202f ||
+    codePoint === 0x205f ||
+    codePoint === 0x3000
+  );
+}
+
+/**
+ * Trims exactly what `strings.TrimSpace` trims, so a reason is stored and
+ * compared on the same characters in every layer. Works in code points, so an
+ * astral character is never split.
+ */
+export function trimAdjustmentReason(value: string): string {
+  const characters = Array.from(value);
+  let start = 0;
+  let end = characters.length;
+  while (
+    start < end &&
+    isAdjustmentReasonWhitespace(characters[start].codePointAt(0)!)
+  ) {
+    start++;
+  }
+  while (
+    end > start &&
+    isAdjustmentReasonWhitespace(characters[end - 1].codePointAt(0)!)
+  ) {
+    end--;
+  }
+  return characters.slice(start, end).join("");
+}
+
 const MAX_EXACT_MINOR_BIGINT = BigInt(MAX_EXACT_MINOR);
 
 /**
@@ -304,11 +353,19 @@ export interface PurchaseOrderLineCalculation {
 
 /** Every stage of the calculation, so the editor can show where a total came from. */
 export interface PurchaseOrderTotals {
-  /** Sum of row gross figures, before any row discount. */
-  grossMinor: number;
-  /** Sum of row discounts. */
-  rowDiscountMinor: number;
-  /** Sum of row nets: the base of the whole-PO discount. */
+  /**
+   * Sum of row gross figures, before any row discount.
+   *
+   * Display-only: Go neither bounds nor stores this aggregate, because the
+   * order is already fully described by the per-line figures and their net
+   * subtotal. When the sum exceeds 2^53-1 it cannot be named exactly as a
+   * JavaScript number, so it is `null` and the panel says so. Refusing the
+   * order here would reject an order the API accepts and can reopen.
+   */
+  grossMinor: number | null;
+  /** Sum of row discounts. Display-only for the same reason as `grossMinor`. */
+  rowDiscountMinor: number | null;
+  /** Sum of row nets: the base of the whole-PO discount, bounded by Go too. */
   subtotalMinor: number;
   /** Whole-PO discount amount, truncated to a whole minor unit. */
   discountMinor: number;
@@ -451,7 +508,7 @@ export function calculatePurchaseOrder(
         `Adjustment must be a signed ${currency.code} amount.`,
     };
   }
-  const adjustmentReason = state.header.adjustmentReason.trim();
+  const adjustmentReason = trimAdjustmentReason(state.header.adjustmentReason);
 
   // The reason rule lives here so the panel and the payload cannot disagree:
   // Unicode code points, and a nonzero adjustment needs more than whitespace.
@@ -469,22 +526,11 @@ export function calculatePurchaseOrder(
     return { lines: lineResults, totals: null, error };
   }
 
-  const grossTotalMinor = toMoney(grossTotal);
-  if (grossTotalMinor === null) {
-    return {
-      lines: lineResults,
-      totals: null,
-      error: "The line totals exceed the supported amount range.",
-    };
-  }
-  const rowDiscountTotalMinor = toMoney(rowDiscountTotal);
-  if (rowDiscountTotalMinor === null) {
-    return {
-      lines: lineResults,
-      totals: null,
-      error: "The row discounts exceed the supported amount range.",
-    };
-  }
+  // Only the subtotal is checked here: it is the value Go stores and the base
+  // of the whole-PO discount. The aggregate gross and row-discount sums are
+  // display-only and Go does not bound them; refusing them here would reject an
+  // order the API accepts. They are converted below, and `null` means "too
+  // large to name exactly", never a refusal.
   const subtotalMinor = toMoney(subtotal);
   if (subtotalMinor === null) {
     return {
@@ -529,8 +575,8 @@ export function calculatePurchaseOrder(
   return {
     lines: lineResults,
     totals: {
-      grossMinor: grossTotalMinor,
-      rowDiscountMinor: rowDiscountTotalMinor,
+      grossMinor: toMoney(grossTotal),
+      rowDiscountMinor: toMoney(rowDiscountTotal),
       subtotalMinor,
       discountMinor: discount,
       afterDiscountMinor: afterDiscount,
@@ -754,7 +800,7 @@ export function buildPurchaseOrderUpdate(
       error: `Adjustment must be a signed ${currency.code} amount.`,
     };
   }
-  const adjustmentReason = state.header.adjustmentReason.trim();
+  const adjustmentReason = trimAdjustmentReason(state.header.adjustmentReason);
 
   // The calculation is also the save-time guard: an unexplained adjustment, a
   // negative total, or one out of range is named here rather than after a round

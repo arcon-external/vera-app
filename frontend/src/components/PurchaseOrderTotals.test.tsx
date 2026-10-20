@@ -141,4 +141,22 @@ describe("PurchaseOrderTotals (issue #470)", () => {
     expect(html).toContain("Printed totals unavailable");
     expect(html).not.toContain("$90,071,992,547,409.92");
   });
+
+  it("says when a display-only aggregate cannot be named exactly", () => {
+    // The Judge's two-line case: each line is exact, the subtotal is zero, and
+    // the aggregate gross/row-discount figures exceed 2^53-1. They are never
+    // stored or sent, so the panel says so instead of printing an inexact
+    // number or refusing the order.
+    const html = render({
+      totals: {
+        ...TOTALS,
+        grossMinor: null,
+        rowDiscountMinor: null,
+      },
+    });
+    expect(html).toContain("Above the exact display range");
+    expect(html).not.toContain("$0.00");
+    expect(html).toContain("$3,233.63");
+    expect(html).toContain("$3,407.36");
+  });
 });

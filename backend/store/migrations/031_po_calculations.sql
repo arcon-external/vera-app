@@ -117,6 +117,30 @@ ALTER TABLE {{schema}}.purchase_order_items
 -- their calculation follows from the entered quantity and price alone. The
 -- printed snapshot comes from the source revision they were created from.
 --
+-- The printed figures are evidence, not arithmetic: if a pre-031 draft's source
+-- revision has no totals row, there is nothing to copy, and writing 0 would
+-- fabricate a document total the customer never saw. This slice is unreleased,
+-- so that can only be a broken development schema; the migration aborts and
+-- names the disorder rather than inventing a figure. A fresh creation refuses
+-- the same source with po_source_incomplete instead.
+DO $backfill_guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM {{schema}}.purchase_orders po
+        LEFT JOIN {{schema}}.quotation_revisions r
+          ON r.quotation_id = po.quotation_id
+         AND r.revision_number = po.source_revision
+        LEFT JOIN {{schema}}.quotation_revision_totals t
+          ON t.revision_id = r.id
+        WHERE r.id IS NULL OR t.revision_id IS NULL
+    ) THEN
+        RAISE EXCEPTION
+            'migration 031 cannot backfill printed totals: a purchase order has no source revision totals';
+    END IF;
+END
+$backfill_guard$;
+
 -- Gross and net are written in one statement: the item net check is already in
 -- place, so a two-step gross-then-net update would violate it in between.
 UPDATE {{schema}}.purchase_order_items
@@ -159,12 +183,12 @@ WHERE NOT EXISTS (
 
 UPDATE {{schema}}.purchase_orders po
 SET ppn_minor = trunc(po.subtotal_minor::numeric * po.ppn_bps / 10000)::bigint,
-    printed_subtotal_minor = COALESCE(t.marginalized_subtotal, 0),
-    printed_discount_minor = COALESCE(t.marginalized_discount, 0),
-    printed_ppn_minor = COALESCE(t.ppn_amount, 0),
-    printed_grand_total_minor = COALESCE(t.customer_grand_total, 0)
+    printed_subtotal_minor = t.marginalized_subtotal,
+    printed_discount_minor = t.marginalized_discount,
+    printed_ppn_minor = t.ppn_amount,
+    printed_grand_total_minor = t.customer_grand_total
 FROM {{schema}}.quotation_revisions r
-LEFT JOIN {{schema}}.quotation_revision_totals t ON t.revision_id = r.id
+JOIN {{schema}}.quotation_revision_totals t ON t.revision_id = r.id
 WHERE r.quotation_id = po.quotation_id AND r.revision_number = po.source_revision;
 
 UPDATE {{schema}}.purchase_orders
@@ -181,7 +205,11 @@ ALTER TABLE {{schema}}.purchase_orders
     ADD CONSTRAINT purchase_orders_adjustment_explained_check
         CHECK (
             adjustment_minor = 0
-            OR btrim(adjustment_reason, E' \t\n\r\f\v') <> ''
+            -- The same set Go's strings.TrimSpace removes and the editor's
+            -- trimAdjustmentReason mirrors: ASCII whitespace plus NEL, NBSP,
+            -- U+1680, U+2000-U+200A, U+2028, U+2029, U+202F, U+205F and U+3000.
+            -- U+FEFF (a BOM) is deliberately content, as it is for Go.
+            OR adjustment_reason !~ '^[\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]+$'
         );
 
 -- No new index: every read is by purchase_order_items.purchase_order_id, which

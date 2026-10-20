@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 import type { CurrencyInfo } from "./format";
 import {
@@ -119,6 +122,56 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
 function initial(overrides: Partial<PurchaseOrderDTO> = {}) {
   return initialPurchaseOrderEditorState(order(overrides), USD);
 }
+
+// The shared contract fixtures. backend/store/po_contract_test.go and
+// backend/api/purchase_orders_test.go read the same files, so an order accepted
+// by the API cannot be silently refused here, and the whitespace set cannot
+// drift between the editor, the store and the schema.
+interface SharedCalculationCase {
+  name: string;
+  why: string;
+  lines: Array<{
+    quantityScaled: number;
+    unitPriceMinor: number;
+    discountEnabled: boolean;
+    discountPercent: number;
+  }>;
+  discountPercent: number;
+  ppnBps: number;
+  adjustmentMinor: number;
+  adjustmentReason: string;
+  want: Record<string, number>;
+}
+
+const calculationFixture = JSON.parse(
+  readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../backend/testdata/po_calculation_cases.json",
+        import.meta.url
+      )
+    ),
+    "utf8"
+  )
+) as { cases: SharedCalculationCase[] };
+
+interface SharedCodePoint {
+  codePoint: number;
+  name: string;
+  why?: string;
+}
+
+const whitespaceFixture = JSON.parse(
+  readFileSync(
+    fileURLToPath(
+      new URL(
+        "../../backend/testdata/po_adjustment_whitespace.json",
+        import.meta.url
+      )
+    ),
+    "utf8"
+  )
+) as { blank: SharedCodePoint[]; content: SharedCodePoint[] };
 
 describe("PO quantity parsing (issue #468)", () => {
   it("parses up to four decimal places into the exact 10^4 scale", () => {
@@ -727,6 +780,93 @@ describe("PO explained calculation (issue #470)", () => {
   });
 });
 
+describe("PO calculation agreement with the backend (issue #470 wave 3)", () => {
+  // The fixture's `want` values are the ones backend/api's shared test asserts
+  // against the real GET response. Handing them to the editor as a DTO is the
+  // reopen path the Judge used: if the API accepts an order, the editor must
+  // calculate it and build the save payload for it.
+  function fixtureOrder(testCase: SharedCalculationCase): PurchaseOrderDTO {
+    return order({
+      DiscountPercent: testCase.discountPercent,
+      PpnBps: testCase.ppnBps,
+      AdjustmentMinor: testCase.adjustmentMinor,
+      AdjustmentReason: testCase.adjustmentReason,
+      Items: testCase.lines.map((line, index) => ({
+        QuotationItemNo: null,
+        QuotationSubNo: null,
+        LineNumber: index + 1,
+        Description: `Line ${index + 1}`,
+        QuantityScaled: line.quantityScaled,
+        UoM: "Pc",
+        UnitPriceMinor: line.unitPriceMinor,
+        DiscountEnabled: line.discountEnabled,
+        DiscountPercent: line.discountPercent,
+        GrossMinor: testCase.want.lineGrossMinor,
+        DiscountMinor: testCase.want.lineDiscountMinor,
+        NetMinor: testCase.want.lineNetMinor,
+      })),
+      SubtotalMinor: testCase.want.subtotalMinor,
+      DiscountMinor: testCase.want.discountMinor,
+      PpnMinor: testCase.want.ppnMinor,
+      GrandTotalMinor: testCase.want.grandTotalMinor,
+    });
+  }
+
+  function fixtureState(testCase: SharedCalculationCase): PurchaseOrderEditorState {
+    return initialPurchaseOrderEditorState(fixtureOrder(testCase), USD);
+  }
+
+  it("publishes totals and builds the save payload for an order the API accepts", () => {
+    expect(calculationFixture.cases.length).toBeGreaterThan(0);
+    for (const testCase of calculationFixture.cases) {
+      const state = fixtureState(testCase);
+      const calculation = calculatePurchaseOrder(state, USD);
+      expect(calculation.error, testCase.why).toBeNull();
+      expect(calculation.lines, testCase.why).toHaveLength(testCase.lines.length);
+      for (const line of calculation.lines) {
+        expect(line, testCase.why).not.toBeNull();
+        expect(line!.grossMinor).toBe(testCase.want.lineGrossMinor);
+        expect(line!.discountMinor).toBe(testCase.want.lineDiscountMinor);
+        expect(line!.netMinor).toBe(testCase.want.lineNetMinor);
+      }
+      expect(calculation.totals, testCase.why).not.toBeNull();
+      expect(calculation.totals!.subtotalMinor).toBe(testCase.want.subtotalMinor);
+      expect(calculation.totals!.discountMinor).toBe(testCase.want.discountMinor);
+      expect(calculation.totals!.afterDiscountMinor).toBe(
+        testCase.want.afterDiscountMinor
+      );
+      expect(calculation.totals!.ppnMinor).toBe(testCase.want.ppnMinor);
+      expect(calculation.totals!.adjustmentMinor).toBe(
+        testCase.want.adjustmentMinor
+      );
+      expect(calculation.totals!.grandTotalMinor).toBe(
+        testCase.want.grandTotalMinor
+      );
+      // The aggregate gross is display-only: it is never stored or sent, and
+      // here it is twice the exact bound, so it must say "unavailable" rather
+      // than refuse the order or print an inexact figure.
+      expect(calculation.totals!.grossMinor).toBeNull();
+      expect(calculation.totals!.rowDiscountMinor).toBeNull();
+
+      const payload = buildPurchaseOrderUpdate(state, USD);
+      expect(payload.error, testCase.why).toBeNull();
+      expect(payload.input, testCase.why).not.toBeNull();
+      expect(payload.input!.Items).toHaveLength(testCase.lines.length);
+      for (let index = 0; index < testCase.lines.length; index++) {
+        const input = payload.input!.Items[index];
+        const line = testCase.lines[index];
+        expect(input.QuantityScaled).toBe(line.quantityScaled);
+        expect(input.UnitPriceMinor).toBe(line.unitPriceMinor);
+        expect(input.DiscountEnabled).toBe(line.discountEnabled);
+        expect(input.DiscountPercent).toBe(line.discountPercent);
+      }
+      expect(payload.input!.DiscountPercent).toBe(testCase.discountPercent);
+      expect(payload.input!.AdjustmentMinor).toBe(testCase.adjustmentMinor);
+      expect(payload.input!.AdjustmentReason).toBe(testCase.adjustmentReason);
+    }
+  });
+});
+
 describe("PO adjustment reason agreement (issue #470 wave 2)", () => {
   function reasonState(reason: string, adjustment = "-0.10") {
     const base = initial();
@@ -762,12 +902,30 @@ describe("PO adjustment reason agreement (issue #470 wave 2)", () => {
   });
 
   it("requires a reason that is not whitespace-only", () => {
-    for (const reason of ["", "   ", "\t", "\n", "\r", "\f", "\v", " \t\n\r\f\v "]) {
+    // The set is the shared fixture's: the same code points the store's
+    // strings.TrimSpace removes and the schema's CHECK refuses. String.trim()
+    // is deliberately not used -- it strips a BOM that Go and the database keep,
+    // and misses NEL (U+0085), which both of them remove.
+    expect(whitespaceFixture.blank.length).toBeGreaterThan(0);
+    for (const point of whitespaceFixture.blank) {
+      const reason = String.fromCodePoint(point.codePoint);
       const result = buildPurchaseOrderUpdate(reasonState(reason), USD);
-      expect(result.input, JSON.stringify(reason)).toBeNull();
-      expect(result.error, JSON.stringify(reason)).toBe(
-        "An adjustment requires a reason.",
-      );
+      expect(result.input, `${point.name} (U+${point.codePoint.toString(16)})`).toBeNull();
+      expect(result.error, point.name).toBe("An adjustment requires a reason.");
+    }
+    const joined = whitespaceFixture.blank
+      .map((point) => String.fromCodePoint(point.codePoint))
+      .join("");
+    expect(buildPurchaseOrderUpdate(reasonState(joined), USD).error).toBe(
+      "An adjustment requires a reason."
+    );
+
+    // Content the editor must keep verbatim, even when it is invisible.
+    for (const point of whitespaceFixture.content) {
+      const reason = String.fromCodePoint(point.codePoint);
+      const result = buildPurchaseOrderUpdate(reasonState(reason), USD);
+      expect(result.error, `${point.name} is content`).toBeNull();
+      expect(result.input?.AdjustmentReason, point.name).toBe(reason);
     }
   });
 
