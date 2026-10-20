@@ -70,7 +70,7 @@ const ORDER: PurchaseOrderDTO = {
   QuotationID: 12,
   SourceRevision: 1,
   CustomerID: 2,
-  PaymentTermsDays: 45,
+  PaymentTerms: "45 days",
 };
 
 const UOM_OPTIONS = [
@@ -127,7 +127,8 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain('aria-label="PO date"');
     expect(html).toContain('aria-label="Received date"');
     expect(html).toContain('aria-label="Requested delivery date"');
-    expect(html).toContain('aria-label="Payment terms (days)"');
+    expect(html).toContain('aria-label="Payment terms"');
+    expect(html).toContain('value="45 days"');
     expect(html).toContain('aria-label="Incoterms"');
 
     // The snapshot is displayed, never offered as an editable customer field.

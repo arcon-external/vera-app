@@ -69,7 +69,11 @@ import type {
   POSourceSelection,
   POSourceValidation,
 } from "./poSelector";
-import { PurchaseOrderEditorPage } from "./components/PurchaseOrderEditor";
+import {
+  PurchaseOrderDiscardPrompt,
+  PurchaseOrderEditorPage,
+} from "./components/PurchaseOrderEditor";
+import { usePurchaseOrderLeaveGuard } from "./poLeaveGuard";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
@@ -454,6 +458,10 @@ function App() {
   const [page, setPage] = useState<
     "home" | "po" | "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
   >("home");
+  // #468 wave 2: the PO editor owns its reducer state, so a tab that unmounts
+  // it loses unsaved work. The editor lifts only its dirty flag; this gate
+  // asks through the same discard panel before any navigation leaves it.
+  const poLeave = usePurchaseOrderLeaveGuard(page, setPage);
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
@@ -1583,6 +1591,12 @@ function App() {
       // handles Escape and contains Tab, and no global shortcut may act on
       // the page behind the modal.
       if (poSelectorOpen) return;
+      // The tab-navigation discard prompt is modal too: Escape is Keep
+      // editing, and no shortcut may navigate behind it.
+      if (poLeave.pendingPage !== null) {
+        if (event.key === "Escape") poLeave.keepEditing();
+        return;
+      }
       if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const inGrid = (event.target as HTMLElement).closest?.("[data-grid-cell]");
         if (inGrid) return;
@@ -1620,22 +1634,28 @@ function App() {
           return;
         case "newQuotation":
           event.preventDefault();
-          requestNewQuotation();
+          // On a dirty PO this asks first; once allowed, the Editor page is
+          // shown before the existing new-quotation confirmation can render
+          // in its action bar.
+          poLeave.request("create", () => {
+            setPage("create");
+            requestNewQuotation();
+          });
           return;
         case "gotoEditor":
-          setPage("create");
+          poLeave.request("create");
           return;
         case "gotoArchive":
-          setPage("archive");
+          poLeave.request("archive");
           return;
         case "gotoClients":
-          if (user?.Role === "admin") setPage("clients");
+          if (user?.Role === "admin") poLeave.request("clients");
           return;
         case "gotoTeam":
-          if (user?.Role === "admin") setPage("users");
+          if (user?.Role === "admin") poLeave.request("users");
           return;
         case "gotoSettings":
-          setPage("settings");
+          poLeave.request("settings");
           return;
         case "toggleHelp":
           setShowHelp((visible) => !visible);
@@ -1646,7 +1666,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen]);
+  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing]);
 
   // PO source selector loaders (#467). The modal owns the three steps; these
   // callbacks are its only transport, so the component stays free of hidden
@@ -1723,6 +1743,7 @@ function App() {
             ReceivedDate: "",
           });
           setPOSource(selection);
+          poLeave.setDirty(false);
           setPODraft(draft);
           setPOSelectorOpen(false);
           setPage("po");
@@ -1734,6 +1755,7 @@ function App() {
         onOpenDraft={async (activePO) => {
           try {
             const draft = await GetPurchaseOrder(activePO.id);
+            poLeave.setDirty(false);
             setPODraft(draft);
             setPOSelectorOpen(false);
             setPage("po");
@@ -1761,14 +1783,14 @@ function App() {
       ) : null}
       <AppShell
       page={page}
-      onOpenHome={() => setPage("home")}
-      onOpenEditor={() => setPage("create")}
-      onOpenDrafts={() => setPage("drafts")}
-      onOpenArchive={() => setPage("archive")}
+      onOpenHome={() => poLeave.request("home")}
+      onOpenEditor={() => poLeave.request("create")}
+      onOpenDrafts={() => poLeave.request("drafts")}
+      onOpenArchive={() => poLeave.request("archive")}
       draftCount={draftCount}
-      onOpenUsers={() => setPage("users")}
-      onOpenClients={() => setPage("clients")}
-      onOpenSettings={() => setPage("settings")}
+      onOpenUsers={() => poLeave.request("users")}
+      onOpenClients={() => poLeave.request("clients")}
+      onOpenSettings={() => poLeave.request("settings")}
       showUsersTab={user?.Role === "admin"}
       showClientsTab={user?.Role === "admin"}
       companyName={companyName}
@@ -1904,11 +1926,13 @@ function App() {
             currency={poEntry}
             uomOptions={storedUoMs ?? []}
             incotermOptions={INCOTERM_OPTIONS}
+            onDirtyChange={poLeave.setDirty}
             onSaved={(updated) => {
               setPODraft(updated);
               pushToast("success", "Purchase order draft saved.");
             }}
             onCancel={() => {
+              poLeave.setDirty(false);
               setPODraft(null);
               setPOSource(null);
               setPage("home");
@@ -2120,6 +2144,13 @@ function App() {
         />
       ) : null}
     </AppShell>
+    {poLeave.pendingPage !== null ? (
+      <PurchaseOrderDiscardPrompt
+        overlay
+        onKeepEditing={poLeave.keepEditing}
+        onDiscard={poLeave.discard}
+      />
+    ) : null}
     </>
       )}
     </>

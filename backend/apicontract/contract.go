@@ -194,7 +194,7 @@ type PurchaseOrderRow struct {
 	QuotationID           int64                  `json:"quotationId"`
 	SourceRevision        int16                  `json:"sourceRevision"`
 	CustomerID            int64                  `json:"customerId"`
-	PaymentTermsDays      int16                  `json:"paymentTermsDays"`
+	PaymentTerms          string                 `json:"paymentTerms"`
 }
 
 // PurchaseOrderCreateRequest starts a draft from one exact issued revision.
@@ -232,7 +232,7 @@ type PurchaseOrderUpdateRequest struct {
 	ReceivedDate          string                   `json:"receivedDate,omitempty"`
 	Incoterms             string                   `json:"incoterms"`
 	Items                 []PurchaseOrderItemInput `json:"items"`
-	PaymentTermsDays      int16                    `json:"paymentTermsDays"`
+	PaymentTerms          string                   `json:"paymentTerms"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.

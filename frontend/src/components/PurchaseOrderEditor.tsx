@@ -1,4 +1,4 @@
-import { useReducer } from "react";
+import { useEffect, useReducer } from "react";
 import { UpdatePurchaseOrderDraft } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
@@ -42,6 +42,57 @@ export interface PurchaseOrderEditorPageProps {
   incotermOptions: { value: string; label: string }[];
   onSaved: (order: PurchaseOrderDTO) => void;
   onCancel: () => void;
+  /**
+   * Reports whether the draft holds unsaved changes, so the page that owns
+   * navigation (App) can ask before unmounting this editor. The editor stays
+   * the only place that decides dirtiness; App never re-derives it.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+/**
+ * The one discard confirmation used by both discard paths: the editor's own
+ * Cancel panel and App's tab-navigation prompt. Keeping the copy in one place
+ * means a staff member reads the same question wherever the leave happens.
+ */
+export function PurchaseOrderDiscardPrompt({
+  onKeepEditing,
+  onDiscard,
+  overlay = false,
+}: {
+  onKeepEditing: () => void;
+  onDiscard: () => void;
+  overlay?: boolean;
+}) {
+  const panel = (
+    <Card className="border-danger-200 p-4">
+      <div role="alertdialog" aria-label="Discard unsaved changes?">
+        <p className="text-lead font-medium text-ink-900">
+          Discard unsaved changes?
+        </p>
+        <p className="mt-1 text-small text-ink-500">
+          The draft was saved earlier. Changes since then will be lost.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button aria-label="Keep editing" onClick={onKeepEditing}>
+            Keep editing
+          </Button>
+          <Button variant="danger" aria-label="Discard changes" onClick={onDiscard}>
+            Discard changes
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+  if (!overlay) return panel;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/45 p-5"
+      role="presentation"
+    >
+      <div className="w-full max-w-md">{panel}</div>
+    </div>
+  );
 }
 
 function errorText(error: unknown): string {
@@ -244,31 +295,10 @@ export function PurchaseOrderEditorView({
       </div>
 
       {state.confirmDiscard ? (
-        <Card className="border-danger-200 p-4">
-          <div role="alertdialog" aria-label="Discard unsaved changes?">
-            <p className="text-lead font-medium text-ink-900">
-              Discard unsaved changes?
-            </p>
-            <p className="mt-1 text-small text-ink-500">
-              The draft was saved earlier. Changes since then will be lost.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                aria-label="Keep editing"
-                onClick={() => dispatch({ type: "cancelDismissed" })}
-              >
-                Keep editing
-              </Button>
-              <Button
-                variant="danger"
-                aria-label="Discard changes"
-                onClick={onDiscard}
-              >
-                Discard changes
-              </Button>
-            </div>
-          </div>
-        </Card>
+        <PurchaseOrderDiscardPrompt
+          onKeepEditing={() => dispatch({ type: "cancelDismissed" })}
+          onDiscard={onDiscard}
+        />
       ) : null}
 
       <Card className="p-4">
@@ -345,11 +375,11 @@ export function PurchaseOrderEditorView({
             }
           />
           <Field
-            label="Payment terms (days)"
-            type="number"
-            value={state.header.paymentTermsDays}
+            label="Payment terms"
+            value={state.header.paymentTerms}
+            placeholder="e.g. 50% advance, balance 30 days after delivery"
             onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { paymentTermsDays: value } })
+              dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
             }
           />
           <div className="grid gap-1.5">
@@ -439,12 +469,20 @@ export function PurchaseOrderEditorPage({
   incotermOptions,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: PurchaseOrderEditorPageProps) {
   const [state, dispatch] = useReducer(
     purchaseOrderEditorReducer,
     undefined,
     () => initialPurchaseOrderEditorState(order, currency)
   );
+
+  // The dirty flag is lifted, not duplicated: the editor still owns the
+  // baseline comparison, and App only consumes the answer so it can ask
+  // before a tab navigation unmounts this component's reducer state.
+  useEffect(() => {
+    onDirtyChange?.(isPurchaseOrderDirty(state));
+  }, [state, onDirtyChange]);
 
   const save = async () => {
     const result = buildPurchaseOrderUpdate(state, currency);

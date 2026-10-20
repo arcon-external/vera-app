@@ -48,7 +48,7 @@ type PurchaseOrderDTO struct {
 	QuotationID           int64
 	SourceRevision        int16
 	CustomerID            int64
-	PaymentTermsDays      int16
+	PaymentTerms          string
 }
 
 // PurchaseOrderCreateInput is the selector's confirmed pair plus an optional
@@ -83,7 +83,7 @@ type PurchaseOrderUpdateInput struct {
 	ReceivedDate          string
 	RequestedDeliveryDate string
 	Incoterms             string
-	PaymentTermsDays      int16
+	PaymentTerms          string
 	Items                 []PurchaseOrderItemInput
 }
 
@@ -157,7 +157,7 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			PODate:                input.PODate,
 			ReceivedDate:          input.ReceivedDate,
 			RequestedDeliveryDate: input.RequestedDeliveryDate,
-			PaymentTermsDays:      input.PaymentTermsDays,
+			PaymentTerms:          input.PaymentTerms,
 			Incoterms:             input.Incoterms,
 			Items:                 items,
 		}, &response); err != nil {
@@ -185,7 +185,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		PODate:                row.PODate,
 		ReceivedDate:          row.ReceivedDate,
 		RequestedDeliveryDate: row.RequestedDeliveryDate,
-		PaymentTermsDays:      row.PaymentTermsDays,
+		PaymentTerms:          row.PaymentTerms,
 		Incoterms:             row.Incoterms,
 		Currency:              row.Currency,
 		TaxZone:               row.TaxZone,

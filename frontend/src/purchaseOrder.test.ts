@@ -6,7 +6,7 @@ import {
   formatUnitPriceMinor,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
-  parsePaymentTermsDays,
+  MAX_PAYMENT_TERMS_LENGTH,
   parseQuantityScaled,
   parseUnitPriceMinor,
   purchaseOrderEditorReducer,
@@ -83,7 +83,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     QuotationID: 12,
     SourceRevision: 1,
     CustomerID: 2,
-    PaymentTermsDays: 45,
+    PaymentTerms: "45 days",
     ...overrides,
   };
 }
@@ -236,7 +236,7 @@ describe("PO draft update payload (issue #468)", () => {
     expect(input.BillingAddress).toBe("Jl. Billing");
     expect(input.PONumber).toBe("PO-1");
     expect(input.ReceivedDate).toBe("2026-10-20");
-    expect(input.PaymentTermsDays).toBe(45);
+    expect(input.PaymentTerms).toBe("45 days");
     expect(input.Items).toHaveLength(2);
     expect(input.Items[0]).toEqual({
       QuotationItemNo: 1,
@@ -292,12 +292,41 @@ describe("PO draft update payload (issue #468)", () => {
     );
   });
 
-  it("validates payment terms and calendar dates", () => {
-    expect(parsePaymentTermsDays("0")).toBe(0);
-    expect(parsePaymentTermsDays("45")).toBe(45);
-    expect(parsePaymentTermsDays("")).toBe(0);
-    expect(parsePaymentTermsDays("3651")).toBeNull();
-    expect(parsePaymentTermsDays("4.5")).toBeNull();
+  it("carries commercial payment wording, not a day count", () => {
+    const wording = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { paymentTerms: "50% advance" },
+    });
+    expect(buildPurchaseOrderUpdate(wording, USD).input?.PaymentTerms).toBe(
+      "50% advance"
+    );
+
+    const second = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { paymentTerms: "30 days after delivery" },
+    });
+    expect(buildPurchaseOrderUpdate(second, USD).input?.PaymentTerms).toBe(
+      "30 days after delivery"
+    );
+
+    // A draft may leave the terms unagreed; only the length is bounded.
+    const cleared = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { paymentTerms: "   " },
+    });
+    expect(buildPurchaseOrderUpdate(cleared, USD).input?.PaymentTerms).toBe("");
+
+    const overlong = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { paymentTerms: "x".repeat(MAX_PAYMENT_TERMS_LENGTH + 1) },
+    });
+    expect(buildPurchaseOrderUpdate(overlong, USD)).toEqual({
+      input: null,
+      error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
+    });
+  });
+
+  it("validates calendar dates", () => {
     expect(validDateField("2026-02-28")).toBe(true);
     expect(validDateField("2026-02-29")).toBe(false);
     expect(validDateField("")).toBe(true);
