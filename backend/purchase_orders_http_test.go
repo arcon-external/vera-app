@@ -191,40 +191,50 @@ func TestPurchaseOrderBindingsRequireSignIn(t *testing.T) {
 // `store` cannot import `backend` without a cycle -- so the resolver is written
 // twice and this test is what keeps the pair from drifting: a change to
 // resolveTax's customer-facing PPN must break here.
+//
+// Both tax models are covered: the legacy category-only revision and the
+// current tax_type/service_category one whose legacy category is empty.
 func TestPurchaseOrderPPNRateMatchesQuotationTaxResolution(t *testing.T) {
-	legacy := []struct {
-		zone     string
-		category string
+	cases := []struct {
+		name            string
+		zone            string
+		taxType         string
+		serviceCategory string
+		legacyCategory  string
 	}{
-		{"FTZ", ""},
-		{"NonFTZ", "SupplyOnly"},
-		{"NonFTZ", "SupplyInstall"},
-		{"NonFTZ", "SupplyInstallConstruction"},
+		{"legacy FTZ", "FTZ", "", "", ""},
+		{"legacy goods", "NonFTZ", "", "", "SupplyOnly"},
+		{"legacy service", "NonFTZ", "", "", "SupplyInstall"},
+		{"legacy construction service", "NonFTZ", "", "", "SupplyInstallConstruction"},
+		{"current non-FTZ goods", "NonFTZ", TaxTypeGoods, "", ""},
+		{"current FTZ goods", "FTZ", TaxTypeGoods, "", ""},
+		{"current service", "NonFTZ", TaxTypeServices, ServiceCategoryNonConstruction, ""},
+		{"current construction service", "NonFTZ", TaxTypeServices, ServiceCategoryConstruction, ""},
 	}
-	for _, testCase := range legacy {
-		taxType, serviceCategory, ok := legacyTaxCategoryToNew(testCase.category)
-		if testCase.category == "" {
-			// FTZ carries no category and therefore no type: resolveTax's
-			// goods branch is the only one that can produce PPN, and it cannot
-			// with an empty type. The quotation's rate is zero by zone.
-			taxType = TaxTypeGoods
-			ok = true
-		}
-		if !ok {
-			t.Fatalf("legacy category %q did not map forward", testCase.category)
-		}
-		ppnBps, _, _, err := resolveTax(testCase.zone, taxType, serviceCategory)
-		if err != nil {
-			t.Fatalf("%s/%s: resolveTax: %v", testCase.zone, testCase.category, err)
-		}
-		poBps, err := store.PurchaseOrderPPNBps(testCase.zone, testCase.category)
-		if err != nil {
-			t.Fatalf("%s/%s: PurchaseOrderPPNBps: %v", testCase.zone, testCase.category, err)
-		}
-		if poBps != int16(ppnBps) {
-			t.Errorf("%s/%s: PO PPN = %d bps, quotation PPN = %d bps",
-				testCase.zone, testCase.category, poBps, ppnBps)
-		}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			quotationType := testCase.taxType
+			quotationCategory := testCase.serviceCategory
+			if quotationType == "" {
+				if testCase.zone == TaxZoneFTZ {
+					quotationType = TaxTypeGoods
+				} else {
+					quotationType, quotationCategory, _ = legacyTaxCategoryToNew(testCase.legacyCategory)
+				}
+			}
+			ppnBps, _, _, err := resolveTax(testCase.zone, quotationType, quotationCategory)
+			if err != nil {
+				t.Fatalf("resolveTax: %v", err)
+			}
+			poBps, err := store.PurchaseOrderPPNBps(
+				testCase.zone, testCase.taxType, testCase.serviceCategory, testCase.legacyCategory)
+			if err != nil {
+				t.Fatalf("PurchaseOrderPPNBps: %v", err)
+			}
+			if poBps != int16(ppnBps) {
+				t.Errorf("PO PPN = %d bps, quotation PPN = %d bps", poBps, ppnBps)
+			}
+		})
 	}
 }
 

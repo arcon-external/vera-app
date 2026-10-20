@@ -72,14 +72,16 @@ type PurchaseOrderCalcLine struct {
 	NetMinor        int64
 }
 
-// PurchaseOrderCalcInput is everything the calculation reads. Printed source
-// totals are deliberately absent: they are evidence copied from the issued
-// revision, never an input to this arithmetic.
+// PurchaseOrderCalcInput is everything the calculation reads. The PPN rate is
+// passed in already resolved: the PO stores the rate once, at creation, so a
+// later legislative change or a quotation created under a newer tax model can
+// never rewrite an entered order. Printed source totals are deliberately
+// absent: they are evidence copied from the issued revision, never an input to
+// this arithmetic.
 type PurchaseOrderCalcInput struct {
 	Lines            []PurchaseOrderCalcLine
 	DiscountPercent  int16
-	TaxZone          string
-	TaxCategory      string
+	PpnBps           int16
 	AdjustmentMinor  int64
 	AdjustmentReason string
 }
@@ -104,9 +106,9 @@ type PurchaseOrderCalc struct {
 // out-of-range input, a forbidden adjustment or any intermediate that would
 // exceed int64: an overflowing PO is refused rather than wrapped.
 func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, error) {
-	ppnBps, err := PurchaseOrderPPNBps(input.TaxZone, input.TaxCategory)
-	if err != nil {
-		return PurchaseOrderCalc{}, err
+	if input.PpnBps < 0 || input.PpnBps > 10000 {
+		return PurchaseOrderCalc{}, fmt.Errorf(
+			"%w: PPN rate must be between 0 and 10000 basis points", ErrPurchaseOrderInvalid)
 	}
 	if input.DiscountPercent < 0 || input.DiscountPercent > MaxDiscountPercent {
 		return PurchaseOrderCalc{}, fmt.Errorf(
@@ -168,7 +170,7 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 		return PurchaseOrderCalc{}, fmt.Errorf("whole purchase order discount: %w", err)
 	}
 	afterDiscount := subtotalMinor - discountMinor
-	ppnMinor, err := poMulDiv(afterDiscount, int64(ppnBps), 10000, false)
+	ppnMinor, err := poMulDiv(afterDiscount, int64(input.PpnBps), 10000, false)
 	if err != nil {
 		return PurchaseOrderCalc{}, fmt.Errorf("PPN: %w", err)
 	}
@@ -190,7 +192,7 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 		SubtotalMinor:      subtotalMinor,
 		DiscountMinor:      discountMinor,
 		AfterDiscountMinor: afterDiscount,
-		PpnBps:             ppnBps,
+		PpnBps:             input.PpnBps,
 		PpnMinor:           ppnMinor,
 		AdjustmentMinor:    adjustment,
 		AdjustmentReason:   reason,
@@ -198,32 +200,75 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 	}, nil
 }
 
-// PurchaseOrderPPNBps resolves the customer-facing PPN rate a PO carries. It
-// follows the quotation's tax model exactly: 11% for Non-FTZ goods, zero for
-// FTZ and for services. PPH22 (2% / 1.75%, internal only) never applies here,
-// which is why the legacy service categories resolve to zero rather than to
-// their internal rate.
-func PurchaseOrderPPNBps(zone, category string) (int16, error) {
+// PurchaseOrderPPNBps resolves the customer-facing PPN rate a PO carries from
+// the frozen source's tax basis. It follows the quotation's tax model exactly:
+// 11% for Non-FTZ goods, zero for FTZ and for services. PPH22 (2% / 1.75%,
+// internal only) never applies here, which is why services resolve to zero
+// rather than to their internal rate.
+//
+// Both tax models are read. A revision created under the current model carries
+// tax_type and service_category with an empty legacy tax_category; an older one
+// carries only the legacy category. Reading both is what keeps PO entry working
+// for a quotation issued either way.
+func PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory string) (int16, error) {
+	if taxType == "" {
+		if zone == "FTZ" {
+			if legacyCategory != "" {
+				return 0, fmt.Errorf("%w: an FTZ purchase order must not carry a tax category",
+					ErrPurchaseOrderInvalid)
+			}
+			taxType = "Goods"
+		} else {
+			mappedType, mappedCategory, ok := legacyPOToTaxType(legacyCategory)
+			if !ok {
+				return 0, fmt.Errorf(
+					"%w: a Non-FTZ purchase order needs a goods or services tax category",
+					ErrPurchaseOrderInvalid)
+			}
+			taxType, serviceCategory = mappedType, mappedCategory
+		}
+	}
 	switch zone {
-	case "FTZ":
-		if category != "" {
-			return 0, fmt.Errorf("%w: an FTZ purchase order must not carry a tax category",
+	case "FTZ", "NonFTZ":
+	default:
+		return 0, fmt.Errorf("%w: unknown tax zone %q", ErrPurchaseOrderInvalid, zone)
+	}
+	switch taxType {
+	case "Goods":
+		if serviceCategory != "" {
+			return 0, fmt.Errorf("%w: goods must not carry a service category",
 				ErrPurchaseOrderInvalid)
 		}
-		return 0, nil
-	case "NonFTZ":
-		switch category {
-		case "SupplyOnly":
+		if zone == "NonFTZ" {
 			return ppnRateBps, nil
-		case "SupplyInstall", "SupplyInstallConstruction":
+		}
+		return 0, nil
+	case "Services":
+		switch serviceCategory {
+		case "NonConstruction", "Construction":
+			// Services tax is PPH22, internal only, so a PO prints no PPN.
 			return 0, nil
 		default:
-			return 0, fmt.Errorf(
-				"%w: a Non-FTZ purchase order needs a goods or services tax category",
+			return 0, fmt.Errorf("%w: services need a service category",
 				ErrPurchaseOrderInvalid)
 		}
 	default:
-		return 0, fmt.Errorf("%w: unknown tax zone %q", ErrPurchaseOrderInvalid, zone)
+		return 0, fmt.Errorf("%w: unknown tax type %q", ErrPurchaseOrderInvalid, taxType)
+	}
+}
+
+// legacyPOToTaxType maps the pre-type-model categories forward, mirroring
+// legacyTaxCategoryToNew in backend/tax.go.
+func legacyPOToTaxType(category string) (taxType, serviceCategory string, ok bool) {
+	switch category {
+	case "SupplyOnly":
+		return "Goods", "", true
+	case "SupplyInstall":
+		return "Services", "NonConstruction", true
+	case "SupplyInstallConstruction":
+		return "Services", "Construction", true
+	default:
+		return "", "", false
 	}
 }
 

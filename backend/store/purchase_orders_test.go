@@ -1221,3 +1221,103 @@ func TestPurchaseOrderMigration031BackfillsAPreCalculationDraft(t *testing.T) {
 			reopened.PrintedSubtotalMinor, reopened.PrintedGrandTotalMinor)
 	}
 }
+
+// seedPOQuotationModernTax writes a revision under the current tax model:
+// tax_type and service_category carry the basis, and the legacy tax_category is
+// empty, exactly as a quotation prepared by today's editor stores it.
+func seedPOQuotationModernTax(t *testing.T, database *Store, zone, taxType, serviceCategory string) QuotationRecord {
+	t.Helper()
+	record, err := database.SaveRevision(context.Background(), RevisionDraft{
+		CustomerCode:     2,
+		CustomerName:     "PT. Buyer",
+		CustomerAddress:  "Jl. Billing 1",
+		RecipientName:    "Budi Santoso",
+		RecipientAddress: "Jl. Recipient 9",
+		Subject:          "Modern tax basis",
+		Incoterm:         "CIF",
+		ValidityDays:     30,
+		PaymentTermDays:  45,
+		LeadTimeDays:     10,
+		TaxZone:          zone,
+		TaxType:          taxType,
+		ServiceCategory:  serviceCategory,
+		TaxRateBps:       200,
+		Currency:         "USD",
+		HTMLSnapshot:     "<html>snapshot</html>",
+		Items: []RevisionItem{{
+			ItemNo:                1,
+			Description:           "Modern widget",
+			Qty:                   1,
+			UoM:                   "Pc",
+			UnitPrice:             1000,
+			MarginalizedUnitPrice: 1000,
+			MarginalizedTotal:     1000,
+			ListUnitPrice:         1000,
+			OriginalTotal:         1000,
+		}},
+		Totals: RevisionTotals{
+			OriginalSubtotal:     1000,
+			OriginalGrand:        1000,
+			MarginalizedSubtotal: 1000,
+			MarginalizedGrand:    1000,
+			CustomerGrandTotal:   1000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed modern quotation: %v", err)
+	}
+	return record
+}
+
+// TestPurchaseOrderPPNResolvesTheCurrentTaxModel is the regression guard for a
+// quotation issued after the Goods/Services split: its legacy tax_category is
+// empty, so a resolver that read only the legacy field refused to create the PO
+// at all. The rate is stored once, and an update reuses it rather than
+// re-resolving against a later tax model.
+func TestPurchaseOrderPPNResolvesTheCurrentTaxModel(t *testing.T) {
+	database := openTestSchema(t, "vera_po_calc_modern_tax")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	goods := seedPOQuotationModernTax(t, database, "NonFTZ", "Goods", "")
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    goods.ID,
+		RevisionNumber: goods.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create goods PO from the current tax model: %v", err)
+	}
+	if draft.PpnBps != 1100 || draft.PpnMinor != 110 ||
+		draft.GrandTotalMinor != 1110 {
+		t.Errorf("goods PPN = %+v; want 1100 bps / 110 / grand 1110", draft)
+	}
+
+	// An update keeps the stored rate: it is a snapshot of the source's basis,
+	// not a fresh resolution.
+	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
+		DiscountPercent: 10, Items: draft.Items,
+	})
+	if err != nil {
+		t.Fatalf("update modern goods PO: %v", err)
+	}
+	if updated.PpnBps != 1100 || updated.PpnMinor != 99 ||
+		updated.GrandTotalMinor != 999 {
+		t.Errorf("updated goods PPN = %+v; want 1100 bps / 99 / grand 999", updated)
+	}
+
+	services := seedPOQuotationModernTax(t, database, "NonFTZ", "Services", "NonConstruction")
+	servicePO, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    services.ID,
+		RevisionNumber: services.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create services PO from the current tax model: %v", err)
+	}
+	if servicePO.PpnBps != 0 || servicePO.PpnMinor != 0 ||
+		servicePO.GrandTotalMinor != 1000 {
+		t.Errorf("services PPN = %+v; want no PPN and grand 1000", servicePO)
+	}
+}

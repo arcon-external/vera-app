@@ -95,10 +95,6 @@ SET gross_minor = round(quantity_scaled::numeric * unit_price_minor / 10000)::bi
 UPDATE {{schema}}.purchase_orders po
 SET subtotal_minor = COALESCE(lines.subtotal, 0),
     discount_minor = 0,
-    ppn_bps = CASE
-        WHEN po.tax_zone = 'NonFTZ' AND po.tax_category = 'SupplyOnly' THEN 1100
-        ELSE 0
-    END,
     adjustment_minor = 0,
     adjustment_reason = ''
 FROM (
@@ -107,6 +103,20 @@ FROM (
     GROUP BY purchase_order_id
 ) AS lines
 WHERE lines.purchase_order_id = po.id;
+
+-- Both tax models: a current revision carries tax_type/service_category, an
+-- older one only the legacy category. Reading both keeps a pre-031 draft's PPN
+-- right whichever model issued its Quotation. The join is its own statement
+-- because a JOIN in an UPDATE's FROM list cannot see the target table.
+UPDATE {{schema}}.purchase_orders po
+SET ppn_bps = CASE
+        WHEN po.tax_zone <> 'NonFTZ' THEN 0
+        WHEN r.tax_type = 'Goods' THEN 1100
+        WHEN COALESCE(r.tax_type, '') = '' AND po.tax_category = 'SupplyOnly' THEN 1100
+        ELSE 0
+    END
+FROM {{schema}}.quotation_revisions r
+WHERE r.quotation_id = po.quotation_id AND r.revision_number = po.source_revision;
 
 UPDATE {{schema}}.purchase_orders po
 SET subtotal_minor = 0

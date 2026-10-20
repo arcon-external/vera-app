@@ -206,7 +206,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	lines, calculation, err := calculatePurchaseOrderLines(lines, 0, 0, "", source.TaxZone, source.TaxCategory)
+	ppnBps, err := PurchaseOrderPPNBps(
+		source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	lines, calculation, err := calculatePurchaseOrderLines(lines, 0, 0, "", ppnBps)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -318,13 +323,13 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	var state string
 	var quotationID int64
 	var sourceRevision int16
-	var taxZone, taxCategory string
+	var ppnBps int16
 	err = tx.QueryRow(ctx, fmt.Sprintf(`
-		SELECT state, quotation_id, source_revision, tax_zone, tax_category
+		SELECT state, quotation_id, source_revision, ppn_bps
 		FROM %s.purchase_orders
 		WHERE id = $1 AND org_id = $2
 		FOR UPDATE`, schema), input.ID, org.ID).Scan(
-		&state, &quotationID, &sourceRevision, &taxZone, &taxCategory)
+		&state, &quotationID, &sourceRevision, &ppnBps)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
@@ -339,7 +344,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	lines, calculation, err := calculatePurchaseOrderLines(
 		input.Items, input.DiscountPercent, input.AdjustmentMinor,
-		input.AdjustmentReason, taxZone, taxCategory)
+		input.AdjustmentReason, ppnBps)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -402,6 +407,8 @@ type purchaseOrderSource struct {
 	Currency        string
 	TaxZone         string
 	TaxCategory     string
+	TaxType         string
+	ServiceCategory string
 	CustomerID      int64
 	RevisionID      int64
 	PaymentTerms    string
@@ -425,6 +432,7 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.quote_number, c.id, c.legal_name, r.id, r.recipient_address,
 		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency,
+		       r.tax_type, r.service_category,
 		       COALESCE(t.marginalized_subtotal, 0),
 		       COALESCE(t.marginalized_discount, 0),
 		       COALESCE(t.ppn_amount, 0),
@@ -446,6 +454,8 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 		&source.TaxZone,
 		&source.TaxCategory,
 		&source.Currency,
+		&source.TaxType,
+		&source.ServiceCategory,
 		&source.PrintedSubtotal,
 		&source.PrintedDiscount,
 		&source.PrintedPpn,
@@ -655,12 +665,11 @@ func validatePurchaseOrderReferences(ctx context.Context, q purchaseOrderQuerier
 // alongside the header totals. The inputs are mutated in place-ish (a new slice
 // is returned) so the caller can persist exactly what was calculated; nothing
 // here recalculates on read.
-func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int16, adjustment int64, reason, taxZone, taxCategory string) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
+func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int16, adjustment int64, reason string, ppnBps int16) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
 	input := PurchaseOrderCalcInput{
 		Lines:            make([]PurchaseOrderCalcLine, len(items)),
 		DiscountPercent:  discountPercent,
-		TaxZone:          taxZone,
-		TaxCategory:      taxCategory,
+		PpnBps:           ppnBps,
 		AdjustmentMinor:  adjustment,
 		AdjustmentReason: reason,
 	}

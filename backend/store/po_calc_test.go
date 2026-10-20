@@ -45,8 +45,7 @@ func TestPurchaseOrderLineGrossRoundsHalfUpAwayFromZero(t *testing.T) {
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			calculation, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-				Lines:   []PurchaseOrderCalcLine{line(testCase.qty, testCase.price)},
-				TaxZone: "FTZ",
+				Lines: []PurchaseOrderCalcLine{line(testCase.qty, testCase.price)},
 			})
 			if err != nil {
 				t.Fatalf("calculate: %v", err)
@@ -62,8 +61,7 @@ func TestPurchaseOrderDiscountsTruncateLikeTheQuotation(t *testing.T) {
 	// 101 x 50% is 50.5 in exact arithmetic. The quotation truncates the
 	// discount amount, so the customer keeps the extra half: 101 - 50 = 51.
 	calculation, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-		Lines:   []PurchaseOrderCalcLine{discountedLine(10000, 101, 50)},
-		TaxZone: "FTZ",
+		Lines: []PurchaseOrderCalcLine{discountedLine(10000, 101, 50)},
 	})
 	if err != nil {
 		t.Fatalf("calculate row discount: %v", err)
@@ -83,7 +81,6 @@ func TestPurchaseOrderDiscountsTruncateLikeTheQuotation(t *testing.T) {
 	whole, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
 		Lines:           []PurchaseOrderCalcLine{line(10000, 101)},
 		DiscountPercent: 50,
-		TaxZone:         "FTZ",
 	})
 	if err != nil {
 		t.Fatalf("calculate whole discount: %v", err)
@@ -98,8 +95,7 @@ func TestPurchaseOrderDiscountsTruncateLikeTheQuotation(t *testing.T) {
 	disabled := discountedLine(10000, 101, 50)
 	disabled.DiscountEnabled = false
 	ignored, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-		Lines:   []PurchaseOrderCalcLine{disabled},
-		TaxZone: "FTZ",
+		Lines: []PurchaseOrderCalcLine{disabled},
 	})
 	if err != nil {
 		t.Fatalf("calculate disabled discount: %v", err)
@@ -115,8 +111,7 @@ func TestPurchaseOrderTaxIsOnTheDiscountedSubtotalAndStaysSeparate(t *testing.T)
 	calculation, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
 		Lines:           []PurchaseOrderCalcLine{line(10000, 1000)},
 		DiscountPercent: 10,
-		TaxZone:         "NonFTZ",
-		TaxCategory:     "SupplyOnly",
+		PpnBps:          1100,
 	})
 	if err != nil {
 		t.Fatalf("calculate: %v", err)
@@ -134,9 +129,8 @@ func TestPurchaseOrderTaxIsOnTheDiscountedSubtotalAndStaysSeparate(t *testing.T)
 
 	// A fractional tax amount truncates, exactly like calcTax.
 	fractional, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-		Lines:       []PurchaseOrderCalcLine{line(10000, 905)},
-		TaxZone:     "NonFTZ",
-		TaxCategory: "SupplyOnly",
+		Lines:  []PurchaseOrderCalcLine{line(10000, 905)},
+		PpnBps: 1100,
 	})
 	if err != nil {
 		t.Fatalf("calculate fractional tax: %v", err)
@@ -146,32 +140,23 @@ func TestPurchaseOrderTaxIsOnTheDiscountedSubtotalAndStaysSeparate(t *testing.T)
 			fractional.PpnMinor, fractional.GrandTotalMinor)
 	}
 
-	// FTZ and services carry no customer-facing PPN.
-	for _, taxCase := range []struct{ zone, category string }{
-		{"FTZ", ""},
-		{"NonFTZ", "SupplyInstall"},
-		{"NonFTZ", "SupplyInstallConstruction"},
-	} {
-		noPpn, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-			Lines:       []PurchaseOrderCalcLine{line(10000, 1000)},
-			TaxZone:     taxCase.zone,
-			TaxCategory: taxCase.category,
-		})
-		if err != nil {
-			t.Fatalf("%s/%s: %v", taxCase.zone, taxCase.category, err)
-		}
-		if noPpn.PpnMinor != 0 || noPpn.GrandTotalMinor != 1000 {
-			t.Errorf("%s/%s PPN = %d / grand %d; want 0/1000",
-				taxCase.zone, taxCase.category, noPpn.PpnMinor, noPpn.GrandTotalMinor)
-		}
+	// A zero rate charges nothing and leaves the grand untouched.
+	noPpn, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
+		Lines: []PurchaseOrderCalcLine{line(10000, 1000)},
+	})
+	if err != nil {
+		t.Fatalf("calculate with no PPN: %v", err)
+	}
+	if noPpn.PpnMinor != 0 || noPpn.GrandTotalMinor != 1000 {
+		t.Errorf("no-PPN PPN = %d / grand %d; want 0/1000",
+			noPpn.PpnMinor, noPpn.GrandTotalMinor)
 	}
 }
 
 func TestPurchaseOrderAdjustmentIsSignedAndRequiresAReason(t *testing.T) {
 	base := PurchaseOrderCalcInput{
-		Lines:       []PurchaseOrderCalcLine{line(10000, 1000)},
-		TaxZone:     "NonFTZ",
-		TaxCategory: "SupplyOnly",
+		Lines:  []PurchaseOrderCalcLine{line(10000, 1000)},
+		PpnBps: 1100,
 	}
 
 	negative := base
@@ -304,15 +289,14 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 			// The line product is 10^4 times an int64, so only a big-integer
 			// intermediate can decide -- a direct int64 multiply wraps.
 			name:  "line gross",
-			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{line(math.MaxInt64, math.MaxInt64)}, TaxZone: "FTZ"},
+			input: PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{line(math.MaxInt64, math.MaxInt64)}},
 			stage: "line 1 gross",
 		},
 		{
 			// Two individually valid lines whose subtotal exceeds int64.
 			name: "subtotal",
 			input: PurchaseOrderCalcInput{
-				Lines:   []PurchaseOrderCalcLine{line(10000, math.MaxInt64/2+1), line(10000, math.MaxInt64/2+1)},
-				TaxZone: "FTZ",
+				Lines: []PurchaseOrderCalcLine{line(10000, math.MaxInt64/2+1), line(10000, math.MaxInt64/2+1)},
 			},
 			stage: "subtotal",
 		},
@@ -321,7 +305,6 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 			name: "grand total",
 			input: PurchaseOrderCalcInput{
 				Lines:            []PurchaseOrderCalcLine{line(10000, math.MaxInt64)},
-				TaxZone:          "FTZ",
 				AdjustmentMinor:  math.MaxInt64,
 				AdjustmentReason: "Overflow",
 			},
@@ -344,32 +327,53 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 
 func TestPurchaseOrderPPNFollowsQuotationTaxSemantics(t *testing.T) {
 	cases := []struct {
-		zone     string
-		category string
-		want     int16
+		name            string
+		zone            string
+		taxType         string
+		serviceCategory string
+		legacyCategory  string
+		want            int16
 	}{
-		{"FTZ", "", 0},
-		{"NonFTZ", "SupplyOnly", 1100},
-		{"NonFTZ", "SupplyInstall", 0},
-		{"NonFTZ", "SupplyInstallConstruction", 0},
+		// The legacy model: only the category travels.
+		{"legacy FTZ", "FTZ", "", "", "", 0},
+		{"legacy non-FTZ goods", "NonFTZ", "", "", "SupplyOnly", 1100},
+		{"legacy service", "NonFTZ", "", "", "SupplyInstall", 0},
+		{"legacy construction service", "NonFTZ", "", "", "SupplyInstallConstruction", 0},
+		// The current model: tax_type and service_category travel, and the
+		// legacy category is empty. This is the case that must keep working
+		// for a quotation issued after the Goods/Services split.
+		{"current non-FTZ goods", "NonFTZ", "Goods", "", "", 1100},
+		{"current FTZ goods", "FTZ", "Goods", "", "", 0},
+		{"current service", "NonFTZ", "Services", "NonConstruction", "", 0},
+		{"current construction service", "NonFTZ", "Services", "Construction", "", 0},
+		// A current revision may still carry both; the current fields win.
+		{"both models agree", "NonFTZ", "Goods", "", "SupplyOnly", 1100},
 	}
 	for _, testCase := range cases {
-		got, err := PurchaseOrderPPNBps(testCase.zone, testCase.category)
-		if err != nil {
-			t.Fatalf("%s/%s: %v", testCase.zone, testCase.category, err)
-		}
-		if got != testCase.want {
-			t.Errorf("%s/%s = %d bps; want %d", testCase.zone, testCase.category, got, testCase.want)
-		}
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := PurchaseOrderPPNBps(
+				testCase.zone, testCase.taxType, testCase.serviceCategory, testCase.legacyCategory)
+			if err != nil {
+				t.Fatalf("%s: %v", testCase.name, err)
+			}
+			if got != testCase.want {
+				t.Errorf("%s = %d bps; want %d", testCase.name, got, testCase.want)
+			}
+		})
 	}
-	for _, bad := range []struct{ zone, category string }{
-		{"NonFTZ", ""},
-		{"NonFTZ", "Unknown"},
-		{"FTZ", "SupplyOnly"},
-		{"Nowhere", ""},
+	for _, bad := range []struct{ name, zone, taxType, serviceCategory, legacyCategory string }{
+		{"non-FTZ without any basis", "NonFTZ", "", "", ""},
+		{"unknown legacy category", "NonFTZ", "", "", "Unknown"},
+		{"FTZ with a legacy category", "FTZ", "", "", "SupplyOnly"},
+		{"unknown zone", "Nowhere", "", "", ""},
+		{"goods with a service category", "NonFTZ", "Goods", "NonConstruction", ""},
+		{"services without a category", "NonFTZ", "Services", "", ""},
+		{"unknown tax type", "NonFTZ", "Beverages", "", ""},
 	} {
-		if _, err := PurchaseOrderPPNBps(bad.zone, bad.category); !errors.Is(err, ErrPurchaseOrderInvalid) {
-			t.Errorf("%s/%s error = %v; want ErrPurchaseOrderInvalid", bad.zone, bad.category, err)
+		if _, err := PurchaseOrderPPNBps(
+			bad.zone, bad.taxType, bad.serviceCategory, bad.legacyCategory,
+		); !errors.Is(err, ErrPurchaseOrderInvalid) {
+			t.Errorf("%s error = %v; want ErrPurchaseOrderInvalid", bad.name, err)
 		}
 	}
 }
