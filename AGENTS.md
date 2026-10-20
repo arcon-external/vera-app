@@ -448,7 +448,7 @@ without validation.
 | ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | **Worker**  | `opencode-go/deepseek-v4.1-flash#max`, fallbacks `openai/gpt-6-sol`       | Writes code, writes and runs tests.                                            |
 | **Riddler** | `opencode-go/deepseek-v4.1-flash#max`                                     | Interrogates a problem into questions. It never verifies, never decides.       |
-| **Advisor** | `openai/gpt-6-sol#max`                                                    | Advises on what to do next. It advises; it never decides.                      |
+| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh`                          | Advises on what to do next. It advises; it never decides.                      |
 | **Judge**   | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
@@ -461,17 +461,16 @@ back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
 The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule holds — the Advisor is Muse Spark, the Judge is GPT-6.1 Sol.
-What it costs is stated plainly: the Worker now shares a family with the Advisor
-(both Muse Spark — the executor and the advisor share blind spots, a pairing the
-rule does not bind but the one to watch), and the Judge shares one with the Worker's
-first fallback; the Judge's fallback shares one with the orchestrator. The Riddler is
-not a reviewer, so the pairing rule does not bind it. The Worker and the Judge are
-**trial models on a billed OpenAI API account** — the ChatGPT Plus subscription does
-not fund them (the first dispatch proved it: `credit_balance_exhausted`) — and their
-limits are unmeasured: a quota wall falls back per the chain, and a dispatch that
-falls back says so in its report. If a future run shows correlated
-misses between a reviewer and its family-mate, re-deal the families rather than
-defending the table.
+What it costs is stated plainly: the Worker, the Riddler and the orchestrator are
+all DeepSeek — the executor and the orchestrator sharing a family is the pairing to
+watch — and the Judge's fallback is DeepSeek too, so the Advisor is the only Muse
+Spark role in the loop. The Riddler is not a reviewer, so the pairing rule does not
+bind it. The Judge is a **trial model on a billed OpenAI API account** — the ChatGPT
+Plus subscription does not fund it (the first dispatch proved it:
+`credit_balance_exhausted`) — and its limits are unmeasured: a quota wall falls back
+per the chain, and a dispatch that falls back says so in its report. If a future run
+shows correlated misses between a reviewer and its family-mate, re-deal the families
+rather than defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
