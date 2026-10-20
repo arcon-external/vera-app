@@ -116,6 +116,7 @@ func finalizeInput(draft PurchaseOrder, user AuthUser, number string) PurchaseOr
 			PaymentTerms:          draft.PaymentTerms,
 			Incoterms:             draft.Incoterms,
 			UpdatedBy:             user.ID,
+			ExpectedVersion:       draft.Version,
 			Items:                 items,
 			DiscountPercent:       draft.DiscountPercent,
 			AdjustmentMinor:       draft.AdjustmentMinor,
@@ -189,7 +190,7 @@ func TestFinalizePurchaseOrderSavesTheRecordAndKeepsTheQuotation(t *testing.T) {
 
 	// Saved is one-way: neither another draft write nor another final save is
 	// allowed.
-	if _, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	if _, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, Items: input.Items,
 	}); !errors.Is(err, ErrPurchaseOrderNotDraft) {
 		t.Errorf("update after save = %v; want ErrPurchaseOrderNotDraft", err)
@@ -212,7 +213,7 @@ func TestFinalizePurchaseOrderRequiresTheFinalSaveMinimum(t *testing.T) {
 	}
 
 	// Zero lines: a draft may reach that state, a saved record may not.
-	emptyDraft, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	emptyDraft, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PONumber: "PO-EMPTY", Items: []PurchaseOrderItem{},
 	})
 	if err != nil {
@@ -246,9 +247,10 @@ func TestFinalizePurchaseOrderRequiresAUniqueNumberPerCustomer(t *testing.T) {
 
 	// Drafts may share a number, including case and whitespace variants, and
 	// carry no comparison key until the final save.
-	if _, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	secondSavedDraft, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: second.ID, UpdatedBy: user.ID, PONumber: "PO-471", Items: second.Items,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("draft number: %v", err)
 	}
 	savedFirst, err := database.FinalizePurchaseOrder(ctx, finalizeInput(first, user, " PO-471 "))
@@ -260,6 +262,7 @@ func TestFinalizePurchaseOrderRequiresAUniqueNumberPerCustomer(t *testing.T) {
 	}
 
 	secondInput := finalizeInput(second, user, "po-471")
+	secondInput.ExpectedVersion = secondSavedDraft.Version
 	if _, err := database.FinalizePurchaseOrder(ctx, secondInput); !errors.Is(err, ErrPurchaseOrderNumberTaken) {
 		t.Fatalf("case variant error = %v; want ErrPurchaseOrderNumberTaken", err)
 	}
@@ -639,10 +642,16 @@ func TestFinalizePurchaseOrderRefusesACorruptedSourceLink(t *testing.T) {
 		database.configSchema()), draft.ID); err != nil {
 		t.Fatalf("corrupt currency: %v", err)
 	}
+	// The row's version trigger moved the record forward, so the writer must
+	// state the version it now carries.
+	corrupted, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen corrupted record: %v", err)
+	}
 	if _, err := database.GetPurchaseOrderReview(ctx, draft.ID); !errors.Is(err, ErrPurchaseOrderSourceCurrencyMismatch) {
 		t.Fatalf("review currency mismatch = %v; want ErrPurchaseOrderSourceCurrencyMismatch", err)
 	}
-	if _, err := database.FinalizePurchaseOrder(ctx, finalizeInput(draft, user, "PO-EUR")); !errors.Is(err, ErrPurchaseOrderSourceCurrencyMismatch) {
+	if _, err := database.FinalizePurchaseOrder(ctx, finalizeInput(corrupted, user, "PO-EUR")); !errors.Is(err, ErrPurchaseOrderSourceCurrencyMismatch) {
 		t.Fatalf("finalize currency mismatch = %v; want ErrPurchaseOrderSourceCurrencyMismatch", err)
 	}
 	if _, err := pool.Exec(ctx, fmt.Sprintf(
@@ -657,10 +666,15 @@ func TestFinalizePurchaseOrderRefusesACorruptedSourceLink(t *testing.T) {
 		database.configSchema()), draft.ID); err != nil {
 		t.Fatalf("corrupt revision: %v", err)
 	}
+	// The currency restore and the revision change each moved the version on.
+	missing, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen missing-revision record: %v", err)
+	}
 	if _, err := database.GetPurchaseOrderReview(ctx, draft.ID); !errors.Is(err, ErrPurchaseOrderSourceNotFound) {
 		t.Fatalf("review missing revision = %v; want ErrPurchaseOrderSourceNotFound", err)
 	}
-	if _, err := database.FinalizePurchaseOrder(ctx, finalizeInput(draft, user, "PO-REV")); !errors.Is(err, ErrPurchaseOrderSourceNotFound) {
+	if _, err := database.FinalizePurchaseOrder(ctx, finalizeInput(missing, user, "PO-REV")); !errors.Is(err, ErrPurchaseOrderSourceNotFound) {
 		t.Fatalf("finalize missing revision = %v; want ErrPurchaseOrderSourceNotFound", err)
 	}
 }

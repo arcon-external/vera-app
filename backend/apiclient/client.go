@@ -24,13 +24,29 @@ type Client struct {
 	baseURL        string
 }
 
+// ConflictInfo is the current state a stale PO save was refused against
+// (#473). It is read from the 409 body, never parsed from the message.
+type ConflictInfo struct {
+	Code           string `json:"code"`
+	CurrentState   string `json:"currentState"`
+	UpdatedByName  string `json:"updatedByName"`
+	UpdatedAt      string `json:"updatedAt"`
+	CurrentVersion int64  `json:"currentVersion"`
+	UpdatedBy      int64  `json:"updatedBy"`
+}
+
 // StatusError is a response the server refused: anything outside 2xx, and the
 // 401 that ends a session.
 //
 // It carries the status code because callers want different things from it. The
 // desktop shows Message and nothing else. The CLI maps the code to an exit
 // status, so a script can branch on "not found" without matching English.
+//
+// Conflict is set only for a named optimistic-concurrency refusal (#473). The
+// desktop binding turns it into a typed result so the warning can name the
+// writer and version without asking Go callers to parse prose.
 type StatusError struct {
+	Conflict   *ConflictInfo
 	StatusCode int
 	Message    string
 }
@@ -54,6 +70,16 @@ func StatusOf(err error) int {
 		return status.StatusCode
 	}
 	return 0
+}
+
+// ConflictOf reports the stale-version details behind an error, or nil when the
+// refusal was something else.
+func ConflictOf(err error) *ConflictInfo {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Conflict
+	}
+	return nil
 }
 
 // BaseURL reports the API address this client talks to. The verification
@@ -139,7 +165,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 		return nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
+		return decodeStatusError(response, "server request failed")
 	}
 	if out == nil {
 		return nil
@@ -156,6 +182,39 @@ func apiError(response *http.Response, fallback string) string {
 		return fallback
 	}
 	return apiErrorBody(body, fallback)
+}
+
+// decodeStatusError reads a refused response once and returns both the message
+// the desktop shows and, for a named stale-version refusal, the conflict
+// details a binding turns into a typed result.
+func decodeStatusError(response *http.Response, fallback string) error {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+	if err != nil {
+		return &StatusError{StatusCode: response.StatusCode, Message: fallback}
+	}
+	failure := &StatusError{
+		StatusCode: response.StatusCode,
+		Message:    apiErrorBody(body, fallback),
+	}
+	var envelope struct {
+		Code           string `json:"code"`
+		CurrentState   string `json:"currentState"`
+		UpdatedByName  string `json:"updatedByName"`
+		UpdatedAt      string `json:"updatedAt"`
+		CurrentVersion int64  `json:"currentVersion"`
+		UpdatedBy      int64  `json:"updatedBy"`
+	}
+	if json.Unmarshal(body, &envelope) == nil && envelope.Code == "po_version_conflict" {
+		failure.Conflict = &ConflictInfo{
+			Code:           envelope.Code,
+			CurrentState:   envelope.CurrentState,
+			CurrentVersion: envelope.CurrentVersion,
+			UpdatedBy:      envelope.UpdatedBy,
+			UpdatedByName:  envelope.UpdatedByName,
+			UpdatedAt:      envelope.UpdatedAt,
+		}
+	}
+	return failure
 }
 
 // PostForm sends an application/x-www-form-urlencoded body and returns the raw

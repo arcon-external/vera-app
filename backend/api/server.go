@@ -130,6 +130,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// and the final save is the one-way draft -> saved transition.
 	server.echo.GET("/v1/purchase-orders/:id/review", server.getPurchaseOrderReview, server.requireSession)
 	server.echo.POST("/v1/purchase-orders/:id/finalize", server.finalizePurchaseOrder, server.requireSession)
+	// Corrections (#473): replacing a saved record requires a reason and the
+	// version it was loaded at; the history returns the immutable snapshots.
+	server.echo.POST("/v1/purchase-orders/:id/correction", server.correctPurchaseOrder, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.
 	server.echo.POST("/v1/purchase-orders/:id/confirmation-number", server.assignPurchaseOrderConfirmation, server.requireSession)

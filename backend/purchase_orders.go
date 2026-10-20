@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"vera-app/backend/apiclient"
 	"vera-app/backend/apicontract"
 	"vera-app/backend/store"
 )
@@ -85,6 +86,9 @@ type PurchaseOrderDTO struct {
 	ConfirmationNumber     *string
 	ConfirmationAssignedAt *string
 	ConfirmationWarn       bool
+	// Version is the optimistic-concurrency revision (#473): the editor sends
+	// the version it loaded, and every write moves it forward.
+	Version int64
 }
 
 // PurchaseOrderSourceLineDTO is one customer-facing line of the exact source
@@ -210,6 +214,8 @@ type PurchaseOrderFinalizeInput struct {
 	AcknowledgedExtra     []int
 	DiscountPercent       int16
 	AdjustmentMinor       int64
+	ExpectedVersion       int64
+	Overwrite             bool
 	DocumentConfirmed     bool
 	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
 	// the record unassigned and consumes no sequence.
@@ -240,6 +246,10 @@ type PurchaseOrderItemInput struct {
 
 // PurchaseOrderUpdateInput replaces the editable draft header, the
 // whole-order discount and adjustment, and every line.
+//
+// ExpectedVersion is mandatory (#473): a save without the version it loaded is
+// refused, never treated as "no check". Overwrite records that the caller chose
+// Overwrite after a version warning, which keeps the replaced draft.
 type PurchaseOrderUpdateInput struct {
 	ID                    int64
 	BillingAddress        string
@@ -257,6 +267,122 @@ type PurchaseOrderUpdateInput struct {
 	Items                 []PurchaseOrderItemInput
 	DiscountPercent       int16
 	AdjustmentMinor       int64
+	ExpectedVersion       int64
+	Overwrite             bool
+}
+
+// PurchaseOrderCorrectionInput replaces a saved record. It carries the same
+// editable values as a draft save plus the reason staff typed, which the server
+// stores in the immutable snapshot. The source link, customer, currency, tax
+// basis, identity and confirmation number have no field here at all.
+type PurchaseOrderCorrectionInput struct {
+	ID                    int64
+	BillingAddress        string
+	DeliveryAddress       string
+	ShipToCode            string
+	ContactEmail          string
+	ContactPhone          string
+	PONumber              string
+	PODate                string
+	ReceivedDate          string
+	RequestedDeliveryDate string
+	Incoterms             string
+	PaymentTerms          string
+	AdjustmentReason      string
+	Reason                string
+	Items                 []PurchaseOrderItemInput
+	DiscountPercent       int16
+	AdjustmentMinor       int64
+	ExpectedVersion       int64
+	Overwrite             bool
+}
+
+// PurchaseOrderConflictDTO is the current state a stale save was refused
+// against, passed to the editor as typed data rather than error prose.
+type PurchaseOrderConflictDTO struct {
+	CurrentState   string
+	UpdatedByName  string
+	UpdatedAt      string
+	CurrentVersion int64
+	UpdatedBy      int64
+}
+
+// PurchaseOrderWriteResult is the answer to a versioned write. Exactly one side
+// is set: Order when the write succeeded, Conflict when the server refused it
+// because the record moved on. A real failure is still the second return value,
+// so the editor never has to guess from an error string.
+type PurchaseOrderWriteResult struct {
+	Order    *PurchaseOrderDTO
+	Conflict *PurchaseOrderConflictDTO
+}
+
+// PurchaseOrderCorrectionAttachmentDTO is the customer PO PDF version that was
+// active when a snapshot was taken.
+type PurchaseOrderCorrectionAttachmentDTO struct {
+	SHA256   string
+	Filename string
+	Version  int32
+}
+
+// PurchaseOrderCorrectionItemDTO is one line of a retained snapshot.
+type PurchaseOrderCorrectionItemDTO struct {
+	QuotationItemNo *int
+	QuotationSubNo  *int
+	LineNumber      int
+	Description     string
+	QuantityScaled  int64
+	UoM             string
+	UnitPriceMinor  int64
+	DiscountEnabled bool
+	DiscountPercent int16
+	GrossMinor      int64
+	DiscountMinor   int64
+	NetMinor        int64
+}
+
+// PurchaseOrderCorrectionDTO is one immutable snapshot: the values a
+// correction replaced, its reason, actor and time, and the attachment version
+// the record referenced at that moment.
+type PurchaseOrderCorrectionDTO struct {
+	Attachment            *PurchaseOrderCorrectionAttachmentDTO
+	PODate                *string
+	RequestedDeliveryDate *string
+	UUID                  string
+	Kind                  string
+	State                 string
+	Reason                string
+	QuoteNumber           string
+	CustomerName          string
+	Currency              string
+	BillingAddress        string
+	DeliveryAddress       string
+	ShipToCode            string
+	ContactEmail          string
+	ContactPhone          string
+	PONumber              string
+	PaymentTerms          string
+	Incoterms             string
+	TaxZone               string
+	TaxCategory           string
+	AdjustmentReason      string
+	ActorName             string
+	ReceivedDate          string
+	CreatedAt             string
+	Items                 []PurchaseOrderCorrectionItemDTO
+	ID                    int64
+	QuotationID           int64
+	SourceRevision        int16
+	CustomerID            int64
+	PreviousVersion       int64
+	ResultingVersion      int64
+	ActorID               int64
+	DiscountPercent       int16
+	SubtotalMinor         int64
+	DiscountMinor         int64
+	PpnBps                int16
+	PpnMinor              int64
+	AdjustmentMinor       int64
+	GrandTotalMinor       int64
 }
 
 // CreatePurchaseOrderDraft creates the one active PO for a Quotation from the
@@ -297,14 +423,16 @@ func (q *Quotation) GetPurchaseOrder(id int64) (PurchaseOrderDTO, error) {
 	return mapPurchaseOrderDTO(response), nil
 }
 
-// UpdatePurchaseOrderDraft replaces the editable draft values.
-func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (PurchaseOrderDTO, error) {
+// UpdatePurchaseOrderDraft replaces the editable draft values. The result is a
+// typed outcome: a stale version comes back as Conflict with no error, so the
+// editor can offer Cancel/Overwrite without parsing a message.
+func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (PurchaseOrderWriteResult, error) {
 	if err := q.requireUser(q.ctx); err != nil {
-		return PurchaseOrderDTO{}, err
+		return PurchaseOrderWriteResult{}, err
 	}
 	client, err := api()
 	if err != nil {
-		return PurchaseOrderDTO{}, err
+		return PurchaseOrderWriteResult{}, err
 	}
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
@@ -337,10 +465,179 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			DiscountPercent:       input.DiscountPercent,
 			AdjustmentMinor:       input.AdjustmentMinor,
 			AdjustmentReason:      input.AdjustmentReason,
+			ExpectedVersion:       input.ExpectedVersion,
+			Overwrite:             input.Overwrite,
 		}, &response); err != nil {
-		return PurchaseOrderDTO{}, err
+		return purchaseOrderWriteFailure(err)
 	}
-	return mapPurchaseOrderDTO(response), nil
+	return purchaseOrderSaved(response), nil
+}
+
+// CorrectPurchaseOrder replaces a saved record. Like a draft save, the version
+// is mandatory and a stale one returns a typed Conflict; unlike it, the reason
+// is required and the server keeps the replaced values.
+func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (PurchaseOrderWriteResult, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
+	for _, item := range input.Items {
+		items = append(items, apicontract.PurchaseOrderItemInput{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+		})
+	}
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/correction",
+		apicontract.PurchaseOrderCorrectionRequest{
+			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
+				BillingAddress:        input.BillingAddress,
+				DeliveryAddress:       input.DeliveryAddress,
+				ShipToCode:            input.ShipToCode,
+				ContactEmail:          input.ContactEmail,
+				ContactPhone:          input.ContactPhone,
+				PONumber:              input.PONumber,
+				PODate:                input.PODate,
+				ReceivedDate:          input.ReceivedDate,
+				RequestedDeliveryDate: input.RequestedDeliveryDate,
+				PaymentTerms:          input.PaymentTerms,
+				Incoterms:             input.Incoterms,
+				Items:                 items,
+				DiscountPercent:       input.DiscountPercent,
+				AdjustmentMinor:       input.AdjustmentMinor,
+				AdjustmentReason:      input.AdjustmentReason,
+				ExpectedVersion:       input.ExpectedVersion,
+				Overwrite:             input.Overwrite,
+			},
+			Reason: input.Reason,
+		}, &response); err != nil {
+		return purchaseOrderWriteFailure(err)
+	}
+	return purchaseOrderSaved(response), nil
+}
+
+// purchaseOrderSaved wraps one successful write.
+func purchaseOrderSaved(row apicontract.PurchaseOrderRow) PurchaseOrderWriteResult {
+	order := mapPurchaseOrderDTO(row)
+	return PurchaseOrderWriteResult{Order: &order}
+}
+
+// purchaseOrderWriteFailure turns a named version conflict into a typed result
+// and leaves every other failure as an error. The server's message is not
+// parsed: the details come from the 409 body through apiclient.ConflictOf.
+func purchaseOrderWriteFailure(err error) (PurchaseOrderWriteResult, error) {
+	conflict := apiclient.ConflictOf(err)
+	if conflict == nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	return PurchaseOrderWriteResult{Conflict: &PurchaseOrderConflictDTO{
+		CurrentVersion: conflict.CurrentVersion,
+		CurrentState:   conflict.CurrentState,
+		UpdatedBy:      conflict.UpdatedBy,
+		UpdatedByName:  conflict.UpdatedByName,
+		UpdatedAt:      conflict.UpdatedAt,
+	}}, nil
+}
+
+// GetPurchaseOrderHistory reads the immutable snapshots of one record, newest
+// first. It is a read: a missing or deleted record is an error, not an empty
+// success, so the panel never claims a history for a record that is gone.
+func (q *Quotation) GetPurchaseOrderHistory(id int64) ([]PurchaseOrderCorrectionDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return nil, err
+	}
+	client, err := api()
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		History []apicontract.PurchaseOrderCorrectionRow `json:"history"`
+	}
+	if err := client.Get("/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/history", &response); err != nil {
+		return nil, err
+	}
+	history := make([]PurchaseOrderCorrectionDTO, 0, len(response.History))
+	for _, row := range response.History {
+		history = append(history, mapPurchaseOrderCorrectionDTO(row))
+	}
+	return history, nil
+}
+
+func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) PurchaseOrderCorrectionDTO {
+	entry := PurchaseOrderCorrectionDTO{
+		ID:                    row.ID,
+		UUID:                  row.UUID,
+		Kind:                  row.Kind,
+		State:                 row.State,
+		Reason:                row.Reason,
+		ActorID:               row.ActorID,
+		ActorName:             row.ActorName,
+		CreatedAt:             row.CreatedAt,
+		PreviousVersion:       row.PreviousVersion,
+		ResultingVersion:      row.ResultingVersion,
+		QuotationID:           row.QuotationID,
+		SourceRevision:        row.SourceRevision,
+		QuoteNumber:           row.QuoteNumber,
+		CustomerID:            row.CustomerID,
+		CustomerName:          row.CustomerName,
+		Currency:              row.Currency,
+		TaxZone:               row.TaxZone,
+		TaxCategory:           row.TaxCategory,
+		BillingAddress:        row.BillingAddress,
+		DeliveryAddress:       row.DeliveryAddress,
+		ShipToCode:            row.ShipToCode,
+		ContactEmail:          row.ContactEmail,
+		ContactPhone:          row.ContactPhone,
+		PONumber:              row.PONumber,
+		PODate:                row.PODate,
+		ReceivedDate:          row.ReceivedDate,
+		RequestedDeliveryDate: row.RequestedDeliveryDate,
+		PaymentTerms:          row.PaymentTerms,
+		Incoterms:             row.Incoterms,
+		DiscountPercent:       row.DiscountPercent,
+		SubtotalMinor:         row.SubtotalMinor,
+		DiscountMinor:         row.DiscountMinor,
+		PpnBps:                row.PpnBps,
+		PpnMinor:              row.PpnMinor,
+		AdjustmentMinor:       row.AdjustmentMinor,
+		AdjustmentReason:      row.AdjustmentReason,
+		GrandTotalMinor:       row.GrandTotalMinor,
+		Items:                 make([]PurchaseOrderCorrectionItemDTO, 0, len(row.Items)),
+	}
+	if row.Attachment != nil {
+		entry.Attachment = &PurchaseOrderCorrectionAttachmentDTO{
+			Version:  row.Attachment.Version,
+			SHA256:   row.Attachment.SHA256,
+			Filename: row.Attachment.Filename,
+		}
+	}
+	for _, item := range row.Items {
+		entry.Items = append(entry.Items, PurchaseOrderCorrectionItemDTO{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			LineNumber:      item.LineNumber,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+			GrossMinor:      item.GrossMinor,
+			DiscountMinor:   item.DiscountMinor,
+			NetMinor:        item.NetMinor,
+		})
+	}
+	return entry
 }
 
 func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
@@ -382,6 +679,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		SavedAt:                row.SavedAt,
 		SavedBy:                row.SavedBy,
 		PdfAbsentConfirmed:     row.PdfAbsentConfirmed,
+		Version:                row.Version,
 		ConfirmationNumber:     row.ConfirmationNumber,
 		ConfirmationAssignedAt: row.ConfirmationAssignedAt,
 		ConfirmationWarn:       row.ConfirmationWarn,
@@ -425,14 +723,15 @@ func (q *Quotation) GetPurchaseOrderReview(id int64) (PurchaseOrderReviewDTO, er
 	return mapPurchaseOrderReviewDTO(response), nil
 }
 
-// FinalizePurchaseOrder is the one-way draft -> saved save.
-func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (PurchaseOrderDTO, error) {
+// FinalizePurchaseOrder is the one-way draft -> saved save. A stale version
+// returns a typed Conflict exactly as a draft save does.
+func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (PurchaseOrderWriteResult, error) {
 	if err := q.requireUser(q.ctx); err != nil {
-		return PurchaseOrderDTO{}, err
+		return PurchaseOrderWriteResult{}, err
 	}
 	client, err := api()
 	if err != nil {
-		return PurchaseOrderDTO{}, err
+		return PurchaseOrderWriteResult{}, err
 	}
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
@@ -473,6 +772,8 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
 				AdjustmentReason:      input.AdjustmentReason,
+				ExpectedVersion:       input.ExpectedVersion,
+				Overwrite:             input.Overwrite,
 			},
 			Decisions:           decisions,
 			AcknowledgedMissing: input.AcknowledgedMissing,
@@ -481,9 +782,9 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 			// #474: the client asks; it never sends a number.
 			AssignConfirmationNumber: input.AssignConfirmationNumber,
 		}, &response); err != nil {
-		return PurchaseOrderDTO{}, err
+		return purchaseOrderWriteFailure(err)
 	}
-	return mapPurchaseOrderDTO(response), nil
+	return purchaseOrderSaved(response), nil
 }
 
 // AssignPurchaseOrderConfirmationNumber issues the optional customer-system

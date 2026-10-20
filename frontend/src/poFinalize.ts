@@ -502,6 +502,10 @@ export interface PurchaseOrderFinalizeInput {
   DocumentConfirmed: boolean;
   /** Whether this save should allocate the optional confirmation number. */
   AssignConfirmationNumber: boolean;
+  /** The version the editor loaded (#473); a stale one is a named conflict. */
+  ExpectedVersion: number;
+  /** Set only after the Overwrite choice; keeps the replaced draft. */
+  Overwrite: boolean;
 }
 
 /**
@@ -563,6 +567,8 @@ export function buildFinalizeInput(
       AcknowledgedExtra: [...evaluation.comparison.extraLineNumbers],
       DocumentConfirmed: finalSaveSendsAbsenceConfirmation(branch, documentConfirmed),
       AssignConfirmationNumber: assignConfirmationNumber,
+      ExpectedVersion: state.version,
+      Overwrite: false,
     },
     error: null,
   };

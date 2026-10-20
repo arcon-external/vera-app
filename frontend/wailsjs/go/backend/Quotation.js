@@ -18,6 +18,10 @@ export function ClearRevisionContext() {
   return window['go']['backend']['Quotation']['ClearRevisionContext']();
 }
 
+export function CorrectPurchaseOrder(arg1) {
+  return window['go']['backend']['Quotation']['CorrectPurchaseOrder'](arg1);
+}
+
 export function CreatePurchaseOrderDraft(arg1) {
   return window['go']['backend']['Quotation']['CreatePurchaseOrderDraft'](arg1);
 }
@@ -80,6 +84,10 @@ export function GetPurchaseOrderDocumentState(arg1) {
 
 export function GetPurchaseOrderDocumentVersionContent(arg1, arg2) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderDocumentVersionContent'](arg1, arg2);
+}
+
+export function GetPurchaseOrderHistory(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
 }
 
 export function GetPurchaseOrderReview(arg1) {

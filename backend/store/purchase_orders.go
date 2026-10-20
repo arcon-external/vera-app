@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -162,6 +161,10 @@ type PurchaseOrder struct {
 	ReceivedDate           time.Time
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
+	// Version is the optimistic-concurrency revision (#473). It starts at 1
+	// and the row's trigger moves it forward on every write, so a save must
+	// state the version it loaded.
+	Version int64
 	// Finalization (#471). SavedAt/SavedBy are set exactly once, by the
 	// transition from draft to saved. PDFAbsentConfirmed records the deliberate
 	// confirmation a save needs while no customer PDF exists.
@@ -245,6 +248,13 @@ type PurchaseOrderUpdate struct {
 	Items                 []PurchaseOrderItem
 	DiscountPercent       int16
 	AdjustmentMinor       int64
+	// ExpectedVersion is the version the editor loaded (#473). It is required:
+	// a missing base is refused rather than treated as "no check".
+	ExpectedVersion int64
+	// Overwrite records that the caller deliberately replaced a version it was
+	// warned about, so the replaced values are kept as history. It never
+	// weakens the version check: the stated version must still match.
+	Overwrite bool
 }
 
 type purchaseOrderQuerier interface {
@@ -374,8 +384,14 @@ func (s *Store) GetPurchaseOrder(ctx context.Context, id int64) (PurchaseOrder, 
 
 // UpdatePurchaseOrderDraft replaces the editable header, the whole-order
 // discount and adjustment, and every line of a draft. The exact calculation is
-// recomputed from the new inputs and stored with them; only drafts may be
-// written, because a saved record's corrections belong to #473.
+// recomputed from the new inputs and stored with them. Only drafts may be
+// written here, because a saved record's corrections belong to
+// CorrectPurchaseOrder (#473).
+//
+// The save states the version the editor loaded. A stale version is refused by
+// name with who saved and when; when the caller chose to overwrite after that
+// warning, the replaced draft -- including the attachment it referenced -- is
+// kept as an immutable snapshot before the write.
 func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrderUpdate) (PurchaseOrder, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
@@ -384,22 +400,13 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if input.ID < 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
+	if input.ExpectedVersion < 1 {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionRequired
+	}
 	input.PONumber = strings.TrimSpace(input.PONumber)
 	input.PaymentTerms = strings.TrimSpace(input.PaymentTerms)
-	if utf8.RuneCountInString(input.PaymentTerms) > maxPaymentTermsLength {
-		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be at most %d characters",
-			ErrPurchaseOrderInvalid, maxPaymentTermsLength)
-	}
-	for index, item := range input.Items {
-		if item.QuantityScaled <= 0 {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d quantity must be positive", ErrPurchaseOrderInvalid, index+1)
-		}
-		if item.UnitPriceMinor < 0 {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d unit price must not be negative", ErrPurchaseOrderInvalid, index+1)
-		}
-		if item.QuotationSubNo != nil && item.QuotationItemNo == nil {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d names a sub-item without its item", ErrPurchaseOrderInvalid, index+1)
-		}
+	if err := validatePurchaseOrderUpdateInput(input); err != nil {
+		return PurchaseOrder{}, err
 	}
 
 	pool, err := s.poolOrError()
@@ -414,71 +421,40 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var state string
-	var quotationID int64
-	var sourceRevision int16
-	var ppnBps int16
-	err = tx.QueryRow(ctx, fmt.Sprintf(`
-		SELECT state, quotation_id, source_revision, ppn_bps
-		FROM %s.purchase_orders
-		WHERE id = $1 AND org_id = $2
-		FOR UPDATE`, schema), input.ID, org.ID).Scan(
-		&state, &quotationID, &sourceRevision, &ppnBps)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PurchaseOrder{}, ErrPurchaseOrderNotFound
-	}
-	if err != nil {
-		return PurchaseOrder{}, fmt.Errorf("lock purchase order %d: %w", input.ID, err)
-	}
-	if state != PurchaseOrderStateDraft {
-		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
-	}
-	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
-		return PurchaseOrder{}, err
-	}
-	lines, calculation, err := calculatePurchaseOrderLines(
-		input.Items, input.DiscountPercent, input.AdjustmentMinor,
-		input.AdjustmentReason, ppnBps)
+	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
+		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
 
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`
-		UPDATE %s.purchase_orders SET
-			billing_address = $3,
-			delivery_address = $4,
-			ship_to_code = $5,
-			contact_email = $6,
-			contact_phone = $7,
-			po_number = $8,
-			po_number_key = NULL,
-			po_date = $9,
-			received_date = COALESCE($10, received_date),
-			requested_delivery_date = $11,
-			payment_terms = $12,
-			incoterms = $13,
-			updated_by = $14,
-			discount_percent = $15,
-			subtotal_minor = $16,
-			discount_minor = $17,
-			ppn_bps = $18,
-			ppn_minor = $19,
-			adjustment_minor = $20,
-			adjustment_reason = $21,
-			grand_total_minor = $22,
-			updated_at = NOW()
-		WHERE id = $1 AND org_id = $2`, schema),
-		input.ID, org.ID, input.BillingAddress, input.DeliveryAddress,
-		input.ShipToCode, input.ContactEmail, input.ContactPhone,
-		nilIfEmptyString(input.PONumber), dateOrNil(input.PODate),
-		dateOrNil(input.ReceivedDate), dateOrNil(input.RequestedDeliveryDate),
-		input.PaymentTerms, input.Incoterms, input.UpdatedBy,
-		input.DiscountPercent, calculation.SubtotalMinor,
-		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
-		calculation.AdjustmentMinor, calculation.AdjustmentReason,
-		calculation.GrandTotalMinor,
-	); err != nil {
-		return PurchaseOrder{}, fmt.Errorf("update purchase order %d: %w", input.ID, err)
+	if input.Overwrite {
+		stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+		if err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+			PurchaseOrderCorrectionKindDraftOverwrite, PurchaseOrderDraftOverwriteReason,
+			input.UpdatedBy); err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+
+	if err := validatePurchaseOrderReferences(ctx, tx, schema,
+		lock.QuotationID, lock.SourceRevision, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
+	lines, calculation, err := calculatePurchaseOrderLines(
+		input.Items, input.DiscountPercent, input.AdjustmentMinor,
+		input.AdjustmentReason, lock.PpnBps)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+
+	// A draft keeps its number free while staff prepare it: the key is cleared,
+	// so two people may still compete for one order. Only the final save writes
+	// it.
+	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, nil); err != nil {
+		return PurchaseOrder{}, err
 	}
 	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
@@ -901,7 +877,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	var confirmationAssignedAt pgtype.Timestamptz
 	var confirmationAssignedBy pgtype.Int8
 	err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT po.id, po.uuid::text, po.org_id::text, po.quotation_id,
+		SELECT po.id, po.version, po.uuid::text, po.org_id::text, po.quotation_id,
 		       po.source_revision, q.quote_number, po.state, po.customer_id,
 		       po.customer_name, po.billing_address, po.delivery_address,
 		       po.ship_to_code, po.contact_email, po.contact_phone,
@@ -923,6 +899,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
 		&order.ID,
+		&order.Version,
 		&order.UUID,
 		&order.OrgID,
 		&order.QuotationID,

@@ -10,7 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -480,27 +479,22 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var state, currency, customerName string
+	var currency, customerName string
 	var quotationID, customerID int64
 	var sourceRevision, ppnBps int16
 	var storedReceived time.Time
-	err = tx.QueryRow(ctx, fmt.Sprintf(`
-		SELECT state, quotation_id, source_revision, customer_id, customer_name,
-		       currency, ppn_bps, received_date
-		FROM %s.purchase_orders
-		WHERE id = $1 AND org_id = $2
-		FOR UPDATE`, schema), input.ID, org.ID).Scan(
-		&state, &quotationID, &sourceRevision, &customerID, &customerName,
-		&currency, &ppnBps, &storedReceived)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return PurchaseOrder{}, ErrPurchaseOrderNotFound
-	}
+	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
+		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
-		return PurchaseOrder{}, fmt.Errorf("lock purchase order %d: %w", input.ID, err)
+		return PurchaseOrder{}, err
 	}
-	if state != PurchaseOrderStateDraft {
-		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
-	}
+	quotationID = lock.QuotationID
+	sourceRevision = lock.SourceRevision
+	customerID = lock.CustomerID
+	customerName = lock.CustomerName
+	currency = lock.Currency
+	ppnBps = lock.PpnBps
+	storedReceived = lock.ReceivedDate
 
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, quotationID, sourceRevision)
 	if err != nil {
@@ -582,6 +576,20 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	recordAbsence := documentState == PurchaseOrderDocumentNone
 	if recordAbsence && !input.DocumentConfirmed {
 		return PurchaseOrder{}, ErrPurchaseOrderPDFConfirmationRequired
+	}
+
+	// A final save that replaced a draft the caller was warned about keeps the
+	// replaced draft, including its attachment reference, before the transition.
+	if input.Overwrite {
+		stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+		if err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+			PurchaseOrderCorrectionKindDraftOverwrite, PurchaseOrderDraftOverwriteReason,
+			input.UpdatedBy); err != nil {
+			return PurchaseOrder{}, err
+		}
 	}
 
 	numberKey := PurchaseOrderNumberKey(input.PONumber)

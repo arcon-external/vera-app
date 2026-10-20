@@ -50,6 +50,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     ContactPhone: "+62 21 555",
     PONumber: "PO-471",
     ReceivedDate: "2026-10-02",
+    Version: 1,
     Incoterms: "CIF",
     Currency: "USD",
     TaxZone: "FTZ",
@@ -358,7 +359,7 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     );
     expect(html).toContain("Saved");
     expect(html).toContain("not a business approval");
-    expect(html).toContain("read-only in this release");
+    expect(html).toContain("keep the values they replace in the correction history");
     expect(html).toContain("PO-471");
     expect(html).toContain("Widget");
     expect(html).toContain("Quotation 1");

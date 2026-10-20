@@ -28,6 +28,7 @@ vi.mock("@backend/backend/Quotation", () => ({
   AssignPurchaseOrderConfirmationNumber: (...args: unknown[]) =>
     assignConfirmationMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
+  GetPurchaseOrderHistory: vi.fn(async () => []),
   GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
   AttachPurchaseOrderDocument: vi.fn(),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
@@ -81,6 +82,7 @@ const ORDER: PurchaseOrderDTO = {
   ContactPhone: "",
   PONumber: "PO-471",
   ReceivedDate: "2026-10-02",
+  Version: 1,
   Incoterms: "CIF",
   Currency: "USD",
   TaxZone: "FTZ",
@@ -189,11 +191,14 @@ beforeEach(() => {
   assignConfirmationMock.mockReset();
   reviewMock.mockResolvedValue(REVIEW);
   finalizeMock.mockResolvedValue({
-    ...ORDER,
-    State: "saved",
-    PaymentTerms: "45 days",
-    GrandTotalMinor: 24500,
-    PdfAbsentConfirmed: true,
+    Order: {
+      ...ORDER,
+      State: "saved",
+      PaymentTerms: "45 days",
+      GrandTotalMinor: 24500,
+      PdfAbsentConfirmed: true,
+    },
+    Conflict: null,
   });
   container = document.createElement("div");
   document.body.appendChild(container);

@@ -34,6 +34,8 @@ import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
+import { PurchaseOrderConflictPrompt } from "./components/PurchaseOrderConflictPrompt";
+import { PurchaseOrderHistoryPanel } from "./components/PurchaseOrderHistoryPanel";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
@@ -69,6 +71,7 @@ import {
   calculatePurchaseOrder,
   initialPurchaseOrderEditorState,
 } from "./purchaseOrder";
+import type { PurchaseOrderHistoryEntry } from "./poCorrection";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import type { PurchaseOrderDocumentStateDTO } from "./purchaseOrderDocument";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
@@ -212,6 +215,7 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   ContactPhone: "+62 778 123 456",
   PONumber: "PO-INF-2026-091",
   ReceivedDate: "2026-10-02",
+  Version: 1,
   Incoterms: "CIF",
   Currency: "USD",
   TaxZone: "NonFTZ",
@@ -274,6 +278,96 @@ const PO_EDITOR_CALCULATION = calculatePurchaseOrder(
   PO_EDITOR_INITIAL,
   PO_EDITOR_USD
 );
+// The correction editor and its history (issue #473). The saved record is at
+// version 4; the reason is required, the confirmation number is text rather
+// than a control, and the two retained snapshots show a correction with its
+// attachment reference and a recovered draft without one.
+const PO_CORRECTING_STATE = initialPurchaseOrderEditorState(
+  { ...PO_EDITOR_ORDER, State: "saved", Version: 4, ConfirmationNumber: "2302260001" },
+  PO_EDITOR_USD
+);
+const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
+  {
+    UUID: "corr-2",
+    Kind: "correction",
+    State: "saved",
+    Reason: "The customer moved to a new warehouse",
+    ActorName: "Budi Santoso",
+    CreatedAt: "2026-10-21T10:15:00+07:00",
+    PONumber: "PO-INF-2026-091",
+    DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    PaymentTerms: "45 days",
+    Incoterms: "CIF",
+    AdjustmentReason: "Round to the printed total",
+    Currency: "USD",
+    PreviousVersion: 4,
+    ResultingVersion: 5,
+    SubtotalMinor: 323363,
+    DiscountMinor: 16168,
+    PpnMinor: 33791,
+    AdjustmentMinor: -250,
+    GrandTotalMinor: 340736,
+    Attachment: {
+      Version: 2,
+      SHA256: "d2f4a6c8e0b1".padEnd(64, "0"),
+      Filename: "Customer PO 4500098123.pdf",
+    },
+    Items: [
+      {
+        LineNumber: 1,
+        Description: "Supply and installation of electrical panels",
+        QuantityScaled: 25000,
+        UoM: "Lot",
+        UnitPriceMinor: 125050,
+        DiscountMinor: 31262,
+        NetMinor: 281363,
+      },
+      {
+        LineNumber: 2,
+        Description: "Mounting and cable termination",
+        QuantityScaled: 10000,
+        UoM: "Unit",
+        UnitPriceMinor: 42000,
+        DiscountMinor: 0,
+        NetMinor: 42000,
+      },
+    ],
+  },
+  {
+    UUID: "corr-1",
+    Kind: "draft_overwrite",
+    State: "draft",
+    Reason: "Draft overwritten after a concurrent save",
+    ActorName: "Sari",
+    CreatedAt: "2026-10-21T09:00:00+07:00",
+    PONumber: "PO-INF-2026-090",
+    DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    PaymentTerms: "30 days",
+    Incoterms: "EXW",
+    AdjustmentReason: "",
+    Currency: "USD",
+    PreviousVersion: 3,
+    ResultingVersion: 4,
+    SubtotalMinor: 300000,
+    DiscountMinor: 0,
+    PpnMinor: 0,
+    AdjustmentMinor: 0,
+    GrandTotalMinor: 300000,
+    Attachment: null,
+    Items: [
+      {
+        LineNumber: 1,
+        Description: "Cooling package",
+        QuantityScaled: 10000,
+        UoM: "Lot",
+        UnitPriceMinor: 300000,
+        DiscountMinor: 0,
+        NetMinor: 300000,
+      },
+    ],
+  },
+];
+
 const PO_EDITOR_UOM_OPTIONS = [
   { value: "Lot", label: "Lot" },
   { value: "Unit", label: "Unit" },
@@ -957,6 +1051,60 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The correction editor (issue #473): the required reason, the saved
+    // record's version, and the protected confirmation number shown as text.
+    // At 360 this says whether the reason card and the protected note wrap.
+    name: "PurchaseOrderCorrectionEditor",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_CORRECTING_STATE}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+        mode="correction"
+        correctionReason="The customer moved to a new warehouse"
+        onCorrectionReasonChange={() => undefined}
+        confirmationNumber="2302260001"
+      />
+    ),
+  },
+  {
+    // The version warning (issue #473): the two choices, the current version
+    // and the writer's name and time. Overwriting is the primary action.
+    name: "PurchaseOrderVersionConflict",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The correction editor sits behind the warning.
+        </p>
+        <PurchaseOrderConflictPrompt
+          conflict={{
+            CurrentState: "saved",
+            CurrentVersion: 5,
+            UpdatedBy: 9,
+            UpdatedByName: "Budi Santoso",
+            UpdatedAt: "2026-10-21T10:15:00+07:00",
+          }}
+          overwriting={false}
+          onCancel={() => undefined}
+          onOverwrite={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The correction history (issue #473): a saved correction with its
+    // attachment reference and a recovered draft, each with reason, actor,
+    // time, versions, replaced lines and totals.
+    name: "PurchaseOrderHistory",
+    element: <PurchaseOrderHistoryPanel entries={PO_HISTORY} currency={PO_EDITOR_USD} />,
+  },
+  {
     // The final-save difference review (issue #471): every differing value
     // with both choices unpressed, the fixed currency statement, one omitted
     // source line, two extra PO lines (one with a suggestion), the corrected
@@ -1018,7 +1166,9 @@ const CASES: SnapshotCase[] = [
         order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
+        onCorrect={() => undefined}
         documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
       />
     ),
   },
@@ -1041,6 +1191,7 @@ const CASES: SnapshotCase[] = [
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
         documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
       />
     ),
   },

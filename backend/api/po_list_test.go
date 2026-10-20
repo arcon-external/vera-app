@@ -78,9 +78,17 @@ func createPOForAPITest(t *testing.T, server *Server, token string, quotationID 
 
 func setPOForAPITestNumber(t *testing.T, server *Server, token string, id int64, number string) {
 	t.Helper()
-	code, body := doJSON(t, server, http.MethodPut,
-		"/v1/purchase-orders/"+strconv.FormatInt(id, 10), token,
-		map[string]any{"poNumber": number})
+	path := "/v1/purchase-orders/" + strconv.FormatInt(id, 10)
+	code, body := doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen PO %d = %d; want 200 (%v)", id, code, body)
+	}
+	var current struct {
+		Version int64 `json:"version"`
+	}
+	encodeDecode(t, body, &current)
+	code, body = doJSON(t, server, http.MethodPut, path, token,
+		map[string]any{"poNumber": number, "expectedVersion": current.Version})
 	if code != http.StatusOK {
 		t.Fatalf("set PO number = %d; want 200 (%v)", code, body)
 	}

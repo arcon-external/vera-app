@@ -94,6 +94,10 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
+		if body["expectedVersion"] != float64(3) || body["overwrite"] != true {
+			t.Errorf("version intent = %v/%v; want 3/true",
+				body["expectedVersion"], body["overwrite"])
+		}
 		if body["billingAddress"] != "Jl. Edited" || body["poNumber"] != "PO-9" ||
 			body["receivedDate"] != "2026-10-02" || body["poDate"] != "2026-10-01" ||
 			body["paymentTerms"] != "50% advance" {
@@ -132,7 +136,7 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 
 	itemNo := 1
 	q := newTestQuotation()
-	draft, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
 		ID:               7,
 		BillingAddress:   "Jl. Edited",
 		PONumber:         "PO-9",
@@ -142,6 +146,8 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 		DiscountPercent:  5,
 		AdjustmentMinor:  -250,
 		AdjustmentReason: "Printed total rounding",
+		ExpectedVersion:  3,
+		Overwrite:        true,
 		Items: []PurchaseOrderItemInput{{
 			QuotationItemNo: &itemNo,
 			Description:     "Widget",
@@ -155,6 +161,10 @@ func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdatePurchaseOrderDraft failed: %v", err)
 	}
+	if result.Conflict != nil || result.Order == nil {
+		t.Fatalf("result = %+v; want a saved order, not a conflict", result)
+	}
+	draft := *result.Order
 	if draft.ID != 7 || draft.ReceivedDate != "2026-10-02" {
 		t.Errorf("draft = %+v; want the updated record", draft)
 	}
@@ -255,16 +265,21 @@ func TestFinalizePurchaseOrderSendsTheAssignmentRequest(t *testing.T) {
 	})
 
 	q := newTestQuotation()
-	saved, err := q.FinalizePurchaseOrder(PurchaseOrderFinalizeInput{
+	result, err := q.FinalizePurchaseOrder(PurchaseOrderFinalizeInput{
 		ID:                       7,
 		PONumber:                 "PO-7",
 		ReceivedDate:             "2026-10-20",
+		ExpectedVersion:          4,
 		DocumentConfirmed:        true,
 		AssignConfirmationNumber: true,
 	})
 	if err != nil {
 		t.Fatalf("FinalizePurchaseOrder failed: %v", err)
 	}
+	if result.Order == nil {
+		t.Fatalf("result = %+v; want the saved order", result)
+	}
+	saved := *result.Order
 	if saved.ConfirmationNumber == nil || *saved.ConfirmationNumber != "2302260003" {
 		t.Errorf("number = %v; want 2302260003", saved.ConfirmationNumber)
 	}
@@ -403,5 +418,152 @@ func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// TestUpdatePurchaseOrderDraftReturnsATypedConflict is the desktop half of the
+// warning contract (#473): the 409's actor, time and version arrive as a
+// result, not as an error string, so the editor can offer Cancel/Overwrite with
+// real values.
+func TestUpdatePurchaseOrderDraftReturnsATypedConflict(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut || request.URL.Path != "/v1/purchase-orders/7" {
+			t.Errorf("request = %s %s; want PUT /v1/purchase-orders/7", request.Method, request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{
+			"error": "purchase order was saved since it was loaded: Sari saved version 5",
+			"code": "po_version_conflict",
+			"currentVersion": 5,
+			"currentState": "draft",
+			"updatedBy": 11,
+			"updatedByName": "Sari",
+			"updatedAt": "2026-10-21T10:15:00+07:00"
+		}`))
+	})
+
+	q := newTestQuotation()
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 4, Overwrite: false,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft returned an error for a conflict: %v", err)
+	}
+	if result.Order != nil {
+		t.Errorf("Order = %+v; want nil on a conflict", result.Order)
+	}
+	if result.Conflict == nil {
+		t.Fatal("Conflict = nil; want the current version and writer")
+	}
+	if result.Conflict.CurrentVersion != 5 || result.Conflict.CurrentState != "draft" ||
+		result.Conflict.UpdatedBy != 11 || result.Conflict.UpdatedByName != "Sari" ||
+		result.Conflict.UpdatedAt != "2026-10-21T10:15:00+07:00" {
+		t.Errorf("Conflict = %+v; want version 5 saved by Sari", result.Conflict)
+	}
+}
+
+// TestCorrectPurchaseOrderPostsTheReasonAndVersion proves the saved record's
+// one write path: a reason travels with the editable values, the version is
+// stated, and no protected identity field is sent.
+func TestCorrectPurchaseOrderPostsTheReasonAndVersion(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/correction" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/correction",
+				request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["reason"] != "Customer moved warehouse" {
+			t.Errorf("reason = %v; want the staff reason", body["reason"])
+		}
+		if body["expectedVersion"] != float64(6) || body["overwrite"] != true {
+			t.Errorf("version intent = %v/%v; want 6/true",
+				body["expectedVersion"], body["overwrite"])
+		}
+		if body["deliveryAddress"] != "Jl. New" {
+			t.Errorf("deliveryAddress = %v; want the corrected value", body["deliveryAddress"])
+		}
+		for _, protected := range []string{"confirmationNumber", "quotationId", "sourceRevision",
+			"customerId", "currency", "uuid", "state", "version"} {
+			if _, sent := body[protected]; sent {
+				t.Errorf("the client sent protected field %q", protected)
+			}
+		}
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, Version: 7, State: "saved", ReceivedDate: "2026-10-20",
+			DeliveryAddress: "Jl. New", Items: []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	result, err := q.CorrectPurchaseOrder(PurchaseOrderCorrectionInput{
+		ID:              7,
+		DeliveryAddress: "Jl. New",
+		Reason:          "Customer moved warehouse",
+		ExpectedVersion: 6,
+		Overwrite:       true,
+	})
+	if err != nil {
+		t.Fatalf("CorrectPurchaseOrder failed: %v", err)
+	}
+	if result.Conflict != nil || result.Order == nil {
+		t.Fatalf("result = %+v; want the corrected record", result)
+	}
+	if result.Order.Version != 7 || result.Order.DeliveryAddress != "Jl. New" {
+		t.Errorf("corrected = %+v; want version 7 with the new address", result.Order)
+	}
+}
+
+// TestGetPurchaseOrderHistoryMapsTheSnapshot covers every value the history
+// panel renders, including the attachment reference.
+func TestGetPurchaseOrderHistoryMapsTheSnapshot(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/purchase-orders/7/history" {
+			t.Errorf("request = %s %s; want GET /v1/purchase-orders/7/history",
+				request.Method, request.URL.Path)
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"history": []apicontract.PurchaseOrderCorrectionRow{{
+				ID: 3, UUID: "corr-3", Kind: "correction", State: "saved",
+				Reason: "Customer moved warehouse", ActorID: 9, ActorName: "Budi",
+				CreatedAt: "2026-10-21T08:00:00Z", PreviousVersion: 4, ResultingVersion: 5,
+				QuotationID: 12, SourceRevision: 1, QuoteNumber: "1502260012",
+				CustomerID: 2, CustomerName: "PT. Buyer", Currency: "USD",
+				DeliveryAddress: "Jl. Old", PONumber: "PO-7", PaymentTerms: "30 days",
+				ReceivedDate: "2026-10-02", SubtotalMinor: 200, GrandTotalMinor: 200,
+				Attachment: &apicontract.PurchaseOrderCorrectionAttachmentRow{
+					Version: 2, SHA256: strings.Repeat("a", 64), Filename: "customer-po.pdf",
+				},
+				Items: []apicontract.PurchaseOrderCorrectionItemRow{{
+					LineNumber: 1, Description: "Widget", QuantityScaled: 20000,
+					UoM: "Pc", UnitPriceMinor: 100, GrossMinor: 200, NetMinor: 200,
+				}},
+			}},
+		})
+	})
+
+	q := newTestQuotation()
+	history, err := q.GetPurchaseOrderHistory(7)
+	if err != nil {
+		t.Fatalf("GetPurchaseOrderHistory failed: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history = %d; want 1", len(history))
+	}
+	entry := history[0]
+	if entry.Kind != "correction" || entry.Reason != "Customer moved warehouse" ||
+		entry.ActorName != "Budi" || entry.PreviousVersion != 4 || entry.ResultingVersion != 5 {
+		t.Errorf("entry = %+v; want the correction's reason and versions", entry)
+	}
+	if entry.Attachment == nil || entry.Attachment.Version != 2 ||
+		entry.Attachment.Filename != "customer-po.pdf" {
+		t.Errorf("attachment = %+v; want version 2 of customer-po.pdf", entry.Attachment)
+	}
+	if len(entry.Items) != 1 || entry.Items[0].LineNumber != 1 || entry.Items[0].NetMinor != 200 {
+		t.Errorf("items = %+v; want the retained line", entry.Items)
 	}
 }

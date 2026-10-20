@@ -12,6 +12,8 @@ export function ClearDraftContext():Promise<void>;
 
 export function ClearRevisionContext():Promise<void>;
 
+export function CorrectPurchaseOrder(arg1:backend.PurchaseOrderCorrectionInput):Promise<backend.PurchaseOrderWriteResult>;
+
 export function CreatePurchaseOrderDraft(arg1:backend.PurchaseOrderCreateInput):Promise<backend.PurchaseOrderDTO>;
 
 export function CustomerID():Promise<number>;
@@ -28,7 +30,7 @@ export function Export(arg1:string):Promise<void>;
 
 export function ExportTo(arg1:string):Promise<void>;
 
-export function FinalizePurchaseOrder(arg1:backend.PurchaseOrderFinalizeInput):Promise<backend.PurchaseOrderDTO>;
+export function FinalizePurchaseOrder(arg1:backend.PurchaseOrderFinalizeInput):Promise<backend.PurchaseOrderWriteResult>;
 
 export function GetActivePurchaseOrderDocumentContent(arg1:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
 
@@ -43,6 +45,8 @@ export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
 export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.PurchaseOrderDocumentStateDTO>;
 
 export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
+
+export function GetPurchaseOrderHistory(arg1:number):Promise<Array<backend.PurchaseOrderCorrectionDTO>>;
 
 export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrderReviewDTO>;
 
@@ -92,7 +96,7 @@ export function SetStore(arg1:store.Store):Promise<void>;
 
 export function SetVerifyURL(arg1:string):Promise<void>;
 
-export function UpdatePurchaseOrderDraft(arg1:backend.PurchaseOrderUpdateInput):Promise<backend.PurchaseOrderDTO>;
+export function UpdatePurchaseOrderDraft(arg1:backend.PurchaseOrderUpdateInput):Promise<backend.PurchaseOrderWriteResult>;
 
 export function ValidatePOSource(arg1:backend.POSourceSelection):Promise<backend.POSourceValidationDTO>;
 
