@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 // The selector turns it into a 404; validation reports it as an invalid pair
 // rather than an error, because "gone" is an answer a confirm screen renders.
 var ErrPOSourceNotFound = errors.New("purchase order source quotation not found")
+
+// ErrPOSourceInvalid reports a selector query that cannot be expressed: today,
+// a page whose offset overflows a signed 64-bit integer (issue #483). It is
+// malformed input, so the handler answers 400 — not ErrPOSourceNotFound's 404.
+var ErrPOSourceInvalid = errors.New("purchase order source query is invalid")
 
 // POSourcePageSize is the selector's fixed page size (issue #467): fifteen
 // Quotations per page, scrollable, so a large archive stays usable. It is part
@@ -103,6 +109,18 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	if page < 1 {
 		page = 1
 	}
+	// PostgreSQL's OFFSET is a signed 64-bit integer and the offset is
+	// (page-1)*POSourcePageSize. Validate before multiplying: the product
+	// wraps for a page this function otherwise accepts, and the negative
+	// offset that reaches Postgres is a database error, not a malformed query
+	// (issue #483). This mirrors the PO archive's guard (#469), adapted to the
+	// selector's own sentinel: the HTTP handler maps ErrPOSourceInvalid to 400,
+	// and the desktop binding sends its page through that same endpoint.
+	if int64(page-1) > math.MaxInt64/POSourcePageSize {
+		return nil, 0, fmt.Errorf(
+			"%w: page %d is past the largest representable offset", ErrPOSourceInvalid, page)
+	}
+	offset := int64(page-1) * POSourcePageSize
 	schema := s.configSchema()
 
 	// The latest revision supplies the row's subject and revision number. The
@@ -164,7 +182,7 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 		%s%s
 		ORDER BY q.id DESC
 		LIMIT $%d OFFSET $%d`, from, where, len(args)+1, len(args)+2),
-		append(args, POSourcePageSize, (page-1)*POSourcePageSize)...)
+		append(args, POSourcePageSize, offset)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list po source quotations: %w", err)
 	}
