@@ -513,6 +513,32 @@ func TestListPurchaseOrdersRejectsInvalidFilters(t *testing.T) {
 	}
 }
 
+func TestListPurchaseOrdersRejectsAPageWhoseOffsetOverflows(t *testing.T) {
+	database := openTestSchema(t, "vera_po_list_page_overflow")
+	ctx := poContext(t, database)
+
+	// 614891469123651722 = floor(MaxInt64/15)+2, so (page-1)*15 wraps
+	// negative and Postgres rejects the OFFSET. That must be invalid input,
+	// never a database error the caller sees as a server failure.
+	if _, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		Page: 614891469123651722,
+	}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("overflowing page error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+
+	// One less is representable: an empty page, not a refusal. This pins that
+	// the guard rejects only the unrepresentable offset and never clamps.
+	boundary, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		Page: 614891469123651721,
+	})
+	if err != nil {
+		t.Fatalf("largest representable page: %v", err)
+	}
+	if boundary.Page != 614891469123651721 || len(boundary.Rows) != 0 {
+		t.Errorf("boundary page = %+v; want an empty page it echoes", boundary)
+	}
+}
+
 func TestEscapeLikeStillCoversTheListSearch(t *testing.T) {
 	// The archive reuses the selector's escape helper. This pins that the
 	// helper is still the one both queries call, so a future change cannot

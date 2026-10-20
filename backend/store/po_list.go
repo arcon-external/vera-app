@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -98,6 +99,18 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 	if page < 1 {
 		page = 1
 	}
+	// PostgreSQL's OFFSET is a signed 64-bit integer and the offset is
+	// (page-1)*PurchaseOrderListPageSize. Validate before multiplying: the
+	// product wraps for a page this function otherwise accepts, and the
+	// negative offset that reaches Postgres is a database error, not a
+	// malformed query (issue #469). This is the one authoritative guard: the
+	// HTTP handler maps ErrPurchaseOrderInvalid to 400, and the desktop
+	// binding sends its page through that same endpoint.
+	if int64(page-1) > math.MaxInt64/PurchaseOrderListPageSize {
+		return PurchaseOrderListPage{}, fmt.Errorf(
+			"%w: page %d is past the largest representable offset", ErrPurchaseOrderInvalid, page)
+	}
+	offset := int64(page-1) * PurchaseOrderListPageSize
 	state := strings.TrimSpace(query.State)
 	switch state {
 	case "", PurchaseOrderStateDraft, PurchaseOrderStateSaved:
@@ -173,7 +186,7 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		%s%s
 		ORDER BY po.received_date DESC, po.id DESC
 		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),
-		append(args, PurchaseOrderListPageSize, (page-1)*PurchaseOrderListPageSize)...)
+		append(args, PurchaseOrderListPageSize, offset)...)
 	if err != nil {
 		return PurchaseOrderListPage{}, fmt.Errorf("list purchase orders: %w", err)
 	}
@@ -208,7 +221,13 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		return PurchaseOrderListPage{}, err
 	}
 
-	totalPages := (total + PurchaseOrderListPageSize - 1) / PurchaseOrderListPageSize
+	// Divide before adding: `total + 14` is the same add-before-divide class
+	// as the old offset. COUNT(*) cannot reach MaxInt-14 in a real table, but
+	// the safe form costs nothing and leaves no wrapping arithmetic here.
+	totalPages := total / PurchaseOrderListPageSize
+	if total%PurchaseOrderListPageSize != 0 {
+		totalPages++
+	}
 	if totalPages < 1 {
 		// One empty page, not "page 1 of 0": the archive still shows its
 		// empty state with working pagination controls.

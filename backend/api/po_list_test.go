@@ -309,6 +309,40 @@ func TestPurchaseOrderListRejectsMalformedFilters(t *testing.T) {
 	}
 }
 
+// TestPurchaseOrderListRejectsAnUnrepresentablePage is the regression for a
+// page whose (page-1)*15 offset overflows a signed 64-bit integer. The handler
+// used to accept it and Postgres answered the negative OFFSET with an error,
+// turning malformed input into a 500. 614891469123651722 is
+// floor(MaxInt64/15)+2: one past the largest page with a representable offset.
+func TestPurchaseOrderListRejectsAnUnrepresentablePage(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_list_page_overflow")
+
+	const page = "614891469123651722"
+	code, body := doJSON(t, server, http.MethodGet, "/v1/purchase-orders?page="+page, token, nil)
+	if code != http.StatusBadRequest {
+		t.Fatalf("GET page=%s = %d; want 400, never 500 (%v)", page, code, body)
+	}
+}
+
+// TestPurchaseOrderListAcceptsTheLargestRepresentablePage pins the other side
+// of that boundary. The guard must reject only the pages whose offset cannot be
+// represented; a page past the end stays an empty page, not a 404 or a clamp.
+func TestPurchaseOrderListAcceptsTheLargestRepresentablePage(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_list_page_boundary")
+
+	// floor(MaxInt64/15)+1. The exact echo is pinned at the store seam, where
+	// the value stays an int64; this body-level helper decodes numbers as
+	// float64 and would round a 19-digit page.
+	const page = 614891469123651721
+	result := listPurchaseOrders(t, server, token, "?page="+strconv.FormatInt(page, 10))
+	if len(result.PurchaseOrders) != 0 {
+		t.Errorf("rows = %d; want an empty page past the end", len(result.PurchaseOrders))
+	}
+	if result.PageSize != 15 || result.TotalPages < 1 {
+		t.Errorf("page meta = %+v; want page size 15 and at least one total page", result)
+	}
+}
+
 func TestPurchaseOrderListEmptyShape(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_list_empty")
 	code, body := doJSON(t, server, http.MethodGet, "/v1/purchase-orders", token, nil)
