@@ -34,7 +34,7 @@ func seedPOListQuotation(t *testing.T, database *Store, code int16, customerName
 		ValidityDays:     30,
 		PaymentTermDays:  30,
 		LeadTimeDays:     10,
-		TaxZone:          "FTZ",
+		TaxZone:          "NonFTZ",
 		TaxCategory:      "SupplyInstall",
 		Currency:         "IDR",
 		HTMLSnapshot:     "<html>snapshot</html>",
