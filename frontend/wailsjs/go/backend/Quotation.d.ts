@@ -38,6 +38,10 @@ export function ListCustomers():Promise<Array<backend.ManagedClient>>;
 
 export function ListDrafts():Promise<Array<backend.DraftSummaryDTO>>;
 
+export function ListPOSourceQuotations(arg1:backend.POSourceQuery):Promise<backend.POSourcePageDTO>;
+
+export function ListPOSourceRevisions(arg1:number):Promise<backend.POSourceRevisionsDTO>;
+
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
 
 export function PickDirectory():Promise<string>;
@@ -65,5 +69,7 @@ export function SetRevisionContext(arg1:string,arg2:number):Promise<void>;
 export function SetStore(arg1:store.Store):Promise<void>;
 
 export function SetVerifyURL(arg1:string):Promise<void>;
+
+export function ValidatePOSource(arg1:backend.POSourceSelection):Promise<backend.POSourceValidationDTO>;
 
 export function VerifyURL():Promise<string>;

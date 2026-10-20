@@ -984,6 +984,169 @@ export namespace backend {
 	        this.ID = source["ID"];
 	    }
 	}
+	export class POSourceQuotationDTO {
+	    QuoteNumber: string;
+	    Subject: string;
+	    CustomerName: string;
+	    ID: number;
+	    LatestRevision: number;
+	    IssuedRevisionCount: number;
+	    HasActivePO: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceQuotationDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.Subject = source["Subject"];
+	        this.CustomerName = source["CustomerName"];
+	        this.ID = source["ID"];
+	        this.LatestRevision = source["LatestRevision"];
+	        this.IssuedRevisionCount = source["IssuedRevisionCount"];
+	        this.HasActivePO = source["HasActivePO"];
+	    }
+	}
+	export class POSourcePageDTO {
+	    Quotations: POSourceQuotationDTO[];
+	    Page: number;
+	    PageSize: number;
+	    Total: number;
+	    TotalPages: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourcePageDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Quotations = this.convertValues(source["Quotations"], POSourceQuotationDTO);
+	        this.Page = source["Page"];
+	        this.PageSize = source["PageSize"];
+	        this.Total = source["Total"];
+	        this.TotalPages = source["TotalPages"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class POSourceQuery {
+	    Search: string;
+	    Page: number;
+	    HideUsed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Search = source["Search"];
+	        this.Page = source["Page"];
+	        this.HideUsed = source["HideUsed"];
+	    }
+	}
+	
+	export class POSourceRevisionDTO {
+	    IssuedAt: string;
+	    Revision: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceRevisionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.IssuedAt = source["IssuedAt"];
+	        this.Revision = source["Revision"];
+	    }
+	}
+	export class POSourceRevisionsDTO {
+	    QuoteNumber: string;
+	    Subject: string;
+	    CustomerName: string;
+	    Revisions: POSourceRevisionDTO[];
+	    QuotationID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceRevisionsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.Subject = source["Subject"];
+	        this.CustomerName = source["CustomerName"];
+	        this.Revisions = this.convertValues(source["Revisions"], POSourceRevisionDTO);
+	        this.QuotationID = source["QuotationID"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class POSourceSelection {
+	    QuotationID: number;
+	    RevisionNumber: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceSelection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationID = source["QuotationID"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	    }
+	}
+	export class POSourceValidationDTO {
+	    Reason: string;
+	    QuotationID: number;
+	    RevisionNumber: number;
+	    Valid: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new POSourceValidationDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Reason = source["Reason"];
+	        this.QuotationID = source["QuotationID"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	        this.Valid = source["Valid"];
+	    }
+	}
 	export class QuotationSubSubItemInput {
 	    Description: string;
 	

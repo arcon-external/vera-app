@@ -13,6 +13,9 @@ import {
   ClearDraftContext,
   SetRevisionContext,
   ClearRevisionContext,
+  ListPOSourceQuotations,
+  ListPOSourceRevisions,
+  ValidatePOSource,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { AppShell } from "./components/AppShell";
@@ -56,6 +59,14 @@ import {
   DocumentHomePage,
   PurchaseOrderPlaceholderPage,
 } from "./components/DocumentHomePage";
+import { POQuotationSelector } from "./components/POQuotationSelector";
+import type {
+  POSourcePage,
+  POSourceQuery,
+  POSourceRevision,
+  POSourceSelection,
+  POSourceValidation,
+} from "./poSelector";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
@@ -443,6 +454,10 @@ function App() {
     id: number;
     revision: number;
   } | null>(null);
+  // The PO source selector (#467) is shared by both entry paths. poSource is
+  // the exact pair it returned; #468 opens PO entry with it.
+  const [poSelectorOpen, setPOSelectorOpen] = useState(false);
+  const [poSource, setPOSource] = useState<POSourceSelection | null>(null);
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
     revision: number;
@@ -1610,6 +1625,57 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew]);
 
+  // PO source selector loaders (#467). The modal owns the three steps; these
+  // callbacks are its only transport, so the component stays free of hidden
+  // API assumptions and both entry paths reuse the same server data.
+  const loadPOSourcePage = useCallback(
+    async (query: POSourceQuery): Promise<POSourcePage> => {
+      const page = await ListPOSourceQuotations({
+        Search: query.search,
+        Page: query.page,
+        HideUsed: query.hideUsed,
+      });
+      return {
+        quotations: page.Quotations.map((row) => ({
+          id: row.ID,
+          quoteNumber: row.QuoteNumber,
+          subject: row.Subject,
+          customerName: row.CustomerName,
+          latestRevision: row.LatestRevision,
+          issuedRevisionCount: row.IssuedRevisionCount,
+          hasActivePO: row.HasActivePO,
+        })),
+        page: page.Page,
+        pageSize: page.PageSize,
+        total: page.Total,
+        totalPages: page.TotalPages,
+      };
+    },
+    []
+  );
+
+  const loadPOSourceRevisions = useCallback(
+    async (quotationId: number): Promise<POSourceRevision[]> => {
+      const response = await ListPOSourceRevisions(quotationId);
+      return response.Revisions.map((revision) => ({
+        revision: revision.Revision,
+        issuedAt: revision.IssuedAt,
+      }));
+    },
+    []
+  );
+
+  const validatePOSourceSelection = useCallback(
+    async (selection: POSourceSelection): Promise<POSourceValidation> => {
+      const result = await ValidatePOSource({
+        QuotationID: selection.quotationId,
+        RevisionNumber: selection.revisionNumber,
+      });
+      return { valid: result.Valid, reason: result.Reason };
+    },
+    []
+  );
+
   return (
     <>
       {showHelp && user !== null ? (
@@ -1618,6 +1684,22 @@ function App() {
       {user !== null ? (
         <WhatsNewModal notes={whatsNew} onDismiss={dismissWhatsNew} />
       ) : null}
+      <POQuotationSelector
+        open={poSelectorOpen}
+        onClose={() => setPOSelectorOpen(false)}
+        onConfirm={(selection) => {
+          setPOSource(selection);
+          setPOSelectorOpen(false);
+          setPage("po");
+          pushToast(
+            "success",
+            `Source selected: quotation ${selection.quotationId}, revision ${selection.revisionNumber}.`
+          );
+        }}
+        loadPage={loadPOSourcePage}
+        loadRevisions={loadPOSourceRevisions}
+        validate={validatePOSourceSelection}
+      />
       {checkingSession ? (
         <div className="flex min-h-full items-center justify-center px-5">
           <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />
@@ -1756,7 +1838,12 @@ function App() {
         />
       ) : null}
 
-      {page === "po" ? <PurchaseOrderPlaceholderPage /> : null}
+      {page === "po" ? (
+        <PurchaseOrderPlaceholderPage
+          onAddFromQuotation={() => setPOSelectorOpen(true)}
+          selectedSource={poSource}
+        />
+      ) : null}
 
       {page === "create" ? (
         <div className="flex flex-col gap-6">

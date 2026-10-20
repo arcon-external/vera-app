@@ -35,6 +35,12 @@ import {
   DocumentHomePage,
   PurchaseOrderPlaceholderPage,
 } from "./components/DocumentHomePage";
+import { POQuotationSelectorView } from "./components/POQuotationSelector";
+import {
+  initialPOSourceSelectorState,
+  poSourceSelectorReducer,
+} from "./poSelector";
+import type { POSourceQuotation } from "./poSelector";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
@@ -82,6 +88,70 @@ interface SnapshotCase {
   name: string;
   element: ReactElement;
 }
+
+// The PO source selector fixture (issue #467): two available Quotations and
+// one already used, so the screenshot proves the used row is greyed and marked
+// without needing an interaction. The three states are the reducer's real
+// output, not hand-written markup.
+const PO_SELECTOR_ROWS: POSourceQuotation[] = [
+  {
+    id: 12,
+    quoteNumber: "1502260012",
+    subject: "Supply and installation of electrical systems",
+    customerName: "PT. Infineon Technologies Batam",
+    latestRevision: 2,
+    issuedRevisionCount: 3,
+    hasActivePO: false,
+  },
+  {
+    id: 11,
+    quoteNumber: "1502260011",
+    subject: "Mechanical works and pump replacement",
+    customerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    latestRevision: 0,
+    issuedRevisionCount: 1,
+    hasActivePO: false,
+  },
+  {
+    id: 10,
+    quoteNumber: "1502260010",
+    subject: "Cooling package",
+    customerName: "PT. Datalec Global Solution",
+    latestRevision: 1,
+    issuedRevisionCount: 2,
+    hasActivePO: true,
+  },
+];
+const PO_SELECTOR_STEP_ONE = {
+  ...initialPOSourceSelectorState,
+  rows: PO_SELECTOR_ROWS,
+  page: 1,
+  pageSize: 15,
+  total: 17,
+  totalPages: 2,
+};
+const PO_SELECTOR_STEP_TWO = poSourceSelectorReducer(
+  poSourceSelectorReducer(PO_SELECTOR_STEP_ONE, {
+    type: "quotationSelected",
+    quotation: PO_SELECTOR_ROWS[0],
+  }),
+  {
+    type: "revisionsLoaded",
+    quotationId: 12,
+    revisions: [
+      { revision: 2, issuedAt: "2026-10-20T10:00:00+07:00" },
+      { revision: 1, issuedAt: "2026-10-18T10:00:00+07:00" },
+      { revision: 0, issuedAt: "2026-10-15T10:00:00+07:00" },
+    ],
+  }
+);
+const PO_SELECTOR_STEP_THREE = poSourceSelectorReducer(
+  poSourceSelectorReducer(PO_SELECTOR_STEP_TWO, {
+    type: "revisionSelected",
+    revision: 2,
+  }),
+  { type: "continue" }
+);
 
 // The line-item editor fixture (issue #430): the proof surface for the UoM
 // select's background chevron. One plain line (its own UoM select) plus one
@@ -421,7 +491,50 @@ const CASES: SnapshotCase[] = [
     // totals -- the screenshot should show a page that states entry is not
     // yet available and pretends nothing else exists.
     name: "PurchaseOrderPlaceholder",
-    element: <PurchaseOrderPlaceholderPage />,
+    element: <PurchaseOrderPlaceholderPage onAddFromQuotation={() => undefined} />,
+  },
+  {
+    // The PO source selector, step 1 (issue #467): search, the checked
+    // filter, pagination, and a used Quotation greyed with its reason. The
+    // list scrolls inside the dialog rather than growing the page.
+    //
+    // What this case cannot show: typing, paging, selection, focus order and
+    // the browser's real scrollbar stay hand-driven.
+    name: "POSelectorStepOne",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_ONE}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // Step 2 (issue #467): three issued revisions, newest first, with the
+    // Continue action disabled until one is chosen.
+    name: "POSelectorStepTwo",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_TWO}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // Step 3 (issue #467): the exact pair, with Confirm enabled because the
+    // reducer produced a complete selection.
+    name: "POSelectorStepThree",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_THREE}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
   },
   {
     // The line-item editor (issue #430): the proof surface for the UoM

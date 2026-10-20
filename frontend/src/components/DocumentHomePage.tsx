@@ -1,3 +1,4 @@
+import type { POSourceSelection } from "../poSelector";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
 // Issue #466: the post-login document home. Quotation and Purchase Order open
@@ -106,23 +107,49 @@ export function DocumentHomePage({
   );
 }
 
-// The honest Purchase Order surface for #466: later tickets build the entry
-// workspace, so this page states plainly that entry is not yet available. No
-// list, no rows, no totals -- nothing that pretends those slices exist.
-export function PurchaseOrderPlaceholderPage() {
+// The honest Purchase Order surface: entry fields arrive with #468, but the
+// source selector (#467) is real now. The action below is the "Add Purchase
+// Order from a Quotation" path; a confirmed selection is displayed so the
+// hand-off is visible rather than implied.
+export interface PurchaseOrderPlaceholderPageProps {
+  onAddFromQuotation: () => void;
+  selectedSource?: POSourceSelection | null;
+}
+
+export function PurchaseOrderPlaceholderPage({
+  onAddFromQuotation,
+  selectedSource = null,
+}: PurchaseOrderPlaceholderPageProps) {
   return (
     <div className="flex flex-col gap-6">
       <SectionHeading title="Purchase Order" />
       <Card className="overflow-hidden">
-        <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <div className="flex flex-col items-center gap-4 px-6 py-16 text-center">
           <p className="text-lead font-medium text-ink-900">
             Purchase order entry is not yet available
           </p>
           <p className="max-w-md text-body text-ink-500">
-            This page will start purchase order entry from an issued
-            quotation revision. Nothing here yet -- use the Home tab to go
-            back.
+            Start from an issued quotation revision. The selection is recorded
+            now; the entry fields arrive in a later step.
           </p>
+          <Button
+            variant="primary"
+            aria-label="Add Purchase Order from a Quotation"
+            onClick={onAddFromQuotation}
+          >
+            Add Purchase Order from a Quotation
+          </Button>
+          {selectedSource !== null ? (
+            <div className="mt-2 w-full max-w-md rounded-lg border border-rule bg-paper-muted px-4 py-3 text-left">
+              <p className="text-small font-medium text-ink-900">
+                Source selected
+              </p>
+              <p className="tnum text-small text-ink-700">
+                Quotation {selectedSource.quotationId} · revision{" "}
+                {selectedSource.revisionNumber}
+              </p>
+            </div>
+          ) : null}
         </div>
       </Card>
     </div>

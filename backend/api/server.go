@@ -112,6 +112,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/quotations/next-sequence", server.nextSequence, server.requireSession)
 	server.echo.GET("/v1/quotations/:id", server.detailEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
+	// PO source selector (issue #467): issued Quotations, their issued
+	// revisions, and the confirm-time revalidation both PO entry paths share.
+	server.echo.GET("/v1/po-sources", server.listPOSources, server.requireSession)
+	server.echo.GET("/v1/po-sources/:id/revisions", server.listPOSourceRevisions, server.requireSession)
+	server.echo.POST("/v1/po-sources/validate", server.validatePOSource, server.requireSession)
 	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
