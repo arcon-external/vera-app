@@ -9,8 +9,8 @@ import {
   type PurchaseOrderSourceLineDTO,
 } from "../poFinalize";
 import {
-  calculatePurchaseOrder,
   initialPurchaseOrderEditorState,
+  MAX_EXACT_MINOR,
   parseDiscountPercent,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
@@ -180,9 +180,9 @@ export function PurchaseOrderDifferenceReviewView({
           </div>
         )}
         <p className="mt-3 text-caption text-ink-500">
-          No choice is selected for you. Choosing Use Quotation writes the
-          quotation's value into this purchase order; choosing Use PO entry keeps
-          what you entered.
+          No choice is selected for you. Use Quotation takes the quotation's
+          value when you continue; Use PO entry keeps what you entered. Back to
+          entry leaves the purchase order as entered.
         </p>
       </Card>
 
@@ -299,7 +299,12 @@ export function PurchaseOrderDifferenceReviewView({
         discountPercent={parseDiscountPercent(evaluation.applied.header.discountPercent)}
         ppnBps={state.ppnBps}
         adjustmentReason={evaluation.applied.header.adjustmentReason.trim()}
-        printedTotals={state.printedTotals}
+        printedTotals={{
+          subtotalMinor: source.PrintedSubtotalMinor,
+          discountMinor: source.PrintedDiscountMinor,
+          ppnMinor: source.PrintedPpnMinor,
+          grandTotalMinor: source.PrintedGrandTotalMinor,
+        }}
         sourceRevision={source.RevisionNumber}
       />
 
@@ -505,7 +510,27 @@ export function PurchaseOrderSavedView({
   onBack,
 }: PurchaseOrderSavedViewProps) {
   const state = initialPurchaseOrderEditorState(order, currency);
-  const totals = calculatePurchaseOrder(state, currency).totals;
+  // A saved record displays its stored figures. Recalculating would let a
+  // later calculator change rewrite what an already-saved record says, which
+  // is exactly what the stored calculation columns exist to prevent.
+  let gross = 0n;
+  let rowDiscount = 0n;
+  for (const item of order.Items) {
+    gross += BigInt(item.GrossMinor);
+    rowDiscount += BigInt(item.DiscountMinor);
+  }
+  const safe = (value: bigint): number | null =>
+    value >= 0n && value <= BigInt(MAX_EXACT_MINOR) ? Number(value) : null;
+  const totals = {
+    grossMinor: safe(gross),
+    rowDiscountMinor: safe(rowDiscount),
+    subtotalMinor: order.SubtotalMinor,
+    discountMinor: order.DiscountMinor,
+    afterDiscountMinor: order.SubtotalMinor - order.DiscountMinor,
+    ppnMinor: order.PpnMinor,
+    adjustmentMinor: order.AdjustmentMinor,
+    grandTotalMinor: order.GrandTotalMinor,
+  };
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
