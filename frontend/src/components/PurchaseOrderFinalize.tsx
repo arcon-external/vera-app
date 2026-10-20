@@ -15,6 +15,7 @@ import {
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
+  type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
@@ -34,6 +35,12 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 // The copy distinguishes finalized data readiness from business approval: a
 // customer PO is already accepted commercially before it is entered, so saving
 // here never claims an approval.
+//
+// The saved totals are the purchase order's own. The quotation revision's
+// printed figures are shown as document evidence and never as a target: an
+// accepted price difference or an extra line is explained by the review's
+// explicit choices and acknowledgements, and the optional signed adjustment
+// exists to reconcile what the customer's PO document actually printed.
 
 export interface PurchaseOrderDifferenceReviewViewProps {
   state: PurchaseOrderEditorState;
@@ -329,7 +336,7 @@ export function PurchaseOrderDifferenceReviewView({
       />
 
       <Card className="p-4">
-        <SectionHeading title="Printed total check" hint="Explained, not overwritten" />
+        <SectionHeading title="Totals check" hint="Reference only" />
         <div className="mt-2 grid gap-1 text-small text-ink-700">
           <p className="flex flex-wrap items-baseline justify-between gap-2">
             <span>Quotation printed total</span>
@@ -338,26 +345,30 @@ export function PurchaseOrderDifferenceReviewView({
             </span>
           </p>
           <p className="flex flex-wrap items-baseline justify-between gap-2">
-            <span>Remaining difference</span>
+            <span>This purchase order</span>
             <span className="tnum whitespace-nowrap font-medium text-ink-900">
-              {evaluation.differenceMinor === null
+              {evaluation.totals === null
                 ? "—"
-                : formatMoney(currency, evaluation.differenceMinor)}
+                : formatMoney(currency, evaluation.totals.grandTotalMinor)}
             </span>
           </p>
           <p className="flex flex-wrap items-baseline justify-between gap-2">
-            <span>Adjustment that covers it</span>
+            <span>Difference to the printed document</span>
             <span className="tnum whitespace-nowrap font-medium text-ink-900">
-              {evaluation.requiredAdjustmentMinor === null
+              {evaluation.printedDifferenceMinor === null
                 ? "—"
-                : formatMoney(currency, evaluation.requiredAdjustmentMinor)}
+                : formatMoney(currency, evaluation.printedDifferenceMinor)}
             </span>
           </p>
         </div>
         <p className="mt-2 text-caption text-ink-500">
-          {evaluation.covered
-            ? "The signed adjustment explains the printed total, so the saved order reproduces the customer document."
-            : "Correct the wrong fields, or return to entry and record the signed adjustment above with a reason. An adjustment never replaces correcting a wrongly entered value."}
+          The saved total is calculated from this purchase order's own lines,
+          row and whole-order discounts, PPN and optional adjustment. The
+          quotation's printed total stays here as document evidence, not as a
+          target: an accepted price difference or an extra line is explained by
+          the choices above and the acknowledgements, and never needs an
+          adjustment to reverse it. Record a signed adjustment with a reason
+          only to reconcile what the customer's PO document actually printed.
         </p>
         {documentState === "none" ? (
           <p className="mt-1 text-caption text-ink-500">
@@ -398,6 +409,12 @@ export function PurchaseOrderDifferenceReviewView({
 export interface PurchaseOrderFinalConfirmationViewProps {
   review: PurchaseOrderReviewDTO;
   evaluation: ReturnType<typeof evaluateReview>;
+  /**
+   * The applied editor payload: the exact values Final save submits. It is
+   * built from the applied review choices, never from the stored record, so
+   * the confirmation cannot show a stale identifier the save will not store.
+   */
+  payload: PurchaseOrderUpdateInput;
   currency: CurrencyInfo;
   documentConfirmed: boolean;
   onToggleDocumentConfirmed: () => void;
@@ -410,6 +427,7 @@ export interface PurchaseOrderFinalConfirmationViewProps {
 export function PurchaseOrderFinalConfirmationView({
   review,
   evaluation,
+  payload,
   currency,
   documentConfirmed,
   onToggleDocumentConfirmed,
@@ -427,7 +445,8 @@ export function PurchaseOrderFinalConfirmationView({
         <SectionHeading title="Final save" hint="One-way: a saved record is read-only" />
         <p className="mt-1 max-w-3xl text-body text-ink-500">
           Saving marks this purchase order as finalized entry data for later
-          documents. It is not a business approval.
+          documents. It is not a business approval. The details below are the
+          values this save will store.
         </p>
       </div>
 
@@ -435,7 +454,7 @@ export function PurchaseOrderFinalConfirmationView({
         <dl className="grid gap-2 text-small sm:grid-cols-2">
           <div>
             <dt className="text-caption text-ink-500">Customer PO number</dt>
-            <dd className="tnum font-medium text-ink-900">{order.PONumber.trim()}</dd>
+            <dd className="tnum font-medium text-ink-900">{payload.PONumber}</dd>
           </div>
           <div>
             <dt className="text-caption text-ink-500">Customer</dt>
@@ -448,11 +467,46 @@ export function PurchaseOrderFinalConfirmationView({
             </dd>
           </div>
           <div>
+            <dt className="text-caption text-ink-500">Customer PO date</dt>
+            <dd className="tnum font-medium text-ink-900">{payload.PODate || "—"}</dd>
+          </div>
+          <div>
             <dt className="text-caption text-ink-500">Received date</dt>
+            <dd className="tnum font-medium text-ink-900">{payload.ReceivedDate}</dd>
+          </div>
+          <div>
+            <dt className="text-caption text-ink-500">Requested delivery</dt>
             <dd className="tnum font-medium text-ink-900">
-              {evaluation.applied.header.receivedDate}
+              {payload.RequestedDeliveryDate || "—"}
             </dd>
           </div>
+          <div>
+            <dt className="text-caption text-ink-500">Payment terms</dt>
+            <dd className="font-medium text-ink-900">{payload.PaymentTerms || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-caption text-ink-500">Incoterms</dt>
+            <dd className="font-medium text-ink-900">{payload.Incoterms || "—"}</dd>
+          </div>
+          <div>
+            <dt className="text-caption text-ink-500">Lines</dt>
+            <dd className="tnum font-medium text-ink-900">{payload.Items.length}</dd>
+          </div>
+          <div>
+            <dt className="text-caption text-ink-500">Whole-PO discount</dt>
+            <dd className="tnum font-medium text-ink-900">
+              {payload.DiscountPercent > 0 ? `${payload.DiscountPercent}%` : "None"}
+            </dd>
+          </div>
+          {payload.AdjustmentMinor !== 0 ? (
+            <div>
+              <dt className="text-caption text-ink-500">Adjustment</dt>
+              <dd className="tnum font-medium text-ink-900">
+                {formatMoney(currency, payload.AdjustmentMinor)} ·{" "}
+                {payload.AdjustmentReason}
+              </dd>
+            </div>
+          ) : null}
           <div>
             <dt className="text-caption text-ink-500">Total</dt>
             <dd className="tnum font-medium text-ink-900">

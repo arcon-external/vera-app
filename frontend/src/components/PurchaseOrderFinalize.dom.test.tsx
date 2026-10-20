@@ -221,6 +221,24 @@ function checkbox(label: string): HTMLInputElement {
   return found;
 }
 
+/**
+ * Types into a controlled input the way a browser does: the value setter from
+ * the prototype bypasses React's instance shadow, then the input event is what
+ * React listens for.
+ */
+function type(label: string, value: string) {
+  const found = document.querySelector<HTMLInputElement>(
+    `input[aria-label="${label}"]`
+  );
+  if (!found) throw new Error(`input ${label} not found`);
+  const setter = Object.getOwnPropertyDescriptor(
+    HTMLInputElement.prototype,
+    "value"
+  )?.set;
+  setter?.call(found, value);
+  found.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function render(onSaved = vi.fn()) {
   act(() =>
     root.render(
@@ -268,8 +286,8 @@ describe("final save from the editor (issue #471)", () => {
       button("Use Quotation for Payment terms").click();
     });
     expect(pressed("Use Quotation for Payment terms")).toBe("true");
-    // The applied quotation values reproduce the printed total, so the
-    // remaining difference is gone and Continue is enabled.
+    // Every difference now has an explicit choice, so the review can continue.
+    // The total is the purchase order's own arithmetic, not a target.
     expect(disabled("Continue final save")).toBe(false);
     expect(document.body.textContent).not.toContain("-$20.00");
     expect(document.body.textContent).toContain("$0.00");
@@ -332,5 +350,41 @@ describe("final save from the editor (issue #471)", () => {
     expect((payload.Items as Array<{ UnitPriceMinor: number }>)[0].UnitPriceMinor).toBe(10000);
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect((onSaved.mock.calls[0][0] as PurchaseOrderDTO).State).toBe("saved");
+  });
+
+  it("confirms the edited PO number it will actually submit", async () => {
+    const onSaved = render();
+    await act(async () => {
+      type("Customer PO number", "UNSAVED-NEW");
+    });
+    await act(async () => {
+      button("Final Save").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Line 1 unit price").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Payment terms").click();
+    });
+    await act(async () => {
+      button("Continue final save").click();
+    });
+
+    // The stored record still says PO-471; the editor says UNSAVED-NEW. The
+    // confirmation must show what the final save submits, never the stored
+    // identifier.
+    expect(document.body.textContent).toContain("UNSAVED-NEW");
+    expect(document.body.textContent).not.toContain("PO-471");
+
+    await act(async () => {
+      checkbox("Confirm saving without the customer PDF").click();
+    });
+    await act(async () => {
+      button("Final save").click();
+    });
+    expect(finalizeMock).toHaveBeenCalledTimes(1);
+    const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.PONumber).toBe("UNSAVED-NEW");
+    expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });

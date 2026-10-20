@@ -436,48 +436,72 @@ func TestFinalizePurchaseOrderRefusesDuplicateMatches(t *testing.T) {
 	}
 }
 
-func TestFinalizePurchaseOrderRequiresThePrintedTotalToBeExplained(t *testing.T) {
-	database := openTestSchema(t, "vera_po_finalize_money")
-	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Money")
+// TestFinalizePurchaseOrderKeepsThePurchaseOrdersOwnTotal is the judge's
+// regression for the monetary rule: the saved grand total belongs to the
+// purchase order, not to the quotation. The quotation printed 200; the
+// customer's order adds a 50 freight line the quotation never carried.
+// Acknowledging that extra line is the whole rule -- no adjustment is needed to
+// reverse the difference, and the saved total is 250.
+func TestFinalizePurchaseOrderKeepsThePurchaseOrdersOwnTotal(t *testing.T) {
+	database := openTestSchema(t, "vera_po_finalize_own_total")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Own total")
 	user := poTestUser(t, database)
 	ctx := poContext(t, database)
 	draft := createFinalizeDraft(t, database, ctx, user, quotation)
 
-	// 2 x 110 = 220 while the document printed 200: the gap must be explained.
-	changed := finalizeInput(draft, user, "PO-MONEY")
-	changed.Items[0].UnitPriceMinor = 110
-	changed.Decisions = []PurchaseOrderDecision{
-		{Key: "line:1:unitPrice", Choice: PurchaseOrderChoicePO},
-	}
-	if _, err := database.FinalizePurchaseOrder(ctx, changed); !errors.Is(err, ErrPurchaseOrderTotalMismatch) {
-		t.Fatalf("unexplained gap error = %v; want ErrPurchaseOrderTotalMismatch", err)
-	}
-
-	// A partial adjustment still leaves a gap.
-	partial := changed
-	partial.AdjustmentMinor = -19
-	partial.AdjustmentReason = "Round to the printed total"
-	if _, err := database.FinalizePurchaseOrder(ctx, partial); !errors.Is(err, ErrPurchaseOrderTotalMismatch) {
-		t.Fatalf("partial adjustment error = %v; want ErrPurchaseOrderTotalMismatch", err)
-	}
-
-	// The exact signed adjustment explains it, and the saved total equals the
-	// printed document.
-	exact := changed
-	exact.AdjustmentMinor = -20
-	exact.AdjustmentReason = "Price difference agreed with the customer"
-	exact.Decisions = []PurchaseOrderDecision{
-		{Key: "line:1:unitPrice", Choice: PurchaseOrderChoicePO},
-	}
-	saved, err := database.FinalizePurchaseOrder(ctx, exact)
+	input := finalizeInput(draft, user, "PO-OWN-TOTAL")
+	input.Items = append(input.Items, PurchaseOrderItem{
+		LineNumber:     3,
+		Description:    "Freight",
+		QuantityScaled: 10000,
+		UoM:            "Lot",
+		UnitPriceMinor: 50,
+	})
+	input.AcknowledgedExtra = []int{3}
+	saved, err := database.FinalizePurchaseOrder(ctx, input)
 	if err != nil {
-		t.Fatalf("exact adjustment finalize: %v", err)
+		t.Fatalf("finalize with an acknowledged extra line: %v", err)
 	}
-	if saved.GrandTotalMinor != 200 || saved.AdjustmentMinor != -20 {
-		t.Errorf("saved total = %d adjustment %d; want 200 / -20",
+	if saved.GrandTotalMinor != 250 {
+		t.Errorf("saved grand = %d; want the purchase order's own 250", saved.GrandTotalMinor)
+	}
+	if saved.AdjustmentMinor != 0 || saved.AdjustmentReason != "" {
+		t.Errorf("adjustment = %d/%q; want none",
+			saved.AdjustmentMinor, saved.AdjustmentReason)
+	}
+}
+
+// TestFinalizePurchaseOrderAcceptsAReasonedDocumentAdjustment pins the other
+// half of the rule: an adjustment exists to reconcile what the customer's PO
+// document actually printed. The order calculates 250 while the document says
+// 260, so staff record +10 with a reason and the saved grand total is 260.
+func TestFinalizePurchaseOrderAcceptsAReasonedDocumentAdjustment(t *testing.T) {
+	database := openTestSchema(t, "vera_po_finalize_document_adjustment")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Document adjustment")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+
+	input := finalizeInput(draft, user, "PO-DOC-ADJUSTMENT")
+	input.Items = append(input.Items, PurchaseOrderItem{
+		LineNumber:     3,
+		Description:    "Freight",
+		QuantityScaled: 10000,
+		UoM:            "Lot",
+		UnitPriceMinor: 50,
+	})
+	input.AcknowledgedExtra = []int{3}
+	input.AdjustmentMinor = 10
+	input.AdjustmentReason = "Customer PO document printed 260.00"
+	saved, err := database.FinalizePurchaseOrder(ctx, input)
+	if err != nil {
+		t.Fatalf("finalize with a document adjustment: %v", err)
+	}
+	if saved.GrandTotalMinor != 260 || saved.AdjustmentMinor != 10 {
+		t.Errorf("saved total = %d adjustment = %d; want 260 / 10",
 			saved.GrandTotalMinor, saved.AdjustmentMinor)
 	}
-	if saved.AdjustmentReason != "Price difference agreed with the customer" {
+	if saved.AdjustmentReason != "Customer PO document printed 260.00" {
 		t.Errorf("saved reason = %q", saved.AdjustmentReason)
 	}
 }

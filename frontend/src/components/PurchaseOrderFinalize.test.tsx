@@ -5,6 +5,7 @@ import type { CurrencyInfo } from "../format";
 import { evaluateReview, type PurchaseOrderSourceDTO } from "../poFinalize";
 import {
   initialPurchaseOrderEditorState,
+  buildPurchaseOrderUpdate,
   type PurchaseOrderDTO,
 } from "../purchaseOrder";
 import {
@@ -249,13 +250,19 @@ describe("PurchaseOrderDifferenceReviewView (issue #471)", () => {
 });
 
 describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
-  function confirmationElement(documentConfirmed: boolean, documentState = "none") {
-    const state = reviewState();
+  function confirmationElement(
+    documentConfirmed: boolean,
+    documentState = "none",
+    state = reviewState(),
+    stored: PurchaseOrderDTO = order()
+  ) {
     const evaluation = evaluateReview(state, SOURCE, USD, {}, [], []);
+    const payload = buildPurchaseOrderUpdate(evaluation.applied, USD).input!;
     return (
       <PurchaseOrderFinalConfirmationView
-        review={{ Order: order(), Source: SOURCE, DocumentState: documentState }}
+        review={{ Order: stored, Source: SOURCE, DocumentState: documentState }}
         evaluation={evaluation}
+        payload={payload}
         currency={USD}
         documentConfirmed={documentConfirmed}
         onToggleDocumentConfirmed={() => undefined}
@@ -290,6 +297,22 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     expect(html).toContain("It is not a business approval");
     expect(html).toContain("PO-471");
     expect(html).toContain("PT. Buyer");
+  });
+
+  it("confirms the applied editor values, not the stored record", () => {
+    const stored = order({ PONumber: "PO-STORED", PaymentTerms: "45 days" });
+    const html = markup(
+      confirmationElement(
+        true,
+        "none",
+        reviewState({ PONumber: "PO-EDITED", PaymentTerms: "30 days" }),
+        stored
+      )
+    );
+    expect(html).toContain("PO-EDITED");
+    expect(html).not.toContain("PO-STORED");
+    expect(html).toContain("30 days");
+    expect(html).toContain("The details below are the values this save will store.");
   });
 });
 

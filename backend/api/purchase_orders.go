@@ -267,11 +267,6 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": err.Error(),
 			"code":  "po_differences_unresolved",
 		})
-	case errors.Is(err, store.ErrPurchaseOrderTotalMismatch):
-		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
-			"error": err.Error(),
-			"code":  "po_total_unexplained",
-		})
 	case errors.Is(err, store.ErrPurchaseOrderPDFConfirmationRequired):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": err.Error(),

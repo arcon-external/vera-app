@@ -64,8 +64,9 @@ func (line PurchaseOrderSourceLine) Label() string {
 }
 
 // PurchaseOrderSource is the exact source revision's customer-facing values.
-// Printed totals are the document evidence the final save reconciles against;
-// they are copied from the revision, never recalculated.
+// Printed totals are the document evidence the review shows beside the entered
+// order; they are copied from the revision, never recalculated, and never a
+// target the saved total must equal.
 type PurchaseOrderSource struct {
 	QuoteNumber            string
 	CustomerName           string
@@ -326,33 +327,6 @@ func ValidatePurchaseOrderDecisions(
 	return nil
 }
 
-// PurchaseOrderRequiredAdjustment is the signed adjustment that makes the
-// calculated total equal the total the customer document printed. A zero
-// answer means the correct fields already reproduce the printed total. Any
-// other answer must be stored as the adjustment, with a reason, because the
-// signed adjustment is the only place a different printed total may be
-// explained (parent story 46).
-func PurchaseOrderRequiredAdjustment(printedGrand int64, calculation PurchaseOrderCalc) (int64, error) {
-	if printedGrand < 0 || printedGrand > MaxExactMinor {
-		return 0, fmt.Errorf("%w: printed grand total is outside the supported amount range",
-			ErrPurchaseOrderInvalid)
-	}
-	for _, amount := range []int64{
-		calculation.SubtotalMinor, calculation.DiscountMinor, calculation.PpnMinor,
-	} {
-		if amount < 0 || amount > MaxExactMinor {
-			return 0, fmt.Errorf("%w: the calculation is outside the supported amount range",
-				ErrPurchaseOrderInvalid)
-		}
-	}
-	required := printedGrand - (calculation.SubtotalMinor - calculation.DiscountMinor + calculation.PpnMinor)
-	if required > MaxExactMinor || required < -MaxExactMinor {
-		return 0, fmt.Errorf("%w: the printed total differs beyond the supported amount range",
-			ErrPurchaseOrderInvalid)
-	}
-	return required, nil
-}
-
 // formatReviewQuantity renders the exact scaled quantity as the shortest
 // decimal with at most four places, the same shape the editor's quantity field
 // holds.
@@ -457,10 +431,17 @@ func checkPurchaseOrderSourceMatches(order PurchaseOrder, source PurchaseOrderSo
 
 // FinalizePurchaseOrder is the one-way draft -> saved transition. It re-reads
 // the source, recomputes the calculation from the submitted values, requires
-// the difference review to be explicitly decided, requires the printed total to
-// be reproduced or exactly explained by the signed adjustment, and asks for the
-// no-PDF confirmation while no attachment exists. Only purchase_orders and
+// the difference review to be explicitly decided, and asks for the no-PDF
+// confirmation while no attachment exists. Only purchase_orders and
 // purchase_order_items are written; the Quotation revision is never touched.
+//
+// The saved grand total belongs to the purchase order, not to the quotation.
+// The explicit per-field choices explain how the order differs from its
+// source; missing and extra lines are acknowledged rather than cancelled. The
+// source's printed total stays available as document evidence, and the signed
+// adjustment is optional: it reconciles what the customer's PO document
+// actually printed, and is never required to reverse an accepted difference
+// (parent stories 41, 45-48 and 51).
 func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFinalize) (PurchaseOrder, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
@@ -579,17 +560,6 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err := ValidatePurchaseOrderDecisions(
 		comparison, input.Decisions, input.AcknowledgedMissing, input.AcknowledgedExtra); err != nil {
 		return PurchaseOrder{}, err
-	}
-
-	requiredAdjustment, err := PurchaseOrderRequiredAdjustment(source.PrintedGrandTotalMinor, calculation)
-	if err != nil {
-		return PurchaseOrder{}, err
-	}
-	if calculation.AdjustmentMinor != requiredAdjustment {
-		remaining := source.PrintedGrandTotalMinor - calculation.GrandTotalMinor
-		return PurchaseOrder{}, fmt.Errorf(
-			"%w: %d minor units remain against the printed total; correct the lines or record an adjustment of %d with a reason",
-			ErrPurchaseOrderTotalMismatch, remaining, requiredAdjustment)
 	}
 
 	documentState, err := purchaseOrderDocumentState(ctx, tx, schema, input.ID)

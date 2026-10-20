@@ -145,6 +145,64 @@ const SOURCE: PurchaseOrderSourceDTO = {
   PrintedGrandTotalMinor: 24500,
 };
 
+// The judge's monetary case in miniature: the quotation printed 200 minor
+// units (one line, 1 x 200) and the customer's order adds a 50 freight line.
+const SOURCE_PRINTED_200: PurchaseOrderSourceDTO = {
+  ...SOURCE,
+  Lines: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineLabel: "1",
+      Description: "Widget",
+      UoM: "Pc",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 200,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+    },
+  ],
+  PrintedSubtotalMinor: 200,
+  PrintedDiscountMinor: 0,
+  PrintedPpnMinor: 0,
+  PrintedGrandTotalMinor: 200,
+};
+
+function orderPrinted200(): PurchaseOrderDTO {
+  return order({
+    Items: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        LineNumber: 1,
+        Description: "Widget",
+        QuantityScaled: 10000,
+        UoM: "Pc",
+        UnitPriceMinor: 200,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+        GrossMinor: 200,
+        DiscountMinor: 0,
+        NetMinor: 200,
+      },
+      {
+        QuotationItemNo: null,
+        QuotationSubNo: null,
+        LineNumber: 2,
+        Description: "Freight",
+        QuantityScaled: 10000,
+        UoM: "Lot",
+        UnitPriceMinor: 50,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+        GrossMinor: 50,
+        DiscountMinor: 0,
+        NetMinor: 50,
+      },
+    ],
+  });
+}
+
 function stateFrom(dto: PurchaseOrderDTO) {
   return initialPurchaseOrderEditorState(dto, USD);
 }
@@ -394,33 +452,62 @@ describe("difference choices", () => {
 
     const decisions: POReviewDecisions = { "header:paymentTerms": "po" };
     const resolved = evaluateReview(state, SOURCE, USD, decisions, ["1"], [1, 3]);
-    // The acknowledgements resolved their lines, but removing a priced line and
-    // adding another leaves the total unexplained, so the save still blocks.
-    expect(resolved.blockers.join("\n")).not.toContain("Quotation line 1");
-    expect(resolved.blockers.join("\n")).not.toContain("has no quotation match");
-    expect(resolved.blockers.join("\n")).toContain("differs from the quotation's printed total");
-    expect(resolved.canContinue).toBe(false);
+    // The acknowledgements resolved their lines. The purchase order keeps its
+    // own total (24600 against the printed 24500); an accepted extra line is
+    // not a gap to be reversed.
+    expect(resolved.blockers).toEqual([]);
+    expect(resolved.canContinue).toBe(true);
+    expect(resolved.totals?.grandTotalMinor).toBe(24600);
   });
 
-  it("requires the printed total to be reproduced or exactly adjusted", () => {
-    const base = order();
-    const state = stateFrom(
-      order({
-        Items: [{ ...base.Items[0], UnitPriceMinor: 11000 }, base.Items[1]],
-      })
-    );
-    const decisions: POReviewDecisions = { "line:1:unitPrice": "po" };
-    const evaluation = evaluateReview(state, SOURCE, USD, decisions, [], []);
-    expect(evaluation.requiredAdjustmentMinor).toBe(-2000);
-    expect(evaluation.differenceMinor).toBe(-2000);
-    expect(evaluation.covered).toBe(false);
+  it("keeps the purchase order's own total when an acknowledged extra line changes it", () => {
+    const state = stateFrom(orderPrinted200());
+    const unacknowledged = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], []);
+    expect(unacknowledged.canContinue).toBe(false);
+    expect(unacknowledged.blockers.join("\n")).toContain("Line 2 has no quotation match");
 
-    state.header.adjustment = "-20.00";
-    state.header.adjustmentReason = "Agreed price rounding";
-    const adjusted = evaluateReview(state, SOURCE, USD, decisions, [], []);
-    expect(adjusted.covered).toBe(true);
-    expect(adjusted.canContinue).toBe(true);
-    expect(adjusted.totals?.grandTotalMinor).toBe(SOURCE.PrintedGrandTotalMinor);
+    // The judge's case: printed 200, an acknowledged extra line of 50, no
+    // adjustment. The save proceeds and the purchase order's total is 250.
+    const evaluation = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
+    expect(evaluation.blockers).toEqual([]);
+    expect(evaluation.canContinue).toBe(true);
+    expect(evaluation.totals?.grandTotalMinor).toBe(250);
+    expect(evaluation.totals?.adjustmentMinor).toBe(0);
+    expect(evaluation.printedDifferenceMinor).toBe(-50);
+    const result = buildFinalizeInput(
+      state,
+      SOURCE_PRINTED_200,
+      USD,
+      "attached",
+      {},
+      [],
+      [2],
+      false
+    );
+    expect(result.error).toBeNull();
+    expect(result.input?.AdjustmentMinor).toBe(0);
+    expect(result.input?.AcknowledgedExtra).toEqual([2]);
+  });
+
+  it("accepts a reasoned adjustment as document reconciliation, not as a target", () => {
+    const state = stateFrom(orderPrinted200());
+    // The lines calculate 250 and the customer's PO document printed 260. The
+    // +10 is an explained document difference, not a reversal forced by the
+    // quotation (which printed 200).
+    state.header.adjustment = "0.10";
+    state.header.adjustmentReason = "Customer PO document printed 260";
+    const evaluation = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
+    expect(evaluation.blockers).toEqual([]);
+    expect(evaluation.canContinue).toBe(true);
+    expect(evaluation.totals?.grandTotalMinor).toBe(260);
+    expect(evaluation.totals?.adjustmentMinor).toBe(10);
+    expect(evaluation.printedDifferenceMinor).toBe(-60);
+
+    // The adjustment is optional, not unguarded: it still needs its reason.
+    state.header.adjustmentReason = "   ";
+    const unexplained = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
+    expect(unexplained.canContinue).toBe(false);
+    expect(unexplained.blockers.join("\n")).toContain("An adjustment requires a reason");
   });
 
   it("refuses to compare amounts across currencies", () => {
