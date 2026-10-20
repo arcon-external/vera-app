@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // Issue #468: a manual PO draft born from one exact issued Quotation revision.
@@ -553,6 +554,7 @@ func TestPurchaseOrderMigrationDeclaresOwnershipAndOneActiveRecord(t *testing.T)
 		"state TEXT NOT NULL",
 		"received_date DATE NOT NULL",
 		"payment_terms TEXT NOT NULL",
+		"char_length(payment_terms) <= 500",
 		"quantity_scaled BIGINT NOT NULL",
 		"unit_price_minor BIGINT NOT NULL",
 		"CREATE UNIQUE INDEX IF NOT EXISTS purchase_orders_active_quotation_idx",
@@ -632,5 +634,93 @@ func TestPurchaseOrderDraftRoundTripsCommercialPaymentWording(t *testing.T) {
 	}
 	if cleared.PaymentTerms != "" {
 		t.Errorf("cleared terms = %q; want empty", cleared.PaymentTerms)
+	}
+}
+
+// TestPurchaseOrderPaymentTermsBoundaryCountsCharacters pins the one length
+// contract the editor, this store and the schema's char_length CHECK share:
+// Unicode characters, not UTF-8 bytes and not UTF-16 units.
+//
+// The red-first probe is 200 ideographs: 200 characters but 600 UTF-8 bytes.
+// A byte counter refuses a value the schema accepts, which is the defect the
+// Judge found; 500 ideographs are 1500 bytes and must still fit.
+func TestPurchaseOrderPaymentTermsBoundaryCountsCharacters(t *testing.T) {
+	database := openTestSchema(t, "vera_po_terms_unicode")
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Unicode terms")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	update := func(terms string) (PurchaseOrder, error) {
+		return database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+			ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: terms, Items: draft.Items,
+		})
+	}
+
+	// 200 characters, 600 bytes. The old len() guard failed here.
+	shortMultiByte := strings.Repeat("界", 200)
+	if _, err := update(shortMultiByte); err != nil {
+		t.Fatalf("200 ideographs are 200 characters (600 bytes): %v", err)
+	}
+
+	// Exactly 500 characters, 1500 bytes: the boundary the schema's
+	// char_length accepts.
+	atLimit := strings.Repeat("界", maxPaymentTermsLength)
+	if got := utf8.RuneCountInString(atLimit); got != maxPaymentTermsLength {
+		t.Fatalf("fixture has %d characters, want %d", got, maxPaymentTermsLength)
+	}
+	updated, err := update(atLimit)
+	if err != nil {
+		t.Fatalf("500 ideographs are 500 characters (1500 bytes): %v", err)
+	}
+	if updated.PaymentTerms != atLimit {
+		t.Errorf("stored terms changed: got %d characters, want %d",
+			utf8.RuneCountInString(updated.PaymentTerms), maxPaymentTermsLength)
+	}
+	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen at the boundary: %v", err)
+	}
+	if reopened.PaymentTerms != atLimit {
+		t.Errorf("reopened terms = %d characters; want %d",
+			utf8.RuneCountInString(reopened.PaymentTerms), maxPaymentTermsLength)
+	}
+
+	// 501 characters is one over, whatever its byte length.
+	if _, err := update(atLimit + "界"); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Errorf("501-character terms error = %v; want ErrPurchaseOrderInvalid", err)
+	}
+
+	// Mixed ASCII and multi-byte text at exactly 500 characters. "PO 界 #" is
+	// six characters, so 83 repeats plus "AB" is 500, not 500 code units.
+	mixed := strings.Repeat("PO 界 #", 83) + "AB"
+	if got := utf8.RuneCountInString(mixed); got != maxPaymentTermsLength {
+		t.Fatalf("mixed fixture has %d characters, want %d", got, maxPaymentTermsLength)
+	}
+	updated, err = update(mixed)
+	if err != nil {
+		t.Fatalf("mixed 500-character terms: %v", err)
+	}
+	if updated.PaymentTerms != mixed {
+		t.Errorf("mixed terms changed on the way through: got %q", updated.PaymentTerms)
+	}
+
+	// The schema itself must agree. 500 ideographs above already prove its
+	// char_length accepted 1500 bytes; this proves 501 characters is refused
+	// even when the store's guard is bypassed.
+	_, err = database.pool.Exec(ctx, fmt.Sprintf(
+		`UPDATE %s.purchase_orders SET payment_terms = $1 WHERE id = $2`,
+		database.configSchema(),
+	), strings.Repeat("界", maxPaymentTermsLength+1), draft.ID)
+	if err == nil {
+		t.Fatal("schema accepted 501 characters; char_length boundary is wrong")
 	}
 }

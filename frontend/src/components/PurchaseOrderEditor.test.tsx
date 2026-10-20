@@ -6,12 +6,15 @@ import {
   purchaseOrderEditorReducer,
   type PurchaseOrderDTO,
 } from "../purchaseOrder";
-import { PurchaseOrderEditorView } from "./PurchaseOrderEditor";
+import {
+  PurchaseOrderDiscardPrompt,
+  PurchaseOrderEditorView,
+} from "./PurchaseOrderEditor";
 
 // Issue #468: the draft editor's markup, rendered without a DOM. The pure
 // suite owns parsing and the dirty guard; this suite proves the assembled page
 // shows the read-only customer snapshot, the editable commercial details and
-// the confirm-before-discard panel without inventing totals or final actions.
+// the shared discard dialog without inventing totals or final actions.
 //
 // What it cannot prove: typing, Select keyboard behaviour, focus, and how the
 // page reads at 360/1280. Those stay hand-driven plus the snapshot harness.
@@ -94,7 +97,6 @@ function render(state = initialPurchaseOrderEditorState(ORDER, USD)): string {
       incotermOptions={INCOTERMS}
       onSave={() => {}}
       onCancel={() => {}}
-      onDiscard={() => {}}
     />
   ).replace(/<!-- -->/g, "");
 }
@@ -168,15 +170,27 @@ describe("PurchaseOrderEditorView dirty guard (issue #468)", () => {
     expect(html).not.toContain("Discard unsaved changes?");
   });
 
-  it("asks before discarding a dirty draft", () => {
+  it("marks an edited draft as unsaved without owning the confirmation", () => {
     const dirty = purchaseOrderEditorReducer(
       initialPurchaseOrderEditorState(ORDER, USD),
       { type: "lineChanged", key: 0, patch: { quantity: "3" } }
     );
-    const asked = purchaseOrderEditorReducer(dirty, { type: "cancelRequested" });
-    const html = render(asked);
+    const html = render(dirty);
     expect(html).toContain("Unsaved changes");
+    // The one confirmation is App's modal guard, not an inline panel inside
+    // the page: two paths must never be able to show two dialogs.
+    expect(html).not.toContain("Discard unsaved changes?");
+  });
+
+  it("renders the shared discard dialog with real choices", () => {
+    const html = renderToString(
+      <PurchaseOrderDiscardPrompt
+        onKeepEditing={() => {}}
+        onDiscard={() => {}}
+      />
+    ).replace(/<!-- -->/g, "");
     expect(html).toContain('role="alertdialog"');
+    expect(html).toContain('aria-modal="true"');
     expect(html).toContain("Discard unsaved changes?");
     expect(buttonTagFor(html, "Keep editing")).not.toContain(" disabled=");
     expect(buttonTagFor(html, "Discard changes")).not.toContain(" disabled=");

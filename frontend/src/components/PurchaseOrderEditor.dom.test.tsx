@@ -15,6 +15,11 @@ import {
 // owns its reducer state, so leaving the PO page unmounts it; the guard must
 // ask before that happens, and Keep editing must leave the typed value alive.
 //
+// Wave 3: the Judge found two dialogs and no modal behaviour. Cancel used to
+// open the editor's inline panel while a tab opened App's overlay, so both
+// could stand at once. There is now one pending discard decision and one
+// dialog; this suite holds that line.
+//
 // This is the runtime regression the SSR suite cannot reach. The harness is
 // App's own composition: AppShell + the editor + the shared leave-guard hook
 // and the shared discard prompt. App supplies only the one-line wiring this
@@ -77,10 +82,12 @@ const UOMS = [{ value: "Pc", label: "Pc" }];
 function Workspace() {
   const [page, setPage] = useState<AppPage>("po");
   const leave = usePurchaseOrderLeaveGuard(page, setPage);
+  const open = leave.pendingPage !== null;
   return (
     <>
       <AppShell
         page={page}
+        inert={open}
         onOpenHome={() => leave.request("home")}
         onOpenEditor={() => leave.request("create")}
         onOpenDrafts={() => leave.request("drafts")}
@@ -95,18 +102,18 @@ function Workspace() {
             uomOptions={UOMS}
             incotermOptions={INCOTERMS}
             onSaved={() => {}}
-            onCancel={() => setPage("home")}
+            onCancel={() => leave.request("home", () => setPage("home"))}
             onDirtyChange={leave.setDirty}
           />
         ) : (
           <p data-testid={`page-${page}`}>Destination {page}</p>
         )}
       </AppShell>
-      {leave.pendingPage !== null ? (
+      {open ? (
         <PurchaseOrderDiscardPrompt
-          overlay
           onKeepEditing={leave.keepEditing}
           onDiscard={leave.discard}
+          returnFocus={leave.pendingReturnFocus}
         />
       ) : null}
     </>
@@ -162,6 +169,29 @@ function prompt(): HTMLElement | null {
   );
 }
 
+function dialogCount(): number {
+  return document.querySelectorAll('[role="alertdialog"]').length;
+}
+
+function paymentTermsValue(): string | undefined {
+  return document.querySelector<HTMLInputElement>(
+    'input[aria-label="Payment terms"]'
+  )?.value;
+}
+
+function pressKey(target: EventTarget, key: string, shiftKey = false): void {
+  act(() => {
+    target.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key,
+        shiftKey,
+        bubbles: true,
+        cancelable: true,
+      })
+    );
+  });
+}
+
 function button(label: string, scope: ParentNode = document): HTMLButtonElement {
   const found = Array.from(
     scope.querySelectorAll<HTMLButtonElement>(`button[aria-label="${label}"]`)
@@ -214,5 +244,107 @@ describe("PO tab navigation leaves unsaved edits (issue #468)", () => {
     click(tab("Drafts"));
     expect(prompt()).toBeNull();
     expect(document.querySelector('[data-testid="page-drafts"]')).not.toBeNull();
+  });
+});
+
+describe("PO discard is one modal decision (issue #468, wave 3)", () => {
+  it("Cancel opens one dialog, a tab click replaces its action, Keep editing stays", () => {
+    act(() => root.render(<Workspace />));
+
+    typeInto("Payment terms", "50% advance");
+    const cancel = button("Cancel draft");
+    act(() => cancel.focus());
+    click(cancel);
+
+    expect(dialogCount()).toBe(1);
+    const dialog = prompt();
+    expect(dialog).not.toBeNull();
+    expect(dialog?.contains(document.activeElement)).toBe(true);
+
+    const shell = document.querySelector<HTMLElement>("[data-app-shell]");
+    expect(shell).not.toBeNull();
+    expect(shell?.getAttribute("aria-hidden")).toBe("true");
+    expect(shell?.hasAttribute("inert")).toBe(true);
+
+    // A tab click while the Cancel confirmation stands must replace the
+    // pending action, never stack a second dialog.
+    click(tab("Archive"));
+    expect(dialogCount()).toBe(1);
+    expect(prompt()?.contains(document.activeElement)).toBe(true);
+
+    click(button("Keep editing"));
+    expect(dialogCount()).toBe(0);
+    expect(document.querySelector('[data-testid="page-archive"]')).toBeNull();
+    expect(paymentTermsValue()).toBe("50% advance");
+    expect(document.activeElement).toBe(cancel);
+    expect(shell?.getAttribute("aria-hidden")).toBeNull();
+    expect(shell?.hasAttribute("inert")).toBe(false);
+  });
+
+  it("Discard from a Cancel-then-tab prompt performs the tab action", () => {
+    act(() => root.render(<Workspace />));
+
+    typeInto("Ship-to code", "SHIP-EDITED");
+    click(button("Cancel draft"));
+    expect(dialogCount()).toBe(1);
+
+    click(tab("Archive"));
+    expect(dialogCount()).toBe(1);
+
+    click(button("Discard changes"));
+    expect(dialogCount()).toBe(0);
+    expect(document.querySelector('[data-testid="page-archive"]')).not.toBeNull();
+    expect(paymentTermsValue()).toBeUndefined();
+  });
+
+  it("Discard from Cancel leaves the PO workspace", () => {
+    act(() => root.render(<Workspace />));
+
+    typeInto("Payment terms", "50% advance");
+    click(button("Cancel draft"));
+    expect(dialogCount()).toBe(1);
+
+    click(button("Discard changes"));
+    expect(dialogCount()).toBe(0);
+    expect(document.querySelector('[data-testid="page-home"]')).not.toBeNull();
+    expect(paymentTermsValue()).toBeUndefined();
+  });
+
+  it("Escape keeps editing and restores focus to the button that asked", () => {
+    act(() => root.render(<Workspace />));
+
+    typeInto("Payment terms", "30 days after delivery");
+    const cancel = button("Cancel draft");
+    act(() => cancel.focus());
+    click(cancel);
+
+    expect(dialogCount()).toBe(1);
+    expect(document.activeElement).toBe(button("Keep editing"));
+
+    pressKey(document, "Escape");
+
+    expect(dialogCount()).toBe(0);
+    expect(paymentTermsValue()).toBe("30 days after delivery");
+    expect(document.activeElement).toBe(cancel);
+  });
+
+  it("contains Tab and Shift+Tab inside the dialog", () => {
+    act(() => root.render(<Workspace />));
+
+    typeInto("Payment terms", "50% advance");
+    click(button("Cancel draft"));
+
+    const keep = button("Keep editing");
+    const discard = button("Discard changes");
+    expect(dialogCount()).toBe(1);
+    expect(document.activeElement).toBe(keep);
+
+    pressKey(keep, "Tab", true);
+    expect(document.activeElement).toBe(discard);
+
+    pressKey(discard, "Tab");
+    expect(document.activeElement).toBe(keep);
+    expect(dialogCount()).toBe(1);
+    expect(prompt()?.contains(document.activeElement)).toBe(true);
   });
 });

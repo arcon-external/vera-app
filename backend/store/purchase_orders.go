@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -28,9 +29,11 @@ const (
 // no locale-dependent decimal string enters the database.
 const QuantityScale int64 = 10000
 
-// maxPaymentTermsLength bounds the free-text terms to what the migration's
-// CHECK accepts. Long enough for a real commercial sentence, short enough that
-// a paste cannot store a page of text in a header field.
+// maxPaymentTermsLength bounds the free-text terms to the migration's
+// char_length CHECK. The unit is Unicode characters -- not UTF-8 bytes and not
+// UTF-16 units -- so "500" means the same thing in Postgres, this store and
+// the editor. Long enough for a real commercial sentence, short enough that a
+// paste cannot store a page of text in a header field.
 const maxPaymentTermsLength = 500
 
 var (
@@ -238,7 +241,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
 	}
 	input.PaymentTerms = strings.TrimSpace(input.PaymentTerms)
-	if len(input.PaymentTerms) > maxPaymentTermsLength {
+	if utf8.RuneCountInString(input.PaymentTerms) > maxPaymentTermsLength {
 		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxPaymentTermsLength)
 	}
