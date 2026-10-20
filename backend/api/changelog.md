@@ -4,6 +4,14 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.2] - 2026-10-20
+
+### Changed
+
+- **Routine library updates, no visible change.** The desktop's rendering
+  library, the Google API client, the image library, and the front-end build
+  tooling moved to their current versions. Nothing changes on screen.
+
 ## [0.14.1] - 2026-10-16
 
 ### Security
