@@ -222,7 +222,30 @@ func (s *Server) finalizePurchaseOrder(context echo.Context) error {
 		AcknowledgedMissing: request.AcknowledgedMissing,
 		AcknowledgedExtra:   request.AcknowledgedExtra,
 		DocumentConfirmed:   request.DocumentConfirmed,
+		// #474: only the checkbox travels; the number itself is allocated by
+		// the server inside the final-save transaction.
+		AssignConfirmationNumber: request.AssignConfirmationNumber,
 	})
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
+}
+
+// assignPurchaseOrderConfirmation issues the optional customer-system
+// reference on a saved record. It is idempotent: an assigned record returns its
+// existing number, and a draft is refused. No request body carries a number.
+func (s *Server) assignPurchaseOrderConfirmation(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	user := requestUser(context)
+	order, err := s.database.AssignPurchaseOrderConfirmationNumber(requestContext, id, user.ID)
 	if err != nil {
 		return purchaseOrderError(context, err)
 	}
@@ -286,6 +309,16 @@ func purchaseOrderError(context echo.Context, err error) error {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": err.Error(),
 			"code":  "po_source_mismatch",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderNotSaved):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": "only a saved purchase order can have a confirmation number",
+			"code":  "po_not_saved",
+		})
+	case errors.Is(err, store.ErrPOConfirmationExhausted):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_confirmation_exhausted",
 		})
 	case errors.Is(err, store.ErrPurchaseOrderInvalid):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
@@ -357,12 +390,18 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		PrintedGrandTotalMinor: order.PrintedGrandTotalMinor,
 		PdfAbsentConfirmed:     order.PDFAbsentConfirmed,
 		SavedBy:                order.SavedBy,
+		ConfirmationNumber:     order.ConfirmationNumber,
+		ConfirmationWarn:       order.ConfirmationWarn,
 		CreatedAt:              order.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:              order.UpdatedAt.Format(time.RFC3339),
 	}
 	if order.SavedAt != nil {
 		formatted := order.SavedAt.Format(time.RFC3339)
 		row.SavedAt = &formatted
+	}
+	if order.ConfirmationAssignedAt != nil {
+		formatted := order.ConfirmationAssignedAt.Format(time.RFC3339)
+		row.ConfirmationAssignedAt = &formatted
 	}
 	row.Items = make([]apicontract.PurchaseOrderItemRow, 0, len(order.Items))
 	for _, item := range order.Items {

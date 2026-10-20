@@ -1950,6 +1950,7 @@ function App() {
           <PurchaseOrderSavedView
             order={poDraft}
             currency={poEntry}
+            onAssigned={(updated) => setPODraft(updated)}
             onBack={() => {
               poLeave.setDirty(false);
               setPODraft(null);

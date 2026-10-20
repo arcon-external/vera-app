@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { AssignPurchaseOrderConfirmationNumber } from "@backend/backend/Quotation";
 import { formatMoney, type CurrencyInfo } from "../format";
 import {
   evaluateReview,
@@ -9,6 +11,9 @@ import {
   type PurchaseOrderSourceLineDTO,
 } from "../poFinalize";
 import {
+  canAssignConfirmationNumber,
+  confirmationNumberLabel,
+  confirmationNumberOf,
   initialPurchaseOrderEditorState,
   MAX_EXACT_MINOR,
   parseDiscountPercent,
@@ -25,6 +30,17 @@ import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+
+/** The server's message when it has one, so the panel names the real refusal. */
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim() !== "") {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim() !== "") {
+    return error;
+  }
+  return "The confirmation number could not be assigned.";
+}
 
 // Issue #471: the final-save review. Three assembled views live here:
 //
@@ -429,6 +445,9 @@ export interface PurchaseOrderFinalConfirmationViewProps {
   currency: CurrencyInfo;
   documentConfirmed: boolean;
   onToggleDocumentConfirmed: () => void;
+  /** #474: whether this save should allocate the optional reference. */
+  assignConfirmation: boolean;
+  onToggleAssignConfirmation: () => void;
   onBack: () => void;
   onFinalSave: () => void;
   saving: boolean;
@@ -442,6 +461,8 @@ export function PurchaseOrderFinalConfirmationView({
   currency,
   documentConfirmed,
   onToggleDocumentConfirmed,
+  assignConfirmation,
+  onToggleAssignConfirmation,
   onBack,
   onFinalSave,
   saving,
@@ -466,6 +487,12 @@ export function PurchaseOrderFinalConfirmationView({
           <div>
             <dt className="text-caption text-ink-500">Customer PO number</dt>
             <dd className="tnum font-medium text-ink-900">{payload.PONumber}</dd>
+          </div>
+          <div>
+            <dt className="text-caption text-ink-500">Confirmation number</dt>
+            <dd className="tnum font-medium text-ink-900">
+              {assignConfirmation ? "Assigned when saved" : "Not assigned"}
+            </dd>
           </div>
           <div>
             <dt className="text-caption text-ink-500">Customer</dt>
@@ -557,6 +584,29 @@ export function PurchaseOrderFinalConfirmationView({
         )}
       </Card>
 
+      <Card className="p-4">
+        <SectionHeading title="Confirmation number" hint="Optional" />
+        <label className="mt-2 flex items-start gap-2 text-small text-ink-800">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-accent-700"
+            aria-label="Assign confirmation number"
+            checked={assignConfirmation}
+            onChange={onToggleAssignConfirmation}
+          />
+          <span>
+            Assign a confirmation number when this purchase order is saved.
+          </span>
+        </label>
+        <p className="mt-2 text-caption text-ink-500">
+          This number is a reference for manual submission to the customer
+          system. Vera does not submit it, and this record is not marked as
+          submitted. Leave the option unchecked when the customer does not
+          require one: an unassigned record consumes no number and shows “Not
+          assigned”.
+        </p>
+      </Card>
+
       {error !== null ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
@@ -581,6 +631,12 @@ export interface PurchaseOrderSavedViewProps {
   currency: CurrencyInfo;
   onBack: () => void;
   /**
+   * Reports a later confirmation-number assignment so the page that owns the
+   * record can keep showing it. The view also keeps its own copy, so it is
+   * correct even when a parent does not provide this.
+   */
+  onAssigned?: (order: PurchaseOrderDTO) => void;
+  /**
    * The server's document state when the parent already has it. Omitted in the
    * app so the panel fetches; supplied by the SSR snapshot so the attached and
    * empty branches are both visible without a browser effect.
@@ -599,9 +655,20 @@ export function PurchaseOrderSavedView({
   order,
   currency,
   onBack,
+  onAssigned,
   documentInitialState,
   onDocumentStateChange,
 }: PurchaseOrderSavedViewProps) {
+  // #474: a later assignment is the one write this read-only view performs.
+  // It keeps the server's answer locally and reports it upward, so the number
+  // appears whether or not the parent re-renders.
+  const [assignedOrder, setAssignedOrder] = useState<PurchaseOrderDTO | null>(null);
+  const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const current = assignedOrder ?? order;
+  const confirmationNumber = confirmationNumberOf(current);
+  const canAssign = canAssignConfirmationNumber(current);
   const state = initialPurchaseOrderEditorState(order, currency);
   // A saved record displays its stored figures. Recalculating would let a
   // later calculator change rewrite what an already-saved record says, which
@@ -624,6 +691,35 @@ export function PurchaseOrderSavedView({
     adjustmentMinor: order.AdjustmentMinor,
     grandTotalMinor: order.GrandTotalMinor,
   };
+
+  const assignConfirmation = async () => {
+    setAssigning(true);
+    setAssignError(null);
+    setCopyStatus(null);
+    try {
+      const assigned = await AssignPurchaseOrderConfirmationNumber(current.ID);
+      setAssignedOrder(assigned);
+      onAssigned?.(assigned);
+    } catch (error) {
+      setAssignError(errorMessage(error));
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  const copyConfirmation = async () => {
+    if (confirmationNumber === "") return;
+    setCopyStatus(null);
+    try {
+      await navigator.clipboard.writeText(confirmationNumber);
+      setCopyStatus("Confirmation number copied.");
+    } catch {
+      setCopyStatus(
+        "The confirmation number could not be copied. Select it and copy it manually."
+      );
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -649,6 +745,66 @@ export function PurchaseOrderSavedView({
         customer PO PDF can still be attached, replaced or removed; field
         corrections arrive with the correction workflow.
       </StatusBanner>
+
+      <Card className="p-4">
+        <SectionHeading title="Confirmation number" hint="Customer-system reference" />
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <span
+            className={
+              confirmationNumber === ""
+                ? "text-small text-ink-600"
+                : "tnum whitespace-nowrap text-h2 font-semibold text-ink-950"
+            }
+          >
+            {confirmationNumberLabel(current)}
+          </span>
+          {confirmationNumber !== "" ? (
+            <Button
+              size="sm"
+              aria-label="Copy confirmation number"
+              onClick={() => void copyConfirmation()}
+            >
+              Copy
+            </Button>
+          ) : canAssign ? (
+            <Button
+              size="sm"
+              variant="primary"
+              aria-label="Assign confirmation number"
+              disabled={assigning}
+              onClick={() => void assignConfirmation()}
+            >
+              {assigning ? "Assigning…" : "Assign confirmation number"}
+            </Button>
+          ) : null}
+        </div>
+        <p className="mt-2 text-caption text-ink-500">
+          This number is a reference for manual submission to the customer
+          system. Vera does not submit it, and this record is not marked as
+          submitted. Once assigned, the number is fixed: it cannot be edited,
+          cleared or regenerated.
+        </p>
+        {current.ConfirmationWarn ? (
+          <div className="mt-2">
+            <StatusBanner tone="info">
+              <span className="font-medium">Confirmation sequence warning: </span>
+              this customer's cycle has reached the 8,000 warning threshold.
+              Numbers keep issuing; past 9,999 the sequence widens to five
+              digits instead of wrapping.
+            </StatusBanner>
+          </div>
+        ) : null}
+        {copyStatus !== null ? (
+          <p role="status" className="mt-2 text-caption text-ink-600">
+            {copyStatus}
+          </p>
+        ) : null}
+        {assignError !== null ? (
+          <div className="mt-2">
+            <StatusBanner tone="danger">{assignError}</StatusBanner>
+          </div>
+        ) : null}
+      </Card>
 
       <Card className="p-4">
         <SectionHeading title="Recorded details" hint="Snapshots kept as entered" />

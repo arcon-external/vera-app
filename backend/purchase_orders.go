@@ -80,6 +80,11 @@ type PurchaseOrderDTO struct {
 	SavedAt                *string
 	SavedBy                *int64
 	PdfAbsentConfirmed     bool
+	// The optional customer-system confirmation reference (#474). Null until
+	// assigned, then immutable; ConfirmationWarn follows the stored sequence.
+	ConfirmationNumber     *string
+	ConfirmationAssignedAt *string
+	ConfirmationWarn       bool
 }
 
 // PurchaseOrderSourceLineDTO is one customer-facing line of the exact source
@@ -206,6 +211,9 @@ type PurchaseOrderFinalizeInput struct {
 	DiscountPercent       int16
 	AdjustmentMinor       int64
 	DocumentConfirmed     bool
+	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
+	// the record unassigned and consumes no sequence.
+	AssignConfirmationNumber bool
 }
 
 // PurchaseOrderCreateInput is the selector's confirmed pair plus an optional
@@ -374,6 +382,9 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		SavedAt:                row.SavedAt,
 		SavedBy:                row.SavedBy,
 		PdfAbsentConfirmed:     row.PdfAbsentConfirmed,
+		ConfirmationNumber:     row.ConfirmationNumber,
+		ConfirmationAssignedAt: row.ConfirmationAssignedAt,
+		ConfirmationWarn:       row.ConfirmationWarn,
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}
@@ -467,7 +478,29 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 			AcknowledgedMissing: input.AcknowledgedMissing,
 			AcknowledgedExtra:   input.AcknowledgedExtra,
 			DocumentConfirmed:   input.DocumentConfirmed,
+			// #474: the client asks; it never sends a number.
+			AssignConfirmationNumber: input.AssignConfirmationNumber,
 		}, &response); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	return mapPurchaseOrderDTO(response), nil
+}
+
+// AssignPurchaseOrderConfirmationNumber issues the optional customer-system
+// reference on a saved record. It is idempotent: the server returns the
+// existing number when one is already assigned.
+func (q *Quotation) AssignPurchaseOrderConfirmationNumber(id int64) (PurchaseOrderDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post(
+		"/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/confirmation-number",
+		struct{}{}, &response); err != nil {
 		return PurchaseOrderDTO{}, err
 	}
 	return mapPurchaseOrderDTO(response), nil

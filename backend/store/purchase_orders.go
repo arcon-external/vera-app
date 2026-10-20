@@ -168,6 +168,17 @@ type PurchaseOrder struct {
 	SavedAt            *time.Time
 	SavedBy            *int64
 	PDFAbsentConfirmed bool
+	// The optional customer-system confirmation reference (#474). It is null
+	// until explicitly assigned, then immutable. ConfirmationWarn is derived
+	// from the stored sequence; the customer code and year are kept beside the
+	// number so the identifier can be audited without parsing it.
+	ConfirmationNumber       *string
+	ConfirmationSequence     *int64
+	ConfirmationYear         *int16
+	ConfirmationCustomerCode *int16
+	ConfirmationAssignedAt   *time.Time
+	ConfirmationAssignedBy   *int64
+	ConfirmationWarn         bool
 }
 
 // PurchaseOrderReview is one draft or saved record beside the exact source
@@ -197,6 +208,10 @@ type PurchaseOrderFinalize struct {
 	AcknowledgedMissing []string
 	AcknowledgedExtra   []int
 	DocumentConfirmed   bool
+	// AssignConfirmationNumber asks for the optional customer-system reference
+	// (#474). It is false unless staff ticked the option; an unrequested save
+	// consumes no sequence.
+	AssignConfirmationNumber bool
 }
 
 // PurchaseOrderCreate is the server-side creation input: the exact source pair
@@ -880,6 +895,11 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	var poDate, requestedDelivery pgtype.Date
 	var savedAt pgtype.Timestamptz
 	var savedBy pgtype.Int8
+	var confirmationNumber pgtype.Text
+	var confirmationSequence pgtype.Int8
+	var confirmationYear, confirmationCustomerCode pgtype.Int2
+	var confirmationAssignedAt pgtype.Timestamptz
+	var confirmationAssignedBy pgtype.Int8
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT po.id, po.uuid::text, po.org_id::text, po.quotation_id,
 		       po.source_revision, q.quote_number, po.state, po.customer_id,
@@ -895,7 +915,10 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.printed_discount_minor, po.printed_ppn_minor,
 		       po.printed_grand_total_minor, po.saved_at, po.saved_by,
 		       (po.pdf_absent_confirmed_at IS NOT NULL
-		        AND po.pdf_absent_confirmed_by IS NOT NULL)
+		        AND po.pdf_absent_confirmed_by IS NOT NULL),
+		       po.confirmation_number, po.confirmation_sequence,
+		       po.confirmation_year, po.confirmation_customer_code,
+		       po.confirmation_assigned_at, po.confirmation_assigned_by
 		FROM %s.purchase_orders po
 		JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
@@ -941,6 +964,12 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&savedAt,
 		&savedBy,
 		&order.PDFAbsentConfirmed,
+		&confirmationNumber,
+		&confirmationSequence,
+		&confirmationYear,
+		&confirmationCustomerCode,
+		&confirmationAssignedAt,
+		&confirmationAssignedBy,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
@@ -955,6 +984,31 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	if savedBy.Valid {
 		value := savedBy.Int64
 		order.SavedBy = &value
+	}
+	if confirmationNumber.Valid {
+		value := confirmationNumber.String
+		order.ConfirmationNumber = &value
+	}
+	if confirmationSequence.Valid {
+		value := confirmationSequence.Int64
+		order.ConfirmationSequence = &value
+		order.ConfirmationWarn = value >= POConfirmationWarnAt
+	}
+	if confirmationYear.Valid {
+		value := confirmationYear.Int16
+		order.ConfirmationYear = &value
+	}
+	if confirmationCustomerCode.Valid {
+		value := confirmationCustomerCode.Int16
+		order.ConfirmationCustomerCode = &value
+	}
+	if confirmationAssignedAt.Valid {
+		value := confirmationAssignedAt.Time
+		order.ConfirmationAssignedAt = &value
+	}
+	if confirmationAssignedBy.Valid {
+		value := confirmationAssignedBy.Int64
+		order.ConfirmationAssignedBy = &value
 	}
 	if poDate.Valid {
 		value := poDate.Time

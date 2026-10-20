@@ -500,6 +500,8 @@ export interface PurchaseOrderFinalizeInput {
   DiscountPercent: number;
   AdjustmentMinor: number;
   DocumentConfirmed: boolean;
+  /** Whether this save should allocate the optional confirmation number. */
+  AssignConfirmationNumber: boolean;
 }
 
 /**
@@ -517,7 +519,8 @@ export function buildFinalizeInput(
   decisions: POReviewDecisions,
   acknowledgedMissing: string[],
   acknowledgedExtra: number[],
-  documentConfirmed: boolean
+  documentConfirmed: boolean,
+  assignConfirmationNumber = false
 ): { input: PurchaseOrderFinalizeInput | null; error: string | null } {
   if (state.header.poNumber.trim() === "") {
     return { input: null, error: "A customer PO number is required before the PO can be saved." };
@@ -559,6 +562,7 @@ export function buildFinalizeInput(
       AcknowledgedMissing: evaluation.comparison.missing.map((line) => sourceLabel(line)),
       AcknowledgedExtra: [...evaluation.comparison.extraLineNumbers],
       DocumentConfirmed: finalSaveSendsAbsenceConfirmation(branch, documentConfirmed),
+      AssignConfirmationNumber: assignConfirmationNumber,
     },
     error: null,
   };
@@ -575,12 +579,15 @@ export function initialFinalizeReviewState(): {
   acknowledgedMissing: string[];
   acknowledgedExtra: number[];
   documentConfirmed: boolean;
+  assignConfirmation: boolean;
 } {
   return {
     decisions: initialReviewDecisions(),
     acknowledgedMissing: [],
     acknowledgedExtra: [],
     documentConfirmed: false,
+    // Optional means unchecked until staff ask for it (#474).
+    assignConfirmation: false,
   };
 }
 

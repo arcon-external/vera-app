@@ -995,6 +995,8 @@ const CASES: SnapshotCase[] = [
         currency={PO_EDITOR_USD}
         documentConfirmed={false}
         onToggleDocumentConfirmed={() => undefined}
+        assignConfirmation={false}
+        onToggleAssignConfirmation={() => undefined}
         onBack={() => undefined}
         onFinalSave={() => undefined}
         saving={false}
@@ -1007,10 +1009,35 @@ const CASES: SnapshotCase[] = [
     // printed source figures beside them, the recorded no-PDF confirmation and
     // the attachment panel's empty state. The document metadata is supplied so
     // the SSR snapshot shows the settled state rather than a loading line.
+    //
+    // #474: this record has no confirmation number, so the panel shows "Not
+    // assigned" and the later Assign action.
     name: "PurchaseOrderSaved",
     element: (
       <PurchaseOrderSavedView
         order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+      />
+    ),
+  },
+  {
+    // A saved record whose confirmation number is issued (#474): the number is
+    // read-only beside Copy, with the manual-submission explanation and no
+    // Submitted claim. The warning banner is shown because the stored sequence
+    // crossed 8000.
+    name: "PurchaseOrderSavedConfirmationAssigned",
+    element: (
+      <PurchaseOrderSavedView
+        order={{
+          ...PO_EDITOR_ORDER,
+          State: "saved",
+          PdfAbsentConfirmed: true,
+          ConfirmationNumber: "2302268000",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+          ConfirmationWarn: true,
+        }}
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
         documentInitialState={PO_DOCUMENT_NONE}
