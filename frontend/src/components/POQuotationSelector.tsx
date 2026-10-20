@@ -120,7 +120,7 @@ function StepOne({
         </p>
       ) : null}
 
-      {state.rowsLoading ? (
+      {state.rowsLoading && rows.length === 0 ? (
         <p className="py-8 text-center text-small text-ink-500">Loading quotations…</p>
       ) : rows.length === 0 ? (
         <p className="py-8 text-center text-small text-ink-500">
@@ -179,7 +179,7 @@ function StepOne({
           Previous
         </Button>
         <span className="tnum text-small text-ink-500">
-          Page {state.page} of {state.totalPages}
+          {state.rowsLoading ? "Loading… · " : ""}Page {state.page} of {state.totalPages}
         </span>
         <Button
           size="sm"
@@ -396,16 +396,24 @@ export function POQuotationSelector({
     if (!open || state.step !== 1) return;
     let stale = false;
     dispatch({ type: "rowsLoading" });
-    pageLoader
-      .current({ page: state.page, search: state.search, hideUsed: state.hideUsed })
-      .then((page) => {
-        if (!stale) dispatch({ type: "rowsLoaded", page });
-      })
-      .catch((error: unknown) => {
-        if (!stale) dispatch({ type: "rowsFailed", error: errorText(error) });
-      });
+    // A search is typed one character at a time; without a pause the modal
+    // would send a request per keystroke. The list keeps its previous rows
+    // visible while the answer is in flight, so the pause is not a blank
+    // screen. Clearing the box, and paging/filtering, query immediately.
+    const delay = state.search.trim() === "" ? 0 : 250;
+    const timer = setTimeout(() => {
+      pageLoader
+        .current({ page: state.page, search: state.search, hideUsed: state.hideUsed })
+        .then((page) => {
+          if (!stale) dispatch({ type: "rowsLoaded", page });
+        })
+        .catch((error: unknown) => {
+          if (!stale) dispatch({ type: "rowsFailed", error: errorText(error) });
+        });
+    }, delay);
     return () => {
       stale = true;
+      clearTimeout(timer);
     };
   }, [open, state.step, state.page, state.search, state.hideUsed]);
 
