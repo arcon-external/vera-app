@@ -185,9 +185,10 @@ type purchaseOrderWriteLock struct {
 
 // lockPurchaseOrderWrite locks the record and enforces the optimistic
 // concurrency contract. A missing row is ErrPurchaseOrderNotFound (never an
-// invitation to insert), a record in the wrong state is refused by name before
-// the version is compared (an already-saved draft is not a concurrency
-// conflict), and a stale ExpectedVersion is the named conflict.
+// invitation to insert); a stale ExpectedVersion is the named conflict, even
+// when the intervening write also changed the record's state (a draft
+// finalized by someone else), because the caller must see who moved it; and a
+// current base in the wrong state is refused with the state rule.
 func lockPurchaseOrderWrite(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -216,12 +217,10 @@ func lockPurchaseOrderWrite(
 	if err != nil {
 		return purchaseOrderWriteLock{}, fmt.Errorf("lock purchase order %d: %w", id, err)
 	}
-	if requiredState != "" && lock.State != requiredState {
-		if requiredState == PurchaseOrderStateSaved {
-			return purchaseOrderWriteLock{}, ErrPurchaseOrderNotSaved
-		}
-		return purchaseOrderWriteLock{}, ErrPurchaseOrderNotDraft
-	}
+	// The version is checked first: a record that moved since the editor loaded
+	// is a conflict the caller can see and overwrite deliberately, even when the
+	// intervening write also changed its state (a draft finalized by someone
+	// else). Only when the base is current does the state rule decide.
 	if lock.Version != expectedVersion {
 		name := ""
 		if err := tx.QueryRow(ctx, fmt.Sprintf(`
@@ -237,6 +236,12 @@ func lockPurchaseOrderWrite(
 			UpdatedByName:  name,
 			UpdatedAt:      lock.UpdatedAt,
 		}
+	}
+	if requiredState != "" && lock.State != requiredState {
+		if requiredState == PurchaseOrderStateSaved {
+			return purchaseOrderWriteLock{}, ErrPurchaseOrderNotSaved
+		}
+		return purchaseOrderWriteLock{}, ErrPurchaseOrderNotDraft
 	}
 	return lock, nil
 }

@@ -509,3 +509,52 @@ func TestPurchaseOrderCorrectionSnapshotCannotBeRewritten(t *testing.T) {
 		t.Errorf("snapshot changed after refused rewrites: %+v (%v)", reloaded, err)
 	}
 }
+
+func TestPurchaseOrderSaveAfterAnInterveningFinalizeWarnsBeforeTheStateRule(t *testing.T) {
+	database := openTestSchema(t, "vera_po_473_finalize_race")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Finalized meanwhile")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	input := finalizeInput(draft, user, "PO-473-F")
+	saved, err := database.FinalizePurchaseOrder(ctx, input)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	// The draft editor still holds version 1. Its save must warn with who saved
+	// and the current version -- the record became saved, which is exactly a
+	// change since load -- rather than a bare "not a draft" dead end.
+	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, ExpectedVersion: draft.Version,
+		PONumber: "PO-473-F-EDIT", Items: draft.Items,
+	})
+	if !errors.Is(err, ErrPurchaseOrderVersionConflict) {
+		t.Fatalf("save after finalize = %v; want ErrPurchaseOrderVersionConflict", err)
+	}
+	var conflict *PurchaseOrderVersionConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error = %T; want *PurchaseOrderVersionConflictError", err)
+	}
+	if conflict.CurrentVersion != saved.Version || conflict.CurrentState != PurchaseOrderStateSaved {
+		t.Errorf("conflict = version %d state %q; want version %d saved",
+			conflict.CurrentVersion, conflict.CurrentState, saved.Version)
+	}
+
+	// Overwrite at the current version then meets the state rule: a saved
+	// record is corrected, never re-drafted.
+	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, ExpectedVersion: conflict.CurrentVersion,
+		Overwrite: true, PONumber: "PO-473-F-EDIT", Items: draft.Items,
+	})
+	if !errors.Is(err, ErrPurchaseOrderNotDraft) {
+		t.Errorf("current-version save after finalize = %v; want ErrPurchaseOrderNotDraft", err)
+	}
+	stored, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if stored.State != PurchaseOrderStateSaved || stored.PONumber != "PO-473-F" {
+		t.Errorf("a refused save changed the record: %+v", stored)
+	}
+}

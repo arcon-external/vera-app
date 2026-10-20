@@ -188,14 +188,19 @@ func TestFinalizePurchaseOrderSavesTheRecordAndKeepsTheQuotation(t *testing.T) {
 		t.Errorf("the final save rewrote the quotation revision:\nbefore %s\nafter  %s", before, after)
 	}
 
-	// Saved is one-way: neither another draft write nor another final save is
-	// allowed.
+	// Saved is one-way. A save from the old base is a warnable conflict; a save
+	// stating the current version is the state rule.
 	if _, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, Items: input.Items,
 	}); !errors.Is(err, ErrPurchaseOrderNotDraft) {
 		t.Errorf("update after save = %v; want ErrPurchaseOrderNotDraft", err)
 	}
-	if _, err := database.FinalizePurchaseOrder(ctx, input); !errors.Is(err, ErrPurchaseOrderNotDraft) {
+	if _, err := database.FinalizePurchaseOrder(ctx, input); !errors.Is(err, ErrPurchaseOrderVersionConflict) {
+		t.Errorf("stale finalize = %v; want ErrPurchaseOrderVersionConflict", err)
+	}
+	current := input
+	current.ExpectedVersion = saved.Version
+	if _, err := database.FinalizePurchaseOrder(ctx, current); !errors.Is(err, ErrPurchaseOrderNotDraft) {
 		t.Errorf("second finalize = %v; want ErrPurchaseOrderNotDraft", err)
 	}
 }
