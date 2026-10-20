@@ -48,10 +48,7 @@ import {
   poSourceSelectorReducer,
 } from "./poSelector";
 import type { POSourceQuotation } from "./poSelector";
-import {
-  initialPurchaseOrderEditorState,
-  purchaseOrderEditorReducer,
-} from "./purchaseOrder";
+import { initialPurchaseOrderEditorState } from "./purchaseOrder";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
 import type { CompanyLabelEntry } from "./companyLabels";
@@ -229,14 +226,6 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
 const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
   PO_EDITOR_ORDER,
   PO_EDITOR_USD
-);
-const PO_EDITOR_DISCARD = purchaseOrderEditorReducer(
-  purchaseOrderEditorReducer(PO_EDITOR_INITIAL, {
-    type: "lineChanged",
-    key: 0,
-    patch: { quantity: "3" },
-  }),
-  { type: "cancelRequested" }
 );
 const PO_EDITOR_UOM_OPTIONS = [
   { value: "Lot", label: "Lot" },
@@ -660,32 +649,13 @@ const CASES: SnapshotCase[] = [
         incotermOptions={INCOTERM_OPTIONS}
         onSave={() => undefined}
         onCancel={() => undefined}
-        onDiscard={() => undefined}
       />
     ),
   },
   {
-    // The dirty-cancel guard (issue #468): Cancel on an edited draft asks
-    // before discarding, with both choices real enabled buttons. The reducer
-    // produced this state, not hand-written markup.
-    name: "PurchaseOrderEditorDiscard",
-    element: (
-      <PurchaseOrderEditorView
-        state={PO_EDITOR_DISCARD}
-        dispatch={() => undefined}
-        currency={PO_EDITOR_USD}
-        uomOptions={PO_EDITOR_UOM_OPTIONS}
-        incotermOptions={INCOTERM_OPTIONS}
-        onSave={() => undefined}
-        onCancel={() => undefined}
-        onDiscard={() => undefined}
-      />
-    ),
-  },
-  {
-    // #468 wave 2: the tab-navigation discard prompt App shows when a dirty PO
-    // editor would be unmounted. Same copy as the inline Cancel panel, in a
-    // modal layer, so both widths must keep both choices readable.
+    // The one discard dialog (issue #468, wave 3): Cancel and a guarded tab
+    // click open this same modal, so both widths must keep both choices
+    // readable and the scrim must cover the page behind it.
     name: "PurchaseOrderTabDiscard",
     element: (
       <div className="min-h-[420px] bg-paper p-4">
@@ -693,7 +663,6 @@ const CASES: SnapshotCase[] = [
           The purchase order editor sits behind the prompt.
         </p>
         <PurchaseOrderDiscardPrompt
-          overlay
           onKeepEditing={() => undefined}
           onDiscard={() => undefined}
         />

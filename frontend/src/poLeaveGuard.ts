@@ -25,6 +25,13 @@ export interface PurchaseOrderLeaveGuard {
   /** The destination waiting behind the discard confirmation, if any. */
   pendingPage: AppPage | null;
   /**
+   * The control that was focused when the pending decision opened. Captured
+   * before the shell becomes inert, because a browser may blur a focused
+   * element inside a newly inert subtree and the dialog could then only
+   * restore focus to <body>.
+   */
+  pendingReturnFocus: HTMLElement | null;
+  /**
    * Navigate, or ask first when leaving a dirty PO editor. `after` replaces
    * the plain navigation for a destination that needs its own work first
    * (mod+N starts a fresh quotation); it runs only once the guard allows it.
@@ -44,15 +51,29 @@ export function usePurchaseOrderLeaveGuard(
   const [pending, setPending] = useState<{
     page: AppPage;
     after: (() => void) | null;
+    returnFocus: HTMLElement | null;
   } | null>(null);
 
   const request = useCallback(
     (next: AppPage, after?: () => void) => {
-      // Going to "po" from "po" is not leaving; everything else is. The
-      // editor's own Cancel path still uses its inline panel, and this gate
-      // never re-derives dirtiness -- it trusts the lifted flag.
+      // Going to "po" from "po" is not leaving; everything else is. There is
+      // exactly one pending decision: Cancel and a tab click both arrive here,
+      // and a second click replaces the first rather than stacking a dialog.
       if (currentPage === "po" && dirty && next !== "po") {
-        setPending({ page: next, after: after ?? null });
+        const active = typeof document === "undefined" ? null : document.activeElement;
+        // A click inside the open dialog is not a new place to return to:
+        // keep the control that opened the decision. In a browser the shell
+        // is inert, so this only matters to the replace-pending path.
+        const trigger =
+          active instanceof HTMLElement &&
+          active.closest('[role="alertdialog"]') === null
+            ? active
+            : null;
+        setPending((previous) => ({
+          page: next,
+          after: after ?? null,
+          returnFocus: trigger ?? previous?.returnFocus ?? null,
+        }));
         return;
       }
       if (after) {
@@ -84,6 +105,7 @@ export function usePurchaseOrderLeaveGuard(
     dirty,
     setDirty,
     pendingPage: pending?.page ?? null,
+    pendingReturnFocus: pending?.returnFocus ?? null,
     request,
     keepEditing,
     discard,

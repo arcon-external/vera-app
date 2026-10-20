@@ -178,22 +178,16 @@ describe("PO editor dirty-cancel guard (issue #468)", () => {
     expect(isPurchaseOrderDirty(removed)).toBe(true);
   });
 
-  it("asks before discarding a dirty draft and closes silently when clean", () => {
+  it("reports dirtiness for the shared leave guard", () => {
     const clean = initial();
-    expect(
-      purchaseOrderEditorReducer(clean, { type: "cancelRequested" }).confirmDiscard
-    ).toBe(false);
+    expect(isPurchaseOrderDirty(clean)).toBe(false);
 
     const dirty = purchaseOrderEditorReducer(clean, {
       type: "lineChanged",
       key: 0,
       patch: { description: "Edited" },
     });
-    const asked = purchaseOrderEditorReducer(dirty, { type: "cancelRequested" });
-    expect(asked.confirmDiscard).toBe(true);
-    expect(
-      purchaseOrderEditorReducer(asked, { type: "cancelDismissed" }).confirmDiscard
-    ).toBe(false);
+    expect(isPurchaseOrderDirty(dirty)).toBe(true);
   });
 
   it("resets the baseline after a successful save", () => {
@@ -324,6 +318,41 @@ describe("PO draft update payload (issue #468)", () => {
       input: null,
       error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
     });
+  });
+
+  it("bounds payment terms by Unicode characters, not UTF-16 units", () => {
+    const withTerms = (terms: string) =>
+      buildPurchaseOrderUpdate(
+        purchaseOrderEditorReducer(initial(), {
+          type: "headerChanged",
+          patch: { paymentTerms: terms },
+        }),
+        USD
+      );
+    const overLimit = {
+      input: null,
+      error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
+    };
+
+    // BMP multi-byte text: 500 characters, 1500 UTF-8 bytes. The schema's
+    // char_length counts these as 500 and the store must agree.
+    const ideographs = "界".repeat(MAX_PAYMENT_TERMS_LENGTH);
+    expect(Array.from(ideographs)).toHaveLength(MAX_PAYMENT_TERMS_LENGTH);
+    expect(withTerms(ideographs).input?.PaymentTerms).toBe(ideographs);
+    expect(withTerms(ideographs + "界")).toEqual(overLimit);
+
+    // Astral text: each emoji is one character but two UTF-16 units, so the
+    // old `.length` guard refused 500 of them (1000 UTF-16 units) as over.
+    const emoji = "😀".repeat(MAX_PAYMENT_TERMS_LENGTH);
+    expect(Array.from(emoji)).toHaveLength(MAX_PAYMENT_TERMS_LENGTH);
+    expect(withTerms(emoji).input?.PaymentTerms).toBe(emoji);
+    expect(withTerms(emoji + "😀")).toEqual(overLimit);
+
+    // Mixed text at exactly 500 characters.
+    const mixed = "PO 界 #".repeat(83) + "AB";
+    expect(Array.from(mixed)).toHaveLength(MAX_PAYMENT_TERMS_LENGTH);
+    expect(withTerms(mixed).input?.PaymentTerms).toBe(mixed);
+    expect(withTerms(mixed + "!")).toEqual(overLimit);
   });
 
   it("validates calendar dates", () => {

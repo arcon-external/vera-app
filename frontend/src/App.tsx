@@ -1783,6 +1783,7 @@ function App() {
       ) : null}
       <AppShell
       page={page}
+      inert={poLeave.pendingPage !== null}
       onOpenHome={() => poLeave.request("home")}
       onOpenEditor={() => poLeave.request("create")}
       onOpenDrafts={() => poLeave.request("drafts")}
@@ -1932,10 +1933,16 @@ function App() {
               pushToast("success", "Purchase order draft saved.");
             }}
             onCancel={() => {
-              poLeave.setDirty(false);
-              setPODraft(null);
-              setPOSource(null);
-              setPage("home");
+              // Cancel is the same discard decision as a tab click: the guard
+              // owns the one dialog, and this cleanup runs only once it is
+              // allowed. A Cancel followed by a tab replaces the pending
+              // action instead of opening a second confirmation.
+              poLeave.request("home", () => {
+                poLeave.setDirty(false);
+                setPODraft(null);
+                setPOSource(null);
+                setPage("home");
+              });
             }}
           />
         )
@@ -2146,9 +2153,9 @@ function App() {
     </AppShell>
     {poLeave.pendingPage !== null ? (
       <PurchaseOrderDiscardPrompt
-        overlay
         onKeepEditing={poLeave.keepEditing}
         onDiscard={poLeave.discard}
+        returnFocus={poLeave.pendingReturnFocus}
       />
     ) : null}
     </>

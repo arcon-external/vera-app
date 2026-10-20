@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS {{schema}}.purchase_orders (
     -- Free text, not a day count: the agreed commercial wording is often
     -- "50% advance" or "30 days after delivery", which a SMALLINT cannot
     -- represent. A draft may leave it empty until the terms are agreed.
+    -- char_length counts Unicode characters, the same unit the Go store
+    -- (utf8.RuneCountInString) and the editor (code points) enforce.
     --
     -- Edit in place, 2026-10-20: 030 had never been deployed beyond
     -- disposable test schemas (the sprint integration branch is unreleased),

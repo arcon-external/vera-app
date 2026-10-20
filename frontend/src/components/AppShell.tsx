@@ -30,6 +30,12 @@ interface AppShellProps {
   actionBar?: ReactNode;
   user?: SignedInUser | null;
   onSignOut?: () => void;
+  /**
+   * Marks the whole shell unreachable while a modal layer owns the page: the
+   * discard prompt sets it so focus and assistance technology stay inside the
+   * one dialog. The caller owns the dialog, so the shell only mirrors it.
+   */
+  inert?: boolean;
 }
 
 // Home sits first: it is the landing page every other tab returns to (#466).
@@ -78,10 +84,16 @@ export function AppShell({
   actionBar,
   user,
   onSignOut,
+  inert = false,
 }: AppShellProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div className="flex min-h-full flex-col bg-paper">
+    <div
+      className="flex min-h-full flex-col bg-paper"
+      data-app-shell=""
+      aria-hidden={inert ? true : undefined}
+      inert={inert ? true : undefined}
+    >
       <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-[1560px] items-center gap-6 px-5 lg:px-8">
           <div className="flex items-center gap-1.5">

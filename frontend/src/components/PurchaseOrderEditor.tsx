@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { UpdatePurchaseOrderDraft } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
@@ -32,7 +32,6 @@ export interface PurchaseOrderEditorViewProps {
   incotermOptions: { value: string; label: string }[];
   onSave: () => void;
   onCancel: () => void;
-  onDiscard: () => void;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -51,46 +50,141 @@ export interface PurchaseOrderEditorPageProps {
 }
 
 /**
- * The one discard confirmation used by both discard paths: the editor's own
- * Cancel panel and App's tab-navigation prompt. Keeping the copy in one place
- * means a staff member reads the same question wherever the leave happens.
+ * The one discard confirmation. Both paths that can lose a draft's unsaved
+ * state -- the editor's Cancel button and App's navigation guard -- open this
+ * same component from one pending decision, so two confirmations can never
+ * stand at once.
+ *
+ * It is modal: focus enters on Keep editing, Tab and Shift+Tab wrap inside the
+ * dialog, Escape means Keep editing, and closing restores focus to the control
+ * that opened it. The caller marks the background inert (AppShell's `inert`
+ * prop); keeping that explicit rather than reaching outside this component
+ * makes the ownership of the page visible where the page is composed.
  */
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function focusableWithin(dialog: HTMLElement): HTMLElement[] {
+  return Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+}
+
 export function PurchaseOrderDiscardPrompt({
   onKeepEditing,
   onDiscard,
-  overlay = false,
+  returnFocus,
 }: {
   onKeepEditing: () => void;
   onDiscard: () => void;
-  overlay?: boolean;
+  /**
+   * The control focused when the decision opened, captured before the shell
+   * became inert. Null falls back to whatever holds focus at mount.
+   */
+  returnFocus?: HTMLElement | null;
 }) {
-  const panel = (
-    <Card className="border-danger-200 p-4">
-      <div role="alertdialog" aria-label="Discard unsaved changes?">
-        <p className="text-lead font-medium text-ink-900">
-          Discard unsaved changes?
-        </p>
-        <p className="mt-1 text-small text-ink-500">
-          The draft was saved earlier. Changes since then will be lost.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button aria-label="Keep editing" onClick={onKeepEditing}>
-            Keep editing
-          </Button>
-          <Button variant="danger" aria-label="Discard changes" onClick={onDiscard}>
-            Discard changes
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-  if (!overlay) return panel;
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // The effect owns the mounting decision; callbacks stay in refs so a parent
+  // re-render cannot re-run it and steal focus a second time.
+  const keepEditing = useRef(onKeepEditing);
+  const discard = useRef(onDiscard);
+  keepEditing.current = onKeepEditing;
+  discard.current = onDiscard;
+  const restoreTo = useRef<HTMLElement | null>(returnFocus ?? null);
+  useEffect(() => {
+    // A second navigation while the dialog stands (a tab click replacing the
+    // Cancel action) moves the restoration target to the newer control.
+    if (returnFocus !== null && returnFocus !== undefined) {
+      restoreTo.current = returnFocus;
+    }
+  }, [returnFocus]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (
+      restoreTo.current === null &&
+      typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+    ) {
+      restoreTo.current = document.activeElement;
+    }
+    const initial = dialog === null ? null : focusableWithin(dialog)[0] ?? dialog;
+    initial?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // The dialog owns Escape; App's global shortcut listener must not
+        // treat the same key as a page action.
+        event.preventDefault();
+        event.stopPropagation();
+        keepEditing.current();
+        return;
+      }
+      if (event.key !== "Tab" || dialog === null) return;
+      const focusable = focusableWithin(dialog);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const inside = dialog.contains(active);
+      if (event.shiftKey && (active === first || !inside)) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!event.shiftKey && (active === last || !inside)) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown, true);
+      const target = restoreTo.current;
+      if (target !== null && target.isConnected) {
+        target.focus();
+      }
+    };
+  }, []);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/45 p-5"
       role="presentation"
     >
-      <div className="w-full max-w-md">{panel}</div>
+      <div className="w-full max-w-md">
+        <Card className="border-danger-200 p-4">
+          <div
+            ref={dialogRef}
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Discard unsaved changes?"
+            tabIndex={-1}
+          >
+            <p className="text-lead font-medium text-ink-900">
+              Discard unsaved changes?
+            </p>
+            <p className="mt-1 text-small text-ink-500">
+              The draft was saved earlier. Changes since then will be lost.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button aria-label="Keep editing" onClick={onKeepEditing}>
+                Keep editing
+              </Button>
+              <Button
+                variant="danger"
+                aria-label="Discard changes"
+                onClick={onDiscard}
+              >
+                Discard changes
+              </Button>
+            </div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -270,7 +364,6 @@ export function PurchaseOrderEditorView({
   incotermOptions,
   onSave,
   onCancel,
-  onDiscard,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   return (
@@ -294,11 +387,8 @@ export function PurchaseOrderEditorView({
         <Badge tone="accent">Draft</Badge>
       </div>
 
-      {state.confirmDiscard ? (
-        <PurchaseOrderDiscardPrompt
-          onKeepEditing={() => dispatch({ type: "cancelDismissed" })}
-          onDiscard={onDiscard}
-        />
+      {state.error !== null ? (
+        <StatusBanner tone="danger">{state.error}</StatusBanner>
       ) : null}
 
       <Card className="p-4">
@@ -507,14 +597,9 @@ export function PurchaseOrderEditorPage({
     }
   };
 
-  const requestCancel = () => {
-    if (isPurchaseOrderDirty(state)) {
-      dispatch({ type: "cancelRequested" });
-      return;
-    }
-    onCancel();
-  };
-
+  // Cancel hands the whole decision to App's guard: there is no separate
+  // editor confirmation, so Cancel followed by a tab click replaces one
+  // pending action instead of opening a second dialog.
   return (
     <PurchaseOrderEditorView
       state={state}
@@ -523,8 +608,7 @@ export function PurchaseOrderEditorPage({
       uomOptions={uomOptions}
       incotermOptions={incotermOptions}
       onSave={() => void save()}
-      onCancel={requestCancel}
-      onDiscard={onCancel}
+      onCancel={onCancel}
     />
   );
 }

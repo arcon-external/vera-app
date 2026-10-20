@@ -96,7 +96,6 @@ export interface PurchaseOrderEditorState {
   nextKey: number;
   saving: boolean;
   error: string | null;
-  confirmDiscard: boolean;
 }
 
 export type PurchaseOrderEditorAction =
@@ -106,9 +105,7 @@ export type PurchaseOrderEditorAction =
   | { type: "lineRemoved"; key: number }
   | { type: "saveStarted" }
   | { type: "saveFailed"; error: string }
-  | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo }
-  | { type: "cancelRequested" }
-  | { type: "cancelDismissed" };
+  | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
 
 /** One replace-lines payload entry (PascalCase = Wails binding). */
 export interface PurchaseOrderItemInput {
@@ -194,6 +191,16 @@ export function formatUnitPriceMinor(
 /** The server's maximum free-text length for payment terms. */
 export const MAX_PAYMENT_TERMS_LENGTH = 500;
 
+/**
+ * Counts Unicode code points, the unit the schema's char_length and the Go
+ * store's utf8.RuneCountInString use. String.prototype.length counts UTF-16
+ * units, so an astral character would consume two of the 500 and the same
+ * wording would be accepted by one layer and refused by another.
+ */
+export function characterCount(value: string): number {
+  return Array.from(value).length;
+}
+
 /** True for a blank field or a real YYYY-MM-DD calendar date. */
 export function validDateField(raw: string): boolean {
   const text = raw.trim();
@@ -259,7 +266,6 @@ export function initialPurchaseOrderEditorState(
     nextKey: lines.length,
     saving: false,
     error: null,
-    confirmDiscard: false,
   };
   state.baseline = serializePurchaseOrderEditor(state);
   return state;
@@ -317,7 +323,7 @@ export function buildPurchaseOrderUpdate(
   // "30 days after delivery" are both real terms. Only the length is bounded,
   // by the same 500 the schema's CHECK enforces.
   const paymentTerms = state.header.paymentTerms.trim();
-  if (paymentTerms.length > MAX_PAYMENT_TERMS_LENGTH) {
+  if (characterCount(paymentTerms) > MAX_PAYMENT_TERMS_LENGTH) {
     return {
       input: null,
       error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
@@ -381,7 +387,6 @@ export function purchaseOrderEditorReducer(
       return {
         ...state,
         header: { ...state.header, ...action.patch },
-        confirmDiscard: false,
       };
     case "lineChanged":
       return {
@@ -389,7 +394,6 @@ export function purchaseOrderEditorReducer(
         lines: state.lines.map((line) =>
           line.key === action.key ? { ...line, ...action.patch } : line
         ),
-        confirmDiscard: false,
       };
     case "lineAdded":
       return {
@@ -407,13 +411,11 @@ export function purchaseOrderEditorReducer(
           },
         ],
         nextKey: state.nextKey + 1,
-        confirmDiscard: false,
       };
     case "lineRemoved":
       return {
         ...state,
         lines: state.lines.filter((line) => line.key !== action.key),
-        confirmDiscard: false,
       };
     case "saveStarted":
       return { ...state, saving: true, error: null };
@@ -423,12 +425,6 @@ export function purchaseOrderEditorReducer(
       const saved = initialPurchaseOrderEditorState(action.order, action.currency);
       return { ...saved, nextKey: Math.max(saved.nextKey, state.nextKey) };
     }
-    case "cancelRequested":
-      return isPurchaseOrderDirty(state)
-        ? { ...state, confirmDiscard: true }
-        : state;
-    case "cancelDismissed":
-      return { ...state, confirmDiscard: false };
     default:
       return state;
   }
