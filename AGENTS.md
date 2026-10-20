@@ -535,6 +535,16 @@ commit resumes the same session, hands back its own findings, and asks whether e
 is closed. Re-briefing a fresh Judge for an increment is the exception, not the
 habit — a resumed Judge knows what it found and why.
 
+**A Judge runs on a quiescent tree — no active workers.** Before dispatching a
+Judge — first pass or resume — the orchestrator confirms that **no worker subagent
+is still running**: every worker in the wave has reported and stopped, and no new
+wave has started. A Judge running beside a live worker judges a moving target: the
+diff it approves may not be the one that ships, its red proofs can collide with a
+worker's scratch edits, and its verdict goes stale the moment that worker lands
+another commit. If a worker is still running, wait for it. If the next wave is
+ready, finish and judge the current wave first — the Judge's verdict is a gate
+before the frontier moves, not a background opinion.
+
 ### 12.3 The todolist, and the tool that does not exist
 
 **OpenCode V2 has no todo tool.** Its built-in catalog is `read`, `glob`, `grep`,
