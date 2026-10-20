@@ -23,7 +23,7 @@ const QUOTATION: POSourceQuotation = {
   customerName: "PT. Infineon Technologies Batam",
   latestRevision: 1,
   issuedRevisionCount: 2,
-  hasActivePO: false,
+  activePO: null,
 };
 
 const USED: POSourceQuotation = {
@@ -33,7 +33,17 @@ const USED: POSourceQuotation = {
   customerName: "PT. H-Tech Oilfield Equipment",
   latestRevision: 0,
   issuedRevisionCount: 1,
-  hasActivePO: true,
+  activePO: { id: 21, state: "saved" },
+};
+
+const DRAFT: POSourceQuotation = {
+  id: 14,
+  quoteNumber: "1502260003",
+  subject: "Commissioning",
+  customerName: "PT. Datalec Global Solution",
+  latestRevision: 0,
+  issuedRevisionCount: 1,
+  activePO: { id: 20, state: "draft" },
 };
 
 const TWO_REVISIONS = [
@@ -56,7 +66,7 @@ function stepOneState(overrides: Partial<POSourceSelectorState> = {}) {
       {
         type: "rowsLoaded",
         page: {
-          quotations: [QUOTATION, USED],
+          quotations: [QUOTATION, USED, DRAFT],
           page: 1,
           pageSize: 15,
           total: 17,
@@ -109,6 +119,7 @@ function render(state: POSourceSelectorState): string {
       dispatch={() => {}}
       onClose={() => {}}
       onConfirm={() => {}}
+      onOpenDraft={() => {}}
     />
   ).replace(/<!-- -->/g, "");
 }
@@ -143,7 +154,7 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     expect(buttonTagFor(html, "Next page")).not.toContain(" disabled=");
   });
 
-  it("makes a used Quotation non-interactive with a reason and the disabled cursor", () => {
+  it("makes a saved Quotation non-interactive with a reason and the disabled cursor", () => {
     const html = render(stepOneState());
     const usedTag = buttonTagFor(html, "Quotation 1502260002, PT. H-Tech Oilfield Equipment");
     expect(usedTag).toContain(" disabled=");
@@ -155,18 +166,32 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     const describedBy = /aria-describedby="([^"]+)"/.exec(usedTag)?.[1];
     expect(describedBy).toBeTruthy();
     expect(html).toContain(`id="${describedBy}"`);
-    expect(html).toContain("Already has a purchase order");
+    expect(html).toContain("PO already exists");
     const usedElement = buttonElementFor(
       html,
       "Quotation 1502260002, PT. H-Tech Oilfield Equipment"
     );
-    expect(usedElement).not.toContain("Already has a purchase order");
+    expect(usedElement).not.toContain("PO already exists");
 
     // The available row is the contrast that makes the guard meaningful.
     const available = buttonTagFor(html, "Quotation 1502260001, PT. Infineon Technologies Batam");
     expect(available).not.toContain(" disabled=");
     expect(available).not.toContain("cursor-not-allowed");
     expect(available).not.toContain("aria-describedby=");
+  });
+
+  it("offers Open draft for a draft and keeps the row itself non-selectable", () => {
+    const html = render(stepOneState());
+    const draftRow = buttonTagFor(html, "Quotation 1502260003, PT. Datalec Global Solution");
+    expect(draftRow).toContain(" disabled=");
+    expect(html).toContain("Draft purchase order in progress");
+    const action = buttonTagFor(
+      html,
+      "Open draft for Quotation 1502260003"
+    );
+    expect(action).not.toContain(" disabled=");
+    // A saved record never offers the draft action.
+    expect(html).not.toContain("Open draft for Quotation 1502260002");
   });
 
   it("puts keyboard focus on a dialog the trap can own", () => {
@@ -178,9 +203,10 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     expect(dialogTag).toContain('tabindex="-1"');
   });
 
-  it("hides used rows when the filter is on, and shows the checked filter", () => {
+  it("hides occupied rows when the filter is on, and shows the checked filter", () => {
     const html = render(stepOneState({ hideUsed: true }));
     expect(html).not.toContain("1502260002");
+    expect(html).not.toContain("1502260003");
     expect(html).toContain("Hide quotations already used");
     expect(html).toMatch(/type="checkbox"[^>]*checked/);
   });

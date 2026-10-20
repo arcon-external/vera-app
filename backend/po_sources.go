@@ -20,17 +20,24 @@ type POSourceQuery struct {
 	HideUsed bool
 }
 
+// POSourceActivePODTO is the active PO occupying a Quotation (issue #468).
+// A draft offers "Open draft"; a saved record stays disabled.
+type POSourceActivePODTO struct {
+	ID    int64
+	State string
+}
+
 // POSourceQuotationDTO is one selectable Quotation: its latest issued
-// revision, how many revisions are issued, and whether a PO already occupies
-// it. HasActivePO is false until #468 supplies the real query.
+// revision, how many revisions are issued, and the active PO that occupies it
+// (if any).
 type POSourceQuotationDTO struct {
+	ActivePO            *POSourceActivePODTO
 	QuoteNumber         string
 	Subject             string
 	CustomerName        string
 	ID                  int64
 	LatestRevision      int16
 	IssuedRevisionCount int
-	HasActivePO         bool
 }
 
 // POSourcePageDTO is one page of the selector's first step.
@@ -103,15 +110,21 @@ func (q *Quotation) ListPOSourceQuotations(query POSourceQuery) (POSourcePageDTO
 	}
 	rows := make([]POSourceQuotationDTO, 0, len(response.Quotations))
 	for _, row := range response.Quotations {
-		rows = append(rows, POSourceQuotationDTO{
+		dto := POSourceQuotationDTO{
 			ID:                  row.ID,
 			QuoteNumber:         row.QuoteNumber,
 			Subject:             row.Subject,
 			CustomerName:        row.CustomerName,
 			LatestRevision:      row.LatestRevision,
 			IssuedRevisionCount: row.IssuedRevisionCount,
-			HasActivePO:         row.HasActivePO,
-		})
+		}
+		if row.ActivePO != nil {
+			dto.ActivePO = &POSourceActivePODTO{
+				ID:    row.ActivePO.ID,
+				State: row.ActivePO.State,
+			}
+		}
+		rows = append(rows, dto)
 	}
 	return POSourcePageDTO{
 		Quotations: rows,

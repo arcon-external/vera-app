@@ -83,22 +83,25 @@ type QuotationSummaryRow struct {
 	RevisionNumber int16  `json:"revision"`
 }
 
+// POSourceActivePORow is the active Purchase Order occupying a Quotation
+// (issue #468). A draft offers "Open draft"; a saved record stays disabled.
+type POSourceActivePORow struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"`
+}
+
 // POSourceQuotationRow is one selectable Quotation in the PO source selector
 // (issue #467). A row always describes the latest issued revision, with the
 // number of issued revisions beside it so the second step knows whether a
-// choice exists.
-//
-// HasActivePO is the eligibility answer: false until PO persistence exists
-// (#468 swaps the placeholder for the real query). It travels in the contract
-// now so the selector and both PO entry paths share one shape.
+// choice exists. ActivePO is null when no PO occupies the Quotation.
 type POSourceQuotationRow struct {
-	ID                  int64  `json:"id"`
-	QuoteNumber         string `json:"quoteNumber"`
-	Subject             string `json:"subject"`
-	CustomerName        string `json:"customerName"`
-	LatestRevision      int16  `json:"latestRevision"`
-	IssuedRevisionCount int    `json:"issuedRevisionCount"`
-	HasActivePO         bool   `json:"hasActivePO"`
+	ActivePO            *POSourceActivePORow `json:"activePO"`
+	ID                  int64                `json:"id"`
+	QuoteNumber         string               `json:"quoteNumber"`
+	Subject             string               `json:"subject"`
+	CustomerName        string               `json:"customerName"`
+	LatestRevision      int16                `json:"latestRevision"`
+	IssuedRevisionCount int                  `json:"issuedRevisionCount"`
 }
 
 // POSourceListResponse is one page of the selector's first step. PageSize is
@@ -148,6 +151,88 @@ type POSourceValidationResponse struct {
 	QuotationID    int64                 `json:"quotationId"`
 	RevisionNumber int16                 `json:"revisionNumber"`
 	Valid          bool                  `json:"valid"`
+}
+
+// PurchaseOrderItemRow is one entered PO line. QuotationItemNo and
+// QuotationSubNo are null for an extra line the source revision never carried.
+// QuantityScaled is an exact count of 1/10000 units; UnitPriceMinor is in the
+// PO currency's minor units.
+type PurchaseOrderItemRow struct {
+	QuotationItemNo *int   `json:"quotationItemNo"`
+	QuotationSubNo  *int   `json:"quotationSubNo"`
+	LineNumber      int    `json:"lineNumber"`
+	Description     string `json:"description"`
+	QuantityScaled  int64  `json:"quantityScaled"`
+	UoM             string `json:"uom"`
+	UnitPriceMinor  int64  `json:"unitPriceMinor"`
+}
+
+// PurchaseOrderRow is one PO draft. Dates are plain YYYY-MM-DD; the optional
+// customer PO date and requested delivery date are null when unset.
+type PurchaseOrderRow struct {
+	PODate                *string                `json:"poDate"`
+	RequestedDeliveryDate *string                `json:"requestedDeliveryDate"`
+	UUID                  string                 `json:"uuid"`
+	State                 string                 `json:"state"`
+	QuoteNumber           string                 `json:"quoteNumber"`
+	CustomerName          string                 `json:"customerName"`
+	BillingAddress        string                 `json:"billingAddress"`
+	DeliveryAddress       string                 `json:"deliveryAddress"`
+	ShipToCode            string                 `json:"shipToCode"`
+	ContactEmail          string                 `json:"contactEmail"`
+	ContactPhone          string                 `json:"contactPhone"`
+	PONumber              string                 `json:"poNumber"`
+	ReceivedDate          string                 `json:"receivedDate"`
+	Incoterms             string                 `json:"incoterms"`
+	Currency              string                 `json:"currency"`
+	TaxZone               string                 `json:"taxZone"`
+	TaxCategory           string                 `json:"taxCategory"`
+	CreatedAt             string                 `json:"createdAt"`
+	UpdatedAt             string                 `json:"updatedAt"`
+	Items                 []PurchaseOrderItemRow `json:"items"`
+	ID                    int64                  `json:"id"`
+	QuotationID           int64                  `json:"quotationId"`
+	SourceRevision        int16                  `json:"sourceRevision"`
+	CustomerID            int64                  `json:"customerId"`
+	PaymentTermsDays      int16                  `json:"paymentTermsDays"`
+}
+
+// PurchaseOrderCreateRequest starts a draft from one exact issued revision.
+// RevisionNumber is a pointer because revision 0 is real and an absent field
+// must not read as it. ReceivedDate is optional; the server defaults it to
+// today.
+type PurchaseOrderCreateRequest struct {
+	QuotationID    int64  `json:"quotationId"`
+	RevisionNumber *int16 `json:"revisionNumber"`
+	ReceivedDate   string `json:"receivedDate,omitempty"`
+}
+
+// PurchaseOrderItemInput is one replace-lines entry. LineNumber is assigned by
+// the server from array order, so drafts always carry 1..n without gaps.
+type PurchaseOrderItemInput struct {
+	QuotationItemNo *int   `json:"quotationItemNo"`
+	QuotationSubNo  *int   `json:"quotationSubNo"`
+	Description     string `json:"description"`
+	QuantityScaled  int64  `json:"quantityScaled"`
+	UoM             string `json:"uom"`
+	UnitPriceMinor  int64  `json:"unitPriceMinor"`
+}
+
+// PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
+// customer snapshots, currency and tax basis are not writable.
+type PurchaseOrderUpdateRequest struct {
+	PODate                string                   `json:"poDate,omitempty"`
+	RequestedDeliveryDate string                   `json:"requestedDeliveryDate,omitempty"`
+	BillingAddress        string                   `json:"billingAddress"`
+	DeliveryAddress       string                   `json:"deliveryAddress"`
+	ShipToCode            string                   `json:"shipToCode"`
+	ContactEmail          string                   `json:"contactEmail"`
+	ContactPhone          string                   `json:"contactPhone"`
+	PONumber              string                   `json:"poNumber"`
+	ReceivedDate          string                   `json:"receivedDate,omitempty"`
+	Incoterms             string                   `json:"incoterms"`
+	Items                 []PurchaseOrderItemInput `json:"items"`
+	PaymentTermsDays      int16                    `json:"paymentTermsDays"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.

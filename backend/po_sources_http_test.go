@@ -36,7 +36,8 @@ func TestListPOSourceQuotationsMapsPageAndQuery(t *testing.T) {
 			Quotations: []apicontract.POSourceQuotationRow{{
 				ID: 12, QuoteNumber: "1502260012", Subject: "Electrical",
 				CustomerName:   "PT. Infineon Technologies Batam",
-				LatestRevision: 2, IssuedRevisionCount: 3, HasActivePO: false,
+				LatestRevision: 2, IssuedRevisionCount: 3,
+				ActivePO: &apicontract.POSourceActivePORow{ID: 7, State: "draft"},
 			}},
 		})
 	})
@@ -56,8 +57,9 @@ func TestListPOSourceQuotationsMapsPageAndQuery(t *testing.T) {
 	}
 	row := page.Quotations[0]
 	if row.ID != 12 || row.QuoteNumber != "1502260012" || row.LatestRevision != 2 ||
-		row.IssuedRevisionCount != 3 || row.HasActivePO {
-		t.Errorf("row = %+v; want the full selectable shape", row)
+		row.IssuedRevisionCount != 3 || row.ActivePO == nil || row.ActivePO.ID != 7 ||
+		row.ActivePO.State != "draft" {
+		t.Errorf("row = %+v; want the full selectable shape with its active draft", row)
 	}
 }
 

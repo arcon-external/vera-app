@@ -10,6 +10,10 @@ export function ClearRevisionContext() {
   return window['go']['backend']['Quotation']['ClearRevisionContext']();
 }
 
+export function CreatePurchaseOrderDraft(arg1) {
+  return window['go']['backend']['Quotation']['CreatePurchaseOrderDraft'](arg1);
+}
+
 export function CustomerID() {
   return window['go']['backend']['Quotation']['CustomerID']();
 }
@@ -48,6 +52,10 @@ export function GetDraft(arg1) {
 
 export function GetInternalBreakdown() {
   return window['go']['backend']['Quotation']['GetInternalBreakdown']();
+}
+
+export function GetPurchaseOrder(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrder'](arg1);
 }
 
 export function GetQuotation(arg1) {
@@ -132,6 +140,10 @@ export function SetStore(arg1) {
 
 export function SetVerifyURL(arg1) {
   return window['go']['backend']['Quotation']['SetVerifyURL'](arg1);
+}
+
+export function UpdatePurchaseOrderDraft(arg1) {
+  return window['go']['backend']['Quotation']['UpdatePurchaseOrderDraft'](arg1);
 }
 
 export function ValidatePOSource(arg1) {

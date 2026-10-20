@@ -3,6 +3,7 @@ import type { KeyboardEvent, RefObject } from "react";
 import {
   canConfirm,
   canContinue,
+  draftOf,
   initialPOSourceSelectorState,
   poSourceQueryDelay,
   poSourceSelectorReducer,
@@ -11,6 +12,7 @@ import {
   visibleRows,
 } from "../poSelector";
 import type {
+  POSourceActivePO,
   POSourcePage,
   POSourceQuery,
   POSourceRevision,
@@ -33,8 +35,11 @@ import { Button, fieldClass } from "./ui";
 export interface POQuotationSelectorProps {
   open: boolean;
   onClose: () => void;
-  /** Receives the confirmed pair. The caller opens PO entry with it (#468). */
-  onConfirm: (selection: POSourceSelection) => void;
+  /** Receives the confirmed pair. The caller opens PO entry with it (#468).
+   *  A rejected promise keeps the dialog open with its error message. */
+  onConfirm: (selection: POSourceSelection) => void | Promise<void>;
+  /** Reopens the draft that already occupies a Quotation (#468). */
+  onOpenDraft?: (activePO: POSourceActivePO) => void;
   /** One page of issued Quotations (15 per page, server-fixed). */
   loadPage: (query: POSourceQuery) => Promise<POSourcePage>;
   /** Issued revisions of one Quotation, newest first. */
@@ -48,6 +53,8 @@ export interface POQuotationSelectorViewProps {
   dispatch: (action: POSourceSelectorAction) => void;
   onClose: () => void;
   onConfirm: () => void;
+  /** Opens the existing draft instead of starting a second PO. */
+  onOpenDraft?: (activePO: POSourceActivePO) => void;
   /** The dialog element: the programmatic focus target on open. */
   dialogRef?: RefObject<HTMLDivElement | null>;
   /** Escape and Tab containment, owned by the container. */
@@ -103,7 +110,8 @@ function SourceSummary({ state }: { state: POSourceSelectorState }) {
 function StepOne({
   state,
   dispatch,
-}: Pick<POQuotationSelectorViewProps, "state" | "dispatch">) {
+  onOpenDraft,
+}: Pick<POQuotationSelectorViewProps, "state" | "dispatch" | "onOpenDraft">) {
   const rows = visibleRows(state.rows, state.hideUsed);
   return (
     <div className="grid gap-4">
@@ -149,7 +157,9 @@ function StepOne({
       ) : (
         <ul className="grid max-h-[42vh] gap-2 overflow-y-auto scroll-thin pr-1">
           {rows.map((row) => {
-            const used = row.hasActivePO;
+            const active = row.activePO;
+            const used = active !== null;
+            const draft = draftOf(row);
             return (
               <li key={row.id} className="grid gap-1">
                 <button
@@ -185,8 +195,19 @@ function StepOne({
                     id={`po-source-used-${row.id}`}
                     className="px-1 text-caption font-medium text-danger-600"
                   >
-                    Already has a purchase order
+                    {draft !== null ? "Draft purchase order in progress" : "PO already exists"}
                   </p>
+                ) : null}
+                {draft !== null && onOpenDraft !== undefined ? (
+                  <div className="px-1">
+                    <Button
+                      size="sm"
+                      aria-label={`Open draft for Quotation ${row.quoteNumber}`}
+                      onClick={() => onOpenDraft(draft)}
+                    >
+                      Open draft
+                    </Button>
+                  </div>
                 ) : null}
               </li>
             );
@@ -311,6 +332,7 @@ export function POQuotationSelectorView({
   dispatch,
   onClose,
   onConfirm,
+  onOpenDraft,
   dialogRef,
   onKeyDown,
 }: POQuotationSelectorViewProps) {
@@ -348,7 +370,9 @@ export function POQuotationSelectorView({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-6 py-5">
-          {state.step === 1 ? <StepOne state={state} dispatch={dispatch} /> : null}
+          {state.step === 1 ? (
+            <StepOne state={state} dispatch={dispatch} onOpenDraft={onOpenDraft} />
+          ) : null}
           {state.step === 2 ? <StepTwo state={state} dispatch={dispatch} /> : null}
           {state.step === 3 ? <StepThree state={state} /> : null}
         </div>
@@ -397,6 +421,7 @@ export function POQuotationSelector({
   open,
   onClose,
   onConfirm,
+  onOpenDraft,
   loadPage,
   loadRevisions,
   validate,
@@ -589,7 +614,7 @@ export function POQuotationSelector({
         dispatch({ type: "confirmFailed", error: validationMessage(outcome.reason) });
         return;
       }
-      onConfirm(selection);
+      await onConfirm(selection);
     } catch (error) {
       if (token !== confirmToken.current || !openRef.current) return;
       dispatch({ type: "confirmFailed", error: errorText(error) });
@@ -603,6 +628,7 @@ export function POQuotationSelector({
       dispatch={dispatch}
       onClose={handleClose}
       onConfirm={() => void confirm()}
+      onOpenDraft={onOpenDraft}
       dialogRef={dialogRef}
       onKeyDown={handleDialogKeyDown}
     />

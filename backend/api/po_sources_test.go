@@ -107,14 +107,19 @@ func exportNextRevision(t *testing.T, server *Server, token, quoteNumber string,
 	}
 }
 
+type poSourceActivePO struct {
+	ID    int64  `json:"id"`
+	State string `json:"state"`
+}
+
 type poSourceRow struct {
-	ID                  int64  `json:"id"`
-	QuoteNumber         string `json:"quoteNumber"`
-	Subject             string `json:"subject"`
-	CustomerName        string `json:"customerName"`
-	LatestRevision      int16  `json:"latestRevision"`
-	IssuedRevisionCount int    `json:"issuedRevisionCount"`
-	HasActivePO         bool   `json:"hasActivePO"`
+	ID                  int64             `json:"id"`
+	QuoteNumber         string            `json:"quoteNumber"`
+	Subject             string            `json:"subject"`
+	CustomerName        string            `json:"customerName"`
+	LatestRevision      int16             `json:"latestRevision"`
+	IssuedRevisionCount int               `json:"issuedRevisionCount"`
+	ActivePO            *poSourceActivePO `json:"activePO"`
 }
 
 type poSourceList struct {
@@ -181,8 +186,8 @@ func TestPOSourceListPaginatesIssuedQuotationsFifteenPerPage(t *testing.T) {
 	if row.LatestRevision != 0 || row.IssuedRevisionCount != 1 {
 		t.Errorf("row revision facts = latest %d, count %d; want 0 and 1", row.LatestRevision, row.IssuedRevisionCount)
 	}
-	if row.HasActivePO {
-		t.Errorf("row claims an active PO before PO persistence exists")
+	if row.ActivePO != nil {
+		t.Errorf("row claims an active PO before one exists")
 	}
 }
 
@@ -331,19 +336,33 @@ func TestPOSourceListExcludesUnsavedDrafts(t *testing.T) {
 	}
 }
 
-func TestPOSourceListPassesEligibilityThroughAndAcceptsTheHideFilter(t *testing.T) {
+func TestPOSourceListReportsTheActivePOAndHonoursTheHideFilter(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_sources_eligibility")
 
-	exportForSelector(t, server, token, poSourceInput("Eligible quotation", "Eligible item"))
+	quotationID, _ := exportForSelector(t, server, token, poSourceInput("Eligible quotation", "Eligible item"))
 
 	list := listPOSources(t, server, token, "?hideUsed=true")
 	if len(list.Quotations) != 1 {
 		t.Fatalf("hideUsed rows = %d; want 1 while no PO exists", len(list.Quotations))
 	}
-	// The contract carries the flag even though #468 supplies the real query:
-	// a row that omits eligibility would force the frontend to invent it.
-	if list.Quotations[0].HasActivePO {
-		t.Errorf("hasActivePO = true; want false until PO persistence exists")
+	if list.Quotations[0].ActivePO != nil {
+		t.Errorf("activePO = %+v; want null before a PO exists", list.Quotations[0].ActivePO)
+	}
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create draft = %d; want 201 (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+
+	occupied := listPOSources(t, server, token, "")
+	if occupied.Quotations[0].ActivePO == nil ||
+		occupied.Quotations[0].ActivePO.ID != draft.ID ||
+		occupied.Quotations[0].ActivePO.State != "draft" {
+		t.Errorf("activePO = %+v; want draft %d", occupied.Quotations[0].ActivePO, draft.ID)
+	}
+	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 0 {
+		t.Errorf("hideUsed rows = %d; want the occupied quotation hidden", len(hidden.Quotations))
 	}
 }
 
