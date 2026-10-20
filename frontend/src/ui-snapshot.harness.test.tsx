@@ -838,6 +838,28 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The same panel when the display-only aggregate gross cannot be named
+    // exactly (issue #470 wave 3). Each line and the stored subtotal/grand are
+    // exact; only the sum of line grosses is above 2^53-1. This case proves the
+    // long status text fits at 360 without clipping the money column.
+    name: "PurchaseOrderTotalsExactRange",
+    element: (
+      <PurchaseOrderTotals
+        totals={{
+          ...PO_EDITOR_CALCULATION.totals!,
+          grossMinor: null,
+          rowDiscountMinor: null,
+        }}
+        currency={PO_EDITOR_USD}
+        discountPercent={5}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
+      />
+    ),
+  },
+  {
     // The same panel while an input cannot be parsed (issue #470 wave 2): an
     // explicit pending state, never a column of fabricated zeros. The printed
     // group stays visible because it is source evidence, not our arithmetic.

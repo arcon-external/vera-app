@@ -41,6 +41,22 @@ function formatBps(bps: number): string {
   return `${(bps / 100).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
 }
 
+/**
+ * A display-only aggregate, or an explicit statement that it cannot be named
+ * exactly. The sum of two valid line grosses can exceed 2^53-1 even when every
+ * line, the subtotal and the grand total are exact; that aggregate is never
+ * stored or sent, so it must not refuse the order, and it must not print a
+ * rounded number either.
+ */
+function aggregateMoney(
+  currency: CurrencyInfo,
+  minor: number | null,
+  negative = false
+): string {
+  if (minor === null) return "Above the exact display range";
+  return formatMoney(currency, negative ? -minor : minor);
+}
+
 function Row({
   label,
   value,
@@ -82,7 +98,9 @@ export function PurchaseOrderTotals({
   printedTotals,
   sourceRevision,
 }: PurchaseOrderTotalsProps) {
-  const showRowDiscounts = totals !== null && totals.rowDiscountMinor > 0;
+  const showRowDiscounts =
+    totals !== null &&
+    (totals.rowDiscountMinor === null || totals.rowDiscountMinor > 0);
   const showWholeDiscount = totals !== null && totals.discountMinor > 0;
   const showPpn = ppnBps > 0;
   const showAdjustment = totals !== null && totals.adjustmentMinor !== 0;
@@ -99,12 +117,12 @@ export function PurchaseOrderTotals({
         </p>
       ) : (
         <dl className="mt-2 divide-y divide-rule">
-          <Row label="Line totals" value={formatMoney(currency, totals.grossMinor)} />
+          <Row label="Line totals" value={aggregateMoney(currency, totals.grossMinor)} />
           {showRowDiscounts ? (
             <Row
               label="Row discounts"
               muted
-              value={formatMoney(currency, -totals.rowDiscountMinor)}
+              value={aggregateMoney(currency, totals.rowDiscountMinor, true)}
             />
           ) : null}
           <Row label="Subtotal" value={formatMoney(currency, totals.subtotalMinor)} />

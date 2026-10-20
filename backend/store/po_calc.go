@@ -297,6 +297,10 @@ func legacyPOToTaxType(category string) (taxType, serviceCategory string, ok boo
 // normalizePurchaseOrderAdjustment enforces the one rule a signed adjustment
 // has: it is visible, and it is explained. A zero adjustment carries no
 // reason, so a half-typed explanation cannot outlive the amount it explained.
+//
+// The blank set is Go's strings.TrimSpace (unicode.IsSpace); the schema's CHECK
+// and the editor's trimAdjustmentReason mirror it, and
+// backend/testdata/po_adjustment_whitespace.json pins the set for all three.
 func normalizePurchaseOrderAdjustment(amount int64, reason string) (int64, string, error) {
 	reason = strings.TrimSpace(reason)
 	if utf8.RuneCountInString(reason) > MaxAdjustmentReasonLength {

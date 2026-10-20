@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Issue #468: a manual PO draft born from one exact issued Quotation revision.
@@ -1278,16 +1279,51 @@ func TestPurchaseOrderMigration031EnforcesExactRangesAndTrimmedReasons(t *testin
 		WHERE id = $2`, schema), MaxExactMinor+1, draft.ID)
 	requirePGConstraint(t, err, "purchase_orders_exact_range_check")
 
-	// A nonzero adjustment explained only by tabs, newlines, carriage returns,
-	// form feeds and vertical tabs must be refused. The grand formula is kept
-	// consistent so the reason check is the one that fails.
-	_, err = pool.Exec(ctx, fmt.Sprintf(`
+	// Every code point the shared fixture calls blank must be refused as the
+	// whole reason, and every code point it calls content must be storable.
+	// The grand formula is kept consistent so the reason check is the one that
+	// fails. The fixture is read by the Go calculator and the editor tests too.
+	whitespace := poWhitespaceFixture(t)
+	for _, point := range whitespace.Blank {
+		_, err = pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET adjustment_minor = 1,
+			    adjustment_reason = $1,
+			    grand_total_minor = subtotal_minor - discount_minor + ppn_minor + 1
+			WHERE id = $2`, schema), string(rune(point.CodePoint)), draft.ID)
+		if err == nil {
+			t.Errorf("%s (%U) only was stored as an explained adjustment",
+				point.Name, point.CodePoint)
+			continue
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23514" ||
+			pgErr.ConstraintName != "purchase_orders_adjustment_explained_check" {
+			t.Errorf("%s (%U): error = %v; want the explained-adjustment CHECK",
+				point.Name, point.CodePoint, err)
+		}
+	}
+	for _, point := range whitespace.Content {
+		_, err = pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET adjustment_minor = 1,
+			    adjustment_reason = $1,
+			    grand_total_minor = subtotal_minor - discount_minor + ppn_minor + 1
+			WHERE id = $2`, schema), string(rune(point.CodePoint)), draft.ID)
+		if err != nil {
+			t.Errorf("%s (%U) is content, but the schema refused it: %v",
+				point.Name, point.CodePoint, err)
+		}
+	}
+	// Put the row back to an unexplained zero adjustment before the length
+	// check below, so only that CHECK can fail.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders
-		SET adjustment_minor = 1,
-		    adjustment_reason = E'\t\n\r\f\v',
-		    grand_total_minor = subtotal_minor - discount_minor + ppn_minor + 1
-		WHERE id = $1`, schema), draft.ID)
-	requirePGConstraint(t, err, "purchase_orders_adjustment_explained_check")
+		SET adjustment_minor = 0, adjustment_reason = '',
+		    grand_total_minor = subtotal_minor - discount_minor + ppn_minor
+		WHERE id = $1`, schema), draft.ID); err != nil {
+		t.Fatalf("reset the adjustment: %v", err)
+	}
 
 	// The bound is Unicode characters, the same unit Go's rune count and the
 	// editor's code-point count use.
@@ -1401,7 +1437,7 @@ func TestPurchaseOrderMigration031DeclaresTheCalculation(t *testing.T) {
 		"purchase_order_items_exact_range_check",
 		"purchase_orders_exact_range_check",
 		"9007199254740991",
-		"btrim(adjustment_reason, E' \\t\\n\\r\\f\\v')",
+		"adjustment_reason !~",
 		"purchase_orders_grand_formula_check",
 		"purchase_orders_adjustment_explained_check",
 		"purchase_order_items_net_formula_check",
@@ -1534,6 +1570,204 @@ func TestPurchaseOrderMigration031BackfillsAPreCalculationDraft(t *testing.T) {
 		t.Errorf("backfilled printed totals = %d/%d; want 3050/3111",
 			reopened.PrintedSubtotalMinor, reopened.PrintedGrandTotalMinor)
 	}
+}
+
+// TestPurchaseOrderMigration031RefusesToFabricatePrintedTotals builds a real
+// pre-031 schema, writes a draft shaped exactly like a #468 record, removes the
+// source revision's totals row, and runs the real migrator. 031 must fail and
+// roll back -- no printed column may exist to read back as zero -- then succeed
+// once the evidence is restored.
+func TestPurchaseOrderMigration031RefusesToFabricatePrintedTotals(t *testing.T) {
+	dsn := testDSN(t)
+	schema := "vera_po_calc_backfill_missing"
+	pool := migrateThrough(t, dsn, schema, 30)
+	database := &Store{pool: pool, config: Config{DSN: dsn, Schema: schema}}
+	t.Cleanup(database.Close)
+
+	quotation := seedPOQuotation(t, database, "PT. Buyer", "Missing printed evidence")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	qualified := quoteIdentifier(schema)
+
+	var customerID int64
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		`SELECT customer_id FROM %s.quotations WHERE id = $1`, qualified),
+		quotation.ID).Scan(&customerID); err != nil {
+		t.Fatalf("read the quotation customer: %v", err)
+	}
+	org, err := database.DefaultOrganization(ctx)
+	if err != nil {
+		t.Fatalf("default organization: %v", err)
+	}
+
+	var draftID int64
+	if err := pool.QueryRow(ctx, fmt.Sprintf(`
+		INSERT INTO %s.purchase_orders (
+			org_id, quotation_id, source_revision, customer_id, customer_name,
+			received_date, currency, tax_zone, tax_category, created_by, updated_by
+		) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'USD', 'NonFTZ', 'SupplyInstall', $6, $6)
+		RETURNING id`, qualified),
+		org.ID, quotation.ID, quotation.RevisionNumber, customerID,
+		quotation.CustomerName, user.ID).Scan(&draftID); err != nil {
+		t.Fatalf("insert the pre-031 draft: %v", err)
+	}
+	for lineNumber, line := range []struct {
+		description string
+		qty         int64
+		price       int64
+	}{
+		{"Half unit", 5000, 1},
+		{"Rounding boundary", 3333, 300},
+	} {
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO %s.purchase_order_items (
+				purchase_order_id, line_number, description, quantity_scaled, uom, unit_price_minor
+			) VALUES ($1, $2, $3, $4, 'Pc', $5)`, qualified),
+			draftID, lineNumber+1, line.description, line.qty, line.price); err != nil {
+			t.Fatalf("insert pre-031 line %d: %v", lineNumber+1, err)
+		}
+	}
+
+	var revisionID int64
+	if err := pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT id FROM %s.quotation_revisions
+		WHERE quotation_id = $1 AND revision_number = $2`, qualified),
+		quotation.ID, quotation.RevisionNumber).Scan(&revisionID); err != nil {
+		t.Fatalf("read the source revision: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		`DELETE FROM %s.quotation_revision_totals WHERE revision_id = $1`, qualified),
+		revisionID); err != nil {
+		t.Fatalf("remove the source totals: %v", err)
+	}
+
+	err = database.Migrate(ctx)
+	if err == nil {
+		t.Fatal("migration 031 fabricated printed totals from a missing source")
+	}
+	if !strings.Contains(err.Error(), "031") ||
+		!strings.Contains(err.Error(), "no source revision totals") {
+		t.Errorf("migration error = %v; want it to name 031 and the missing source totals", err)
+	}
+	var recorded bool
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		`SELECT EXISTS (SELECT 1 FROM %s.schema_migrations WHERE version = 31)`, qualified)).
+		Scan(&recorded); err != nil {
+		t.Fatalf("check migration bookkeeping: %v", err)
+	}
+	if recorded {
+		t.Error("migration 031 was recorded despite failing")
+	}
+	var printedColumn bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.columns
+			WHERE table_schema = $1 AND table_name = 'purchase_orders'
+			  AND column_name = 'printed_subtotal_minor'
+		)`, schema).Scan(&printedColumn); err != nil {
+		t.Fatalf("check the rolled-back columns: %v", err)
+	}
+	if printedColumn {
+		t.Error("031 left its printed columns behind after rolling back; a zero could be read as evidence")
+	}
+
+	// Restore the evidence and migrate again: the same draft must backfill to
+	// the figures the source revision actually printed, not to zero.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.quotation_revision_totals (
+			revision_id, original_subtotal, original_discount, original_grand_total,
+			marginalized_subtotal, marginalized_discount, marginalized_grand_total,
+			tax_amount, marginalized_grand_after_tax, profit_amount, nett_profit,
+			ppn_amount, customer_grand_total
+		) VALUES ($1, 0, 0, 0, 3050, 0, 3050, 0, 3111, 0, 0, 0, 3111)`, qualified),
+		revisionID); err != nil {
+		t.Fatalf("restore the source totals: %v", err)
+	}
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("migrate after restoring the evidence: %v", err)
+	}
+	reopened, err := database.GetPurchaseOrder(ctx, draftID)
+	if err != nil {
+		t.Fatalf("reopen after backfill: %v", err)
+	}
+	if reopened.SubtotalMinor != 101 || reopened.GrandTotalMinor != 101 {
+		t.Errorf("backfilled totals = %d/%d; want 101/101",
+			reopened.SubtotalMinor, reopened.GrandTotalMinor)
+	}
+	if reopened.PrintedSubtotalMinor != 3050 ||
+		reopened.PrintedDiscountMinor != 0 ||
+		reopened.PrintedPpnMinor != 0 ||
+		reopened.PrintedGrandTotalMinor != 3111 {
+		t.Errorf("backfilled printed totals = %d/%d/%d/%d; want 3050/0/0/3111",
+			reopened.PrintedSubtotalMinor, reopened.PrintedDiscountMinor,
+			reopened.PrintedPpnMinor, reopened.PrintedGrandTotalMinor)
+	}
+}
+
+// migrateThrough applies the embedded migrations up to and including version
+// `through`, recording them in a fresh schema exactly as Migrate does. It lets
+// a test hold a schema at the shape a draft was written against before the next
+// migration existed.
+func migrateThrough(t *testing.T, dsn, schema string, through int) *pgxpool.Pool {
+	t.Helper()
+	resetTestSchema(t, dsn, schema)
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect for migration setup: %v", err)
+	}
+	qualified := quoteIdentifier(schema)
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+qualified); err != nil {
+		pool.Close()
+		t.Fatalf("create schema %s: %v", schema, err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`, qualified)); err != nil {
+		pool.Close()
+		t.Fatalf("create schema_migrations: %v", err)
+	}
+	migrations, err := loadMigrations(schema)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("load migrations: %v", err)
+	}
+	applied := 0
+	for _, migration := range migrations {
+		if migration.version > through {
+			continue
+		}
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			pool.Close()
+			t.Fatalf("begin migration %d: %v", migration.version, err)
+		}
+		if _, err := tx.Exec(ctx, migration.sql); err != nil {
+			_ = tx.Rollback(ctx)
+			pool.Close()
+			t.Fatalf("apply migration %d (%s): %v", migration.version, migration.name, err)
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			`INSERT INTO %s.schema_migrations (version, name) VALUES ($1, $2)`, qualified),
+			migration.version, migration.name); err != nil {
+			_ = tx.Rollback(ctx)
+			pool.Close()
+			t.Fatalf("record migration %d: %v", migration.version, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			pool.Close()
+			t.Fatalf("commit migration %d: %v", migration.version, err)
+		}
+		applied++
+	}
+	if applied != through {
+		pool.Close()
+		t.Fatalf("applied %d migrations through version %d", applied, through)
+	}
+	return pool
 }
 
 // seedPOQuotationModernTax writes a revision under the current tax model:
