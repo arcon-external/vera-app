@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,6 +47,13 @@ var (
 	// ErrPurchaseOrderSourceNotFound means the selected Quotation or revision
 	// is gone (or was never issued).
 	ErrPurchaseOrderSourceNotFound = errors.New("purchase order source quotation or revision not found")
+	// ErrPurchaseOrderSourceIncomplete means the revision exists but has no
+	// stored totals row. A PO copies those printed figures as evidence; without
+	// them there is nothing to copy, and creating the PO would invent zeros.
+	ErrPurchaseOrderSourceIncomplete = errors.New("purchase order source revision is incomplete")
+	// ErrPurchaseOrderSourceOutOfRange means a source amount or printed total
+	// is outside 0..MaxExactMinor and could not cross into the editor exactly.
+	ErrPurchaseOrderSourceOutOfRange = errors.New("purchase order source amount is outside the supported amount range")
 	// ErrPurchaseOrderBadReference refuses a line that names a Quotation item
 	// or sub-item that the frozen source revision does not carry.
 	ErrPurchaseOrderBadReference = errors.New("purchase order line references an unknown quotation item")
@@ -429,14 +435,15 @@ type purchaseOrderSource struct {
 func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema string, quotationID int64, revision int16) (purchaseOrderSource, error) {
 	var source purchaseOrderSource
 	var paymentTermDays int16
+	var printedSubtotal, printedDiscount, printedPpn, printedGrand pgtype.Int8
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.quote_number, c.id, c.legal_name, r.id, r.recipient_address,
 		       r.incoterm, r.payment_term_days, r.tax_zone, r.tax_category, r.currency,
 		       r.tax_type, r.service_category,
-		       COALESCE(t.marginalized_subtotal, 0),
-		       COALESCE(t.marginalized_discount, 0),
-		       COALESCE(t.ppn_amount, 0),
-		       COALESCE(t.customer_grand_total, 0)
+		       t.marginalized_subtotal,
+		       t.marginalized_discount,
+		       t.ppn_amount,
+		       t.customer_grand_total
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r
@@ -456,16 +463,40 @@ func loadPurchaseOrderSource(ctx context.Context, q purchaseOrderQuerier, schema
 		&source.Currency,
 		&source.TaxType,
 		&source.ServiceCategory,
-		&source.PrintedSubtotal,
-		&source.PrintedDiscount,
-		&source.PrintedPpn,
-		&source.PrintedGrand,
+		&printedSubtotal,
+		&printedDiscount,
+		&printedPpn,
+		&printedGrand,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return purchaseOrderSource{}, ErrPurchaseOrderSourceNotFound
 	}
 	if err != nil {
 		return purchaseOrderSource{}, fmt.Errorf("load purchase order source %d/%d: %w", quotationID, revision, err)
+	}
+	if !printedSubtotal.Valid || !printedDiscount.Valid || !printedPpn.Valid || !printedGrand.Valid {
+		return purchaseOrderSource{}, fmt.Errorf(
+			"%w: revision %d has no printed totals to copy",
+			ErrPurchaseOrderSourceIncomplete, revision)
+	}
+	source.PrintedSubtotal = printedSubtotal.Int64
+	source.PrintedDiscount = printedDiscount.Int64
+	source.PrintedPpn = printedPpn.Int64
+	source.PrintedGrand = printedGrand.Int64
+	for _, printed := range []struct {
+		name  string
+		value int64
+	}{
+		{"subtotal", source.PrintedSubtotal},
+		{"discount", source.PrintedDiscount},
+		{"PPN", source.PrintedPpn},
+		{"grand total", source.PrintedGrand},
+	} {
+		if printed.value < 0 || printed.value > MaxExactMinor {
+			return purchaseOrderSource{}, fmt.Errorf(
+				"%w: printed %s %d is outside 0..%d",
+				ErrPurchaseOrderSourceOutOfRange, printed.name, printed.value, MaxExactMinor)
+		}
 	}
 	source.PaymentTerms = quotationPaymentTerms(paymentTermDays)
 	return source, nil
@@ -526,6 +557,9 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 			&item.UoM, &item.UnitPriceMinor, &item.ShowSubPrices); err != nil {
 			return nil, fmt.Errorf("scan purchase order source item: %w", err)
 		}
+		if err := checkSourceUnitPrice(item.UnitPriceMinor); err != nil {
+			return nil, fmt.Errorf("source item %d: %w", item.ItemNo, err)
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -549,6 +583,9 @@ func copyPurchaseOrderLines(ctx context.Context, q purchaseOrderQuerier, schema 
 		if err := subRows.Scan(&itemID, &sub.SubNo, &sub.Description, &sub.Quantity,
 			&sub.UoM, &sub.UnitPriceMinor); err != nil {
 			return nil, fmt.Errorf("scan purchase order source sub-item: %w", err)
+		}
+		if err := checkSourceUnitPrice(sub.UnitPriceMinor); err != nil {
+			return nil, fmt.Errorf("source sub-item %d: %w", sub.SubNo, err)
 		}
 		subs[itemID] = append(subs[itemID], sub)
 	}
@@ -596,10 +633,24 @@ func scaledQuantity(quantity int64) (int64, error) {
 	if quantity <= 0 {
 		return 0, fmt.Errorf("%w: source quantity must be positive", ErrPurchaseOrderInvalid)
 	}
-	if quantity > math.MaxInt64/QuantityScale {
-		return 0, fmt.Errorf("%w: source quantity is too large", ErrPurchaseOrderInvalid)
+	if quantity > MaxExactMinor/QuantityScale {
+		return 0, fmt.Errorf(
+			"%w: source quantity %d exceeds the supported amount range",
+			ErrPurchaseOrderSourceOutOfRange, quantity)
 	}
 	return quantity * QuantityScale, nil
+}
+
+// checkSourceUnitPrice keeps a frozen revision's list price inside the range
+// the editor can read back exactly. It is a source-integrity refusal rather
+// than a user-input error: nothing the staff member typed caused it.
+func checkSourceUnitPrice(value int64) error {
+	if value < 0 || value > MaxExactMinor {
+		return fmt.Errorf(
+			"%w: source unit price %d is outside 0..%d",
+			ErrPurchaseOrderSourceOutOfRange, value, MaxExactMinor)
+	}
+	return nil
 }
 
 // validatePurchaseOrderReferences ensures every non-nil line reference exists

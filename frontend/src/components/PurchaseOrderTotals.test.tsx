@@ -116,4 +116,29 @@ describe("PurchaseOrderTotals (issue #470)", () => {
     expect(html).toContain("$3,607.50");
     expect(html).toContain("kept as printed");
   });
+
+  it("shows a pending state instead of fabricated zeros", () => {
+    const html = render({ totals: null });
+    expect(html).toContain("Calculation pending");
+    expect(html).toContain("Fix the highlighted field");
+    expect(html).not.toContain("$0.00");
+    expect(html).not.toContain("Grand total");
+    // The source document's evidence is independent of our arithmetic and
+    // stays visible while the calculation is pending.
+    expect(html).toContain("Printed grand total");
+    expect(html).toContain("$3,607.50");
+  });
+
+  it("marks printed totals unavailable when a value cannot be exact", () => {
+    const html = render({
+      printedTotals: {
+        subtotalMinor: Number.MAX_SAFE_INTEGER + 1,
+        discountMinor: 0,
+        ppnMinor: 0,
+        grandTotalMinor: Number.MAX_SAFE_INTEGER + 1,
+      },
+    });
+    expect(html).toContain("Printed totals unavailable");
+    expect(html).not.toContain("$90,071,992,547,409.92");
+  });
 });

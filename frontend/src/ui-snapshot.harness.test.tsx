@@ -838,6 +838,23 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The same panel while an input cannot be parsed (issue #470 wave 2): an
+    // explicit pending state, never a column of fabricated zeros. The printed
+    // group stays visible because it is source evidence, not our arithmetic.
+    name: "PurchaseOrderTotalsPending",
+    element: (
+      <PurchaseOrderTotals
+        totals={null}
+        currency={PO_EDITOR_USD}
+        discountPercent={null}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason=""
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
+      />
+    ),
+  },
+  {
     // The one discard dialog (issue #468, wave 3): Cancel and a guarded tab
     // click open this same modal, so both widths must keep both choices
     // readable and the scrim must cover the page behind it.

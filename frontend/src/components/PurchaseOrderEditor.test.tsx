@@ -201,6 +201,20 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain("Discount $-312.62");
   });
 
+  it("replaces the totals with a pending state while an input cannot be parsed", () => {
+    const bad = purchaseOrderEditorReducer(
+      initialPurchaseOrderEditorState(ORDER, USD),
+      { type: "headerChanged", patch: { adjustment: "not money" } }
+    );
+    const html = render(bad);
+    expect(html).toContain("Calculation pending");
+    expect(html).toContain("Adjustment must be a signed USD amount.");
+    // The old grand total must not survive beside the parse error, and zero
+    // must never stand in for a calculation that did not happen.
+    expect(html).not.toContain("$3,069.45");
+    expect(html).not.toContain("$0.00");
+  });
+
   it("prints PPN separately only when the frozen basis charges it", () => {
     const services = render();
     expect(services).not.toContain("PPN (11%)");

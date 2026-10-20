@@ -208,6 +208,7 @@ func TestPurchaseOrderPPNRateMatchesQuotationTaxResolution(t *testing.T) {
 		{"legacy construction service", "NonFTZ", "", "", "SupplyInstallConstruction"},
 		{"current non-FTZ goods", "NonFTZ", TaxTypeGoods, "", ""},
 		{"current FTZ goods", "FTZ", TaxTypeGoods, "", ""},
+		{"current FTZ service", "FTZ", TaxTypeServices, ServiceCategoryNonConstruction, ""},
 		{"current service", "NonFTZ", TaxTypeServices, ServiceCategoryNonConstruction, ""},
 		{"current construction service", "NonFTZ", TaxTypeServices, ServiceCategoryConstruction, ""},
 	}

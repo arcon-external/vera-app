@@ -147,6 +147,16 @@ func purchaseOrderError(context echo.Context, err error) error {
 		})
 	case errors.Is(err, store.ErrPurchaseOrderSourceNotFound):
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation revision not found"})
+	case errors.Is(err, store.ErrPurchaseOrderSourceIncomplete):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_source_incomplete",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderSourceOutOfRange):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_source_out_of_range",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderBadReference):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	case errors.Is(err, store.ErrPurchaseOrderInvalid):
