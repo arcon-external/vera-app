@@ -113,9 +113,23 @@ func setPOListState(t *testing.T, database *Store, ctx context.Context, id int64
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
-	if _, err := pool.Exec(ctx, fmt.Sprintf(
-		"UPDATE %s.purchase_orders SET state = $2 WHERE id = $1",
-		database.configSchema()), id, state); err != nil {
+	// A saved row must carry its final identity (migration 032). The archive
+	// test only needs the state, so seed a synthetic number and actor rather
+	// than pretending the #471 final-save rules do not exist.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_orders SET
+			state = $2,
+			po_number = CASE WHEN $2 = 'saved'
+				THEN COALESCE(NULLIF(btrim(po_number), ''), 'PO-LIST-' || id)
+				ELSE po_number END,
+			po_number_key = CASE WHEN $2 = 'saved'
+				THEN lower(COALESCE(NULLIF(btrim(po_number), ''), 'PO-LIST-' || id))
+				ELSE NULL END,
+			saved_at = CASE WHEN $2 = 'saved' THEN NOW() ELSE NULL END,
+			saved_by = CASE WHEN $2 = 'saved'
+				THEN (SELECT id FROM %s.users ORDER BY id LIMIT 1)
+				ELSE NULL END
+		WHERE id = $1`, database.configSchema(), database.configSchema()), id, state); err != nil {
 		t.Fatalf("set PO %d state %s: %v", id, state, err)
 	}
 }

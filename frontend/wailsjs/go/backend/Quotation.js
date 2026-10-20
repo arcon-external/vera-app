@@ -42,6 +42,10 @@ export function ExportTo(arg1) {
   return window['go']['backend']['Quotation']['ExportTo'](arg1);
 }
 
+export function FinalizePurchaseOrder(arg1) {
+  return window['go']['backend']['Quotation']['FinalizePurchaseOrder'](arg1);
+}
+
 export function GetCustomerPreview() {
   return window['go']['backend']['Quotation']['GetCustomerPreview']();
 }
@@ -56,6 +60,10 @@ export function GetInternalBreakdown() {
 
 export function GetPurchaseOrder(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrder'](arg1);
+}
+
+export function GetPurchaseOrderReview(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderReview'](arg1);
 }
 
 export function GetQuotation(arg1) {

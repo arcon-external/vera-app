@@ -51,23 +51,26 @@ type purchaseOrderRow struct {
 		DiscountMinor   int64  `json:"discountMinor"`
 		NetMinor        int64  `json:"netMinor"`
 	} `json:"items"`
-	DiscountPercent        int16  `json:"discountPercent"`
-	PpnBps                 int16  `json:"ppnBps"`
-	AdjustmentReason       string `json:"adjustmentReason"`
-	ID                     int64  `json:"id"`
-	QuotationID            int64  `json:"quotationId"`
-	SourceRevision         int16  `json:"sourceRevision"`
-	CustomerID             int64  `json:"customerId"`
-	PaymentTerms           string `json:"paymentTerms"`
-	SubtotalMinor          int64  `json:"subtotalMinor"`
-	DiscountMinor          int64  `json:"discountMinor"`
-	PpnMinor               int64  `json:"ppnMinor"`
-	AdjustmentMinor        int64  `json:"adjustmentMinor"`
-	GrandTotalMinor        int64  `json:"grandTotalMinor"`
-	PrintedSubtotalMinor   int64  `json:"printedSubtotalMinor"`
-	PrintedDiscountMinor   int64  `json:"printedDiscountMinor"`
-	PrintedPpnMinor        int64  `json:"printedPpnMinor"`
-	PrintedGrandTotalMinor int64  `json:"printedGrandTotalMinor"`
+	DiscountPercent        int16   `json:"discountPercent"`
+	PpnBps                 int16   `json:"ppnBps"`
+	AdjustmentReason       string  `json:"adjustmentReason"`
+	ID                     int64   `json:"id"`
+	QuotationID            int64   `json:"quotationId"`
+	SourceRevision         int16   `json:"sourceRevision"`
+	CustomerID             int64   `json:"customerId"`
+	PaymentTerms           string  `json:"paymentTerms"`
+	SubtotalMinor          int64   `json:"subtotalMinor"`
+	DiscountMinor          int64   `json:"discountMinor"`
+	PpnMinor               int64   `json:"ppnMinor"`
+	AdjustmentMinor        int64   `json:"adjustmentMinor"`
+	GrandTotalMinor        int64   `json:"grandTotalMinor"`
+	PrintedSubtotalMinor   int64   `json:"printedSubtotalMinor"`
+	PrintedDiscountMinor   int64   `json:"printedDiscountMinor"`
+	PrintedPpnMinor        int64   `json:"printedPpnMinor"`
+	PrintedGrandTotalMinor int64   `json:"printedGrandTotalMinor"`
+	SavedAt                *string `json:"savedAt"`
+	SavedBy                *int64  `json:"savedBy"`
+	PdfAbsentConfirmed     bool    `json:"pdfAbsentConfirmed"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
@@ -91,8 +94,23 @@ func setPurchaseOrderStateForTest(t *testing.T, schema string, id int64, state s
 		t.Fatalf("connect for state change: %v", err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(),
-		"UPDATE "+quoteIdentForTest(schema)+".purchase_orders SET state = $2 WHERE id = $1",
+	// A saved row must carry its final identity (migration 032). This helper
+	// is only used by #468's read-side occupancy test, so it seeds a synthetic
+	// number and actor rather than pretending the #471 rules do not exist.
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.purchase_orders SET
+			state = $2,
+			po_number = CASE WHEN $2 = 'saved'
+				THEN COALESCE(NULLIF(btrim(po_number), ''), 'PO-API-' || id)
+				ELSE po_number END,
+			po_number_key = CASE WHEN $2 = 'saved'
+				THEN lower(COALESCE(NULLIF(btrim(po_number), ''), 'PO-API-' || id))
+				ELSE NULL END,
+			saved_at = CASE WHEN $2 = 'saved' THEN NOW() ELSE NULL END,
+			saved_by = CASE WHEN $2 = 'saved'
+				THEN (SELECT id FROM %s.users ORDER BY id LIMIT 1)
+				ELSE NULL END
+		WHERE id = $1`, quoteIdentForTest(schema), quoteIdentForTest(schema)),
 		id, state); err != nil {
 		t.Fatalf("set purchase order %d state %s: %v", id, state, err)
 	}
@@ -366,13 +384,15 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 
 	// The source revision printed 290000 before its own 10% discount and 261000
-	// after it (FTZ, no PPN). The PO starts from the customer-facing list
-	// prices, with no discount of its own.
+	// after it (FTZ, no PPN). Creation copies the customer-facing list prices
+	// and the source's own discounts (#471), so the draft already reproduces the
+	// printed total instead of starting 29000 above it.
 	_, body := createPODraft(t, server, token, quotationID, 0, nil)
 	draft := decodePurchaseOrder(t, body)
-	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 290000 ||
-		draft.DiscountMinor != 0 || draft.PpnBps != 0 || draft.PpnMinor != 0 {
-		t.Fatalf("created calculation = %+v; want subtotal/grand 290000 and no tax", draft)
+	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 261000 ||
+		draft.DiscountMinor != 29000 || draft.DiscountPercent != 10 ||
+		draft.PpnBps != 0 || draft.PpnMinor != 0 {
+		t.Fatalf("created calculation = %+v; want subtotal 290000, 10%% discount, grand 261000", draft)
 	}
 	if draft.PrintedSubtotalMinor != 290000 || draft.PrintedDiscountMinor != 29000 ||
 		draft.PrintedPpnMinor != 0 || draft.PrintedGrandTotalMinor != 261000 {
@@ -605,8 +625,10 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 	// Nothing refused may have been stored.
 	_, body = doJSON(t, server, http.MethodGet, path, token, nil)
 	reopened := decodePurchaseOrder(t, body)
-	if reopened.GrandTotalMinor != 290000 || reopened.DiscountMinor != 0 {
-		t.Errorf("a refused update changed the PO: %+v", reopened)
+	if reopened.GrandTotalMinor != draft.GrandTotalMinor ||
+		reopened.DiscountMinor != draft.DiscountMinor ||
+		reopened.SubtotalMinor != draft.SubtotalMinor {
+		t.Errorf("a refused update changed the PO: %+v (was %+v)", reopened, draft)
 	}
 }
 
@@ -825,5 +847,242 @@ func requireSharedPOCalculation(t *testing.T, testCase sharedPOCalculationCase, 
 			testCase.Want.SubtotalMinor, testCase.Want.DiscountMinor,
 			testCase.DiscountPercent, testCase.PpnBps, testCase.Want.PpnMinor,
 			testCase.Want.AdjustmentMinor, testCase.Want.GrandTotalMinor)
+	}
+}
+
+// finalizeBody builds the final-save payload a client sends: the stored
+// values, an explicit number, and the review acknowledgements. Tests change
+// only the field they exercise.
+func finalizeBody(row purchaseOrderRow, number string) map[string]any {
+	items := make([]map[string]any, 0, len(row.Items))
+	for _, item := range row.Items {
+		items = append(items, map[string]any{
+			"quotationItemNo": item.QuotationItemNo,
+			"quotationSubNo":  item.QuotationSubNo,
+			"description":     item.Description,
+			"quantityScaled":  item.QuantityScaled,
+			"uom":             item.UoM,
+			"unitPriceMinor":  item.UnitPriceMinor,
+			"discountEnabled": item.DiscountEnabled,
+			"discountPercent": item.DiscountPercent,
+		})
+	}
+	return map[string]any{
+		"billingAddress":      row.BillingAddress,
+		"deliveryAddress":     row.DeliveryAddress,
+		"shipToCode":          row.ShipToCode,
+		"contactEmail":        row.ContactEmail,
+		"contactPhone":        row.ContactPhone,
+		"poNumber":            number,
+		"receivedDate":        row.ReceivedDate,
+		"paymentTerms":        row.PaymentTerms,
+		"incoterms":           row.Incoterms,
+		"items":               items,
+		"discountPercent":     row.DiscountPercent,
+		"adjustmentMinor":     row.AdjustmentMinor,
+		"adjustmentReason":    row.AdjustmentReason,
+		"decisions":           []map[string]any{},
+		"acknowledgedMissing": []string{},
+		"acknowledgedExtra":   []int{},
+		"documentConfirmed":   true,
+	}
+}
+
+func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_finalize")
+	quotationID, quoteNumber := exportForSelector(t, server, token, quotationInput())
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	// The review returns the exact source and the document branch. Every PO is
+	// without its customer PDF until #472 ships.
+	code, body = doJSON(t, server, http.MethodGet, path+"/review", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("review = %d (%v)", code, body)
+	}
+	var review struct {
+		DocumentState string `json:"documentState"`
+		Source        struct {
+			QuotationID    int64  `json:"quotationId"`
+			RevisionNumber int16  `json:"revisionNumber"`
+			Currency       string `json:"currency"`
+			PaymentTerms   string `json:"paymentTerms"`
+			Incoterms      string `json:"incoterms"`
+			Lines          []struct {
+				QuotationItemNo int    `json:"quotationItemNo"`
+				LineLabel       string `json:"lineLabel"`
+				Description     string `json:"description"`
+				QuantityScaled  int64  `json:"quantityScaled"`
+				UnitPriceMinor  int64  `json:"unitPriceMinor"`
+			} `json:"lines"`
+			PrintedGrandTotalMinor int64 `json:"printedGrandTotalMinor"`
+		} `json:"source"`
+	}
+	encodeDecode(t, body, &review)
+	if review.DocumentState != "none" {
+		t.Errorf("document state = %q; want none", review.DocumentState)
+	}
+	if review.Source.QuotationID != quotationID || review.Source.RevisionNumber != 0 ||
+		review.Source.Currency != draft.Currency || review.Source.PaymentTerms != "30 days" ||
+		review.Source.Incoterms != "EXW" {
+		t.Errorf("source = %+v; want the exact revision", review.Source)
+	}
+	if len(review.Source.Lines) != 2 || review.Source.Lines[0].LineLabel != "1" ||
+		review.Source.Lines[1].LineLabel != "2" ||
+		review.Source.Lines[0].UnitPriceMinor != 120000 {
+		t.Errorf("source lines = %+v", review.Source.Lines)
+	}
+
+	// Final save requires the explicit review; none of it is preselected.
+	unconfirmed := finalizeBody(draft, " PO-API-1 ")
+	unconfirmed["documentConfirmed"] = false
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, unconfirmed)
+	if code != http.StatusUnprocessableEntity || body["code"] != "po_pdf_confirmation_required" {
+		t.Fatalf("unconfirmed = %d %v; want 422 po_pdf_confirmation_required", code, body)
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalizeBody(draft, " PO-API-1 "))
+	if code != http.StatusOK {
+		t.Fatalf("finalize = %d (%v)", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if saved.State != "saved" || saved.PONumber != "PO-API-1" ||
+		saved.SavedAt == nil || saved.SavedBy == nil || !saved.PdfAbsentConfirmed {
+		t.Errorf("saved = %+v; want a trimmed number and recorded identity", saved)
+	}
+	if saved.GrandTotalMinor != review.Source.PrintedGrandTotalMinor {
+		t.Errorf("saved grand = %d; want the printed %d",
+			saved.GrandTotalMinor, review.Source.PrintedGrandTotalMinor)
+	}
+	if saved.QuoteNumber != quoteNumber {
+		t.Errorf("quote number = %q; want %q", saved.QuoteNumber, quoteNumber)
+	}
+
+	// Reopen and the archive both show it saved; further edits are refused.
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK || decodePurchaseOrder(t, body).State != "saved" {
+		t.Fatalf("reopen saved = %d %v", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet, "/v1/purchase-orders?state=saved", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("saved list = %d (%v)", code, body)
+	}
+	var list struct {
+		PurchaseOrders []struct {
+			ID    int64  `json:"id"`
+			State string `json:"state"`
+		} `json:"purchaseOrders"`
+	}
+	encodeDecode(t, body, &list)
+	if len(list.PurchaseOrders) != 1 || list.PurchaseOrders[0].ID != draft.ID {
+		t.Errorf("saved list = %+v; want the finalized record", list.PurchaseOrders)
+	}
+
+	code, body = doJSON(t, server, http.MethodPut, path, token, finalizeBody(draft, "PO-API-1"))
+	if code != http.StatusConflict || body["code"] != "po_not_draft" {
+		t.Errorf("edit saved = %d %v; want 409 po_not_draft", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalizeBody(draft, "PO-API-1"))
+	if code != http.StatusConflict || body["code"] != "po_not_draft" {
+		t.Errorf("second finalize = %d %v; want 409 po_not_draft", code, body)
+	}
+}
+
+func TestPurchaseOrderFinalizeEnforcesTheReviewRules(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_finalize_rules")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	// The final-save minimum.
+	body = finalizeBody(draft, "   ")
+	code, response := doJSON(t, server, http.MethodPost, path+"/finalize", token, body)
+	if code != http.StatusUnprocessableEntity || response["code"] != "po_incomplete" {
+		t.Errorf("blank number = %d %v; want 422 po_incomplete", code, response)
+	}
+
+	// A changed payment-term wording is a difference, and no decision blocks.
+	body = finalizeBody(draft, "PO-RULES")
+	body["paymentTerms"] = "30 days after delivery"
+	code, response = doJSON(t, server, http.MethodPost, path+"/finalize", token, body)
+	if code != http.StatusUnprocessableEntity ||
+		response["code"] != "po_differences_unresolved" ||
+		!strings.Contains(fmt.Sprint(response["error"]), "header:paymentTerms") {
+		t.Errorf("undecided = %d %v; want 422 naming header:paymentTerms", code, response)
+	}
+
+	// Claiming the quotation while sending a different value is refused too.
+	body["decisions"] = []map[string]any{
+		{"key": "header:paymentTerms", "choice": "quotation"},
+	}
+	code, response = doJSON(t, server, http.MethodPost, path+"/finalize", token, body)
+	if code != http.StatusUnprocessableEntity || response["code"] != "po_differences_unresolved" {
+		t.Errorf("lying quotation choice = %d %v; want 422", code, response)
+	}
+
+	// An explicit PO choice is enough; the wording change is saved.
+	body["decisions"] = []map[string]any{
+		{"key": "header:paymentTerms", "choice": "po"},
+	}
+	code, response = doJSON(t, server, http.MethodPost, path+"/finalize", token, body)
+	if code != http.StatusOK {
+		t.Fatalf("explicit choice = %d %v", code, response)
+	}
+	if decodePurchaseOrder(t, response).PaymentTerms != "30 days after delivery" {
+		t.Errorf("saved terms = %q", decodePurchaseOrder(t, response).PaymentTerms)
+	}
+}
+
+func TestPurchaseOrderFinalizeRejectsADuplicateCustomerNumber(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_finalize_number")
+	firstID, _ := exportForSelector(t, server, token, quotationInput())
+	secondID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, firstID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("first create = %d (%v)", code, body)
+	}
+	first := decodePurchaseOrder(t, body)
+	code, body = createPODraft(t, server, token, secondID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("second create = %d (%v)", code, body)
+	}
+	second := decodePurchaseOrder(t, body)
+
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(first.ID, 10)+"/finalize", token,
+		finalizeBody(first, "PO-API-DUP"))
+	if code != http.StatusOK {
+		t.Fatalf("first finalize = %d (%v)", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(second.ID, 10)+"/finalize", token,
+		finalizeBody(second, "po-api-dup"))
+	if code != http.StatusConflict || body["code"] != "po_number_taken" {
+		t.Errorf("case-variant duplicate = %d %v; want 409 po_number_taken", code, body)
+	}
+}
+
+func TestPurchaseOrderReviewAndFinalizeRequireASession(t *testing.T) {
+	server, _ := testQuotationServer(t, "vera_api_po_finalize_auth")
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/v1/purchase-orders/1/review"},
+		{http.MethodPost, "/v1/purchase-orders/1/finalize"},
+	} {
+		code, _ := doJSON(t, server, request.method, request.path, "", map[string]any{})
+		if code != http.StatusUnauthorized {
+			t.Errorf("%s %s = %d; want 401", request.method, request.path, code)
+		}
 	}
 }

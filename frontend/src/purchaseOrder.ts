@@ -78,6 +78,11 @@ export interface PurchaseOrderDTO {
   PrintedDiscountMinor: number;
   PrintedPpnMinor: number;
   PrintedGrandTotalMinor: number;
+  /** Set exactly once by the draft -> saved transition (#471). */
+  SavedAt?: string | null;
+  SavedBy?: number | null;
+  /** The deliberate no-PDF confirmation recorded by the final save (#471). */
+  PdfAbsentConfirmed?: boolean;
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */

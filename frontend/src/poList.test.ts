@@ -278,10 +278,10 @@ describe("row decisions (issue #469)", () => {
     expect(poNumberLabel(row({ PONumber: "PO-9" }))).toBe("PO-9");
   });
 
-  it("opens drafts and leaves saved records to the later saved view", () => {
-    // #471 has not shipped a saved-detail route, so opening a saved row in the
-    // draft editor would mislabel it. The list states the limitation instead.
+  it("opens drafts and saved records", () => {
+    // #471 added the read-only saved view: a saved row opens its own record
+    // rather than the draft editor, and editing stays gated until #473.
     expect(canOpenRow(row({ State: "draft" }))).toBe(true);
-    expect(canOpenRow(row({ State: "saved" }))).toBe(false);
+    expect(canOpenRow(row({ State: "saved" }))).toBe(true);
   });
 });

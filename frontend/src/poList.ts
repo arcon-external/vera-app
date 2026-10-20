@@ -238,12 +238,12 @@ export function poNumberLabel(row: POListRowDTO): string {
 }
 
 /**
- * Whether a row can open the #468 draft editor. A saved record has no saved
- * view yet (#471), so opening it in the draft editor would mislabel it as a
- * draft; the row stays visible with the limitation stated.
+ * Whether a row can open its record. Drafts open the entry editor; saved
+ * records open the read-only saved view #471 added, so the saved PO is visible
+ * while editing stays gated until the correction workflow (#473).
  */
 export function canOpenRow(row: POListRowDTO): boolean {
-  return row.State === "draft";
+  return row.State === "draft" || row.State === "saved";
 }
 
 export function poListReducer(state: POListState, action: POListAction): POListState {
