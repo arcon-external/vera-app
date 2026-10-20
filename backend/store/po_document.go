@@ -50,18 +50,26 @@ var (
 //  1. the byte bound, before any parsing work;
 //  2. the PDF header at the first byte;
 //  3. the end-of-file marker, reached through trailing whitespace;
-//  4. the object skeleton, skipping every stream body so page content is never
-//     read as structure;
+//  4. the object skeleton: every stream body is skipped using /Length when it
+//     is a direct integer or an indirect reference. A first pass harvests the
+//     top-level integer objects, so a forward reference is resolved before the
+//     structure pass. Content is isolated exactly when that length is
+//     resolvable and agrees with the file; otherwise the scanner falls back to
+//     the first endstream marker;
 //  5. the last startxref, which must be an integer offset in the file and must
 //     point at a classic xref table or a /Type /XRef object;
-//  6. the /Root reference in the real trailer or xref-stream dictionary, which
-//     must name a /Type /Catalog object that exists in the file;
+//  6. the /Root reference in the real trailer or xref-stream dictionary — never
+//     from a scanned substring — which must name a /Type /Catalog object that
+//     exists in the file;
 //  7. encryption, read from that same dictionary only, so a literal /Encrypt
-//     inside page content does not reject a valid file.
+//     inside page content is not mistaken for an encrypted document.
 //
 // The structure checks live in pdf_structure.go. The accepted object-stream
 // policy is documented in docs/po-documents.md: a catalog that is not a plain
-// object is accepted only when an /ObjStm header lists it.
+// object is accepted only when an /ObjStm header lists it. A /FlateDecode (or
+// /Fl, or single-element [/FlateDecode]) header is decompressed to read that
+// index; any other filter is a named rejection, and the catalog dictionary
+// itself is never decompressed.
 func ValidatePurchaseOrderPDF(data []byte) error {
 	if int64(len(data)) > MaxPurchaseOrderDocumentBytes {
 		return ErrPurchaseOrderDocumentTooLarge

@@ -2,9 +2,12 @@ package store
 
 import (
 	"bytes"
+	"compress/zlib"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
+	"strings"
 )
 
 // Issue #472: PDF structure inspection for the customer PO document.
@@ -16,14 +19,29 @@ import (
 // the last startxref to the cross-reference section, and requires the /Root
 // reference in the real trailer (or xref stream) to name a real catalog object.
 //
-// What it deliberately does not check: xref entries pointing at the objects
-// they claim (a scan-based object index is used instead), page trees, fonts, or
+// Stream isolation is exact when a stream's /Length is a direct integer or an
+// indirect reference: top-level integer objects are harvested in a first pass,
+// so a /Length defined later in the file (real writers emit forward references)
+// is resolved before the structure pass. A stream whose /Length cannot be resolved
+// at all falls back to the first endstream marker, so content after that point
+// is not isolated — but the trailer and the /Root it names are still read only
+// through the xref section startxref points at.
+//
+// What it deliberately does not check: incremental updates (/Prev chains are
+// not followed; a latest trailer without /Root is refused), xref entries
+// pointing at the objects they claim (a scan-based object index is used
+// instead), the compressed catalog dictionary itself, page trees, fonts, or
 // whether a reader would render the file. Those are rendering concerns; this
 // check answers "is this a document, or a bag of tokens that looks like one".
 
 // pdfMaxParseDepth bounds dictionary and array nesting so a hostile file cannot
 // exhaust the stack.
 const pdfMaxParseDepth = 32
+
+// pdfMaxObjectStreamHeaderBytes bounds the /ObjStm header this check will
+// decompress. A header holds object-number/value index pairs only, so a
+// megabyte is already generous; the cap keeps a decompression bomb cheap.
+const pdfMaxObjectStreamHeaderBytes int64 = 1 << 20
 
 // errPDFMalformed is an internal reason; the public error stays
 // ErrPurchaseOrderDocumentInvalid so callers keep one sentinel.
@@ -325,7 +343,9 @@ type pdfObject struct {
 // scanPDFObjects walks the file once, recording every plain object and the last
 // startxref pointer. Stream bodies are skipped, so a stream can contain the
 // literal text "trailer", "/Encrypt" or "obj" without affecting the result.
-func scanPDFObjects(data []byte) (map[pdfObjectKey]*pdfObject, int, bool, error) {
+// lengths holds the integer objects collected before this pass; it is what lets
+// a forward /Length reference be resolved while the stream is being skipped.
+func scanPDFObjects(data []byte, lengths map[pdfObjectKey]int64) (map[pdfObjectKey]*pdfObject, int, bool, error) {
 	l := newPDFLexer(data)
 	objects := make(map[pdfObjectKey]*pdfObject)
 	startXref := -1
@@ -359,9 +379,11 @@ func scanPDFObjects(data []byte) (map[pdfObjectKey]*pdfObject, int, bool, error)
 			l.pos = afterNumber
 			continue
 		}
-		object, err := parsePDFObject(l, pdfObjectKey{number: int(token.value), generation: int(generation.value)}, objects)
+		object, err := parsePDFObject(l, pdfObjectKey{number: int(token.value), generation: int(generation.value)}, objects, lengths)
 		if err != nil {
-			return nil, 0, false, err
+			// The objects found so far are still useful to the harvest pass: a
+			// fallback stream boundary may be the only thing that failed.
+			return objects, startXref, startXrefSeen, err
 		}
 		if object != nil {
 			objects[object.key] = object
@@ -371,7 +393,7 @@ func scanPDFObjects(data []byte) (map[pdfObjectKey]*pdfObject, int, bool, error)
 
 // parsePDFObject reads an object body and, when present, skips its stream body.
 // The "obj" keyword is already consumed.
-func parsePDFObject(l *pdfLexer, key pdfObjectKey, objects map[pdfObjectKey]*pdfObject) (*pdfObject, error) {
+func parsePDFObject(l *pdfLexer, key pdfObjectKey, objects map[pdfObjectKey]*pdfObject, lengths map[pdfObjectKey]int64) (*pdfObject, error) {
 	bodyToken := l.next()
 	value, err := parsePDFValue(l, bodyToken, 0)
 	if err != nil {
@@ -392,7 +414,7 @@ func parsePDFObject(l *pdfLexer, key pdfObjectKey, objects map[pdfObjectKey]*pdf
 	if next.kind == pdfTokenKeyword && next.text == "stream" {
 		object.hasStream = true
 		start := pdfStreamDataStart(l.data, l.pos)
-		end, ok := pdfStreamDataEnd(l.data, start, value, objects)
+		end, ok := pdfStreamDataEnd(l.data, start, value, lengths)
 		if !ok {
 			return nil, fmt.Errorf("%w: a stream has no endstream marker", errPDFMalformed)
 		}
@@ -428,11 +450,11 @@ func pdfStreamDataStart(data []byte, pos int) int {
 }
 
 // pdfStreamDataEnd finds the endstream keyword. /Length is used when it is a
-// direct integer or a resolvable indirect reference; otherwise the first
-// endstream marker is taken. This is what keeps content bytes out of the
-// structural scan.
-func pdfStreamDataEnd(data []byte, start int, value *pdfValue, objects map[pdfObjectKey]*pdfObject) (int, bool) {
-	if length, ok := pdfIntegerEntry(value, objects, "Length"); ok &&
+// direct integer or a reference to a harvested integer object, including one
+// defined later in the file; otherwise the first endstream marker is taken.
+// This is what keeps content bytes out of the structural scan.
+func pdfStreamDataEnd(data []byte, start int, value *pdfValue, lengths map[pdfObjectKey]int64) (int, bool) {
+	if length, ok := pdfResolvedLength(value, lengths); ok &&
 		length >= 0 && int64(start)+length <= int64(len(data)) {
 		cursor := start + int(length)
 		for cursor < len(data) && pdfWhitespace(data[cursor]) {
@@ -473,6 +495,45 @@ func pdfIntegerEntry(dictionary *pdfValue, objects map[pdfObjectKey]*pdfObject, 
 	return 0, false
 }
 
+// pdfResolvedLength reads a stream's /Length from the harvested integer objects.
+// A forward reference is the reason this is separate from pdfIntegerEntry: the
+// object map for the structure pass is incomplete while that pass is running.
+func pdfResolvedLength(dictionary *pdfValue, lengths map[pdfObjectKey]int64) (int64, bool) {
+	if dictionary == nil || dictionary.kind != pdfValueDict {
+		return 0, false
+	}
+	entry := dictionary.entries["Length"]
+	if entry == nil {
+		return 0, false
+	}
+	switch entry.kind {
+	case pdfValueNumber:
+		if entry.isInteger {
+			return entry.value, true
+		}
+	case pdfValueRef:
+		value, ok := lengths[pdfObjectKey{number: entry.number, generation: entry.generation}]
+		return value, ok
+	}
+	return 0, false
+}
+
+// harvestPDFIntegerObjects collects top-level integer objects so the structure
+// pass can skip a stream whose /Length is an indirect reference defined later
+// in the file. This pass itself may read a stream body as structure when that
+// stream's length is not yet known; it only keeps integer object values, which
+// is the one thing the structure pass needs to resolve those references.
+func harvestPDFIntegerObjects(data []byte) map[pdfObjectKey]int64 {
+	objects, _, _, _ := scanPDFObjects(data, nil)
+	lengths := make(map[pdfObjectKey]int64)
+	for key, object := range objects {
+		if object.isInteger && !object.hasStream {
+			lengths[key] = object.value
+		}
+	}
+	return lengths
+}
+
 func pdfDictNameIs(dictionary *pdfValue, key, name string) bool {
 	if dictionary == nil || dictionary.kind != pdfValueDict {
 		return false
@@ -485,7 +546,8 @@ func pdfDictNameIs(dictionary *pdfValue, key, name string) bool {
 // trailer or xref-stream dictionary carries /Encrypt. A structural problem is
 // returned as ErrPurchaseOrderDocumentInvalid with a readable reason.
 func inspectPDFStructure(data []byte) (bool, error) {
-	objects, startXref, startXrefSeen, err := scanPDFObjects(data)
+	lengths := harvestPDFIntegerObjects(data)
+	objects, startXref, startXrefSeen, err := scanPDFObjects(data, lengths)
 	if err != nil {
 		return false, pdfInvalid(err)
 	}
@@ -607,8 +669,9 @@ func inspectPDFTrailer(dictionary *pdfValue, objects map[pdfObjectKey]*pdfObject
 // requirePDFCatalogObject enforces that /Root names a real catalog. A catalog
 // may legally live in an object stream; that is accepted only when the object
 // stream's own header lists the object number (generation 0), so an absent
-// object is never silently accepted. The compressed dictionary itself is not
-// decompressed, and the docs say so.
+// object is never silently accepted. The header is decompressed for a
+// /FlateDecode stream; the catalog dictionary inside it is not decompressed,
+// and the docs say so.
 func requirePDFCatalogObject(objects map[pdfObjectKey]*pdfObject, number, generation int, data []byte) error {
 	if object := objects[pdfObjectKey{number: number, generation: generation}]; object != nil {
 		if object.dict == nil {
@@ -619,15 +682,25 @@ func requirePDFCatalogObject(objects map[pdfObjectKey]*pdfObject, number, genera
 		}
 		return nil
 	}
-	if generation == 0 && pdfObjectStreamLists(objects, number, data) {
-		return nil
+	if generation == 0 {
+		listed, unreadable := pdfObjectStreamLists(objects, number, data)
+		if listed {
+			return nil
+		}
+		if unreadable != nil {
+			return unreadable
+		}
 	}
 	return errors.New("its catalog object is missing")
 }
 
 // pdfObjectStreamLists reports whether an /ObjStm object's header names the
-// object number. The header is the first /First bytes of the stream data.
-func pdfObjectStreamLists(objects map[pdfObjectKey]*pdfObject, number int, data []byte) bool {
+// object number, and whether a stream that might have named it could not be
+// read. An unreadable object stream returns a named reason instead of becoming
+// a silent "catalog object is missing": an unsupported filter, or a body that
+// does not decompress, is what staff should be told.
+func pdfObjectStreamLists(objects map[pdfObjectKey]*pdfObject, number int, data []byte) (bool, error) {
+	var unreadable error
 	for _, object := range objects {
 		if !object.hasStream || !pdfDictNameIs(object.dict, "Type", "ObjStm") {
 			continue
@@ -637,18 +710,92 @@ func pdfObjectStreamLists(objects map[pdfObjectKey]*pdfObject, number int, data 
 			continue
 		}
 		first, ok := pdfIntegerEntry(object.dict, objects, "First")
-		if !ok || first < 0 || int64(object.streamEnd-object.streamStart) < first {
+		if !ok || first < 0 || first > pdfMaxObjectStreamHeaderBytes {
 			continue
 		}
-		body := data[object.streamStart:object.streamEnd]
-		numbers := pdfIntegerTokens(body[:first], int(count)*2)
+		header, err := pdfObjectStreamHeader(object.dict, data[object.streamStart:object.streamEnd], int(first))
+		if err != nil {
+			if unreadable == nil {
+				unreadable = err
+			}
+			continue
+		}
+		numbers := pdfIntegerTokens(header, int(count)*2)
 		for index := 0; index+1 < len(numbers); index += 2 {
 			if numbers[index] == int64(number) {
-				return true
+				return true, nil
 			}
 		}
 	}
-	return false
+	return false, unreadable
+}
+
+// pdfObjectStreamHeader returns the first /First bytes of the object stream's
+// decoded data. FlateDecode (and its /Fl abbreviation, alone or in a
+// single-element array) is decompressed with a bounded read, because only the
+// object-number index lives there. Any other filter is a named rejection: this
+// check does not claim to read it, and it must not report the catalog as absent
+// when the reason is a filter it cannot decode.
+func pdfObjectStreamHeader(dictionary *pdfValue, body []byte, first int) ([]byte, error) {
+	filters, err := pdfStreamFilters(dictionary)
+	if err != nil {
+		return nil, err
+	}
+	if len(filters) == 0 {
+		if len(body) < first {
+			return nil, errors.New("its object stream is shorter than its /First header")
+		}
+		return body[:first], nil
+	}
+	if len(filters) != 1 || filters[0] != "FlateDecode" {
+		return nil, fmt.Errorf("its object stream uses an unsupported filter (%s); only /FlateDecode is supported",
+			strings.Join(filters, " + "))
+	}
+	reader, err := zlib.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, errors.New("its /FlateDecode object stream cannot be decompressed")
+	}
+	defer reader.Close()
+	header, err := io.ReadAll(io.LimitReader(reader, int64(first)))
+	if err != nil || len(header) < first {
+		return nil, errors.New("its /FlateDecode object stream cannot be decompressed")
+	}
+	return header, nil
+}
+
+// pdfStreamFilters returns /Filter as a list of filter names, expanding the
+// /Fl abbreviation so a caller compares one spelling. A /Filter chain is
+// returned whole, so an unsupported combination is named rather than guessed.
+func pdfStreamFilters(dictionary *pdfValue) ([]string, error) {
+	if dictionary == nil || dictionary.kind != pdfValueDict {
+		return nil, nil
+	}
+	entry := dictionary.entries["Filter"]
+	if entry == nil {
+		return nil, nil
+	}
+	switch entry.kind {
+	case pdfValueName:
+		return []string{pdfFilterName(entry.name)}, nil
+	case pdfValueArray:
+		names := make([]string, 0, len(entry.items))
+		for _, item := range entry.items {
+			if item.kind != pdfValueName {
+				return nil, errors.New("its object stream /Filter array is not a list of names")
+			}
+			names = append(names, pdfFilterName(item.name))
+		}
+		return names, nil
+	}
+	return nil, errors.New("its object stream /Filter is neither a name nor a list of names")
+}
+
+// pdfFilterName expands the one abbreviation this check understands.
+func pdfFilterName(name string) string {
+	if name == "Fl" {
+		return "FlateDecode"
+	}
+	return name
 }
 
 func pdfIntegerTokens(data []byte, limit int) []int64 {
