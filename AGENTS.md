@@ -23,30 +23,30 @@ the rest of this guide is applied.
 
 ## 2. Repository Map
 
-| Path | Purpose |
-| --- | --- |
-| `main.go` | Wails startup, Postgres open, binding registration |
-| `cmd/vera/` | The `vera` CLI: every feature as a command, plus local validate/render |
-| `cmd/veraserver/` | The API server binary |
-| `docs/cli.md` | The CLI guide: every command, the input format, exit codes |
-| `backend/quotation.go` | `Prepare`/`Export` flow, input + data models |
-| `backend/builder.go` | Per-item pricing, totals, markup + per-row discount math |
-| `backend/tax.go` | Tax zone/category → basis-point rates, tax + nett |
-| `backend/preview.go` | Customer/internal preview DTOs, template HTML preview |
-| `backend/archive.go` | Archive list/detail/revision Wails methods |
-| `backend/format.go` | Rupiah + description formatting |
-| `backend/template.go` | Embedded template/asset loading |
-| `backend/theme/` | Brand theme: four bases → derived role palette for both renderers + portal |
-| `backend/store/` | Postgres config, migrations, repositories |
-| `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template |
-| `backend/template/css/template-fixed.css` | PDF/preview styles |
-| `frontend/src/App.tsx` | Application shell/state, page routing |
-| `frontend/src/components/` | UI components (shell, ledger, review, archive, detail) |
-| `frontend/src/tax.ts` | Tax options, rates, paste normalizers |
-| `frontend/src/format.ts` | IDR formatting + client-side margin and discount math |
-| `frontend/wailsjs/go/*` | Generated Wails bindings |
-| `.env.example` | Documented Postgres variable names (no secrets) |
-| `test-data/` | Local Excel fixtures (gitignored) |
+| Path                                        | Purpose                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| `main.go`                                   | Wails startup, Postgres open, binding registration                         |
+| `cmd/vera/`                                 | The `vera` CLI: every feature as a command, plus local validate/render     |
+| `cmd/veraserver/`                           | The API server binary                                                      |
+| `docs/cli.md`                               | The CLI guide: every command, the input format, exit codes                 |
+| `backend/quotation.go`                      | `Prepare`/`Export` flow, input + data models                               |
+| `backend/builder.go`                        | Per-item pricing, totals, markup + per-row discount math                   |
+| `backend/tax.go`                            | Tax zone/category → basis-point rates, tax + nett                          |
+| `backend/preview.go`                        | Customer/internal preview DTOs, template HTML preview                      |
+| `backend/archive.go`                        | Archive list/detail/revision Wails methods                                 |
+| `backend/format.go`                         | Rupiah + description formatting                                            |
+| `backend/template.go`                       | Embedded template/asset loading                                            |
+| `backend/theme/`                            | Brand theme: four bases → derived role palette for both renderers + portal |
+| `backend/store/`                            | Postgres config, migrations, repositories                                  |
+| `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template                                       |
+| `backend/template/css/template-fixed.css`   | PDF/preview styles                                                         |
+| `frontend/src/App.tsx`                      | Application shell/state, page routing                                      |
+| `frontend/src/components/`                  | UI components (shell, ledger, review, archive, detail)                     |
+| `frontend/src/tax.ts`                       | Tax options, rates, paste normalizers                                      |
+| `frontend/src/format.ts`                    | IDR formatting + client-side margin and discount math                      |
+| `frontend/wailsjs/go/*`                     | Generated Wails bindings                                                   |
+| `.env.example`                              | Documented Postgres variable names (no secrets)                            |
+| `test-data/`                                | Local Excel fixtures (gitignored)                                          |
 
 ## 3. Setup Commands
 
@@ -280,7 +280,7 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   `VERA_SIGNING_KEY`, never in source or the database) over a canonical field
   set pinned by `backend/signing.go`'s format test. The public portal at
   `/v/<shortId>` (and `POST /verify`) renders valid / superseded / mismatch /
-  not-found. `short_id` identifies one *revision*. Never change the canonical
+  not-found. `short_id` identifies one _revision_. Never change the canonical
   format without a migration story: existing printed codes must keep
   verifying. TLS is Google-managed — never self-signed.
 
@@ -390,15 +390,15 @@ makes the read visible afterwards, which a merge otherwise has no place for.
 > **What enforces this now.** A `pr.yml` step ("Report Dependabot alerts", in the
 > Frontend build job) queries the open-alert list on every PR and writes it to the
 > job summary, so the "before" read is visible without anyone typing anything. It
-> fails the job only when a *successful* read finds a `critical`/`high` alert:
+> fails the job only when a _successful_ read finds a `critical`/`high` alert:
 > `low`/`medium` are reported without failing, and any API failure — bad
 > permission, rate limit, network, an unexpected response — warns and passes, so a
 > blind check never blocks a PR. That fail-open is load-bearing, not decorative:
 > `GITHUB_TOKEN` has returned HTTP 403 on this endpoint even with broad grants
 > (upstream discussion `github.com/orgs/community/discussions/60612`), while the
 > docs promise `security-events` only for code-scanning alerts — so until a real
-> run shows a successful read, treat a green tick as "no blocking alerts *that this
-> check could see*" and keep doing the manual reads above. By §12.5's own standard
+> run shows a successful read, treat a green tick as "no blocking alerts _that this
+> check could see_" and keep doing the manual reads above. By §12.5's own standard
 > this step becomes a guard the day a run proves it can go red; today it is a
 > visible reminder with a tripwire attached.
 
@@ -411,7 +411,7 @@ makes the read visible afterwards, which a merge otherwise has no place for.
    one: `vitest@2` carried its own `vite@5`, `esbuild@0.21` and `tinypool@1`,
    and nothing short of a vitest major removed them.
 3. Refresh `frontend/package.json.md5` (`md5 -q frontend/package.json >
-   frontend/package.json.md5`). It is tracked and must match
+frontend/package.json.md5`). It is tracked and must match
    `frontend/package.json`, but it is a **Wails artifact rather than a CI
    fingerprint**: nothing in `.github/` or `scripts/` reads it, so a stale copy
    fails nothing and the step is hygiene, not a gate. `wails build` rewrites it,
@@ -444,12 +444,12 @@ without validation.
 
 ### 12.1 The roles
 
-| Role | Model | Job |
-| --- | --- | --- |
-| **Worker** | `opencode-go/muse-spark-1.3-contributor#xhigh`, fallbacks `openai/gpt-6-sol` then `opencode/big-pickle` | Writes code, writes and runs tests. |
-| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
-| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
-| **Judge** | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| Role        | Model                                                                     | Job                                                                            |
+| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Worker**  | `opencode-go/deepseek-v4.1-flash#max`, fallbacks `openai/gpt-6-sol`       | Writes code, writes and runs tests.                                            |
+| **Riddler** | `opencode-go/deepseek-v4.1-flash#max`                                     | Interrogates a problem into questions. It never verifies, never decides.       |
+| **Advisor** | `openai/gpt-6-sol#max`                                                    | Advises on what to do next. It advises; it never decides.                      |
+| **Judge**   | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
@@ -614,7 +614,7 @@ While workers run in parallel:
 - **Nobody commits.** The orchestrator commits; concurrent `git add` on one working
   tree is a race.
 - **Nobody runs anything that writes shared output.** `npm --prefix frontend run
-  build` writes `frontend/dist`, which `backend/**` embeds.
+build` writes `frontend/dist`, which `backend/**` embeds.
 - **Nobody edits a file another worker owns.** If a task needs a change in someone
   else's file, it waits for the next wave.
 - **One tree, or a worktree per branch.** Workers share the working tree and never
@@ -654,11 +654,11 @@ While workers run in parallel:
 
 ### 12.6 How the loop scales
 
-| Change | Minimum |
-| --- | --- |
-| Behaviour, or anything staff see | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
-| Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7) |
-| Comments, docs, formatting only | One Worker, the gates (Section 13), and orchestrator validation |
+| Change                                                      | Minimum                                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Behaviour, or anything staff see                            | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
+| Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7)                             |
+| Comments, docs, formatting only                             | One Worker, the gates (Section 13), and orchestrator validation                           |
 
 The floor is never zero: **a Worker writes the change and the orchestrator validates
 it.** Skipping the Judge is a decision the orchestrator states out loud, with its
@@ -715,7 +715,7 @@ If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
 test from Section 7.
 
-On CI, PRs whose diff is *entirely* `frontend/src/**` or `frontend/public/**` skip
+On CI, PRs whose diff is _entirely_ `frontend/src/**` or `frontend/public/**` skip
 the Go suite's heavy steps via the scope step in `pr.yml` (the required "Go
 gates" check still reports — it just finishes fast). Every other path keeps the
 full suite, deliberately: root `*.md` feeds `TestChangelogCopyMatchesRoot`, and
@@ -757,9 +757,9 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 5. Push `main`, then create the release — **the release must exist before the
    workflow runs**, because every artifact job uploads into it: a missing
    release fails all of them (v0.10.1 lost a full cycle to `release not
-   found`). `gh release create` creates the tag as well, so there is no
+found`). `gh release create` creates the tag as well, so there is no
    separate tag step and no window in which a job can run without a release.
-   Pin `--target` explicitly: `gh release create` tags the *remote* default
+   Pin `--target` explicitly: `gh release create` tags the _remote_ default
    branch head when the tag does not exist, and if the version-bump commit is
    still local the tag lands on the commit without the bump, the desktop
    build fails its own stamp check, and the tag has to be force-moved by hand
@@ -774,13 +774,13 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 6. The tag the release created triggers `.github/workflows/desktop.yml`, which builds
    **nine** artifacts, each with a `.sha256` sidecar:
 
-   | Artifact | Job |
-   |---|---|
-   | `Vera-v<version>-windows-amd64-installer.exe` | `windows` |
-   | `Vera-v<version>-windows-arm64-installer.exe` | `windows-arm64` |
-   | `Vera-v<version>-macos-universal.dmg` | `macos` |
-   | `Vera-CLI-v<version>-{linux,darwin}-{amd64,arm64}` | `cli` |
-   | `Vera-CLI-v<version>-windows-{amd64,arm64}.exe` | `cli` |
+   | Artifact                                           | Job             |
+   | -------------------------------------------------- | --------------- |
+   | `Vera-v<version>-windows-amd64-installer.exe`      | `windows`       |
+   | `Vera-v<version>-windows-arm64-installer.exe`      | `windows-arm64` |
+   | `Vera-v<version>-macos-universal.dmg`              | `macos`         |
+   | `Vera-CLI-v<version>-{linux,darwin}-{amd64,arm64}` | `cli`           |
+   | `Vera-CLI-v<version>-windows-{amd64,arm64}.exe`    | `cli`           |
 
    All are version-stamped. The `v` appears **inside** the filename as well as
    in the tag: tag `v0.5.1` → `Vera-v0.5.1-…`. The three installer names are a
@@ -796,6 +796,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
    The `cli` job fails the release if a binary does not carry the tag, so a
    mis-stamped build cannot be published.
+
 7. **The `Announce to the updater` job does the mirroring and the updater
    variables for you.** It runs last, gated on all three installer jobs, and is
    the only thing that makes an installed desktop offer the new version. A
@@ -824,15 +825,17 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    are not pushed to every installed copy.
 
    Re-run it by hand after fixing whatever it complained about:
+
    ```bash
    gh run rerun --repo arcon-external/vera-app --failed    # or re-run the job
    ```
 
-   `gh run rerun --failed` recovers a *skipped* announce job once its `needs`
+   `gh run rerun --failed` recovers a _skipped_ announce job once its `needs`
    succeed (verified at v0.10.1), so it does not need a full re-run.
 
    To do it outside CI, the script is the whole sequence and takes `--dry-run`,
    which runs every check and changes nothing:
+
    ```bash
    scripts/announce-release.sh --version v0.4.0 --dry-run
    scripts/announce-release.sh --version v0.4.0
@@ -846,7 +849,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    It must print the tag the release created. If it prints anything older, the
    announce job failed; read its log before doing anything else.
 9. Add a Download section to the release notes listing the installers **and the
-    six CLI binaries**, with one install line each, and these prerequisites:
+   six CLI binaries**, with one install line each, and these prerequisites:
    - Windows: SmartScreen will warn on unsigned builds — expected until signing.
      A Chrome installation is no longer required for exporting quotations; the
      native renderer replaced it in v0.4.0.
@@ -864,10 +867,10 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
   template in `backend/template/` is the source of truth for how a quotation
   looks; both engines render it.
 
-  | build | `render.Active` | chromedp dependency |
-  | --- | --- | --- |
-  | `go build` | gpdf (native, no browser) | **absent** |
-  | `go build -tags chromedp` | chromedp (headless Chrome) | present |
+  | build                     | `render.Active`            | chromedp dependency |
+  | ------------------------- | -------------------------- | ------------------- |
+  | `go build`                | gpdf (native, no browser)  | **absent**          |
+  | `go build -tags chromedp` | chromedp (headless Chrome) | present             |
 
   Reach for chromedp when the template has changed and the native layout has not
   caught up — it renders the template exactly as written, and it is the oracle
@@ -890,6 +893,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
   A rendering test under `-tags chromedp` skips without a browser — see
   `render.RequireUsable`. Do not add an environment variable that selects the
   engine at runtime: a compile-time choice is the point.
+
 - **Split presentation:** `GetCustomerPreview` is separated from
   `GetInternalBreakdown` (never exported). The customer view carries the
   document plus the cost side the review panel renders — but **never margin,
@@ -909,12 +913,12 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
 ## 16. Environment & Secrets
 
-| Variable | Purpose |
-| --- | --- |
-| `VERA_POSTGRES_DSN` | Primary Postgres connection string |
-| `VERA_POSTGRES_SCHEMA` | Schema name (default `vera`) |
-| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE` | Fallback |
-| `VERA_POSTGRES_TEST_DSN` | Test-only DSN for `backend/store` integration tests |
+| Variable                                                                                                                                                          | Purpose                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `VERA_POSTGRES_DSN`                                                                                                                                               | Primary Postgres connection string                                    |
+| `VERA_POSTGRES_SCHEMA`                                                                                                                                            | Schema name (default `vera`)                                          |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE`                                                                                        | Fallback                                                              |
+| `VERA_POSTGRES_TEST_DSN`                                                                                                                                          | Test-only DSN for `backend/store` integration tests                   |
 | `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_WINDOWS_ARM64` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
 
 The repository is public (since 2026-10-12), which changes the threat model:
