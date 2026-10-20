@@ -36,6 +36,8 @@ import {
   PurchaseOrderPlaceholderPage,
 } from "./components/DocumentHomePage";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
+import { QuotationDetailHeader } from "./components/QuotationDetailPage";
+import type { ArchivedQuotation } from "./archive";
 import {
   initialPOSourceSelectorState,
   poSourceSelectorReducer,
@@ -152,6 +154,18 @@ const PO_SELECTOR_STEP_THREE = poSourceSelectorReducer(
   }),
   { type: "continue" }
 );
+
+// The issued-Quotation detail header (#467 wave 2): the second PO entry path
+// beside Edit, with the revision picker present because this quotation has
+// three issued revisions. Only the header is rendered; the page fetches its
+// revision in an effect, which this harness never runs.
+const DETAIL_QUOTATION = {
+  QuoteNumber: "1502260012",
+  RevisionNumber: 2,
+  AvailableRevisions: [2, 1, 0],
+  CustomerName: "PT. Infineon Technologies Batam",
+  Subject: "Supply and installation of electrical systems",
+} as ArchivedQuotation;
 
 // The line-item editor fixture (issue #430): the proof surface for the UoM
 // select's background chevron. One plain line (its own UoM select) plus one
@@ -533,6 +547,32 @@ const CASES: SnapshotCase[] = [
         dispatch={() => undefined}
         onClose={() => undefined}
         onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // The issued-Quotation detail header (#467 wave 2): the title, revision
+    // picker, the new "Add Purchase Order from a Quotation" action and Edit.
+    // At 360 it is the case that says whether the two actions wrap without
+    // overflowing.
+    //
+    // What this case cannot show: the click that opens the shared selector,
+    // the focus restore on close, and the page below the header (which fetches
+    // its revision in an effect) stay hand-driven.
+    name: "QuotationDetailHeader",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        onAddPurchaseOrder={() => undefined}
       />
     ),
   },
