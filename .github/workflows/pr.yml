@@ -186,8 +186,14 @@ jobs:
         # end-to-end export test in the Go suite -- the one that builds a
         # quotation and produces real PDF bytes, which is exactly the path a
         # broken renderer would break.
+        #
+        # The 10m timeout is go test's per-package default, and backend/api's
+        # Postgres-backed suite now passes it on a hosted runner (the PO work
+        # added several schema-per-test suites). A package timeout is reported
+        # as a deadlock dump, which reads like a hang rather than a slow suite;
+        # give the suite headroom instead of misdiagnosing it as one.
         if: steps.scope.outputs.needs_go != 'false'
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...
 
       - name: Prove the export test actually ran
         # A green tick cannot distinguish a test that ran from one that skipped,
