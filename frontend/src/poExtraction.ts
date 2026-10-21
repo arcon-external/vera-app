@@ -108,7 +108,6 @@ export interface PurchaseOrderExtractionStateDTO {
 }
 
 export type ExtractionStatus = "extracted" | "needs_review" | "absent";
-export type ExtractionRunStatus = "queued" | "running" | "succeeded" | "failed" | "stale";
 
 /** The six header keys, in the order the review panel shows them. */
 export const EXTRACTION_FIELD_ORDER = [

@@ -347,8 +347,6 @@ var currencyCandidates = map[string]bool{
 	"INR": true, "PHP": true, "VND": true, "SAR": true, "AED": true,
 }
 
-var currencyToken = regexp.MustCompile(`\b[A-Z]{3}\b`)
-
 func fallbackCurrency(lines []visualLine) (fieldMatch, bool) {
 	seen := map[string]bool{}
 	values := make([]string, 0, 2)
