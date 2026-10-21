@@ -105,6 +105,14 @@ function button(label: string, scope: ParentNode = document): HTMLButtonElement 
   return found;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
   const input = document.querySelector<HTMLInputElement>(
     'input[aria-label="Customer PO PDF file"]'
@@ -168,6 +176,36 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
     expect(attachMock).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain("Customer PO 2.pdf");
     expect(container.textContent).toContain("Version 2 of 2");
+  });
+
+  it("ignores an initial state read that lands after a replacement was read (#477)", async () => {
+    const delayedInitialRead = deferred<PurchaseOrderDocumentStateDTO>();
+    stateMock.mockReturnValueOnce(delayedInitialRead.promise);
+    attachMock.mockResolvedValueOnce(stateWith(2).Document);
+    stateMock.mockResolvedValueOnce(stateWith(2, [2, 1]));
+
+    act(() => root.render(<PurchaseOrderDocumentPanel purchaseOrderId={7} />));
+    await flush();
+    expect(container.textContent).toContain("Loading the customer PO PDF…");
+
+    // A replacement is read while the panel's first read is still in flight.
+    chooseFile("Replacement.pdf");
+    await flush();
+    expect(container.textContent).toContain("Customer PO 2.pdf");
+    expect(container.textContent).toContain("Version 2 of 2");
+
+    // The first read now answers with the document it replaced. It must not
+    // overwrite the newer state, or the editor would be told the old document
+    // is active again.
+    await act(async () => {
+      delayedInitialRead.resolve(stateWith(1));
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.textContent).toContain("Customer PO 2.pdf");
+    expect(container.textContent).toContain("Version 2 of 2");
+    expect(container.textContent).not.toContain("Customer PO 1.pdf");
   });
 
   it("asks before removing the current PDF and keeps it when told to", async () => {

@@ -294,6 +294,10 @@ export function PurchaseOrderDocumentPanel({
   const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const previewUrl = useRef<string | null>(null);
+  // Every state read carries the generation it was requested for. A read that
+  // started before a replacement (or removal) must not overwrite the state the
+  // later read reported, even if it lands afterwards.
+  const stateGeneration = useRef(0);
 
   const applyState = (next: PurchaseOrderDocumentStateDTO) => {
     setState(next);
@@ -301,8 +305,15 @@ export function PurchaseOrderDocumentPanel({
   };
 
   const refresh = async () => {
-    const next = await GetPurchaseOrderDocumentState(purchaseOrderId);
-    applyState(next);
+    const generation = stateGeneration.current + 1;
+    stateGeneration.current = generation;
+    try {
+      const next = await GetPurchaseOrderDocumentState(purchaseOrderId);
+      if (generation !== stateGeneration.current) return;
+      applyState(next);
+    } finally {
+      if (generation === stateGeneration.current) setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -311,16 +322,22 @@ export function PurchaseOrderDocumentPanel({
       setLoading(false);
       return;
     }
+    const generation = stateGeneration.current + 1;
+    stateGeneration.current = generation;
     void (async () => {
       try {
         const next = await GetPurchaseOrderDocumentState(purchaseOrderId);
-        if (!cancelled) {
+        if (!cancelled && generation === stateGeneration.current) {
           applyState(next);
         }
       } catch (loadError) {
-        if (!cancelled) setError(documentErrorMessage(loadError));
+        if (!cancelled && generation === stateGeneration.current) {
+          setError(documentErrorMessage(loadError));
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && generation === stateGeneration.current) {
+          setLoading(false);
+        }
       }
     })();
     return () => {
