@@ -378,6 +378,11 @@ func purchaseOrderError(context echo.Context, err error) error {
 		})
 	case errors.Is(err, store.ErrPurchaseOrderSourceNotFound):
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation revision not found"})
+	case errors.Is(err, store.ErrPurchaseOrderSourceMissing):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_source_missing",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderSourceIncomplete):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": err.Error(),
@@ -500,6 +505,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		PrintedPpnMinor:        order.PrintedPpnMinor,
 		PrintedGrandTotalMinor: order.PrintedGrandTotalMinor,
 		PdfAbsentConfirmed:     order.PDFAbsentConfirmed,
+		SourceMissing:          order.SourceMissing,
 		SavedBy:                order.SavedBy,
 		ConfirmationNumber:     order.ConfirmationNumber,
 		ConfirmationWarn:       order.ConfirmationWarn,

@@ -358,17 +358,6 @@ func (s *Server) revisionsEndpoint(context echo.Context) error {
 	return context.JSON(http.StatusOK, map[string]any{"revisions": revisions})
 }
 
-func (s *Server) deleteEndpoint(context echo.Context) error {
-	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
-	if err != nil || id < 1 {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
-	}
-	if err := s.database.DeleteQuotation(context.Request().Context(), id); err != nil {
-		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation not found"})
-	}
-	return context.NoContent(http.StatusNoContent)
-}
-
 func (s *Server) attachDocumentEndpoint(context echo.Context) error {
 	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
 	if err != nil || id < 1 {

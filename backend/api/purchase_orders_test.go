@@ -75,6 +75,7 @@ type purchaseOrderRow struct {
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
 	Version                int64   `json:"version"`
+	SourceMissing          bool    `json:"sourceMissing"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {

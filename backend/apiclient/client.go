@@ -35,6 +35,24 @@ type ConflictInfo struct {
 	UpdatedBy      int64  `json:"updatedBy"`
 }
 
+// DeletionChangeInfo is one named difference between a confirmed deletion
+// chain and the chain as it stands (#480). The desktop binding turns these into
+// typed modal rows, so the wording lives server-side.
+type DeletionChangeInfo struct {
+	Field  string `json:"field"`
+	Label  string `json:"label"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+// DeletionConflictInfo is the 409 body a stale deletion confirmation carries.
+// Preview stays raw so this package does not depend on the API contract; the
+// binding decodes it into the generated shape.
+type DeletionConflictInfo struct {
+	Changes []DeletionChangeInfo `json:"changes"`
+	Preview json.RawMessage      `json:"preview"`
+}
+
 // StatusError is a response the server refused: anything outside 2xx, and the
 // 401 that ends a session.
 //
@@ -49,6 +67,7 @@ type ConflictInfo struct {
 // to a particular one (po_not_draft) the same way.
 type StatusError struct {
 	Conflict   *ConflictInfo
+	Deletion   *DeletionConflictInfo
 	StatusCode int
 	Code       string
 	Message    string
@@ -94,6 +113,16 @@ func CodeOf(err error) string {
 		return status.Code
 	}
 	return ""
+}
+
+// DeletionOf reports the changed-chain details behind a refused deletion, or nil
+// when the refusal was something else (#480).
+func DeletionOf(err error) *DeletionConflictInfo {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Deletion
+	}
+	return nil
 }
 
 // BaseURL reports the API address this client talks to. The verification
@@ -211,12 +240,14 @@ func decodeStatusError(response *http.Response, fallback string) error {
 		Message:    apiErrorBody(body, fallback),
 	}
 	var envelope struct {
-		Code           string `json:"code"`
-		CurrentState   string `json:"currentState"`
-		UpdatedByName  string `json:"updatedByName"`
-		UpdatedAt      string `json:"updatedAt"`
-		CurrentVersion int64  `json:"currentVersion"`
-		UpdatedBy      int64  `json:"updatedBy"`
+		Code           string               `json:"code"`
+		CurrentState   string               `json:"currentState"`
+		UpdatedByName  string               `json:"updatedByName"`
+		UpdatedAt      string               `json:"updatedAt"`
+		CurrentVersion int64                `json:"currentVersion"`
+		UpdatedBy      int64                `json:"updatedBy"`
+		Changes        []DeletionChangeInfo `json:"changes"`
+		Preview        json.RawMessage      `json:"preview"`
 	}
 	if json.Unmarshal(body, &envelope) == nil {
 		failure.Code = envelope.Code
@@ -228,6 +259,12 @@ func decodeStatusError(response *http.Response, fallback string) error {
 				UpdatedBy:      envelope.UpdatedBy,
 				UpdatedByName:  envelope.UpdatedByName,
 				UpdatedAt:      envelope.UpdatedAt,
+			}
+		}
+		if envelope.Code == "deletion_chain_changed" {
+			failure.Deletion = &DeletionConflictInfo{
+				Changes: envelope.Changes,
+				Preview: envelope.Preview,
 			}
 		}
 	}

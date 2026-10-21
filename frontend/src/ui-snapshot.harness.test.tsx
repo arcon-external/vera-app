@@ -33,6 +33,10 @@ import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
+import {
+  DeletionChallengePanel,
+  DeletionDialogView,
+} from "./components/DeletionDialog";
 import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
 import { PurchaseOrderConflictPrompt } from "./components/PurchaseOrderConflictPrompt";
 import { PurchaseOrderHistoryPanel } from "./components/PurchaseOrderHistoryPanel";
@@ -58,6 +62,11 @@ import {
   PurchaseOrderSourceChange,
 } from "./components/PurchaseOrderRepair";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
+import {
+  deletionReducer,
+  initialDeletionState,
+  type DeletionPreviewDTO,
+} from "./deletion";
 import type { ArchivedQuotation } from "./archive";
 import type { CurrencyInfo } from "./format";
 import {
@@ -766,6 +775,141 @@ const TEMPLATE_LABELS: CompanyLabelEntry[] = [
   label("termsLeadTime", "3. Lead time is {leadtime}.", 300, true),
   label("termsIncoterm", "4. Incoterms: {incoterm}", 300, true),
 ];
+
+
+// #480: the permanent-deletion dialog. Three states are evidence: a single
+// record with the surviving document listed, a whole chain with the issued
+// ten-letter challenge, and a chain that moved between the challenge and the
+// confirmation. The dialog is an overlay in the app; here it is rendered inline
+// because the harness screenshots a page, not a modal interaction.
+const DELETION_PREVIEW: DeletionPreviewDTO = {
+  TargetType: "quotation",
+  TargetID: 12,
+  TargetUUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+  DocumentNumber: "1502260012",
+  DocumentNumberLabel: "Quotation number",
+  QuoteNumber: "1502260012",
+  PONumber: "",
+  CustomerName: "PT. Infineon Technologies Batam",
+  State: "issued",
+  SourceMissing: false,
+  Version: 0,
+  Fingerprint: "v1;target=quotation;quotation_id=12;revisions=0,1",
+  Scopes: [
+    {
+      Scope: "record",
+      Available: true,
+      UnavailableReason: "",
+      RequiresChallenge: false,
+      Removes: [
+        {
+          Type: "quotation",
+          ID: 12,
+          UUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+          DocumentNumber: "1502260012",
+          SourceReference: "",
+          Label: "Quotation 1502260012",
+          State: "issued",
+          Version: 0,
+          Revisions: [0, 1],
+          DocumentVersions: 2,
+          HistoryEntries: 0,
+        },
+      ],
+      Preserves: [
+        {
+          Type: "purchase_order",
+          ID: 34,
+          UUID: "9a6f7e2c-51c8-4f18-9a3a-1d0f2b6c4e77",
+          DocumentNumber: "PO-INF-2026-091",
+          SourceReference: "1502260012",
+          Label: "Purchase order PO-INF-2026-091",
+          State: "saved",
+          Version: 7,
+          Revisions: [],
+          DocumentVersions: 1,
+          HistoryEntries: 3,
+        },
+      ],
+    },
+    {
+      Scope: "chain",
+      Available: true,
+      UnavailableReason: "",
+      RequiresChallenge: true,
+      Removes: [
+        {
+          Type: "quotation",
+          ID: 12,
+          UUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+          DocumentNumber: "1502260012",
+          SourceReference: "",
+          Label: "Quotation 1502260012",
+          State: "issued",
+          Version: 0,
+          Revisions: [0, 1],
+          DocumentVersions: 2,
+          HistoryEntries: 0,
+        },
+        {
+          Type: "purchase_order",
+          ID: 34,
+          UUID: "9a6f7e2c-51c8-4f18-9a3a-1d0f2b6c4e77",
+          DocumentNumber: "PO-INF-2026-091",
+          SourceReference: "1502260012",
+          Label: "Purchase order PO-INF-2026-091",
+          State: "saved",
+          Version: 7,
+          Revisions: [],
+          DocumentVersions: 1,
+          HistoryEntries: 3,
+        },
+      ],
+      Preserves: [],
+    },
+  ],
+};
+
+function deletionState(scope: "record" | "chain") {
+  return deletionReducer(
+    deletionReducer(initialDeletionState, {
+      type: "previewLoaded",
+      preview: DELETION_PREVIEW,
+    }),
+    { type: "scopeChanged", scope }
+  );
+}
+
+const DELETION_CHAIN_READY = deletionReducer(deletionState("chain"), {
+  type: "challengeLoaded",
+  challenge: {
+    ChallengeID: "challenge-480",
+    Letters: "ABCDEFGHJK",
+    ExpiresAt: "2026-10-21T10:15:00Z",
+    Fingerprint: DELETION_PREVIEW.Fingerprint,
+  },
+});
+
+const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
+  type: "chainChanged",
+  changed: {
+    Preview: { ...DELETION_PREVIEW, Fingerprint: "v1;target=quotation;quotation_id=12;revisions=0,1,2" },
+    Changes: [
+      {
+        Field: "purchase_order_34_version",
+        Label: "Purchase order 34 version",
+        Before: "7",
+        After: "8",
+      },
+      {
+        Field: "revisions",
+        Label: "Quotation revisions",
+        Before: "0,1",
+        After: "0,1,2",
+      },
+    ],
+  },
+});
 
 const CASES: SnapshotCase[] = [
   {
@@ -1546,6 +1690,80 @@ const CASES: SnapshotCase[] = [
         onBack={() => undefined}
         onEdit={() => undefined}
         onAddPurchaseOrder={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: single-record scope. The connected purchase order is listed as
+    // surviving, because deleting the quotation releases its link rather than
+    // deleting it.
+    name: "DeletionDialogRecord",
+    element: (
+      <DeletionDialogView
+        state={deletionState("record")}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: whole-chain scope with the issued challenge. The ten letters are
+    // the second confirmation; this is the state where the delete button is
+    // still disabled until the admin types them.
+    name: "DeletionDialogChain",
+    element: (
+      <DeletionDialogView
+        state={DELETION_CHAIN_READY}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: the challenge card on its own. In the 900px dialog screenshot the
+    // card sits below the fold of the dialog's own scroll container, so this
+    // case is the evidence that the issued letters, the expiry and the input
+    // render legibly at both widths.
+    name: "DeletionDialogChallengePanel",
+    element: (
+      <DeletionChallengePanel
+        state={DELETION_CHAIN_READY}
+        challengeError="Those letters do not match the challenge."
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: the changed-chain stop. Nothing was deleted; the modal names what
+    // moved and asks for the confirmation to be renewed.
+    name: "DeletionDialogChanged",
+    element: (
+      <DeletionDialogView
+        state={DELETION_CHANGED}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
       />
     ),
   },

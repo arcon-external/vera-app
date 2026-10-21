@@ -81,6 +81,9 @@ type PurchaseOrderDTO struct {
 	SavedAt                *string
 	SavedBy                *int64
 	PdfAbsentConfirmed     bool
+	// SourceMissing is the #480 state: the record's Quotation was deleted and
+	// it now carries only a former-source reference.
+	SourceMissing bool
 	// The optional customer-system confirmation reference (#474). Null until
 	// assigned, then immutable; ConfirmationWarn follows the stored sequence.
 	ConfirmationNumber     *string
@@ -866,6 +869,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		SavedAt:                row.SavedAt,
 		SavedBy:                row.SavedBy,
 		PdfAbsentConfirmed:     row.PdfAbsentConfirmed,
+		SourceMissing:          row.SourceMissing,
 		Version:                row.Version,
 		ConfirmationNumber:     row.ConfirmationNumber,
 		ConfirmationAssignedAt: row.ConfirmationAssignedAt,

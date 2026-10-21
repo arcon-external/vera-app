@@ -147,7 +147,7 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		where += fmt.Sprintf(`
 			AND (
 				COALESCE(po.po_number, '') ILIKE %s ESCAPE '\'
-				OR COALESCE(q.quote_number, '') ILIKE %s ESCAPE '\'
+				OR COALESCE(q.quote_number, po.former_quote_number, '') ILIKE %s ESCAPE '\'
 				OR po.customer_name ILIKE %s ESCAPE '\'
 			)`, placeholder, placeholder, placeholder)
 	}
@@ -181,8 +181,9 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT po.id, po.uuid::text, po.state, COALESCE(po.po_number, ''),
-		       COALESCE(q.quote_number, ''), po.source_revision, po.customer_id,
-		       po.customer_name, po.received_date, po.currency, (q.id IS NULL)
+		       COALESCE(q.quote_number, po.former_quote_number, ''), po.source_revision,
+		       po.customer_id, po.customer_name, po.received_date, po.currency,
+		       (q.id IS NULL)
 		%s%s
 		ORDER BY po.received_date DESC, po.id DESC
 		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),

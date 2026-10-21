@@ -12,15 +12,17 @@ export function ClearDraftContext():Promise<void>;
 
 export function ClearRevisionContext():Promise<void>;
 
+export function ConfirmDeletion(arg1:backend.DeletionConfirmInput):Promise<backend.DeletionConfirmResult>;
+
 export function CorrectPurchaseOrder(arg1:backend.PurchaseOrderCorrectionInput):Promise<backend.PurchaseOrderWriteResult>;
+
+export function CreateDeletionChallenge(arg1:backend.DeletionChallengeInput):Promise<backend.DeletionChallengeResult>;
 
 export function CreatePurchaseOrderDraft(arg1:backend.PurchaseOrderCreateInput):Promise<backend.PurchaseOrderDTO>;
 
 export function CustomerID():Promise<number>;
 
 export function DeleteDraft(arg1:number):Promise<void>;
-
-export function DeleteQuotation(arg1:number):Promise<void>;
 
 export function DownloadTemplateSample(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<string>;
 
@@ -71,6 +73,8 @@ export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>
 export function PickDirectory():Promise<string>;
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
+
+export function PreviewDeletion(arg1:backend.DeletionPreviewInput):Promise<backend.DeletionPreviewDTO>;
 
 export function PreviewTemplateDocument(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<number>>;
 

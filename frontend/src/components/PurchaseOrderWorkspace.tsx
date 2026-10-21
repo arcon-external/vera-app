@@ -63,7 +63,9 @@ export function PurchaseOrderWorkspacePage({
   const { draft, phase } = workspace;
 
   if (phase === "list" || draft === null) {
-    return <PurchaseOrderListPage onAdd={onAdd} onOpen={onOpen} />;
+    return (
+      <PurchaseOrderListPage onAdd={onAdd} onOpen={onOpen} isAdmin={isAdmin} />
+    );
   }
 
   // Neither the discarded working copy nor a stale saved snapshot is shown
