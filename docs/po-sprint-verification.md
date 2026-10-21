@@ -1,11 +1,13 @@
 # Quotation → PO sprint verification (#482)
 
-Status: **partially verified — one required gate is BLOCKED and one user-facing
-copy defect is open.** No release, merge, push or production change was made.
+Status: **partially verified — one required gate is BLOCKED; the copy defect D1
+found during verification is RESOLVED.** No release, merge, push or production
+change was made.
 
 - Branch: `feat/464-po-sprint`
 - Verified commit: `8809adb` (`merge: resolve manual extraction conflicts and retry
   safely (#479)`), clean tree before the verification.
+- D1 fix: `22879b4` (`fix: correct the extraction OCR hint copy`, `Refs #482`).
 - Database: disposable local `vera-pg-test` (PostgreSQL 18.6),
   `postgres://vera:vera@127.0.0.1:55432/veratest?sslmode=disable`, and the
   rehearsal schema `vera_sprint_upgrade`. Production was never contacted.
@@ -15,7 +17,7 @@ copy defect is open.** No release, merge, push or production change was made.
 
 | # | Acceptance criterion | Status |
 | --- | --- | --- |
-| 1 | Manual and PDF workflows, both entry paths, selector steps, lists/filters, drafts, finalization, correction | **PASS** (behaviour); one copy defect, D1 |
+| 1 | Manual and PDF workflows, both entry paths, selector steps, lists/filters, drafts, finalization, correction | **PASS** (behaviour); D1 **RESOLVED** in `22879b4` |
 | 2 | Optional numbering, race/overwrite paths, deletion challenges, source survival/repair, permissions end to end | **PASS** |
 | 3 | Production-shaped upgrade/rollback rehearsal; old signature still verifies | **PASS** (local binary + schema rehearsal, not a production deploy) |
 | 4 | Real assembled pages, modal keyboard/focus, errors, progress, evidence at narrow/wide | **PASS** for jsdom + SSR snapshots; real Wails interactions **HAND-DRIVEN** |
@@ -313,7 +315,7 @@ they must consume; no merge or release was performed.
 
 ## 7. Defects found
 
-### D1 — stale extraction copy says scanned pages are not read
+### D1 — stale extraction copy says scanned pages are not read — **RESOLVED**
 
 `frontend/src/purchaseOrderDocument.ts:229` (and the empty-state hint at
 `:216`) still says:
@@ -330,19 +332,43 @@ comment at `frontend/src/components/PurchaseOrderExtractionPanel.tsx:44`
 carries the same stale claim ("A scanned page is reported as an abstention,
 never OCRed here").
 
-No product code was changed here. Recommended fix wave: update both hints and
-the comment, and strengthen `purchaseOrderDocument.test.ts` so the wording
-cannot regress to "scanned pages are not read" after OCR exists.
+The `tdd` lens found the reason the existing test missed it:
+`purchaseOrderDocument.test.ts:100` asserted only that the hint contains
+`"text layer"`, which the stale sentence still satisfied. The correct
+regression seam is the pure `extractAndCompareAvailability` function, with the
+panel SSR pass as the assembled check. The `diagnosing-bugs` lens confirmed the
+boundary: the minimised repro is the rendered `DocumentAttached` panel, where
+the hint and the OCR evidence line contradicted each other on one screen.
 
-The `tdd` lens found the reason the existing test misses it:
-`purchaseOrderDocument.test.ts:100` asserts only that the hint contains
-`"text layer"`, which the stale sentence still satisfies. A correct regression
-seam exists and is cheap — `extractAndCompareAvailability` is a pure function —
-so the fix should assert the shipped scan behaviour in the wording (and the
-absence of the "not read" claim) before changing the string. The
-`diagnosing-bugs` lens confirmed the same boundary: the minimised repro is the
-rendered `DocumentAttached` panel, where the hint and the OCR evidence line
-contradict each other on one screen.
+**Resolution — `22879b4`** (`fix: correct the extraction OCR hint copy`,
+`Refs #482`). Copy changes only:
+
+- `purchaseOrderDocument.ts:216` — `"Reads the selectable text layer only."` →
+  `"Reads selectable text and OCRs scanned pages."`
+- `purchaseOrderDocument.ts:229` — `"Reads the selectable text layer only;
+  scanned pages are not read."` → `"Reads selectable text and OCRs scanned
+  pages; low-confidence OCR values need review against the page image."`
+- `PurchaseOrderExtractionPanel.tsx:44` — `"A scanned page is reported as an
+  abstention, never OCRed here."` → `"The engine OCRs only pages without a
+  usable text layer, and its low-confidence evidence arrives marked
+  `needs_review` rather than as fact."`
+
+Red/green evidence (md5-restore scratch):
+
+- New guards: `purchaseOrderDocument.test.ts` — "says scanned pages are OCRed
+  and that low-confidence OCR needs review";
+  `PurchaseOrderDocumentPanel.test.tsx` — "says scanned pages are OCRed, with a
+  low-confidence review instruction".
+- Against the old copy (scratch restored, green md5 `7aefe453…` saved first):
+  `npx vitest run src/purchaseOrderDocument.test.ts
+  src/components/PurchaseOrderDocumentPanel.test.tsx` → **exit 1**, exactly
+  those 2 tests failed (`expected 'Reads the selectable text layer only;…' to
+  contain 'OCRs scanned pages'`).
+- Restored from the saved copy (`md5sum -c` → `OK`) and re-ran → **exit 0**,
+  29 passed in 2 files.
+- Full gates after the fix: `npm --prefix frontend test` exit 0 (830 passed, 48
+  opt-in snapshot tests skipped), `npm --prefix frontend run build` exit 0,
+  `gofmt -l .` exit 0 (no output), `go vet ./...` exit 0.
 
 No functional failure was found: every gate above passed, and the OCR pipeline
 behaves as documented in the Docker and API tests.
@@ -379,8 +405,9 @@ behaves as documented in the Docker and API tests.
     to this verification worker, so both axes were run directly rather than
     delegated.
   - `tdd` — used to check whether each claimed guard can actually fail. It
-    found D1's guard is too weak: the test asserts a substring the stale copy
-    still contains.
+    found D1's guard was too weak (the test asserted a substring the stale copy
+    still contained); the fix in `22879b4` replaces it with the two guards
+    proven red on the old copy above.
   - `diagnosing-bugs` — used for D1: the repro is the assembled panel where
     the stale hint and the OCR evidence line disagree; the correct regression
     seam is the pure `extractAndCompareAvailability` function. No fix was
