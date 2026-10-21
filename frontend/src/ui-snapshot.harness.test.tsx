@@ -1907,14 +1907,14 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The issued-Quotation detail header (#467 wave 2): the title, revision
-    // picker, the new "Add Purchase Order from a Quotation" action and Edit.
-    // At 360 it is the case that says whether the two actions wrap without
+    // The issued-Quotation detail header (#467 wave 2 + #485 copy): the title,
+    // revision picker, "Add Purchase Order from a Quotation", Copy and Edit.
+    // At 360 it is the case that says whether the three actions wrap without
     // overflowing.
     //
     // What this case cannot show: the click that opens the shared selector,
-    // the focus restore on close, and the page below the header (which fetches
-    // its revision in an effect) stay hand-driven.
+    // the focus restore on close, the real clipboard write, and the page below
+    // the header (which fetches its revision in an effect) stay hand-driven.
     name: "QuotationDetailHeader",
     element: (
       <QuotationDetailHeader
@@ -1929,6 +1929,8 @@ const CASES: SnapshotCase[] = [
         onBack={() => undefined}
         onEdit={() => undefined}
         onAddPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+        copyDisabled={false}
       />
     ),
   },
