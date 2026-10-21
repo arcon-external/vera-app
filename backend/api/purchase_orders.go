@@ -76,59 +76,79 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	poDate, err := parsePurchaseOrderDate(request.PODate, "poDate")
+	if protected := request.Named(); protected != "" {
+		return purchaseOrderProtectedField(context, protected)
+	}
+	update, err := purchaseOrderUpdateFromRequest(request, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	received, err := parsePurchaseOrderDate(request.ReceivedDate, "receivedDate")
-	if err != nil {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	requested, err := parsePurchaseOrderDate(request.RequestedDeliveryDate, "requestedDeliveryDate")
-	if err != nil {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	items := make([]store.PurchaseOrderItem, 0, len(request.Items))
-	for _, item := range request.Items {
-		items = append(items, store.PurchaseOrderItem{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-		})
-	}
+	update.ID = id
 	requestContext, err := s.organizationContext(context.Request().Context())
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
 	}
-	user := requestUser(context)
-	order, err := s.database.UpdatePurchaseOrderDraft(requestContext, store.PurchaseOrderUpdate{
-		ID:                    id,
-		BillingAddress:        request.BillingAddress,
-		DeliveryAddress:       request.DeliveryAddress,
-		ShipToCode:            request.ShipToCode,
-		ContactEmail:          request.ContactEmail,
-		ContactPhone:          request.ContactPhone,
-		PONumber:              request.PONumber,
-		PODate:                poDate,
-		ReceivedDate:          received,
-		RequestedDeliveryDate: requested,
-		PaymentTerms:          request.PaymentTerms,
-		Incoterms:             request.Incoterms,
-		UpdatedBy:             user.ID,
-		Items:                 items,
-		DiscountPercent:       request.DiscountPercent,
-		AdjustmentMinor:       request.AdjustmentMinor,
-		AdjustmentReason:      request.AdjustmentReason,
+	order, err := s.database.UpdatePurchaseOrderDraft(requestContext, update)
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
+}
+
+// correctPurchaseOrder replaces a saved record. The reason is required, the
+// expected version is mandatory, and the payload can never name the source
+// link, customer, currency, tax basis, identity or confirmation number.
+func (s *Server) correctPurchaseOrder(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	var request apicontract.PurchaseOrderCorrectionRequest
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if protected := request.Named(); protected != "" {
+		return purchaseOrderProtectedField(context, protected)
+	}
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	if err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	update.ID = id
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	order, err := s.database.CorrectPurchaseOrder(requestContext, store.PurchaseOrderCorrectionInput{
+		PurchaseOrderUpdate: update,
+		Reason:              request.Reason,
 	})
 	if err != nil {
 		return purchaseOrderError(context, err)
 	}
 	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
+}
+
+// getPurchaseOrderHistory returns the immutable snapshots of one record,
+// newest first.
+func (s *Server) getPurchaseOrderHistory(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	history, err := s.database.GetPurchaseOrderHistory(requestContext, id)
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	rows := make([]apicontract.PurchaseOrderCorrectionRow, 0, len(history))
+	for _, entry := range history {
+		rows = append(rows, mapPurchaseOrderCorrection(entry))
+	}
+	return context.JSON(http.StatusOK, map[string]any{"history": rows})
 }
 
 // getPurchaseOrderReview opens one record beside the exact source revision it
@@ -161,31 +181,15 @@ func (s *Server) finalizePurchaseOrder(context echo.Context) error {
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	poDate, err := parsePurchaseOrderDate(request.PODate, "poDate")
+	if protected := request.Named(); protected != "" {
+		return purchaseOrderProtectedField(context, protected)
+	}
+	user := requestUser(context)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, user.ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	received, err := parsePurchaseOrderDate(request.ReceivedDate, "receivedDate")
-	if err != nil {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	requested, err := parsePurchaseOrderDate(request.RequestedDeliveryDate, "requestedDeliveryDate")
-	if err != nil {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
-	}
-	items := make([]store.PurchaseOrderItem, 0, len(request.Items))
-	for _, item := range request.Items {
-		items = append(items, store.PurchaseOrderItem{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-		})
-	}
+	update.ID = id
 	decisions := make([]store.PurchaseOrderDecision, 0, len(request.Decisions))
 	for _, decision := range request.Decisions {
 		decisions = append(decisions, store.PurchaseOrderDecision{
@@ -197,27 +201,8 @@ func (s *Server) finalizePurchaseOrder(context echo.Context) error {
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
 	}
-	user := requestUser(context)
 	order, err := s.database.FinalizePurchaseOrder(requestContext, store.PurchaseOrderFinalize{
-		PurchaseOrderUpdate: store.PurchaseOrderUpdate{
-			ID:                    id,
-			BillingAddress:        request.BillingAddress,
-			DeliveryAddress:       request.DeliveryAddress,
-			ShipToCode:            request.ShipToCode,
-			ContactEmail:          request.ContactEmail,
-			ContactPhone:          request.ContactPhone,
-			PONumber:              request.PONumber,
-			PODate:                poDate,
-			ReceivedDate:          received,
-			RequestedDeliveryDate: requested,
-			PaymentTerms:          request.PaymentTerms,
-			Incoterms:             request.Incoterms,
-			UpdatedBy:             user.ID,
-			Items:                 items,
-			DiscountPercent:       request.DiscountPercent,
-			AdjustmentMinor:       request.AdjustmentMinor,
-			AdjustmentReason:      request.AdjustmentReason,
-		},
+		PurchaseOrderUpdate: update,
 		Decisions:           decisions,
 		AcknowledgedMissing: request.AcknowledgedMissing,
 		AcknowledgedExtra:   request.AcknowledgedExtra,
@@ -253,9 +238,31 @@ func (s *Server) assignPurchaseOrderConfirmation(context echo.Context) error {
 }
 
 func purchaseOrderError(context echo.Context, err error) error {
+	var versionConflict *store.PurchaseOrderVersionConflictError
+	if errors.As(err, &versionConflict) {
+		return context.JSON(http.StatusConflict, apicontract.PurchaseOrderConflictResponse{
+			Error:          versionConflict.Error(),
+			Code:           "po_version_conflict",
+			CurrentState:   versionConflict.CurrentState,
+			CurrentVersion: versionConflict.CurrentVersion,
+			UpdatedBy:      versionConflict.UpdatedBy,
+			UpdatedByName:  versionConflict.UpdatedByName,
+			UpdatedAt:      versionConflict.UpdatedAt.Format(time.RFC3339),
+		})
+	}
 	switch {
 	case errors.Is(err, store.ErrPurchaseOrderNotFound):
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "purchase order not found"})
+	case errors.Is(err, store.ErrPurchaseOrderVersionRequired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": "reload the purchase order before saving; the version it was loaded at is required",
+			"code":  "po_version_required",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderCorrectionReasonRequired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": "a correction needs a reason",
+			"code":  "po_correction_reason_required",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderExists):
 		return context.JSON(http.StatusConflict, map[string]string{
 			"error": "this quotation already has a purchase order",
@@ -355,6 +362,7 @@ func purchaseOrderError(context echo.Context, err error) error {
 func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 	row := apicontract.PurchaseOrderRow{
 		ID:                     order.ID,
+		Version:                order.Version,
 		UUID:                   order.UUID,
 		State:                  order.State,
 		QuotationID:            order.QuotationID,
@@ -433,6 +441,136 @@ func parsePurchaseOrderDate(raw, field string) (*time.Time, error) {
 		return nil, fmt.Errorf("%s must be a date like 2026-10-20", field)
 	}
 	return &value, nil
+}
+
+// purchaseOrderProtectedField refuses a request that carried a protected value.
+// The name is repeated so the client knows which field it must not send; the
+// value itself is never echoed.
+func purchaseOrderProtectedField(context echo.Context, field string) error {
+	return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+		"error": "the field " + field + " is protected and cannot be changed by a purchase order save or correction",
+		"code":  "po_protected_field",
+	})
+}
+
+// purchaseOrderUpdateFromRequest converts the shared editable payload. It only
+// fails on a malformed date; every other rule belongs to the store so the API
+// and the desktop cannot disagree.
+func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateRequest, updatedBy int64) (store.PurchaseOrderUpdate, error) {
+	poDate, err := parsePurchaseOrderDate(request.PODate, "poDate")
+	if err != nil {
+		return store.PurchaseOrderUpdate{}, err
+	}
+	received, err := parsePurchaseOrderDate(request.ReceivedDate, "receivedDate")
+	if err != nil {
+		return store.PurchaseOrderUpdate{}, err
+	}
+	requested, err := parsePurchaseOrderDate(request.RequestedDeliveryDate, "requestedDeliveryDate")
+	if err != nil {
+		return store.PurchaseOrderUpdate{}, err
+	}
+	items := make([]store.PurchaseOrderItem, 0, len(request.Items))
+	for _, item := range request.Items {
+		items = append(items, store.PurchaseOrderItem{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+		})
+	}
+	return store.PurchaseOrderUpdate{
+		BillingAddress:        request.BillingAddress,
+		DeliveryAddress:       request.DeliveryAddress,
+		ShipToCode:            request.ShipToCode,
+		ContactEmail:          request.ContactEmail,
+		ContactPhone:          request.ContactPhone,
+		PONumber:              request.PONumber,
+		PODate:                poDate,
+		ReceivedDate:          received,
+		RequestedDeliveryDate: requested,
+		PaymentTerms:          request.PaymentTerms,
+		Incoterms:             request.Incoterms,
+		UpdatedBy:             updatedBy,
+		Items:                 items,
+		DiscountPercent:       request.DiscountPercent,
+		AdjustmentMinor:       request.AdjustmentMinor,
+		AdjustmentReason:      request.AdjustmentReason,
+		ExpectedVersion:       request.ExpectedVersion,
+		Overwrite:             request.Overwrite,
+	}, nil
+}
+
+// mapPurchaseOrderCorrection exposes one retained snapshot. Nothing here reads
+// the live record: the history is the values as they stood.
+func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract.PurchaseOrderCorrectionRow {
+	row := apicontract.PurchaseOrderCorrectionRow{
+		ID:                    entry.ID,
+		UUID:                  entry.UUID,
+		Kind:                  entry.Kind,
+		State:                 entry.State,
+		Reason:                entry.Reason,
+		ActorID:               entry.ActorID,
+		ActorName:             entry.ActorName,
+		CreatedAt:             entry.CreatedAt.Format(time.RFC3339),
+		PreviousVersion:       entry.PreviousVersion,
+		ResultingVersion:      entry.ResultingVersion,
+		QuotationID:           entry.QuotationID,
+		SourceRevision:        entry.SourceRevision,
+		QuoteNumber:           entry.QuoteNumber,
+		CustomerID:            entry.CustomerID,
+		CustomerName:          entry.CustomerName,
+		Currency:              entry.Currency,
+		TaxZone:               entry.TaxZone,
+		TaxCategory:           entry.TaxCategory,
+		BillingAddress:        entry.BillingAddress,
+		DeliveryAddress:       entry.DeliveryAddress,
+		ShipToCode:            entry.ShipToCode,
+		ContactEmail:          entry.ContactEmail,
+		ContactPhone:          entry.ContactPhone,
+		PONumber:              entry.PONumber,
+		PODate:                formatPurchaseOrderDate(entry.PODate),
+		ReceivedDate:          entry.ReceivedDate.Format("2006-01-02"),
+		RequestedDeliveryDate: formatPurchaseOrderDate(entry.RequestedDeliveryDate),
+		PaymentTerms:          entry.PaymentTerms,
+		Incoterms:             entry.Incoterms,
+		DiscountPercent:       entry.DiscountPercent,
+		SubtotalMinor:         entry.SubtotalMinor,
+		DiscountMinor:         entry.DiscountMinor,
+		PpnBps:                entry.PpnBps,
+		PpnMinor:              entry.PpnMinor,
+		AdjustmentMinor:       entry.AdjustmentMinor,
+		AdjustmentReason:      entry.AdjustmentReason,
+		GrandTotalMinor:       entry.GrandTotalMinor,
+		Items:                 make([]apicontract.PurchaseOrderCorrectionItemRow, 0, len(entry.Items)),
+	}
+	if entry.Attachment != nil {
+		row.Attachment = &apicontract.PurchaseOrderCorrectionAttachmentRow{
+			Version:  entry.Attachment.Version,
+			SHA256:   entry.Attachment.SHA256,
+			Filename: entry.Attachment.Filename,
+		}
+	}
+	for _, item := range entry.Items {
+		row.Items = append(row.Items, apicontract.PurchaseOrderCorrectionItemRow{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			LineNumber:      item.LineNumber,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+			GrossMinor:      item.GrossMinor,
+			DiscountMinor:   item.DiscountMinor,
+			NetMinor:        item.NetMinor,
+		})
+	}
+	return row
 }
 
 func formatPurchaseOrderDate(value *time.Time) *string {

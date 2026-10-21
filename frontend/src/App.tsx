@@ -471,11 +471,17 @@ function App() {
   // the archive (#469): the selector's two paths create or reopen a draft and
   // set this.
   const [poDraft, setPODraft] = useState<PurchaseOrderDTO | null>(null);
+  // #473: a saved record's Correct action opens the same editor in correction
+  // mode, which requires a reason and keeps the replaced values.
+  const [poCorrecting, setPOCorrecting] = useState(false);
   // Leaving the PO page clears the edited draft, so returning to the PO surface
   // shows the archive rather than a stale editor. The leave guard owns the
   // dirty-check before this runs.
   const navigatePage = useCallback((next: AppPage) => {
-    if (next !== "po") setPODraft(null);
+    if (next !== "po") {
+      setPODraft(null);
+      setPOCorrecting(false);
+    }
     setPage(next);
   }, []);
   const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage);
@@ -514,6 +520,7 @@ function App() {
       try {
         const draft = await GetPurchaseOrder(id);
         poLeave.setDirty(false);
+        setPOCorrecting(false);
         setPODraft(draft);
         setPage("po");
       } catch (error) {
@@ -1768,6 +1775,7 @@ function App() {
             ReceivedDate: "",
           });
           poLeave.setDirty(false);
+          setPOCorrecting(false);
           setPODraft(draft);
           setPOSelectorOpen(false);
           setPage("po");
@@ -1780,6 +1788,7 @@ function App() {
           try {
             const draft = await GetPurchaseOrder(activePO.id);
             poLeave.setDirty(false);
+            setPOCorrecting(false);
             setPODraft(draft);
             setPOSelectorOpen(false);
             setPage("po");
@@ -1944,16 +1953,19 @@ function App() {
             The purchase order's currency ({poDraft.Currency}) is not in the
             loaded currency catalogue, so money cannot be edited safely yet.
           </StatusBanner>
-        ) : isSavedPurchaseOrder(poDraft) ? (
-          // #471: a saved record opens read-only. Editing waits for the
-          // correction workflow (#473), so no field here is an input.
+        ) : isSavedPurchaseOrder(poDraft) && !poCorrecting ? (
+          // #471/#473: a saved record opens read-only; Correct is the one entry
+          // into the correction editor, which asks for a reason and records the
+          // replaced values.
           <PurchaseOrderSavedView
             order={poDraft}
             currency={poEntry}
+            onCorrect={() => setPOCorrecting(true)}
             onAssigned={(updated) => setPODraft(updated)}
             onBack={() => {
               poLeave.setDirty(false);
               setPODraft(null);
+              setPOCorrecting(false);
             }}
           />
         ) : (
@@ -1963,21 +1975,33 @@ function App() {
             currency={poEntry}
             uomOptions={storedUoMs ?? []}
             incotermOptions={INCOTERM_OPTIONS}
+            mode={poCorrecting ? "correction" : "draft"}
             onDirtyChange={poLeave.setDirty}
             onSaved={(updated) => {
               setPODraft(updated);
+              const corrected = poCorrecting;
+              setPOCorrecting(false);
               pushToast(
                 "success",
-                updated.State === "saved"
-                  ? "Purchase order saved and finalized."
-                  : "Purchase order draft saved."
+                corrected
+                  ? "Purchase order corrected. The previous values are in the history."
+                  : updated.State === "saved"
+                    ? "Purchase order saved and finalized."
+                    : "Purchase order draft saved."
               );
             }}
             onCancel={() => {
               // Cancel is the same discard decision as a tab click: the guard
               // owns the one dialog, and this cleanup runs only once it is
-              // allowed. The page stays "po", so a clean Cancel lands back on
-              // the archive; a dirty one asks first.
+              // allowed. A correction returns to the saved view; a draft Cancel
+              // returns to the archive after the guard allows it.
+              if (poCorrecting) {
+                poLeave.request("po", () => {
+                  poLeave.setDirty(false);
+                  setPOCorrecting(false);
+                });
+                return;
+              }
               poLeave.request("home", () => {
                 poLeave.setDirty(false);
                 setPODraft(null);

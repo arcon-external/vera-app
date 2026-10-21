@@ -59,7 +59,10 @@ export function usePurchaseOrderLeaveGuard(
       // Going to "po" from "po" is not leaving; everything else is. There is
       // exactly one pending decision: Cancel and a tab click both arrive here,
       // and a second click replaces the first rather than stacking a dialog.
-      if (currentPage === "po" && dirty && next !== "po") {
+      // A same-page request with its own follow-up (leaving correction mode
+      // back to the saved view) also asks first, because it would unmount the
+      // editor just the same.
+      if (currentPage === "po" && dirty && (next !== "po" || after !== undefined)) {
         const active = typeof document === "undefined" ? null : document.activeElement;
         // A click inside the open dialog is not a new place to return to:
         // keep the control that opened the decision. In a browser the shell

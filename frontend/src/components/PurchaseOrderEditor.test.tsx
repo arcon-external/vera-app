@@ -43,6 +43,7 @@ const ORDER: PurchaseOrderDTO = {
   ContactPhone: "+62 21 555",
   PONumber: "PO-9001",
   ReceivedDate: "2026-10-02",
+  Version: 1,
   Incoterms: "CIF",
   Currency: "USD",
   TaxZone: "NonFTZ",

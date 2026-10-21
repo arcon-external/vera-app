@@ -1,6 +1,10 @@
-import { useState } from "react";
-import { AssignPurchaseOrderConfirmationNumber } from "@backend/backend/Quotation";
+import { useEffect, useState } from "react";
+import {
+  AssignPurchaseOrderConfirmationNumber,
+  GetPurchaseOrderHistory,
+} from "@backend/backend/Quotation";
 import { formatMoney, type CurrencyInfo } from "../format";
+import type { PurchaseOrderHistoryEntry } from "../poCorrection";
 import {
   evaluateReview,
   sourceLineLabel,
@@ -27,6 +31,7 @@ import type {
   PurchaseOrderDocumentStateDTO,
 } from "../purchaseOrderDocument";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
+import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -631,6 +636,11 @@ export interface PurchaseOrderSavedViewProps {
   currency: CurrencyInfo;
   onBack: () => void;
   /**
+   * Opens the correction editor (#473). Omitted by a surface that only reads a
+   * record (the SSR snapshot), so the action never exists without a handler.
+   */
+  onCorrect?: () => void;
+  /**
    * Reports a later confirmation-number assignment so the page that owns the
    * record can keep showing it. The view also keeps its own copy, so it is
    * correct even when a parent does not provide this.
@@ -643,6 +653,9 @@ export interface PurchaseOrderSavedViewProps {
    */
   documentInitialState?: PurchaseOrderDocumentStateDTO | null;
   onDocumentStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
+  /** The history the parent already has; omitted in the app so it fetches. */
+  historyInitial?: PurchaseOrderHistoryEntry[] | null;
+  historyInitialError?: string | null;
 }
 
 /**
@@ -655,9 +668,12 @@ export function PurchaseOrderSavedView({
   order,
   currency,
   onBack,
+  onCorrect,
   onAssigned,
   documentInitialState,
   onDocumentStateChange,
+  historyInitial,
+  historyInitialError = null,
 }: PurchaseOrderSavedViewProps) {
   // #474: a later assignment is the one write this read-only view performs.
   // It keeps the server's answer locally and reports it upward, so the number
@@ -666,10 +682,47 @@ export function PurchaseOrderSavedView({
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  // #473: the retained correction snapshots. The parent may supply them (SSR),
+  // otherwise this is the one read the saved view performs.
+  const [history, setHistory] = useState<PurchaseOrderHistoryEntry[]>(
+    historyInitial ?? []
+  );
+  const [historyLoading, setHistoryLoading] = useState(historyInitial == null);
+  const [historyError, setHistoryError] = useState<string | null>(historyInitialError);
   const current = assignedOrder ?? order;
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
   const state = initialPurchaseOrderEditorState(order, currency);
+
+  useEffect(() => {
+    if (historyInitial !== undefined && historyInitial !== null) {
+      setHistory(historyInitial);
+      setHistoryLoading(false);
+      setHistoryError(historyInitialError);
+      return;
+    }
+    let cancelled = false;
+    setHistoryLoading(true);
+    GetPurchaseOrderHistory(order.ID)
+      .then((entries) => {
+        if (cancelled) return;
+        setHistory(entries ?? []);
+        setHistoryError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setHistory([]);
+        setHistoryError(errorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // A correction changes the version, so reopening the same record refetches
+    // rather than showing the history from before the write.
+  }, [order.ID, order.Version]);
   // A saved record displays its stored figures. Recalculating would let a
   // later calculator change rewrite what an already-saved record says, which
   // is exactly what the stored calculation columns exist to prevent.
@@ -733,7 +786,14 @@ export function PurchaseOrderSavedView({
             {order.SourceRevision} · {order.Currency.toUpperCase()}
           </p>
         </div>
-        <Badge tone="success">Saved</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone="success">Saved</Badge>
+          {onCorrect !== undefined ? (
+            <Button size="sm" aria-label="Correct purchase order" onClick={onCorrect}>
+              Correct
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <StatusBanner tone="info">
@@ -741,9 +801,10 @@ export function PurchaseOrderSavedView({
         approval.
       </StatusBanner>
       <StatusBanner tone="info">
-        This saved purchase order's fields are read-only in this release. The
-        customer PO PDF can still be attached, replaced or removed; field
-        corrections arrive with the correction workflow.
+        Corrections need a reason and keep the values they replace in the
+        correction history. The customer PO PDF can still be attached, replaced
+        or removed; the customer, quotation link, currency and confirmation
+        number stay protected.
       </StatusBanner>
 
       <Card className="p-4">
@@ -919,6 +980,13 @@ export function PurchaseOrderSavedView({
         initialState={documentInitialState}
         absenceConfirmed={order.PdfAbsentConfirmed === true}
         onStateChange={onDocumentStateChange}
+      />
+
+      <PurchaseOrderHistoryPanel
+        entries={history}
+        currency={currency}
+        loading={historyLoading}
+        error={historyError}
       />
 
       <div className="border-t border-rule pt-4">

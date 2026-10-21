@@ -48,6 +48,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     ContactPhone: "+62 21 555",
     PONumber: "PO-471",
     ReceivedDate: "2026-10-02",
+    Version: 1,
     Incoterms: "CIF",
     Currency: "USD",
     TaxZone: "FTZ",

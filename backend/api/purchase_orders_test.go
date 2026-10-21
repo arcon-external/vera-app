@@ -74,6 +74,7 @@ type purchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	Version                int64   `json:"version"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
@@ -197,6 +198,7 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	// Update replaces the header and lines. The source stays fixed.
 	code, body = doJSON(t, server, http.MethodPut,
 		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, map[string]any{
+			"expectedVersion":       draft.Version,
 			"billingAddress":        "Jl. Billing edited",
 			"deliveryAddress":       "Jl. Delivery",
 			"shipToCode":            "SHIP-1",
@@ -299,7 +301,8 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 
 	// A line naming an item the source revision never carried is refused.
 	code, response := doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTerms": "30 days after delivery",
+		"expectedVersion": draft.Version,
+		"paymentTerms":    "30 days after delivery",
 		"items": []map[string]any{{
 			"quotationItemNo": 99,
 			"description":     "Bogus",
@@ -313,7 +316,8 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 	}
 
 	code, response = doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTerms": "30 days after delivery",
+		"expectedVersion": draft.Version,
+		"paymentTerms":    "30 days after delivery",
 		"items": []map[string]any{{
 			"description":    "Zero quantity",
 			"quantityScaled": 0,
@@ -325,13 +329,27 @@ func TestPurchaseOrderDraftRejectsInvalidLinesAndSavedWrites(t *testing.T) {
 		t.Errorf("zero quantity = %d; want 422 (%v)", code, response)
 	}
 
-	// A finalized record is not writable through the draft endpoint.
+	// A finalized record is not writable through the draft endpoint. The old
+	// base is the warnable conflict; the current version meets the state rule.
 	setPurchaseOrderStateForTest(t, "vera_api_po_invalid", draft.ID, "saved")
 	code, response = doJSON(t, server, http.MethodPut, path, token, map[string]any{
-		"paymentTerms": "30 days after delivery",
+		"expectedVersion": draft.Version,
+		"paymentTerms":    "30 days after delivery",
 	})
-	if code != http.StatusConflict {
-		t.Errorf("saved update = %d; want 409 (%v)", code, response)
+	if code != http.StatusConflict || response["code"] != "po_version_conflict" {
+		t.Errorf("stale saved update = %d %v; want 409 po_version_conflict", code, response)
+	}
+	code, response = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen saved = %d (%v)", code, response)
+	}
+	finalized := decodePurchaseOrder(t, response)
+	code, response = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": finalized.Version,
+		"paymentTerms":    "30 days after delivery",
+	})
+	if code != http.StatusConflict || response["code"] != "po_not_draft" {
+		t.Errorf("saved update = %d %v; want 409 po_not_draft", code, response)
 	}
 }
 
@@ -406,6 +424,7 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 
 	code, body := doJSON(t, server, http.MethodPut,
 		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, map[string]any{
+			"expectedVersion":  draft.Version,
 			"paymentTerms":     "45 days",
 			"discountPercent":  5,
 			"adjustmentMinor":  -700,
@@ -614,6 +633,7 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
+			testCase.body["expectedVersion"] = draft.Version
 			code, response := doJSON(t, server, http.MethodPut, path, token, testCase.body)
 			if code != http.StatusUnprocessableEntity {
 				t.Fatalf("status = %d; want 422 (%v)", code, response)
@@ -799,6 +819,7 @@ func TestPurchaseOrderAcceptsTheSharedMaximumLineCase(t *testing.T) {
 				})
 			}
 			code, body := doJSON(t, server, http.MethodPut, path, token, map[string]any{
+				"expectedVersion":  draft.Version,
 				"paymentTerms":     "45 days",
 				"discountPercent":  testCase.DiscountPercent,
 				"adjustmentMinor":  testCase.AdjustmentMinor,
@@ -888,6 +909,7 @@ func finalizeBody(row purchaseOrderRow, number string) map[string]any {
 		"acknowledgedMissing": []string{},
 		"acknowledgedExtra":   []int{},
 		"documentConfirmed":   true,
+		"expectedVersion":     row.Version,
 	}
 }
 
@@ -989,11 +1011,23 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 		t.Errorf("saved list = %+v; want the finalized record", list.PurchaseOrders)
 	}
 
+	// A stale edit is the warnable conflict; the same edit at the current
+	// version meets the state rule.
 	code, body = doJSON(t, server, http.MethodPut, path, token, finalizeBody(draft, "PO-API-1"))
+	if code != http.StatusConflict || body["code"] != "po_version_conflict" {
+		t.Errorf("stale edit saved = %d %v; want 409 po_version_conflict", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen finalized = %d (%v)", code, body)
+	}
+	finalized := decodePurchaseOrder(t, body)
+	edit := finalizeBody(finalized, "PO-API-1")
+	code, body = doJSON(t, server, http.MethodPut, path, token, edit)
 	if code != http.StatusConflict || body["code"] != "po_not_draft" {
 		t.Errorf("edit saved = %d %v; want 409 po_not_draft", code, body)
 	}
-	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalizeBody(draft, "PO-API-1"))
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, edit)
 	if code != http.StatusConflict || body["code"] != "po_not_draft" {
 		t.Errorf("second finalize = %d %v; want 409 po_not_draft", code, body)
 	}
@@ -1186,8 +1220,9 @@ func TestPurchaseOrderConfirmationNumbersOverTheAPI(t *testing.T) {
 	otherSaved := finalizePOOverAPI(t, server, token, other, "PO-CONF-3", true)
 	checkPOConfirmationNumber(t, otherSaved, "03", "0001")
 
-	// A client cannot supply the number: the field is not part of the request
-	// shape, and a save that does not request assignment stores null.
+	// A client cannot supply the number: the field is protected, so the save is
+	// refused by name (#473) rather than silently ignoring the value. A save
+	// that does not request assignment stores null.
 	thirdInput := quotationInput()
 	thirdInput["Subject"] = "Confirmation client supplied"
 	thirdID, _ := exportForSelector(t, server, token, thirdInput)
@@ -1196,8 +1231,14 @@ func TestPurchaseOrderConfirmationNumbersOverTheAPI(t *testing.T) {
 	thirdBody["confirmationNumber"] = "2302999999"
 	code, body = doJSON(t, server, http.MethodPost,
 		"/v1/purchase-orders/"+strconv.FormatInt(third.ID, 10)+"/finalize", token, thirdBody)
+	if code != http.StatusUnprocessableEntity || body["code"] != "po_protected_field" {
+		t.Fatalf("client-supplied finalize = %d %v; want 422 po_protected_field", code, body)
+	}
+	delete(thirdBody, "confirmationNumber")
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(third.ID, 10)+"/finalize", token, thirdBody)
 	if code != http.StatusOK {
-		t.Fatalf("client-supplied finalize = %d (%v)", code, body)
+		t.Fatalf("finalize without a client number = %d (%v)", code, body)
 	}
 	thirdSaved := decodePurchaseOrder(t, body)
 	if thirdSaved.ConfirmationNumber != nil {

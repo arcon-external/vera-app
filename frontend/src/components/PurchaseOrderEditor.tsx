@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
+  CorrectPurchaseOrder,
   FinalizePurchaseOrder,
   GetPurchaseOrderReview,
   UpdatePurchaseOrderDraft,
@@ -7,6 +8,12 @@ import {
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
 import { formatMoney, type CurrencyInfo } from "../format";
+import {
+  correctionReasonError,
+  trimCorrectionReason,
+  writeOutcome,
+  type PurchaseOrderConflictDTO,
+} from "../poCorrection";
 import {
   buildFinalizeInput,
   evaluateReview,
@@ -30,6 +37,7 @@ import {
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
+import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
 import {
   PurchaseOrderDifferenceReviewView,
   PurchaseOrderFinalConfirmationView,
@@ -61,6 +69,12 @@ export interface PurchaseOrderEditorViewProps {
   onFinalSave: () => void;
   /** True while the review's exact source is being loaded. */
   finalSaving: boolean;
+  /** "correction" replaces a saved record and requires the reason (#473). */
+  mode?: "draft" | "correction";
+  correctionReason?: string;
+  onCorrectionReasonChange?: (value: string) => void;
+  /** Shown read-only in correction mode; there is no input for it. */
+  confirmationNumber?: string;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -76,6 +90,8 @@ export interface PurchaseOrderEditorPageProps {
    * the only place that decides dirtiness; App never re-derives it.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /** "correction" edits a saved record; every save then needs a reason. */
+  mode?: "draft" | "correction";
 }
 
 /**
@@ -447,8 +463,13 @@ export function PurchaseOrderEditorView({
   onCancel,
   onFinalSave,
   finalSaving,
+  mode = "draft",
+  correctionReason = "",
+  onCorrectionReasonChange,
+  confirmationNumber = "",
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
+  const correcting = mode === "correction";
   // The panel and the save guard read the same pure calculation, so the number
   // on screen is the number the payload will carry.
   const calculation = calculatePurchaseOrder(state, currency);
@@ -457,7 +478,10 @@ export function PurchaseOrderEditorView({
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <SectionHeading title="Purchase Order" hint={`Draft ${state.orderId}`} />
+          <SectionHeading
+            title="Purchase Order"
+            hint={correcting ? `Saved record ${state.orderId} · correction` : `Draft ${state.orderId}`}
+          />
           <h1 className="tnum text-display font-semibold text-ink-950">
             {state.quoteNumber}
           </h1>
@@ -470,12 +494,53 @@ export function PurchaseOrderEditorView({
                 }`
               : ""}
           </p>
+          <p className="mt-1 text-caption text-ink-500">
+            {correcting
+              ? `Editing version ${state.version}. The previous values are kept in the correction history.`
+              : `Loaded at version ${state.version}.`}
+          </p>
         </div>
-        <Badge tone="accent">Draft</Badge>
+        <Badge tone="accent">{correcting ? "Correction" : "Draft"}</Badge>
       </div>
 
       {state.error !== null ? (
         <StatusBanner tone="danger">{state.error}</StatusBanner>
+      ) : null}
+
+      {correcting ? (
+        <Card className="p-4">
+          <SectionHeading
+            title="Correction"
+            hint="A reason is required and kept with the replaced values"
+          />
+          <label className="mt-2 grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">
+              Reason for this correction
+            </span>
+            <textarea
+              aria-label="Correction reason"
+              className={`${fieldClass} min-h-20 resize-y`}
+              placeholder="What changed and why, for the people who will read this record later"
+              value={correctionReason}
+              onChange={(event) => onCorrectionReasonChange?.(event.target.value)}
+            />
+          </label>
+          <div className="mt-3 grid gap-1 text-caption text-ink-500">
+            <p>
+              <span className="font-medium text-ink-700">Customer PO number:</span>{" "}
+              <span className="tnum">{state.header.poNumber || "—"}</span>
+            </p>
+            <p>
+              <span className="font-medium text-ink-700">Confirmation number:</span>{" "}
+              <span className="tnum">{confirmationNumber || "Not assigned"}</span>
+            </p>
+            <p>
+              The customer, quotation link, currency, tax basis, UUID and
+              confirmation number are protected. They cannot be changed here;
+              repairing a quotation link is its own permission (#475).
+            </p>
+          </div>
+        </Card>
       ) : null}
 
       <Card className="p-4">
@@ -701,28 +766,36 @@ export function PurchaseOrderEditorView({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <span className="text-caption text-ink-500">
-          {dirty ? "Unsaved changes" : "All changes saved"} · Final Save reviews
-          every difference against the exact quotation revision.
+          {dirty ? "Unsaved changes" : "All changes saved"} ·{" "}
+          {correcting
+            ? "Saving keeps the replaced values and reason in the correction history."
+            : "Final Save reviews every difference against the exact quotation revision."}
         </span>
         <div className="flex flex-wrap items-center gap-2">
-          <Button aria-label="Cancel draft" onClick={onCancel}>
+          <Button aria-label={correcting ? "Cancel correction" : "Cancel draft"} onClick={onCancel}>
             Cancel
           </Button>
           <Button
-            aria-label="Save draft"
+            aria-label={correcting ? "Save correction" : "Save draft"}
             disabled={state.saving || finalSaving}
             onClick={onSave}
           >
-            {state.saving ? "Saving…" : "Save draft"}
+            {state.saving
+              ? "Saving…"
+              : correcting
+                ? "Save correction"
+                : "Save draft"}
           </Button>
-          <Button
-            variant="primary"
-            aria-label="Final Save"
-            disabled={state.saving || finalSaving}
-            onClick={onFinalSave}
-          >
-            {finalSaving ? "Loading review…" : "Final Save"}
-          </Button>
+          {correcting ? null : (
+            <Button
+              variant="primary"
+              aria-label="Final Save"
+              disabled={state.saving || finalSaving}
+              onClick={onFinalSave}
+            >
+              {finalSaving ? "Loading review…" : "Final Save"}
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -737,7 +810,9 @@ export function PurchaseOrderEditorPage({
   onSaved,
   onCancel,
   onDirtyChange,
+  mode = "draft",
 }: PurchaseOrderEditorPageProps) {
+  const correcting = mode === "correction";
   const [state, dispatch] = useReducer(
     purchaseOrderEditorReducer,
     undefined,
@@ -762,6 +837,12 @@ export function PurchaseOrderEditorPage({
     null
   );
   const [finalSaving, setFinalSaving] = useState(false);
+  // #473: the required reason a correction carries, and the one warning a
+  // stale save gets. The working copy is never touched by either.
+  const [reason, setReason] = useState("");
+  const [conflict, setConflict] = useState<PurchaseOrderConflictDTO | null>(null);
+  // Which write the warning belongs to: Overwrite resumes the same one.
+  const [pendingWrite, setPendingWrite] = useState<"save" | "finalize">("save");
 
   // The dirty flag is lifted, not duplicated: the editor still owns the
   // baseline comparison, and App only consumes the answer so it can ask
@@ -770,24 +851,57 @@ export function PurchaseOrderEditorPage({
     onDirtyChange?.(isPurchaseOrderDirty(state));
   }, [state, onDirtyChange]);
 
-  const save = async () => {
+  const save = async (expectedVersion: number, overwrite: boolean) => {
+    if (correcting) {
+      const reasonProblem = correctionReasonError(reason);
+      if (reasonProblem !== null) {
+        dispatch({ type: "saveFailed", error: reasonProblem });
+        return;
+      }
+    }
     const result = buildPurchaseOrderUpdate(state, currency);
     if (result.input === null) {
       dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
       return;
     }
+    const payload = {
+      ...result.input,
+      ExpectedVersion: expectedVersion,
+      Overwrite: overwrite,
+    };
     dispatch({ type: "saveStarted" });
     try {
-      const updated = await UpdatePurchaseOrderDraft(
-        new backend.PurchaseOrderUpdateInput({
-          ...result.input,
-          Items: result.input.Items.map(
-            (item) => new backend.PurchaseOrderItemInput(item)
-          ),
-        })
+      const items = payload.Items.map(
+        (item) => new backend.PurchaseOrderItemInput(item)
       );
-      dispatch({ type: "saveSucceeded", order: updated, currency });
-      onSaved(updated);
+      const answer = correcting
+        ? await CorrectPurchaseOrder(
+            new backend.PurchaseOrderCorrectionInput({
+              ...payload,
+              Reason: trimCorrectionReason(reason),
+              Items: items,
+            })
+          )
+        : await UpdatePurchaseOrderDraft(
+            new backend.PurchaseOrderUpdateInput({ ...payload, Items: items })
+          );
+      const outcome = writeOutcome(answer);
+      if (outcome.kind === "saved") {
+        dispatch({ type: "saveSucceeded", order: outcome.order, currency });
+        setConflict(null);
+        onSaved(outcome.order);
+        return;
+      }
+      if (outcome.kind === "conflict") {
+        dispatch({ type: "saveConflict" });
+        setPendingWrite("save");
+        setConflict(outcome.conflict);
+        return;
+      }
+      dispatch({
+        type: "saveFailed",
+        error: "The server answered without a saved record. Try again.",
+      });
     } catch (error) {
       dispatch({ type: "saveFailed", error: errorText(error) });
     }
@@ -817,7 +931,7 @@ export function PurchaseOrderEditorPage({
     }
   };
 
-  const finalSave = async () => {
+  const finalSave = async (expectedVersion: number, overwrite: boolean) => {
     if (review === null) return;
     const result = buildFinalizeInput(
       state,
@@ -838,18 +952,52 @@ export function PurchaseOrderEditorPage({
     setFinalSaving(true);
     try {
       const saved = await FinalizePurchaseOrder(
-        new backend.PurchaseOrderFinalizeInput(result.input)
+        new backend.PurchaseOrderFinalizeInput({
+          ...result.input,
+          ExpectedVersion: expectedVersion,
+          Overwrite: overwrite,
+        })
       );
-      dispatch({ type: "saveSucceeded", order: saved, currency });
-      onSaved(saved);
-      setReview(null);
-      setView("entry");
+      const outcome = writeOutcome(saved);
+      if (outcome.kind === "saved") {
+        dispatch({ type: "saveSucceeded", order: outcome.order, currency });
+        setConflict(null);
+        onSaved(outcome.order);
+        setReview(null);
+        setView("entry");
+        return;
+      }
+      if (outcome.kind === "conflict") {
+        setPendingWrite("finalize");
+        setConflict(outcome.conflict);
+        return;
+      }
+      dispatch({
+        type: "saveFailed",
+        error: "The server answered without a saved record. Try again.",
+      });
     } catch (error) {
       dispatch({ type: "saveFailed", error: errorText(error) });
     } finally {
       setFinalSaving(false);
     }
   };
+
+  const conflictPrompt =
+    conflict === null ? null : (
+      <PurchaseOrderConflictPrompt
+        conflict={conflict}
+        overwriting={state.saving || finalSaving}
+        onCancel={() => setConflict(null)}
+        onOverwrite={() => {
+          if (pendingWrite === "finalize") {
+            void finalSave(conflict.CurrentVersion, true);
+          } else {
+            void save(conflict.CurrentVersion, true);
+          }
+        }}
+      />
+    );
 
   const evaluation =
     review === null
@@ -870,6 +1018,7 @@ export function PurchaseOrderEditorPage({
   // choice already applied.
   if (view === "review" && review !== null) {
     return (
+      <>
       <PurchaseOrderDifferenceReviewView
         state={state}
         source={review.Source}
@@ -922,6 +1071,8 @@ export function PurchaseOrderEditorPage({
           setView("confirm");
         }}
       />
+      {conflictPrompt}
+      </>
     );
   }
 
@@ -932,6 +1083,7 @@ export function PurchaseOrderEditorPage({
     confirmPayload !== null
   ) {
     return (
+      <>
       <PurchaseOrderFinalConfirmationView
         review={review}
         evaluation={evaluation}
@@ -944,10 +1096,12 @@ export function PurchaseOrderEditorPage({
           setAssignConfirmation((current) => !current)
         }
         onBack={() => setView("review")}
-        onFinalSave={() => void finalSave()}
+        onFinalSave={() => void finalSave(state.version, false)}
         saving={finalSaving}
         error={state.error}
       />
+      {conflictPrompt}
+      </>
     );
   }
 
@@ -960,11 +1114,16 @@ export function PurchaseOrderEditorPage({
         currency={currency}
         uomOptions={uomOptions}
         incotermOptions={incotermOptions}
-        onSave={() => void save()}
+        onSave={() => void save(state.version, false)}
         onCancel={onCancel}
         onFinalSave={() => void startReview()}
         finalSaving={reviewLoading}
+        mode={mode}
+        correctionReason={reason}
+        onCorrectionReasonChange={setReason}
+        confirmationNumber={order.ConfirmationNumber ?? ""}
       />
+      {conflictPrompt}
     </div>
   );
 }

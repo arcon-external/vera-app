@@ -92,7 +92,7 @@ func createPOForList(t *testing.T, database *Store, ctx context.Context, quotati
 // to cover. Update replaces the lines; the copied ones are passed back.
 func setPOListNumber(t *testing.T, database *Store, ctx context.Context, order PurchaseOrder, user AuthUser, number string) PurchaseOrder {
 	t.Helper()
-	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID:           order.ID,
 		PONumber:     number,
 		UpdatedBy:    user.ID,

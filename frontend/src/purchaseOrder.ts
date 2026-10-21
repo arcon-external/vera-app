@@ -91,6 +91,11 @@ export interface PurchaseOrderDTO {
   ConfirmationNumber?: string | null;
   ConfirmationAssignedAt?: string | null;
   ConfirmationWarn?: boolean;
+  /**
+   * The optimistic-concurrency revision (#473). It starts at 1 and moves
+   * forward on every write; the editor submits the version it loaded.
+   */
+  Version: number;
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */
@@ -140,6 +145,8 @@ export interface PurchaseOrderEditorState {
   ppnBps: number;
   /** What the source revision printed, kept separate from the calculation. */
   printedTotals: PurchaseOrderPrintedTotals;
+  /** The version this editor loaded (#473); every save states it. */
+  version: number;
   /** Canonical snapshot of the last loaded/saved values, for dirtiness. */
   baseline: string;
   nextKey: number;
@@ -153,6 +160,7 @@ export type PurchaseOrderEditorAction =
   | { type: "lineAdded"; uom: string }
   | { type: "lineRemoved"; key: number }
   | { type: "saveStarted" }
+  | { type: "saveConflict" }
   | { type: "saveFailed"; error: string }
   | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
 
@@ -186,6 +194,10 @@ export interface PurchaseOrderUpdateInput {
   Items: PurchaseOrderItemInput[];
   DiscountPercent: number;
   AdjustmentMinor: number;
+  /** The version the editor loaded (#473). */
+  ExpectedVersion: number;
+  /** True only after the Overwrite choice; keeps the replaced draft. */
+  Overwrite: boolean;
 }
 
 /**
@@ -694,6 +706,7 @@ export function initialPurchaseOrderEditorState(
       ppnMinor: order.PrintedPpnMinor ?? 0,
       grandTotalMinor: order.PrintedGrandTotalMinor ?? 0,
     },
+    version: order.Version,
     baseline: "",
     nextKey: lines.length,
     saving: false,
@@ -868,6 +881,8 @@ export function buildPurchaseOrderUpdate(
       Items: items,
       DiscountPercent: discountPercent,
       AdjustmentMinor: adjustment,
+      ExpectedVersion: state.version,
+      Overwrite: false,
     },
     error: null,
   };
@@ -917,6 +932,10 @@ export function purchaseOrderEditorReducer(
       };
     case "saveStarted":
       return { ...state, saving: true, error: null };
+    case "saveConflict":
+      // The conflict dialog owns the explanation; the editor keeps its working
+      // copy and shows no duplicate error line.
+      return { ...state, saving: false, error: null };
     case "saveFailed":
       return { ...state, saving: false, error: action.error };
     case "saveSucceeded": {

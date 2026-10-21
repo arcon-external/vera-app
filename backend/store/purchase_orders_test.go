@@ -347,7 +347,7 @@ func TestPurchaseOrderDraftUpdateReplacesHeaderAndLines(t *testing.T) {
 	delivery := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
 	received := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
 	itemNo, subNo := 2, 1
-	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID:                    draft.ID,
 		BillingAddress:        "Jl. Billing edited",
 		DeliveryAddress:       "Jl. Delivery",
@@ -433,7 +433,7 @@ func TestPurchaseOrderDraftUpdateRefusesUnmappedOrInvalidLines(t *testing.T) {
 	}
 
 	wrongItem := 99
-	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	_, err = updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "30 days after delivery",
 		Items: []PurchaseOrderItem{{
 			LineNumber: 1, Description: "Bogus", QuotationItemNo: &wrongItem,
@@ -444,7 +444,7 @@ func TestPurchaseOrderDraftUpdateRefusesUnmappedOrInvalidLines(t *testing.T) {
 		t.Errorf("unknown item reference error = %v; want ErrPurchaseOrderBadReference", err)
 	}
 
-	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	_, err = updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "30 days after delivery",
 		Items: []PurchaseOrderItem{{
 			LineNumber: 1, Description: "Zero", QuantityScaled: 0,
@@ -485,7 +485,7 @@ func TestPurchaseOrderDraftUpdateRefusesANonDraft(t *testing.T) {
 		t.Fatalf("mark saved: %v", err)
 	}
 
-	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	_, err = updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "30 days after delivery",
 	})
 	if !errors.Is(err, ErrPurchaseOrderNotDraft) {
@@ -522,7 +522,7 @@ func TestPurchaseOrdersAreOrganizationScoped(t *testing.T) {
 	if _, err := database.GetPurchaseOrder(ctxB, draftA.ID); !errors.Is(err, ErrPurchaseOrderNotFound) {
 		t.Errorf("org B read org A's PO: %v; want ErrPurchaseOrderNotFound", err)
 	}
-	if _, err := database.UpdatePurchaseOrderDraft(ctxB, PurchaseOrderUpdate{
+	if _, err := updateDraft(t, database, ctxB, PurchaseOrderUpdate{
 		ID: draftA.ID, UpdatedBy: user.ID, PaymentTerms: "50% advance",
 	}); !errors.Is(err, ErrPurchaseOrderNotFound) {
 		t.Errorf("org B updated org A's PO: %v; want ErrPurchaseOrderNotFound", err)
@@ -602,7 +602,7 @@ func TestPurchaseOrderDraftRoundTripsCommercialPaymentWording(t *testing.T) {
 	// neither is a day count, so both must survive an update and a reopen
 	// byte for byte.
 	for _, wording := range []string{"50% advance", "30 days after delivery"} {
-		updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 			ID:           draft.ID,
 			UpdatedBy:    user.ID,
 			PaymentTerms: wording,
@@ -625,7 +625,7 @@ func TestPurchaseOrderDraftRoundTripsCommercialPaymentWording(t *testing.T) {
 
 	// An over-long paste is refused by the store before the schema's CHECK
 	// would, so the editor gets a named field rather than a database error.
-	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	_, err = updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID:           draft.ID,
 		UpdatedBy:    user.ID,
 		PaymentTerms: strings.Repeat("x", maxPaymentTermsLength+1),
@@ -636,7 +636,7 @@ func TestPurchaseOrderDraftRoundTripsCommercialPaymentWording(t *testing.T) {
 	}
 
 	// An empty draft term is allowed: a draft may omit what is not agreed yet.
-	cleared, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	cleared, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "   ", Items: draft.Items,
 	})
 	if err != nil {
@@ -670,7 +670,7 @@ func TestPurchaseOrderPaymentTermsBoundaryCountsCharacters(t *testing.T) {
 	}
 
 	update := func(terms string) (PurchaseOrder, error) {
-		return database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		return updateDraft(t, database, ctx, PurchaseOrderUpdate{
 			ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: terms, Items: draft.Items,
 		})
 	}
@@ -839,7 +839,7 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 	// Now enter a row discount, a whole-PO discount and a signed adjustment.
 	itemNo1, itemNo2 := 1, 2
 	subNo1, subNo2 := 1, 2
-	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID:               draft.ID,
 		UpdatedBy:        user.ID,
 		PaymentTerms:     "45 days",
@@ -922,7 +922,7 @@ func TestPurchaseOrderPPNIsStoredForNonFTZGoodsOnly(t *testing.T) {
 	}
 
 	// A whole discount is taken before PPN: 1000 - 10% = 900, PPN 99, 999.
-	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID:              draft.ID,
 		UpdatedBy:       user.ID,
 		PaymentTerms:    "45 days",
@@ -958,7 +958,7 @@ func TestPurchaseOrderUpdateRefusesUnexplainedAdjustmentsAndInvalidTotals(t *tes
 		patch.UpdatedBy = user.ID
 		patch.PaymentTerms = "45 days"
 		patch.Items = draft.Items
-		return database.UpdatePurchaseOrderDraft(ctx, patch)
+		return updateDraft(t, database, ctx, patch)
 	}
 
 	if _, err := update(PurchaseOrderUpdate{AdjustmentMinor: -1}); !errors.Is(err, ErrPurchaseOrderInvalid) {
@@ -1001,7 +1001,7 @@ func TestPurchaseOrderUpdateRefusesOverflowWithoutWritingHalfACalculation(t *tes
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_, err = database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	_, err = updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
 		Items: []PurchaseOrderItem{{
 			Description: "Impossible", QuantityScaled: math.MaxInt64,
@@ -1072,7 +1072,7 @@ func TestPurchaseOrderUpdateRefusesTheJudgeCounterexample(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+			_, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 				ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
 				Items: []PurchaseOrderItem{testCase.item},
 			})
@@ -1443,7 +1443,7 @@ func TestPurchaseOrderLinesMatchNestedQuotationSubItems(t *testing.T) {
 	}
 	itemNo, subNo := 2, 2
 	// Item 2.2 is a line of the frozen revision; 2.3 is not.
-	accepted, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	accepted, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
 		Items: []PurchaseOrderItem{{
 			Description: "Commissioning", QuotationItemNo: &itemNo, QuotationSubNo: &subNo,
@@ -1462,7 +1462,7 @@ func TestPurchaseOrderLinesMatchNestedQuotationSubItems(t *testing.T) {
 	}
 
 	missing := 3
-	if _, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	if _, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
 		Items: []PurchaseOrderItem{{
 			Description: "Missing", QuotationItemNo: &itemNo, QuotationSubNo: &missing,
@@ -1913,7 +1913,7 @@ func TestPurchaseOrderPPNResolvesTheCurrentTaxModel(t *testing.T) {
 
 	// An update keeps the stored rate: it is a snapshot of the source's basis,
 	// not a fresh resolution.
-	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
 		DiscountPercent: 10, Items: draft.Items,
 	})
