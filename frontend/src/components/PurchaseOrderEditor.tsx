@@ -36,17 +36,23 @@ import {
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
+  type PurchaseOrderHeader,
+  type PurchaseOrderLine,
   type PurchaseOrderLineCalculation,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import {
   applyExtractionSelection,
-  defaultExtractionSelection,
+  createExtractionEditTracker,
   extractionErrorMessage,
   extractionIsStale,
   extractionProgressText,
   extractionResultActionable,
   isTerminalExtractionStatus,
+  resolveExtractionConflicts,
+  resolvedExtractionSelection,
+  type ExtractionChoice,
+  type ExtractionEditTracker,
   type PurchaseOrderExtractionDocumentDTO,
   type PurchaseOrderExtractionStateDTO,
 } from "../poExtraction";
@@ -899,6 +905,20 @@ export function PurchaseOrderEditorPage({
   const [extractionState, setExtractionState] =
     useState<PurchaseOrderExtractionStateDTO | null>(null);
   const [extractionSelection, setExtractionSelection] = useState<Record<string, boolean>>({});
+  /**
+   * #479: the editor as it stood when tracking began, plus the choices staff
+   * made for conflicting values. The tracker distinguishes "still empty" from
+   * "cleared deliberately"; the choices are kept across a retry and discarded
+   * with the document generation.
+   */
+  const [extractionTracker, setExtractionTracker] = useState<ExtractionEditTracker>(() =>
+    createExtractionEditTracker(0, state.header, state.lines)
+  );
+  const extractionTrackerRef = useRef(extractionTracker);
+  extractionTrackerRef.current = extractionTracker;
+  const [extractionChoices, setExtractionChoices] = useState<
+    Record<string, ExtractionChoice>
+  >({});
   const [extractionStarting, setExtractionStarting] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [extractionApplied, setExtractionApplied] = useState<{
@@ -926,6 +946,32 @@ export function PurchaseOrderEditorPage({
   // the first response was scheduled.
   const editorStateRef = useRef(state);
   editorStateRef.current = state;
+
+  /**
+   * Re-bases the tracker on the values now in the editor. It is called when a
+   * document generation ends or a result is consumed: from that point the new
+   * values are the baseline a later edit is measured against.
+   */
+  function rebaseExtractionTracker(
+    header: PurchaseOrderHeader = editorStateRef.current.header,
+    lines: PurchaseOrderLine[] = editorStateRef.current.lines
+  ): ExtractionEditTracker {
+    const next = createExtractionEditTracker(
+      extractionGeneration.current,
+      header,
+      lines
+    );
+    extractionTrackerRef.current = next;
+    setExtractionTracker(next);
+    return next;
+  }
+
+  /** The tracker for the active document generation, created on first need. */
+  function ensureExtractionTracker(): ExtractionEditTracker {
+    const current = extractionTrackerRef.current;
+    if (current.generation === extractionGeneration.current) return current;
+    return rebaseExtractionTracker();
+  }
 
   function clearExtractionPoll() {
     if (extractionPoll.current !== null) {
@@ -957,6 +1003,10 @@ export function PurchaseOrderEditorPage({
     setExtractionApplied(null);
     setDismissedExtractionId(null);
     setExtractionError(null);
+    // #479: the old run's baseline and choices describe a PDF that is no
+    // longer active. They end with the generation, before any refresh returns.
+    setExtractionChoices({});
+    rebaseExtractionTracker();
   };
 
   // Declared as a function so adoptExtraction and the poll can call each other
@@ -1005,6 +1055,8 @@ export function PurchaseOrderEditorPage({
       setExtractionState({ Run: run, Document: active });
       extractionInitialized.current = null;
       setExtractionSelection({});
+      setExtractionChoices({});
+      rebaseExtractionTracker();
       return;
     }
     setExtractionState(next);
@@ -1012,13 +1064,24 @@ export function PurchaseOrderEditorPage({
       if (extractionInitialized.current !== run.ID) {
         extractionInitialized.current = run.ID;
         const editor = editorStateRef.current;
-        setExtractionSelection(
-          defaultExtractionSelection(run.Result, editor.header, editor.lines, currency)
+        // #479: the default selection is the resolved matrix, not a blanket
+        // "empty means preselect". A field staff cleared while the run was
+        // processing starts unchosen and waits for a decision.
+        const plan = resolveExtractionConflicts(
+          run.Result,
+          editor.header,
+          editor.lines,
+          ensureExtractionTracker(),
+          currency
         );
+        setExtractionSelection(plan.selection);
       }
     } else {
       extractionInitialized.current = null;
       setExtractionSelection({});
+      // A queued/running run still needs a baseline: staff can keep typing,
+      // and an edit made from here on is protected when the result arrives.
+      if (run != null) ensureExtractionTracker();
     }
     if (run != null && !isTerminalExtractionStatus(run.Status)) {
       scheduleExtractionPoll(run.ID);
@@ -1096,6 +1159,13 @@ export function PurchaseOrderEditorPage({
     // its run is never made actionable here.
     const generation = extractionGeneration.current;
     clearExtractionPoll();
+    // #479: a retry is a request, never a reset. The working copy and the
+    // reviewed choices stay; only the old row ticks are dropped because they
+    // name rows of a result that is about to be replaced. The tracker keeps
+    // its original baseline, so edits made before and between retries remain
+    // protected.
+    ensureExtractionTracker();
+    setExtractionSelection({});
     setExtractionStarting(true);
     setExtractionError(null);
     setExtractionApplied(null);
@@ -1118,6 +1188,10 @@ export function PurchaseOrderEditorPage({
     setExtractionSelection((current) => ({ ...current, [key]: selected }));
   };
 
+  const chooseExtraction = (key: string, choice: ExtractionChoice) => {
+    setExtractionChoices((current) => ({ ...current, [key]: choice }));
+  };
+
   const applyExtraction = () => {
     const run = extractionState?.Run;
     const active =
@@ -1125,9 +1199,21 @@ export function PurchaseOrderEditorPage({
         ? activeDocumentRef.current
         : extractionState?.Document ?? null;
     if (run == null || run.Result == null || extractionIsStale(run, active)) return;
+    const plan = resolveExtractionConflicts(
+      run.Result,
+      state.header,
+      state.lines,
+      ensureExtractionTracker(),
+      currency
+    );
+    const selection = resolvedExtractionSelection(
+      plan,
+      extractionChoices,
+      extractionSelection
+    );
     const applied = applyExtractionSelection(
       run.Result,
-      extractionSelection,
+      selection,
       state.header,
       state.lines,
       state.nextKey,
@@ -1140,6 +1226,41 @@ export function PurchaseOrderEditorPage({
       lines: applied.lines,
       nextKey: state.nextKey + applied.appliedRows,
     });
+    // The applied proposals are consumed; the rest of the result is not. Only
+    // the baseline of what Apply actually wrote moves, so an unresolved
+    // cleared field or line conflict stays a conflict until it is decided or
+    // the result is discarded.
+    const previous = extractionTrackerRef.current;
+    const baselineHeader = { ...previous.baseline.header };
+    const appliedHeaderKeys = [
+      "poNumber",
+      "poDate",
+      "requestedDeliveryDate",
+      "paymentTerms",
+      "incoterms",
+    ] as const;
+    for (const key of appliedHeaderKeys) {
+      if (Object.prototype.hasOwnProperty.call(applied.headerPatch, key)) {
+        baselineHeader[key] = String(applied.headerPatch[key] ?? "");
+      }
+    }
+    const baselineLines =
+      applied.lines !== undefined
+        ? applied.lines.map((line) => ({
+            key: line.key,
+            description: line.description,
+            quantity: line.quantity,
+            uom: line.uom,
+            unitPrice: line.unitPrice,
+          }))
+        : previous.baseline.lines;
+    const nextTracker: ExtractionEditTracker = {
+      generation: previous.generation,
+      baseline: { header: baselineHeader, lines: baselineLines },
+    };
+    extractionTrackerRef.current = nextTracker;
+    setExtractionTracker(nextTracker);
+    setExtractionChoices({});
     setExtractionApplied({ fields: applied.appliedFields, rows: applied.appliedRows });
   };
 
@@ -1485,6 +1606,27 @@ export function PurchaseOrderEditorPage({
   const showExtractionPanel =
     extractionResultActionable(extractionRun, activeExtractionDocument) &&
     dismissedExtractionId !== extractionRun?.ID;
+  // #479: the comparison is recomputed from the editor as staff type, not
+  // frozen when the result arrived, and every choice is folded into the one
+  // selection Apply consumes.
+  const extractionPlan =
+    showExtractionPanel && extractionRun?.Result != null
+      ? resolveExtractionConflicts(
+          extractionRun.Result,
+          state.header,
+          state.lines,
+          extractionTracker,
+          currency
+        )
+      : null;
+  const extractionResolvedSelection =
+    extractionPlan !== null
+      ? resolvedExtractionSelection(
+          extractionPlan,
+          extractionChoices,
+          extractionSelection
+        )
+      : extractionSelection;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1531,11 +1673,18 @@ export function PurchaseOrderEditorPage({
           header={state.header}
           lines={state.lines}
           currency={currency}
-          selection={extractionSelection}
+          selection={extractionResolvedSelection}
           onToggle={toggleExtraction}
           onApply={applyExtraction}
-          onDiscard={() => setDismissedExtractionId(extractionRun.ID)}
+          onDiscard={() => {
+            setDismissedExtractionId(extractionRun.ID);
+            setExtractionChoices({});
+            rebaseExtractionTracker();
+          }}
           applied={extractionApplied}
+          plan={extractionPlan}
+          choices={extractionChoices}
+          onChoose={chooseExtraction}
         />
       ) : null}
       <PurchaseOrderEditorView

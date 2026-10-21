@@ -3,6 +3,7 @@ import {
   APPLICABLE_HEADER_KEYS,
   EXTRACTION_FIELD_LABELS,
   EXTRACTION_FIELD_ORDER,
+  EXTRACTION_LINES_KEY,
   EXTRACTION_MIN_CONFIDENCE,
   EXTRACTION_STATUS_LABELS,
   extractionAbstentionSummary,
@@ -17,6 +18,9 @@ import {
   headerProposalApplicable,
   proposalCellKey,
   rowProposalApplicable,
+  type ExtractionChoice,
+  type ExtractionConflictPlan,
+  type ExtractionFieldComparison,
   type ExtractionFieldKey,
   type ExtractionStatus,
   type PurchaseOrderExtractionCellDTO,
@@ -49,6 +53,14 @@ export interface PurchaseOrderExtractionPanelViewProps {
   onApply: () => void;
   onDiscard: () => void;
   applied?: { fields: number; rows: number } | null;
+  /**
+   * Issue #479: the resolved comparison. When present, a field or the line set
+   * whose proposal conflicts shows an explicit choice instead of a checkbox.
+   */
+  plan?: ExtractionConflictPlan | null;
+  /** The staff member's side per conflict key; absent means manual. */
+  choices?: Record<string, ExtractionChoice>;
+  onChoose?: (key: string, choice: ExtractionChoice) => void;
 }
 
 function statusTone(status: string): "success" | "internal" | "neutral" {
@@ -115,6 +127,9 @@ function FieldProposal({
   currency,
   selection,
   onToggle,
+  comparison,
+  choice,
+  onChoose,
 }: {
   field: PurchaseOrderExtractionFieldDTO;
   header: PurchaseOrderHeader;
@@ -122,6 +137,9 @@ function FieldProposal({
   currency: CurrencyInfo;
   selection: Record<string, boolean>;
   onToggle: (key: string, selected: boolean) => void;
+  comparison: ExtractionFieldComparison | null;
+  choice: ExtractionChoice;
+  onChoose?: (key: string, choice: ExtractionChoice) => void;
 }) {
   const key = field.Key as ExtractionFieldKey;
   const label = EXTRACTION_FIELD_LABELS[key] ?? field.Key;
@@ -130,20 +148,23 @@ function FieldProposal({
   const selected = selection[proposalCellKey("header", field.Key)] === true;
   const current = currentHeaderValue(header, key).trim();
   const differs = current !== "" && current !== field.Cell.Value.trim();
+  const conflict = comparison?.outcome === "conflict";
   return (
     <li
       className="grid gap-2 rounded-lg border border-rule bg-paper-subtle/40 p-3 sm:grid-cols-[auto_1fr_auto] sm:items-start"
       data-testid={`po-extraction-field-${field.Key}`}
     >
       <div className="flex items-start gap-2">
-        <input
-          type="checkbox"
-          className="mt-1 h-4 w-4 accent-[var(--color-accent-600)]"
-          aria-label={`Apply extracted ${label}`}
-          checked={selected}
-          disabled={!applicable}
-          onChange={(event) => onToggle(proposalCellKey("header", field.Key), event.target.checked)}
-        />
+        {!conflict ? (
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 accent-[var(--color-accent-600)]"
+            aria-label={`Apply extracted ${label}`}
+            checked={selected}
+            disabled={!applicable}
+            onChange={(event) => onToggle(proposalCellKey("header", field.Key), event.target.checked)}
+          />
+        ) : null}
         {field.Cell.Status !== "absent" ? <PageMap cell={field.Cell} pages={pages} /> : null}
       </div>
       <div className="min-w-0">
@@ -164,7 +185,43 @@ function FieldProposal({
             Protected by the Quotation; compare it here and correct the quotation link instead.
           </p>
         ) : null}
-        {differs && applicable ? (
+        {conflict && comparison ? (
+          <fieldset
+            className="mt-2 grid gap-1.5 rounded-md border border-rule bg-white p-2"
+            data-testid={`po-extraction-conflict-${field.Key}`}
+          >
+            <legend className="px-1 text-caption text-ink-600">
+              {comparison.touched
+                ? "You changed this while extraction ran. Choose the value to use."
+                : "The draft and the PDF differ. Choose the value to use."}
+            </legend>
+            <label className="flex items-start gap-2 text-small text-ink-900">
+              <input
+                type="radio"
+                className="mt-1 accent-[var(--color-accent-600)]"
+                name={`extraction-conflict-${field.Key}`}
+                aria-label={`Keep draft ${label}`}
+                checked={choice !== "extracted"}
+                onChange={() => onChoose?.(comparison.key, "manual")}
+              />
+              <span>
+                {current === "" ? "Keep it empty" : <>Keep draft “{current}”</>}
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-small text-ink-900">
+              <input
+                type="radio"
+                className="mt-1 accent-[var(--color-accent-600)]"
+                name={`extraction-conflict-${field.Key}`}
+                aria-label={`Use extracted ${label}`}
+                checked={choice === "extracted"}
+                onChange={() => onChoose?.(comparison.key, "extracted")}
+              />
+              <span>Use extracted “{comparison.extracted}”</span>
+            </label>
+          </fieldset>
+        ) : null}
+        {differs && applicable && !conflict ? (
           <p className="mt-1 text-caption text-ink-600">
             The draft currently holds “{current}”. Applying replaces it.
           </p>
@@ -200,12 +257,15 @@ export function PurchaseOrderExtractionRowCard({
   currency,
   selection,
   onToggle,
+  locked = false,
 }: {
   row: PurchaseOrderExtractionRowDTO;
   index: number;
   currency: CurrencyInfo;
   selection: Record<string, boolean>;
   onToggle: (key: string, selected: boolean) => void;
+  /** Issue #479: a line conflict resolved as Keep my lines locks row apply. */
+  locked?: boolean;
 }) {
   const applicable = rowProposalApplicable(row, currency);
   const selected = selection[proposalCellKey("row", String(index))] === true;
@@ -220,7 +280,7 @@ export function PurchaseOrderExtractionRowCard({
           className="mt-1 h-4 w-4 accent-[var(--color-accent-600)]"
           aria-label={`Apply extracted line ${row.LineNumber.Value || index + 1}`}
           checked={selected}
-          disabled={!applicable}
+          disabled={!applicable || locked}
           onChange={(event) => onToggle(proposalCellKey("row", String(index)), event.target.checked)}
         />
         <span className="tnum text-caption font-medium text-ink-500">
@@ -304,10 +364,18 @@ export function PurchaseOrderExtractionPanelView({
   onApply,
   onDiscard,
   applied = null,
+  plan = null,
+  choices = {},
+  onChoose,
 }: PurchaseOrderExtractionPanelViewProps) {
   const fields = EXTRACTION_FIELD_ORDER.map((key) =>
     result.Fields.find((field) => field.Key === key)
   ).filter((field): field is PurchaseOrderExtractionFieldDTO => field != null);
+  const lineConflict = plan?.lines?.outcome === "conflict";
+  const lineChoice = choices[EXTRACTION_LINES_KEY] ?? "manual";
+  const rowsLocked = lineConflict && lineChoice !== "extracted";
+  const comparisonFor = (fieldKey: string) =>
+    plan?.fields.find((field) => field.key === proposalCellKey("header", fieldKey)) ?? null;
   const selectedFields = fields.filter(
     (field) =>
       selection[proposalCellKey("header", field.Key)] === true &&
@@ -315,10 +383,14 @@ export function PurchaseOrderExtractionPanelView({
   ).length;
   const selectedRows = result.Rows.filter(
     (row, index) =>
+      !rowsLocked &&
       selection[proposalCellKey("row", String(index))] === true &&
       rowProposalApplicable(row, currency)
   ).length;
   const canApply = selectedFields + selectedRows > 0;
+  const replaceLinesHint = `Applying line proposals replaces the current ${lines.length} ${
+    lines.length === 1 ? "line" : "lines"
+  } with the ticked rows.`;
   return (
     <div data-testid="po-extraction-panel">
       <Card className="p-4">
@@ -329,6 +401,10 @@ export function PurchaseOrderExtractionPanelView({
       <p className="text-small text-ink-600">
         These proposals are evidence from the document, not confirmed facts. Tick the
         values to apply, then review the draft. Nothing changes until you press Apply.
+      </p>
+      <p className="mt-1 text-small text-ink-600">
+        Where the draft already held a different value, choose which one this field
+        uses; extraction never replaces it on its own.
       </p>
       <p className="mt-1 text-caption text-ink-500">{extractionAbstentionSummary(result)}</p>
       <p className="mt-1 text-caption text-ink-600" data-testid="po-extraction-provenance">
@@ -379,6 +455,9 @@ export function PurchaseOrderExtractionPanelView({
                 currency={currency}
                 selection={selection}
                 onToggle={onToggle}
+                comparison={comparisonFor(field.Key)}
+                choice={choices[proposalCellKey("header", field.Key)] ?? "manual"}
+                onChoose={onChoose}
               />
             ))}
           </ul>
@@ -388,10 +467,45 @@ export function PurchaseOrderExtractionPanelView({
           <div className="mb-2 flex flex-wrap items-baseline gap-2">
             <h3 className="text-small font-medium text-ink-700">Lines</h3>
             <span className="text-caption text-ink-500">
-              Applying line proposals replaces the current {lines.length}{" "}
-              {lines.length === 1 ? "line" : "lines"} with the ticked rows.
+              {rowsLocked
+                ? "Your line changes are kept while this choice stands."
+                : replaceLinesHint}
             </span>
           </div>
+          {lineConflict && plan?.lines ? (
+            <fieldset
+              className="mb-2 grid gap-1.5 rounded-md border border-rule bg-paper-subtle/60 p-2"
+              data-testid="po-extraction-line-conflict"
+            >
+              <legend className="px-1 text-caption text-ink-600">
+                You changed the lines while extraction ran. Choose what the draft uses.
+              </legend>
+              <label className="flex items-start gap-2 text-small text-ink-900">
+                <input
+                  type="radio"
+                  className="mt-1 accent-[var(--color-accent-600)]"
+                  name="extraction-line-conflict"
+                  aria-label="Keep my lines"
+                  checked={lineChoice !== "extracted"}
+                  onChange={() => onChoose?.(EXTRACTION_LINES_KEY, "manual")}
+                />
+                <span>
+                  Keep my lines ({plan.lines.current})
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-small text-ink-900">
+                <input
+                  type="radio"
+                  className="mt-1 accent-[var(--color-accent-600)]"
+                  name="extraction-line-conflict"
+                  aria-label="Use extracted lines"
+                  checked={lineChoice === "extracted"}
+                  onChange={() => onChoose?.(EXTRACTION_LINES_KEY, "extracted")}
+                />
+                <span>Use extracted lines ({plan.lines.extracted})</span>
+              </label>
+            </fieldset>
+          ) : null}
           {result.Rows.length === 0 ? (
             <p className="text-small text-ink-600">
               No line table was read. Enter the lines manually or check the page image.
@@ -406,6 +520,7 @@ export function PurchaseOrderExtractionPanelView({
                   currency={currency}
                   selection={selection}
                   onToggle={onToggle}
+                  locked={rowsLocked}
                 />
               ))}
             </ul>

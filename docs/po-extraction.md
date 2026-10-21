@@ -440,11 +440,31 @@ CPU limits and `--cap-drop ALL`. It forwards the page and OCR settings.
   confidence)`), and the confidence label on any OCR-read value. A value below
   the 70% floor says so; a row also names its low-confidence cells.
 - Default selection is conservative: only an `extracted` header proposal into
-  an **empty** editor field starts ticked. A field staff already filled is not
-  ticked, whether equal or different; `needs_review` and `absent` wait for a
+  an **empty, untouched** editor field starts ticked. A field staff already
+  filled is not ticked, whether equal or different; a field they cleared while
+  the run was active waits for a choice; `needs_review` and `absent` wait for a
   tick. Every row starts unticked.
 - **Apply selected** is the only path into the editor. Currency is evidence
   only — the PO's currency comes from the Quotation and is protected.
+- **Manual edits during processing are reconciled, not overwritten (#479).**
+  The editor records a baseline when tracking starts and compares every later
+  value against it. An untouched empty field may fill in from an `extracted`
+  proposal; a nonempty value that differs, or a field staff deliberately
+  cleared, becomes an explicit **Keep draft / Use extracted** choice. Equal
+  normalized values need no prompt (numbers compare semantically, text ignores
+  surrounding and repeated whitespace without hiding a changed word), and a
+  manual nonempty value is kept when extraction is empty. A `needs_review`
+  proposal never auto-populates. Choices are committed only by Apply.
+- **Line changes are protected too.** A line cell edited or cleared, or a line
+  added or removed while the run was active, turns the row replacement into an
+  explicit **Keep my lines / Use extracted lines** choice; while Keep stands the
+  row checkboxes are disabled. Differing rows nobody touched remain the
+  ordinary opt-in proposals, not conflicts.
+- **Extract again** (the same “Extract and compare” action) never clears,
+  overwrites or saves the editor. It keeps the working copy, the correction
+  reason and the conflict choices; only stale row ticks are dropped. Replacing
+  or removing the PDF discards the run, its tracked edits and its choices with
+  the old document generation, so a late response cannot resurrect them.
 - Choosing any row **replaces the current line set** with the ticked extracted
   rows. The panel states this before the action; mixing rows into the
   quotation-seeded lines would silently duplicate quantities.
@@ -456,8 +476,9 @@ CPU limits and `--cap-drop ALL`. It forwards the page and OCR settings.
   the active document, so a refresh still in flight cannot leave proposals for
   the previous PDF actionable.
 
-This release does not implement paternal conflict resolution (#479) or a retry
-policy.
+This flow is deliberately separate from the PO-versus-Quotation difference
+review on final Save (#471): extraction turns proposals into draft values,
+whereas the final review chooses between the finished PO and its issued source.
 
 ## Tests
 

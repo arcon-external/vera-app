@@ -3,9 +3,12 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
-import type {
-  PurchaseOrderExtractionResultDTO,
-  PurchaseOrderExtractionRowDTO,
+import {
+  createExtractionEditTracker,
+  EXTRACTION_LINES_KEY,
+  resolveExtractionConflicts,
+  type PurchaseOrderExtractionResultDTO,
+  type PurchaseOrderExtractionRowDTO,
 } from "../poExtraction";
 import type { PurchaseOrderHeader, PurchaseOrderLine } from "../purchaseOrder";
 import { PurchaseOrderExtractionPanelView } from "./PurchaseOrderExtractionPanel";
@@ -320,5 +323,148 @@ describe("extraction review panel", () => {
     );
     expect(apply?.textContent).toBe("Apply selected");
     expect(checkbox("Apply extracted line 1").disabled).toBe(true);
+  });
+});
+
+// Issue #479: only the values that actually conflict get a choice. An auto
+// field is preselected without a prompt; a field the draft already held is a
+// conflict even though nobody touched it, and it is never preselected.
+describe("extraction conflict choices", () => {
+  function conflictingHeader(): PurchaseOrderHeader {
+    return {
+      ...emptyHeader(),
+      poNumber: "PO-1",
+      paymentTerms: "45 days",
+      incoterms: "CIF Batam",
+    };
+  }
+
+  function planFor(
+    currentHeader: PurchaseOrderHeader,
+    currentLines: PurchaseOrderLine[],
+    baselineHeader = currentHeader,
+    baselineLines = currentLines
+  ) {
+    const tracker = createExtractionEditTracker(1, baselineHeader, baselineLines);
+    return resolveExtractionConflicts(
+      result(),
+      currentHeader,
+      currentLines,
+      tracker,
+      USD
+    );
+  }
+
+  function renderPlan(
+    plan: ReturnType<typeof resolveExtractionConflicts>,
+    header: PurchaseOrderHeader,
+    currentLines: PurchaseOrderLine[],
+    choices: Record<string, "manual" | "extracted">,
+    onChoose: (key: string, choice: "manual" | "extracted") => void,
+    selection: Record<string, boolean> = {}
+  ) {
+    act(() =>
+      root.render(
+        <PurchaseOrderExtractionPanelView
+          result={result()}
+          header={header}
+          lines={currentLines}
+          currency={USD}
+          selection={selection}
+          onToggle={() => undefined}
+          onApply={() => undefined}
+          onDiscard={() => undefined}
+          plan={plan}
+          choices={choices}
+          onChoose={onChoose}
+        />
+      )
+    );
+  }
+
+  it("shows a choice only for conflicting fields and preselects unedited empty ones", () => {
+    const current = conflictingHeader();
+    const plan = planFor(current, lines());
+    renderPlan(plan, current, lines(), {}, () => undefined, plan.selection);
+
+    expect(container.querySelector('[data-testid="po-extraction-conflict-poNumber"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="po-extraction-conflict-paymentTerms"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="po-extraction-conflict-poDate"]')).toBeNull();
+    expect(container.querySelector('[data-testid="po-extraction-conflict-incoterms"]')).toBeNull();
+
+    // The untouched, differing values wait for a decision; the empty date is
+    // selected without a prompt.
+    expect(checkbox("Apply extracted Customer PO date").checked).toBe(true);
+    expect(checkbox("Apply extracted Incoterms").checked).toBe(false);
+    expect(container.querySelector('input[aria-label="Apply extracted Customer PO number"]')).toBeNull();
+  });
+
+  it("reports the chosen side and shows the draft and extracted values", () => {
+    const current = conflictingHeader();
+    const plan = planFor(current, lines());
+    const onChoose = vi.fn();
+    renderPlan(plan, current, lines(), {}, onChoose, plan.selection);
+
+    const keep = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Keep draft Customer PO number"]'
+    );
+    const use = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Use extracted Customer PO number"]'
+    );
+    expect(keep?.checked).toBe(true);
+    expect(use?.checked).toBe(false);
+    expect(container.textContent).toContain("PO-1");
+    expect(container.textContent).toContain("4500123456");
+
+    act(() => use?.click());
+    expect(onChoose).toHaveBeenCalledWith("header:poNumber", "extracted");
+
+    renderPlan(
+      plan,
+      current,
+      lines(),
+      { "header:poNumber": "extracted" },
+      onChoose,
+      plan.selection
+    );
+    const keepAfterChoice = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Keep draft Customer PO number"]'
+    );
+    expect(keepAfterChoice?.checked).toBe(false);
+    act(() => keepAfterChoice?.click());
+    expect(onChoose).toHaveBeenCalledWith("header:poNumber", "manual");
+  });
+
+  it("asks before replacing line cells edited while extraction ran", () => {
+    const current = conflictingHeader();
+    const editedLines = [{ ...lines()[0]!, description: "Typed by hand" }];
+    const plan = planFor(current, editedLines, current, lines());
+    expect(plan.lines?.outcome).toBe("conflict");
+    renderPlan(plan, current, editedLines, {}, () => undefined, plan.selection);
+
+    expect(container.querySelector('[data-testid="po-extraction-line-conflict"]')).not.toBeNull();
+    const keep = container.querySelector<HTMLInputElement>('input[aria-label="Keep my lines"]');
+    expect(keep?.checked).toBe(true);
+    expect(checkbox("Apply extracted line 1").disabled).toBe(true);
+  });
+
+  it("enables the row proposals only after Use extracted lines is chosen", () => {
+    const current = conflictingHeader();
+    const editedLines = [{ ...lines()[0]!, description: "Typed by hand" }];
+    const plan = planFor(current, editedLines, current, lines());
+    renderPlan(
+      plan,
+      current,
+      editedLines,
+      { [EXTRACTION_LINES_KEY]: "extracted" },
+      () => undefined,
+      plan.selection
+    );
+
+    expect(checkbox("Apply extracted line 1").disabled).toBe(false);
+    const use = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Use extracted lines"]'
+    );
+    expect(use?.checked).toBe(true);
   });
 });
