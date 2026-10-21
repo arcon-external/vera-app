@@ -58,7 +58,6 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
-import { PurchaseOrderListPage } from "./components/PurchaseOrderListPage";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
   POSourcePage,
@@ -67,14 +66,10 @@ import type {
   POSourceSelection,
   POSourceValidation,
 } from "./poSelector";
-import {
-  PurchaseOrderDiscardPrompt,
-  PurchaseOrderEditorPage,
-} from "./components/PurchaseOrderEditor";
-import { PurchaseOrderSavedView } from "./components/PurchaseOrderFinalize";
-import { isSavedPurchaseOrder } from "./poFinalize";
+import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
+import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
-import type { PurchaseOrderDTO } from "./purchaseOrder";
+import { usePurchaseOrderWorkspace } from "./poWorkspace";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { UsersPage } from "./components/UsersPage";
 import { ClientsPage } from "./components/ClientsPage";
@@ -467,23 +462,32 @@ function App() {
   } | null>(null);
   // The PO source selector (#467) is shared by both PO entry paths.
   const [poSelectorOpen, setPOSelectorOpen] = useState(false);
-  // The draft the PO workspace is editing (#468). Null means the PO page is
-  // the archive (#469): the selector's two paths create or reopen a draft and
-  // set this.
-  const [poDraft, setPODraft] = useState<PurchaseOrderDTO | null>(null);
-  // #473: a saved record's Correct action opens the same editor in correction
-  // mode, which requires a reason and keeps the replaced values.
-  const [poCorrecting, setPOCorrecting] = useState(false);
+  // The PO workspace (#468/#473) owns the open record and its phase in one
+  // controller, so Cancel from a correction can re-read the saved record
+  // instead of leaving a stale editor behind. The page renders the archive when
+  // no record is open.
+  const { pushToast } = useToast();
+  const poWorkspace = usePurchaseOrderWorkspace({
+    onRefreshError: (error) =>
+      pushToast(
+        "error",
+        getErrorMessage(
+          error,
+          "The saved purchase order could not be reloaded, so the archive is shown."
+        )
+      ),
+  });
+  const closePurchaseOrder = poWorkspace.close;
   // Leaving the PO page clears the edited draft, so returning to the PO surface
   // shows the archive rather than a stale editor. The leave guard owns the
   // dirty-check before this runs.
-  const navigatePage = useCallback((next: AppPage) => {
-    if (next !== "po") {
-      setPODraft(null);
-      setPOCorrecting(false);
-    }
-    setPage(next);
-  }, []);
+  const navigatePage = useCallback(
+    (next: AppPage) => {
+      if (next !== "po") closePurchaseOrder();
+      setPage(next);
+    },
+    [closePurchaseOrder]
+  );
   const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage);
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
@@ -511,7 +515,6 @@ function App() {
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
-  const { pushToast } = useToast();
   // #469: a row opens the exact stored draft by id through the #468 route.
   // The list already knows the id; the server is the authority on the record,
   // so it is fetched rather than passed in from the row.
@@ -520,8 +523,7 @@ function App() {
       try {
         const draft = await GetPurchaseOrder(id);
         poLeave.setDirty(false);
-        setPOCorrecting(false);
-        setPODraft(draft);
+        poWorkspace.open(draft);
         setPage("po");
       } catch (error) {
         pushToast(
@@ -530,7 +532,7 @@ function App() {
         );
       }
     },
-    [poLeave, pushToast]
+    [poLeave, poWorkspace.open, pushToast]
   );
   const [user, setUser] = useState<SignedInUser | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
@@ -667,10 +669,14 @@ function App() {
   // fields until the catalogue can name the denomination.
   const poEntry = useMemo(
     () =>
-      poDraft === null
+      poWorkspace.draft === null
         ? null
-        : resolveLiveEntry(currencyCatalogue, poDraft.Currency, IDR_FALLBACK_ENTRY),
-    [currencyCatalogue, poDraft]
+        : resolveLiveEntry(
+            currencyCatalogue,
+            poWorkspace.draft.Currency,
+            IDR_FALLBACK_ENTRY
+          ),
+    [currencyCatalogue, poWorkspace.draft]
   );
 
   // The resolved canonical unit every default falls back to: the profile's
@@ -1775,8 +1781,7 @@ function App() {
             ReceivedDate: "",
           });
           poLeave.setDirty(false);
-          setPOCorrecting(false);
-          setPODraft(draft);
+          poWorkspace.open(draft);
           setPOSelectorOpen(false);
           setPage("po");
           pushToast(
@@ -1788,8 +1793,7 @@ function App() {
           try {
             const draft = await GetPurchaseOrder(activePO.id);
             poLeave.setDirty(false);
-            setPOCorrecting(false);
-            setPODraft(draft);
+            poWorkspace.open(draft);
             setPOSelectorOpen(false);
             setPage("po");
           } catch (error) {
@@ -1943,72 +1947,30 @@ function App() {
       ) : null}
 
       {page === "po" ? (
-        poDraft === null ? (
-          <PurchaseOrderListPage
-            onAdd={() => setPOSelectorOpen(true)}
-            onOpen={(id) => void openPurchaseOrder(id)}
-          />
-        ) : poEntry === null ? (
-          <StatusBanner tone="danger">
-            The purchase order's currency ({poDraft.Currency}) is not in the
-            loaded currency catalogue, so money cannot be edited safely yet.
-          </StatusBanner>
-        ) : isSavedPurchaseOrder(poDraft) && !poCorrecting ? (
-          // #471/#473: a saved record opens read-only; Correct is the one entry
-          // into the correction editor, which asks for a reason and records the
-          // replaced values.
-          <PurchaseOrderSavedView
-            order={poDraft}
-            currency={poEntry}
-            onCorrect={() => setPOCorrecting(true)}
-            onAssigned={(updated) => setPODraft(updated)}
-            onBack={() => {
-              poLeave.setDirty(false);
-              setPODraft(null);
-              setPOCorrecting(false);
-            }}
-          />
-        ) : (
-          <PurchaseOrderEditorPage
-            key={poDraft.ID}
-            order={poDraft}
-            currency={poEntry}
-            uomOptions={storedUoMs ?? []}
-            incotermOptions={INCOTERM_OPTIONS}
-            mode={poCorrecting ? "correction" : "draft"}
-            onCorrectionStart={() => setPOCorrecting(true)}
-            onDirtyChange={poLeave.setDirty}
-            onSaved={(updated, corrected) => {
-              setPODraft(updated);
-              setPOCorrecting(false);
-              pushToast(
-                "success",
-                corrected
-                  ? "Purchase order corrected. The previous values are in the history."
-                  : updated.State === "saved"
-                    ? "Purchase order saved and finalized."
-                    : "Purchase order draft saved."
-              );
-            }}
-            onCancel={() => {
-              // Cancel is the same discard decision as a tab click: the guard
-              // owns the one dialog, and this cleanup runs only once it is
-              // allowed. A correction returns to the saved view; a draft Cancel
-              // returns to the archive after the guard allows it.
-              if (poCorrecting) {
-                poLeave.request("po", () => {
-                  poLeave.setDirty(false);
-                  setPOCorrecting(false);
-                });
-                return;
-              }
-              poLeave.request("home", () => {
-                poLeave.setDirty(false);
-                setPODraft(null);
-              });
-            }}
-          />
-        )
+        <PurchaseOrderWorkspacePage
+          workspace={poWorkspace}
+          currency={poEntry}
+          uomOptions={storedUoMs ?? []}
+          incotermOptions={INCOTERM_OPTIONS}
+          onAdd={() => setPOSelectorOpen(true)}
+          onOpen={(id) => void openPurchaseOrder(id)}
+          onSaved={(updated, corrected) => {
+            pushToast(
+              "success",
+              corrected
+                ? "Purchase order corrected. The previous values are in the history."
+                : updated.State === "saved"
+                  ? "Purchase order saved and finalized."
+                  : "Purchase order draft saved."
+            );
+          }}
+          onBack={() => {
+            poLeave.setDirty(false);
+            poWorkspace.close();
+          }}
+          onCancel={() => poWorkspace.cancel(poLeave.request, poLeave.setDirty)}
+          onDirtyChange={poLeave.setDirty}
+        />
       ) : null}
 
       {page === "create" ? (
