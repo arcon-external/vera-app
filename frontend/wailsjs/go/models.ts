@@ -2323,11 +2323,11 @@ export namespace backend {
 	    DPI: number;
 	    Confidence?: number;
 	    Reason: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderExtractionPageModeDTO(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Number = source["Number"];
@@ -2494,6 +2494,7 @@ export namespace backend {
 	        this.SHA256 = source["SHA256"];
 	    }
 	}
+	
 	
 	
 	
