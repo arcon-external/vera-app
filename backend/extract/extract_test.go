@@ -321,6 +321,117 @@ func TestProposeMarksAmbiguousConflictingAndUnparseableValuesNeedsReview(t *test
 	}
 }
 
+func TestProposeMarksConflictingCurrenciesNeedsReview(t *testing.T) {
+	// No "Currency:" label: the fallback collects every currency code it sees.
+	// Two codes are two answers, never "the first one wins".
+	words := []testWord{
+		word("PO", 50, 90, 14), word("No:", 67, 90, 16), word("4500123456", 86, 90, 60),
+		word("Amounts", 50, 120, 45), word("in", 99, 120, 12),
+		word("USD", 115, 120, 25), word("and", 145, 120, 20), word("IDR", 170, 120, 25),
+	}
+	result := parseFixture(t, words)
+	currency := assertField(t, result, apicontract.ExtractionFieldCurrency, "USD / IDR", apicontract.ExtractionStatusNeedsReview)
+	if !strings.Contains(currency.Note, "USD") || !strings.Contains(currency.Note, "IDR") {
+		t.Errorf("currency note = %q; want both printed codes named", currency.Note)
+	}
+
+	// The same conflict on a labelled line must not normalise to its first token.
+	labelled := []testWord{
+		word("Currency:", 50, 90, 50), word("USD", 104, 90, 22),
+		word("/", 128, 90, 6), word("IDR", 136, 90, 22),
+	}
+	result = parseFixture(t, labelled)
+	currency = assertField(t, result, apicontract.ExtractionFieldCurrency, "USD / IDR", apicontract.ExtractionStatusNeedsReview)
+	if !strings.Contains(currency.Note, "USD") || !strings.Contains(currency.Note, "IDR") {
+		t.Errorf("labelled currency note = %q; want both printed codes named", currency.Note)
+	}
+}
+
+func TestNormaliseDecimalKeepsGroupingHonest(t *testing.T) {
+	cases := []struct {
+		raw    string
+		kind   decimalKind
+		want   string
+		status string
+	}{
+		{"1.2.3", decimalQuantity, "1.2.3", apicontract.ExtractionStatusNeedsReview},
+		{"1.25.000", decimalMoney, "1.25.000", apicontract.ExtractionStatusNeedsReview},
+		{"1,25,000", decimalMoney, "1,25,000", apicontract.ExtractionStatusNeedsReview},
+		{"1,2.30", decimalMoney, "1,2.30", apicontract.ExtractionStatusNeedsReview},
+		{"1.250.000", decimalMoney, "1250000", apicontract.ExtractionStatusExtracted},
+		{"1,250,000", decimalMoney, "1250000", apicontract.ExtractionStatusExtracted},
+		{"1.250,00", decimalMoney, "1250.00", apicontract.ExtractionStatusExtracted},
+		{"1,250.00", decimalMoney, "1250.00", apicontract.ExtractionStatusExtracted},
+	}
+	for _, testCase := range cases {
+		got, status, _ := normaliseDecimal(testCase.raw, testCase.kind)
+		if got != testCase.want || status != testCase.status {
+			t.Errorf("normaliseDecimal(%q) = %q/%q; want %q/%q",
+				testCase.raw, got, status, testCase.want, testCase.status)
+		}
+	}
+}
+
+func tableHeaderWithoutAmountWords() []testWord {
+	return []testWord{
+		word("No", 50, 200, 13),
+		word("Description", 90, 200, 55),
+		word("Qty", 300, 200, 16),
+		word("UoM", 350, 200, 21),
+		word("Unit", 400, 200, 18),
+		word("Price", 421, 200, 23),
+	}
+}
+
+func TestProposeKeepsTheQuantityWhenThereIsNoAmountColumn(t *testing.T) {
+	words := append(headerWords(), tableHeaderWithoutAmountWords()...)
+	words = append(words, word("1", 50, 225, 6))
+	words = append(words, word("Electrical", 90, 225, 70), word("panel", 162, 225, 40))
+	words = append(words, word("2", 300, 225, 18), word("Pc", 350, 225, 20),
+		word("1250.00", 400, 225, 40))
+	words = append(words, totalWords("2500.00", 260)...)
+	result := parseFixture(t, words)
+
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %d; want 1 (%+v)", len(result.Rows), result.Rows)
+	}
+	row := result.Rows[0]
+	if row.Quantity.Status != apicontract.ExtractionStatusExtracted || row.Quantity.Value != "2" {
+		t.Errorf("quantity = %+v; want the printed qty 2 kept", row.Quantity)
+	}
+	if row.Amount.Status != apicontract.ExtractionStatusAbsent || row.Amount.Value != "" {
+		t.Errorf("amount = %+v; a table with no Amount column must leave it absent", row.Amount)
+	}
+	if row.UnitPrice.Value != "1250.00" {
+		t.Errorf("unit price = %q; want 1250.00", row.UnitPrice.Value)
+	}
+}
+
+func TestProposeCarriesTheWholeWrappedDescription(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	// A wrapped description continues the same line item: the full text and a
+	// region covering both lines, never a value whose evidence is only part.
+	words = append(words, word("extension", 90, 239, 55))
+	words = append(words, rowWords("2", "Cable", "1", "M", "42.00", "42.00", 261)...)
+	result := parseFixture(t, words)
+
+	if len(result.Rows) != 2 {
+		t.Fatalf("rows = %d; want 2", len(result.Rows))
+	}
+	first := result.Rows[0]
+	if first.Description.Value != "Panel extension" || first.Description.Raw != "Panel extension" {
+		t.Errorf("description = %q (raw %q); want the whole wrapped text",
+			first.Description.Value, first.Description.Raw)
+	}
+	if first.Description.BBox == nil || first.Description.BBox.Height < 20 {
+		t.Errorf("description bbox = %+v; want a union covering both wrapped lines", first.Description.BBox)
+	}
+	if first.BBox == nil || first.BBox.Height < 20 {
+		t.Errorf("row bbox = %+v; want the wrapped line included", first.BBox)
+	}
+}
+
 func TestProposeMarksIncompleteAndDuplicateRowsNeedsReview(t *testing.T) {
 	words := append(headerWords(), tableHeaderWords()...)
 	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)

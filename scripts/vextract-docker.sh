@@ -8,6 +8,12 @@
 #
 #   VERA_EXTRACTOR_CMD="$PWD/scripts/vextract-docker.sh" go run ./cmd/veraserver
 #
+# There is no in-process fallback: the server image ships no extractor, and an
+# empty VERA_EXTRACTOR_CMD disables extraction (the start endpoint answers 503).
+# A same-UID child in the server container could read the parent's /proc
+# environment, so this wrapper (or an equivalent isolated worker with no
+# database or signing credentials) is the supported path.
+#
 # The container has no network, no writable root filesystem, no credentials and
 # hard memory/PID/CPU caps. The PDF is the only input and the JSON result is the
 # only output. Build the image first:

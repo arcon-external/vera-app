@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "../poLeaveGuard";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 import { AppShell } from "./AppShell";
 import {
   PurchaseOrderDiscardPrompt,
@@ -25,9 +26,11 @@ import {
 // and the shared discard prompt. App supplies only the one-line wiring this
 // harness copies.
 
-const { extractionMock, startExtractionMock } = vi.hoisted(() => ({
+const { extractionMock, startExtractionMock, documentStateMock, attachMock } = vi.hoisted(() => ({
   extractionMock: vi.fn(),
   startExtractionMock: vi.fn(),
+  documentStateMock: vi.fn(),
+  attachMock: vi.fn(),
 }));
 
 // The editor page now mounts the document panel, which reads the one optional
@@ -36,8 +39,8 @@ const { extractionMock, startExtractionMock } = vi.hoisted(() => ({
 // navigation, so both reads default to their empty state; individual tests
 // override the extraction answer where they exercise it.
 vi.mock("@backend/backend/Quotation", () => ({
-  GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
-  AttachPurchaseOrderDocument: vi.fn(),
+  GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
+  AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
   GetPurchaseOrderExtraction: (...args: unknown[]) => extractionMock(...args),
@@ -165,6 +168,9 @@ beforeEach(() => {
   extractionMock.mockReset();
   extractionMock.mockResolvedValue({ Run: null, Document: null });
   startExtractionMock.mockReset();
+  attachMock.mockReset();
+  documentStateMock.mockReset();
+  documentStateMock.mockResolvedValue(extractionDocumentState());
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -288,18 +294,60 @@ function extractionState() {
   };
 }
 
+function extractionDocumentState(
+  id = 4,
+  version = 1,
+  sha256 = "doc-sha"
+): PurchaseOrderDocumentStateDTO {
+  const document = {
+    UUID: `doc-${id}-${version}`,
+    SHA256: sha256,
+    ContentType: "application/pdf",
+    OriginalFilename: "Customer PO.pdf",
+    UploadedAt: "2026-10-21T10:00:00Z",
+    ID: id,
+    PurchaseOrderID: 7,
+    Version: version,
+    SizeBytes: 1536,
+    UploadedBy: 4,
+    Active: true,
+  };
+  return { Document: document, Versions: [document] };
+}
+
 function extractionCheckbox(label: string): HTMLInputElement {
   const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
   if (!found) throw new Error(`checkbox ${label} not found`);
   return found;
 }
 
-function applySelectedButton(): HTMLButtonElement {
-  const found = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
-    (candidate) => candidate.textContent?.startsWith("Apply selected")
+function applySelectedButtonOrNull(): HTMLButtonElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
+      candidate.textContent?.startsWith("Apply selected")
+    ) ?? null
   );
+}
+
+function applySelectedButton(): HTMLButtonElement {
+  const found = applySelectedButtonOrNull();
   if (!found) throw new Error("Apply selected button not found");
   return found;
+}
+
+function chooseDocumentFile(name = "Replacement.pdf", content = "%PDF-1.7\n"): void {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Customer PO PDF file"]'
+  );
+  if (!input) throw new Error("file input not found");
+  const file = new File([content], name, { type: "application/pdf" });
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [file],
+  });
+  act(() => {
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 function inputValue(label: string): string | undefined {
@@ -530,6 +578,43 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
     expect(inputValue("Line 1 description")).toBe("Extracted line");
     expect(inputValue("Line 1 quantity")).toBe("2");
     expect(inputValue("Line 1 unit price")).toBe("$1,250.00");
+  });
+
+  it("removes Apply as soon as the PDF is replaced, even while the document refresh is pending", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    let resolveDocumentRefresh!: (state: PurchaseOrderDocumentStateDTO) => void;
+    const pendingDocumentRefresh = new Promise<PurchaseOrderDocumentStateDTO>((resolve) => {
+      resolveDocumentRefresh = resolve;
+    });
+    documentStateMock.mockReturnValueOnce(Promise.resolve(extractionDocumentState()));
+    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh);
+    attachMock.mockResolvedValue(undefined);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    const row = extractionCheckbox("Apply extracted line 1");
+    act(() => row.click());
+    expect(applySelectedButtonOrNull()).not.toBeNull();
+
+    // Replacing the PDF succeeds, but the refreshed document state is still in
+    // flight: this is exactly the window where old proposals used to stay live.
+    chooseDocumentFile();
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+
+    // When the refresh finally resolves to a new generation, the old result is
+    // still not actionable even though the extraction read returns it again.
+    await act(async () => {
+      resolveDocumentRefresh(extractionDocumentState(5, 2, "replacement-sha"));
+      await Promise.resolve();
+    });
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
   });
 
   it("discards a stale result visibly and offers no Apply", async () => {

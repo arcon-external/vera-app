@@ -1,31 +1,30 @@
 # Vera API server (veraserver).
+#
+# This image deliberately contains no PDF extractor and no Poppler. Extraction
+# runs in the dedicated restricted image (docker/po-extract) or an equivalent
+# isolated worker: a same-UID subprocess sharing this container can read
+# /proc/<server-pid>/environ and recover the database DSN or the signing key, so
+# a clean child environment is not isolation. VERA_EXTRACTOR_CMD must name that
+# isolated command; without it the extraction endpoint answers 503 (#477).
 FROM golang:1.27-bookworm AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /veraserver ./cmd/veraserver \
-	&& CGO_ENABLED=0 go build -trimpath -o /vextract ./cmd/vextract
+RUN CGO_ENABLED=0 go build -trimpath -o /veraserver ./cmd/veraserver
 
 FROM debian:bookworm-slim
 # postgresql-client-18 matches the Neon production server (PG18, Singapore).
 # Bookworm ships PG15, whose pg_dump refuses to talk to a newer server, so
 # take the client from the official PGDG repository. If production moves PG
 # major, this pin must move with it.
-#
-# poppler-utils is the text-PDF extractor's engine (#477). It runs as a
-# separate process with a minimal environment, never with the server's DSN or
-# signing key. For a hard container-level memory cap and `--network none`, use
-# the pinned image in docker/po-extract and point VERA_EXTRACTOR_CMD at
-# scripts/vextract-docker.sh on a Docker-capable host.
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ca-certificates curl gnupg poppler-utils \
+	&& apt-get install -y --no-install-recommends ca-certificates curl gnupg \
 	&& curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/pgdg.gpg \
 	&& echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
 	&& apt-get update \
 	&& apt-get install -y --no-install-recommends postgresql-client-18 \
 	&& rm -rf /var/lib/apt/lists
 COPY --from=builder /veraserver /usr/local/bin/veraserver
-COPY --from=builder /vextract /usr/local/bin/vextract
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/veraserver"]

@@ -173,7 +173,12 @@ Start failures:
 | --- | --- |
 | No attached PDF | `409 po_extraction_document_required` |
 | Unknown purchase order | `404` |
-| Extraction engine not configured | `503 po_extraction_unavailable` |
+| No isolated extractor configured (or its command is unavailable) | `503 po_extraction_unavailable` |
+
+The start endpoint **preflights** the configured command before it creates a
+job. An unavailable extractor is a deployment answer, not a queued run: nothing
+is stored, so history never claims extraction was attempted when it never ran.
+A command that disappears *after* the preflight is still a typed run failure.
 
 Run failure codes stored in `errorCode` (the manual path always remains):
 
@@ -203,10 +208,21 @@ Over a bound is a **failed run** with a typed reason, never a partial result.
 
 ## Security and operations
 
+- **Production isolation is the dedicated container, not a child process.** A
+  same-UID child in the server container is not isolated: it can read
+  `/proc/<server-pid>/environ` and recover the database DSN or the signing key,
+  so clearing its environment proves nothing. Extraction therefore runs only
+  through the dedicated restricted image (`docker/po-extract`) — or an
+  equivalent isolated worker/service that holds no database or signing
+  credentials. `Dockerfile.veraserver` ships neither `vextract` nor Poppler, and
+  without `VERA_EXTRACTOR_CMD` extraction is disabled (`503`), not silently
+  degraded.
 - **Restricted worker.** PDF bytes in, result JSON out. No DSN, no signing key,
   no session token, no caller-supplied path. The child gets a minimal
   environment (`PATH`, `HOME=/tmp`, `TMPDIR=/tmp`, `LANG`, the page cap, plus
-  explicit operator/test extras), never `os.Environ()`.
+  explicit operator/test extras), never `os.Environ()`. The container adds
+  `--network none`, a read-only root, `--cap-drop ALL`,
+  `--security-opt no-new-privileges`, and memory/PID/CPU limits.
 - **Build context.** `.dockerignore` excludes `.env`, `test-data/*.pdf`,
   `frontend/node_modules`, `frontend/dist` and repository history, so local
   credentials and customer PDFs cannot enter an image layer.
@@ -218,18 +234,33 @@ Over a bound is a **failed run** with a typed reason, never a partial result.
 - **Google hosting remains a subprocessor.** Server-side processing runs on
   Google infrastructure; this is not on-device processing.
 
-### Image pinning and the production path
+### Image pinning, licensing and the reviewed configuration
 
-`docker/po-extract/Dockerfile` pins both bases by digest:
+`docker/po-extract/Dockerfile` is the **reviewed configuration**. It pins both
+bases by digest and the engine package by exact version:
 
 - builder `golang:1.26-bookworm@sha256:d9c68c2c…` (matches the Go toolchain);
 - runtime `debian:trixie-slim@sha256:62bd423a…`;
-- `poppler-utils` installed from that image's Debian suite, currently
-  **Poppler 25.03.0** (`pdftotext version 25.03.0`).
+- `poppler-utils=25.03.0-5+deb13u4` from that image's Debian suite (Poppler
+  reports `pdftotext version 25.03.0`).
+
+An exact package pin is intentional: if the Debian suite rotates the package
+away, the image build fails loudly instead of silently shipping a different
+Poppler. Moving the pin is a reviewed change, not a rebuild side effect.
 
 The Dockerfile records the installed version in `/etc/vextract-engine-version`;
 `vextract -version` prints it, and every result carries the same
 `engineVersion`, so a repeat run is comparable.
+
+**License review basis (user-approved, 2026-10-21).** Poppler is GPL. Vera uses
+it as a separate server-side subprocess inside this dedicated image and does not
+link it into the desktop application or the server binary, so the desktop
+distribution is not conveying Poppler. The corresponding source for the pinned
+Debian package is obtainable from the Debian archive
+(`apt-get source poppler=25.03.0-5+deb13u4`) and from the matching Poppler
+25.03.0 release; any distribution of a rebuilt image carries the usual
+source-offer duty for that GPL program, which the release notes must satisfy.
+The server image (`Dockerfile.veraserver`) ships no Poppler and no extractor.
 
 Build and check:
 
@@ -237,22 +268,16 @@ Build and check:
 scripts/build-po-extract-image.sh          # builds vera-po-extract:dev, prints version
 ```
 
-`Dockerfile.veraserver` also builds `vextract` and installs Debian bookworm's
-`poppler-utils`, so the API server can run the extractor as a child process
-with the default `VERA_EXTRACTOR_CMD=vextract`. That child gets the minimal
-environment (no DSN, no signing key) and the same page/time/output bounds, but
-it shares the server container's memory limit. For a hard separate memory cap
-and `--network none`, run the pinned extractor image through
-`scripts/vextract-docker.sh` on a Docker-capable host and point
-`VERA_EXTRACTOR_CMD` at the wrapper. The result's `engineVersion` distinguishes
-the two Poppler builds (bookworm 22.12 vs trixie 25.03), so a result is always
-attributable to the engine that produced it.
+In development the server reaches the image through
+`scripts/vextract-docker.sh` on a Docker-capable host. That wrapper is a
+convenience around the same isolation flags, not a production default. The
+result's `engineVersion` makes the engine that produced it attributable.
 
 ### Environment
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `VERA_EXTRACTOR_CMD` | `vextract` | Executable plus fixed arguments. The server splits on whitespace; no shell is invoked. |
+| `VERA_EXTRACTOR_CMD` | *(none)* | The isolated extractor command. The server splits on whitespace; no shell is invoked. Empty disables extraction and the start endpoint answers `503`; there is no in-process fallback. |
 | `VERA_EXTRACT_MAX_PAGES` | `40` | Page cap read by `vextract`; the server also validates the result against its own cap. |
 
 For local development, point the server at the container wrapper:
@@ -264,14 +289,6 @@ VERA_EXTRACTOR_CMD="$PWD/scripts/vextract-docker.sh" \
 
 The wrapper adds `--network none`, `--read-only`, the `/tmp` tmpfs, memory/PID/
 CPU limits and `--cap-drop ALL`. It forwards `VERA_EXTRACT_MAX_PAGES`.
-
-### Licensing
-
-Poppler is GPL-licensed. This ticket uses it as a **separate server-side
-process** and does not link it into a distributed desktop binary. The exact
-version, artifact and distribution question still need the review described in
-`po-extraction-benchmark.md` §4 before any broader distribution; no dependency
-is added to the desktop application.
 
 ## UI behaviour
 
@@ -293,6 +310,11 @@ is added to the desktop application.
   quotation-seeded lines would silently duplicate quantities.
 - A stale result is discarded with a visible explanation; failed runs show the
   typed reason and state that manual entry is unchanged.
+- Replacing or removing the PDF clears the current result and the tick
+  selection immediately, before the document refresh returns. The panel and
+  **Apply selected** compare the run's document id, version and SHA-256 against
+  the active document, so a refresh still in flight cannot leave proposals for
+  the previous PDF actionable.
 
 This ticket does not implement paternal conflict resolution (#479), retry
 policy, or OCR (#478).
@@ -300,14 +322,17 @@ policy, or OCR (#478).
 ## Tests
 
 ```bash
-# Parser, proposals, abstention and the command engine boundary (no Docker)
+# Parser, proposals, abstention, the command engine boundary and the
+# production-isolation guards (no Docker)
 go test ./backend/extract ./cmd/vextract
 
 # Store lifecycle, stale binding, interrupted recovery (disposable Postgres)
 VERA_POSTGRES_TEST_DSN='postgres://…' go test ./backend/store
 
-# API: start/read, 409 without a PDF, stale replacement, typed failures,
-# timeout, idempotent start, interrupted recovery, no PO writes
+# API: start/read, 409 without a PDF, 503 when no isolated extractor is
+# configured or its command is unavailable (nothing queued), stale
+# replacement, typed failures, timeout, idempotent start, interrupted
+# recovery, no PO writes
 VERA_POSTGRES_TEST_DSN='postgres://…' go test ./backend/api -run Extraction -v
 
 # Real Poppler, opt-in (the image must be built)

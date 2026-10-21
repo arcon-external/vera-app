@@ -27,11 +27,10 @@ import (
 // image (#476 decision), but the same boundary lets the benchmark harness
 // swap a different text engine without changing the server.
 const (
-	DefaultExtractorCommand = "vextract"
-	DefaultExtractTimeout   = 45 * time.Second
-	DefaultMaxOutputBytes   = 8 << 20
-	DefaultMaxInputBytes    = 20 << 20 // the customer PDF bound, plus nothing
-	DefaultMaxStderrBytes   = 64 << 10
+	DefaultExtractTimeout = 45 * time.Second
+	DefaultMaxOutputBytes = 8 << 20
+	DefaultMaxInputBytes  = 20 << 20 // the customer PDF bound, plus nothing
+	DefaultMaxStderrBytes = 64 << 10
 )
 
 var (
@@ -58,6 +57,14 @@ type Engine interface {
 	Extract(ctx context.Context, pdf []byte) (apicontract.ExtractionOutput, error)
 }
 
+// Prober is the optional preflight contract. An engine that can answer whether
+// it is usable implements it, so a deployment with no isolated extractor is a
+// 503 before a job exists rather than a queued job that fails. An engine
+// without it (a test stub) is assumed available.
+type Prober interface {
+	Available(ctx context.Context) error
+}
+
 // CommandEngine runs an executable with the PDF on stdin.
 type CommandEngine struct {
 	// Command is the executable and its fixed arguments. The page cap is
@@ -73,13 +80,22 @@ type CommandEngine struct {
 	MaxPages       int
 }
 
-// NewCommandEngineFromEnvironment reads VERA_EXTRACTOR_CMD (default
-// "vextract"). An empty value falls back to the default rather than running
-// the caller's shell with no arguments.
-func NewCommandEngineFromEnvironment() *CommandEngine {
+// NewCommandEngineFromEnvironment reads VERA_EXTRACTOR_CMD. There is no
+// default: a server that was not given an isolated extractor does not extract
+// at all, and its start endpoint answers 503.
+//
+// The reason is the isolation boundary, not configuration taste. A same-UID
+// child in the server container is not isolated: it can read
+// /proc/<server-pid>/environ and recover the database DSN or the signing key,
+// so a clean child environment proves nothing on its own. The command must name
+// the dedicated restricted image wrapper (scripts/vextract-docker.sh in
+// development) or an equivalent isolated worker/service that holds no database
+// or signing credentials. Dockerfile.veraserver ships neither the extractor nor
+// Poppler, so the in-container binary is not a supported production path.
+func NewCommandEngineFromEnvironment() Engine {
 	command := SplitCommand(os.Getenv("VERA_EXTRACTOR_CMD"))
 	if len(command) == 0 {
-		command = []string{DefaultExtractorCommand}
+		return nil
 	}
 	return &CommandEngine{
 		Command:        command,
@@ -97,6 +113,20 @@ func NewCommandEngineFromEnvironment() *CommandEngine {
 // not interpreted.
 func SplitCommand(line string) []string {
 	return strings.Fields(line)
+}
+
+// Available is the preflight the service runs before it queues work. It proves
+// the configured program can be resolved by this process and deliberately does
+// not start a document run. A command that disappears after this check is
+// still a typed runtime failure, never a silently lost job.
+func (engine *CommandEngine) Available(context.Context) error {
+	if engine == nil || len(engine.Command) == 0 {
+		return fmt.Errorf("%w: no isolated extractor is configured", ErrExtractorUnavailable)
+	}
+	if _, err := exec.LookPath(engine.Command[0]); err != nil {
+		return fmt.Errorf("%w: %s", ErrExtractorUnavailable, engine.Command[0])
+	}
+	return nil
 }
 
 // Extract runs the engine and validates its answer.

@@ -50,6 +50,14 @@ func (s *Service) Start(ctx context.Context, purchaseOrderID, actorID int64) (st
 	if s.Store == nil || s.Engine == nil {
 		return store.PurchaseOrderExtraction{}, fmt.Errorf("%w: no extraction service is configured", ErrExtractorUnavailable)
 	}
+	// Preflight before a row exists. An extractor that cannot be started is a
+	// deployment answer (503), not a queued job that fails later: a job would
+	// leave history that says extraction was attempted when it never ran.
+	if prober, ok := s.Engine.(Prober); ok {
+		if err := prober.Available(ctx); err != nil {
+			return store.PurchaseOrderExtraction{}, err
+		}
+	}
 	run, err := s.Store.CreatePurchaseOrderExtraction(ctx, store.PurchaseOrderExtractionCreate{
 		PurchaseOrderID: purchaseOrderID,
 		RequestedBy:     actorID,

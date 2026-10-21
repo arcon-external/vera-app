@@ -224,6 +224,7 @@ func TestExtractionStartsFromTheAttachedPDFAndNeverWritesTheDraft(t *testing.T) 
 
 func TestExtractionRequiresAnAttachedPDFAndReportsNoRun(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_extract_no_pdf")
+	server.SetExtractor(&stubExtractionEngine{output: extractionFixture()})
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 	code, body := createPODraft(t, server, token, quotationID, 0, nil)
 	if code != http.StatusCreated {
@@ -289,6 +290,65 @@ func TestExtractionResultIsDiscardedWhenThePDFIsReplaced(t *testing.T) {
 	}
 	if second.Run.Status != "succeeded" || second.Run.DocumentSHA256 == first.Run.DocumentSHA256 {
 		t.Errorf("second run = %+v; want success on the replacement generation", second.Run)
+	}
+}
+
+func TestExtractionIsUnavailableUntilAnIsolatedExtractorIsConfigured(t *testing.T) {
+	// The default server configuration has no extractor. A same-UID child in
+	// the server container is not isolation (it can read the parent's /proc
+	// environment), so failing closed is the only safe default.
+	t.Setenv("VERA_EXTRACTOR_CMD", "")
+	server, token := testQuotationServer(t, "vera_api_po_extract_unconfigured")
+	if server.extractions.Engine != nil {
+		t.Fatalf("default server configured an extraction engine: %+v", server.extractions.Engine)
+	}
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := createPODraftWithPDF(t, server, token, quotationID, "unconfigured")
+
+	code, body := startExtraction(t, server, token, draft.ID)
+	if code != http.StatusServiceUnavailable || body["code"] != "po_extraction_unavailable" {
+		t.Fatalf("start without a configured extractor = %d %v; want 503 po_extraction_unavailable", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/extractions/latest", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("latest = %d; want 200 (%v)", code, body)
+	}
+	state := extractionState(t, body)
+	if state.Run != nil {
+		t.Errorf("a refused start queued run %+v; the operator must configure isolation first", state.Run)
+	}
+}
+
+func TestExtractionStartRefusesAnUnavailableCommandBeforeQueueing(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_extract_probe")
+	server.SetExtractor(&extract.CommandEngine{
+		Command: []string{"vera-extractor-that-does-not-exist"},
+	})
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := createPODraftWithPDF(t, server, token, quotationID, "probe")
+
+	code, body := startExtraction(t, server, token, draft.ID)
+	if code != http.StatusServiceUnavailable || body["code"] != "po_extraction_unavailable" {
+		t.Fatalf("start with a missing extractor = %d %v; want 503 po_extraction_unavailable", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/extractions/latest", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("latest = %d; want 200 (%v)", code, body)
+	}
+	if state := extractionState(t, body); state.Run != nil {
+		t.Errorf("a preflight refusal queued run %+v; it must store nothing", state.Run)
+	}
+
+	// The operator opts in explicitly. Without this the endpoint stays 503;
+	// with it, the normal 202 path and typed run failures are unchanged.
+	server.SetExtractor(&stubExtractionEngine{output: extractionFixture()})
+	if code, body := startExtraction(t, server, token, draft.ID); code != http.StatusAccepted {
+		t.Fatalf("start after an explicit engine = %d (%v); want 202", code, body)
+	}
+	if state := waitForExtraction(t, server, token, draft.ID); state.Run == nil || state.Run.Status != "succeeded" {
+		t.Fatalf("run after an explicit engine = %+v; want succeeded", state.Run)
 	}
 }
 
@@ -412,6 +472,7 @@ func TestInterruptedExtractionFailsAfterRecovery(t *testing.T) {
 
 func TestExtractionRequiresASessionAndAKnownRecord(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_extract_auth")
+	server.SetExtractor(&stubExtractionEngine{output: extractionFixture()})
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 	draft := createPODraftWithPDF(t, server, token, quotationID, "auth")
 
