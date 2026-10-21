@@ -32,9 +32,11 @@ jobs:
   go:
     name: Go gates
     # A hung job otherwise runs the 360-minute default before anyone is told.
-    # Generous against a measured ~4 minutes warm and ~6 cold, because the point
-    # is catching a wedged container or a stuck npm ci, not shaving the margin.
-    timeout-minutes: 20
+    # The Postgres-backed suites (backend/api, backend/store, plus the PO
+    # schema-per-test cases) now take ~20 minutes cold on a hosted runner, so a
+    # 20-minute cap kills a healthy run mid-suite. Keep the job cap above the
+    # `go test -timeout 30m` budget; this is a hang tripwire, not a stopwatch.
+    timeout-minutes: 45
     # Pinned, not ubuntu-latest. The runner image is part of the setup-go cache
     # key, so the migration to Ubuntu 26 (beginning 2026-10-19) would cold-start
     # every job on the day it rolls out. Here the durability fix is the speed fix.
