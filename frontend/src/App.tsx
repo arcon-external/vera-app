@@ -45,6 +45,8 @@ import {
   applyQuotationCopy,
   archivedToEditorDraft,
   formatCopyRevision,
+  currencyMismatchMessage,
+  missingCurrencyMessage,
   pasteSuccessMessage,
   resolveCopyPasteText,
   unknownCustomerMessage,
@@ -924,10 +926,25 @@ function App() {
   const handleCopyPasteCapture = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
       const raw = event.clipboardData?.getData("text");
-      const decision = resolveCopyPasteText(raw, { dirty, customerOptions });
+      const decision = resolveCopyPasteText(raw, {
+        dirty,
+        customerOptions,
+        liveCurrency: companyCurrency,
+      });
       if (decision.action === "ignore") return;
       event.preventDefault();
       event.stopPropagation();
+      if (decision.action === "refuse-currency-mismatch") {
+        pushToast(
+          "error",
+          currencyMismatchMessage(decision.payloadCurrency, decision.liveCurrency)
+        );
+        return;
+      }
+      if (decision.action === "refuse-missing-currency") {
+        pushToast("error", missingCurrencyMessage());
+        return;
+      }
       if (decision.action === "refuse-unknown-customer") {
         pushToast("error", unknownCustomerMessage(decision.customerCode));
         return;
@@ -938,7 +955,7 @@ function App() {
       }
       applyCopyPayload(decision.payload);
     },
-    [dirty, customerOptions, pushToast, applyCopyPayload]
+    [dirty, customerOptions, companyCurrency, pushToast, applyCopyPayload]
   );
 
   const handleOpenQuotation = useCallback((id: number, revision: number) => {

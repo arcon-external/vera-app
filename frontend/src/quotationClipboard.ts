@@ -18,6 +18,10 @@ import type { ToastType } from "./toast";
  * Ordinary text pastes are never intercepted: only a payload with this kind
  * (and a supported version) fills the form. Everything else falls through to
  * the existing cell/description paste handlers.
+ *
+ * Amounts are denominated in the revision's currency (`quotation.currency`):
+ * pasting under a different live company currency is refused before anything
+ * is touched, so figures are never silently reinterpreted.
  */
 
 export const QUOTATION_COPY_KIND = "vera.quotation-copy";
@@ -61,6 +65,12 @@ export interface QuotationCopyQuotation {
   /** Informational: the editor has no address inputs, Prepare resolves both
    * from the client directory on the next export. Never applied. */
   recipientAddress: string;
+  /**
+   * The revision's currency code (e.g. "IDR"). Informational for the applied
+   * values, but validated on paste: it must match the editor's live currency
+   * (case-insensitively) or the paste is refused with nothing changed.
+   */
+  currency: string;
   subject: string;
   incoterm: string;
   validityDays: number;
@@ -114,6 +124,7 @@ export function buildQuotationCopy(quotation: ArchivedQuotation): string {
       customerCode: quotation.CustomerCode,
       recipientName: quotation.RecipientName,
       recipientAddress: quotation.RecipientAddress,
+      currency: quotation.Currency,
       subject: quotation.Subject,
       incoterm: quotation.Incoterm,
       validityDays: quotation.ValidityDays,
@@ -270,6 +281,8 @@ export function parseQuotationCopy(text: string): QuotationCopyPayload | null {
     !isFiniteNumber(q.customerCode) ||
     !isString(q.recipientName) ||
     !isString(q.recipientAddress) ||
+    !isString(q.currency) ||
+    q.currency.trim() === "" ||
     !isString(q.subject) ||
     !isString(q.incoterm) ||
     !isFiniteNumber(q.validityDays) ||
@@ -301,6 +314,7 @@ export function parseQuotationCopy(text: string): QuotationCopyPayload | null {
       customerCode: Math.trunc(q.customerCode),
       recipientName: q.recipientName,
       recipientAddress: q.recipientAddress,
+      currency: q.currency,
       subject: q.subject,
       incoterm: q.incoterm,
       validityDays: Math.trunc(q.validityDays),
@@ -473,20 +487,60 @@ export type CopyPasteDecision =
   | { action: "ignore" }
   | { action: "apply"; payload: QuotationCopyPayload }
   | { action: "confirm"; payload: QuotationCopyPayload }
-  | { action: "refuse-unknown-customer"; customerCode: number };
+  | { action: "refuse-unknown-customer"; customerCode: number }
+  | { action: "refuse-currency-mismatch"; payloadCurrency: string; liveCurrency: string }
+  | { action: "refuse-missing-currency" };
+
+/** Currency codes compare case-insensitively ("idr" pastes into an "IDR" editor). */
+function sameCurrency(a: string, b: string): boolean {
+  return a.trim().toUpperCase() === b.trim().toUpperCase();
+}
+
+/**
+ * True when the text is a marked v1 payload whose quotation carries no usable
+ * currency. The strict parser would only return null for this -- identical to
+ * ordinary text -- so this names the specific refusal instead.
+ */
+function payloadMissingCurrency(text: string): boolean {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (!isRecord(raw)) return false;
+  if (raw.kind !== QUOTATION_COPY_KIND) return false;
+  if (raw.version !== QUOTATION_COPY_VERSION) return false;
+  const q = raw.quotation;
+  if (!isRecord(q)) return false;
+  return !(isString(q.currency) && q.currency.trim() !== "");
+}
 
 /**
  * The paste-capture decision: marked payloads are applied (blank editor),
- * confirmed (editor has content) or refused (unknown customer); everything
- * else is ignored so ordinary pastes keep their existing behaviour.
+ * confirmed (editor has content) or refused (unknown customer, currency
+ * mismatch, missing currency); everything else is ignored so ordinary pastes
+ * keep their existing behaviour. Every refusal changes nothing.
  */
 export function resolveCopyPasteText(
   text: string | null | undefined,
-  opts: { dirty: boolean; customerOptions: ReadonlyArray<{ value: number; label: string }> }
+  opts: {
+    dirty: boolean;
+    customerOptions: ReadonlyArray<{ value: number; label: string }>;
+    liveCurrency: string;
+  }
 ): CopyPasteDecision {
   if (!text) return { action: "ignore" };
+  if (payloadMissingCurrency(text)) return { action: "refuse-missing-currency" };
   const payload = parseQuotationCopy(text);
   if (payload === null) return { action: "ignore" };
+  if (!sameCurrency(payload.quotation.currency, opts.liveCurrency)) {
+    return {
+      action: "refuse-currency-mismatch",
+      payloadCurrency: payload.quotation.currency,
+      liveCurrency: opts.liveCurrency,
+    };
+  }
   if (!opts.customerOptions.some((option) => option.value === payload.quotation.customerCode)) {
     return { action: "refuse-unknown-customer", customerCode: payload.quotation.customerCode };
   }
@@ -537,4 +591,17 @@ export function unknownCustomerMessage(customerCode: number): string {
     `The copied quotation is for a customer (code ${customerCode}) that isn't ` +
     "in the client list, so nothing was pasted."
   );
+}
+
+/** The refusal toast when the payload currency differs from the live one. */
+export function currencyMismatchMessage(payloadCurrency: string, liveCurrency: string): string {
+  return (
+    `This quotation was issued in ${payloadCurrency}; the editor is set to ${liveCurrency}. ` +
+    "Change the company currency or copy from a matching revision."
+  );
+}
+
+/** The refusal toast when a marked payload carries no usable currency. */
+export function missingCurrencyMessage(): string {
+  return "This clipboard item has no currency and cannot be applied.";
 }

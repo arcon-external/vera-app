@@ -8,6 +8,8 @@ import {
   archivedToEditorDraft,
   buildQuotationCopy,
   copyQuotationToClipboard,
+  currencyMismatchMessage,
+  missingCurrencyMessage,
   parseQuotationCopy,
   resolveCopyPasteText,
   splitRawDescription,
@@ -198,6 +200,24 @@ describe("buildQuotationCopy / parseQuotationCopy", () => {
     expect(payload.quotation.items).toHaveLength(2);
   });
 
+  it("carries the revision currency", () => {
+    const parsed = parseQuotationCopy(buildQuotationCopy(makeArchived())) as QuotationCopyPayload;
+    expect(parsed.quotation.currency).toBe("IDR");
+  });
+
+  it("rejects a payload with missing currency", () => {
+    const payload = JSON.parse(buildQuotationCopy(makeArchived()));
+    const quotation = { ...payload.quotation };
+    delete quotation.currency;
+    expect(parseQuotationCopy(JSON.stringify({ ...payload, quotation }))).toBeNull();
+  });
+
+  it("rejects a payload with blank currency", () => {
+    const payload = JSON.parse(buildQuotationCopy(makeArchived()));
+    const quotation = { ...payload.quotation, currency: "   " };
+    expect(parseQuotationCopy(JSON.stringify({ ...payload, quotation }))).toBeNull();
+  });
+
   it("carries raw costs, never display or marginalised figures", () => {
     const parsed = parseQuotationCopy(buildQuotationCopy(makeArchived())) as QuotationCopyPayload;
     const [plain, split] = parsed.quotation.items;
@@ -363,8 +383,8 @@ describe("applyQuotationCopy", () => {
 });
 
 describe("resolveCopyPasteText", () => {
-  function decide(text: string | null, dirty: boolean) {
-    return resolveCopyPasteText(text, { dirty, customerOptions: CUSTOMERS });
+  function decide(text: string | null, dirty: boolean, liveCurrency = "IDR") {
+    return resolveCopyPasteText(text, { dirty, customerOptions: CUSTOMERS, liveCurrency });
   }
 
   it("ignores ordinary text, including tab-separated and multiline pastes", () => {
@@ -392,6 +412,56 @@ describe("resolveCopyPasteText", () => {
       action: "refuse-unknown-customer",
       customerCode: 99,
     });
+  });
+});
+
+describe("paste currency gate", () => {
+  function decideWith(text: string | null, dirty: boolean, liveCurrency: string) {
+    return resolveCopyPasteText(text, { dirty, customerOptions: CUSTOMERS, liveCurrency });
+  }
+
+  it("fills when the payload currency matches the live currency", () => {
+    const text = buildQuotationCopy(makeArchived());
+    expect(decideWith(text, false, "IDR").action).toBe("apply");
+    expect(decideWith(text, true, "IDR").action).toBe("confirm");
+  });
+
+  it("accepts a case-insensitive currency match", () => {
+    expect(decideWith(buildQuotationCopy(makeArchived({ Currency: "idr" })), false, "IDR").action).toBe(
+      "apply"
+    );
+    expect(decideWith(buildQuotationCopy(makeArchived({ Currency: "Idr" })), true, "IDR").action).toBe(
+      "confirm"
+    );
+  });
+
+  it("refuses a mismatched currency before any confirm step, naming both codes", () => {
+    const text = buildQuotationCopy(makeArchived({ Currency: "USD" }));
+    expect(decideWith(text, true, "IDR")).toEqual({
+      action: "refuse-currency-mismatch",
+      payloadCurrency: "USD",
+      liveCurrency: "IDR",
+    });
+    expect(currencyMismatchMessage("USD", "IDR")).toBe(
+      "This quotation was issued in USD; the editor is set to IDR. " +
+        "Change the company currency or copy from a matching revision."
+    );
+  });
+
+  it("refuses a marked payload with no currency", () => {
+    const payload = JSON.parse(buildQuotationCopy(makeArchived()));
+    const quotation = { ...payload.quotation };
+    delete quotation.currency;
+    const text = JSON.stringify({ ...payload, quotation });
+    expect(decideWith(text, false, "IDR")).toEqual({ action: "refuse-missing-currency" });
+    expect(missingCurrencyMessage()).toBe(
+      "This clipboard item has no currency and cannot be applied."
+    );
+  });
+
+  it("still ignores ordinary text that is not a payload", () => {
+    expect(decideWith("just typing", true, "IDR")).toEqual({ action: "ignore" });
+    expect(decideWith("Pump\tLot\t2\t15000000", false, "IDR")).toEqual({ action: "ignore" });
   });
 });
 
