@@ -350,10 +350,26 @@ func (s *Store) CreateDeletionChallenge(ctx context.Context, input DeletionChall
 		return DeletionChallenge{}, err
 	}
 	schema := s.configSchema()
-	if err := requireDeletionAdmin(ctx, pool, schema, input.ActorID); err != nil {
+
+	// Issuance writes a snapshot of the chain -- document numbers, revisions,
+	// record counts -- into its fingerprint, so it takes the same chain lock as
+	// the deletion before it reads anything. A deletion that commits while
+	// issuance waits then leaves nothing for it to describe: the re-read inside
+	// the lock answers "not found" instead of storing a fingerprint of a chain
+	// that no longer exists.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return DeletionChallenge{}, fmt.Errorf("begin deletion challenge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := requireDeletionAdmin(ctx, tx, schema, input.ActorID); err != nil {
 		return DeletionChallenge{}, err
 	}
-	facts, err := loadDeletionFacts(ctx, pool, schema, org.ID, input.TargetType, input.TargetID)
+	if err := lockDeletionChain(ctx, tx, schema, org.ID, input.TargetType, input.TargetID); err != nil {
+		return DeletionChallenge{}, err
+	}
+	facts, err := loadDeletionFacts(ctx, tx, schema, org.ID, input.TargetType, input.TargetID)
 	if err != nil {
 		return DeletionChallenge{}, err
 	}
@@ -371,7 +387,7 @@ func (s *Store) CreateDeletionChallenge(ctx context.Context, input DeletionChall
 	// Issuing a challenge is one of the paths that can observe an expired one,
 	// so it removes every expired row for the organization. See the retention
 	// contract on purgeExpiredDeletionChallenges.
-	if err := purgeExpiredDeletionChallenges(ctx, pool, schema, org.ID, ""); err != nil {
+	if err := purgeExpiredDeletionChallenges(ctx, tx, schema, org.ID, ""); err != nil {
 		return DeletionChallenge{}, err
 	}
 	letters, err := newDeletionLetters()
@@ -380,7 +396,7 @@ func (s *Store) CreateDeletionChallenge(ctx context.Context, input DeletionChall
 	}
 	var id string
 	var expiresAt time.Time
-	if err := pool.QueryRow(ctx, fmt.Sprintf(`
+	if err := tx.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.deletion_challenges (
 			org_id, target_type, target_id, scope, fingerprint,
 			letters_sha256, created_by, expires_at
@@ -391,6 +407,9 @@ func (s *Store) CreateDeletionChallenge(ctx context.Context, input DeletionChall
 		time.Now().Add(deletionChallengeTTL),
 	).Scan(&id, &expiresAt); err != nil {
 		return DeletionChallenge{}, fmt.Errorf("store deletion challenge: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return DeletionChallenge{}, fmt.Errorf("commit deletion challenge: %w", err)
 	}
 	return DeletionChallenge{
 		ID:          id,
@@ -495,6 +514,20 @@ func (s *Store) ConfirmDeletion(ctx context.Context, input DeletionConfirmInput)
 
 	challengeID, err := checkDeletionChallenge(ctx, tx, schema, org.ID, input, preview)
 	if err != nil {
+		if errors.Is(err, ErrDeletionChallengeExpired) {
+			// The challenge passed the pre-transaction sweep, then expired while
+			// this transaction waited for the chain lock. The rollback below
+			// would undo a delete of the row this check just found expired, so
+			// the cleanup runs on its own connection after the rollback and
+			// commits: the refused attempt must not leave its expired snapshot
+			// behind.
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				return DeletionResult{}, fmt.Errorf("roll back the expired deletion: %w", rollbackErr)
+			}
+			if _, cleanupErr := dropExpiredDeletionChallenge(ctx, pool, schema, org.ID, input.ChallengeID); cleanupErr != nil {
+				return DeletionResult{}, cleanupErr
+			}
+		}
 		return DeletionResult{}, err
 	}
 
@@ -1132,11 +1165,16 @@ func deletionChangeLabel(key string) string {
 //     the deletion that uses it.
 //   - Every path that can observe an expired challenge removes it: a preview,
 //     a challenge issuance, and a confirmation. The confirmation that is itself
-//     refused for expiry removes the row it refused.
+//     refused for expiry removes the row it refused -- including when the row
+//     expires while that confirmation waits for the chain lock, which is why its
+//     cleanup runs on a separate connection after the refused transaction has
+//     rolled back.
 //   - A successful deletion removes every challenge issued for any record in
 //     the chain it touched, in the same transaction as the removal. That covers
 //     siblings -- a challenge for the other target, or one already expired --
-//     not just the submitted row.
+//     not just the submitted row. Issuance takes the same chain lock as the
+//     deletion, so a challenge cannot be inserted between that purge and the
+//     deletion's commit.
 //
 // Together those rules mean an expired challenge never outlives the
 // organization's next preview, challenge issuance or confirmation, and a
