@@ -988,10 +988,24 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 		}
 
 		if it.Package == nil {
+			// A plain line is its main row plus one scope row per
+			// description line: the merged, unpriced row the state-B side
+			// draws, reusing its number style, indent and rail. The lines
+			// are rows of their own, not bullets inside the main cell,
+			// and the main row keeps its own values, never a sum of the
+			// lines.
 			out = append(out, rowBlock{
 				item: it, kind: rowMain, lines: lines, subs: subs,
 				height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 			})
+			for _, dl := range it.DescLines {
+				plines := e.Wrap(dl.Text, px(bodyPx), scopeW, false)
+				part := &Part{SubNo: dl.No, Desc: dl.Text}
+				out = append(out, rowBlock{
+					item: it, part: part, kind: rowScope, lines: plines,
+					height: rowHeight(plines, nil, subPadY),
+				})
+			}
 			continue
 		}
 

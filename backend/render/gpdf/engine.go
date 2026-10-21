@@ -107,9 +107,9 @@ type Input struct {
 	QRPNG               []byte
 }
 
-// Item is one table row. SubItems are the legacy description bullets parsed
-// back out of DisplayDesc; Package, when non-nil, is a modular line whose rows
-// are drawn from its parts instead.
+// Item is one table row. DescLines are the plain line's description lines,
+// laid out as their own scope rows; Package, when non-nil, is a modular
+// line whose rows are drawn from its parts instead.
 type Item struct {
 	DescMain  string
 	Qty       string
@@ -118,10 +118,19 @@ type Item struct {
 	Total     string
 	// Disc is this row's own discount as it prints ("10%" or "—"), already
 	// formatted by the application so both renderers show the same string.
-	Disc     string
-	SubItems []string
-	Package  *Package
-	No       int
+	Disc      string
+	SubItems  []string
+	DescLines []DescLine
+	Package   *Package
+	No        int
+}
+
+// DescLine is one description line of a plain item: its X.Y number and its
+// plain text. It draws as a scope row -- the merged, unpriced row the
+// state-B side draws -- and carries no numeric cells of its own.
+type DescLine struct {
+	No   string
+	Text string
 }
 
 // Package is a modular line's composition. ShowPrices picks the customer

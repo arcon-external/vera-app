@@ -131,9 +131,11 @@ func TestTemplateRendersAllThreeStates(t *testing.T) {
 }
 
 // TestTemplateSubFreeDocumentIsUnchanged is the backward-compatibility core:
-// a document with no sub-items renders the same shape the template always
-// produced -- one item per tbody, no colspan cells, the legacy bullet list
-// intact for old revisions that stored scope as text.
+// a document with no sub-items renders one tbody per item, each with its own
+// full-value main row. Since #485 feature 2, a plain item's "- " bullet lines
+// print as their own merged sub-rows numbered X.Y under the main row -- the
+// same merged row the state-B side draws -- instead of a bullet list inside
+// the description cell.
 func TestTemplateSubFreeDocumentIsUnchanged(t *testing.T) {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
@@ -163,17 +165,37 @@ func TestTemplateSubFreeDocumentIsUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
-	if strings.Contains(page, "colspan") {
-		t.Errorf("a document without sub-items must not contain merged cells")
+	// The two description lines are merged scope rows of their own, not
+	// priced cells and not bullets inside the main row's cell.
+	if got := strings.Count(page, `class="sub-row"`); got != 2 {
+		t.Errorf("sub-row count = %d, want 2 (one per description line)", got)
 	}
-	if !strings.Contains(page, "desc-subitems") {
-		t.Errorf("legacy text bullets vanished from the sub-free document")
+	for _, want := range []string{">1.1<", ">1.2<"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("description line numbering %s missing", want)
+		}
 	}
-	if strings.Contains(page, "class=\"sub-row\"") || strings.Contains(page, "class=\"sub-parent\"") {
-		t.Errorf("sub row classes rendered without sub-items")
+	if strings.Contains(page, `<ul class="desc-subitems">`) {
+		t.Errorf("plain item still renders bullets inside its description cell; lines are rows of their own now")
 	}
-	// Banding: with one row per item, per-item parity must equal per-row
-	// parity. Item 1 is odd, so its cells stay paper.
+	if strings.Contains(page, "class=\"sub-parent\"") {
+		t.Errorf("sub-parent row rendered without sub-items")
+	}
+	// The main row keeps its own figures, and the line rows carry no price
+	// cells of their own: no price figure may appear inside a sub-row band.
+	for _, seg := range strings.Split(page, `<tr class="sub-row">`)[1:] {
+		body := seg
+		if i := strings.Index(body, "</tr>"); i >= 0 {
+			body = body[:i]
+		}
+		for _, price := range []string{"10.000", "20.000"} {
+			if strings.Contains(body, price) {
+				t.Errorf("price figure %s inside a description line row; line rows carry no prices", price)
+			}
+		}
+	}
+	// Banding: with one item, per-item parity must equal per-row parity.
+	// Item 1 is odd, so its cells stay paper.
 	if strings.Contains(page, `<tbody class="item" style=`) {
 		t.Errorf("tbody picked up inline styling")
 	}

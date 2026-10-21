@@ -3,6 +3,8 @@ package backend
 import (
 	"fmt"
 	"time"
+
+	"vera-app/backend/render/quotation"
 )
 
 // applyMarkup adds a percentage margin to a unit cost.
@@ -152,6 +154,24 @@ func buildItems(inputItems []QuotationItemInput, currencyCode string) []Quotatio
 			item.DisplayListUnitPrice = formatMoney(currencyCode, listSum)
 			item.DisplayDiscount = formatMoney(currencyCode, discountSum)
 			item.DisplayMarginAmount = formatSignedMoney(currencyCode, item.MarginAmount)
+		} else {
+			// A plain line's "- " bullet lines are description lines: they
+			// print as their own numbered sub-rows and never reprice the
+			// line. Numbering needs the final No, which is known only here,
+			// so it happens now rather than in newQuotationItem. A line with
+			// sub-items never reaches this branch -- validation refuses
+			// bullets and parts on one item -- so DescriptionLines stays
+			// empty for every package.
+			if _, lines := splitDescriptionLines(item.Description); len(lines) > 0 {
+				numbered := make([]quotation.DescriptionLine, 0, len(lines))
+				for i, text := range lines {
+					numbered = append(numbered, quotation.DescriptionLine{
+						No:   fmt.Sprintf("%d.%d", item.No, i+1),
+						Text: text,
+					})
+				}
+				item.DescriptionLines = numbered
+			}
 		}
 		items = append(items, item)
 	}
@@ -317,11 +337,15 @@ func buildViews(subTotal, discountAmount, grandTotal uint64, currencyCode string
 // newQuotationItem seeds an unpriced line: cost and sell are the same figure,
 // and the list price starts equal to the sell price so an undiscounted line
 // reads identically to a line whose discount happens to be zero.
+//
+// DisplayDesc is the main half only: the "- " bullet lines travel separately
+// as DescriptionLines (numbered in buildItems once No is known), so emitting
+// them here too would print every line twice.
 func newQuotationItem(desc string, qty uint32, uom string, unitPrice uint64, currencyCode string) QuotationItem {
 	total := uint64(qty) * unitPrice
 	return QuotationItem{
 		Description:              desc,
-		DisplayDesc:              formatDescription(desc),
+		DisplayDesc:              formatDescriptionMain(desc),
 		UoM:                      uom,
 		DisplayOriginalUnitPrice: formatMoney(currencyCode, unitPrice),
 		DisplayOriginalTotal:     formatMoney(currencyCode, total),

@@ -144,6 +144,12 @@ type QuotationSubSubItem struct {
 // their own rows beneath the parent, priced (state C) or as plain scope rows
 // (state B) depending on ShowSubPrices.
 //
+// DescriptionLines is populated only for plain lines carrying "- " bullet
+// lines in the raw description. Each line renders as its own full-width
+// sub-row numbered X.Y under the main row, which keeps its own values: the
+// lines are presentation, never pricing, and the raw Description, the totals
+// and the signed payload never see them.
+//
 // Field order is chosen for memory layout: every string and the slice lead,
 // word-sized numerics follow, and the flags and counts close. See
 // struct_alignment_test.go.
@@ -157,6 +163,7 @@ type QuotationItem struct {
 	DisplayTotal             string
 	DisplayMarginAmount      string
 	SubItems                 []QuotationSubItem
+	DescriptionLines         []quotation.DescriptionLine
 	OriginalUnitPrice        uint64
 	OriginalTotal            uint64
 	MarginAmount             int64
@@ -1470,6 +1477,11 @@ func (q *Quotation) displayData() QuotationData {
 			sub.UoM = q.uomLabel(sub.UoM)
 			item.SubItems[j] = sub
 		}
+		// The lines are display-final already (numbered in buildItems from
+		// the raw description), but the slice is still copied: the template
+		// execution must not be able to alias the signed data's backing
+		// array, the same reason SubItems is copied above.
+		item.DescriptionLines = append([]quotation.DescriptionLine(nil), q.Data.Items[i].DescriptionLines...)
 		data.Items[i] = item
 	}
 	return data
@@ -1562,15 +1574,16 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 			})
 		}
 		items = append(items, quotation.Item{
-			No:            int(it.No),
-			DisplayDesc:   string(it.DisplayDesc),
-			Qty:           it.Qty,
-			UoM:           it.UoM,
-			UnitPrice:     it.DisplayListUnitPrice,
-			Total:         it.DisplayTotal,
-			Disc:          it.DisplayUnitPrice,
-			SubItems:      parts,
-			ShowSubPrices: it.ShowSubPrices,
+			No:               int(it.No),
+			DisplayDesc:      string(it.DisplayDesc),
+			Qty:              it.Qty,
+			UoM:              it.UoM,
+			UnitPrice:        it.DisplayListUnitPrice,
+			Total:            it.DisplayTotal,
+			Disc:             it.DisplayUnitPrice,
+			SubItems:         parts,
+			DescriptionLines: it.DescriptionLines,
+			ShowSubPrices:    it.ShowSubPrices,
 		})
 	}
 
