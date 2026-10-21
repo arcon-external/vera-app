@@ -87,6 +87,20 @@ describe("customer PO PDF panel", () => {
     expect(empty).toContain("Attach a customer PO PDF before extracting its data.");
   });
 
+  it("says scanned pages are OCRed, with a low-confidence review instruction", () => {
+    // Issue #478 shipped OCR; the panel must not keep the #477 claim that
+    // scanned pages are skipped. The attached branch carries the full hint.
+    const empty = render();
+    expect(empty).not.toContain("scanned pages are not read");
+    expect(empty).not.toContain("text layer only");
+
+    const attached = render({ state: stateWith(1), onExtract: () => undefined });
+    expect(attached).toContain("OCRs scanned pages");
+    expect(attached).toContain("low-confidence OCR values need review");
+    expect(attached).not.toContain("scanned pages are not read");
+    expect(attached).not.toContain("text layer only");
+  });
+
   it("enables Extract and compare only where a proposal can be applied", () => {
     const attached = render({ state: stateWith(1), onExtract: () => undefined });
     expect(attached).toContain('aria-label="Extract and compare"');

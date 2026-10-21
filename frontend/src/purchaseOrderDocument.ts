@@ -213,7 +213,7 @@ export function extractAndCompareAvailability(
     return {
       enabled: false,
       reason: "Attach a customer PO PDF before extracting its data.",
-      hint: "Reads the selectable text layer only.",
+      hint: "Reads selectable text and OCRs scanned pages.",
     };
   }
   if (!hasApplyTarget) {
@@ -226,7 +226,7 @@ export function extractAndCompareAvailability(
   return {
     enabled: true,
     reason: "",
-    hint: "Reads the selectable text layer only; scanned pages are not read.",
+    hint: "Reads selectable text and OCRs scanned pages; low-confidence OCR values need review against the page image.",
   };
 }
 

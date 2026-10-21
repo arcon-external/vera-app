@@ -97,7 +97,18 @@ describe("Extract and compare availability", () => {
   it("offers extraction with a PDF when the editor can apply proposals", () => {
     const availability = extractAndCompareAvailability("attached");
     expect(availability.enabled).toBe(true);
-    expect(availability.hint).toContain("text layer");
+    expect(availability.hint).toContain("selectable text");
+  });
+
+  it("says scanned pages are OCRed and that low-confidence OCR needs review", () => {
+    // #478 shipped per-page OCR. This guard fails on the stale #477 copy
+    // ("scanned pages are not read") and on any hint that drops the
+    // uncertainty instruction staff need before applying OCR evidence.
+    const availability = extractAndCompareAvailability("attached");
+    expect(availability.hint).toContain("OCRs scanned pages");
+    expect(availability.hint).toMatch(/low-confidence OCR values need review/i);
+    expect(availability.hint).not.toContain("scanned pages are not read");
+    expect(availability.hint).not.toContain("text layer only");
   });
 
   it("explains the correction path on a read-only saved view", () => {

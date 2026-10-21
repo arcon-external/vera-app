@@ -41,7 +41,8 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 // region, an absent value is visibly absent, and a `needs_review` value is
 // never preselected. Applying is one explicit action for the ticked fields and
 // rows; choosing a row replaces the line set, which is stated before the
-// action. A scanned page is reported as an abstention, never OCRed here.
+// action. The engine OCRs only pages without a usable text layer, and its
+// low-confidence evidence arrives marked `needs_review` rather than as fact.
 
 export interface PurchaseOrderExtractionPanelViewProps {
   result: PurchaseOrderExtractionResultDTO;
