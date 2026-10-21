@@ -161,6 +161,8 @@ export type PurchaseOrderEditorAction =
   | { type: "lineRemoved"; key: number }
   | { type: "saveStarted" }
   | { type: "saveConflict" }
+  | { type: "versionAdopted"; version: number }
+  | { type: "valuesReplaced"; header: PurchaseOrderHeader; lines: PurchaseOrderLine[] }
   | { type: "saveFailed"; error: string }
   | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
 
@@ -936,6 +938,16 @@ export function purchaseOrderEditorReducer(
       // The conflict dialog owns the explanation; the editor keeps its working
       // copy and shows no duplicate error line.
       return { ...state, saving: false, error: null };
+    case "versionAdopted":
+      // Wave 2 of #473: a draft write that met a saved record continues as a
+      // correction against the version the server named, without discarding the
+      // working copy or the version it must submit.
+      return { ...state, version: action.version };
+    case "valuesReplaced":
+      // Wave 2 of #473: a finalize review can hold "Use Quotation" choices that
+      // exist only as decisions. Applying them to the working copy before the
+      // correction transition keeps the values the reviewer confirmed.
+      return { ...state, header: action.header, lines: action.lines, error: null };
     case "saveFailed":
       return { ...state, saving: false, error: action.error };
     case "saveSucceeded": {

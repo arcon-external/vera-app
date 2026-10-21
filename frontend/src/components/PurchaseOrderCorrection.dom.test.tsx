@@ -193,7 +193,12 @@ function typeInto(label: string, value: string) {
   found.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function render(mode: "draft" | "correction", onSaved = vi.fn(), state?: PurchaseOrderDTO) {
+function render(
+  mode: "draft" | "correction",
+  onSaved = vi.fn(),
+  state?: PurchaseOrderDTO,
+  onCorrectionStart?: () => void
+) {
   act(() =>
     root.render(
       <PurchaseOrderEditorPage
@@ -203,6 +208,7 @@ function render(mode: "draft" | "correction", onSaved = vi.fn(), state?: Purchas
         incotermOptions={[{ value: "CIF", label: "CIF" }]}
         onSaved={onSaved}
         onCancel={() => undefined}
+        onCorrectionStart={onCorrectionStart}
         mode={mode}
       />
     )
@@ -367,6 +373,111 @@ describe("draft overwrite (issue #473)", () => {
     expect(retry.ExpectedVersion).toBe(5);
     expect(retry.Overwrite).toBe(true);
     expect(retry.PONumber).toBe("PO-473-EDITED");
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("never promises a draft overwrite when the record is already saved", async () => {
+    // The exact wave-2 finding: the conflict response says `saved`, yet the
+    // dialog promised an Overwrite that the server refuses by design.
+    updateMock.mockResolvedValue({
+      Order: null,
+      Conflict: { ...CONFLICT_BUDI, CurrentState: "saved" },
+    });
+    correctMock.mockResolvedValue({
+      Order: order({ Version: 6, DeliveryAddress: "Jl. New Delivery 9" }),
+      Conflict: null,
+    });
+    const onCorrectionStart = vi.fn();
+    const onSaved = render("draft", vi.fn(), order({ State: "draft", Version: 3 }), onCorrectionStart);
+
+    typeInto("Delivery address", "Jl. New Delivery 9");
+    await act(async () => {
+      button("Save draft").click();
+    });
+
+    expect(document.body.textContent).toContain("This purchase order changed");
+    expect(document.body.textContent).toContain("cannot be overwritten as a draft");
+    expect(queryButton("Overwrite")).toBeNull();
+    expect(queryButton("Correct saved record")).not.toBeNull();
+    expect(document.body.textContent).not.toContain(
+      "Overwrite applies your working copy"
+    );
+
+    await act(async () => {
+      button("Correct saved record").click();
+    });
+    // The transition keeps the working copy and opens the correction form; it
+    // has not written anything yet, because a reason is still required.
+    expect(document.body.textContent).not.toContain("This purchase order changed");
+    expect(
+      document.querySelector('textarea[aria-label="Correction reason"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Delivery address"]')
+        ?.value
+    ).toBe("Jl. New Delivery 9");
+    expect(correctMock).not.toHaveBeenCalled();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(onCorrectionStart).toHaveBeenCalledTimes(1);
+
+    typeInto("Correction reason", "The record was saved while I was editing");
+    await act(async () => {
+      button("Save correction").click();
+    });
+    expect(correctMock).toHaveBeenCalledTimes(1);
+    const payload = correctMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.ExpectedVersion).toBe(5);
+    expect(payload.Overwrite).toBe(false);
+    expect(payload.Reason).toBe("The record was saved while I was editing");
+    expect(payload.DeliveryAddress).toBe("Jl. New Delivery 9");
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the work and offers the correction when Overwrite races into po_not_draft", async () => {
+    // The refusal arrives after Overwrite was chosen: the draft was finalized
+    // in the meantime, so the server answered po_not_draft. A dead end would
+    // discard the working copy; the same correction transition keeps it.
+    updateMock
+      .mockResolvedValueOnce({ Order: null, Conflict: { ...CONFLICT_BUDI, CurrentState: "draft" } })
+      .mockResolvedValueOnce({ Order: null, Conflict: null, SavedRecord: true });
+    correctMock.mockResolvedValue({
+      Order: order({ Version: 6, DeliveryAddress: "Jl. New Delivery 9" }),
+      Conflict: null,
+    });
+    const onSaved = render("draft", vi.fn(), order({ State: "draft", Version: 4 }));
+
+    typeInto("Delivery address", "Jl. New Delivery 9");
+    await act(async () => {
+      button("Save draft").click();
+    });
+    expect(document.body.textContent).toContain("Overwrite");
+    await act(async () => {
+      button("Overwrite").click();
+    });
+
+    expect(document.body.textContent).toContain("This purchase order changed");
+    expect(document.body.textContent).not.toContain(
+      "The server answered without a saved record"
+    );
+    expect(queryButton("Overwrite")).toBeNull();
+    expect(queryButton("Correct saved record")).not.toBeNull();
+    expect(
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Delivery address"]')
+        ?.value
+    ).toBe("Jl. New Delivery 9");
+
+    await act(async () => {
+      button("Correct saved record").click();
+    });
+    typeInto("Correction reason", "Saved by another editor while I confirmed");
+    await act(async () => {
+      button("Save correction").click();
+    });
+    expect(correctMock).toHaveBeenCalledTimes(1);
+    const payload = correctMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.ExpectedVersion).toBe(5);
+    expect(payload.DeliveryAddress).toBe("Jl. New Delivery 9");
+    expect(payload.Reason).toBe("Saved by another editor while I confirmed");
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 });

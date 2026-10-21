@@ -25,16 +25,30 @@ const CORRECTION: PurchaseOrderHistoryEntry = {
   Reason: "The customer moved to a new warehouse",
   ActorName: "Budi Santoso",
   CreatedAt: "2026-10-21T10:15:00+07:00",
-  PONumber: "PO-473",
+  QuoteNumber: "1502260044",
+  CustomerName: "PT. Buyer Nusantara",
+  SourceRevision: 7,
+  Currency: "USD",
+  TaxZone: "FTZ",
+  TaxCategory: "Goods",
+  BillingAddress: "Jl. Old Billing 7",
   DeliveryAddress: "Jl. Old Delivery 9",
+  ShipToCode: "SHIP-OLD-3",
+  ContactEmail: "old.buyer@example.com",
+  ContactPhone: "+62 21 555 0101",
+  PONumber: "PO-473",
+  PODate: "2026-09-30",
+  ReceivedDate: "2026-10-01",
+  RequestedDeliveryDate: "2026-11-15",
   PaymentTerms: "30 days",
   Incoterms: "CIF",
   AdjustmentReason: "Rounded to the printed total",
-  Currency: "USD",
   PreviousVersion: 4,
   ResultingVersion: 5,
+  DiscountPercent: 5,
   SubtotalMinor: 20000,
   DiscountMinor: 2000,
+  PpnBps: 1100,
   PpnMinor: 1980,
   AdjustmentMinor: -250,
   GrandTotalMinor: 19730,
@@ -113,6 +127,49 @@ describe("PurchaseOrderHistoryPanel (issue #473)", () => {
     expect(html).toContain("$180.00");
     expect(html).toContain("$200.00");
     expect(html).toContain("$197.30");
+  });
+
+  it("renders every retained header value, not just the handful it once showed", () => {
+    // Wave 2 of #473: a correction that changed only the billing address, the
+    // ship-to code, the contact details or a date must be understandable from
+    // this panel. Each value below is distinct, so an omitted field cannot be
+    // satisfied by another field's text.
+    const html = markup([CORRECTION]);
+    for (const [surface, value] of [
+      ["quote number", "1502260044"],
+      ["customer", "PT. Buyer Nusantara"],
+      ["source revision", ">7<"],
+      ["state", ">saved<"],
+      ["currency", "USD"],
+      ["tax zone", "FTZ"],
+      ["tax category", "Goods"],
+      ["billing address", "Jl. Old Billing 7"],
+      ["delivery address", "Jl. Old Delivery 9"],
+      ["ship-to code", "SHIP-OLD-3"],
+      ["contact email", "old.buyer@example.com"],
+      ["contact phone", "+62 21 555 0101"],
+      ["PO date", "2026-09-30"],
+      ["received date", "2026-10-01"],
+      ["requested delivery date", "2026-11-15"],
+      ["payment terms", "30 days"],
+      ["incoterms", "CIF"],
+      ["PO number", "PO-473"],
+      ["whole-PO discount", "5%"],
+      ["PPN rate", "1100 bps"],
+      ["adjustment reason", "Rounded to the printed total"],
+      ["attachment", "Customer PO PDF v2"],
+    ] as const) {
+      expect(html, `${surface} is missing from the retained snapshot`).toContain(value);
+    }
+    for (const group of [
+      "Identity",
+      "Addresses and contact",
+      "Dates and terms",
+      "Totals",
+      "Lines",
+    ]) {
+      expect(html, `history group ${group} is missing`).toContain(group);
+    }
   });
 
   it("reports a history read failure instead of an empty success", () => {

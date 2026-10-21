@@ -270,12 +270,8 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 			"%w: the correction reason must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxCorrectionReasonLength)
 	}
-	if err := validatePurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
+	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
 		return PurchaseOrder{}, err
-	}
-	if input.PONumber == "" {
-		return PurchaseOrder{}, fmt.Errorf(
-			"%w: a saved purchase order needs its customer PO number", ErrPurchaseOrderIncomplete)
 	}
 
 	pool, err := s.poolOrError()
@@ -333,9 +329,9 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	return corrected, nil
 }
 
-// validatePurchaseOrderUpdateInput is the shared shape check both a draft save
-// and a correction apply: payment terms, positive quantities, nonnegative
-// prices and a sub-item that names its item.
+// validatePurchaseOrderUpdateInput is the shape check every write applies:
+// payment terms, positive quantities, nonnegative prices and a sub-item that
+// names its item. A draft may be saved incomplete, so it stops here.
 func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 	if utf8.RuneCountInString(input.PaymentTerms) > maxPaymentTermsLength {
 		return fmt.Errorf("%w: payment terms must be at most %d characters",
@@ -351,6 +347,25 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		if item.QuotationSubNo != nil && item.QuotationItemNo == nil {
 			return fmt.Errorf("%w: line %d names a sub-item without its item", ErrPurchaseOrderInvalid, index+1)
 		}
+	}
+	return nil
+}
+
+// validateSavedPurchaseOrderUpdateInput is the final-save minimum, shared by
+// finalization and a saved-record correction so the two can never drift: a
+// saved record needs its customer PO number and at least one valid line, and
+// every line must pass the same shape check a draft line does. The caller has
+// already trimmed the header values it submits.
+func validateSavedPurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
+	if err := validatePurchaseOrderUpdateInput(input); err != nil {
+		return err
+	}
+	if input.PONumber == "" {
+		return fmt.Errorf(
+			"%w: a saved purchase order needs its customer PO number", ErrPurchaseOrderIncomplete)
+	}
+	if len(input.Items) == 0 {
+		return fmt.Errorf("%w: at least one valid item is required", ErrPurchaseOrderIncomplete)
 	}
 	return nil
 }

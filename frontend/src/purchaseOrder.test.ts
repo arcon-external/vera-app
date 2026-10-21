@@ -319,6 +319,26 @@ describe("PO editor dirty-cancel guard (issue #468)", () => {
     expect(isPurchaseOrderDirty(dirty)).toBe(true);
   });
 
+  it("adopts a saved-record transition's version and applied review values", () => {
+    const state = initial();
+    const adopted = purchaseOrderEditorReducer(state, {
+      type: "versionAdopted",
+      version: 9,
+    });
+    expect(adopted.version).toBe(9);
+    // The version is not part of the working copy, so it alone is not dirty.
+    expect(isPurchaseOrderDirty(adopted)).toBe(false);
+
+    const replaced = purchaseOrderEditorReducer(adopted, {
+      type: "valuesReplaced",
+      header: { ...state.header, paymentTerms: "From the quotation" },
+      lines: state.lines,
+    });
+    expect(replaced.version).toBe(9);
+    expect(replaced.header.paymentTerms).toBe("From the quotation");
+    expect(isPurchaseOrderDirty(replaced)).toBe(true);
+  });
+
   it("resets the baseline after a successful save", () => {
     const dirty = purchaseOrderEditorReducer(initial(), {
       type: "lineChanged",
