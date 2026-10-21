@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"vera-app/backend/apicontract"
@@ -295,5 +296,44 @@ func TestExtractionOperationsRequireOrganizationContext(t *testing.T) {
 	}
 	if _, err := database.LatestPurchaseOrderExtraction(context.Background(), draft.ID); err == nil {
 		t.Fatal("latest without an organization context succeeded")
+	}
+}
+
+func TestConcurrentExtractionStartsShareOneActiveRun(t *testing.T) {
+	database := openTestSchema(t, "vera_po_extract_concurrent")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Concurrent")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	attachTestDocument(t, database, ctx, draft.ID, user, minimalPDF(nil, ""))
+
+	runs := make([]PurchaseOrderExtraction, 2)
+	errs := make([]error, 2)
+	var wait sync.WaitGroup
+	for index := range runs {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			runs[index], errs[index] = database.CreatePurchaseOrderExtraction(ctx, PurchaseOrderExtractionCreate{
+				PurchaseOrderID: draft.ID,
+				RequestedBy:     user.ID,
+			})
+		}(index)
+	}
+	wait.Wait()
+	for index, err := range errs {
+		if err != nil {
+			t.Fatalf("start %d: %v", index, err)
+		}
+	}
+	if runs[0].ID != runs[1].ID {
+		t.Errorf("concurrent starts created runs %d and %d; want the same active run", runs[0].ID, runs[1].ID)
+	}
+	state, err := database.LatestPurchaseOrderExtraction(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	if state.Run == nil || state.Run.ID != runs[0].ID {
+		t.Errorf("latest run = %+v; want %d", state.Run, runs[0].ID)
 	}
 }
