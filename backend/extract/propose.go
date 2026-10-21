@@ -495,15 +495,37 @@ func formatDate(year, month, day int) string {
 }
 
 func normaliseCurrency(raw string) (string, string, string) {
-	trimmed := strings.ToUpper(strings.TrimSpace(raw))
-	token := strings.Fields(trimmed)
-	if len(token) > 0 && len(token[0]) == 3 && isLetters(token[0]) {
-		return token[0], apicontract.ExtractionStatusExtracted, ""
+	trimmed := strings.Join(strings.Fields(strings.TrimSpace(raw)), " ")
+	codes := currencyCodes(strings.ToUpper(trimmed))
+	if len(codes) > 1 {
+		return trimmed, apicontract.ExtractionStatusNeedsReview,
+			fmt.Sprintf("More than one currency is printed (%s); confirm which one applies.", strings.Join(codes, ", "))
 	}
-	if currencyCandidates[trimmed] {
-		return trimmed, apicontract.ExtractionStatusExtracted, ""
+	if len(codes) == 1 {
+		return codes[0], apicontract.ExtractionStatusExtracted, ""
+	}
+	if len(trimmed) == 3 && isLetters(strings.ToUpper(trimmed)) {
+		return strings.ToUpper(trimmed), apicontract.ExtractionStatusExtracted, ""
 	}
 	return raw, apicontract.ExtractionStatusNeedsReview, "The printed currency is not a three-letter code; confirm the currency."
+}
+
+// currencyCodes returns the distinct supported codes printed in the value, in
+// order. A value naming two codes is two answers, not a preference: the caller
+// must abstain rather than take the first token as fact.
+func currencyCodes(upper string) []string {
+	seen := map[string]bool{}
+	codes := make([]string, 0, 2)
+	for _, token := range strings.FieldsFunc(upper, func(character rune) bool {
+		return character < 'A' || character > 'Z'
+	}) {
+		if len(token) != 3 || !currencyCandidates[token] || seen[token] {
+			continue
+		}
+		seen[token] = true
+		codes = append(codes, token)
+	}
+	return codes
 }
 
 func isLetters(value string) bool {
@@ -513,6 +535,36 @@ func isLetters(value string) bool {
 		}
 	}
 	return value != ""
+}
+
+// validThousandsGrouping reports whether value is digits in groups of three,
+// with the first group one to three digits. A separator that is not grouping
+// (1.2.3) must abstain, never be silently flattened into 123.
+func validThousandsGrouping(value string, separator byte) bool {
+	groups := strings.Split(value, string(separator))
+	if len(groups) < 2 {
+		return false
+	}
+	for index, group := range groups {
+		if group == "" {
+			return false
+		}
+		for _, character := range group {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+		if index == 0 {
+			if len(group) > 3 {
+				return false
+			}
+			continue
+		}
+		if len(group) != 3 {
+			return false
+		}
+	}
+	return true
 }
 
 var incoterms = map[string]bool{
@@ -612,27 +664,6 @@ func tableColumns(line visualLine) ([]tableColumn, bool) {
 	}
 	sort.SliceStable(columns, func(left, right int) bool { return columns[left].XMin < columns[right].XMin })
 
-	// "Jumlah" means quantity in a quantity column and amount in a money
-	// column. If a unit-price column exists to its left and no explicit amount
-	// was found, it is the amount.
-	hasPrice := false
-	hasAmount := false
-	for _, column := range columns {
-		if column.Kind == columnUnitPrice {
-			hasPrice = true
-		}
-		if column.Kind == columnAmount {
-			hasAmount = true
-		}
-	}
-	for index := range columns {
-		if columns[index].Kind == columnQuantity && hasPrice && !hasAmount {
-			// Only reclassify a "jumlah" token, not a literal "qty".
-			columns[index].Kind = columnAmount
-			hasAmount = true
-		}
-	}
-
 	// Keep the leftmost occurrence of each kind; a second "price" column is
 	// not something this reader can disambiguate.
 	seen := map[columnKind]bool{}
@@ -687,9 +718,15 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 			}
 			if cells.numericEmpty() {
 				// A wrapped description continues the previous row. This is a
-				// layout fact, not a new line item.
+				// layout fact, not a new line item. The proposal must carry the
+				// whole text and a region covering every wrapped line: a value
+				// whose raw or bbox shows only the first line is worse than an
+				// abstention.
 				if previous != nil {
-					previous.Description.Value = strings.TrimSpace(previous.Description.Value + " " + cells.descriptionText)
+					full := strings.TrimSpace(previous.Description.Value + " " + cells.descriptionText)
+					previous.Description.Value = full
+					previous.Description.Raw = strings.TrimSpace(previous.Description.Raw + " " + cells.descriptionText)
+					previous.Description.BBox = unionExtractionBoxes(previous.Description.BBox, cells.descriptionBox)
 					previous.BBox = unionExtractionBoxes(previous.BBox, cells.descriptionBox)
 					continue
 				}
@@ -944,18 +981,33 @@ func normaliseDecimal(raw string, kind decimalKind) (string, string, string) {
 	switch {
 	case dots > 0 && commas > 0:
 		// Both separators: the rightmost is the decimal point, the other is
-		// grouping. 1,250.00 and 1.250,00 both resolve exactly.
+		// grouping. 1,250.00 and 1.250,00 both resolve exactly, and a
+		// malformed grouping (1,2.30) abstains rather than inventing digits.
 		if strings.LastIndex(body, ",") > strings.LastIndex(body, ".") {
+			integer := body[:strings.LastIndex(body, ",")]
+			if strings.Contains(integer, ".") && !validThousandsGrouping(integer, '.') {
+				return raw, apicontract.ExtractionStatusNeedsReview,
+					"The thousands separators are not grouped in threes; confirm the printed value."
+			}
 			fractionLength = len(body) - strings.LastIndex(body, ",") - 1
 			body = strings.ReplaceAll(body, ".", "")
 			body = strings.ReplaceAll(body, ",", ".")
 		} else {
+			integer := body[:strings.LastIndex(body, ".")]
+			if strings.Contains(integer, ",") && !validThousandsGrouping(integer, ',') {
+				return raw, apicontract.ExtractionStatusNeedsReview,
+					"The thousands separators are not grouped in threes; confirm the printed value."
+			}
 			fractionLength = len(body) - strings.LastIndex(body, ".") - 1
 			body = strings.ReplaceAll(body, ",", "")
 		}
 	case dots > 0 && commas == 0:
 		if dots > 1 {
-			// 1.250.000 is grouping only.
+			// 1.250.000 is grouping only, but 1.2.3 is not a number.
+			if !validThousandsGrouping(body, '.') {
+				return raw, apicontract.ExtractionStatusNeedsReview,
+					"The thousands separators are not grouped in threes; confirm the printed value."
+			}
 			body = strings.ReplaceAll(body, ".", "")
 			break
 		}
@@ -966,7 +1018,11 @@ func normaliseDecimal(raw string, kind decimalKind) (string, string, string) {
 		}
 	case commas > 0 && dots == 0:
 		if commas > 1 {
-			// 1,250,000 is grouping only.
+			// 1,250,000 is grouping only, but 1,25,000 is not a number.
+			if !validThousandsGrouping(body, ',') {
+				return raw, apicontract.ExtractionStatusNeedsReview,
+					"The thousands separators are not grouped in threes; confirm the printed value."
+			}
 			body = strings.ReplaceAll(body, ",", "")
 			break
 		}

@@ -45,9 +45,12 @@ import {
   extractionErrorMessage,
   extractionIsStale,
   extractionProgressText,
+  extractionResultActionable,
   isTerminalExtractionStatus,
+  type PurchaseOrderExtractionDocumentDTO,
   type PurchaseOrderExtractionStateDTO,
 } from "../poExtraction";
+import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderExtractionPanelView } from "./PurchaseOrderExtractionPanel";
 import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
@@ -257,6 +260,18 @@ export function PurchaseOrderDiscardPrompt({
         </Card>
       </div>
     </div>
+  );
+}
+
+function sameExtractionDocument(
+  left: PurchaseOrderExtractionDocumentDTO | null,
+  right: PurchaseOrderExtractionDocumentDTO | null
+): boolean {
+  if (left === null || right === null) return left === right;
+  return (
+    left.ID === right.ID &&
+    left.Version === right.Version &&
+    left.SHA256 === right.SHA256
   );
 }
 
@@ -891,6 +906,19 @@ export function PurchaseOrderEditorPage({
     rows: number;
   } | null>(null);
   const [dismissedExtractionId, setDismissedExtractionId] = useState<number | null>(null);
+  // The active PDF generation as the document panel has reported it. Undefined
+  // means "not loaded yet"; null means the record deliberately has no PDF. The
+  // review panel and Apply compare the run against this, not against whatever
+  // document the last extraction response happened to mention.
+  const [activeDocument, setActiveDocument] = useState<
+    PurchaseOrderExtractionDocumentDTO | null | undefined
+  >(undefined);
+  const activeDocumentRef = useRef<PurchaseOrderExtractionDocumentDTO | null | undefined>(
+    undefined
+  );
+  // Bumped whenever the active document changes. A response that was requested
+  // for the previous generation is discarded instead of adopted.
+  const extractionGeneration = useRef(0);
   const extractionPoll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extractionInitialized = useRef<number | null>(null);
   // Async poll callbacks must see the editor as it is now, not as it was when
@@ -904,6 +932,23 @@ export function PurchaseOrderEditorPage({
       extractionPoll.current = null;
     }
   }
+
+  /**
+   * Clears the result and the apply selection now. Called on a document change
+   * (and on a successful attach/replace/remove before its refresh returns), so
+   * old proposals stop being actionable at the moment the PDF changes rather
+   * than one round trip later.
+   */
+  const invalidateExtraction = () => {
+    extractionGeneration.current += 1;
+    extractionInitialized.current = null;
+    clearExtractionPoll();
+    setExtractionState(null);
+    setExtractionSelection({});
+    setExtractionApplied(null);
+    setDismissedExtractionId(null);
+    setExtractionError(null);
+  };
 
   // Declared as a function so adoptExtraction and the poll can call each other
   // without a render-time ordering problem; no timer fires during render.
@@ -936,8 +981,18 @@ export function PurchaseOrderEditorPage({
   }
 
   const adoptExtraction = (next: PurchaseOrderExtractionStateDTO) => {
+    const run = next.Run ?? null;
+    const active = activeDocumentRef.current;
+    // A response for a different PDF generation is never made actionable: it
+    // may be the answer to a request that was already in flight when the
+    // document changed.
+    if (run != null && active !== undefined && extractionIsStale(run, active)) {
+      setExtractionState({ Run: run, Document: active });
+      extractionInitialized.current = null;
+      setExtractionSelection({});
+      return;
+    }
     setExtractionState(next);
-    const run = next.Run;
     if (run != null && run.Status === "succeeded" && run.Result != null) {
       if (extractionInitialized.current !== run.ID) {
         extractionInitialized.current = run.ID;
@@ -975,16 +1030,40 @@ export function PurchaseOrderEditorPage({
   }, [order.ID]);
 
   const refreshExtraction = () => {
+    const generation = extractionGeneration.current;
     clearExtractionPoll();
     setDismissedExtractionId(null);
     setExtractionApplied(null);
     void (async () => {
       try {
-        adoptExtraction(await GetPurchaseOrderExtraction(order.ID));
+        const next = await GetPurchaseOrderExtraction(order.ID);
+        if (generation !== extractionGeneration.current) return;
+        adoptExtraction(next);
       } catch (refreshError) {
+        if (generation !== extractionGeneration.current) return;
         setExtractionError(errorText(refreshError));
       }
     })();
+  };
+
+  const handleDocumentStateChange = (next: PurchaseOrderDocumentStateDTO) => {
+    const document: PurchaseOrderExtractionDocumentDTO | null = next.Document
+      ? {
+          ID: next.Document.ID,
+          Version: next.Document.Version,
+          SHA256: next.Document.SHA256,
+        }
+      : null;
+    const previous = activeDocumentRef.current;
+    activeDocumentRef.current = document;
+    setActiveDocument(document);
+    const run = extractionState?.Run ?? null;
+    const changed =
+      previous !== undefined
+        ? !sameExtractionDocument(previous, document)
+        : run != null && extractionIsStale(run, document);
+    if (changed) invalidateExtraction();
+    refreshExtraction();
   };
 
   const startExtraction = () => {
@@ -1011,7 +1090,11 @@ export function PurchaseOrderEditorPage({
 
   const applyExtraction = () => {
     const run = extractionState?.Run;
-    if (run == null || run.Result == null) return;
+    const active =
+      activeDocumentRef.current !== undefined
+        ? activeDocumentRef.current
+        : extractionState?.Document ?? null;
+    if (run == null || run.Result == null || extractionIsStale(run, active)) return;
     const applied = applyExtractionSelection(
       run.Result,
       extractionSelection,
@@ -1360,16 +1443,18 @@ export function PurchaseOrderEditorPage({
   }
 
   const extractionRun = extractionState?.Run ?? null;
+  const activeExtractionDocument =
+    activeDocument !== undefined
+      ? activeDocument
+      : extractionState?.Document ?? null;
   const extractionStale =
     extractionRun != null &&
-    extractionIsStale(extractionRun, extractionState?.Document ?? null);
+    extractionIsStale(extractionRun, activeExtractionDocument);
   const extractionInFlight =
     extractionRun != null && !isTerminalExtractionStatus(extractionRun.Status);
   const showExtractionPanel =
-    extractionRun?.Status === "succeeded" &&
-    extractionRun.Result != null &&
-    !extractionStale &&
-    dismissedExtractionId !== extractionRun.ID;
+    extractionResultActionable(extractionRun, activeExtractionDocument) &&
+    dismissedExtractionId !== extractionRun?.ID;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1382,7 +1467,8 @@ export function PurchaseOrderEditorPage({
             : null
         }
         extractionStarting={extractionStarting}
-        onStateChange={() => refreshExtraction()}
+        onStateChange={handleDocumentStateChange}
+        onDocumentChanged={invalidateExtraction}
       />
       {extractionError !== null ? (
         <StatusBanner tone="danger">

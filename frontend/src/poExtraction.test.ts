@@ -8,6 +8,7 @@ import {
   extractionIsStale,
   extractionProgressText,
   extractionRegion,
+  extractionResultActionable,
   headerProposalApplicable,
   isTerminalExtractionStatus,
   parseExtractedDecimal,
@@ -201,6 +202,39 @@ describe("extraction status and progress", () => {
     expect(extractionIsStale(run, { ID: 3, Version: 2, SHA256: "aaaa" })).toBe(true);
     expect(extractionIsStale({ ...run, Status: "stale" }, { ID: 3, Version: 1, SHA256: "aaaa" })).toBe(true);
     expect(extractionIsStale(run, null)).toBe(true);
+  });
+
+  it("offers a result only for the active document generation", () => {
+    const document = { ID: 3, Version: 1, SHA256: "aaaa" };
+    const base = {
+      UUID: "run",
+      Status: "succeeded",
+      Engine: "stub",
+      EngineVersion: "1.0",
+      DocumentSHA256: "aaaa",
+      ErrorCode: null,
+      ErrorMessage: null,
+      ID: 1,
+      PurchaseOrderID: 2,
+      DocumentID: 3,
+      DocumentVersion: 1,
+      PageCount: 1,
+      RequestedBy: 4,
+      CreatedAt: "",
+      StartedAt: null,
+      FinishedAt: null,
+      DurationMS: null,
+    };
+    const succeeded = {
+      ...base,
+      Result: result(),
+    };
+    expect(extractionResultActionable(succeeded, document)).toBe(true);
+    expect(extractionResultActionable(succeeded, { ID: 3, Version: 2, SHA256: "bbbb" })).toBe(false);
+    expect(extractionResultActionable(succeeded, { ID: 3, Version: 2, SHA256: "aaaa" })).toBe(false);
+    expect(extractionResultActionable(succeeded, null)).toBe(false);
+    expect(extractionResultActionable({ ...succeeded, Result: null }, document)).toBe(false);
+    expect(extractionResultActionable({ ...succeeded, Status: "failed" }, document)).toBe(false);
   });
 
   it("maps typed failures to a manual-path sentence", () => {

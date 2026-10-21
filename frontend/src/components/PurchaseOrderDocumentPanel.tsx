@@ -255,6 +255,13 @@ export interface PurchaseOrderDocumentPanelProps {
   initialState?: PurchaseOrderDocumentStateDTO | null;
   absenceConfirmed?: boolean;
   onStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
+  /**
+   * Called synchronously when a successful attach/replace/remove has changed
+   * the active document, before the state refresh returns. The editor clears
+   * any extraction result and selection here, so a refresh that is still in
+   * flight cannot leave proposals for the old PDF actionable.
+   */
+  onDocumentChanged?: () => void;
   /** Omitted by a saved view: its document panel explains the correction path. */
   onExtract?: () => void;
   extractionStatus?: "queued" | "running" | null;
@@ -272,6 +279,7 @@ export function PurchaseOrderDocumentPanel({
   initialState = null,
   absenceConfirmed = false,
   onStateChange,
+  onDocumentChanged,
   onExtract,
   extractionStatus = null,
   extractionStarting = false,
@@ -349,6 +357,9 @@ export function PurchaseOrderDocumentPanel({
           Filename: file.name,
         })
       );
+      // Notify before refreshing: the editor must not keep showing proposals
+      // for the previous PDF while the new state is still being read.
+      onDocumentChanged?.();
       await refresh();
       setPendingRemoval(false);
     } catch (uploadError) {
@@ -400,6 +411,7 @@ export function PurchaseOrderDocumentPanel({
     setError(null);
     try {
       await RemovePurchaseOrderDocument(purchaseOrderId, true);
+      onDocumentChanged?.();
       await refresh();
       setPendingRemoval(false);
     } catch (removeError) {

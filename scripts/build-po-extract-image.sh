@@ -3,10 +3,10 @@
 # build-po-extract-image.sh — build the pinned text-PDF extractor image and
 # print the engine version it carries.
 #
-# The Dockerfile pins both base images by digest and records the installed
-# Poppler version at build time. This script is the one-liner the deployment
-# notes use; it changes nothing unless the image tag already exists (Docker
-# replaces it).
+# The Dockerfile pins both base images by digest, pins poppler-utils to an exact
+# Debian package version, and records the installed Poppler version at build
+# time. This script is the one-liner the deployment notes use; it changes nothing
+# unless the image tag already exists (Docker replaces it).
 #
 # Override the tag with VERA_PO_EXTRACT_IMAGE.
 set -euo pipefail

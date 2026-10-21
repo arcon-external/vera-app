@@ -178,6 +178,20 @@ export function extractionIsStale(
   return run.DocumentSHA256 !== document.SHA256;
 }
 
+/**
+ * Whether a run may supply proposals to the editor for the active document.
+ * A succeeded result is not enough: the document generation must still match,
+ * otherwise a refresh that has not returned yet could leave old proposals
+ * actionable after the PDF was replaced.
+ */
+export function extractionResultActionable(
+  run: PurchaseOrderExtractionDTO | null | undefined,
+  document: PurchaseOrderExtractionDocumentDTO | null | undefined
+): boolean {
+  if (run == null || run.Status !== "succeeded" || run.Result == null) return false;
+  return !extractionIsStale(run, document);
+}
+
 /** The reason staff read when extraction did not succeed. */
 export function extractionErrorMessage(run: {
   Status: string;

@@ -180,6 +180,20 @@ func TestValidateExtractionOutputRecomputesAbstentionsAndRejectsBadShapes(t *tes
 	}
 }
 
+func TestCommandEnginePreflightNamesAnUnavailableProgram(t *testing.T) {
+	missing := commandEngine("vera-extractor-that-does-not-exist")
+	if err := missing.Available(context.Background()); !errors.Is(err, ErrExtractorUnavailable) {
+		t.Errorf("preflight of a missing program = %v; want ErrExtractorUnavailable", err)
+	}
+	empty := commandEngine()
+	if err := empty.Available(context.Background()); !errors.Is(err, ErrExtractorUnavailable) {
+		t.Errorf("preflight with no command = %v; want ErrExtractorUnavailable", err)
+	}
+	if err := commandEngine("sh", "-c", "true").Available(context.Background()); err != nil {
+		t.Errorf("preflight of an available program = %v; want nil", err)
+	}
+}
+
 func TestSplitExtractorCommand(t *testing.T) {
 	if got := SplitCommand("  vextract  "); len(got) != 1 || got[0] != "vextract" {
 		t.Errorf("SplitCommand = %v; want [vextract]", got)

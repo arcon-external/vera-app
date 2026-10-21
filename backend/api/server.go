@@ -53,9 +53,10 @@ func (s *Server) SetSigner(signer *backend.Signer) {
 	s.signer = signer
 }
 
-// SetExtractor replaces the restricted extraction engine. Production uses the
-// command named by VERA_EXTRACTOR_CMD; tests use a stub so the default suite
-// needs no Poppler and no Docker.
+// SetExtractor replaces the restricted extraction engine. Production leaves it
+// nil unless VERA_EXTRACTOR_CMD names the dedicated isolated command, in which
+// case extraction is disabled and the start endpoint answers 503. Tests use a
+// stub so the default suite needs no Poppler and no Docker.
 func (s *Server) SetExtractor(engine extract.Engine) {
 	s.extractions.Engine = engine
 }
