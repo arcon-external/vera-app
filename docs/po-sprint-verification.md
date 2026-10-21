@@ -1,12 +1,15 @@
 # Quotation → PO sprint verification (#482)
 
-Status: **partially verified — one required gate is BLOCKED; the copy defect D1
-found during verification is RESOLVED.** No release, merge, push or production
-change was made.
+Status: **partially verified — one required gate is BLOCKED; D1 is RESOLVED.
+The Judge passed the record on evidence accuracy subject to two corrections
+(applied below), and returned **NOT PASS / BLOCKED** for sprint completion.**
+No release or merge was made; the branch and draft PR are pushed.
 
 - Branch: `feat/464-po-sprint`
-- Verified commit: `8809adb` (`merge: resolve manual extraction conflicts and retry
-  safely (#479)`), clean tree before the verification.
+- Behaviour verified at `8809adb` (`merge: resolve manual extraction conflicts and
+  retry safely (#479)`), clean tree before the verification.
+- Final code at `5098a55` (D1 fix `22879b4`, record update `5098a55`); the Judge
+  corrections are a docs-only commit after it.
 - D1 fix: `22879b4` (`fix: correct the extraction OCR hint copy`, `Refs #482`).
 - Database: disposable local `vera-pg-test` (PostgreSQL 18.6),
   `postgres://vera:vera@127.0.0.1:55432/veratest?sslmode=disable`, and the
@@ -288,15 +291,17 @@ PR #484 stays a draft. This is a documented blocker, not an assumption.
 
 ## 6. Repository gates on the quiescent tree
 
-Tree was clean at `8809adb`; no worker was running.
+Gates were run at `8809adb` and re-run at the final code `5098a55` after the D1
+copy fix; the tree was clean and no worker was running. The final-SHA numbers
+are below (the 830 total includes the two D1 guards).
 
 | Command | Exit | Result |
 | --- | --- | --- |
 | `gofmt -l .` | 0 | no output |
 | `go vet ./...` | 0 | clean |
-| `VERA_POSTGRES_TEST_DSN=… go test -race -count=1 ./...` | 0 | 16 packages `ok`; `backend/api` 260.6 s, `backend/store` 166.0 s, `cmd/vera` 5.8 s |
-| `npm --prefix frontend run build` | 0 | 88 modules, 711.82 kB JS / 41.80 kB CSS |
-| `npm --prefix frontend test` | 0 | 62 files passed, 1 skipped; 828 tests passed, 48 skipped (the 48 are the opt-in UI snapshot harness) |
+| `VERA_POSTGRES_TEST_DSN=… go test -race -count=1 ./...` | 0 | 16 packages `ok`; `backend/api` 254.7 s, `backend/store` 159.6 s, `cmd/vera` 5.8 s |
+| `npm --prefix frontend run build` | 0 | 88 modules, 711.87 kB JS / 41.80 kB CSS |
+| `npm --prefix frontend test` | 0 | 62 files passed, 1 skipped; 830 tests passed, 48 skipped (the 48 are the opt-in UI snapshot harness) |
 | `go test ./cmd/vera -run '^TestEndToEndThroughTheCLI$'` (DSN) | 0 | PASS |
 | Targeted store PO suite (`-race`, DSN) | 0 | 132 PASS |
 | Targeted API PO suite (`-race`, DSN) | 0 | 74 PASS, 1 Docker test skipped (run separately) |
@@ -309,9 +314,18 @@ Tree was clean at `8809adb`; no worker was running.
 Signature regression tests also pass by name: 20 canonical/signing tests in
 `backend` and 15 `TestVerify*` tests in `backend/api` with the DSN.
 
-**Judge before merge and orchestrator revalidation are process roles, not
-commands, and have not happened in this session.** This record is the evidence
-they must consume; no merge or release was performed.
+The upgrade/rollback rehearsal is **self-reported** in this record: it was run
+on a disposable schema and reported `REHEARSAL OK`, but no script, transcript
+or log was committed, so it is not independently reproducible from the repo.
+It is recorded as a residual in §8, not as a failed rehearsal.
+
+**Judge verdict:** the record **PASSES on evidence accuracy** subject to two
+corrections — the gate table's SHA is now the final code SHA, and §8 no longer
+sweeps #476 into “open until the PR merges”. **PR #484: NOT PASS as written** —
+it resolved #476 while #476's measurement/signoff criteria are unmet; the body
+now uses `Refs #476` and the PR stays draft. **Sprint completion: NOT PASS /
+BLOCKED** on criterion 5. Orchestrator revalidation re-ran the final-SHA gates;
+no merge or release was performed.
 
 ## 7. Defects found
 
@@ -390,11 +404,18 @@ behaves as documented in the Docker and API tests.
   proven by tests, not by production-shaped data.
 - **`cmd/vera` PO path** — the CLI has no PO commands; PO end-to-end evidence
   is the API suite.
-- **Judge verdict and orchestrator revalidation** — pending; PR #484 is still a
-  draft and remains unmodified.
-- Administrative state observed, not altered: #465–#482 are open until the
-  integration PR merges; #483's fix is present and its regression tests pass,
-  but the issue itself is still open.
+- **Upgrade/rollback rehearsal evidence** — self-reported; no committed
+  script/transcript/log, so it is not independently reproducible from the repo.
+  The rehearsal itself was run and reported, not contradicted.
+- **Judge verdict and orchestrator revalidation** — the Judge passed the record
+  on evidence accuracy subject to the two corrections now applied; it returned
+  **NOT PASS / BLOCKED** for sprint completion. PR #484 stays draft; the
+  `Resolves #476` overreach is corrected to `Refs #476`.
+- Administrative state: all child tickets are open until the integration PR
+  merges, except **#476**, which stays open until its measurement/signoff
+  criteria are met; **#482** and **#464** stay open until the extraction gate
+  resolves. #483's fix is present, its regression tests pass, and the PR
+  resolves it.
 
 ## 9. Process record
 
@@ -410,12 +431,13 @@ behaves as documented in the Docker and API tests.
     proven red on the old copy above.
   - `diagnosing-bugs` — used for D1: the repro is the assembled panel where
     the stale hint and the OCR evidence line disagree; the correct regression
-    seam is the pure `extractAndCompareAvailability` function. No fix was
-    applied, per the brief.
+    seam is the pure `extractAndCompareAvailability` function. The fix was
+    applied in `22879b4` after the defect was recorded.
   - Deliberately not loaded: `research` (the primary documents are in-repo),
     `prototype` (no design fork), and the design/copy skills (no product
     change).
 - Every claim above names its command or file; the piped-exit-code trap was
   avoided by writing outputs to files and reading the shell's own exit.
-- No code, AGENTS.md, pricing, signing, release or PR was changed. The only
-  committed artifact is this document.
+- Pricing, signing, release and production code were not changed. The only
+  product-code change is the D1 copy/test fix (`22879b4`); this document and
+  the PR body are the verification artifacts.
