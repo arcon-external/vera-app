@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"vera-app/backend/apicontract"
 )
@@ -203,7 +204,7 @@ func mapPurchaseOrderExtraction(row apicontract.PurchaseOrderExtractionRow) (Pur
 		FinishedAt:      row.FinishedAt,
 		DurationMS:      row.DurationMS,
 	}
-	trimmed := string(row.Result)
+	trimmed := strings.TrimSpace(string(row.Result))
 	if trimmed != "" && trimmed != "null" {
 		var output apicontract.ExtractionOutput
 		if err := json.Unmarshal(row.Result, &output); err != nil {
