@@ -309,11 +309,16 @@ type PurchaseOrderConflictDTO struct {
 
 // PurchaseOrderWriteResult is the answer to a versioned write. Exactly one side
 // is set: Order when the write succeeded, Conflict when the server refused it
-// because the record moved on. A real failure is still the second return value,
-// so the editor never has to guess from an error string.
+// because the record moved on, or SavedRecord when the record is already saved
+// or was finalized by the intervening save. SavedRecord is not an error: the
+// caller keeps its working copy and continues through the correction flow,
+// which requires a reason, instead of promising a draft overwrite that the
+// server would refuse. A real failure is still the second return value, so the
+// editor never has to guess from an error string.
 type PurchaseOrderWriteResult struct {
-	Order    *PurchaseOrderDTO
-	Conflict *PurchaseOrderConflictDTO
+	Order       *PurchaseOrderDTO
+	Conflict    *PurchaseOrderConflictDTO
+	SavedRecord bool
 }
 
 // PurchaseOrderCorrectionAttachmentDTO is the customer PO PDF version that was
@@ -532,21 +537,29 @@ func purchaseOrderSaved(row apicontract.PurchaseOrderRow) PurchaseOrderWriteResu
 	return PurchaseOrderWriteResult{Order: &order}
 }
 
-// purchaseOrderWriteFailure turns a named version conflict into a typed result
-// and leaves every other failure as an error. The server's message is not
-// parsed: the details come from the 409 body through apiclient.ConflictOf.
+// purchaseOrderWriteFailure turns a named version conflict into a typed result,
+// a saved-record refusal into the correction-flow answer, and leaves every
+// other failure as an error. The server's message is not parsed: the details
+// come from the response body through apiclient.
 func purchaseOrderWriteFailure(err error) (PurchaseOrderWriteResult, error) {
 	conflict := apiclient.ConflictOf(err)
-	if conflict == nil {
-		return PurchaseOrderWriteResult{}, err
+	if conflict != nil {
+		return PurchaseOrderWriteResult{Conflict: &PurchaseOrderConflictDTO{
+			CurrentVersion: conflict.CurrentVersion,
+			CurrentState:   conflict.CurrentState,
+			UpdatedBy:      conflict.UpdatedBy,
+			UpdatedByName:  conflict.UpdatedByName,
+			UpdatedAt:      conflict.UpdatedAt,
+		}}, nil
 	}
-	return PurchaseOrderWriteResult{Conflict: &PurchaseOrderConflictDTO{
-		CurrentVersion: conflict.CurrentVersion,
-		CurrentState:   conflict.CurrentState,
-		UpdatedBy:      conflict.UpdatedBy,
-		UpdatedByName:  conflict.UpdatedByName,
-		UpdatedAt:      conflict.UpdatedAt,
-	}}, nil
+	// The version check passed and the state rule refused: the record is saved,
+	// so the working copy belongs in a correction, not a draft write. It is a
+	// typed answer rather than an error so the editor keeps every value and
+	// opens the correction flow instead of dead-ending on a message.
+	if apiclient.CodeOf(err) == "po_not_draft" {
+		return PurchaseOrderWriteResult{SavedRecord: true}, nil
+	}
+	return PurchaseOrderWriteResult{}, err
 }
 
 // GetPurchaseOrderHistory reads the immutable snapshots of one record, newest

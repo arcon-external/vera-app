@@ -509,19 +509,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 
 	// The final-save minimum: source revision (loaded above), a customer PO
 	// number, a received date, the customer snapshot, the currency, and at
-	// least one valid item. A draft may be missing any of them.
-	if input.PONumber == "" {
-		return PurchaseOrder{}, fmt.Errorf("%w: a customer PO number is required", ErrPurchaseOrderIncomplete)
-	}
-	if customerID < 1 || strings.TrimSpace(customerName) == "" {
-		return PurchaseOrder{}, fmt.Errorf("%w: the customer is missing", ErrPurchaseOrderIncomplete)
-	}
-	if strings.TrimSpace(currency) == "" {
-		return PurchaseOrder{}, fmt.Errorf("%w: the currency is missing", ErrPurchaseOrderIncomplete)
-	}
-	if len(input.Items) == 0 {
-		return PurchaseOrder{}, fmt.Errorf("%w: at least one valid item is required", ErrPurchaseOrderIncomplete)
-	}
+	// least one valid item. A draft may be missing any of them. The item and PO
+	// number rules are shared with a saved-record correction, so the two can
+	// never drift.
 	received := normalizeDate(input.ReceivedDate)
 	if received.IsZero() {
 		received = normalizeDate(&storedReceived)
@@ -529,21 +519,17 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if received.IsZero() {
 		return PurchaseOrder{}, fmt.Errorf("%w: a received date is required", ErrPurchaseOrderIncomplete)
 	}
+	if customerID < 1 || strings.TrimSpace(customerName) == "" {
+		return PurchaseOrder{}, fmt.Errorf("%w: the customer is missing", ErrPurchaseOrderIncomplete)
+	}
+	if strings.TrimSpace(currency) == "" {
+		return PurchaseOrder{}, fmt.Errorf("%w: the currency is missing", ErrPurchaseOrderIncomplete)
+	}
 	for index := range input.Items {
-		item := &input.Items[index]
-		item.LineNumber = index + 1
-		if item.QuantityScaled <= 0 {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d quantity must be positive",
-				ErrPurchaseOrderInvalid, index+1)
-		}
-		if item.UnitPriceMinor < 0 {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d unit price must not be negative",
-				ErrPurchaseOrderInvalid, index+1)
-		}
-		if item.QuotationSubNo != nil && item.QuotationItemNo == nil {
-			return PurchaseOrder{}, fmt.Errorf("%w: line %d names a sub-item without its item",
-				ErrPurchaseOrderInvalid, index+1)
-		}
+		input.Items[index].LineNumber = index + 1
+	}
+	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
+		return PurchaseOrder{}, err
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
 		return PurchaseOrder{}, err

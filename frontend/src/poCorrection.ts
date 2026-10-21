@@ -21,6 +21,12 @@ export interface PurchaseOrderConflictDTO {
 export interface PurchaseOrderWriteResultDTO {
   Order?: PurchaseOrderDTO | null;
   Conflict?: PurchaseOrderConflictDTO | null;
+  /**
+   * True when the record is already saved, so the write cannot be a draft
+   * overwrite. The result is an answer, not a failure: the editor keeps its
+   * working copy and opens the correction flow (wave 2).
+   */
+  SavedRecord?: boolean | null;
 }
 
 /** One line of a retained snapshot, as the history panel renders it. */
@@ -46,16 +52,30 @@ export interface PurchaseOrderHistoryEntry {
   Reason: string;
   ActorName: string;
   CreatedAt: string;
-  PONumber: string;
+  QuoteNumber: string;
+  CustomerName: string;
+  SourceRevision: number;
+  Currency: string;
+  TaxZone: string;
+  TaxCategory: string;
+  BillingAddress: string;
   DeliveryAddress: string;
+  ShipToCode: string;
+  ContactEmail: string;
+  ContactPhone: string;
+  PONumber: string;
+  PODate?: string | null;
+  ReceivedDate: string;
+  RequestedDeliveryDate?: string | null;
   PaymentTerms: string;
   Incoterms: string;
   AdjustmentReason: string;
-  Currency: string;
   PreviousVersion: number;
   ResultingVersion: number;
+  DiscountPercent: number;
   SubtotalMinor: number;
   DiscountMinor: number;
+  PpnBps: number;
   PpnMinor: number;
   AdjustmentMinor: number;
   GrandTotalMinor: number;
@@ -67,6 +87,7 @@ export interface PurchaseOrderHistoryEntry {
 export type PurchaseOrderWriteOutcome =
   | { kind: "saved"; order: PurchaseOrderDTO }
   | { kind: "conflict"; conflict: PurchaseOrderConflictDTO }
+  | { kind: "savedRecord" }
   | { kind: "empty" };
 
 /**
@@ -77,6 +98,7 @@ export type PurchaseOrderWriteOutcome =
 export function writeOutcome(result: PurchaseOrderWriteResultDTO): PurchaseOrderWriteOutcome {
   if (result.Order) return { kind: "saved", order: result.Order };
   if (result.Conflict) return { kind: "conflict", conflict: result.Conflict };
+  if (result.SavedRecord === true) return { kind: "savedRecord" };
   return { kind: "empty" };
 }
 
@@ -121,14 +143,34 @@ export function formatHistoryTime(iso: string): string {
 }
 
 /**
+ * True when the record in the warning is no longer a draft. A draft write
+ * cannot overwrite it: the only safe offer is the correction flow, which keeps
+ * the working copy and requires a reason. A correction already has its reason,
+ * so it treats a saved-state conflict as an ordinary version conflict.
+ */
+export function conflictNeedsCorrection(conflict: PurchaseOrderConflictDTO): boolean {
+  return conflict.CurrentState !== "draft";
+}
+
+/**
  * The warning's one sentence. It names who saved, when and which version is
  * current, because the requirement is that a save since load warns with real
- * values regardless of how much time elapsed.
+ * values regardless of how much time elapsed. When the record is saved
+ * (`savedTransition`), it never promises a draft overwrite: that write would be
+ * refused by design.
  */
-export function conflictWarning(conflict: PurchaseOrderConflictDTO): string {
-  return `${conflictActorName(conflict)} saved version ${conflict.CurrentVersion} at ${formatHistoryTime(
-    conflict.UpdatedAt
-  )}. Overwriting applies your changes and keeps the previous version in the history.`;
+export function conflictWarning(
+  conflict: PurchaseOrderConflictDTO,
+  savedTransition = false
+): string {
+  const time = formatHistoryTime(conflict.UpdatedAt);
+  const saved = `${conflictActorName(conflict)} saved version ${conflict.CurrentVersion}${
+    time === "" ? "" : ` at ${time}`
+  }.`;
+  if (savedTransition) {
+    return `${saved} A saved record cannot be overwritten as a draft. Correcting it keeps everything you have typed and requires a reason.`;
+  }
+  return `${saved} Overwriting applies your changes and keeps the previous version in the history.`;
 }
 
 /** "Correction" or "Draft overwritten", as the history panel labels a kind. */

@@ -265,3 +265,32 @@ func TestConflictOfIgnoresOtherRefusals(t *testing.T) {
 		t.Errorf("ConflictOf = %+v; want nil for a non-conflict refusal", conflict)
 	}
 }
+
+// TestCodeOfReadsTheRefusalCode is wave 2 of #473: the desktop must react to a
+// saved-record refusal (po_not_draft) as a named answer, not by matching the
+// English sentence. Every refusal's stable code survives on the error.
+func TestCodeOfReadsTheRefusalCode(t *testing.T) {
+	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{"error":"only a draft can be edited","code":"po_not_draft"}`))
+	})
+	err := client.Put("/v1/purchase-orders/7", map[string]any{"expectedVersion": 5}, nil)
+	if StatusOf(err) != http.StatusConflict {
+		t.Fatalf("StatusOf = %d; want 409", StatusOf(err))
+	}
+	if code := CodeOf(err); code != "po_not_draft" {
+		t.Errorf("CodeOf = %q; want po_not_draft", code)
+	}
+	if conflict := ConflictOf(err); conflict != nil {
+		t.Errorf("ConflictOf = %+v; want nil: this is a state refusal, not a version conflict", conflict)
+	}
+	if code := CodeOf(fmt.Errorf("wrapped: %w", err)); code != "po_not_draft" {
+		t.Errorf("CodeOf on a wrapped error = %q; want po_not_draft", code)
+	}
+}
+
+func TestCodeOfIsEmptyWithoutARefusalCode(t *testing.T) {
+	if code := CodeOf(fmt.Errorf("network unreachable")); code != "" {
+		t.Errorf("CodeOf = %q; want empty for a non-response error", code)
+	}
+}

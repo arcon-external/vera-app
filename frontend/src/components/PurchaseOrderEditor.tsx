@@ -9,6 +9,7 @@ import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
 import { formatMoney, type CurrencyInfo } from "../format";
 import {
+  conflictNeedsCorrection,
   correctionReasonError,
   trimCorrectionReason,
   writeOutcome,
@@ -82,7 +83,13 @@ export interface PurchaseOrderEditorPageProps {
   currency: CurrencyInfo;
   uomOptions: CompanyUnitOption[];
   incotermOptions: { value: string; label: string }[];
-  onSaved: (order: PurchaseOrderDTO) => void;
+  /**
+   * Reports the stored record. `corrected` is true when this save went through
+   * the correction flow, including a draft that was transitioned into one after
+   * an intervening finalization (wave 2 of #473), so the page can word its
+   * success message truthfully.
+   */
+  onSaved: (order: PurchaseOrderDTO, corrected?: boolean) => void;
   onCancel: () => void;
   /**
    * Reports whether the draft holds unsaved changes, so the page that owns
@@ -90,6 +97,13 @@ export interface PurchaseOrderEditorPageProps {
    * the only place that decides dirtiness; App never re-derives it.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Wave 2 of #473: the editor moved a draft write into the correction flow
+   * after an intervening finalization. App should treat this record as a
+   * correction from now on, so Cancel returns to the saved view instead of the
+   * archive.
+   */
+  onCorrectionStart?: () => void;
   /** "correction" edits a saved record; every save then needs a reason. */
   mode?: "draft" | "correction";
 }
@@ -810,9 +824,14 @@ export function PurchaseOrderEditorPage({
   onSaved,
   onCancel,
   onDirtyChange,
+  onCorrectionStart,
   mode = "draft",
 }: PurchaseOrderEditorPageProps) {
-  const correcting = mode === "correction";
+  // #473 wave 2: a draft write that meets an already-saved record keeps the
+  // working copy and continues as a correction. The transition is local to this
+  // editor; App still owns whether the record opened in correction mode.
+  const [savedCorrection, setSavedCorrection] = useState(false);
+  const correcting = mode === "correction" || savedCorrection;
   const [state, dispatch] = useReducer(
     purchaseOrderEditorReducer,
     undefined,
@@ -843,6 +862,54 @@ export function PurchaseOrderEditorPage({
   const [conflict, setConflict] = useState<PurchaseOrderConflictDTO | null>(null);
   // Which write the warning belongs to: Overwrite resumes the same one.
   const [pendingWrite, setPendingWrite] = useState<"save" | "finalize">("save");
+
+  /**
+   * Wave 2 of #473: carry the working copy into the correction flow at the
+   * version the server named. Nothing is written here; the reason panel appears
+   * and the next Save correction submits against `version`.
+   */
+  const beginSavedCorrection = (version: number) => {
+    // A finalize review holds "Use Quotation" choices that exist only as
+    // decisions. Apply them to the working copy before the review closes, so
+    // the correction carries what the reviewer had confirmed. From the entry
+    // view there is nothing to apply.
+    if (view !== "entry" && review !== null) {
+      const applied = evaluateReview(
+        state,
+        review.Source,
+        currency,
+        decisions,
+        acknowledgedMissing,
+        acknowledgedExtra
+      );
+      dispatch({
+        type: "valuesReplaced",
+        header: applied.applied.header,
+        lines: applied.applied.lines,
+      });
+    }
+    dispatch({ type: "versionAdopted", version });
+    setSavedCorrection(true);
+    onCorrectionStart?.();
+    setConflict(null);
+    setPendingWrite("save");
+    setReview(null);
+    setConfirmPayload(null);
+    setView("entry");
+  };
+
+  /**
+   * The answer to a draft write that met a saved record. The earlier warning's
+   * actor and time are kept when there is one; a bare po_not_draft has only the
+   * version, because the server validated it before its state rule refused.
+   */
+  const savedRecordAnswer = (version: number): PurchaseOrderConflictDTO => ({
+    CurrentState: "saved",
+    CurrentVersion: version,
+    UpdatedBy: conflict?.UpdatedBy ?? 0,
+    UpdatedByName: conflict?.UpdatedByName ?? "",
+    UpdatedAt: conflict?.UpdatedAt ?? "",
+  });
 
   // The dirty flag is lifted, not duplicated: the editor still owns the
   // baseline comparison, and App only consumes the answer so it can ask
@@ -889,13 +956,21 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency });
         setConflict(null);
-        onSaved(outcome.order);
+        onSaved(outcome.order, correcting);
         return;
       }
       if (outcome.kind === "conflict") {
         dispatch({ type: "saveConflict" });
         setPendingWrite("save");
         setConflict(outcome.conflict);
+        return;
+      }
+      if (outcome.kind === "savedRecord") {
+        // The record is saved: a draft write cannot replace it. Keep the work
+        // and offer the correction transition rather than a dead end.
+        dispatch({ type: "saveConflict" });
+        setPendingWrite("save");
+        setConflict(savedRecordAnswer(expectedVersion));
         return;
       }
       dispatch({
@@ -962,7 +1037,7 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency });
         setConflict(null);
-        onSaved(outcome.order);
+        onSaved(outcome.order, correcting);
         setReview(null);
         setView("entry");
         return;
@@ -970,6 +1045,16 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "conflict") {
         setPendingWrite("finalize");
         setConflict(outcome.conflict);
+        return;
+      }
+      if (outcome.kind === "savedRecord") {
+        // Someone finalized the record while the review was open. The final
+        // save cannot become an overwrite; keep the reviewed working copy and
+        // continue as a correction against the version just submitted, because
+        // the server's version check passed before its state rule refused.
+        dispatch({ type: "saveConflict" });
+        setPendingWrite("save");
+        setConflict(savedRecordAnswer(expectedVersion));
         return;
       }
       dispatch({
@@ -988,7 +1073,9 @@ export function PurchaseOrderEditorPage({
       <PurchaseOrderConflictPrompt
         conflict={conflict}
         overwriting={state.saving || finalSaving}
+        savedTransition={!correcting && conflictNeedsCorrection(conflict)}
         onCancel={() => setConflict(null)}
+        onCorrectSaved={() => beginSavedCorrection(conflict.CurrentVersion)}
         onOverwrite={() => {
           if (pendingWrite === "finalize") {
             void finalSave(conflict.CurrentVersion, true);
@@ -1118,7 +1205,7 @@ export function PurchaseOrderEditorPage({
         onCancel={onCancel}
         onFinalSave={() => void startReview()}
         finalSaving={reviewLoading}
-        mode={mode}
+        mode={correcting ? "correction" : "draft"}
         correctionReason={reason}
         onCorrectionReasonChange={setReason}
         confirmationNumber={order.ConfirmationNumber ?? ""}

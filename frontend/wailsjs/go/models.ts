@@ -2108,6 +2108,7 @@ export namespace backend {
 	export class PurchaseOrderWriteResult {
 	    Order?: PurchaseOrderDTO;
 	    Conflict?: PurchaseOrderConflictDTO;
+	    SavedRecord: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderWriteResult(source);
@@ -2117,6 +2118,7 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Order = this.convertValues(source["Order"], PurchaseOrderDTO);
 	        this.Conflict = this.convertValues(source["Conflict"], PurchaseOrderConflictDTO);
+	        this.SavedRecord = source["SavedRecord"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

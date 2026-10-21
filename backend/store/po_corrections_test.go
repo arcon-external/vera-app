@@ -211,6 +211,64 @@ func TestPurchaseOrderCorrectionKeepsThePreviousValuesAndRequiresAReason(t *test
 	}
 }
 
+// TestPurchaseOrderCorrectionKeepsTheFinalizeMinimum is wave 2 of #473: a
+// saved record that a correction produces must keep the minimum finalization
+// enforces. Finalization refuses an empty record by design; a correction that
+// accepted `items: []` would be a second, weaker door into the same state. The
+// two paths share one validation function, so this test guards the shared rule,
+// not a copy of it. A draft may still be saved incomplete.
+func TestPurchaseOrderCorrectionKeepsTheFinalizeMinimum(t *testing.T) {
+	database := openTestSchema(t, "vera_po_473_minimum")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Minimum")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	saved := savedPurchaseOrder(t, database, ctx, user, quotation, "PO-473-MIN")
+
+	// The reported shape: no lines at all, otherwise a valid correction.
+	empty := correctionInput(saved, user, "Remove every line", saved.Version)
+	empty.Items = nil
+	if _, err := database.CorrectPurchaseOrder(ctx, empty); !errors.Is(err, ErrPurchaseOrderIncomplete) {
+		t.Fatalf("empty correction = %v; want ErrPurchaseOrderIncomplete", err)
+	}
+
+	// A line finalization would refuse is refused here too, so the saved
+	// minimum cannot be met by an invalid line.
+	invalid := correctionInput(saved, user, "Zero the quantity", saved.Version)
+	invalid.Items = append([]PurchaseOrderItem(nil), saved.Items...)
+	invalid.Items[0].QuantityScaled = 0
+	if _, err := database.CorrectPurchaseOrder(ctx, invalid); !errors.Is(err, ErrPurchaseOrderInvalid) {
+		t.Fatalf("invalid line correction = %v; want ErrPurchaseOrderInvalid", err)
+	}
+
+	// Neither refusal wrote anything: no version bump, no history row, and the
+	// stored lines are untouched.
+	stored, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("reopen after refusals: %v", err)
+	}
+	if stored.Version != saved.Version || len(stored.Items) != len(saved.Items) ||
+		stored.PONumber != saved.PONumber {
+		t.Errorf("a refused correction changed the record: %+v", stored)
+	}
+	if history, err := database.GetPurchaseOrderHistory(ctx, saved.ID); err != nil || len(history) != 0 {
+		t.Fatalf("history after refusals = %+v, %v; want none", history, err)
+	}
+
+	// The same write on a draft is still allowed: the minimum belongs to the
+	// saved state, not to every write. A draft is deliberately unfinished.
+	draftQuotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Minimum draft")
+	draft := createFinalizeDraft(t, database, ctx, user, draftQuotation)
+	updated, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+		ID: draft.ID, UpdatedBy: user.ID, ExpectedVersion: draft.Version,
+	})
+	if err != nil {
+		t.Fatalf("incomplete draft save = %v; want a draft to remain incomplete", err)
+	}
+	if len(updated.Items) != 0 {
+		t.Errorf("incomplete draft items = %d; want 0", len(updated.Items))
+	}
+}
+
 func TestPurchaseOrderCorrectionPreservesProtectedIdentity(t *testing.T) {
 	database := openTestSchema(t, "vera_po_473_protected")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Protected")

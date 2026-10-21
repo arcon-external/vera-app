@@ -3,6 +3,7 @@ import {
   attachmentReferenceLabel,
   canCorrectPurchaseOrder,
   conflictActorName,
+  conflictNeedsCorrection,
   conflictWarning,
   correctionKindLabel,
   correctionReasonError,
@@ -102,6 +103,12 @@ describe("write outcome", () => {
     expect(writeOutcome({ Order: null, Conflict: null }).kind).toBe("empty");
     expect(writeOutcome({}).kind).toBe("empty");
   });
+
+  it("treats a saved-record refusal as the correction-flow answer", () => {
+    expect(
+      writeOutcome({ Order: null, Conflict: null, SavedRecord: true })
+    ).toEqual({ kind: "savedRecord" });
+  });
 });
 
 describe("conflict wording", () => {
@@ -111,6 +118,18 @@ describe("conflict wording", () => {
     expect(warning).toContain("version 5");
     expect(warning).toContain("2026-10-21 10:15 +07:00");
     expect(warning).toContain("keeps the previous version in the history");
+  });
+
+  it("knows when a draft write must offer a correction instead of an overwrite", () => {
+    expect(conflictNeedsCorrection(CONFLICT)).toBe(false);
+    expect(conflictNeedsCorrection({ ...CONFLICT, CurrentState: "saved" })).toBe(true);
+  });
+
+  it("never promises an overwrite that the server would refuse", () => {
+    const warning = conflictWarning({ ...CONFLICT, CurrentState: "saved" }, true);
+    expect(warning).toContain("cannot be overwritten as a draft");
+    expect(warning).toContain("requires a reason");
+    expect(warning).not.toContain("Overwriting applies");
   });
 
   it("never claims a name it was not given", () => {

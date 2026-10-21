@@ -294,16 +294,30 @@ const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
     Reason: "The customer moved to a new warehouse",
     ActorName: "Budi Santoso",
     CreatedAt: "2026-10-21T10:15:00+07:00",
-    PONumber: "PO-INF-2026-091",
+    QuoteNumber: "1502260044",
+    CustomerName: "PT. Batam Electrical Works",
+    SourceRevision: 1,
+    Currency: "USD",
+    TaxZone: "FTZ",
+    TaxCategory: "Goods",
+    BillingAddress: "Jl. Billing 12, Batam Center, Kota Batam",
     DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    ShipToCode: "SHIP-INF-3",
+    ContactEmail: "procurement@buyer.example",
+    ContactPhone: "+62 778 555 0101",
+    PONumber: "PO-INF-2026-091",
+    PODate: "2026-10-02",
+    ReceivedDate: "2026-10-03",
+    RequestedDeliveryDate: "2026-11-20",
     PaymentTerms: "45 days",
     Incoterms: "CIF",
     AdjustmentReason: "Round to the printed total",
-    Currency: "USD",
     PreviousVersion: 4,
     ResultingVersion: 5,
+    DiscountPercent: 5,
     SubtotalMinor: 323363,
     DiscountMinor: 16168,
+    PpnBps: 1100,
     PpnMinor: 33791,
     AdjustmentMinor: -250,
     GrandTotalMinor: 340736,
@@ -340,16 +354,30 @@ const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
     Reason: "Draft overwritten after a concurrent save",
     ActorName: "Sari",
     CreatedAt: "2026-10-21T09:00:00+07:00",
-    PONumber: "PO-INF-2026-090",
+    QuoteNumber: "1502260044",
+    CustomerName: "PT. Batam Electrical Works",
+    SourceRevision: 1,
+    Currency: "USD",
+    TaxZone: "FTZ",
+    TaxCategory: "Goods",
+    BillingAddress: "Jl. Billing 12, Batam Center, Kota Batam",
     DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    ShipToCode: "SHIP-INF-3",
+    ContactEmail: "procurement@buyer.example",
+    ContactPhone: "+62 778 555 0101",
+    PONumber: "PO-INF-2026-090",
+    PODate: "",
+    ReceivedDate: "2026-10-03",
+    RequestedDeliveryDate: "",
     PaymentTerms: "30 days",
     Incoterms: "EXW",
     AdjustmentReason: "",
-    Currency: "USD",
     PreviousVersion: 3,
     ResultingVersion: 4,
+    DiscountPercent: 0,
     SubtotalMinor: 300000,
     DiscountMinor: 0,
+    PpnBps: 0,
     PpnMinor: 0,
     AdjustmentMinor: 0,
     GrandTotalMinor: 300000,
@@ -1074,13 +1102,40 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The version warning (issue #473): the two choices, the current version
-    // and the writer's name and time. Overwriting is the primary action.
+    // The version warning (issue #473): the two choices when a draft really is
+    // still a draft -- the current version, the writer's name and time, and
+    // Overwrite as the primary action.
     name: "PurchaseOrderVersionConflict",
     element: (
       <div className="min-h-[420px] bg-paper p-4">
         <p className="text-small text-ink-500">
           The correction editor sits behind the warning.
+        </p>
+        <PurchaseOrderConflictPrompt
+          conflict={{
+            CurrentState: "draft",
+            CurrentVersion: 5,
+            UpdatedBy: 9,
+            UpdatedByName: "Budi Santoso",
+            UpdatedAt: "2026-10-21T10:15:00+07:00",
+          }}
+          overwriting={false}
+          onCancel={() => undefined}
+          onCorrectSaved={() => undefined}
+          onOverwrite={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The saved-record transition (issue #473 wave 2): a draft write met a
+    // record that is already saved, so the dialog offers no Overwrite. The
+    // correction form, with its required reason, is the one safe way forward.
+    name: "PurchaseOrderSavedRecordTransition",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The draft editor keeps its working copy behind the warning.
         </p>
         <PurchaseOrderConflictPrompt
           conflict={{
@@ -1091,7 +1146,9 @@ const CASES: SnapshotCase[] = [
             UpdatedAt: "2026-10-21T10:15:00+07:00",
           }}
           overwriting={false}
+          savedTransition
           onCancel={() => undefined}
+          onCorrectSaved={() => undefined}
           onOverwrite={() => undefined}
         />
       </div>

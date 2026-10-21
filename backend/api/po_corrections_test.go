@@ -424,6 +424,58 @@ func correctionItems(row purchaseOrderRow) []map[string]any {
 	return items
 }
 
+// TestPurchaseOrderCorrectionCannotEmptyASavedRecord is wave 2 of #473 and the
+// Judge's exact probe: an authenticated correction with `items: []` must not be
+// accepted. Finalization refuses an empty record; a saved correction is the
+// other door into the same state, so it must keep the same minimum. The refusal
+// is a 422 before any write, so the version, the lines and the history are
+// untouched.
+func TestPurchaseOrderCorrectionCannotEmptyASavedRecord(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_473_minimum")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	saved := savedPOOverAPI(t, server, token, quotationID)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(saved.ID, 10)
+
+	empty := correctionBody(saved, "Remove every line")
+	empty["items"] = []map[string]any{}
+	code, response := doJSON(t, server, http.MethodPost, path+"/correction", token, empty)
+	if code != http.StatusUnprocessableEntity || response["code"] != "po_incomplete" {
+		t.Fatalf("empty correction = %d %v; want 422 po_incomplete", code, response)
+	}
+	if message, _ := response["error"].(string); !strings.Contains(message, "at least one valid item") {
+		t.Errorf("error = %q; want the missing minimum named", message)
+	}
+
+	// A line finalization would refuse is refused here too.
+	invalid := correctionBody(saved, "Zero the quantity")
+	invalidItems := correctionItems(saved)
+	invalidItems[0]["quantityScaled"] = 0
+	invalid["items"] = invalidItems
+	code, response = doJSON(t, server, http.MethodPost, path+"/correction", token, invalid)
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid line correction = %d %v; want 422", code, response)
+	}
+
+	// Neither refusal wrote: same version, same lines, no history row.
+	code, response = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen = %d (%v)", code, response)
+	}
+	stored := decodePurchaseOrder(t, response)
+	if stored.Version != saved.Version || len(stored.Items) != len(saved.Items) ||
+		stored.PONumber != saved.PONumber {
+		t.Errorf("a refused correction changed the record: version %d, %d lines, PO %q",
+			stored.Version, len(stored.Items), stored.PONumber)
+	}
+	code, response = doJSON(t, server, http.MethodGet, path+"/history", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("history = %d (%v)", code, response)
+	}
+	if history := decodePurchaseOrderHistory(t, response); len(history) != 0 {
+		t.Errorf("history entries = %d; want 0 after a refused correction", len(history))
+	}
+}
+
 func TestPurchaseOrderCorrectionOfADeletedRecordIsNotFound(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_473_deleted")
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())

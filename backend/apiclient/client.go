@@ -44,10 +44,13 @@ type ConflictInfo struct {
 //
 // Conflict is set only for a named optimistic-concurrency refusal (#473). The
 // desktop binding turns it into a typed result so the warning can name the
-// writer and version without asking Go callers to parse prose.
+// writer and version without asking Go callers to parse prose. Code is the
+// server's stable refusal code for every named refusal, so a binding can react
+// to a particular one (po_not_draft) the same way.
 type StatusError struct {
 	Conflict   *ConflictInfo
 	StatusCode int
+	Code       string
 	Message    string
 }
 
@@ -80,6 +83,17 @@ func ConflictOf(err error) *ConflictInfo {
 		return status.Conflict
 	}
 	return nil
+}
+
+// CodeOf reports the server's stable refusal code behind an error (for example
+// "po_not_draft"), or "" when the error carried none. It is how a binding
+// reacts to a named refusal without reading English prose.
+func CodeOf(err error) string {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code
+	}
+	return ""
 }
 
 // BaseURL reports the API address this client talks to. The verification
@@ -204,14 +218,17 @@ func decodeStatusError(response *http.Response, fallback string) error {
 		CurrentVersion int64  `json:"currentVersion"`
 		UpdatedBy      int64  `json:"updatedBy"`
 	}
-	if json.Unmarshal(body, &envelope) == nil && envelope.Code == "po_version_conflict" {
-		failure.Conflict = &ConflictInfo{
-			Code:           envelope.Code,
-			CurrentState:   envelope.CurrentState,
-			CurrentVersion: envelope.CurrentVersion,
-			UpdatedBy:      envelope.UpdatedBy,
-			UpdatedByName:  envelope.UpdatedByName,
-			UpdatedAt:      envelope.UpdatedAt,
+	if json.Unmarshal(body, &envelope) == nil {
+		failure.Code = envelope.Code
+		if envelope.Code == "po_version_conflict" {
+			failure.Conflict = &ConflictInfo{
+				Code:           envelope.Code,
+				CurrentState:   envelope.CurrentState,
+				CurrentVersion: envelope.CurrentVersion,
+				UpdatedBy:      envelope.UpdatedBy,
+				UpdatedByName:  envelope.UpdatedByName,
+				UpdatedAt:      envelope.UpdatedAt,
+			}
 		}
 	}
 	return failure

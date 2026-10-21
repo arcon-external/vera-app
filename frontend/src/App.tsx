@@ -1976,10 +1976,10 @@ function App() {
             uomOptions={storedUoMs ?? []}
             incotermOptions={INCOTERM_OPTIONS}
             mode={poCorrecting ? "correction" : "draft"}
+            onCorrectionStart={() => setPOCorrecting(true)}
             onDirtyChange={poLeave.setDirty}
-            onSaved={(updated) => {
+            onSaved={(updated, corrected) => {
               setPODraft(updated);
-              const corrected = poCorrecting;
               setPOCorrecting(false);
               pushToast(
                 "success",

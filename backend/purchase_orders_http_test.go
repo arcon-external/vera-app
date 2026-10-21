@@ -474,6 +474,35 @@ func TestUpdatePurchaseOrderDraftReturnsATypedConflict(t *testing.T) {
 	}
 }
 
+// TestUpdatePurchaseOrderDraftReturnsASavedRecordAnswer is wave 2 of #473: a
+// po_not_draft refusal is a typed answer, not an error string. The editor keeps
+// the working copy and offers the correction flow instead of dead-ending on
+// "only a draft can be edited" after a staff member chose Overwrite.
+func TestUpdatePurchaseOrderDraftReturnsASavedRecordAnswer(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{
+			"error": "only a draft can be edited",
+			"code": "po_not_draft"
+		}`))
+	})
+
+	q := newTestQuotation()
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 5, Overwrite: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft returned an error for a saved record: %v", err)
+	}
+	if !result.SavedRecord {
+		t.Error("SavedRecord = false; want the correction-flow answer")
+	}
+	if result.Order != nil || result.Conflict != nil {
+		t.Errorf("result = %+v; want neither an order nor a version conflict", result)
+	}
+}
+
 // TestCorrectPurchaseOrderPostsTheReasonAndVersion proves the saved record's
 // one write path: a reason travels with the editable values, the version is
 // stated, and no protected identity field is sent.
