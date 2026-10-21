@@ -12,6 +12,7 @@ import {
   type POListAction,
   type POListPageDTO,
   type POListRowDTO,
+  type POListSourceMissingFilter,
   type POListState,
   type POListStateFilter,
 } from "../poList";
@@ -62,6 +63,15 @@ const STATE_OPTIONS = [
   { value: "", label: "All states" },
   { value: "draft", label: "Draft" },
   { value: "saved", label: "Saved" },
+];
+
+// #481: the source state is an independent predicate, not a third entry
+// state. The server names the modes "only" and "exclude"; the labels say what
+// the reader sees so neither a Draft nor a Saved record is implied to move.
+const SOURCE_OPTIONS = [
+  { value: "any", label: "Any source" },
+  { value: "only", label: "Source missing only" },
+  { value: "exclude", label: "Source present only" },
 ];
 
 function SourceMissingBadge() {
@@ -217,24 +227,21 @@ export function PurchaseOrderListView({
         </fieldset>
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-3 border-t border-rule pt-3">
-          <div className="grid gap-1">
-            <label
-              className="inline-flex w-fit cursor-not-allowed items-center gap-2 text-small text-ink-400"
-              title="Available when Quotation deletion ships"
-            >
-              <input
-                type="checkbox"
-                aria-label="Source missing only"
-                className="h-4 w-4 rounded border-rule"
-                checked={state.filters.sourceMissing === "only"}
-                disabled
-                aria-disabled="true"
-                readOnly
-              />
-              Source missing only
-            </label>
-            <p className="max-w-md text-caption text-ink-400">
-              Source-missing filtering arrives with the follow-up archive work.
+          <div className="grid min-w-44 gap-1.5">
+            <span className="text-small font-medium text-ink-700">Source</span>
+            <Select
+              ariaLabel="Source"
+              value={state.filters.sourceMissing}
+              options={SOURCE_OPTIONS}
+              onChange={(value) =>
+                dispatch({
+                  type: "filtersChanged",
+                  patch: { sourceMissing: value as POListSourceMissingFilter },
+                })
+              }
+            />
+            <p className="max-w-xs text-caption text-ink-400">
+              Source missing is independent of Draft/Saved.
             </p>
           </div>
           <div className="flex items-center gap-2.5">
@@ -341,7 +348,9 @@ export function PurchaseOrderListView({
                           {row.QuoteNumber}
                         </span>
                         <p className="text-caption text-ink-400">
-                          Revision {row.SourceRevision}
+                          {row.SourceMissing
+                            ? `Former quotation · revision ${row.SourceRevision}`
+                            : `Revision ${row.SourceRevision}`}
                         </p>
                         {row.SourceMissing ? <SourceMissingBadge /> : null}
                       </td>

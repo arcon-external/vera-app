@@ -18,9 +18,9 @@ import (
 const PurchaseOrderListPageSize = 15
 
 // The source-missing filter values. "any" is the default; "only" and "exclude"
-// make the source-missing state an independent predicate. Until #480/#481 ship
-// deletion and repair, purchase_orders.quotation_id is NOT NULL with a live
-// foreign key, so no row can match "only".
+// make the source-missing state an independent predicate. #480 makes the state
+// real: deletion releases purchase_orders.quotation_id and keeps a former
+// source reference, while #481 repairs it through the admin link flow.
 const (
 	PurchaseOrderSourceMissingAny     = "any"
 	PurchaseOrderSourceMissingOnly    = "only"
@@ -81,10 +81,11 @@ type PurchaseOrderListPage struct {
 // more ids, the received-date range is inclusive, and Draft/Saved is the stored
 // entry state -- never an invented fulfilment or payment status.
 //
-// SourceMissing is derived from the Quotation join, not from a column: when
-// deletion ships, the retained PO must keep reading without its source. Today
-// the foreign key makes a missing source impossible, so "only" answers zero
-// rows and the predicate stays inert rather than pretending the feature exists.
+// SourceMissing is derived from the Quotation join, not from a column: a
+// retained PO keeps reading without its source because deletion nulls
+// quotation_id and copies the former number and revision onto the row. "only"
+// therefore answers the survivors #481 repairs, and "exclude" hides them
+// without changing the stored entry state.
 func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQuery) (PurchaseOrderListPage, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {

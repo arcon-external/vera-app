@@ -220,7 +220,7 @@ export function Badge({
   tone = "neutral",
   children,
 }: {
-  tone?: "neutral" | "internal" | "success" | "accent";
+  tone?: "neutral" | "internal" | "success" | "accent" | "danger";
   children: ReactNode;
 }) {
   const tones = {
@@ -228,6 +228,7 @@ export function Badge({
     internal: "border-internal-200 bg-internal-50 text-internal-700",
     success: "border-success-200 bg-success-50 text-success-700",
     accent: "border-accent-200 bg-accent-50 text-accent-700",
+    danger: "border-danger-200 bg-danger-50 text-danger-700",
   } as const;
   return (
     <span

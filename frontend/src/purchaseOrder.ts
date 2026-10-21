@@ -84,6 +84,13 @@ export interface PurchaseOrderDTO {
   /** The deliberate no-PDF confirmation recorded by the final save (#471). */
   PdfAbsentConfirmed?: boolean;
   /**
+   * The #480 state: the Quotation this record followed was permanently
+   * deleted. It is independent of Draft/Saved, and the record keeps its own
+   * values plus a former-source reference until an admin repairs the link
+   * (#481).
+   */
+  SourceMissing?: boolean;
+  /**
    * The optional customer-system confirmation reference (#474). Null until
    * staff assign it; after that it is immutable. ConfirmationWarn follows the
    * stored customer-year sequence.

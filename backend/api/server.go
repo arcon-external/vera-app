@@ -136,8 +136,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// #475: repairing the saved source link is admin-only. The review reads the
 	// candidate revision without writing; the repair repeats the #471 difference
 	// rules and records the old/new link and the choices.
-	server.echo.POST("/v1/purchase-orders/:id/source-repair/review", server.reviewPurchaseOrderSource, server.requireSession, server.requireAdmin)
-	server.echo.POST("/v1/purchase-orders/:id/source-repair", server.repairPurchaseOrderSource, server.requireSession, server.requireAdmin)
+	// #481: the refusal a non-admin receives is the same typed code the store
+	// would return, so the link-repair contract has one answer at every layer.
+	server.echo.POST("/v1/purchase-orders/:id/source-repair/review", server.reviewPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
+	server.echo.POST("/v1/purchase-orders/:id/source-repair", server.repairPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
 	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.
@@ -344,12 +346,26 @@ func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 
 // requireAdmin denies non-admin callers. It must run after requireSession.
 func (s *Server) requireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(context echo.Context) error {
-		user, _ := context.Get("user").(store.AuthUser)
-		if err := auth.RequireRole(user, "admin"); err != nil {
-			return context.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	return s.requireAdminWithCode("")(next)
+}
+
+// requireAdminWithCode is requireAdmin with a stable machine-readable refusal
+// code. The store repeats every admin rule inside its transaction, and its
+// errors already carry a code; the route gate should not answer a different
+// shape just because it ran first. An empty code keeps the historical body.
+func (s *Server) requireAdminWithCode(code string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(context echo.Context) error {
+			user, _ := context.Get("user").(store.AuthUser)
+			if err := auth.RequireRole(user, "admin"); err != nil {
+				body := map[string]string{"error": err.Error()}
+				if code != "" {
+					body["code"] = code
+				}
+				return context.JSON(http.StatusForbidden, body)
+			}
+			return next(context)
 		}
-		return next(context)
 	}
 }
 
