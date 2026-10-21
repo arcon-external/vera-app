@@ -4,6 +4,33 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.3] - 2026-10-21
+
+### Added
+
+- **Copy an archived quotation into a new entry.** The archived quotation page
+  now has a Copy to clipboard button. Paste it anywhere on the quotation editor
+  to start a new unsaved quotation with the same customer, terms and line
+  items. The archived quotation number and revision are not reused, and a
+  quotation issued in a different currency or for an unknown customer is
+  refused rather than reinterpreting the figures.
+
+### Changed
+
+- **Unsplit description lines print as numbered rows.** When “Split into
+  sub-items” is off, each description line now prints beneath the item as its
+  own full-width row numbered 1.1, 1.2, …, instead of a bullet list. The item
+  keeps its own quantity and prices; items split into sub-items are unchanged.
+
+### Fixed
+
+- **Long quotation descriptions no longer freeze PDF export.** A description
+  line taller than a page could leave the PDF renderer retrying the same row
+  forever. Long rows now flow across pages, and no text is dropped.
+- **Editing an archived quotation now restores its customer and terms.** The
+  archive page was missing the customer code and payment/validity terms, so
+  Edit could open a revision with the customer unset and blank terms.
+
 ## [0.14.2] - 2026-10-20
 
 ### Changed
