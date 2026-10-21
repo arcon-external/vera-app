@@ -170,6 +170,12 @@ export type PurchaseOrderEditorAction =
   | { type: "saveConflict" }
   | { type: "versionAdopted"; version: number }
   | { type: "valuesReplaced"; header: PurchaseOrderHeader; lines: PurchaseOrderLine[] }
+  | {
+      type: "extractionApplied";
+      header: Partial<PurchaseOrderHeader>;
+      lines?: PurchaseOrderLine[];
+      nextKey: number;
+    }
   | { type: "saveFailed"; error: string }
   | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
 
@@ -955,6 +961,17 @@ export function purchaseOrderEditorReducer(
       // exist only as decisions. Applying them to the working copy before the
       // correction transition keeps the values the reviewer confirmed.
       return { ...state, header: action.header, lines: action.lines, error: null };
+    case "extractionApplied":
+      // #477: only the chosen proposals. Lines are replaced only when the
+      // staff member ticked at least one extracted row; otherwise the current
+      // entries stay exactly as they were.
+      return {
+        ...state,
+        header: { ...state.header, ...action.header },
+        lines: action.lines ?? state.lines,
+        nextKey: Math.max(state.nextKey, action.nextKey),
+        error: null,
+      };
     case "saveFailed":
       return { ...state, saving: false, error: action.error };
     case "saveSucceeded": {

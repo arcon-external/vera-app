@@ -2,7 +2,9 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
   FinalizePurchaseOrder,
+  GetPurchaseOrderExtraction,
   GetPurchaseOrderReview,
+  StartPurchaseOrderExtraction,
   UpdatePurchaseOrderDraft,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
@@ -37,7 +39,17 @@ import {
   type PurchaseOrderLineCalculation,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
+import {
+  applyExtractionSelection,
+  defaultExtractionSelection,
+  extractionErrorMessage,
+  extractionIsStale,
+  extractionProgressText,
+  isTerminalExtractionStatus,
+  type PurchaseOrderExtractionStateDTO,
+} from "../poExtraction";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
+import { PurchaseOrderExtractionPanelView } from "./PurchaseOrderExtractionPanel";
 import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
 import {
   PurchaseOrderDifferenceReviewView,
@@ -863,6 +875,161 @@ export function PurchaseOrderEditorPage({
   // Which write the warning belongs to: Overwrite resumes the same one.
   const [pendingWrite, setPendingWrite] = useState<"save" | "finalize">("save");
 
+  // #477: the extraction review. The run is the server's, the selection is
+  // local, and applying is the one action that moves a proposal into the
+  // working copy. A run is never applied automatically and a late response
+  // cannot overwrite a value staff has since edited: the selection starts from
+  // what the editor held when the result arrived, and Apply re-checks each
+  // ticked value against the current header.
+  const [extractionState, setExtractionState] =
+    useState<PurchaseOrderExtractionStateDTO | null>(null);
+  const [extractionSelection, setExtractionSelection] = useState<Record<string, boolean>>({});
+  const [extractionStarting, setExtractionStarting] = useState(false);
+  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [extractionApplied, setExtractionApplied] = useState<{
+    fields: number;
+    rows: number;
+  } | null>(null);
+  const [dismissedExtractionId, setDismissedExtractionId] = useState<number | null>(null);
+  const extractionPoll = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const extractionInitialized = useRef<number | null>(null);
+  // Async poll callbacks must see the editor as it is now, not as it was when
+  // the first response was scheduled.
+  const editorStateRef = useRef(state);
+  editorStateRef.current = state;
+
+  function clearExtractionPoll() {
+    if (extractionPoll.current !== null) {
+      clearTimeout(extractionPoll.current);
+      extractionPoll.current = null;
+    }
+  }
+
+  // Declared as a function so adoptExtraction and the poll can call each other
+  // without a render-time ordering problem; no timer fires during render.
+  function scheduleExtractionPoll(runId: number, attempt = 0) {
+    if (attempt >= 120) {
+      setExtractionError(
+        "Extraction has not reported a result after two minutes. Run Extract again, or enter the values manually."
+      );
+      clearExtractionPoll();
+      return;
+    }
+    clearExtractionPoll();
+    extractionPoll.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const next = await GetPurchaseOrderExtraction(order.ID);
+          const run = next.Run;
+          if (run !== null && run !== undefined && run.ID === runId && !isTerminalExtractionStatus(run.Status)) {
+            setExtractionState(next);
+            scheduleExtractionPoll(runId, attempt + 1);
+            return;
+          }
+          adoptExtraction(next);
+        } catch (pollError) {
+          setExtractionError(errorText(pollError));
+          clearExtractionPoll();
+        }
+      })();
+    }, 1000);
+  }
+
+  const adoptExtraction = (next: PurchaseOrderExtractionStateDTO) => {
+    setExtractionState(next);
+    const run = next.Run;
+    if (run != null && run.Status === "succeeded" && run.Result != null) {
+      if (extractionInitialized.current !== run.ID) {
+        extractionInitialized.current = run.ID;
+        const editor = editorStateRef.current;
+        setExtractionSelection(
+          defaultExtractionSelection(run.Result, editor.header, editor.lines, currency)
+        );
+      }
+    } else {
+      extractionInitialized.current = null;
+      setExtractionSelection({});
+    }
+    if (run != null && !isTerminalExtractionStatus(run.Status)) {
+      scheduleExtractionPoll(run.ID);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const next = await GetPurchaseOrderExtraction(order.ID);
+        if (!cancelled) adoptExtraction(next);
+      } catch (loadError) {
+        if (!cancelled) setExtractionError(errorText(loadError));
+      }
+    })();
+    return () => {
+      cancelled = true;
+      clearExtractionPoll();
+    };
+    // Re-reading is keyed to the record; the callbacks above are intentionally
+    // stable for its lifetime and read current values through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.ID]);
+
+  const refreshExtraction = () => {
+    clearExtractionPoll();
+    setDismissedExtractionId(null);
+    setExtractionApplied(null);
+    void (async () => {
+      try {
+        adoptExtraction(await GetPurchaseOrderExtraction(order.ID));
+      } catch (refreshError) {
+        setExtractionError(errorText(refreshError));
+      }
+    })();
+  };
+
+  const startExtraction = () => {
+    if (extractionStarting) return;
+    clearExtractionPoll();
+    setExtractionStarting(true);
+    setExtractionError(null);
+    setExtractionApplied(null);
+    setDismissedExtractionId(null);
+    void (async () => {
+      try {
+        adoptExtraction(await StartPurchaseOrderExtraction(order.ID));
+      } catch (startError) {
+        setExtractionError(errorText(startError));
+      } finally {
+        setExtractionStarting(false);
+      }
+    })();
+  };
+
+  const toggleExtraction = (key: string, selected: boolean) => {
+    setExtractionSelection((current) => ({ ...current, [key]: selected }));
+  };
+
+  const applyExtraction = () => {
+    const run = extractionState?.Run;
+    if (run == null || run.Result == null) return;
+    const applied = applyExtractionSelection(
+      run.Result,
+      extractionSelection,
+      state.header,
+      state.lines,
+      state.nextKey,
+      currency
+    );
+    if (applied.appliedFields === 0 && applied.appliedRows === 0) return;
+    dispatch({
+      type: "extractionApplied",
+      header: applied.headerPatch,
+      lines: applied.lines,
+      nextKey: state.nextKey + applied.appliedRows,
+    });
+    setExtractionApplied({ fields: applied.appliedFields, rows: applied.appliedRows });
+  };
+
   /**
    * Wave 2 of #473: carry the working copy into the correction flow at the
    * version the server named. Nothing is written here; the reason panel appears
@@ -1192,9 +1359,69 @@ export function PurchaseOrderEditorPage({
     );
   }
 
+  const extractionRun = extractionState?.Run ?? null;
+  const extractionStale =
+    extractionRun != null &&
+    extractionIsStale(extractionRun, extractionState?.Document ?? null);
+  const extractionInFlight =
+    extractionRun != null && !isTerminalExtractionStatus(extractionRun.Status);
+  const showExtractionPanel =
+    extractionRun?.Status === "succeeded" &&
+    extractionRun.Result != null &&
+    !extractionStale &&
+    dismissedExtractionId !== extractionRun.ID;
+
   return (
     <div className="flex flex-col gap-6">
-      <PurchaseOrderDocumentPanel purchaseOrderId={order.ID} />
+      <PurchaseOrderDocumentPanel
+        purchaseOrderId={order.ID}
+        onExtract={startExtraction}
+        extractionStatus={
+          extractionRun?.Status === "queued" || extractionRun?.Status === "running"
+            ? extractionRun.Status
+            : null
+        }
+        extractionStarting={extractionStarting}
+        onStateChange={() => refreshExtraction()}
+      />
+      {extractionError !== null ? (
+        <StatusBanner tone="danger">
+          {extractionError} You can still enter the values manually; the PDF stays
+          attached.
+        </StatusBanner>
+      ) : null}
+      {extractionInFlight ? (
+        <StatusBanner tone="info">
+          <span role="status">
+            {extractionProgressText(extractionRun?.Status ?? "queued")} You can keep
+            entering values while it runs.
+          </span>
+        </StatusBanner>
+      ) : null}
+      {extractionStale && !extractionInFlight ? (
+        <StatusBanner tone="info">
+          {extractionErrorMessage(extractionRun ?? { Status: "stale" })}
+        </StatusBanner>
+      ) : null}
+      {!extractionStale && extractionRun?.Status === "failed" ? (
+        <StatusBanner tone="danger">
+          {extractionErrorMessage(extractionRun)} The PDF stays attached and the manual
+          entry path is unchanged.
+        </StatusBanner>
+      ) : null}
+      {showExtractionPanel && extractionRun?.Result != null ? (
+        <PurchaseOrderExtractionPanelView
+          result={extractionRun.Result}
+          header={state.header}
+          lines={state.lines}
+          currency={currency}
+          selection={extractionSelection}
+          onToggle={toggleExtraction}
+          onApply={applyExtraction}
+          onDiscard={() => setDismissedExtractionId(extractionRun.ID)}
+          applied={extractionApplied}
+        />
+      ) : null}
       <PurchaseOrderEditorView
         state={state}
         dispatch={dispatch}

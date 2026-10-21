@@ -38,6 +38,8 @@ import {
   DeletionDialogView,
 } from "./components/DeletionDialog";
 import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
+import { PurchaseOrderExtractionPanelView, PurchaseOrderExtractionRowCard } from "./components/PurchaseOrderExtractionPanel";
+import type { PurchaseOrderExtractionResultDTO } from "./poExtraction";
 import { PurchaseOrderConflictPrompt } from "./components/PurchaseOrderConflictPrompt";
 import { PurchaseOrderHistoryPanel } from "./components/PurchaseOrderHistoryPanel";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
@@ -466,6 +468,96 @@ const PO_DOCUMENT_ATTACHED: PurchaseOrderDocumentStateDTO = {
       ReplacedAt: "2026-10-20T09:15:00Z",
     },
   ],
+};
+
+// The extraction review (issue #477): six header proposals with one absent and
+// one needs-review, and two table rows. The page map is drawn from the real
+// bbox, so the screenshot proves the evidence is visible beside the value and
+// that the narrow layout does not turn into a horizontal table.
+const PO_EXTRACTION_CELL = (value: string, status: string, page: number | null = 1) => ({
+  Value: value,
+  Raw: value,
+  Status: status,
+  Page: page,
+  BBox: page === null ? null : { X: 86, Y: 82, Width: 56, Height: 9 },
+  Confidence: null,
+  Note: "",
+});
+
+const PO_EXTRACTION_REVIEW: PurchaseOrderExtractionResultDTO = {
+  Engine: "poppler",
+  EngineVersion: "25.03.0",
+  PageCount: 2,
+  PagesWithText: 1,
+  PagesWithoutText: 1,
+  DurationMs: 64,
+  SchemaVersion: 1,
+  Pages: [
+    { Number: 1, Width: 595, Height: 842 },
+    { Number: 2, Width: 595, Height: 842 },
+  ],
+  Fields: [
+    { Key: "poNumber", Cell: PO_EXTRACTION_CELL("4500098123", "extracted") },
+    { Key: "poDate", Cell: PO_EXTRACTION_CELL("2026-10-20", "extracted") },
+    { Key: "requestedDeliveryDate", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "currency", Cell: PO_EXTRACTION_CELL("USD", "extracted") },
+    {
+      Key: "paymentTerms",
+      Cell: {
+        ...PO_EXTRACTION_CELL("45 days from delivery", "needs_review"),
+        Note: "The printed terms are not a standard net-days phrase; confirm them.",
+      },
+    },
+    { Key: "incoterms", Cell: PO_EXTRACTION_CELL("CIF Batam", "extracted") },
+  ],
+  Rows: [
+    {
+      LineNumber: PO_EXTRACTION_CELL("1", "extracted"),
+      Description: PO_EXTRACTION_CELL("Supply of electrical panels", "extracted"),
+      Quantity: PO_EXTRACTION_CELL("25", "extracted"),
+      UoM: PO_EXTRACTION_CELL("Lot", "extracted"),
+      UnitPrice: PO_EXTRACTION_CELL("1180.00", "extracted"),
+      Amount: PO_EXTRACTION_CELL("29500.00", "extracted"),
+      Status: "extracted",
+      Page: 1,
+      BBox: { X: 50, Y: 225, Width: 490, Height: 10 },
+      Note: "",
+    },
+    {
+      LineNumber: PO_EXTRACTION_CELL("2", "extracted"),
+      Description: PO_EXTRACTION_CELL("Cable termination", "extracted"),
+      Quantity: PO_EXTRACTION_CELL("", "absent", null),
+      UoM: PO_EXTRACTION_CELL("M", "extracted"),
+      UnitPrice: PO_EXTRACTION_CELL("42.00", "extracted"),
+      Amount: PO_EXTRACTION_CELL("420.00", "extracted"),
+      Status: "needs_review",
+      Page: 2,
+      BBox: { X: 50, Y: 225, Width: 490, Height: 10 },
+      Note: "The quantity cell is empty; the printed row needs a manual check.",
+    },
+  ],
+  Abstentions: { Fields: 2, Rows: 1 },
+};
+
+const PO_EXTRACTION_NO_TEXT: PurchaseOrderExtractionResultDTO = {
+  Engine: "poppler",
+  EngineVersion: "25.03.0",
+  PageCount: 1,
+  PagesWithText: 0,
+  PagesWithoutText: 1,
+  DurationMs: 12,
+  SchemaVersion: 1,
+  Pages: [{ Number: 1, Width: 595, Height: 842 }],
+  Fields: [
+    { Key: "poNumber", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "poDate", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "requestedDeliveryDate", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "currency", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "paymentTerms", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+    { Key: "incoterms", Cell: PO_EXTRACTION_CELL("", "absent", null) },
+  ],
+  Rows: [],
+  Abstentions: { Fields: 6, Rows: 0 },
 };
 
 // The final-save review (issue #471): the exact source revision beside the
@@ -1578,15 +1670,79 @@ const CASES: SnapshotCase[] = [
   {
     // The attachment panel with version 2 active and version 1 retained
     // (#472): filename, size, "Version 2 of 2", View, Replace and Remove.
+    // #477 enables Extract and compare and states the text-layer limit.
     name: "PurchaseOrderDocumentAttached",
     element: (
       <PurchaseOrderDocumentPanelView
         state={PO_DOCUMENT_ATTACHED}
+        onExtract={() => undefined}
         onChooseFile={() => undefined}
         onView={() => undefined}
         onRemove={() => undefined}
         onConfirmRemove={() => undefined}
         onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // The extraction review (#477): every header field with its status and
+    // page region, two line proposals, one absent cell and one needs-review
+    // row, and the one explicit Apply action. This is where the 360 layout
+    // proves the evidence does not become a horizontal scroll table.
+    name: "PurchaseOrderExtractionReview",
+    element: (
+      <PurchaseOrderExtractionPanelView
+        result={PO_EXTRACTION_REVIEW}
+        header={PO_EDITOR_INITIAL.header}
+        lines={PO_EDITOR_INITIAL.lines}
+        currency={PO_EDITOR_USD}
+        selection={{ "header:poNumber": true, "row:0": true }}
+        onToggle={() => undefined}
+        onApply={() => undefined}
+        onDiscard={() => undefined}
+      />
+    ),
+  },
+  {
+    // The extraction review's line cards (#477) in isolation: the full panel
+    // is taller than the 900px snapshot viewport, so this case proves the
+    // four-cell row grid and its evidence reflow at 360 without clipping money.
+    name: "PurchaseOrderExtractionRows",
+    element: (
+      <div className="grid gap-2">
+        <h3 className="text-small font-medium text-ink-700">Lines</h3>
+        <p className="text-caption text-ink-500">
+          Applying line proposals replaces the current 2 lines with the ticked rows.
+        </p>
+        <ul className="grid gap-2">
+          {PO_EXTRACTION_REVIEW.Rows.map((row, index) => (
+            <PurchaseOrderExtractionRowCard
+              key={`snapshot-row-${index}`}
+              row={row}
+              index={index}
+              currency={PO_EDITOR_USD}
+              selection={{ "row:0": true }}
+              onToggle={() => undefined}
+            />
+          ))}
+        </ul>
+      </div>
+    ),
+  },
+  {
+    // An image-only document (#477): the honest empty state. The panel says
+    // the text layer is empty, does not OCR, and offers no Apply.
+    name: "PurchaseOrderExtractionNoText",
+    element: (
+      <PurchaseOrderExtractionPanelView
+        result={PO_EXTRACTION_NO_TEXT}
+        header={PO_EDITOR_INITIAL.header}
+        lines={PO_EDITOR_INITIAL.lines}
+        currency={PO_EDITOR_USD}
+        selection={{}}
+        onToggle={() => undefined}
+        onApply={() => undefined}
+        onDiscard={() => undefined}
       />
     ),
   },

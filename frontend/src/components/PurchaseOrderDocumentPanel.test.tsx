@@ -80,14 +80,30 @@ describe("customer PO PDF panel", () => {
     expect(html).not.toContain("No customer PO PDF attached");
   });
 
-  it("keeps Extract and compare visibly disabled and says why", () => {
+  it("keeps Extract and compare disabled without a PDF and says why", () => {
     const empty = render();
     expect(empty).toContain("Extract and compare");
     expect(empty).toContain("disabled");
     expect(empty).toContain("Attach a customer PO PDF before extracting its data.");
+  });
 
-    const attached = render({ state: stateWith(1) });
-    expect(attached).toContain("Extraction is not available in this release.");
+  it("enables Extract and compare only where a proposal can be applied", () => {
+    const attached = render({ state: stateWith(1), onExtract: () => undefined });
+    expect(attached).toContain('aria-label="Extract and compare"');
+    expect(attached).not.toContain('aria-label="Extract and compare" disabled');
+
+    const savedView = render({ state: stateWith(1) });
+    expect(savedView).toContain("Correct this record to apply extracted proposals.");
+  });
+
+  it("shows honest progress while an extraction runs", () => {
+    const running = render({
+      state: stateWith(1),
+      onExtract: () => undefined,
+      extractionStatus: "running",
+    });
+    expect(running).toContain("Reading the PDF text…");
+    expect(running).toContain("Extracting…");
   });
 
   it("asks its own confirmation before removing the current PDF", () => {

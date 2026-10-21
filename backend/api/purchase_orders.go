@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"vera-app/backend/apicontract"
+	"vera-app/backend/extract"
 	"vera-app/backend/store"
 )
 
@@ -461,6 +462,21 @@ func purchaseOrderError(context echo.Context, err error) error {
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": "confirm removing the customer PO PDF",
 			"code":  "po_document_removal_unconfirmed",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderExtractionDocumentRequired):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_extraction_document_required",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderExtractionNotFound):
+		return context.JSON(http.StatusNotFound, map[string]string{
+			"error": "purchase order extraction not found",
+			"code":  "po_extraction_not_found",
+		})
+	case errors.Is(err, extract.ErrExtractorUnavailable):
+		return context.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": err.Error(),
+			"code":  "po_extraction_unavailable",
 		})
 	default:
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "purchase order operation failed"})

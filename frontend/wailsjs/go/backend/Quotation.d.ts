@@ -48,6 +48,8 @@ export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.Purch
 
 export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
 
+export function GetPurchaseOrderExtraction(arg1:number):Promise<backend.PurchaseOrderExtractionStateDTO>;
+
 export function GetPurchaseOrderHistory(arg1:number):Promise<Array<backend.PurchaseOrderCorrectionDTO>>;
 
 export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrderReviewDTO>;
@@ -103,6 +105,8 @@ export function SetRevisionContext(arg1:string,arg2:number):Promise<void>;
 export function SetStore(arg1:store.Store):Promise<void>;
 
 export function SetVerifyURL(arg1:string):Promise<void>;
+
+export function StartPurchaseOrderExtraction(arg1:number):Promise<backend.PurchaseOrderExtractionStateDTO>;
 
 export function UpdatePurchaseOrderDraft(arg1:backend.PurchaseOrderUpdateInput):Promise<backend.PurchaseOrderWriteResult>;
 

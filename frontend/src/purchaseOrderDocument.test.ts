@@ -94,10 +94,16 @@ describe("Extract and compare availability", () => {
     expect(availability.reason).toContain("Attach a customer PO PDF");
   });
 
-  it("remains disabled with a PDF until extraction ships", () => {
+  it("offers extraction with a PDF when the editor can apply proposals", () => {
     const availability = extractAndCompareAvailability("attached");
+    expect(availability.enabled).toBe(true);
+    expect(availability.hint).toContain("text layer");
+  });
+
+  it("explains the correction path on a read-only saved view", () => {
+    const availability = extractAndCompareAvailability("attached", false);
     expect(availability.enabled).toBe(false);
-    expect(availability.reason).toContain("not available");
+    expect(availability.reason).toContain("Correct this record");
   });
 });
 
