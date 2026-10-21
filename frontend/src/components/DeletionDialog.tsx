@@ -290,9 +290,7 @@ export function DeletionDialogView({
                 <span className="text-small text-ink-700">{preview.CustomerName}</span>
               </div>
               <p className="text-caption text-ink-500">
-                {preview.TargetType === "quotation"
-                  ? `Quotation ${preview.QuoteNumber}`
-                  : `Quotation ${preview.QuoteNumber} · revision ${preview.Version}`}
+                {`Quotation ${preview.QuoteNumber}`}
                 {preview.State !== "" ? ` · ${preview.State}` : ""}
               </p>
 

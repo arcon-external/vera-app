@@ -309,7 +309,7 @@ describe("deletion copy", () => {
   it("states what is removed and that backups expire on the retention schedule", () => {
     const state = loaded();
     const consequences = deletionScopeConsequences(state).join(" ");
-    expect(consequences).toContain("attachments");
+    expect(consequences).toContain("attachment");
     expect(consequences).toContain("history");
     expect(consequences).toContain("cannot be undone");
     expect(deletionReducer(state, { type: "previewLoaded", preview: preview() }).backupNotice)

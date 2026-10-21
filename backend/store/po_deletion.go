@@ -991,8 +991,10 @@ func deletionFingerprintOrder(fingerprint string) []string {
 // deletionChangeLabel names a fingerprint key in the words the modal shows.
 func deletionChangeLabel(key string) string {
 	switch key {
-	case "quotation_id", "quotation_uuid":
+	case "quotation_id":
 		return "Source quotation"
+	case "quotation_uuid":
+		return "Source quotation identity"
 	case "quotation_number":
 		return "Quotation number"
 	case "revisions":
@@ -1009,7 +1011,9 @@ func deletionChangeLabel(key string) string {
 		return "Purchase order state"
 	case "purchase_order_number":
 		return "Customer PO number"
-	case "purchase_order_id", "purchase_order_uuid":
+	case "purchase_order_id":
+		return "Purchase order"
+	case "purchase_order_uuid":
 		return "Purchase order identity"
 	}
 	if rest, ok := strings.CutPrefix(key, "purchase_order_"); ok {

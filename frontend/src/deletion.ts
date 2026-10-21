@@ -405,8 +405,8 @@ export function deletionScopeConsequences(state: DeletionState): string[] {
   );
   lines.push(
     state.scope === "chain"
-      ? `This permanently removes ${removed.length} connected documents, ${revisions} issued revisions, ${attachments} attachments and ${history} history versions. It cannot be undone.`
-      : `This permanently removes ${removed.length} document with ${revisions} issued revisions, ${attachments} attachments and ${history} history versions. It cannot be undone.`
+      ? `This permanently removes ${countLabel(removed.length, "connected document")}, ${countLabel(revisions, "issued revision")}, ${countLabel(attachments, "attachment")} and ${countLabel(history, "history version")}. It cannot be undone.`
+      : `This permanently removes ${countLabel(removed.length, "document")} with ${countLabel(revisions, "issued revision")}, ${countLabel(attachments, "attachment")} and ${countLabel(history, "history version")}. It cannot be undone.`
   );
   if (plan.Preserves.length > 0) {
     for (const row of plan.Preserves) {
@@ -447,6 +447,10 @@ export function formatChallengeExpiry(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(parsed);
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
 /** The preview's document number in the modal's title area. */
