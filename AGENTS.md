@@ -437,7 +437,7 @@ Close the issue only after:
 
 ## 12. The Orchestrated Workflow
 
-Work on an issue is run by an **orchestrator** — the assistant — directing four
+Work on an issue is run by an **orchestrator** — the assistant — directing five
 subordinate roles. The orchestrator plans, decides and verifies; the subordinates
 do their role and stop. No issue is started without a plan and none is merged
 without validation.
@@ -450,6 +450,7 @@ without validation.
 | **Riddler** | `opencode-go/deepseek-v4.1-flash#max`                                     | Interrogates a problem into questions. It never verifies, never decides.       |
 | **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh`                          | Advises on what to do next. It advises; it never decides.                      |
 | **Judge**   | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| **Checker** | `opencode-go/muse-spark-1.3-contributor`                                  | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
@@ -484,6 +485,18 @@ changed, never what was tried and abandoned, and the abandoned attempt is often 
 most useful thing in the report.
 
 **The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not.
+
+**The Checker watches CI after every push.** It is dispatched in the background
+against the pushed SHA and reports **every** check, not just the first red one. A
+check that is pending, skipped, cancelled or missing is **not green**, and a green
+run on an older SHA is **stale** — both are reported as failures of the read, not
+as passes. For each red check it reads the log to the decisive step or test, quotes
+the line, and classifies the cause as **code** (a test or compile failure the
+Worker must fix) or **infrastructure** (timeout, missing binary, network, runner
+capacity). It never edits, reruns or merges anything, and it never guesses: if the
+checks are still running it says so and when to look again. The agent type lives
+at `.opencode/agents/checker.md`; dispatch it every time a push changes the PR
+head, and carry its read in the orchestrator's report.
 
 **The Riddler interrogates the problem.** Fed one or more problems, it produces 10–20
 questions per problem that map the surface before anyone designs against it. Its
@@ -693,6 +706,8 @@ corrupt. Every exit code is read directly (Section 12.5).
    saved, and what the next run should do differently.
 5. The Dependabot read — before the PR and after the merge (Section 11). Both, not
    one.
+6. The Checker's CI read for the pushed SHA — every check, or the failure with its
+   decisive log line and whether it is code or infrastructure.
 
 The report goes on the **issue**, because the written record is what §12.6 says does
 the enforcing; the reply to the user carries the same thing in short form.
