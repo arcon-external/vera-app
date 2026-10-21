@@ -353,6 +353,260 @@ func TestDeleteQuotationRecordKeepsItsPOAsSourceMissingAndReadable(t *testing.T)
 	}
 }
 
+// deleteQuotationRecordWithFreshPreview removes only the quotation, leaving the
+// connected Purchase Order source-missing. It is the setup both regressions
+// below need.
+func deleteQuotationRecordWithFreshPreview(t *testing.T, database *Store, admin AuthUser, ctx context.Context, quotation QuotationRecord) {
+	t.Helper()
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType:          DeletionTargetQuotation,
+		TargetID:            quotation.ID,
+		Scope:               DeletionScopeRecord,
+		Reason:              "source removed to exercise the survivor",
+		TypedNumber:         quotation.QuoteNumber,
+		ExpectedFingerprint: preview.Fingerprint,
+		ActorID:             admin.ID,
+	}); err != nil {
+		t.Fatalf("delete the quotation record: %v", err)
+	}
+}
+
+// assertDeletionChange names one canonical fingerprint key and its new value.
+func assertDeletionChange(t *testing.T, changes []DeletionChange, field, after string) {
+	t.Helper()
+	for _, change := range changes {
+		if change.Field != field {
+			continue
+		}
+		if change.After != after {
+			t.Errorf("change %q after = %q; want %q", field, change.After, after)
+		}
+		return
+	}
+	t.Errorf("changes = %+v; want %q named", changes, field)
+}
+
+// TestSourceMissingDeletionFingerprintCoversADocumentUploadedAfterPreview is the
+// Judge's #480 reproduction: the quotation is deleted first, the surviving
+// Purchase Order is previewed, and a customer PDF arrives before the
+// confirmation. The old fingerprint omitted the record's own attachment count
+// whenever the source was missing, so confirming it deleted the new file too.
+func TestSourceMissingDeletionFingerprintCoversADocumentUploadedAfterPreview(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_source_missing_document")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Late PDF", "PO-480-LATE-PDF")
+	admin := deletionUser(t, database, "admin")
+	deleteQuotationRecordWithFreshPreview(t, database, admin, ctx, quotation)
+
+	preview := previewFor(t, database, admin, DeletionTargetPurchaseOrder, saved.ID)
+	if _, err := database.AttachPurchaseOrderDocument(ctx, PurchaseOrderDocumentUpload{
+		PurchaseOrderID: saved.ID,
+		Filename:        "arrived-after-preview.pdf",
+		Data:            minimalPDF(nil, ""),
+		UploadedBy:      admin.ID,
+	}); err != nil {
+		t.Fatalf("attach a document after the preview: %v", err)
+	}
+
+	fresh := previewFor(t, database, admin, DeletionTargetPurchaseOrder, saved.ID)
+	if fresh.Fingerprint == preview.Fingerprint {
+		t.Fatal("a document uploaded after the preview left the fingerprint unchanged")
+	}
+
+	_, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType:          DeletionTargetPurchaseOrder,
+		TargetID:            saved.ID,
+		Scope:               DeletionScopeRecord,
+		Reason:              "delete the record",
+		TypedNumber:         saved.PONumber,
+		ExpectedFingerprint: preview.Fingerprint,
+		ActorID:             admin.ID,
+	})
+	var changed *DeletionChainChangedError
+	if !errors.As(err, &changed) {
+		t.Fatalf("stale confirmation error = %v; want DeletionChainChangedError", err)
+	}
+	assertDeletionChange(t, changed.Changes,
+		fmt.Sprintf("purchase_order_%d_documents", saved.ID), "1")
+
+	if countRows(t, database, "purchase_orders", "id = $1", saved.ID) != 1 {
+		t.Fatal("a stale confirmation deleted the purchase order")
+	}
+	if countRows(t, database, "purchase_order_documents", "purchase_order_id = $1", saved.ID) != 1 {
+		t.Fatal("a stale confirmation deleted the document uploaded after the preview")
+	}
+	if n := countRows(t, database, "deletion_audits",
+		"target_type = $1 AND target_id = $2", DeletionTargetPurchaseOrder, saved.ID); n != 0 {
+		t.Fatalf("audits = %d; want 0 after a refused confirmation", n)
+	}
+
+	// The fresh confirmation covers the file the admin has now been shown and
+	// removes it with the record.
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType:          DeletionTargetPurchaseOrder,
+		TargetID:            saved.ID,
+		Scope:               DeletionScopeRecord,
+		Reason:              "delete the record",
+		TypedNumber:         saved.PONumber,
+		ExpectedFingerprint: fresh.Fingerprint,
+		ActorID:             admin.ID,
+	}); err != nil {
+		t.Fatalf("delete with the fresh fingerprint: %v", err)
+	}
+	if countRows(t, database, "purchase_order_documents", "purchase_order_id = $1", saved.ID) != 0 {
+		t.Fatal("the confirmed deletion left the purchase order document behind")
+	}
+}
+
+// TestSourceMissingDeletionFingerprintCoversHistoryAddedAfterPreview is the same
+// hole for the history count: a correction snapshot that arrives after the
+// preview must invalidate the confirmation, not be deleted unconfirmed.
+func TestSourceMissingDeletionFingerprintCoversHistoryAddedAfterPreview(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_source_missing_history")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Late History", "PO-480-LATE-HISTORY")
+	admin := deletionUser(t, database, "admin")
+	deleteQuotationRecordWithFreshPreview(t, database, admin, ctx, quotation)
+
+	preview := previewFor(t, database, admin, DeletionTargetPurchaseOrder, saved.ID)
+	insertDeletionHistoryRow(t, database, saved.ID)
+
+	fresh := previewFor(t, database, admin, DeletionTargetPurchaseOrder, saved.ID)
+	if fresh.Fingerprint == preview.Fingerprint {
+		t.Fatal("a history row added after the preview left the fingerprint unchanged")
+	}
+
+	_, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType:          DeletionTargetPurchaseOrder,
+		TargetID:            saved.ID,
+		Scope:               DeletionScopeRecord,
+		Reason:              "delete the record",
+		TypedNumber:         saved.PONumber,
+		ExpectedFingerprint: preview.Fingerprint,
+		ActorID:             admin.ID,
+	})
+	var changed *DeletionChainChangedError
+	if !errors.As(err, &changed) {
+		t.Fatalf("stale confirmation error = %v; want DeletionChainChangedError", err)
+	}
+	assertDeletionChange(t, changed.Changes,
+		fmt.Sprintf("purchase_order_%d_history", saved.ID), "1")
+
+	if countRows(t, database, "purchase_orders", "id = $1", saved.ID) != 1 {
+		t.Fatal("a stale confirmation deleted the purchase order")
+	}
+	if countRows(t, database, "purchase_order_corrections", "purchase_order_id = $1", saved.ID) != 1 {
+		t.Fatal("a stale confirmation deleted the history row added after the preview")
+	}
+	if n := countRows(t, database, "deletion_audits",
+		"target_type = $1 AND target_id = $2", DeletionTargetPurchaseOrder, saved.ID); n != 0 {
+		t.Fatalf("audits = %d; want 0 after a refused confirmation", n)
+	}
+
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType:          DeletionTargetPurchaseOrder,
+		TargetID:            saved.ID,
+		Scope:               DeletionScopeRecord,
+		Reason:              "delete the record",
+		TypedNumber:         saved.PONumber,
+		ExpectedFingerprint: fresh.Fingerprint,
+		ActorID:             admin.ID,
+	}); err != nil {
+		t.Fatalf("delete with the fresh fingerprint: %v", err)
+	}
+	if countRows(t, database, "purchase_order_corrections", "purchase_order_id = $1", saved.ID) != 0 {
+		t.Fatal("the confirmed deletion left the history row behind")
+	}
+}
+
+// insertDeletionHistoryRow appends one correction snapshot directly. While a
+// record is source missing the store refuses every write that needs the frozen
+// source revision (#481 reopens that surface), so the row is arranged at the
+// table level: the fingerprint guard must cover the count however the row
+// arrives.
+func insertDeletionHistoryRow(t *testing.T, database *Store, id int64) {
+	t.Helper()
+	schema := database.configSchema()
+	if _, err := database.pool.Exec(context.Background(), fmt.Sprintf(`
+		INSERT INTO %s.purchase_order_corrections (
+			org_id, purchase_order_id, previous_version, resulting_version,
+			kind, state, reason, actor, quotation_id, source_revision,
+			quote_number, customer_id, customer_name, currency, tax_zone,
+			tax_category, received_date
+		)
+		SELECT po.org_id, po.id, po.version, po.version + 1,
+		       'correction', po.state, 'row added after the preview',
+		       po.updated_by, COALESCE(po.quotation_id, po.former_quotation_id, 0),
+		       po.source_revision, COALESCE(q.quote_number, po.former_quote_number, ''),
+		       po.customer_id, po.customer_name, po.currency, po.tax_zone,
+		       po.tax_category, po.received_date
+		FROM %s.purchase_orders po
+		LEFT JOIN %s.quotations q ON q.id = po.quotation_id
+		WHERE po.id = $1`, schema, schema, schema), id); err != nil {
+		t.Fatalf("insert a history row after the preview: %v", err)
+	}
+}
+
+// TestDeletionRefusesAQuotationFollowedByAnotherOrganization covers the
+// residual the Judge recorded: the quotation is invisible to this
+// organization's chain, so the foreign key used to abort the deletion as a
+// generic failure after rollback. The refusal is now named before any write.
+func TestDeletionRefusesAQuotationFollowedByAnotherOrganization(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_cross_org")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Cross Tenant", "Cross tenant")
+	admin := deletionUser(t, database, "admin")
+	schema := database.configSchema()
+
+	var otherOrg string
+	if err := database.pool.QueryRow(ctx, fmt.Sprintf(
+		`INSERT INTO %s.organizations (name) VALUES ('PT. Other Tenant') RETURNING id::text`,
+		schema)).Scan(&otherOrg); err != nil {
+		t.Fatalf("insert a second organization: %v", err)
+	}
+	if _, err := database.pool.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.purchase_orders (
+			org_id, quotation_id, source_revision, customer_id, customer_name,
+			received_date, currency, tax_zone, created_by, updated_by
+		)
+		SELECT $1::uuid, q.id, 0, q.customer_id, c.legal_name, CURRENT_DATE,
+		       'IDR', 'FTZ', $3, $3
+		FROM %s.quotations q
+		JOIN %s.customers c ON c.id = q.customer_id
+		WHERE q.id = $2`, schema, schema, schema), otherOrg, quotation.ID, user.ID); err != nil {
+		t.Fatalf("insert a purchase order in the other organization: %v", err)
+	}
+
+	if _, err := database.PreviewDeletion(ctx, DeletionPreviewInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID, ActorID: admin.ID,
+	}); !errors.Is(err, ErrDeletionCrossOrgLinked) {
+		t.Fatalf("cross-organization preview error = %v; want ErrDeletionCrossOrgLinked", err)
+	}
+	if _, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, ExpectedFingerprint: "v1", ActorID: admin.ID,
+	}); !errors.Is(err, ErrDeletionCrossOrgLinked) {
+		t.Fatalf("cross-organization challenge error = %v; want ErrDeletionCrossOrgLinked", err)
+	}
+	for _, scope := range []string{DeletionScopeRecord, DeletionScopeChain} {
+		if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+			TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+			Scope: scope, Reason: "cross-tenant attempt",
+			TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: "v1",
+			ActorID: admin.ID,
+		}); !errors.Is(err, ErrDeletionCrossOrgLinked) {
+			t.Fatalf("%s confirmation error = %v; want ErrDeletionCrossOrgLinked", scope, err)
+		}
+	}
+
+	if countRows(t, database, "quotations", "id = $1", quotation.ID) != 1 {
+		t.Fatal("a refused cross-organization deletion removed the quotation")
+	}
+	if n := countRows(t, database, "deletion_audits", ""); n != 0 {
+		t.Fatalf("audits = %d; want 0 after a refused cross-organization deletion", n)
+	}
+}
+
 func TestDeletionRequiresAReasonAndTheTypedNumber(t *testing.T) {
 	database := openTestSchema(t, "vera_po_delete_confirm")
 	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Confirm", "PO-480-CONFIRM")

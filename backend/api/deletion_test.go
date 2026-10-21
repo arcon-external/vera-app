@@ -1,10 +1,16 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v4"
+
+	"vera-app/backend/store"
 )
 
 // Issue #480: the authenticated deletion surface. These tests drive the real
@@ -232,6 +238,109 @@ func TestDeleteQuotationRecordOverAPILeavesThePOReadable(t *testing.T) {
 	rows, _ := body["purchaseOrders"].([]any)
 	if len(rows) != 1 {
 		t.Fatalf("sourceMissing=only rows = %v; want the surviving record", body["purchaseOrders"])
+	}
+}
+
+func TestDeleteSourceMissingPOStopsWhenADocumentArrivesAfterThePreview(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_delete_source_missing_late_document")
+	quotationID, quoteNumber := exportForSelector(t, server, token, quotationInput())
+	saved := savedPOOverAPI(t, server, token, quotationID)
+
+	// The Judge's reproduction: remove the source alone, preview the surviving
+	// record, then upload a customer PDF before the confirmation.
+	quotationPreview := previewDeletionOverAPI(t, server, token, "quotation", quotationID)
+	code, body := doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "quotation", "targetId": quotationID, "scope": "record",
+		"reason": "customer cancelled", "typedNumber": quoteNumber,
+		"expectedFingerprint": quotationPreview.Fingerprint,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("delete quotation record = %d (%v)", code, body)
+	}
+
+	preview := previewDeletionOverAPI(t, server, token, "purchase_order", saved.ID)
+	code, body = uploadPurchaseOrderDocument(t, server, token, saved.ID,
+		"arrived-after-preview.pdf", documentTestPDF("late"))
+	if code != http.StatusCreated {
+		t.Fatalf("upload after the preview = %d (%v)", code, body)
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "purchase_order", "targetId": saved.ID, "scope": "record",
+		"reason": "delete the record", "typedNumber": saved.PONumber,
+		"expectedFingerprint": preview.Fingerprint,
+	})
+	if code != http.StatusConflict || body["code"] != "deletion_chain_changed" {
+		t.Fatalf("stale confirmation = %d (%v); want 409/deletion_chain_changed", code, body)
+	}
+	field := "purchase_order_" + strconv.FormatInt(saved.ID, 10) + "_documents"
+	changes, _ := body["changes"].([]any)
+	named := false
+	for _, entry := range changes {
+		change, _ := entry.(map[string]any)
+		if change["field"] == field {
+			named = true
+			if change["after"] != "1" {
+				t.Errorf("changed document count after = %v; want 1", change["after"])
+			}
+		}
+	}
+	if !named {
+		t.Fatalf("changes = %v; want %s named", changes, field)
+	}
+	fresh, _ := body["preview"].(map[string]any)
+	if fresh == nil || fresh["fingerprint"] == preview.Fingerprint {
+		t.Fatalf("stale confirmation carries no fresh preview: %v", body["preview"])
+	}
+
+	// Nothing was deleted: the record and the unconfirmed document remain.
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(saved.ID, 10), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("record after a refused confirmation = %d (%v); want 200", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(saved.ID, 10)+"/document", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("document after a refused confirmation = %d (%v); want 200", code, body)
+	}
+
+	// The fresh preview is the confirmation the modal can renew with.
+	freshFingerprint, _ := fresh["fingerprint"].(string)
+	code, body = doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "purchase_order", "targetId": saved.ID, "scope": "record",
+		"reason": "delete the record", "typedNumber": saved.PONumber,
+		"expectedFingerprint": freshFingerprint,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("renewed confirmation = %d (%v)", code, body)
+	}
+}
+
+// TestDeletionErrorMapsACrossOrganizationLinkTo409 pins the HTTP shape of the
+// store's cross-organization refusal. A full HTTP fixture cannot carry a second
+// organization (the single-tenant resolver refuses two rows), so the store test
+// owns the end-to-end proof and this owns the response code.
+func TestDeletionErrorMapsACrossOrganizationLinkTo409(t *testing.T) {
+	server := &Server{}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/deletions", nil)
+	context := echo.New().NewContext(request, recorder)
+	if err := server.deletionError(context, "quotation", 1, store.ErrDeletionCrossOrgLinked); err != nil {
+		t.Fatalf("map cross-organization refusal: %v", err)
+	}
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d; want 409", recorder.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode refusal: %v (%s)", err, recorder.Body.String())
+	}
+	if body["code"] != "deletion_cross_org_linked" {
+		t.Fatalf("code = %v; want deletion_cross_org_linked", body["code"])
+	}
+	if message, _ := body["error"].(string); !strings.Contains(strings.ToLower(message), "another organization") {
+		t.Errorf("error = %q; want it to name the other organization", message)
 	}
 }
 

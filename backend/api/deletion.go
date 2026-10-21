@@ -170,6 +170,13 @@ func (s *Server) deletionError(context echo.Context, targetType string, targetID
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": err.Error(), "code": "deletion_scope_unavailable", "field": "scope",
 		})
+	case errors.Is(err, store.ErrDeletionCrossOrgLinked):
+		// The connected record belongs to another organization, so this
+		// organization cannot remove it and must not try: a conflict with the
+		// record's current connections, not a server failure.
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(), "code": "deletion_cross_org_linked",
+		})
 	case errors.Is(err, store.ErrDeletionInvalid):
 		return context.JSON(http.StatusBadRequest, map[string]string{
 			"error": err.Error(), "code": "deletion_invalid",
