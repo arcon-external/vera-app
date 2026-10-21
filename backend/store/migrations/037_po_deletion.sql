@@ -43,9 +43,12 @@
 -- any change refuses the write and the admin must renew the challenge. Letters
 -- are stored as a SHA-256 of their uppercase form, never as plaintext -- they are
 -- deliberate-action friction, not an authentication factor, and there is no
--- reason to keep them readable. A successful deletion deletes its challenge row
--- in the same transaction, and a new challenge opportunistically purges rows
--- that expired more than a day ago.
+-- reason to keep them readable. Retention is bounded rather than left to a
+-- background job: every path that can observe an expired challenge (preview,
+-- challenge issuance, confirmation) removes it, and a successful deletion
+-- removes every challenge for any record in the chain it touched in the same
+-- transaction. A challenge row therefore never outlives the deletion it names,
+-- and never outlives its expiry by more than the next deletion operation.
 --
 -- # Audit
 --
