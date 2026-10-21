@@ -421,3 +421,115 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     expect(html).toContain("cannot be edited, cleared or regenerated");
   });
 });
+
+describe("PurchaseOrderSavedView source missing (issue #481)", () => {
+  const missing = { SourceMissing: true, State: "saved" };
+
+  it("keeps Saved and names the deleted source independently", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    // Draft/Saved is still the record's own state; missing source is a second,
+    // independent fact and never replaces it.
+    expect(html).toContain(">Saved<");
+    expect(html).toContain(">Source missing<");
+    expect(html).toContain("The quotation this purchase order followed was permanently deleted");
+    expect(html).toContain("former quotation 1502260042 revision 1");
+    // The record's own readable values survive, with its confirmation number
+    // still absent rather than invented.
+    expect(html).toContain("PO-471");
+    expect(html).toContain("PT. Buyer");
+    expect(html).toContain("Not assigned");
+  });
+
+  it("records the no-new-downstream-document rule without claiming it works", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(html).toContain("No new Delivery Order or Invoice can be created from this purchase order until the source is linked.");
+    expect(html).toContain("This release does not create Delivery Orders or Invoices.");
+  });
+
+  it("offers Link Quotation to an admin and no action to staff", () => {
+    const admin = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(admin).toContain('aria-label="Link Quotation"');
+    expect(admin).not.toContain('aria-label="Repair source link"');
+    expect(admin).toContain("Link a quotation to repair the source");
+
+    const staff = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(staff).not.toContain('aria-label="Link Quotation"');
+    expect(staff).not.toContain('aria-label="Repair source link"');
+    expect(staff).toContain("An administrator can link a quotation");
+  });
+
+  it("keeps the live-source action wording when nothing is missing", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved" })}
+        currency={USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(html).not.toContain(">Source missing<");
+    expect(html).not.toContain("No new Delivery Order or Invoice");
+    expect(html).toContain('aria-label="Repair source link"');
+    expect(html).toContain('aria-label="Correct purchase order"');
+  });
+
+  it("does not offer a correction that the server would refuse while the source is missing", () => {
+    const staff = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(staff).not.toContain('aria-label="Correct purchase order"');
+
+    const admin = markup(
+      <PurchaseOrderSavedView
+        order={order(missing)}
+        currency={USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(admin).not.toContain('aria-label="Correct purchase order"');
+    expect(admin).toContain('aria-label="Link Quotation"');
+  });
+});

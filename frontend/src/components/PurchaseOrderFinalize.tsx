@@ -30,6 +30,7 @@ import type {
   PurchaseOrderDocumentState,
   PurchaseOrderDocumentStateDTO,
 } from "../purchaseOrderDocument";
+import { sourceReferenceLabel, sourceRepairActionLabel } from "../poRepair";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
@@ -815,13 +816,22 @@ export function PurchaseOrderSavedView({
             {order.PONumber}
           </h1>
           <p className="mt-1 text-body text-ink-500">
-            {order.CustomerName} · quotation {order.QuoteNumber} revision{" "}
-            {order.SourceRevision} · {order.Currency.toUpperCase()}
+            {order.CustomerName} · {sourceReferenceLabel(current)} ·{" "}
+            {order.Currency.toUpperCase()}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="success">Saved</Badge>
-          {onCorrect !== undefined ? (
+          {current.SourceMissing ? (
+            <Badge tone="danger">Source missing</Badge>
+          ) : null}
+          {/*
+            #481: a correction needs the frozen source revision to compare
+            against, and the server refuses one while the source is missing
+            (po_source_missing). Offering the action would be a dead end; the
+            admin's Link Quotation is the one repair path in this state.
+          */}
+          {onCorrect !== undefined && !current.SourceMissing ? (
             <Button size="sm" aria-label="Correct purchase order" onClick={onCorrect}>
               Correct
             </Button>
@@ -829,10 +839,10 @@ export function PurchaseOrderSavedView({
           {canRepairSource && onRepairSource !== undefined ? (
             <Button
               size="sm"
-              aria-label="Repair source link"
+              aria-label={sourceRepairActionLabel(current)}
               onClick={onRepairSource}
             >
-              Repair source link
+              {sourceRepairActionLabel(current)}
             </Button>
           ) : null}
         </div>
@@ -842,6 +852,23 @@ export function PurchaseOrderSavedView({
         Finalized entry data for later documents. This is not a business
         approval.
       </StatusBanner>
+      {current.SourceMissing ? (
+        <>
+          <StatusBanner tone="danger">
+            <span className="font-medium">Source missing. </span>
+            The quotation this purchase order followed was permanently deleted.
+            The purchase order, its recorded values and its customer PO PDF are
+            kept. No new Delivery Order or Invoice can be created from this
+            purchase order until the source is linked. This release does not
+            create Delivery Orders or Invoices.
+          </StatusBanner>
+          <p className="text-caption text-ink-500">
+            {canRepairSource
+              ? "Link a quotation to repair the source; the values above stay the starting point and the difference review is repeated."
+              : "An administrator can link a quotation to repair the source."}
+          </p>
+        </>
+      ) : null}
       <StatusBanner tone="info">
         Corrections need a reason and keep the values they replace in the
         correction history. The customer PO PDF can still be attached, replaced

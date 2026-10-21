@@ -446,6 +446,7 @@ describe("cancel from a saved-record correction (issue #473)", () => {
     expect(queryButton("Save correction")).toBeNull();
     expect(queryButton("Correct purchase order")).toBeNull();
   });
+});
 
 describe("source-link repair from the saved view (issue #475)", () => {
   async function flush(): Promise<void> {
@@ -532,4 +533,126 @@ describe("source-link repair from the saved view (issue #475)", () => {
   });
 });
 
+describe("source-missing record repair from the saved view (issue #481)", () => {
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function missingOrder(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
+    return order({
+      SourceMissing: true,
+      QuoteNumber: "1502260012",
+      ConfirmationNumber: "2302260001",
+      ...overrides,
+    });
+  }
+
+  function repairReview(record: PurchaseOrderDTO): PurchaseOrderReviewDTO {
+    return {
+      Order: record,
+      Source: {
+        QuotationID: 19,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260019",
+        CustomerID: record.CustomerID,
+        CustomerName: record.CustomerName,
+        Currency: "USD",
+        PaymentTerms: record.PaymentTerms,
+        Incoterms: record.Incoterms,
+        DiscountPercent: 0,
+        Lines: [
+          {
+            QuotationItemNo: 1,
+            QuotationSubNo: null,
+            LineLabel: "1",
+            Description: "Widget",
+            UoM: "Pc",
+            QuantityScaled: 20000,
+            UnitPriceMinor: 10000,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+          },
+        ],
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+      },
+      DocumentState: "none",
+    };
+  }
+
+  it("shows the banner and Link Quotation only to an admin, and no action to staff", async () => {
+    getMock.mockResolvedValue(missingOrder());
+    await act(async () => {
+      root.render(<Harness initialId={7} isAdmin={false} />);
+    });
+    await flush();
+    expect(document.body.textContent).toContain(
+      "The quotation this purchase order followed was permanently deleted"
+    );
+    expect(queryButton("Link Quotation")).toBeNull();
+    expect(queryButton("Repair source link")).toBeNull();
+    expect(document.body.textContent).toContain(
+      "An administrator can link a quotation to repair the source."
+    );
+
+    await act(async () => {
+      root.render(<Harness initialId={7} isAdmin />);
+    });
+    await flush();
+    expect(queryButton("Link Quotation")).not.toBeNull();
+  });
+
+  it("keeps the current values, records the reason and returns to a linked saved view", async () => {
+    const record = missingOrder({ DeliveryAddress: "Jl. Deleted Source 1" });
+    getMock.mockResolvedValue(record);
+    repairMock.mockResolvedValue({
+      Order: missingOrder({
+        SourceMissing: false,
+        QuoteNumber: "1502260019",
+        SourceRevision: 1,
+        DeliveryAddress: "Jl. Deleted Source 1",
+        Version: 5,
+      }),
+      Conflict: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <Harness initialId={7} isAdmin repairReview={repairReview(record)} />
+      );
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Former source (deleted)");
+
+    // The review starts from the record's own values with nothing preselected,
+    // and continuing is allowed because every compared value matches.
+    await act(async () => {
+      button("Continue to repair").click();
+    });
+    typeInto("Reason for repairing the source link", "recover the deleted source");
+    await act(async () => {
+      button("Link Quotation").click();
+    });
+    await flush();
+
+    expect(repairMock).toHaveBeenCalledTimes(1);
+    const input = repairMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(input.TargetQuotationID).toBe(19);
+    expect(input.TargetRevisionNumber).toBe(1);
+    expect(input.ExpectedVersion).toBe(record.Version);
+    expect(input.Reason).toBe("recover the deleted source");
+    expect(input.DeliveryAddress).toBe("Jl. Deleted Source 1");
+
+    // The server's repaired record replaces the saved view: the missing-source
+    // banner is gone and the new link is what the page names.
+    expectSavedView();
+    expect(document.body.textContent).not.toContain(
+      "The quotation this purchase order followed was permanently deleted"
+    );
+    expect(document.body.textContent).toContain("quotation 1502260019 revision 1");
+  });
 });

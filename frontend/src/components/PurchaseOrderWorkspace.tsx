@@ -10,6 +10,7 @@
 import type { CompanyUnitOption } from "../companyUnits";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
@@ -116,7 +117,7 @@ export function PurchaseOrderWorkspacePage({
         order={draft}
         currency={currency}
         onCorrect={workspace.correct}
-        canRepairSource={isAdmin}
+        canRepairSource={canRepairSource(draft, isAdmin)}
         onRepairSource={onRepairSource}
         onAssigned={workspace.assigned}
         onBack={onBack}

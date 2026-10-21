@@ -19,6 +19,8 @@ import {
   canRepairSource,
   repairConflictWarning,
   repairReasonError,
+  sourceReferenceLabel,
+  sourceRepairActionLabel,
   sourceRepairSummary,
 } from "./poRepair";
 
@@ -143,6 +145,31 @@ describe("source repair visibility", () => {
     expect(canRepairSource(order(), true)).toBe(true);
     expect(canRepairSource(order(), false)).toBe(false);
     expect(canRepairSource(order({ State: "draft" }), true)).toBe(false);
+    // A missing source does not loosen the role or the state rule (#481): it
+    // is the same saved-record admin operation with different wording.
+    expect(canRepairSource(order({ SourceMissing: true }), true)).toBe(true);
+    expect(canRepairSource(order({ SourceMissing: true }), false)).toBe(false);
+    expect(
+      canRepairSource(order({ SourceMissing: true, State: "draft" }), true)
+    ).toBe(false);
+  });
+});
+
+describe("source-missing wording (issue #481)", () => {
+  it("calls the operation Link Quotation only when the source was deleted", () => {
+    expect(sourceRepairActionLabel(order({ SourceMissing: true }))).toBe(
+      "Link Quotation"
+    );
+    expect(sourceRepairActionLabel(order())).toBe("Repair source link");
+  });
+
+  it("presents a deleted link as the former source, never as current", () => {
+    expect(sourceReferenceLabel(order({ SourceMissing: true }))).toBe(
+      "former quotation 1502260001 revision 0"
+    );
+    expect(sourceReferenceLabel(order())).toBe(
+      "quotation 1502260001 revision 0"
+    );
   });
 });
 

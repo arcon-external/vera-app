@@ -12,7 +12,7 @@ import (
 // Issue #469: the authenticated HTTP surface of the PO archive. These tests
 // drive the real server and disposable Postgres through public behaviour: the
 // page shape, the three search fields, the customer/date/state filters, the
-// inert source-missing predicate, the customer facet, validation and the
+// source-missing predicate, the customer facet, validation and the
 // session gate. The two-organization proof lives at the store seam, where a
 // second organization can exist without breaking the single seeded one.
 
@@ -269,14 +269,14 @@ func TestPurchaseOrderListCustomerFacetIsOrgWideAndIndependentOfThePage(t *testi
 	}
 }
 
-func TestPurchaseOrderListSourceMissingIsAcceptedButInert(t *testing.T) {
+func TestPurchaseOrderListSourceMissingPredicateOnLiveRows(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_list_source_missing")
 	quotationID, _ := exportForPOList(t, server, token, 2, "Live source")
 	order := createPOForAPITest(t, server, token, quotationID, "2026-02-10")
 
 	only := listPurchaseOrders(t, server, token, "?sourceMissing=only")
 	if len(only.PurchaseOrders) != 0 || only.Total != 0 {
-		t.Errorf("sourceMissing=only = %+v; no record can be missing its source today", only.PurchaseOrders)
+		t.Errorf("sourceMissing=only = %+v; a live link is not missing", only.PurchaseOrders)
 	}
 	excluded := listPurchaseOrders(t, server, token, "?sourceMissing=exclude")
 	if len(excluded.PurchaseOrders) != 1 || excluded.PurchaseOrders[0].ID != order.ID {

@@ -6,8 +6,8 @@ package apicontract
 
 // PurchaseOrderListRow is one archive row. PONumber is the customer's own
 // number and stays empty until it is entered; QuoteNumber identifies the exact
-// source Quotation. SourceMissing is always false until deletion ships (#480),
-// at which point the retained PO can outlive its Quotation.
+// source Quotation, or the former one when SourceMissing is true. Deletion
+// (#480) may remove the Quotation while the retained PO survives.
 type PurchaseOrderListRow struct {
 	UUID           string `json:"uuid"`
 	State          string `json:"state"`
@@ -19,7 +19,10 @@ type PurchaseOrderListRow struct {
 	ID             int64  `json:"id"`
 	CustomerID     int64  `json:"customerId"`
 	SourceRevision int16  `json:"sourceRevision"`
-	SourceMissing  bool   `json:"sourceMissing"`
+	// SourceMissing is independent of the stored draft/saved state: true when
+	// the followed Quotation was permanently deleted (#480) and the row now
+	// carries a former-source reference until an admin repairs it (#481).
+	SourceMissing bool `json:"sourceMissing"`
 }
 
 // PurchaseOrderCustomerRow is one option of the customer multi-select. The

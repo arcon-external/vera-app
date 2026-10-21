@@ -52,6 +52,26 @@ export function canRepairSource(order: PurchaseOrderDTO, isAdmin: boolean): bool
   return isAdmin && order.State === "saved";
 }
 
+/**
+ * The saved view's action name (#481). A record whose Quotation was deleted is
+ * not being corrected against a known source; it is being linked to one for the
+ * first time, which is what the staff-facing wording should say. The operation
+ * and its rules are the same #475 repair either way.
+ */
+export function sourceRepairActionLabel(order: PurchaseOrderDTO): string {
+  return order.SourceMissing === true ? "Link Quotation" : "Repair source link";
+}
+
+/**
+ * The exact source link a saved record shows. A source-missing record carries
+ * a former-source reference rather than a live link, so the label says so
+ * instead of presenting a deleted quotation as current.
+ */
+export function sourceReferenceLabel(order: PurchaseOrderDTO): string {
+  const link = `quotation ${order.QuoteNumber} revision ${order.SourceRevision}`;
+  return order.SourceMissing === true ? `former ${link}` : link;
+}
+
 /** The repair payload the desktop binding sends, as the Go input names it. */
 export interface PurchaseOrderSourceRepairInput {
   ID: number;

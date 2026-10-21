@@ -12,8 +12,8 @@ import (
 // Issue #469: the PO archive reads purchase_orders, not quotations. These
 // tests drive the real store against a disposable schema: the fixed 15-row
 // page, newest received first, search over the three promised fields, the
-// customer/date/state filters, the inert source-missing contract, and the
-// #465 organization boundary.
+// customer/date/state filters, the source-missing predicate, and the #465
+// organization boundary.
 //
 // They observe stored behaviour only: the returned rows and their count. The
 // SQL behind them may change entirely.
@@ -458,7 +458,7 @@ func TestListPurchaseOrdersIsOrganizationScoped(t *testing.T) {
 	}
 }
 
-func TestListPurchaseOrdersSourceMissingContractIsInertUntilDeletionShips(t *testing.T) {
+func TestListPurchaseOrdersSourceMissingPredicateOnLiveRows(t *testing.T) {
 	database := openTestSchema(t, "vera_po_list_source_missing")
 	user := poTestUser(t, database)
 	ctx := poContext(t, database)
@@ -466,15 +466,14 @@ func TestListPurchaseOrdersSourceMissingContractIsInertUntilDeletionShips(t *tes
 	quotation := seedPOListQuotation(t, database, 2, "PT. Alpha", "Live source")
 	order := createPOForList(t, database, ctx, quotation, user, "2026-02-10")
 
-	// No record can be source-missing today: purchase_orders.quotation_id is
-	// NOT NULL with a live foreign key. The predicate is still accepted and
-	// answers zero, so #480/#481 can activate it without changing the API.
+	// A live link is never source missing: "only" answers zero for it. The
+	// reachable state after #480 deletion is covered by the repair suite.
 	only, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{SourceMissing: PurchaseOrderSourceMissingOnly, Page: 1})
 	if err != nil {
 		t.Fatalf("sourceMissing=only: %v", err)
 	}
 	if len(only.Rows) != 0 || only.Total != 0 {
-		t.Errorf("sourceMissing=only returned %+v; no record can be missing its source today", only.Rows)
+		t.Errorf("sourceMissing=only returned %+v; a live link is not missing", only.Rows)
 	}
 	excluded, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{SourceMissing: PurchaseOrderSourceMissingExclude, Page: 1})
 	if err != nil {

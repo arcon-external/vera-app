@@ -1,8 +1,10 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  activeFilterCount,
   initialPOListFilters,
   initialPOListState,
+  resetPOListFilters,
   type POListPageDTO,
   type POListRowDTO,
   type POListState,
@@ -198,7 +200,7 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     expect(missing).toContain(">Source missing<");
   });
 
-  it("keeps the Source missing filter independent, disabled, and honest", () => {
+  it("offers the Source missing filter as an independent, enabled predicate", () => {
     const html = render({
       state: state({
         rows: [row()],
@@ -207,15 +209,48 @@ describe("PurchaseOrderListView states (issue #469)", () => {
         totalPages: 1,
       }),
     });
-    const input = html
-      .split("<input")
-      .find((chunk) => chunk.includes('aria-label="Source missing only"'));
-    expect(input).toBeDefined();
-    expect(input?.slice(0, input.indexOf(">"))).toContain(" disabled=");
-    // #481 owns the filter surface; #480 only makes the state reachable, so the
-    // copy must stop claiming the state cannot exist.
-    expect(html).toContain("Source-missing filtering arrives with the follow-up archive work.");
+    const trigger = buttonTagFor(html, "Source");
+    expect(trigger).not.toContain(" disabled=");
+    expect(html).toContain("Any source");
+    expect(html).toContain("Source missing is independent of Draft/Saved.");
+    // #481 activates the filter; the #480 arrival note must be gone.
+    expect(html).not.toContain("Source-missing filtering arrives");
     expect(html).not.toContain("No purchase order can be missing its source today.");
+  });
+
+  it("renders each source-missing filter mode and counts it", () => {
+    const only = render({
+      state: state({
+        filters: { ...initialPOListFilters, sourceMissing: "only" },
+        rows: [row({ SourceMissing: true })],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(only).toContain("Source missing only");
+    expect(only).toContain("1 filter active");
+    expect(only).toContain("Former quotation");
+    expect(only).toContain(">Source missing<");
+
+    const excluded = render({
+      state: state({
+        filters: { ...initialPOListFilters, sourceMissing: "exclude" },
+        rows: [row()],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(excluded).toContain("Source present only");
+    expect(excluded).toContain("1 filter active");
+    expect(excluded).not.toContain("Former quotation");
+  });
+
+  it("resets the Source missing filter with the rest of the filters", () => {
+    // The reset action is the reducer's; the view must count the dimension so
+    // Reset is enabled and the label names it.
+    const missing = { ...initialPOListFilters, sourceMissing: "only" as const };
+    expect(activeFilterCount(missing)).toBe(1);
+    expect(resetPOListFilters().sourceMissing).toBe("any");
   });
 
   it("offers no delete control to a non-admin view", () => {

@@ -14,6 +14,7 @@ import {
   buildSourceRepairInput,
   repairConflictWarning,
   repairReasonError,
+  sourceRepairActionLabel,
   sourceRepairChoiceLabel,
 } from "../poRepair";
 import {
@@ -69,12 +70,13 @@ export function PurchaseOrderSourceChange({
   confirmationNumber: string | null;
 }) {
   const customerChanged = review.Order.CustomerID !== review.Source.CustomerID;
+  const sourceMissing = review.Order.SourceMissing === true;
   return (
     <Card className="p-4" data-source-repair>
       <SectionHeading title="Source link change" hint="Old link → new link" />
       <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
         <SourceSide
-          label="Current source"
+          label={sourceMissing ? "Former source (deleted)" : "Current source"}
           quoteNumber={review.Order.QuoteNumber}
           revision={review.Order.SourceRevision}
           customerName={review.Order.CustomerName}
@@ -90,6 +92,13 @@ export function PurchaseOrderSourceChange({
         />
       </div>
       <div className="mt-3 grid gap-1 text-small text-ink-700">
+        {sourceMissing ? (
+          <p>
+            The record keeps its current values and its confirmation number as
+            the starting point. The new revision is compared with those values
+            exactly as a final save compares them.
+          </p>
+        ) : null}
         <p>
           <span className="font-medium text-ink-900">Confirmation number: </span>
           {confirmationNumber === null || confirmationNumber === ""
@@ -154,6 +163,8 @@ export function PurchaseOrderRepairConfirmationView({
   const customerChanged = review.Order.CustomerID !== review.Source.CustomerID;
   const customerLocked =
     customerChanged && confirmationNumber !== null && confirmationNumber !== "";
+  const sourceMissing = review.Order.SourceMissing === true;
+  const actionLabel = sourceRepairActionLabel(review.Order);
   const total = evaluation.totals === null ? null : evaluation.totals.grandTotalMinor;
   return (
     <div className="flex flex-col gap-5">
@@ -168,6 +179,13 @@ export function PurchaseOrderRepairConfirmationView({
         </div>
         <Badge tone="accent">Source repair</Badge>
       </div>
+
+      {sourceMissing ? (
+        <StatusBanner tone="info">
+          The quotation this record followed was deleted. Its current values are
+          the starting point.
+        </StatusBanner>
+      ) : null}
 
       <PurchaseOrderSourceChange review={review} confirmationNumber={confirmationNumber} />
 
@@ -232,11 +250,15 @@ export function PurchaseOrderRepairConfirmationView({
         </Button>
         <Button
           variant="primary"
-          aria-label="Repair source link"
+          aria-label={actionLabel}
           disabled={saving || stale || reasonError !== null || customerLocked}
           onClick={onSave}
         >
-          {saving ? "Repairing…" : "Repair source link"}
+          {saving
+            ? sourceMissing
+              ? "Linking…"
+              : "Repairing…"
+            : actionLabel}
         </Button>
       </div>
     </div>
@@ -401,6 +423,14 @@ export function PurchaseOrderRepairPage({
 
   return (
     <div className="flex flex-col gap-5">
+      {review.Order.SourceMissing ? (
+        <StatusBanner tone="info">
+          The quotation this record followed was deleted. Linking a new
+          quotation starts from the record's current values and repeats the
+          difference review; the confirmation number is kept for a
+          same-customer link.
+        </StatusBanner>
+      ) : null}
       <PurchaseOrderSourceChange
         review={review}
         confirmationNumber={review.Order.ConfirmationNumber ?? null}

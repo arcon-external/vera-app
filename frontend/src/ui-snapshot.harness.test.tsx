@@ -591,11 +591,10 @@ const PO_REPAIR_EVALUATION = evaluateReview(
   []
 );
 
-// The PO archive (issue #469): a mixed page of drafts and a saved record, one
-// row without a customer PO number, the customer multi-select and the 31-row
-// pagination. The Source missing badge is deliberately absent: no record can
-// carry it until deletion ships, and a fixture that shows it would imply the
-// feature exists.
+// The PO archive (issue #469, #481): a mixed page of drafts and saved records,
+// one row without a customer PO number, one source-missing row whose former
+// quotation is named beside its own readable values, the independent Source
+// filter, the customer multi-select and the 31-row pagination.
 const PO_LIST_ROWS: POListRowDTO[] = [
   {
     UUID: "uuid-po-9",
@@ -635,6 +634,19 @@ const PO_LIST_ROWS: POListRowDTO[] = [
     CustomerID: 4,
     SourceRevision: 1,
     SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-6",
+    State: "saved",
+    PONumber: "PO-HTE-2026-08",
+    QuoteNumber: "1505260011",
+    CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    ReceivedDate: "2026-09-18",
+    Currency: "IDR",
+    ID: 6,
+    CustomerID: 3,
+    SourceRevision: 2,
+    SourceMissing: true,
   },
 ];
 const PO_LIST_CUSTOMERS = [
@@ -1486,6 +1498,33 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderSavedView
         order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // A saved record whose source Quotation was deleted (issue #481): the
+    // independent Source missing badge and banner, the former quotation named
+    // beside the record's own readable values, the no-new-downstream rule, and
+    // the admin-only Link Quotation action. Correct is absent because the
+    // server refuses a correction while the source is missing.
+    name: "PurchaseOrderSavedSourceMissing",
+    element: (
+      <PurchaseOrderSavedView
+        order={{
+          ...PO_EDITOR_ORDER,
+          State: "saved",
+          PdfAbsentConfirmed: true,
+          SourceMissing: true,
+          ConfirmationNumber: "2302268001",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+        }}
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
         onCorrect={() => undefined}

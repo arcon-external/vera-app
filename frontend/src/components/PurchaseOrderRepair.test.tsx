@@ -288,6 +288,27 @@ describe("PurchaseOrderSourceChange (issue #475)", () => {
     );
     expect(html).toContain("Moving it to another customer is refused");
   });
+
+  it("names a deleted source as the former link and keeps the started values", () => {
+    const html = plain(
+      renderToString(
+        <PurchaseOrderSourceChange
+          review={review({
+            order: {
+              SourceMissing: true,
+              ConfirmationNumber: "2302260001",
+            },
+          })}
+          confirmationNumber="2302260001"
+        />
+      )
+    );
+    expect(html).toContain("Former source (deleted)");
+    expect(html).toContain("Quotation 1502260001 · revision 0");
+    expect(html).toContain(
+      "The record keeps its current values and its confirmation number as the starting point."
+    );
+  });
 });
 
 describe("PurchaseOrderDifferenceReviewView in repair mode (issue #475)", () => {
@@ -336,6 +357,20 @@ describe("PurchaseOrderRepairConfirmationView (issue #475)", () => {
     expect(saveButton).not.toContain('disabled=""');
     expect(html).toContain("Values this repair stores");
     expect(html).toContain("Kept PO entry");
+  });
+
+  it("calls the action Link Quotation when the old source was deleted", () => {
+    const html = plain(
+      confirmationMarkup(
+        review({ order: { SourceMissing: true } }),
+        "recovered the deleted quotation"
+      )
+    );
+    expect(html).toContain('aria-label="Link Quotation"');
+    expect(html).not.toContain('aria-label="Repair source link"');
+    expect(html).toContain(
+      "The quotation this record followed was deleted. Its current values are the starting point."
+    );
   });
 
   it("disables the save when the customer would change after assignment", () => {

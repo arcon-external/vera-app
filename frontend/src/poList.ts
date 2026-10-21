@@ -24,7 +24,11 @@ export interface POListRowDTO {
   ID: number;
   CustomerID: number;
   SourceRevision: number;
-  /** Independent of Draft/Saved. Always false until deletion ships (#480). */
+  /**
+   * Independent of Draft/Saved. True when the followed Quotation was
+   * permanently deleted (#480); QuoteNumber/SourceRevision then name the
+   * former source.
+   */
   SourceMissing: boolean;
 }
 
@@ -59,8 +63,9 @@ export type POListStateFilter = "" | "draft" | "saved";
 
 /**
  * Source missing is an independent predicate, not a third state. "any" is the
- * default; "only" and "exclude" exist so #480/#481 can activate the filter
- * without changing this contract. Today only "any"/"exclude" can match.
+ * default; "only" shows the records whose Quotation was deleted and "exclude"
+ * hides them. The archive's Source control selects one of the three and the
+ * server filters on the same value.
  */
 export type POListSourceMissingFilter = "any" | "only" | "exclude";
 

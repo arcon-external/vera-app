@@ -690,3 +690,219 @@ func TestListPOSourceQuotationsRepairModeFreesOnlyTheRepairedRecord(t *testing.T
 		t.Fatalf("unknown excluded record error = %v; want ErrPurchaseOrderNotFound", err)
 	}
 }
+
+// Issue #481: repairing a saved record whose source Quotation was permanently
+// deleted. The record is not a new draft and nothing about it may be erased:
+// its own values, its customer PO number and an assigned confirmation number
+// are the starting point, the former link stays readable until the repair
+// commits, and the history records what the link moved from.
+func TestRepairSourceMissingPurchaseOrderLinksTheSurvivorAndKeepsItsIdentity(t *testing.T) {
+	database := openTestSchema(t, "vera_po_481_missing_repair")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Survives", "PO-481-SURVIVES")
+	admin := deletionUser(t, database, "admin")
+
+	assigned, err := database.AssignPurchaseOrderConfirmationNumber(ctx, saved.ID, admin.ID)
+	if err != nil {
+		t.Fatalf("assign confirmation: %v", err)
+	}
+	deleteQuotationRecordWithFreshPreview(t, database, admin, ctx, quotation)
+
+	missing, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("read the source-missing record: %v", err)
+	}
+	if !missing.SourceMissing {
+		t.Fatal("the surviving record is not marked source missing")
+	}
+	if missing.QuotationID != quotation.ID || missing.QuoteNumber != quotation.QuoteNumber {
+		t.Errorf("former link = %d/%q; want %d/%q",
+			missing.QuotationID, missing.QuoteNumber, quotation.ID, quotation.QuoteNumber)
+	}
+	if missing.ConfirmationNumber == nil || *missing.ConfirmationNumber != *assigned.ConfirmationNumber {
+		t.Errorf("confirmation number = %v; want the assigned %v",
+			missing.ConfirmationNumber, assigned.ConfirmationNumber)
+	}
+	if missing.PONumber != saved.PONumber || missing.DeliveryAddress != saved.DeliveryAddress {
+		t.Errorf("readable values drifted: %+v", missing)
+	}
+
+	// The archive finds it by the former number and by the independent
+	// source-missing predicate while it is waiting for a new source.
+	searched, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		Search: quotation.QuoteNumber, Page: 1,
+	})
+	if err != nil {
+		t.Fatalf("search by former quote number: %v", err)
+	}
+	if len(searched.Rows) != 1 || searched.Rows[0].ID != saved.ID {
+		t.Errorf("search by former number = %+v; want the survivor", searched.Rows)
+	}
+	only, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		SourceMissing: PurchaseOrderSourceMissingOnly, Page: 1,
+	})
+	if err != nil {
+		t.Fatalf("sourceMissing=only: %v", err)
+	}
+	if len(only.Rows) != 1 || only.Rows[0].ID != saved.ID || !only.Rows[0].SourceMissing {
+		t.Errorf("sourceMissing=only = %+v; want the survivor", only.Rows)
+	}
+	excluded, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		SourceMissing: PurchaseOrderSourceMissingExclude, Page: 1,
+	})
+	if err != nil {
+		t.Fatalf("sourceMissing=exclude: %v", err)
+	}
+	if len(excluded.Rows) != 0 {
+		t.Errorf("sourceMissing=exclude = %+v; want none", excluded.Rows)
+	}
+
+	target := seedRepairQuotation(t, database, 2, "PT. Survives", "Replacement source", "Jl. Billing 1", 100, 45)
+	review, err := database.ReviewPurchaseOrderSource(ctx, missing.ID, target.ID, target.RevisionNumber)
+	if err != nil {
+		t.Fatalf("review the source-missing record: %v", err)
+	}
+	if !review.Order.SourceMissing {
+		t.Error("the review lost the missing-source state")
+	}
+	if review.Source.QuotationID != target.ID || review.Order.QuoteNumber != quotation.QuoteNumber {
+		t.Errorf("review source = %d; order quote = %q; want %d and the old %q",
+			review.Source.QuotationID, review.Order.QuoteNumber, target.ID, quotation.QuoteNumber)
+	}
+
+	repaired, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, missing, admin, target, "the source quotation was deleted"))
+	if err != nil {
+		t.Fatalf("repair the source-missing record: %v", err)
+	}
+	if repaired.SourceMissing {
+		t.Error("the repaired record still claims a missing source")
+	}
+	if repaired.QuotationID != target.ID || repaired.SourceRevision != target.RevisionNumber {
+		t.Errorf("repaired source = %d/%d; want %d/%d",
+			repaired.QuotationID, repaired.SourceRevision, target.ID, target.RevisionNumber)
+	}
+	if repaired.QuoteNumber != target.QuoteNumber {
+		t.Errorf("repaired quote number = %q; want %q", repaired.QuoteNumber, target.QuoteNumber)
+	}
+	if repaired.ConfirmationNumber == nil || *repaired.ConfirmationNumber != *assigned.ConfirmationNumber {
+		t.Errorf("confirmation number = %v; want the assigned %v",
+			repaired.ConfirmationNumber, assigned.ConfirmationNumber)
+	}
+	if repaired.PONumber != saved.PONumber || repaired.DeliveryAddress != saved.DeliveryAddress ||
+		repaired.GrandTotalMinor != saved.GrandTotalMinor {
+		t.Errorf("repair did not start from the record's own values: %+v", repaired)
+	}
+	if repaired.Version <= missing.Version {
+		t.Errorf("version = %d; want it forward from %d", repaired.Version, missing.Version)
+	}
+
+	history, err := database.GetPurchaseOrderHistory(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(history) != 1 || history[0].Repair == nil {
+		t.Fatalf("history = %+v; want one source repair", history)
+	}
+	if history[0].Repair.PreviousQuotationID != quotation.ID ||
+		history[0].Repair.PreviousQuoteNumber != quotation.QuoteNumber ||
+		history[0].Repair.NewQuotationID != target.ID ||
+		history[0].Repair.NewQuoteNumber != target.QuoteNumber {
+		t.Errorf("repair history = %+v; want former %d/%q -> %d/%q",
+			history[0].Repair, quotation.ID, quotation.QuoteNumber, target.ID, target.QuoteNumber)
+	}
+
+	// The former reference belongs to the missing state only: the repaired row
+	// is a live link again, and the archive follows the new source.
+	var formerCleared bool
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if err := pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT former_quotation_id IS NULL AND former_quotation_uuid IS NULL
+		       AND former_quote_number IS NULL AND former_source_revision IS NULL
+		FROM %s.purchase_orders WHERE id = $1`, database.configSchema()),
+		saved.ID).Scan(&formerCleared); err != nil {
+		t.Fatalf("read former source columns: %v", err)
+	}
+	if !formerCleared {
+		t.Error("the repaired record kept a former-source reference")
+	}
+	only, err = database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		SourceMissing: PurchaseOrderSourceMissingOnly, Page: 1,
+	})
+	if err != nil {
+		t.Fatalf("sourceMissing=only after repair: %v", err)
+	}
+	if len(only.Rows) != 0 {
+		t.Errorf("sourceMissing=only after repair = %+v; want none", only.Rows)
+	}
+	byNewNumber, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{
+		Search: target.QuoteNumber, Page: 1,
+	})
+	if err != nil {
+		t.Fatalf("search by the new quote number: %v", err)
+	}
+	if len(byNewNumber.Rows) != 1 || byNewNumber.Rows[0].ID != saved.ID {
+		t.Errorf("search by the new number = %+v; want the repaired record", byNewNumber.Rows)
+	}
+}
+
+// The #475 eligibility rules are repeated for a source-missing record: an
+// occupied target, a cross-customer move after assignment and a stale editor
+// are all refused without writing anything or erasing the missing state.
+func TestRepairSourceMissingPurchaseOrderRepeatsTheSavedEligibilityRules(t *testing.T) {
+	database := openTestSchema(t, "vera_po_481_missing_eligibility")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Survives", "PO-481-ELIGIBLE")
+	admin := deletionUser(t, database, "admin")
+	staff := poTestUser(t, database)
+
+	assigned, err := database.AssignPurchaseOrderConfirmationNumber(ctx, saved.ID, admin.ID)
+	if err != nil {
+		t.Fatalf("assign confirmation: %v", err)
+	}
+	deleteQuotationRecordWithFreshPreview(t, database, admin, ctx, quotation)
+	missing, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("read the source-missing record: %v", err)
+	}
+
+	// An occupied target is refused; the live PO that occupies it is untouched.
+	occupied := seedRepairQuotation(t, database, 2, "PT. Survives", "Occupied target", "Jl. Billing 1", 100, 45)
+	savedPurchaseOrder(t, database, ctx, staff, occupied, "PO-481-OCCUPIED")
+	if _, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, missing, admin, occupied, "move to an occupied source")); !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
+		t.Fatalf("occupied target error = %v; want ErrPurchaseOrderTargetOccupied", err)
+	}
+
+	// A different customer is refused after the number exists.
+	other := seedRepairQuotation(t, database, 4, "PT. Other", "Other customer", "Jl. Billing B", 100, 45)
+	if _, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, missing, admin, other, "move to another customer")); !errors.Is(err, ErrPurchaseOrderConfirmationCustomerLocked) {
+		t.Fatalf("cross-customer error = %v; want ErrPurchaseOrderConfirmationCustomerLocked", err)
+	}
+
+	// A stale editor is a named conflict, never an overwrite.
+	stale := repairInput(t, missing, admin, seedRepairQuotation(t, database, 2, "PT. Survives", "Fresh target", "Jl. Billing 1", 100, 45), "stale editor")
+	stale.ExpectedVersion = missing.Version - 1
+	var conflict *PurchaseOrderVersionConflictError
+	if _, err := database.RepairPurchaseOrderSource(ctx, stale); !errors.As(err, &conflict) {
+		t.Fatalf("stale repair error = %v; want a version conflict", err)
+	}
+
+	// Every refusal left the record exactly where it was: still source missing,
+	// with the assigned number and the same version.
+	after, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("read after refused repairs: %v", err)
+	}
+	if !after.SourceMissing || after.QuotationID != quotation.ID {
+		t.Errorf("refusals changed the source: %+v", after)
+	}
+	if after.ConfirmationNumber == nil || *after.ConfirmationNumber != *assigned.ConfirmationNumber {
+		t.Errorf("refusals changed the confirmation number: %v", after.ConfirmationNumber)
+	}
+	if after.Version != missing.Version {
+		t.Errorf("refusals moved version %d -> %d", missing.Version, after.Version)
+	}
+}
