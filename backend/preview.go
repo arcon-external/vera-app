@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+
+	"vera-app/backend/render/quotation"
 )
 
 // CustomerPreviewItem is one line of the customer's document, plus the cost
@@ -11,6 +13,11 @@ import (
 //
 // Like CustomerPreview, it carries no margin: the amount a line earned is on
 // InternalPreviewItem, which is where the panel reads it from.
+//
+// DescriptionLines are the plain item's "- " bullet lines, numbered X.Y
+// after the item's No. They are customer-safe -- number and text only, no
+// margin, no PPH22, no profit -- because the review panel reads the same
+// lines the document prints.
 type CustomerPreviewItem struct {
 	Description              string
 	DisplayDesc              template.HTML
@@ -19,6 +26,7 @@ type CustomerPreviewItem struct {
 	DisplayOriginalTotal     string
 	DisplayUnitPrice         string
 	DisplayTotal             string
+	DescriptionLines         []quotation.DescriptionLine
 	OriginalUnitPrice        uint64
 	OriginalTotal            uint64
 	UnitPrice                uint64
@@ -227,6 +235,7 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 			DisplayOriginalTotal:     it.DisplayOriginalTotal,
 			DisplayUnitPrice:         it.DisplayUnitPrice,
 			DisplayTotal:             it.DisplayTotal,
+			DescriptionLines:         it.DescriptionLines,
 			OriginalUnitPrice:        it.OriginalUnitPrice,
 			OriginalTotal:            it.OriginalTotal,
 			UnitPrice:                it.UnitPrice,

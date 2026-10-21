@@ -37,34 +37,13 @@ func formatSignedMoney(code string, amount int64) string {
 }
 
 func formatDescription(raw string) template.HTML {
-	clean := strings.ReplaceAll(raw, "\r\n", "\n")
-	lines := strings.Split(clean, "\n")
-
-	mainParts := make([]string, 0, len(lines))
-	bullets := make([]string, 0, len(lines))
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "- ") {
-			item := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
-			if item != "" {
-				bullets = append(bullets, item)
-			}
-			continue
-		}
-
-		mainParts = append(mainParts, trimmed)
-	}
+	main, bullets := splitDescriptionLines(raw)
 
 	var b strings.Builder
 
-	if len(mainParts) > 0 {
+	if main != "" {
 		b.WriteString(`<div class="desc-main">`)
-		b.WriteString(html.EscapeString(strings.Join(mainParts, " ")))
+		b.WriteString(html.EscapeString(main))
 		b.WriteString(`</div>`)
 	}
 
@@ -83,6 +62,50 @@ func formatDescription(raw string) template.HTML {
 	}
 
 	return template.HTML(b.String())
+}
+
+// splitDescriptionLines parses a raw description once, for every consumer of
+// its two halves. Lines whose trimmed form starts with "- " are description
+// lines; every other non-empty line joins the main description with single
+// spaces. It is the one place that decides what a bullet is, so the main-only
+// HTML below and the numbered line rows beside it cannot disagree about which
+// lines are which.
+func splitDescriptionLines(raw string) (main string, lines []string) {
+	clean := strings.ReplaceAll(raw, "\r\n", "\n")
+
+	mainParts := make([]string, 0)
+	bullets := make([]string, 0)
+
+	for _, line := range strings.Split(clean, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "- ") {
+			item := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			if item != "" {
+				bullets = append(bullets, item)
+			}
+			continue
+		}
+
+		mainParts = append(mainParts, trimmed)
+	}
+
+	return strings.Join(mainParts, " "), bullets
+}
+
+// formatDescriptionMain renders the main half of a raw description only: the
+// bullet lines travel separately as numbered DescriptionLines, so emitting
+// them here too would print every line twice. A description of bullets only
+// has no main half, and its HTML is empty with it.
+func formatDescriptionMain(raw string) template.HTML {
+	main, _ := splitDescriptionLines(raw)
+	if main == "" {
+		return template.HTML("")
+	}
+	return template.HTML(`<div class="desc-main">` + html.EscapeString(main) + `</div>`)
 }
 
 // FormatLeadTime composes the lead time sentence the document prints:

@@ -453,22 +453,32 @@ func refItems() []fixtureItem {
 	}
 }
 
-// descHTML renders a description and its bullets the way formatDescription does,
-// so the browser lays out the same markup the native renderer is told about.
-// Both renderers must be given the same document or the comparison measures two
-// documents.
+// descHTML renders a description's main half the way formatDescriptionMain
+// does: the plain item's lines travel separately as numbered DescriptionLines
+// (see quotationDataFromEngineInput), so the browser lays out the same
+// document the native renderer is told about. Both renderers must be given
+// the same document or the comparison measures two documents.
+//
+// The fixture text is trusted the way refItems is: it carries no markup or
+// entities, so no escaping is applied here, exactly as before.
 func descHTML(f fixtureItem) string {
-	var b strings.Builder
-	b.WriteString(`<div class="desc-main">` + f.DescMain + `</div>`)
+	return `<div class="desc-main">` + f.DescMain + `</div>`
+}
+
+// descLines numbers a fixture item's plain description lines the way
+// buildItems numbers production lines: X.Y from the item's final No.
+func descLines(f fixtureItem) []quotation.DescriptionLine {
 	if len(f.SubItems) == 0 {
-		return b.String()
+		return nil
 	}
-	b.WriteString(`<ul class="desc-subitems">`)
-	for _, s := range f.SubItems {
-		b.WriteString("<li>" + s + "</li>")
+	out := make([]quotation.DescriptionLine, 0, len(f.SubItems))
+	for i, s := range f.SubItems {
+		out = append(out, quotation.DescriptionLine{
+			No:   fmt.Sprintf("%d.%d", f.No, i+1),
+			Text: s,
+		})
 	}
-	b.WriteString("</ul>")
-	return b.String()
+	return out
 }
 
 // equivalenceQuotation builds the quotation the two renderers are compared on.
@@ -594,6 +604,7 @@ func quotationDataFromEngineInput(t *testing.T, q *Quotation, logo, qrPNG []byte
 		d.Items = append(d.Items, QuotationItem{
 			No:               uint32(f.No),
 			DisplayDesc:      template.HTML(descHTML(f)),
+			DescriptionLines: descLines(f),
 			UoM:              f.UoM,
 			DisplayUnitPrice: f.UnitPrice,
 			DisplayTotal:     f.Total,
