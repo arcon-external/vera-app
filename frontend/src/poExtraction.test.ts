@@ -197,6 +197,8 @@ describe("extraction status and progress", () => {
     };
     expect(extractionIsStale(run, { ID: 3, Version: 1, SHA256: "aaaa" })).toBe(false);
     expect(extractionIsStale(run, { ID: 3, Version: 2, SHA256: "bbbb" })).toBe(true);
+    // Same bytes, new document generation: still a different source.
+    expect(extractionIsStale(run, { ID: 3, Version: 2, SHA256: "aaaa" })).toBe(true);
     expect(extractionIsStale({ ...run, Status: "stale" }, { ID: 3, Version: 1, SHA256: "aaaa" })).toBe(true);
     expect(extractionIsStale(run, null)).toBe(true);
   });

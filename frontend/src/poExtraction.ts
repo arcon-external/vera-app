@@ -173,6 +173,9 @@ export function extractionIsStale(
   if (run == null) return false;
   if (run.Status === "stale") return true;
   if (document == null) return true;
+  // A replacement is a new generation even when the bytes happen to be
+  // identical (same SHA): the document row and version are the identity.
+  if (run.DocumentID !== document.ID || run.DocumentVersion !== document.Version) return true;
   return run.DocumentSHA256 !== document.SHA256;
 }
 
