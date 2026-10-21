@@ -4,15 +4,19 @@ package apicontract
 //
 // The extractor is evidence, never a fact. Every field and every row cell
 // carries its own status, its source page and (where the engine supplies one)
-// its source region. Poppler supplies word boxes, so `bbox` is populated for
-// every proposal; `confidence` is always null because it does not report one.
-// A value the extractor cannot normalise is returned as `needs_review` with
-// the printed text preserved, never guessed into a different value.
+// its source region and confidence. A value the extractor cannot normalise is
+// returned as `needs_review` with the printed text preserved, never guessed
+// into a different value.
 //
 // The same schema is the extractor's stdout contract (cmd/vextract), the
 // stored result, the API response and the desktop binding. One definition is
 // what keeps those four from drifting.
-const ExtractionSchemaVersion = 1
+//
+// ExtractionSchemaVersion is the stored contract's version. Version 2 (#478)
+// adds per-page processing evidence (pageModes, pagesWithOcr) and OCR engine
+// identity. A version-1 stored result remains readable: the new fields decode
+// as empty, which the UI renders as "no OCR evidence", not as an error.
+const ExtractionSchemaVersion = 2
 
 // Cell and row statuses. `absent` is a deliberate answer, not a missing
 // object: a field the document does not print is reported so the reviewer can
@@ -21,6 +25,14 @@ const (
 	ExtractionStatusExtracted   = "extracted"
 	ExtractionStatusNeedsReview = "needs_review"
 	ExtractionStatusAbsent      = "absent"
+)
+
+// Per-page processing modes. "text" means the page's own text layer was used
+// and the page was never OCRed; "ocr" means the page had no usable text layer
+// and was rendered and read by the OCR engine.
+const (
+	ExtractionPageModeText = "text"
+	ExtractionPageModeOCR  = "ocr"
 )
 
 // Header field keys, in the order the review panel shows them. Currency is
@@ -63,6 +75,26 @@ type ExtractionPageInfo struct {
 	Number int     `json:"number"`
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
+}
+
+// ExtractionPageMode is one page's processing evidence.
+//
+// Mode is "text" or "ocr". TextWords/TextChars are the text layer's size
+// before any decision, so a reviewer can see why the page took its path. For an
+// OCR page, OCRWords is how many words OCR returned, DPI is the resolution it
+// was rendered at (which may be below the configured value to respect the pixel
+// bound), and Confidence is the mean word confidence (null when the engine
+// measured none). Reason is the human-readable decision, stored with the
+// result so the evidence does not depend on reading this release's source.
+type ExtractionPageMode struct {
+	Number     int      `json:"number"`
+	Mode       string   `json:"mode"`
+	TextWords  int      `json:"textWords"`
+	TextChars  int      `json:"textChars"`
+	OCRWords   int      `json:"ocrWords"`
+	DPI        int      `json:"dpi,omitempty"`
+	Confidence *float64 `json:"confidence"`
+	Reason     string   `json:"reason,omitempty"`
 }
 
 // ExtractionCell is one proposed value and its provenance.
@@ -119,17 +151,25 @@ type ExtractionAbstentions struct {
 }
 
 // ExtractionOutput is the complete extractor answer. Engine and EngineVersion
-// are part of the stored result so repeat runs are comparable and a
-// regression is attributable to a version.
+// identify the text engine; OCREngine and OCREngineVersion identify the OCR
+// engine when one ran. Every version is part of the stored result so repeat
+// runs are comparable and a regression is attributable.
 type ExtractionOutput struct {
-	SchemaVersion    int                   `json:"schemaVersion"`
-	Engine           string                `json:"engine"`
-	EngineVersion    string                `json:"engineVersion"`
-	PageCount        int                   `json:"pageCount"`
-	PagesWithText    int                   `json:"pagesWithText"`
+	SchemaVersion    int    `json:"schemaVersion"`
+	Engine           string `json:"engine"`
+	EngineVersion    string `json:"engineVersion"`
+	OCREngine        string `json:"ocrEngine,omitempty"`
+	OCREngineVersion string `json:"ocrEngineVersion,omitempty"`
+	PageCount        int    `json:"pageCount"`
+	// PagesWithText counts pages read from their own text layer.
+	PagesWithText int `json:"pagesWithText"`
+	// PagesWithoutText counts pages whose text layer was unusable. Every one
+	// of them was OCRed; PagesWithOCR says so explicitly.
 	PagesWithoutText int                   `json:"pagesWithoutText"`
+	PagesWithOCR     int                   `json:"pagesWithOcr"`
 	DurationMs       int64                 `json:"durationMs"`
 	Pages            []ExtractionPageInfo  `json:"pages"`
+	PageModes        []ExtractionPageMode  `json:"pageModes"`
 	Fields           []ExtractionField     `json:"fields"`
 	Rows             []ExtractionRow       `json:"rows"`
 	Abstentions      ExtractionAbstentions `json:"abstentions"`

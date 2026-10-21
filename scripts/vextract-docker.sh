@@ -30,7 +30,7 @@ cpus="${VERA_PO_EXTRACT_CPUS:-1}"
 exec docker run --rm -i \
   --network none \
   --read-only \
-  --tmpfs /tmp:rw,size=64m,noexec,nosuid \
+  --tmpfs /tmp:rw,size=256m,noexec,nosuid \
   --memory "$memory" \
   --memory-swap "$memory" \
   --pids-limit 64 \
@@ -38,5 +38,9 @@ exec docker run --rm -i \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   -e HOME=/tmp \
+  -e XDG_CACHE_HOME=/tmp \
   -e "VERA_EXTRACT_MAX_PAGES=${VERA_EXTRACT_MAX_PAGES:-40}" \
+  -e "VERA_EXTRACT_OCR_DPI=${VERA_EXTRACT_OCR_DPI:-300}" \
+  -e "VERA_EXTRACT_MAX_OCR_PAGES=${VERA_EXTRACT_MAX_OCR_PAGES:-20}" \
+  -e "VERA_EXTRACT_OCR_LANGS=${VERA_EXTRACT_OCR_LANGS:-eng+ind}" \
   "$image" "$@"

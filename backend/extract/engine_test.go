@@ -29,6 +29,9 @@ func validEngineOutput() apicontract.ExtractionOutput {
 		Pages: []apicontract.ExtractionPageInfo{
 			{Number: 1, Width: 595, Height: 842},
 		},
+		PageModes: []apicontract.ExtractionPageMode{
+			{Number: 1, Mode: apicontract.ExtractionPageModeText, TextWords: 12, TextChars: 120},
+		},
 		Fields: []apicontract.ExtractionField{
 			{Key: apicontract.ExtractionFieldPONumber, ExtractionCell: apicontract.ExtractionCell{
 				Value: "4500123456", Raw: "4500123456", Status: apicontract.ExtractionStatusExtracted,
@@ -114,7 +117,7 @@ func TestCommandEngineRefusesMalformedOversizedAndFailedAnswers(t *testing.T) {
 		{"failed", []string{"sh", "-c", `printf 'pdftotext: broken' >&2; exit 3`}, 1 << 20, ErrEngineFailed},
 		{"missing binary", []string{"vera-extractor-that-does-not-exist"}, 1 << 20, ErrExtractorUnavailable},
 		{"page limit", []string{"sh", "-c", `cat <<'JSON'
-{"schemaVersion":1,"engine":"stub","engineVersion":"1","pageCount":41,"pagesWithText":41,"fields":[],"rows":[],"abstentions":{}}
+{"schemaVersion":2,"engine":"stub","engineVersion":"1","pageCount":41,"pagesWithText":41,"fields":[],"rows":[],"abstentions":{}}
 JSON`}, 1 << 20, ErrPageLimit},
 	}
 	for _, testCase := range cases {
@@ -214,5 +217,94 @@ printf '%s' "$STUB_OUTPUT"`)
 	engine.Environment = []string{"STUB_OUTPUT=" + output}
 	if _, err := engine.Extract(context.Background(), []byte("%PDF-1.7 stub")); err != nil {
 		t.Fatalf("extract: %v (exit 7 means a server secret crossed the boundary; exit 8 means the page cap was missing)", err)
+	}
+}
+
+// Issue #478: the v2 page evidence must be coherent, or the stored result
+// would claim more than the extractor did.
+func TestValidateExtractionOutputRequiresCoherentPageModes(t *testing.T) {
+	if err := ValidateExtractionOutput(func() *apicontract.ExtractionOutput {
+		output := validEngineOutput()
+		return &output
+	}(), 40); err != nil {
+		t.Fatalf("the valid fixture was refused: %v", err)
+	}
+
+	cases := map[string]func(*apicontract.ExtractionOutput){
+		"no page modes": func(output *apicontract.ExtractionOutput) {
+			output.PageModes = nil
+		},
+		"wrong page number": func(output *apicontract.ExtractionOutput) {
+			output.PageModes[0].Number = 2
+		},
+		"unknown mode": func(output *apicontract.ExtractionOutput) {
+			output.PageModes[0].Mode = "guess"
+		},
+		"text count mismatch": func(output *apicontract.ExtractionOutput) {
+			output.PagesWithText = 0
+			output.PagesWithoutText = 1
+			output.PagesWithOCR = 1
+		},
+		"ocr count mismatch": func(output *apicontract.ExtractionOutput) {
+			output.PageModes[0].Mode = apicontract.ExtractionPageModeOCR
+			output.PageModes[0].OCRWords = 4
+			output.PageModes[0].DPI = 300
+			output.PagesWithText = 0
+			output.PagesWithoutText = 1
+			output.PagesWithOCR = 0
+		},
+		"ocr without an engine": func(output *apicontract.ExtractionOutput) {
+			output.PageModes[0].Mode = apicontract.ExtractionPageModeOCR
+			output.PageModes[0].OCRWords = 4
+			output.PageModes[0].DPI = 300
+			output.PagesWithText = 0
+			output.PagesWithoutText = 1
+			output.PagesWithOCR = 1
+		},
+		"ocr page without a dpi": func(output *apicontract.ExtractionOutput) {
+			output.PageModes[0].Mode = apicontract.ExtractionPageModeOCR
+			output.PageModes[0].OCRWords = 4
+			output.PagesWithText = 0
+			output.PagesWithoutText = 1
+			output.PagesWithOCR = 1
+			output.OCREngine = "tesseract"
+			output.OCREngineVersion = "5.5.0"
+		},
+		"page confidence out of range": func(output *apicontract.ExtractionOutput) {
+			confidence := 140.0
+			output.PageModes[0].Confidence = &confidence
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			output := validEngineOutput()
+			mutate(&output)
+			if err := ValidateExtractionOutput(&output, 40); !errors.Is(err, ErrInvalidOutput) {
+				t.Fatalf("error = %v; want ErrInvalidOutput", err)
+			}
+		})
+	}
+}
+
+func TestValidateExtractionOutputChecksCellConfidence(t *testing.T) {
+	output := validEngineOutput()
+	low := 42.0
+	output.Fields[0].Confidence = &low
+	output.Rows[0].Quantity.Confidence = &low
+	if err := ValidateExtractionOutput(&output, 40); err != nil {
+		t.Fatalf("a measured confidence was refused: %v", err)
+	}
+
+	tooHigh := 120.0
+	bad := validEngineOutput()
+	bad.Fields[0].Confidence = &tooHigh
+	if err := ValidateExtractionOutput(&bad, 40); !errors.Is(err, ErrInvalidOutput) {
+		t.Errorf("confidence above 100 error = %v; want ErrInvalidOutput", err)
+	}
+
+	absent := validEngineOutput()
+	absent.Fields[1].Confidence = &low
+	if err := ValidateExtractionOutput(&absent, 40); !errors.Is(err, ErrInvalidOutput) {
+		t.Errorf("confidence on an absent cell error = %v; want ErrInvalidOutput", err)
 	}
 }

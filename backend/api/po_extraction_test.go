@@ -63,6 +63,7 @@ func extractionFixture() apicontract.ExtractionOutput {
 		PagesWithText:    1,
 		PagesWithoutText: 0,
 		Pages:            []apicontract.ExtractionPageInfo{{Number: 1, Width: 595, Height: 842}},
+		PageModes:        []apicontract.ExtractionPageMode{{Number: 1, Mode: apicontract.ExtractionPageModeText, TextWords: 12, TextChars: 120}},
 		DurationMs:       9,
 		Fields: []apicontract.ExtractionField{
 			{Key: apicontract.ExtractionFieldPONumber, ExtractionCell: apicontract.ExtractionCell{
@@ -359,6 +360,9 @@ func TestExtractionFailuresAreTypedAndKeepTheManualPath(t *testing.T) {
 		want string
 	}{
 		{"page limit", &stubExtractionEngine{err: extract.ErrPageLimit}, "page_limit"},
+		{"ocr page limit", &stubExtractionEngine{err: extract.ErrOCRLimit}, "ocr_page_limit"},
+		{"page too large", &stubExtractionEngine{err: extract.ErrPixelLimit}, "page_too_large"},
+		{"ocr unavailable", &stubExtractionEngine{err: extract.ErrOCREngine}, "ocr_unavailable"},
 		{"invalid output", &stubExtractionEngine{output: apicontract.ExtractionOutput{}}, "invalid_output"},
 	}
 	for _, testCase := range cases {
@@ -484,5 +488,74 @@ func TestExtractionRequiresASessionAndAKnownRecord(t *testing.T) {
 	code, _ = startExtraction(t, server, token, draft.ID+9999)
 	if code != http.StatusNotFound {
 		t.Errorf("start on an unknown record = %d; want 404", code)
+	}
+}
+
+// Issue #478: a mixed document stores its per-page OCR evidence in the run
+// result, so the review panel can say which pages were OCRed and which values
+// are below the confidence floor.
+func extractionOCRFixure() apicontract.ExtractionOutput {
+	output := extractionFixture()
+	output.PageCount = 2
+	output.Pages = append(output.Pages, apicontract.ExtractionPageInfo{Number: 2, Width: 595, Height: 842})
+	meanConfidence := 88.0
+	output.PageModes = append(output.PageModes, apicontract.ExtractionPageMode{
+		Number: 2, Mode: apicontract.ExtractionPageModeOCR,
+		TextWords: 3, TextChars: 14, OCRWords: 20, DPI: 300,
+		Confidence: &meanConfidence, Reason: "below the text floor",
+	})
+	output.PagesWithoutText = 1
+	output.PagesWithOCR = 1
+	output.OCREngine = "tesseract"
+	output.OCREngineVersion = "5.5.0-test"
+	quantityConfidence := 55.0
+	page := 2
+	output.Rows = append(output.Rows, apicontract.ExtractionRow{
+		LineNumber:  apicontract.ExtractionCell{Value: "2", Raw: "2", Status: apicontract.ExtractionStatusExtracted, Page: &page},
+		Description: apicontract.ExtractionCell{Value: "Cable termination", Raw: "Cable termination", Status: apicontract.ExtractionStatusExtracted, Page: &page},
+		Quantity: apicontract.ExtractionCell{Value: "10.5", Raw: "10.5", Status: apicontract.ExtractionStatusNeedsReview,
+			Page: &page, Confidence: &quantityConfidence, Note: "low OCR confidence"},
+		UoM:       apicontract.ExtractionCell{Value: "M", Raw: "M", Status: apicontract.ExtractionStatusExtracted, Page: &page},
+		UnitPrice: apicontract.ExtractionCell{Value: "42.00", Raw: "42.00", Status: apicontract.ExtractionStatusExtracted, Page: &page},
+		Amount:    apicontract.ExtractionCell{Value: "441.00", Raw: "441.00", Status: apicontract.ExtractionStatusExtracted, Page: &page},
+		Status:    apicontract.ExtractionStatusNeedsReview,
+		Page:      2,
+		Note:      "low OCR confidence",
+	})
+	return output
+}
+
+func TestExtractionStoresPageModesAndOCRProvenance(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_extract_ocr")
+	server.SetExtractor(&stubExtractionEngine{output: extractionOCRFixure()})
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := createPODraftWithPDF(t, server, token, quotationID, "ocr")
+
+	if code, body := startExtraction(t, server, token, draft.ID); code != http.StatusAccepted {
+		t.Fatalf("start = %d (%v)", code, body)
+	}
+	state := waitForExtraction(t, server, token, draft.ID)
+	if state.Run == nil || state.Run.Status != "succeeded" {
+		t.Fatalf("run = %+v; want succeeded", state.Run)
+	}
+	var result apicontract.ExtractionOutput
+	if err := json.Unmarshal(state.Run.Result, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.OCREngine != "tesseract" || result.OCREngineVersion != "5.5.0-test" {
+		t.Errorf("OCR engine = %q/%q; want the pinned engine", result.OCREngine, result.OCREngineVersion)
+	}
+	if result.PagesWithOCR != 1 || result.PagesWithoutText != 1 || len(result.PageModes) != 2 {
+		t.Fatalf("page evidence = %+v", result)
+	}
+	if result.PageModes[1].Mode != apicontract.ExtractionPageModeOCR || result.PageModes[1].DPI != 300 {
+		t.Errorf("OCR page mode = %+v", result.PageModes[1])
+	}
+	if len(result.Rows) != 2 || result.Rows[1].Quantity.Confidence == nil ||
+		*result.Rows[1].Quantity.Confidence != 55 {
+		t.Errorf("OCR row confidence = %+v; want the measured 55", result.Rows[1].Quantity)
+	}
+	if result.Rows[1].Status != apicontract.ExtractionStatusNeedsReview {
+		t.Errorf("OCR row status = %q; want needs_review", result.Rows[1].Status)
 	}
 }

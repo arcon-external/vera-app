@@ -3,8 +3,12 @@
 Status: **proposed, not yet validated on real POs.** No authorized customer
 PDFs exist in this environment, so no accuracy, latency, or memory number in
 this document is a measurement. Every threshold in §2 is a proposal awaiting
-pilot signoff. #477/#478 must not claim reliability until the protocol below
-has run on authorized samples.
+pilot signoff. #477 and #478 implement text extraction and selective OCR
+plumbing respectively; neither claims reliability, and the §2.5 scan/mixed
+bars remain **unmeasured**. The release position for scans is the explicit
+limitations list in [`po-extraction.md`](po-extraction.md), not an acceptance
+result. The protocol below still has to run on authorized samples before any
+reliability claim is made.
 
 ## 1. Decision: proposed pipeline and candidates
 

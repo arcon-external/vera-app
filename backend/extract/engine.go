@@ -219,7 +219,8 @@ func (engine *CommandEngine) Extract(ctx context.Context, pdf []byte) (apicontra
 // extractorEnvironment is the complete environment the child receives. It is
 // intentionally tiny: the API process holds credentials the extractor must not
 // inherit. A dev wrapper needs PATH and a writable HOME; the default binary
-// only needs PATH and the page cap.
+// only needs PATH and the page cap. The OCR settings are operator
+// configuration, forwarded only when the operator set them.
 func extractorEnvironment(extra []string, maxPages int) []string {
 	path := os.Getenv("PATH")
 	if path == "" {
@@ -231,6 +232,15 @@ func extractorEnvironment(extra []string, maxPages int) []string {
 		"TMPDIR=/tmp",
 		"LANG=C.UTF-8",
 		fmt.Sprintf("VERA_EXTRACT_MAX_PAGES=%d", maxPages),
+	}
+	for _, name := range []string{
+		"VERA_EXTRACT_OCR_DPI",
+		"VERA_EXTRACT_MAX_OCR_PAGES",
+		"VERA_EXTRACT_OCR_LANGS",
+	} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			environment = append(environment, name+"="+value)
+		}
 	}
 	if host := os.Getenv("DOCKER_HOST"); host != "" {
 		environment = append(environment, "DOCKER_HOST="+host)
@@ -263,8 +273,49 @@ func ValidateExtractionOutput(output *apicontract.ExtractionOutput, maxPages int
 			return fmt.Errorf("%w: page map entry %d is unusable", ErrInvalidOutput, index)
 		}
 	}
+	if len(output.PageModes) != output.PageCount {
+		return fmt.Errorf("%w: %d pages named but %d page modes supplied", ErrInvalidOutput, output.PageCount, len(output.PageModes))
+	}
+	textPages, ocrPages := 0, 0
+	for index, mode := range output.PageModes {
+		if mode.Number != index+1 {
+			return fmt.Errorf("%w: page mode entry %d names page %d", ErrInvalidOutput, index, mode.Number)
+		}
+		if mode.TextWords < 0 || mode.TextChars < 0 || mode.OCRWords < 0 {
+			return fmt.Errorf("%w: page %d has a negative word count", ErrInvalidOutput, mode.Number)
+		}
+		if mode.Confidence != nil && (!finite(*mode.Confidence) || *mode.Confidence < 0 || *mode.Confidence > 100) {
+			return fmt.Errorf("%w: page %d has confidence %v", ErrInvalidOutput, mode.Number, *mode.Confidence)
+		}
+		switch mode.Mode {
+		case apicontract.ExtractionPageModeText:
+			textPages++
+			if mode.OCRWords != 0 || mode.DPI != 0 || mode.Confidence != nil {
+				return fmt.Errorf("%w: text page %d claims OCR evidence", ErrInvalidOutput, mode.Number)
+			}
+		case apicontract.ExtractionPageModeOCR:
+			ocrPages++
+			if mode.DPI < MinOCRDpi || mode.DPI > MaxOCRDpi {
+				return fmt.Errorf("%w: OCR page %d was rendered at %d dpi", ErrInvalidOutput, mode.Number, mode.DPI)
+			}
+		default:
+			return fmt.Errorf("%w: page %d has mode %q", ErrInvalidOutput, mode.Number, mode.Mode)
+		}
+	}
+	if textPages != output.PagesWithText || ocrPages != output.PagesWithoutText ||
+		ocrPages != output.PagesWithOCR {
+		return fmt.Errorf(
+			"%w: page modes say %d text/%d ocr but the counts say %d text/%d without/%d ocr",
+			ErrInvalidOutput, textPages, ocrPages,
+			output.PagesWithText, output.PagesWithoutText, output.PagesWithOCR)
+	}
 	if output.PagesWithText+output.PagesWithoutText != output.PageCount {
 		return fmt.Errorf("%w: page text counts do not add up", ErrInvalidOutput)
+	}
+	if ocrPages > 0 {
+		if strings.TrimSpace(output.OCREngine) == "" || strings.TrimSpace(output.OCREngineVersion) == "" {
+			return fmt.Errorf("%w: OCR ran but the OCR engine and version are absent", ErrInvalidOutput)
+		}
 	}
 	if len(output.Fields) != len(apicontract.ExtractionFieldKeys) {
 		return fmt.Errorf("%w: %d header fields, want %d", ErrInvalidOutput, len(output.Fields), len(apicontract.ExtractionFieldKeys))
@@ -280,6 +331,9 @@ func ValidateExtractionOutput(output *apicontract.ExtractionOutput, maxPages int
 		}
 		if field.Status == apicontract.ExtractionStatusAbsent && field.Value != "" {
 			return fmt.Errorf("%w: absent header field %q carries a value", ErrInvalidOutput, field.Key)
+		}
+		if err := validateCellConfidence(field.ExtractionCell); err != nil {
+			return fmt.Errorf("%w: header field %q: %v", ErrInvalidOutput, field.Key, err)
 		}
 	}
 	for _, key := range apicontract.ExtractionFieldKeys {
@@ -307,9 +361,28 @@ func ValidateExtractionOutput(output *apicontract.ExtractionOutput, maxPages int
 			if cell.Status != apicontract.ExtractionStatusAbsent && strings.TrimSpace(cell.Value) == "" {
 				return fmt.Errorf("%w: row %d %s is not absent but has no value", ErrInvalidOutput, index, label)
 			}
+			if err := validateCellConfidence(cell); err != nil {
+				return fmt.Errorf("%w: row %d %s: %v", ErrInvalidOutput, index, label, err)
+			}
 		}
 	}
 	output.Abstentions = countAbstentions(*output)
+	return nil
+}
+
+// validateCellConfidence checks the one thing a confidence can be wrong about
+// that matters: a value outside 0..100, or a confidence claimed for an absent
+// value (nothing was read, so nothing was scored).
+func validateCellConfidence(cell apicontract.ExtractionCell) error {
+	if cell.Confidence == nil {
+		return nil
+	}
+	if !finite(*cell.Confidence) || *cell.Confidence < 0 || *cell.Confidence > 100 {
+		return fmt.Errorf("confidence %v is outside 0..100", *cell.Confidence)
+	}
+	if cell.Status == apicontract.ExtractionStatusAbsent {
+		return fmt.Errorf("an absent value claims a confidence")
+	}
 	return nil
 }
 
@@ -365,6 +438,12 @@ func ClassifyFailure(stderr string, waitErr error) error {
 	switch {
 	case strings.HasPrefix(lower, "page_limit:"):
 		return fmt.Errorf("%w: %s", ErrPageLimit, message)
+	case strings.HasPrefix(lower, "ocr_page_limit:"):
+		return fmt.Errorf("%w: %s", ErrOCRLimit, message)
+	case strings.HasPrefix(lower, "page_too_large:"):
+		return fmt.Errorf("%w: %s", ErrPixelLimit, message)
+	case strings.HasPrefix(lower, "ocr_unavailable:"):
+		return fmt.Errorf("%w: %s", ErrOCREngine, message)
 	case strings.HasPrefix(lower, "timeout:"):
 		return fmt.Errorf("%w: %s", ErrTimeout, message)
 	case strings.HasPrefix(lower, "invalid_output:"):

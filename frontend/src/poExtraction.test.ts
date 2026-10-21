@@ -2,8 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   applyExtractionSelection,
   defaultExtractionSelection,
+  EXTRACTION_MIN_CONFIDENCE,
   extractionAbstentionSummary,
+  extractionCellConfidenceLabel,
+  extractionEngineSummary,
   extractionErrorMessage,
+  extractionFoundNoText,
+  extractionLowConfidenceCellLabels,
+  extractionPageModeSummary,
+  extractionUsesOCR,
   extractionEvidenceLabel,
   extractionIsStale,
   extractionProgressText,
@@ -93,9 +100,13 @@ function result(): PurchaseOrderExtractionResultDTO {
     PageCount: 1,
     PagesWithText: 1,
     PagesWithoutText: 0,
+    PagesWithOCR: 0,
     DurationMs: 9,
-    SchemaVersion: 1,
+    SchemaVersion: 2,
     Pages: [{ Number: 1, Width: 595, Height: 842 }],
+    PageModes: [
+      { Number: 1, Mode: "text", TextWords: 20, TextChars: 180, OCRWords: 0, DPI: 0, Confidence: null },
+    ],
     Fields: [
       { Key: "poNumber", Cell: cell("4500123456") },
       { Key: "poDate", Cell: cell("2026-10-12") },
@@ -244,8 +255,10 @@ describe("extraction status and progress", () => {
     expect(extractionErrorMessage({ Status: "failed", ErrorCode: "timeout", ErrorMessage: "" })).toContain(
       "too long"
     );
+    // #478: a scan is no longer an excuse. invalid_output means the pages were
+    // read but could not be turned into values, and the sentence says so.
     expect(extractionErrorMessage({ Status: "failed", ErrorCode: "invalid_output", ErrorMessage: "" })).toContain(
-      "scanned"
+      "manually"
     );
     expect(extractionErrorMessage({ Status: "failed", ErrorCode: "interrupted", ErrorMessage: "" })).toContain(
       "restarted"
@@ -379,5 +392,123 @@ describe("evidence and abstention wording", () => {
   it("summarizes abstentions instead of implying accuracy", () => {
     expect(extractionAbstentionSummary(result())).toContain("2 of 6 header fields");
     expect(extractionAbstentionSummary(result())).toContain("0 of 2 lines");
+  });
+});
+
+// Issue #478: OCR provenance and the confidence gate. These are the decisions
+// that keep a scan from looking like a confident fact: a low-confidence value
+// is labelled, the page says it was OCRed and at what resolution, and nothing
+// here applies a value by itself.
+describe("OCR provenance", () => {
+  function mixedResult(): PurchaseOrderExtractionResultDTO {
+    const extraction = result();
+    extraction.PageCount = 2;
+    extraction.Pages = [
+      { Number: 1, Width: 595, Height: 842 },
+      { Number: 2, Width: 595, Height: 842 },
+    ];
+    extraction.PageModes = [
+      {
+        Number: 1,
+        Mode: "text",
+        TextWords: 20,
+        TextChars: 180,
+        OCRWords: 0,
+        DPI: 0,
+        Confidence: null,
+        Reason: "above the text floor",
+      },
+      {
+        Number: 2,
+        Mode: "ocr",
+        TextWords: 2,
+        TextChars: 11,
+        OCRWords: 24,
+        DPI: 300,
+        Confidence: 88,
+        Reason: "below the text floor",
+      },
+    ];
+    extraction.PagesWithoutText = 1;
+    extraction.PagesWithOCR = 1;
+    extraction.OCREngine = "tesseract";
+    extraction.OCREngineVersion = "5.5.0";
+    extraction.Rows[1] = {
+      ...extraction.Rows[1]!,
+      Quantity: cell("10.5", "needs_review", { Confidence: 55, Page: 2, Note: "low OCR confidence" }),
+      UnitPrice: cell("42.00", "extracted", { Confidence: 96, Page: 2 }),
+      Page: 2,
+      Status: "needs_review",
+      Note: "One or more cells were read with low OCR confidence; confirm the line.",
+    };
+    return extraction;
+  }
+
+  it("says which engine read the text layer and whether OCR ran", () => {
+    expect(extractionUsesOCR(result())).toBe(false);
+    expect(extractionEngineSummary(result())).toContain("Text layer: stub 1.0");
+    expect(extractionEngineSummary(result())).toContain("no page needed OCR");
+    // A stored schema-1 result has no page evidence, so the summary must not
+    // claim that no page needed OCR.
+    const legacy = result();
+    delete legacy.PageModes;
+    delete legacy.PagesWithOCR;
+    legacy.SchemaVersion = 1;
+    expect(extractionEngineSummary(legacy)).toContain("OCR evidence not recorded");
+
+    const mixed = mixedResult();
+    expect(extractionUsesOCR(mixed)).toBe(true);
+    expect(extractionEngineSummary(mixed)).toContain("OCR: tesseract 5.5.0");
+    expect(extractionEngineSummary(mixed)).toContain("1 of 2 pages");
+  });
+
+  it("describes each page's mode and OCR resolution", () => {
+    const mixed = mixedResult();
+    const lines = mixed.PageModes!.map(extractionPageModeSummary);
+    expect(lines[0]).toContain("text layer");
+    expect(lines[1]).toContain("OCR at 300 DPI");
+    expect(lines[1]).toContain("24 words");
+    expect(lines[1]).toContain("88% mean confidence");
+  });
+
+  it("labels a value below the confidence floor and leaves a confident one alone", () => {
+    expect(EXTRACTION_MIN_CONFIDENCE).toBe(70);
+    const low = cell("10.5", "needs_review", { Confidence: 55 });
+    expect(extractionCellConfidenceLabel(low)).toContain("55%");
+    expect(extractionCellConfidenceLabel(low)).toContain("below the 70% floor");
+    expect(extractionCellConfidenceLabel(cell("10.5", "extracted", { Confidence: 96 }))).toBe(
+      "OCR confidence 96%"
+    );
+    expect(extractionCellConfidenceLabel(cell("10.5"))).toBe("");
+  });
+
+  it("names the low-confidence cells of a row", () => {
+    const mixed = mixedResult();
+    expect(extractionLowConfidenceCellLabels(mixed.Rows[1]!)).toContain("quantity 55%");
+    expect(extractionLowConfidenceCellLabels(mixed.Rows[0]!)).toBe("");
+  });
+
+  it("does not claim no text when OCR read the pages", () => {
+    const empty = result();
+    empty.Rows = [];
+    empty.Fields = empty.Fields.map((field) => ({ ...field, Cell: cell("", "absent", { Confidence: null }) }));
+    expect(extractionFoundNoText(empty)).toBe(true);
+    empty.PageModes = mixedResult().PageModes;
+    empty.PagesWithoutText = 1;
+    expect(extractionFoundNoText(empty)).toBe(false);
+  });
+
+  it("no longer blames a scan for an unreadable result", () => {
+    const message = extractionErrorMessage({ Status: "failed", ErrorCode: "invalid_output" });
+    expect(message.toLowerCase()).not.toContain("does not read scanned");
+    expect(extractionErrorMessage({ Status: "failed", ErrorCode: "ocr_page_limit" })).toContain(
+      "scanned pages"
+    );
+    expect(extractionErrorMessage({ Status: "failed", ErrorCode: "page_too_large" })).toContain(
+      "too large"
+    );
+    expect(extractionErrorMessage({ Status: "failed", ErrorCode: "ocr_unavailable" })).toContain(
+      "scanned pages"
+    );
   });
 });

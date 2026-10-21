@@ -61,9 +61,13 @@ function result(): PurchaseOrderExtractionResultDTO {
     PageCount: 1,
     PagesWithText: 1,
     PagesWithoutText: 0,
+    PagesWithOCR: 0,
     DurationMs: 20,
-    SchemaVersion: 1,
+    SchemaVersion: 2,
     Pages: [{ Number: 1, Width: 595, Height: 842 }],
+    PageModes: [
+      { Number: 1, Mode: "text", TextWords: 20, TextChars: 180, OCRWords: 0, DPI: 0, Confidence: null },
+    ],
     Fields: [
       { Key: "poNumber", Cell: cell("4500123456", "extracted") },
       { Key: "poDate", Cell: cell("2026-10-12", "extracted") },
@@ -224,6 +228,71 @@ describe("extraction review panel", () => {
     expect(apply?.textContent).toContain("1 field");
     act(() => apply?.click());
     expect(onApply).toHaveBeenCalled();
+  });
+
+  it("shows OCR provenance and low-confidence evidence without auto-applying", () => {
+    const extraction = result();
+    extraction.PageCount = 2;
+    extraction.Pages = [
+      { Number: 1, Width: 595, Height: 842 },
+      { Number: 2, Width: 595, Height: 842 },
+    ];
+    extraction.PageModes = [
+      { Number: 1, Mode: "text", TextWords: 20, TextChars: 180, OCRWords: 0, DPI: 0, Confidence: null },
+      {
+        Number: 2,
+        Mode: "ocr",
+        TextWords: 2,
+        TextChars: 11,
+        OCRWords: 24,
+        DPI: 300,
+        Confidence: 88,
+        Reason: "below the text floor",
+      },
+    ];
+    extraction.PagesWithoutText = 1;
+    extraction.PagesWithOCR = 1;
+    extraction.OCREngine = "tesseract";
+    extraction.OCREngineVersion = "5.5.0";
+    extraction.Rows[1] = {
+      ...extraction.Rows[1]!,
+      Quantity: {
+        Value: "10.5",
+        Raw: "10.5",
+        Status: "needs_review",
+        Page: 2,
+        BBox: { X: 300, Y: 225, Width: 30, Height: 10 },
+        Confidence: 55,
+        Note: "low OCR confidence",
+      },
+      Page: 2,
+      Status: "needs_review",
+    };
+    act(() =>
+      root.render(
+        <PurchaseOrderExtractionPanelView
+          result={extraction}
+          header={emptyHeader()}
+          lines={lines()}
+          currency={USD}
+          selection={{}}
+          onToggle={() => undefined}
+          onApply={() => undefined}
+          onDiscard={() => undefined}
+        />
+      )
+    );
+    const text = container.textContent ?? "";
+    expect(text).toContain("OCR: tesseract 5.5.0");
+    expect(text).toContain("Page 2: OCR at 300 DPI");
+    expect(text).toContain("24 words");
+    expect(text).toContain("88% mean confidence");
+    expect(text).toContain("OCR confidence 55%");
+    expect(text).toContain("Low OCR confidence: quantity 55%");
+    // Evidence is never applied by itself: the low-confidence row starts
+    // unticked and Apply stays disabled with nothing selected.
+    expect(checkbox("Apply extracted line 2").checked).toBe(false);
+    expect(button("Apply selected").disabled).toBe(true);
   });
 
   it("opens no apply path when nothing can be represented", () => {
