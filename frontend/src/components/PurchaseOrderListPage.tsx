@@ -11,9 +11,11 @@ import {
   toggleCustomerFilter,
   type POListAction,
   type POListPageDTO,
+  type POListRowDTO,
   type POListState,
   type POListStateFilter,
 } from "../poList";
+import { DeletionDialog } from "./DeletionDialog";
 import { Select } from "./Select";
 import { Badge, Button, Card, fieldClass } from "./ui";
 
@@ -22,17 +24,18 @@ import { Badge, Button, Card, fieldClass } from "./ui";
 // draft by id through the #468 editor. The server owns filtering, ordering and
 // the 15-row page; this page only says which filters and page are current.
 //
-// What it deliberately does not render: attachments and correction history
-// (no such table exists yet, #472/#473), any fulfilment or payment status
-// (never implemented, and the parent spec forbids inventing one), and a
-// Source missing badge for a state that cannot exist until deletion ships
-// (#480/#481). The filter is present but disabled, with that stated.
+// #480 adds the admin-only permanent-deletion entry point. A row whose source
+// Quotation was deleted renders the Source missing badge from #469's contract;
+// the archive's source-missing filter is still #481's surface, so the control
+// stays disabled here.
 
 export interface PurchaseOrderListPageProps {
   /** Opens the #468 draft editor for one row id. */
   onOpen: (id: number) => void;
   /** Starts a new PO through the shared source selector. */
   onAdd: () => void;
+  /** Whether the signed-in user may permanently delete a record. */
+  isAdmin?: boolean;
 }
 
 export interface PurchaseOrderListViewProps {
@@ -41,6 +44,8 @@ export interface PurchaseOrderListViewProps {
   onOpen: (id: number) => void;
   onAdd: () => void;
   onRetry: () => void;
+  /** Present only for an admin; absent renders no delete control at all. */
+  onDelete?: (row: POListRowDTO) => void;
 }
 
 function errorText(error: unknown): string {
@@ -73,6 +78,7 @@ export function PurchaseOrderListView({
   onOpen,
   onAdd,
   onRetry,
+  onDelete,
 }: PurchaseOrderListViewProps) {
   const filterCount = activeFilterCount(state.filters);
   const filtered = filterCount > 0;
@@ -228,8 +234,7 @@ export function PurchaseOrderListView({
               Source missing only
             </label>
             <p className="max-w-md text-caption text-ink-400">
-              Available when Quotation deletion ships. No purchase order can be
-              missing its source today.
+              Source-missing filtering arrives with the follow-up archive work.
             </p>
           </div>
           <div className="flex items-center gap-2.5">
@@ -352,19 +357,32 @@ export function PurchaseOrderListView({
                         </Badge>
                       </td>
                       <td className="px-5 py-3 text-right align-middle">
-                        <Button
-                          size="sm"
-                          aria-label={`Open purchase order ${poNumberLabel(row)}`}
-                          disabled={!openable}
-                          title={
-                            row.State === "draft"
-                              ? "Open this draft"
-                              : "Open this saved purchase order (read-only)"
-                          }
-                          onClick={() => onOpen(row.ID)}
-                        >
-                          Open
-                        </Button>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Button
+                            size="sm"
+                            aria-label={`Open purchase order ${poNumberLabel(row)}`}
+                            disabled={!openable}
+                            title={
+                              row.State === "draft"
+                                ? "Open this draft"
+                                : "Open this saved purchase order (read-only)"
+                            }
+                            onClick={() => onOpen(row.ID)}
+                          >
+                            Open
+                          </Button>
+                          {onDelete !== undefined ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Delete purchase order ${poNumberLabel(row)}`}
+                              className="hover:!bg-danger-50 hover:!text-danger-600"
+                              onClick={() => onDelete(row)}
+                            >
+                              Delete
+                            </Button>
+                          ) : null}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -411,6 +429,7 @@ export function PurchaseOrderListView({
 export function PurchaseOrderListPage({
   onOpen,
   onAdd,
+  isAdmin = false,
 }: PurchaseOrderListPageProps) {
   const [state, dispatch] = useReducer(
     poListReducer,
@@ -422,6 +441,10 @@ export function PurchaseOrderListPage({
   const requestSeq = useRef(0);
   const lastSearch = useRef(state.filters.search);
   const [reload, setReload] = useState(0);
+  const [deletionTarget, setDeletionTarget] = useState<{
+    id: number;
+    label: string;
+  } | null>(null);
 
   useEffect(() => {
     const seq = ++requestSeq.current;
@@ -462,12 +485,37 @@ export function PurchaseOrderListPage({
   }, [state.filters, state.page, reload]);
 
   return (
-    <PurchaseOrderListView
-      state={state}
-      dispatch={dispatch}
-      onOpen={onOpen}
-      onAdd={onAdd}
-      onRetry={() => setReload((current) => current + 1)}
-    />
+    <>
+      <PurchaseOrderListView
+        state={state}
+        dispatch={dispatch}
+        onOpen={onOpen}
+        onAdd={onAdd}
+        onRetry={() => setReload((current) => current + 1)}
+        onDelete={
+          isAdmin
+            ? (row) =>
+                setDeletionTarget({
+                  id: row.ID,
+                  label: row.PONumber.trim() === ""
+                    ? `purchase order #${row.ID}`
+                    : `purchase order ${row.PONumber}`,
+                })
+            : undefined
+        }
+      />
+      {deletionTarget !== null ? (
+        <DeletionDialog
+          targetType="purchase_order"
+          targetId={deletionTarget.id}
+          targetLabel={deletionTarget.label}
+          onClose={() => setDeletionTarget(null)}
+          onDeleted={() => {
+            setDeletionTarget(null);
+            setReload((current) => current + 1);
+          }}
+        />
+      ) : null}
+    </>
   );
 }

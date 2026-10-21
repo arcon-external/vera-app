@@ -18,8 +18,16 @@ export function ClearRevisionContext() {
   return window['go']['backend']['Quotation']['ClearRevisionContext']();
 }
 
+export function ConfirmDeletion(arg1) {
+  return window['go']['backend']['Quotation']['ConfirmDeletion'](arg1);
+}
+
 export function CorrectPurchaseOrder(arg1) {
   return window['go']['backend']['Quotation']['CorrectPurchaseOrder'](arg1);
+}
+
+export function CreateDeletionChallenge(arg1) {
+  return window['go']['backend']['Quotation']['CreateDeletionChallenge'](arg1);
 }
 
 export function CreatePurchaseOrderDraft(arg1) {
@@ -32,10 +40,6 @@ export function CustomerID() {
 
 export function DeleteDraft(arg1) {
   return window['go']['backend']['Quotation']['DeleteDraft'](arg1);
-}
-
-export function DeleteQuotation(arg1) {
-  return window['go']['backend']['Quotation']['DeleteQuotation'](arg1);
 }
 
 export function DownloadTemplateSample(arg1, arg2, arg3, arg4, arg5) {
@@ -136,6 +140,10 @@ export function PickDirectory() {
 
 export function Prepare(arg1) {
   return window['go']['backend']['Quotation']['Prepare'](arg1);
+}
+
+export function PreviewDeletion(arg1) {
+  return window['go']['backend']['Quotation']['PreviewDeletion'](arg1);
 }
 
 export function PreviewTemplateDocument(arg1, arg2, arg3, arg4, arg5) {

@@ -550,6 +550,361 @@ export namespace backend {
 		}
 	}
 	
+	export class DeletionChallengeDTO {
+	    ChallengeID: string;
+	    Letters: string;
+	    ExpiresAt: string;
+	    Fingerprint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionChallengeDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ChallengeID = source["ChallengeID"];
+	        this.Letters = source["Letters"];
+	        this.ExpiresAt = source["ExpiresAt"];
+	        this.Fingerprint = source["Fingerprint"];
+	    }
+	}
+	export class DeletionChallengeInput {
+	    TargetType: string;
+	    TargetID: number;
+	    Scope: string;
+	    ExpectedFingerprint: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionChallengeInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.TargetType = source["TargetType"];
+	        this.TargetID = source["TargetID"];
+	        this.Scope = source["Scope"];
+	        this.ExpectedFingerprint = source["ExpectedFingerprint"];
+	    }
+	}
+	export class DeletionChangeDTO {
+	    Field: string;
+	    Label: string;
+	    Before: string;
+	    After: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionChangeDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Field = source["Field"];
+	        this.Label = source["Label"];
+	        this.Before = source["Before"];
+	        this.After = source["After"];
+	    }
+	}
+	export class DeletionRecordDTO {
+	    Type: string;
+	    UUID: string;
+	    DocumentNumber: string;
+	    SourceReference: string;
+	    Label: string;
+	    State: string;
+	    Revisions: number[];
+	    ID: number;
+	    Version: number;
+	    DocumentVersions: number;
+	    HistoryEntries: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionRecordDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Type = source["Type"];
+	        this.UUID = source["UUID"];
+	        this.DocumentNumber = source["DocumentNumber"];
+	        this.SourceReference = source["SourceReference"];
+	        this.Label = source["Label"];
+	        this.State = source["State"];
+	        this.Revisions = source["Revisions"];
+	        this.ID = source["ID"];
+	        this.Version = source["Version"];
+	        this.DocumentVersions = source["DocumentVersions"];
+	        this.HistoryEntries = source["HistoryEntries"];
+	    }
+	}
+	export class DeletionScopeDTO {
+	    Scope: string;
+	    UnavailableReason: string;
+	    Removes: DeletionRecordDTO[];
+	    Preserves: DeletionRecordDTO[];
+	    Available: boolean;
+	    RequiresChallenge: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionScopeDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Scope = source["Scope"];
+	        this.UnavailableReason = source["UnavailableReason"];
+	        this.Removes = this.convertValues(source["Removes"], DeletionRecordDTO);
+	        this.Preserves = this.convertValues(source["Preserves"], DeletionRecordDTO);
+	        this.Available = source["Available"];
+	        this.RequiresChallenge = source["RequiresChallenge"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeletionPreviewDTO {
+	    TargetType: string;
+	    TargetUUID: string;
+	    DocumentNumber: string;
+	    DocumentNumberLabel: string;
+	    QuoteNumber: string;
+	    PONumber: string;
+	    CustomerName: string;
+	    State: string;
+	    Fingerprint: string;
+	    Scopes: DeletionScopeDTO[];
+	    TargetID: number;
+	    Version: number;
+	    SourceMissing: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionPreviewDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.TargetType = source["TargetType"];
+	        this.TargetUUID = source["TargetUUID"];
+	        this.DocumentNumber = source["DocumentNumber"];
+	        this.DocumentNumberLabel = source["DocumentNumberLabel"];
+	        this.QuoteNumber = source["QuoteNumber"];
+	        this.PONumber = source["PONumber"];
+	        this.CustomerName = source["CustomerName"];
+	        this.State = source["State"];
+	        this.Fingerprint = source["Fingerprint"];
+	        this.Scopes = this.convertValues(source["Scopes"], DeletionScopeDTO);
+	        this.TargetID = source["TargetID"];
+	        this.Version = source["Version"];
+	        this.SourceMissing = source["SourceMissing"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeletionChangedDTO {
+	    Preview?: DeletionPreviewDTO;
+	    Changes: DeletionChangeDTO[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionChangedDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Preview = this.convertValues(source["Preview"], DeletionPreviewDTO);
+	        this.Changes = this.convertValues(source["Changes"], DeletionChangeDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeletionChallengeResult {
+	    Challenge?: DeletionChallengeDTO;
+	    Changed?: DeletionChangedDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionChallengeResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Challenge = this.convertValues(source["Challenge"], DeletionChallengeDTO);
+	        this.Changed = this.convertValues(source["Changed"], DeletionChangedDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class DeletionConfirmInput {
+	    TargetType: string;
+	    TargetID: number;
+	    Scope: string;
+	    Reason: string;
+	    TypedNumber: string;
+	    ExpectedFingerprint: string;
+	    ChallengeID: string;
+	    ChallengeLetters: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionConfirmInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.TargetType = source["TargetType"];
+	        this.TargetID = source["TargetID"];
+	        this.Scope = source["Scope"];
+	        this.Reason = source["Reason"];
+	        this.TypedNumber = source["TypedNumber"];
+	        this.ExpectedFingerprint = source["ExpectedFingerprint"];
+	        this.ChallengeID = source["ChallengeID"];
+	        this.ChallengeLetters = source["ChallengeLetters"];
+	    }
+	}
+	export class DeletionOutcomeDTO {
+	    Removed: DeletionRecordDTO[];
+	    AuditIDs: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionOutcomeDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Removed = this.convertValues(source["Removed"], DeletionRecordDTO);
+	        this.AuditIDs = source["AuditIDs"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeletionConfirmResult {
+	    Outcome?: DeletionOutcomeDTO;
+	    Changed?: DeletionChangedDTO;
+	    ChallengeProblem: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionConfirmResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Outcome = this.convertValues(source["Outcome"], DeletionOutcomeDTO);
+	        this.Changed = this.convertValues(source["Changed"], DeletionChangedDTO);
+	        this.ChallengeProblem = source["ChallengeProblem"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class DeletionPreviewInput {
+	    TargetType: string;
+	    TargetID: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeletionPreviewInput(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.TargetType = source["TargetType"];
+	        this.TargetID = source["TargetID"];
+	    }
+	}
+	
 	export class DeletionRequest {
 	    Email: string;
 	    DisplayName: string;
@@ -572,6 +927,7 @@ export namespace backend {
 	        this.UserID = source["UserID"];
 	    }
 	}
+	
 	export class DraftDTO {
 	    Payload: string;
 	    Subject: string;
@@ -1607,6 +1963,7 @@ export namespace backend {
 	    SavedAt?: string;
 	    SavedBy?: number;
 	    PdfAbsentConfirmed: boolean;
+	    SourceMissing: boolean;
 	    ConfirmationNumber?: string;
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
@@ -1658,6 +2015,7 @@ export namespace backend {
 	        this.SavedAt = source["SavedAt"];
 	        this.SavedBy = source["SavedBy"];
 	        this.PdfAbsentConfirmed = source["PdfAbsentConfirmed"];
+	        this.SourceMissing = source["SourceMissing"];
 	        this.ConfirmationNumber = source["ConfirmationNumber"];
 	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
 	        this.ConfirmationWarn = source["ConfirmationWarn"];

@@ -185,6 +185,10 @@ type purchaseOrderWriteLock struct {
 	SourceRevision int16
 	PpnBps         int16
 	UpdatedBy      int64
+	// SourceMissing is #480: the live quotation link was released by a
+	// deletion. Reads still work; writes that need the frozen source revision
+	// are refused with a named error instead of a missing-row surprise.
+	SourceMissing bool
 }
 
 // lockPurchaseOrderWrite locks the record and enforces the optimistic
@@ -205,16 +209,17 @@ func lockPurchaseOrderWrite(
 	}
 	var lock purchaseOrderWriteLock
 	err := tx.QueryRow(ctx, fmt.Sprintf(`
-		SELECT state, version, quotation_id, source_revision, customer_id,
+		SELECT state, version, COALESCE(quotation_id, former_quotation_id, 0),
+		       source_revision, customer_id,
 		       customer_name, currency, tax_zone, tax_category, ppn_bps,
-		       received_date, updated_by, updated_at
+		       received_date, updated_by, updated_at, (quotation_id IS NULL)
 		FROM %s.purchase_orders
 		WHERE id = $1 AND org_id = $2
 		FOR UPDATE`, schema), id, orgID).Scan(
 		&lock.State, &lock.Version, &lock.QuotationID, &lock.SourceRevision,
 		&lock.CustomerID, &lock.CustomerName, &lock.Currency, &lock.TaxZone,
 		&lock.TaxCategory, &lock.PpnBps, &lock.ReceivedDate, &lock.UpdatedBy,
-		&lock.UpdatedAt)
+		&lock.UpdatedAt, &lock.SourceMissing)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return purchaseOrderWriteLock{}, ErrPurchaseOrderNotFound
 	}
@@ -248,6 +253,16 @@ func lockPurchaseOrderWrite(
 		return purchaseOrderWriteLock{}, ErrPurchaseOrderNotDraft
 	}
 	return lock, nil
+}
+
+// requirePurchaseOrderSource refuses a write whose rules need the frozen source
+// revision when #480 released the link. Reads and the #475 repair stay open: the
+// record is not broken, it is waiting for a new source.
+func requirePurchaseOrderSource(lock purchaseOrderWriteLock) error {
+	if lock.SourceMissing {
+		return ErrPurchaseOrderSourceMissing
+	}
+	return nil
 }
 
 // CorrectPurchaseOrder replaces a saved record with the submitted values and
@@ -293,6 +308,9 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateSaved)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
 

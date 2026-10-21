@@ -212,9 +212,34 @@ describe("PurchaseOrderListView states (issue #469)", () => {
       .find((chunk) => chunk.includes('aria-label="Source missing only"'));
     expect(input).toBeDefined();
     expect(input?.slice(0, input.indexOf(">"))).toContain(" disabled=");
-    expect(html).toContain(
-      "Available when Quotation deletion ships. No purchase order can be missing its source today."
-    );
+    // #481 owns the filter surface; #480 only makes the state reachable, so the
+    // copy must stop claiming the state cannot exist.
+    expect(html).toContain("Source-missing filtering arrives with the follow-up archive work.");
+    expect(html).not.toContain("No purchase order can be missing its source today.");
+  });
+
+  it("offers no delete control to a non-admin view", () => {
+    const html = render({
+      state: state({
+        rows: [row()],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(html).not.toContain("Delete purchase order");
+  });
+
+  it("offers the admin delete entry point without changing the row's Open control", () => {
+    const html = render({
+      state: state({
+        rows: [row()],
+        total: 1,
+        totalPages: 1,
+      }),
+      onDelete: () => undefined,
+    });
+    expect(html).toContain('aria-label="Delete purchase order PO-INF-2026-091"');
+    expect(html).toContain('aria-label="Open purchase order PO-INF-2026-091"');
   });
 
   it("lists the customer facet and marks the selected customers", () => {

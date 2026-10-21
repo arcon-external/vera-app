@@ -150,7 +150,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/purchase-orders/:id/document/content", server.getPurchaseOrderDocumentContent, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id/documents/:version/content", server.getPurchaseOrderDocumentVersionContent, server.requireSession)
 	server.echo.DELETE("/v1/purchase-orders/:id/document", server.removePurchaseOrderDocument, server.requireSession)
-	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
+	// #480: permanent deletion. Preview and challenge describe the exact chain;
+	// confirm is the irreversible write. All three are admin-only, and the store
+	// re-reads the actor's stored role inside the write.
+	server.echo.POST("/v1/deletions/preview", server.previewDeletion, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/deletions/challenge", server.createDeletionChallenge, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/deletions", server.confirmDeletion, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/users", server.createUser, server.requireSession, server.requireAdmin)

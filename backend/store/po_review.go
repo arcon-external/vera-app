@@ -488,6 +488,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	if err := requirePurchaseOrderSource(lock); err != nil {
+		return PurchaseOrder{}, err
+	}
 	quotationID = lock.QuotationID
 	sourceRevision = lock.SourceRevision
 	customerID = lock.CustomerID

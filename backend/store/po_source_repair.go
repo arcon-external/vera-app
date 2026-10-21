@@ -223,6 +223,12 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		UPDATE %s.purchase_orders SET
 			quotation_id = $3,
 			source_revision = $4,
+			-- A repaired record has a live link again; the former-source
+			-- reference belongs to the missing-source state only.
+			former_quotation_id = NULL,
+			former_quotation_uuid = NULL,
+			former_quote_number = NULL,
+			former_source_revision = NULL,
 			customer_id = $5,
 			customer_name = $6,
 			billing_address = $7,
@@ -324,7 +330,9 @@ func checkPurchaseOrderRepairTarget(
 	order PurchaseOrder,
 	source PurchaseOrderSource,
 ) error {
-	if order.QuotationID == source.QuotationID && order.SourceRevision == source.RevisionNumber {
+	if !order.SourceMissing &&
+		order.QuotationID == source.QuotationID &&
+		order.SourceRevision == source.RevisionNumber {
 		return ErrPurchaseOrderSourceUnchanged
 	}
 	var occupied bool

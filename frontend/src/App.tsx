@@ -2176,6 +2176,7 @@ function App() {
           // catalogue loads, never a row's steady state.
           <ArchivePage
             currency={liveEntry}
+            isAdmin={user?.Role === "admin"}
             onNewQuotation={handleNewQuotation}
             onOpenQuotation={handleOpenQuotation}
           />

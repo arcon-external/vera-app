@@ -84,6 +84,10 @@ var (
 	// with the revision it names (a customer, for instance). Like the currency
 	// refusal, it is a broken link rather than something staff entered.
 	ErrPurchaseOrderSourceMismatch = errors.New("purchase order source does not match the record")
+	// ErrPurchaseOrderSourceMissing is the #480 state a deletion can create:
+	// the record's Quotation was permanently deleted, so the rules that compare
+	// against the frozen revision cannot run until an admin repairs the link.
+	ErrPurchaseOrderSourceMissing = errors.New("purchase order source quotation was deleted; repair the source link first")
 )
 
 // PurchaseOrderDecision is one explicit difference-review choice for a review
@@ -165,6 +169,10 @@ type PurchaseOrder struct {
 	// and the row's trigger moves it forward on every write, so a save must
 	// state the version it loaded.
 	Version int64
+	// SourceMissing is the #480 state: the record followed a Quotation that was
+	// deleted, so it keeps its own values and a former-source reference.
+	// QuotationID and QuoteNumber then name the former link, not a live one.
+	SourceMissing bool
 	// Finalization (#471). SavedAt/SavedBy are set exactly once, by the
 	// transition from draft to saved. PDFAbsentConfirmed records the deliberate
 	// confirmation a save needs while no customer PDF exists.
@@ -352,6 +360,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		if isActivePurchaseOrderConflict(err) {
 			return PurchaseOrder{}, ErrPurchaseOrderExists
 		}
+		// A concurrent quotation deletion holds the parent row FOR UPDATE; this
+		// insert's foreign-key check then fails with 23503. The source is gone,
+		// not the request malformed.
+		if isMissingQuotationConflict(err) {
+			return PurchaseOrder{}, ErrPurchaseOrderSourceNotFound
+		}
 		return PurchaseOrder{}, fmt.Errorf("insert purchase order: %w", err)
 	}
 
@@ -424,6 +438,9 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -876,9 +893,12 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	var confirmationYear, confirmationCustomerCode pgtype.Int2
 	var confirmationAssignedAt pgtype.Timestamptz
 	var confirmationAssignedBy pgtype.Int8
+	var sourceMissing bool
 	err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT po.id, po.version, po.uuid::text, po.org_id::text, po.quotation_id,
-		       po.source_revision, q.quote_number, po.state, po.customer_id,
+		SELECT po.id, po.version, po.uuid::text, po.org_id::text,
+		       COALESCE(po.quotation_id, po.former_quotation_id, 0),
+		       po.source_revision, COALESCE(q.quote_number, po.former_quote_number, ''),
+		       po.state, po.customer_id,
 		       po.customer_name, po.billing_address, po.delivery_address,
 		       po.ship_to_code, po.contact_email, po.contact_phone,
 		       COALESCE(po.po_number, ''), po.po_date, po.received_date,
@@ -894,9 +914,10 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		        AND po.pdf_absent_confirmed_by IS NOT NULL),
 		       po.confirmation_number, po.confirmation_sequence,
 		       po.confirmation_year, po.confirmation_customer_code,
-		       po.confirmation_assigned_at, po.confirmation_assigned_by
+		       po.confirmation_assigned_at, po.confirmation_assigned_by,
+		       (po.quotation_id IS NULL)
 		FROM %s.purchase_orders po
-		JOIN %s.quotations q ON q.id = po.quotation_id
+		LEFT JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
 		&order.ID,
 		&order.Version,
@@ -947,6 +968,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&confirmationCustomerCode,
 		&confirmationAssignedAt,
 		&confirmationAssignedBy,
+		&sourceMissing,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
@@ -954,6 +976,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	if err != nil {
 		return PurchaseOrder{}, fmt.Errorf("load purchase order %d: %w", id, err)
 	}
+	order.SourceMissing = sourceMissing
 	if savedAt.Valid {
 		value := savedAt.Time
 		order.SavedAt = &value
@@ -1058,4 +1081,17 @@ func isActivePurchaseOrderConflict(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23505" && pgErr.ConstraintName == "purchase_orders_active_quotation_idx"
+}
+
+// isMissingQuotationConflict names the foreign-key failure a creation race with
+// a permanent Quotation deletion produces. It is the race guard for #480: the
+// deletion holds the quotation row FOR UPDATE, so an insert either completes
+// first (and the deletion stops on a changed chain) or waits and then finds no
+// parent.
+func isMissingQuotationConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "23503" && pgErr.ConstraintName == "purchase_orders_quotation_id_fkey"
 }

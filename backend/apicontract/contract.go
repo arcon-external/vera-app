@@ -243,6 +243,9 @@ type PurchaseOrderRow struct {
 	SavedAt            *string `json:"savedAt"`
 	SavedBy            *int64  `json:"savedBy"`
 	PdfAbsentConfirmed bool    `json:"pdfAbsentConfirmed"`
+	// SourceMissing is the #480 state: the record's Quotation was permanently
+	// deleted and it keeps a former-source reference instead.
+	SourceMissing bool `json:"sourceMissing"`
 	// The optional customer-system confirmation reference (#474). It is null
 	// until assigned, and then immutable. ConfirmationWarn turns true once the
 	// customer-year cycle reaches the shared 8000 warning threshold.
