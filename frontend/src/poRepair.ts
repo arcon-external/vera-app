@@ -14,9 +14,9 @@ import {
 } from "./poFinalize";
 import {
   buildPurchaseOrderUpdate,
-  initialPurchaseOrderEditorState,
   trimAdjustmentReason,
   type PurchaseOrderDTO,
+  type PurchaseOrderEditorState,
   type PurchaseOrderItemInput,
 } from "./purchaseOrder";
 import type { CurrencyInfo } from "./format";
@@ -87,14 +87,16 @@ function sourceLabelOf(line: { LineLabel: string; QuotationItemNo: number; Quota
 }
 
 /**
- * Builds the repair payload. It refuses exactly what the server refuses: a
- * missing reason, an unresolved difference, an unacknowledged missing/extra
- * line, a currency mismatch, or an incomplete record. The applied review state
- * becomes the editable values, so a "Use Quotation" choice is stored rather
- * than merely claimed, and the version the panel loaded is stated for the CAS.
+ * Builds the repair payload from the editor state the review actually shows,
+ * after the admin corrected matches and chose values. It refuses exactly what
+ * the server refuses: a missing reason, an unresolved difference, an
+ * unacknowledged missing/extra line, a currency mismatch, or an incomplete
+ * record. The applied review state becomes the editable values, so a "Use
+ * Quotation" choice is stored rather than merely claimed, and the version the
+ * panel loaded is stated for the CAS.
  */
 export function buildSourceRepairInput(
-  order: PurchaseOrderDTO,
+  state: PurchaseOrderEditorState,
   review: PurchaseOrderReviewDTO,
   currency: CurrencyInfo,
   decisions: POReviewDecisions,
@@ -106,7 +108,6 @@ export function buildSourceRepairInput(
   if (reasonError !== null) {
     return { input: null, error: reasonError };
   }
-  const state = initialPurchaseOrderEditorState(review.Order, currency);
   const evaluation = evaluateReview(
     state,
     review.Source,
@@ -128,7 +129,7 @@ export function buildSourceRepairInput(
   return {
     input: {
       ...update.input,
-      ID: order.ID,
+      ID: state.orderId,
       TargetQuotationID: review.Source.QuotationID,
       TargetRevisionNumber: review.Source.RevisionNumber,
       Reason: trimRepairReason(reason),

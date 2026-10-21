@@ -146,11 +146,53 @@ function review(): PurchaseOrderReviewDTO {
   };
 }
 
+/**
+ * The Judge's scenario: the candidate shares no line reference, unit price,
+ * payment terms or Incoterms with the record, so the review can only pass after
+ * the match is corrected and the quotation values are chosen.
+ */
+function mismatchedReview(): PurchaseOrderReviewDTO {
+  return {
+    Order: order(),
+    Source: {
+      QuotationID: 9,
+      RevisionNumber: 1,
+      QuoteNumber: "1502260009",
+      CustomerID: 2,
+      CustomerName: "PT. Buyer",
+      Currency: "USD",
+      PaymentTerms: "30 days",
+      Incoterms: "FOB",
+      DiscountPercent: 0,
+      Lines: [
+        {
+          QuotationItemNo: 2,
+          QuotationSubNo: null,
+          LineLabel: "2",
+          Description: "Revised widget",
+          UoM: "Pc",
+          QuantityScaled: 20000,
+          UnitPriceMinor: 12000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+        },
+      ],
+      PrintedSubtotalMinor: 24000,
+      PrintedDiscountMinor: 0,
+      PrintedPpnMinor: 0,
+      PrintedGrandTotalMinor: 24000,
+    },
+    DocumentState: "none",
+  };
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
   repairMock.mockReset();
+  // jsdom has no layout, so the Select's scroll-into-view effect would throw.
+  Element.prototype.scrollIntoView = () => undefined;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -169,20 +211,33 @@ async function flush(): Promise<void> {
 }
 
 async function renderPage(props: {
+  review?: PurchaseOrderReviewDTO;
   onCancel?: () => void;
   onRepaired?: (order: PurchaseOrderDTO) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 } = {}): Promise<void> {
   await act(async () => {
     root.render(
       <PurchaseOrderRepairPage
-        review={review()}
+        review={props.review ?? review()}
         currency={USD}
         onCancel={props.onCancel ?? (() => undefined)}
         onRepaired={props.onRepaired ?? (() => undefined)}
+        onDirtyChange={props.onDirtyChange}
       />
     );
   });
   await flush();
+}
+
+/** Chooses a quotation line in one line's match picker. */
+async function chooseMatch(lineNumber: number, label: string): Promise<void> {
+  await click(button(`Line ${lineNumber} quotation match`));
+  const option = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('[role="option"]')
+  ).find((candidate) => candidate.textContent?.includes(label));
+  if (option === undefined) throw new Error(`no match option "${label}"`);
+  await click(option);
 }
 
 function button(label: string): HTMLButtonElement {
@@ -262,6 +317,82 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
     ]);
     expect(repaired).toHaveLength(1);
     expect(repaired[0].QuotationID).toBe(9);
+  });
+
+  it("treats a corrected line match as an unsaved change", async () => {
+    const dirty: boolean[] = [];
+    await renderPage({
+      review: mismatchedReview(),
+      onDirtyChange: (value) => dirty.push(value),
+    });
+    expect(dirty).toEqual([]);
+
+    await chooseMatch(1, "2 — Revised widget");
+
+    expect(dirty).toEqual([true]);
+  });
+
+  it("saves the corrected match and the values chosen for it", async () => {
+    repairMock.mockResolvedValue({
+      Order: order({ QuotationID: 9, QuoteNumber: "1502260009", Version: 5 }),
+    });
+    await renderPage({ review: mismatchedReview() });
+
+    await chooseMatch(1, "2 — Revised widget");
+    // The corrected match moves the comparison to the candidate's own line:
+    // only its description, price, payment terms and Incoterms differ now.
+    expect(document.body.textContent).toContain("Currently quotation line 2");
+    for (const label of [
+      "Payment terms",
+      "Incoterms",
+      "Line 1 description",
+      "Line 1 unit price",
+    ]) {
+      await click(button(`Use Quotation for ${label}`));
+    }
+    await click(button("Continue to repair"));
+    expect(document.body.textContent).toContain("Confirm the source repair");
+    await type(
+      textarea("Reason for repairing the source link"),
+      "the order followed another quotation line"
+    );
+    await click(button("Repair source link"));
+
+    expect(repairMock).toHaveBeenCalledTimes(1);
+    const payload = repairMock.mock.calls[0][0] as {
+      Items: Array<Record<string, unknown>>;
+      Decisions: Array<{ Key: string; Choice: string }>;
+      PaymentTerms: string;
+      Incoterms: string;
+      TargetQuotationID: number;
+      TargetRevisionNumber: number;
+      ExpectedVersion: number;
+      Reason: string;
+    };
+    expect(payload.TargetQuotationID).toBe(9);
+    expect(payload.TargetRevisionNumber).toBe(1);
+    expect(payload.ExpectedVersion).toBe(4);
+    expect(payload.Reason).toBe("the order followed another quotation line");
+    expect(payload.PaymentTerms).toBe("30 days");
+    expect(payload.Incoterms).toBe("FOB");
+    expect(payload.Items).toEqual([
+      {
+        QuotationItemNo: 2,
+        QuotationSubNo: null,
+        Description: "Revised widget",
+        QuantityScaled: 20000,
+        UoM: "Pc",
+        UnitPriceMinor: 12000,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+    ]);
+    expect(payload.Decisions).toEqual([
+      { Key: "header:paymentTerms", Choice: "quotation" },
+      { Key: "header:incoterms", Choice: "quotation" },
+      { Key: "line:1:description", Choice: "quotation" },
+      { Key: "line:1:unitPrice", Choice: "quotation" },
+    ]);
   });
 
   it("shows a stale version as the named conflict instead of overwriting", async () => {

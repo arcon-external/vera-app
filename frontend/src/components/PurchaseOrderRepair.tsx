@@ -8,6 +8,7 @@ import {
   type POReviewChoice,
   type POReviewDecisions,
   type PurchaseOrderReviewDTO,
+  type PurchaseOrderSourceLineDTO,
 } from "../poFinalize";
 import {
   buildSourceRepairInput,
@@ -314,11 +315,34 @@ export function PurchaseOrderRepairPage({
     setReason(value);
     onDirtyChange?.(true);
   };
+  // A corrected match is an unsaved change of its own: it is as much of the
+  // repair as a chosen value, and it must be what the payload carries.
+  const changeMatch = (
+    lineKey: number,
+    source: PurchaseOrderSourceLineDTO | null
+  ) => {
+    const line = state.lines.find((candidate) => candidate.key === lineKey);
+    if (line === undefined) return;
+    const quotationItemNo = source === null ? null : source.QuotationItemNo;
+    const quotationSubNo = source === null ? null : (source.QuotationSubNo ?? null);
+    if (
+      line.quotationItemNo === quotationItemNo &&
+      line.quotationSubNo === quotationSubNo
+    ) {
+      return;
+    }
+    dispatch({
+      type: "lineChanged",
+      key: lineKey,
+      patch: { quotationItemNo, quotationSubNo },
+    });
+    onDirtyChange?.(true);
+  };
 
   const save = async () => {
     const built = buildSourceRepairInput(
-      review.Order,
-      { ...review, Order: { ...review.Order, Version: state.version } },
+      state,
+      review,
       currency,
       decisions,
       acknowledgedMissing,
@@ -394,21 +418,12 @@ export function PurchaseOrderRepairPage({
         onDecision={setDecision}
         onToggleMissing={toggleMissing}
         onToggleExtra={toggleExtra}
-        onMatchChange={(lineKey, source) =>
-          dispatch({
-            type: "lineChanged",
-            key: lineKey,
-            patch: {
-              quotationItemNo: source === null ? null : source.QuotationItemNo,
-              quotationSubNo: source === null ? null : (source.QuotationSubNo ?? null),
-            },
-          })
-        }
         onBack={onCancel}
         onContinue={() => {
           if (!evaluation.canContinue) return;
           setView("confirm");
         }}
+        onMatchChange={changeMatch}
       />
       <p className="text-caption text-ink-500">
         The reason is required on the next step; nothing is written yet.
