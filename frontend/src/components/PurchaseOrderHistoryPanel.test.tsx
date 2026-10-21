@@ -70,6 +70,28 @@ const CORRECTION: PurchaseOrderHistoryEntry = {
   ],
 };
 
+const SOURCE_REPAIR: PurchaseOrderHistoryEntry = {
+  ...CORRECTION,
+  UUID: "corr-3",
+  Kind: "source_repair",
+  Reason: "The order followed the wrong revision",
+  PreviousVersion: 5,
+  ResultingVersion: 6,
+  Attachment: null,
+  Repair: {
+    PreviousQuoteNumber: "1502260044",
+    PreviousSourceRevision: 7,
+    PreviousCustomerName: "PT. Buyer Nusantara",
+    NewQuoteNumber: "1502260051",
+    NewSourceRevision: 0,
+    NewCustomerName: "PT. Buyer Nusantara",
+    Decisions: [
+      { Key: "header:paymentTerms", Choice: "quotation" },
+      { Key: "line:1:unitPrice", Choice: "po" },
+    ],
+  },
+};
+
 const DRAFT_OVERWRITE: PurchaseOrderHistoryEntry = {
   ...CORRECTION,
   UUID: "corr-2",
@@ -183,4 +205,25 @@ describe("PurchaseOrderHistoryPanel (issue #473)", () => {
     expect(html).toContain("purchase order not found");
     expect(html).not.toContain("No corrections have been recorded");
   });
+
+describe("PurchaseOrderHistoryPanel source repair (issue #475)", () => {
+  it("names the old and new source and every recorded choice", () => {
+    const html = markup([SOURCE_REPAIR]);
+    expect(html).toContain("Source repaired");
+    expect(html).toContain(
+      "Quotation 1502260044 · revision 7 → Quotation 1502260051 · revision 0"
+    );
+    expect(html).toContain("header:paymentTerms");
+    expect(html).toContain("Used Quotation");
+    expect(html).toContain("line:1:unitPrice");
+    expect(html).toContain("Kept PO entry");
+    expect(html).toContain("The order followed the wrong revision");
+  });
+
+  it("does not claim a customer move when both sides name the same customer", () => {
+    const html = markup([SOURCE_REPAIR]);
+    expect(html).not.toContain("customer PT. Buyer Nusantara →");
+  });
+});
+
 });

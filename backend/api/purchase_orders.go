@@ -129,6 +129,84 @@ func (s *Server) correctPurchaseOrder(context echo.Context) error {
 	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
 }
 
+// reviewPurchaseOrderSource compares a saved record against a candidate
+// revision without writing anything (#475). The admin gate is the route's; the
+// review itself applies the same eligibility rules the save will apply, so an
+// ineligible target is named before the admin spends time deciding values.
+func (s *Server) reviewPurchaseOrderSource(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	var request apicontract.PurchaseOrderSourceReviewRequest
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	review, err := s.database.ReviewPurchaseOrderSource(
+		requestContext, id, request.TargetQuotationID, *request.TargetRevisionNumber)
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrderReview(review))
+}
+
+// repairPurchaseOrderSource moves a saved record to another issued revision.
+// The reason, the loaded version and the full #471 difference review are all
+// required; the old and new link and the choices become history. Only an admin
+// reaches this handler, and the store re-reads the actor's stored role.
+func (s *Server) repairPurchaseOrderSource(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	var request apicontract.PurchaseOrderSourceRepairRequest
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if protected := request.Named(); protected != "" {
+		return purchaseOrderProtectedField(context, protected)
+	}
+	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
+	}
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	if err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	update.ID = id
+	decisions := make([]store.PurchaseOrderDecision, 0, len(request.Decisions))
+	for _, decision := range request.Decisions {
+		decisions = append(decisions, store.PurchaseOrderDecision{
+			Key:    decision.Key,
+			Choice: decision.Choice,
+		})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	order, err := s.database.RepairPurchaseOrderSource(requestContext, store.PurchaseOrderSourceRepairInput{
+		PurchaseOrderUpdate: update,
+		Reason:              request.Reason,
+		QuotationID:         request.TargetQuotationID,
+		RevisionNumber:      *request.TargetRevisionNumber,
+		Decisions:           decisions,
+		AcknowledgedMissing: request.AcknowledgedMissing,
+		AcknowledgedExtra:   request.AcknowledgedExtra,
+	})
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
+}
+
 // getPurchaseOrderHistory returns the immutable snapshots of one record,
 // newest first.
 func (s *Server) getPurchaseOrderHistory(context echo.Context) error {
@@ -258,6 +336,31 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": "reload the purchase order before saving; the version it was loaded at is required",
 			"code":  "po_version_required",
 		})
+	case errors.Is(err, store.ErrPurchaseOrderRepairForbidden):
+		return context.JSON(http.StatusForbidden, map[string]string{
+			"error": "repairing a purchase order source link requires an administrator",
+			"code":  "po_repair_forbidden",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderRepairReasonRequired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": "a source repair needs a reason",
+			"code":  "po_repair_reason_required",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderSourceUnchanged):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_source_unchanged",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderTargetOccupied):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_target_occupied",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderConfirmationCustomerLocked):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_confirmation_customer_locked",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderCorrectionReasonRequired):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": "a correction needs a reason",
@@ -319,7 +422,7 @@ func purchaseOrderError(context echo.Context, err error) error {
 		})
 	case errors.Is(err, store.ErrPurchaseOrderNotSaved):
 		return context.JSON(http.StatusConflict, map[string]string{
-			"error": "only a saved purchase order can have a confirmation number",
+			"error": "save the purchase order first; this action needs a saved record",
 			"code":  "po_not_saved",
 		})
 	case errors.Is(err, store.ErrPOConfirmationExhausted):
@@ -553,6 +656,28 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 			SHA256:   entry.Attachment.SHA256,
 			Filename: entry.Attachment.Filename,
 		}
+	}
+	if entry.Repair != nil {
+		repair := &apicontract.PurchaseOrderSourceRepairRow{
+			PreviousQuotationID:    entry.Repair.PreviousQuotationID,
+			PreviousSourceRevision: entry.Repair.PreviousSourceRevision,
+			PreviousQuoteNumber:    entry.Repair.PreviousQuoteNumber,
+			PreviousCustomerID:     entry.Repair.PreviousCustomerID,
+			PreviousCustomerName:   entry.Repair.PreviousCustomerName,
+			NewQuotationID:         entry.Repair.NewQuotationID,
+			NewSourceRevision:      entry.Repair.NewSourceRevision,
+			NewQuoteNumber:         entry.Repair.NewQuoteNumber,
+			NewCustomerID:          entry.Repair.NewCustomerID,
+			NewCustomerName:        entry.Repair.NewCustomerName,
+			Decisions:              make([]apicontract.PurchaseOrderSourceRepairDecisionRow, 0, len(entry.Repair.Decisions)),
+		}
+		for _, decision := range entry.Repair.Decisions {
+			repair.Decisions = append(repair.Decisions, apicontract.PurchaseOrderSourceRepairDecisionRow{
+				Key:    decision.Key,
+				Choice: decision.Choice,
+			})
+		}
+		row.Repair = repair
 	}
 	for _, item := range entry.Items {
 		row.Items = append(row.Items, apicontract.PurchaseOrderCorrectionItemRow{

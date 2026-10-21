@@ -150,6 +150,14 @@ export function RefreshCompanyIdentity() {
   return window['go']['backend']['Quotation']['RefreshCompanyIdentity']();
 }
 
+export function RepairPurchaseOrderSource(arg1) {
+  return window['go']['backend']['Quotation']['RepairPurchaseOrderSource'](arg1);
+}
+
+export function ReviewPurchaseOrderSource(arg1) {
+  return window['go']['backend']['Quotation']['ReviewPurchaseOrderSource'](arg1);
+}
+
 export function RemovePurchaseOrderDocument(arg1, arg2) {
   return window['go']['backend']['Quotation']['RemovePurchaseOrderDocument'](arg1, arg2);
 }

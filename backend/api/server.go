@@ -133,6 +133,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// Corrections (#473): replacing a saved record requires a reason and the
 	// version it was loaded at; the history returns the immutable snapshots.
 	server.echo.POST("/v1/purchase-orders/:id/correction", server.correctPurchaseOrder, server.requireSession)
+	// #475: repairing the saved source link is admin-only. The review reads the
+	// candidate revision without writing; the repair repeats the #471 difference
+	// rules and records the old/new link and the choices.
+	server.echo.POST("/v1/purchase-orders/:id/source-repair/review", server.reviewPurchaseOrderSource, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/purchase-orders/:id/source-repair", server.repairPurchaseOrderSource, server.requireSession, server.requireAdmin)
 	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.

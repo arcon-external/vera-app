@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   POSourcePage,
+  POSourceQuotation,
   POSourceQuery,
   POSourceRevision,
   POSourceSelection,
@@ -43,13 +44,20 @@ const OTHER = {
   activePO: null,
 };
 
+const DRAFT_ROW = {
+  ...OTHER,
+  id: 14,
+  quoteNumber: "1502260003",
+  activePO: { id: 20, state: "draft" as const },
+};
+
 const TWO_REVISIONS: POSourceRevision[] = [
   { revision: 1, issuedAt: "2026-10-20T10:00:00+07:00" },
   { revision: 0, issuedAt: "2026-10-18T10:00:00+07:00" },
 ];
 
 function page(
-  quotations = [QUOTATION, OTHER],
+  quotations: POSourceQuotation[] = [QUOTATION, OTHER],
   pageNumber = 1,
   totalPages = 1
 ): POSourcePage {
@@ -81,6 +89,8 @@ interface HarnessProps {
   loadRevisions?: (quotationId: number) => Promise<POSourceRevision[]>;
   validate?: (selection: POSourceSelection) => Promise<POSourceValidation>;
   onConfirm?: (selection: POSourceSelection) => void;
+  mode?: "entry" | "repair";
+  excludePOID?: number;
 }
 
 function Harness({
@@ -89,6 +99,8 @@ function Harness({
   loadRevisions = async () => TWO_REVISIONS,
   validate = async () => ({ valid: true }),
   onConfirm = () => {},
+  mode = "entry",
+  excludePOID,
 }: HarnessProps) {
   const [open, setOpen] = useState(initialOpen);
   return (
@@ -101,6 +113,8 @@ function Harness({
       </button>
       <POQuotationSelector
         open={open}
+        mode={mode}
+        excludePOID={excludePOID}
         onClose={() => setOpen(false)}
         onConfirm={onConfirm}
         loadPage={loadPage}
@@ -356,4 +370,32 @@ describe("POQuotationSelector interaction (issue #467 wave 3)", () => {
 
     expect(onConfirm).not.toHaveBeenCalled();
   });
+
+describe("POQuotationSelector repair mode (issue #475)", () => {
+  it("asks the server to exempt the repaired record and never offers to open its draft", async () => {
+    const queries: POSourceQuery[] = [];
+    await renderHarness({
+      mode: "repair",
+      excludePOID: 21,
+      loadPage: async (query) => {
+        queries.push(query);
+        return page([QUOTATION, DRAFT_ROW]);
+      },
+    });
+    expect(queries[0]).toMatchObject({ page: 1, excludePOID: 21 });
+    expect(document.body.textContent).toContain("Select the new quotation");
+    expect(document.body.textContent).toContain("Step 1 of 3");
+    // The draft row is still non-selectable, and repair mode offers no
+    // "Open draft" shortcut that would leave the saved record behind.
+    expect(document.body.textContent).toContain("Draft purchase order in progress");
+    expect(document.querySelector('button[aria-label^="Open draft"]')).toBeNull();
+  });
+
+  it("keeps the ordinary entry wording when no repair mode is asked for", async () => {
+    await renderHarness();
+    expect(document.body.textContent).toContain("Select a quotation");
+    expect(document.body.textContent).not.toContain("Select the new quotation");
+  });
+});
+
 });

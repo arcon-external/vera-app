@@ -53,6 +53,10 @@ import {
   type PurchaseOrderSourceDTO,
 } from "./poFinalize";
 import { PurchaseOrderTotals } from "./components/PurchaseOrderTotals";
+import {
+  PurchaseOrderRepairConfirmationView,
+  PurchaseOrderSourceChange,
+} from "./components/PurchaseOrderRepair";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import type { ArchivedQuotation } from "./archive";
 import type { CurrencyInfo } from "./format";
@@ -544,6 +548,34 @@ const PO_REVIEW_DTO: PurchaseOrderReviewDTO = {
 const PO_REVIEW_EVALUATION = evaluateReview(
   PO_REVIEW_STATE,
   PO_REVIEW_SOURCE,
+  PO_EDITOR_USD,
+  {},
+  [],
+  []
+);
+
+// The source repair (issue #475) compares the same record against a genuinely
+// different link, so the old → new pair in the evidence is not two identical
+// quotations: revision 2 becomes revision 0 of another issued quotation.
+const PO_REPAIR_SOURCE: PurchaseOrderSourceDTO = {
+  ...PO_REVIEW_SOURCE,
+  QuotationID: 19,
+  QuoteNumber: "1502260051",
+  RevisionNumber: 0,
+};
+const PO_REPAIR_REVIEW_DTO: PurchaseOrderReviewDTO = {
+  Order: {
+    ...PO_REVIEW_ORDER,
+    State: "saved",
+    PdfAbsentConfirmed: true,
+    ConfirmationNumber: "2302260001",
+  },
+  Source: PO_REPAIR_SOURCE,
+  DocumentState: "none",
+};
+const PO_REPAIR_EVALUATION = evaluateReview(
+  PO_REVIEW_STATE,
+  PO_REPAIR_SOURCE,
   PO_EDITOR_USD,
   {},
   [],
@@ -1053,6 +1085,29 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The selector in repair mode (issue #475): the same three steps with the
+    // repair wording. The server has already exempted the repaired record's
+    // own Quotation, so the remaining occupied rows are still disabled and no
+    // "Open draft" shortcut is offered.
+    name: "POSelectorRepairMode",
+    element: (
+      <POQuotationSelectorView
+        state={{
+          ...PO_SELECTOR_STEP_ONE,
+          rows: [
+            { ...PO_SELECTOR_ROWS[0], activePO: null },
+            PO_SELECTOR_ROWS[1],
+            PO_SELECTOR_ROWS[2],
+          ],
+        }}
+        dispatch={() => undefined}
+        mode="repair"
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
     // The manual PO draft editor (issue #468/#470): header snapshot, copied
     // lines in the PO's own USD currency, each line's own discount controls,
     // and the calculation inputs. At 360 this is the case that says whether
@@ -1194,6 +1249,51 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The repair difference review (issue #475): the same #471 choices against
+    // the candidate revision, no choice preselected, and the repair wording
+    // instead of the final-save one.
+    name: "PurchaseOrderRepairReview",
+    element: (
+      <PurchaseOrderDifferenceReviewView
+        state={PO_REVIEW_STATE}
+        source={PO_REPAIR_SOURCE}
+        currency={PO_EDITOR_USD}
+        quoteNumber={PO_REPAIR_SOURCE.QuoteNumber}
+        mode="repair"
+        documentState="none"
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    ),
+  },
+  {
+    // The repair confirmation (issue #475): old link → new link, the kept
+    // confirmation number, the choices this repair stores and the required
+    // reason. At 360 this says whether the link pair and the reason field
+    // stack instead of overflowing.
+    name: "PurchaseOrderRepairConfirmation",
+    element: (
+      <PurchaseOrderRepairConfirmationView
+        review={PO_REPAIR_REVIEW_DTO}
+        evaluation={PO_REPAIR_EVALUATION}
+        currency={PO_EDITOR_USD}
+        reason="The order followed the wrong quotation revision"
+        onReasonChange={() => undefined}
+        onBack={() => undefined}
+        onSave={() => undefined}
+        saving={false}
+        error={null}
+      />
+    ),
+  },
+  {
     // The required final confirmation when no customer PDF exists (#471).
     // The checkbox is unchecked and Final save is disabled: the deliberate
     // acknowledgement must be given, not assumed.
@@ -1230,6 +1330,23 @@ const CASES: SnapshotCase[] = [
         currency={PO_EDITOR_USD}
         onBack={() => undefined}
         onCorrect={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // The saved record with the admin source-repair action (issue #475), beside
+    // Correct. The action is absent from the staff case above.
+    name: "PurchaseOrderSavedRepairAction",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
         documentInitialState={PO_DOCUMENT_NONE}
         historyInitial={PO_HISTORY}
       />

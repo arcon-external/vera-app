@@ -36,13 +36,34 @@ func (s *Server) listPOSources(context echo.Context) error {
 		}
 		hideUsed = parsed
 	}
+	// #475 repair mode. The excluded record's own Quotation must stay
+	// selectable, and that exemption is an admin operation: a staff member who
+	// should not repair anything must not even be handed the list. The normal
+	// entry path sends no parameter and keeps its ordinary session gate.
+	excludePOID := int64(0)
+	if raw := context.QueryParam("excludePOId"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed < 1 {
+			return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid excludePOId"})
+		}
+		if requestUser(context).Role != "admin" {
+			return context.JSON(http.StatusForbidden, map[string]string{
+				"error": "repairing a purchase order source link requires an administrator",
+				"code":  "po_repair_forbidden",
+			})
+		}
+		excludePOID = parsed
+	}
 
 	requestContext, err := s.organizationContext(context.Request().Context())
 	if err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
 	}
 	quotations, total, err := s.database.ListPOSourceQuotations(
-		requestContext, page, context.QueryParam("search"), hideUsed)
+		requestContext, page, context.QueryParam("search"), hideUsed, excludePOID)
+	if errors.Is(err, store.ErrPurchaseOrderNotFound) {
+		return context.JSON(http.StatusNotFound, map[string]string{"error": "purchase order not found"})
+	}
 	if errors.Is(err, store.ErrPOSourceInvalid) {
 		// A page whose offset cannot be represented is malformed input, not a
 		// server failure (issue #483).

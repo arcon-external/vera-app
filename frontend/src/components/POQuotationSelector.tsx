@@ -35,6 +35,14 @@ import { Button, fieldClass } from "./ui";
 export interface POQuotationSelectorProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * "entry" starts a new PO from a free revision; "repair" (#475) moves a saved
+   * record's link and keeps its own Quotation selectable through excludePOID.
+   * The server gates repair mode on an admin, not this prop.
+   */
+  mode?: "entry" | "repair";
+  /** The saved record being repaired; absent for ordinary entry. */
+  excludePOID?: number;
   /** Receives the confirmed pair. The caller opens PO entry with it (#468).
    *  A rejected promise keeps the dialog open with its error message. */
   onConfirm: (selection: POSourceSelection) => void | Promise<void>;
@@ -53,6 +61,8 @@ export interface POQuotationSelectorViewProps {
   dispatch: (action: POSourceSelectorAction) => void;
   onClose: () => void;
   onConfirm: () => void;
+  /** "entry" or "repair"; changes the wording, never the three-step rules. */
+  mode?: "entry" | "repair";
   /** Opens the existing draft instead of starting a second PO. */
   onOpenDraft?: (activePO: POSourceActivePO) => void;
   /** The dialog element: the programmatic focus target on open. */
@@ -306,7 +316,7 @@ function StepTwo({
   );
 }
 
-function StepThree({ state }: Pick<POQuotationSelectorViewProps, "state">) {
+function StepThree({ state, mode = "entry" }: Pick<POQuotationSelectorViewProps, "state" | "mode">) {
   return (
     <div className="grid gap-4">
       <SourceSummary state={state} />
@@ -315,7 +325,9 @@ function StepThree({ state }: Pick<POQuotationSelectorViewProps, "state">) {
           Revision {state.selectedRevision ?? "not selected"}
         </p>
         <p className="text-small text-ink-500">
-          The purchase order will be linked to this exact issued revision.
+          {mode === "repair"
+            ? "The saved purchase order will follow this exact issued revision. Its values are reviewed against it before anything is saved, and its confirmation number and history are kept."
+            : "The purchase order will be linked to this exact issued revision."}
         </p>
       </div>
       {state.confirmError !== null ? (
@@ -332,11 +344,13 @@ export function POQuotationSelectorView({
   dispatch,
   onClose,
   onConfirm,
+  mode = "entry",
   onOpenDraft,
   dialogRef,
   onKeyDown,
 }: POQuotationSelectorViewProps) {
   const confirming = state.confirming;
+  const repairing = mode === "repair";
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/45 p-5"
@@ -347,7 +361,11 @@ export function POQuotationSelectorView({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Select a quotation for the purchase order"
+        aria-label={
+          repairing
+            ? "Select a new quotation for the saved purchase order"
+            : "Select a quotation for the purchase order"
+        }
         tabIndex={-1}
         onKeyDown={onKeyDown}
         className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-rule bg-white shadow-card outline-none"
@@ -357,7 +375,9 @@ export function POQuotationSelectorView({
           <div>
             <h2 className="text-title font-semibold text-ink-950">
               {state.step === 1
-                ? "Select a quotation"
+                ? repairing
+                  ? "Select the new quotation"
+                  : "Select a quotation"
                 : state.step === 2
                   ? "Select a revision"
                   : "Confirm the source"}
@@ -371,10 +391,14 @@ export function POQuotationSelectorView({
 
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-6 py-5">
           {state.step === 1 ? (
-            <StepOne state={state} dispatch={dispatch} onOpenDraft={onOpenDraft} />
+            <StepOne
+              state={state}
+              dispatch={dispatch}
+              onOpenDraft={repairing ? undefined : onOpenDraft}
+            />
           ) : null}
           {state.step === 2 ? <StepTwo state={state} dispatch={dispatch} /> : null}
-          {state.step === 3 ? <StepThree state={state} /> : null}
+          {state.step === 3 ? <StepThree state={state} mode={mode} /> : null}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-rule px-6 py-4">
@@ -421,6 +445,8 @@ export function POQuotationSelector({
   open,
   onClose,
   onConfirm,
+  mode = "entry",
+  excludePOID,
   onOpenDraft,
   loadPage,
   loadRevisions,
@@ -560,7 +586,14 @@ export function POQuotationSelector({
     lastSearch.current = state.search;
     const timer = setTimeout(() => {
       pageLoader
-        .current({ page: state.page, search: state.search, hideUsed: state.hideUsed })
+        .current({
+          page: state.page,
+          search: state.search,
+          hideUsed: state.hideUsed,
+          ...(excludePOID !== undefined && excludePOID > 0
+            ? { excludePOID }
+            : {}),
+        })
         .then((page) => {
           if (!stale) dispatch({ type: "rowsLoaded", page });
         })
@@ -572,7 +605,7 @@ export function POQuotationSelector({
       stale = true;
       clearTimeout(timer);
     };
-  }, [open, state.step, state.page, state.search, state.hideUsed]);
+  }, [open, state.step, state.page, state.search, state.hideUsed, excludePOID]);
 
   const selectedID = state.selected?.id ?? null;
   useEffect(() => {
@@ -628,6 +661,7 @@ export function POQuotationSelector({
       dispatch={dispatch}
       onClose={handleClose}
       onConfirm={() => void confirm()}
+      mode={mode}
       onOpenDraft={onOpenDraft}
       dialogRef={dialogRef}
       onKeyDown={handleDialogKeyDown}
