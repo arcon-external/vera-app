@@ -360,6 +360,12 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 		{"PurchaseOrderItemInput", PurchaseOrderItemInput{}},
 		{"PurchaseOrderUpdateInput", PurchaseOrderUpdateInput{}},
 		{"PurchaseOrderFinalizeInput", PurchaseOrderFinalizeInput{}},
+		{"PurchaseOrderWriteResult", PurchaseOrderWriteResult{}},
+		{"PurchaseOrderConflictDTO", PurchaseOrderConflictDTO{}},
+		{"PurchaseOrderCorrectionInput", PurchaseOrderCorrectionInput{}},
+		{"PurchaseOrderCorrectionDTO", PurchaseOrderCorrectionDTO{}},
+		{"PurchaseOrderCorrectionItemDTO", PurchaseOrderCorrectionItemDTO{}},
+		{"PurchaseOrderCorrectionAttachmentDTO", PurchaseOrderCorrectionAttachmentDTO{}},
 	}
 	for _, target := range targets {
 		start := strings.Index(source, "export class "+target.name+" {")
@@ -406,6 +412,9 @@ func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
 		reflect.TypeOf(apicontract.PurchaseOrderItemRow{}),
 		reflect.TypeOf(PurchaseOrderDTO{}),
 		reflect.TypeOf(PurchaseOrderItemDTO{}),
+		reflect.TypeOf(PurchaseOrderCorrectionDTO{}),
+		reflect.TypeOf(PurchaseOrderCorrectionItemDTO{}),
+		reflect.TypeOf(PurchaseOrderConflictDTO{}),
 	}
 	for _, surface := range surfaces {
 		for index := 0; index < surface.NumField(); index++ {
