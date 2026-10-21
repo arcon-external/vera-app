@@ -724,6 +724,143 @@ func (e *Engine) drawTableRow(p *page, m metrics, clip *clipRegion, top float64,
 	}
 }
 
+// drawTableRowCont paints a continuation fragment of an oversized row: the
+// same zebra fill, rules, sides and description as the whole-row path, but no
+// numeric cells.
+//
+// The head fragment already printed them through drawTableRow, so repeating
+// them would put two quantities on one logical row, and centring them per
+// fragment would drift them away from the row they belong to. The background
+// and rules repeat because the table's grid does: a fragment is still a band
+// of the table, not a gap in it.
+func (e *Engine) drawTableRowCont(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
+	switch rb.kind {
+	case rowParentTitle:
+		e.drawMergedRowCont(p, m, clip, top, rb, isEven, parentPadTopPx, true)
+	case rowScope:
+		e.drawMergedRowCont(p, m, clip, top, rb, isEven, subRowPadPx, false)
+	case rowPart:
+		e.drawPartRowCont(p, m, clip, top, rb, isEven)
+	default:
+		e.drawMainRowCont(p, m, clip, top, rb, isEven)
+	}
+}
+
+// drawMainRowCont paints a main row's continuation: everything drawMainRow
+// paints except the number, quantity, unit and price cells, which the head
+// fragment carries.
+func (e *Engine) drawMainRowCont(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
+	h := rb.height
+	bodyH := h - px(1)
+	if isEven {
+		for i := 0; i < m.cols.last; i++ {
+			p.add(box{
+				x: m.colX[i] + px(1), y: top,
+				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
+				fill: e.pal.Surface, clip: clip,
+			})
+		}
+	}
+	for i := 1; i < m.cols.last; i++ {
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
+	}
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
+
+	dx := m.colX[1] + px(tdPadPx)
+	subTextX := dx + px(subIndentPx)
+	dy := top + px(tdPadPx) + bodyBaselineOffset
+	for _, line := range rb.lines {
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.pal.Ink})
+		dy += descLineH
+	}
+	e.drawBullets(p, subTextX, dy, rb.subs, e.pal.Ink)
+}
+
+// drawPartRowCont paints a state-C part's continuation: the rail and the
+// description stay, the sub number and every priced cell stays with the head.
+func (e *Engine) drawPartRowCont(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool) {
+	h := rb.height
+	bodyH := h - px(1)
+
+	if isEven {
+		for i := 0; i < m.cols.last; i++ {
+			p.add(box{
+				x: m.colX[i] + px(1), y: top,
+				w: m.colX[i+1] - m.colX[i] - px(1), h: bodyH,
+				fill: e.pal.Surface, clip: clip,
+			})
+		}
+	}
+	for i := 1; i < m.cols.last; i++ {
+		p.add(box{x: m.colX[i], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
+	}
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
+
+	// The rail, full height of the padding box, exactly as the whole row
+	// draws it: a continuation is still a sub row.
+	p.add(box{
+		x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
+		w: px(railWidthPx), h: bodyH - px(1),
+		fill: e.pal.Rail, clip: clip,
+	})
+
+	dx := m.colX[1] + px(1) + px(subRowIndentPx)
+	bulletX := dx + px(subBulletIndentPx)
+	dy := top + px(subRowPadPx) + bodyBaselineOffset
+	for _, line := range rb.lines {
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: e.pal.SubInk})
+		dy += descLineH
+	}
+	e.drawBullets(p, bulletX, dy, rb.subs, e.pal.SubInk)
+}
+
+// drawMergedRowCont paints a merged row's continuation -- the state-C title or
+// a state-B scope row -- without its number cell. The rail stays on scope
+// rows; the title keeps its body ink.
+func (e *Engine) drawMergedRowCont(p *page, m metrics, clip *clipRegion, top float64, rb rowBlock, isEven bool, padTopPx float64, title bool) {
+	bodyH := rb.height - px(1)
+
+	if isEven {
+		p.add(box{
+			x: m.tableX + px(1), y: top,
+			w: m.tableW - 2*px(1), h: bodyH,
+			fill: e.pal.Surface, clip: clip,
+		})
+	}
+	tableSides(p, m, clip, top, bodyH, e.pal.Rule)
+	p.add(box{x: m.tableX, y: top + bodyH, w: m.tableW, h: px(1), fill: e.pal.Rule, clip: clip})
+	// The No. cell's right edge, which is the merged cell's own left border.
+	p.add(box{x: m.colX[1], y: top, w: px(1), h: bodyH, fill: e.pal.Rule, clip: clip})
+
+	if !title {
+		// The rail hangs from the row's padding box, exactly as the whole
+		// row draws it.
+		p.add(box{
+			x: m.colX[1] + px(1) + px(railLeftPx), y: top + px(1),
+			w: px(railWidthPx), h: bodyH - px(1),
+			fill: e.pal.Rail, clip: clip,
+		})
+	}
+
+	textColor := e.pal.Ink
+	indent := float64(tdPadPx)
+	if !title {
+		textColor = e.pal.SubInk
+		indent = subRowIndentPx
+	}
+	dx := m.colX[1] + px(1) + px(indent)
+	dy := top + px(padTopPx) + bodyBaselineOffset
+	for _, line := range rb.lines {
+		p.add(run{x: dx, baseline: dy, size: px(bodyPx), text: line, color: textColor})
+		dy += descLineH
+	}
+	if !title {
+		e.drawBullets(p, dx+px(subBulletIndentPx), dy, rb.subs, e.pal.SubInk)
+	}
+}
+
 // drawBullets paints a bullet list: the disc marker on each item's first line,
 // the text at textX, the 6px gap above the list and the 3px between items —
 // exactly the box model rowHeight mirrors. Shared by main rows (description

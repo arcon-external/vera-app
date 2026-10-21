@@ -41,11 +41,33 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
   return quotation.TaxCategory || quotation.TaxZone;
 }
 import { useToast } from "../toast";
+import { copyQuotationToClipboard } from "../quotationClipboard";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
 function padRevision(revision: number): string {
   return String(revision).padStart(2, "0");
+}
+
+/**
+ * Copies the viewed revision's entry values as versioned JSON text. Exported
+ * for the SSR pin: the button renders with its label and disabled state, and
+ * the write itself is unit-tested through copyQuotationToClipboard.
+ */
+export function QuotationCopyButton({
+  quotation,
+  disabled,
+  onCopy,
+}: {
+  quotation: ArchivedQuotation;
+  disabled: boolean;
+  onCopy: (quotation: ArchivedQuotation) => void;
+}) {
+  return (
+    <Button variant="secondary" disabled={disabled} onClick={() => onCopy(quotation)}>
+      Copy to clipboard
+    </Button>
+  );
 }
 
 interface QuotationDetailPageProps {
@@ -207,9 +229,18 @@ export function QuotationDetailPage({
               </Badge>
             )}
           </div>
-          <Button variant="primary" onClick={() => onEdit(quotation)}>
-            Edit revision {padRevision(quotation.RevisionNumber)}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <QuotationCopyButton
+              quotation={quotation}
+              disabled={switching}
+              onCopy={(current) =>
+                void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
+              }
+            />
+            <Button variant="primary" onClick={() => onEdit(quotation)}>
+              Edit revision {padRevision(quotation.RevisionNumber)}
+            </Button>
+          </div>
         </div>
         <p className="mt-2 max-w-3xl text-body text-ink-500">
           {quotation.CustomerName} — {quotation.Subject}

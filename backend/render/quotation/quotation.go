@@ -115,9 +115,9 @@ type Input struct {
 	DiscountPercent uint8
 }
 
-// Item is one quotation line as the quotation holds it. DisplayDesc is the HTML
-// formatDescription produced, bullets included; deciding how to lay that out is
-// the renderer's problem.
+// Item is one quotation line as the quotation holds it. DisplayDesc is the
+// main-only HTML formatDescriptionMain produces; the description lines below
+// travel separately so each renderer can lay them out as their own rows.
 //
 // SubItems and ShowSubPrices carry a modular package: the line's price is the
 // sum of its parts, and ShowSubPrices decides whether the customer copy prints
@@ -132,11 +132,24 @@ type Item struct {
 	// Disc is the net unit price -- the list price after the row's own
 	// discount -- preformatted like UnitPrice and Total. Rendering it is the
 	// renderer's problem; deciding what it says is not.
-	Disc          string
-	SubItems      []SubItem
-	No            int
-	Qty           uint32
-	ShowSubPrices bool
+	Disc     string
+	SubItems []SubItem
+	// DescriptionLines are the plain item's "- " bullet lines, numbered X.Y
+	// after the item's final No is known. They print as their own full-width
+	// scope rows under the main row, which keeps its own values: the lines
+	// are presentation, never pricing.
+	DescriptionLines []DescriptionLine
+	No               int
+	Qty              uint32
+	ShowSubPrices    bool
+}
+
+// DescriptionLine is one "- " bullet line of an unsplit description: its
+// X.Y number and its plain text. It carries no values of its own, exactly
+// like a scope row, which is what each renderer draws from it.
+type DescriptionLine struct {
+	No   string
+	Text string
 }
 
 // SubItem is one priced part of a package line, as both renderers see it.

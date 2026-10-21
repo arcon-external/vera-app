@@ -103,23 +103,29 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 	})
 }
 
-// engineItems flattens quotation lines into the engine's row model, splitting
-// each description back into its main text and its bullets. Package lines
-// carry their parts through as structured data; their descriptions hold no
-// bullets (validation refuses both at once).
+// engineItems flattens quotation lines into the engine's row model. A plain
+// line's main text comes from its main-only DisplayDesc; its description
+// lines arrive structured and numbered, so they never pass through the
+// main row's bullet list. Package lines carry their parts through as
+// structured data; their descriptions hold no bullets (validation refuses
+// both at once).
 func engineItems(items []quotation.Item) []Item {
 	out := make([]Item, 0, len(items))
 	for _, it := range items {
-		main, subs := splitDescription(it.DisplayDesc)
 		row := Item{
 			No:        it.No,
-			DescMain:  main,
-			SubItems:  subs,
+			DescMain:  stripTags(it.DisplayDesc),
 			Qty:       formatQty(it.Qty),
 			UoM:       it.UoM,
 			UnitPrice: it.UnitPrice,
 			Total:     it.Total,
 			Disc:      it.Disc,
+		}
+		if len(it.DescriptionLines) > 0 {
+			row.DescLines = make([]DescLine, 0, len(it.DescriptionLines))
+			for _, dl := range it.DescriptionLines {
+				row.DescLines = append(row.DescLines, DescLine{No: dl.No, Text: dl.Text})
+			}
 		}
 		if len(it.SubItems) > 0 {
 			pkg := &Package{ShowPrices: it.ShowSubPrices, Parts: make([]Part, 0, len(it.SubItems))}
@@ -142,42 +148,8 @@ func engineItems(items []quotation.Item) []Item {
 	return out
 }
 
-// splitDescription reverses formatDescription: the bullets it emitted as list
-// items come back as bullets, and the leading text as the description.
-//
-// formatDescription is HTML, so the reversal is on tags rather than on text. It
-// is not a general HTML parser and is not meant to be: the only producer of this
-// markup is the function above, and the engine has to agree with it exactly.
-func splitDescription(html string) (string, []string) {
-	var main strings.Builder
-	var bullets []string
-
-	rest := html
-	// Everything before the first list item is the description.
-	if i := strings.Index(rest, "<ul"); i >= 0 {
-		main.WriteString(stripTags(rest[:i]))
-		rest = rest[i:]
-	} else {
-		return stripTags(rest), nil
-	}
-	for {
-		i := strings.Index(rest, "<li>")
-		if i < 0 {
-			break
-		}
-		rest = rest[i+len("<li>"):]
-		j := strings.Index(rest, "</li>")
-		if j < 0 {
-			break
-		}
-		bullets = append(bullets, stripTags(rest[:j]))
-		rest = rest[j+len("</li>"):]
-	}
-	return strings.TrimSpace(main.String()), bullets
-}
-
-// stripTags removes tags and decodes the handful of entities formatDescription
-// can emit.
+// stripTags removes tags and decodes the handful of entities the main-only
+// description HTML can carry.
 func stripTags(s string) string {
 	var b strings.Builder
 	depth := 0

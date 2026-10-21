@@ -125,6 +125,48 @@ func TestGetQuotationMapsDetail(t *testing.T) {
 	}
 }
 
+// TestGetQuotationMapsEntryTerms pins the desktop leg of the copy contract
+// (#485): the entry values the server emits for the revision reach the
+// archived quotation the copy path reads -- the customer code the editor
+// pastes by, the address snapshot, and the revision's own terms. Before the
+// mapping these read as the zero values, which is why the editor opened
+// every revision with no customer and blank terms.
+func TestGetQuotationMapsEntryTerms(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		_ = json.NewEncoder(writer).Encode(apicontract.QuotationDetail{
+			ID: 8, QuoteNumber: "15020008", Revision: 0,
+			AvailableRevisions: []int16{0},
+			CustomerName:       "Acme",
+			CustomerCode:       4,
+			CustomerAddress:    "Jl. Klien 12",
+			RecipientAddress:   "Gedung Penerima 3",
+			ValidityDays:       45,
+			PaymentTermDays:    60,
+		})
+	})
+
+	q := newTestQuotation()
+	detail, err := q.GetQuotationRevision(8, 0)
+	if err != nil {
+		t.Fatalf("GetQuotationRevision failed: %v", err)
+	}
+	if detail.CustomerCode != 4 {
+		t.Errorf("customerCode = %d; want 4", detail.CustomerCode)
+	}
+	if detail.CustomerAddress != "Jl. Klien 12" {
+		t.Errorf("customerAddress = %q; want the stored client address", detail.CustomerAddress)
+	}
+	if detail.RecipientAddress != "Gedung Penerima 3" {
+		t.Errorf("recipientAddress = %q; want the stored recipient address", detail.RecipientAddress)
+	}
+	if detail.ValidityDays != 45 {
+		t.Errorf("validityDays = %d; want 45", detail.ValidityDays)
+	}
+	if detail.PaymentTermDays != 60 {
+		t.Errorf("paymentTermDays = %d; want 60", detail.PaymentTermDays)
+	}
+}
+
 // TestGetQuotationCarriesCurrency pins the revision side of the B4 contract
 // at the desktop mapping: the code the server emits for the revision reaches
 // the archived quotation the editor compares against the live profile before
