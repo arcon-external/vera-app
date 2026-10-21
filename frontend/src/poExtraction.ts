@@ -16,6 +16,7 @@ import {
   formatUnitPriceMinor,
   MAX_EXACT_MINOR,
   parseQuantityScaled,
+  parseUnitPriceMinor,
   type PurchaseOrderHeader,
   type PurchaseOrderLine,
 } from "./purchaseOrder";
@@ -591,4 +592,371 @@ export function extractionFoundNoText(result: PurchaseOrderExtractionResultDTO):
   if (result.Rows.length > 0) return false;
   if (extractionUsesOCR(result)) return false;
   return result.Fields.every((field) => field.Cell.Status === "absent");
+}
+
+// ---------------------------------------------------------------------------
+// Issue #479: reconciliation with edits made while extraction was processing.
+//
+// The tracker is a snapshot of the editor when the run began; every later
+// comparison is against that baseline. It answers the one question the raw
+// values cannot: was an empty field always empty (safe to populate), or did
+// staff clear it deliberately while the PDF was being read (a conflict)?
+//
+// The resolver is the itemised matrix. It does not mutate anything: the panel
+// renders it and Apply consumes it, so a select box, a radio choice and the
+// values written into the draft cannot disagree.
+
+/** The comparison key for the extracted line set, alongside the row keys. */
+export const EXTRACTION_LINES_KEY = "lines";
+
+export type ExtractionLineCell = "description" | "quantity" | "uom" | "unitPrice";
+
+export interface ExtractionEditorSnapshot {
+  header: Record<ExtractionFieldKey, string>;
+  lines: Array<{
+    key: number;
+    description: string;
+    quantity: string;
+    uom: string;
+    unitPrice: string;
+  }>;
+}
+
+/**
+ * The baseline an extraction run is reconciled against. `generation` binds it
+ * to the document generation: a replaced PDF discards the tracker with the run
+ * it belonged to.
+ */
+export interface ExtractionEditTracker {
+  generation: number;
+  baseline: ExtractionEditorSnapshot;
+}
+
+export interface ExtractionEditorChanges {
+  headerChanged: ExtractionFieldKey[];
+  headerCleared: ExtractionFieldKey[];
+  lineCellsChanged: Array<{ index: number; field: ExtractionLineCell }>;
+  linesAdded: number[];
+  linesRemoved: number[];
+  anyLineChange: boolean;
+}
+
+const LINE_CELL_FIELDS: ExtractionLineCell[] = [
+  "description",
+  "quantity",
+  "uom",
+  "unitPrice",
+];
+
+/**
+ * Whitespace-insensitive comparison for text. Internal runs collapse too, so
+ * "CIF  Batam" equals "CIF Batam", while a changed word stays visible.
+ */
+export function normalizeExtractionText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function extractionTextEqual(left: string, right: string): boolean {
+  return normalizeExtractionText(left) === normalizeExtractionText(right);
+}
+
+/** Numeric equality is semantic: 2, 2.0 and 2.0000 are the same quantity. */
+function extractionQuantityEqual(left: string, right: string): boolean {
+  const leftValue = parseQuantityScaled(left);
+  const rightValue = parseQuantityScaled(right);
+  if (leftValue !== null && rightValue !== null) return leftValue === rightValue;
+  return extractionTextEqual(left, right);
+}
+
+/** Money equality compares minor units, so "$1,250.00" equals "1250.00". */
+function extractionMoneyEqual(
+  current: string,
+  extracted: string,
+  currency: CurrencyInfo
+): boolean {
+  const currentMinor = parseUnitPriceMinor(currency, current);
+  const extractedMinor = parseExtractedDecimal(extracted, currency.exponent);
+  if (currentMinor !== null && extractedMinor !== null) {
+    return currentMinor === extractedMinor;
+  }
+  return extractionTextEqual(current, extracted);
+}
+
+function snapshotHeader(header: PurchaseOrderHeader): Record<ExtractionFieldKey, string> {
+  return {
+    poNumber: header.poNumber,
+    poDate: header.poDate,
+    requestedDeliveryDate: header.requestedDeliveryDate,
+    currency: "",
+    paymentTerms: header.paymentTerms,
+    incoterms: header.incoterms,
+  };
+}
+
+/** Captures the editor as the baseline a run is reconciled against. */
+export function createExtractionEditTracker(
+  generation: number,
+  header: PurchaseOrderHeader,
+  lines: PurchaseOrderLine[]
+): ExtractionEditTracker {
+  return {
+    generation,
+    baseline: {
+      header: snapshotHeader(header),
+      lines: lines.map((line) => ({
+        key: line.key,
+        description: line.description,
+        quantity: line.quantity,
+        uom: line.uom,
+        unitPrice: line.unitPrice,
+      })),
+    },
+  };
+}
+
+/** What staff changed or cleared since the tracker's baseline. */
+export function extractionEditorChanges(
+  tracker: ExtractionEditTracker,
+  header: PurchaseOrderHeader,
+  lines: PurchaseOrderLine[]
+): ExtractionEditorChanges {
+  const headerChanged: ExtractionFieldKey[] = [];
+  const headerCleared: ExtractionFieldKey[] = [];
+  for (const key of EXTRACTION_FIELD_ORDER) {
+    const before = tracker.baseline.header[key] ?? "";
+    const now = currentHeaderValue(header, key);
+    if (extractionTextEqual(before, now)) continue;
+    headerChanged.push(key);
+    if (normalizeExtractionText(now) === "" && normalizeExtractionText(before) !== "") {
+      headerCleared.push(key);
+    }
+  }
+
+  const baselineLines = new Map(tracker.baseline.lines.map((line) => [line.key, line]));
+  const currentByKey = new Map(lines.map((line, index) => [line.key, { line, index }]));
+  const lineCellsChanged: Array<{ index: number; field: ExtractionLineCell }> = [];
+  const linesAdded: number[] = [];
+  for (const [key, entry] of currentByKey) {
+    const before = baselineLines.get(key);
+    if (before === undefined) {
+      linesAdded.push(key);
+      continue;
+    }
+    for (const field of LINE_CELL_FIELDS) {
+      const equal =
+        field === "quantity"
+          ? extractionQuantityEqual(before[field], entry.line[field])
+          : extractionTextEqual(before[field], entry.line[field]);
+      if (!equal) lineCellsChanged.push({ index: entry.index, field });
+    }
+  }
+  const linesRemoved: number[] = [];
+  for (const key of baselineLines.keys()) {
+    if (!currentByKey.has(key)) linesRemoved.push(key);
+  }
+
+  return {
+    headerChanged,
+    headerCleared,
+    lineCellsChanged,
+    linesAdded,
+    linesRemoved,
+    anyLineChange:
+      linesAdded.length > 0 || linesRemoved.length > 0 || lineCellsChanged.length > 0,
+  };
+}
+
+export type ExtractionComparisonOutcome = "none" | "keep" | "auto" | "review" | "conflict";
+
+export interface ExtractionFieldComparison {
+  /** `header:<key>` or `lines`. */
+  key: string;
+  kind: "header" | "lines";
+  label: string;
+  current: string;
+  extracted: string;
+  outcome: ExtractionComparisonOutcome;
+  /** True when staff changed or cleared this value while tracking was alive. */
+  touched: boolean;
+}
+
+export interface ExtractionConflictPlan {
+  fields: ExtractionFieldComparison[];
+  lines: ExtractionFieldComparison | null;
+  /** Comparison keys that need an explicit manual/extracted choice. */
+  conflicts: string[];
+  /** Default selection: auto proposals only; conflicts start unchosen. */
+  selection: Record<string, boolean>;
+}
+
+/**
+ * Whether the extracted rows already describe the current lines exactly enough
+ * that applying them would change nothing. Quantity and unit price compare
+ * semantically; descriptions and UoM compare whitespace-insensitively.
+ */
+function extractionRowsMatchLines(
+  rows: PurchaseOrderExtractionRowDTO[],
+  lines: PurchaseOrderLine[],
+  currency: CurrencyInfo
+): boolean {
+  if (rows.length !== lines.length) return false;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    const line = lines[index]!;
+    if (!extractionTextEqual(row.Description.Value, line.description)) return false;
+    if (!extractionQuantityEqual(row.Quantity.Value, line.quantity)) return false;
+    if (!extractionTextEqual(row.UoM.Value, line.uom)) return false;
+    if (!extractionMoneyEqual(line.unitPrice, row.UnitPrice.Value, currency)) return false;
+  }
+  return true;
+}
+
+function linesSummary(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * The conflict matrix for one result against the editor and its baseline.
+ *
+ * - equal normalized values (numeric equality for quantities/money) keep the
+ *   current value with no prompt;
+ * - a nonempty current value with an empty proposal keeps it, no prompt;
+ * - an empty, unedited field takes an `extracted` proposal automatically;
+ * - a manually cleared field or a differing nonempty value is a conflict that
+ *   waits for an explicit choice;
+ * - both empty is no proposal at all.
+ *
+ * `needs_review` proposals never auto-populate; they stay an explicit opt-in.
+ * Currency is protected by the Quotation and is evidence only.
+ */
+export function resolveExtractionConflicts(
+  result: PurchaseOrderExtractionResultDTO,
+  header: PurchaseOrderHeader,
+  lines: PurchaseOrderLine[],
+  tracker: ExtractionEditTracker,
+  currency: CurrencyInfo
+): ExtractionConflictPlan {
+  const changes = extractionEditorChanges(tracker, header, lines);
+  const fields: ExtractionFieldComparison[] = [];
+  const selection: Record<string, boolean> = {};
+  const conflicts: string[] = [];
+
+  for (const field of result.Fields) {
+    const key = field.Key as ExtractionFieldKey;
+    if (!EXTRACTION_FIELD_ORDER.includes(key)) continue;
+    const comparisonKey = proposalCellKey("header", field.Key);
+    const current = currentHeaderValue(header, key);
+    const extracted = field.Cell.Value.trim();
+    const touched = changes.headerChanged.includes(key);
+    const applicable = headerProposalApplicable(field, currency);
+    const protectedField = !APPLICABLE_HEADER_KEYS.includes(key);
+
+    let outcome: ExtractionComparisonOutcome;
+    if (protectedField) {
+      outcome = "none";
+    } else if (field.Cell.Status === "absent" || extracted === "") {
+      outcome = normalizeExtractionText(current) === "" ? "none" : "keep";
+    } else if (normalizeExtractionText(current) === "") {
+      const baseline = normalizeExtractionText(tracker.baseline.header[key] ?? "");
+      if (baseline !== "") {
+        // The field was filled when tracking began and is empty now: staff
+        // cleared it deliberately, so extraction must not quietly restore it.
+        outcome = applicable ? "conflict" : "review";
+      } else if (field.Cell.Status === "extracted" && applicable) {
+        outcome = "auto";
+      } else {
+        outcome = "review";
+      }
+    } else if (extractionTextEqual(current, extracted)) {
+      outcome = "keep";
+    } else {
+      // A value nobody touched is still a conflict: extraction never replaces
+      // a different nonempty value on its own.
+      outcome = applicable ? "conflict" : "review";
+    }
+
+    fields.push({
+      key: comparisonKey,
+      kind: "header",
+      label: EXTRACTION_FIELD_LABELS[key] ?? field.Key,
+      current: current.trim(),
+      extracted,
+      outcome,
+      touched,
+    });
+    selection[comparisonKey] = outcome === "auto";
+    if (outcome === "conflict") conflicts.push(comparisonKey);
+  }
+
+  let lineComparison: ExtractionFieldComparison | null = null;
+  if (result.Rows.length > 0) {
+    const equal = extractionRowsMatchLines(result.Rows, lines, currency);
+    const touched = changes.anyLineChange;
+    const outcome: ExtractionComparisonOutcome = equal
+      ? "keep"
+      : touched
+        ? "conflict"
+        : "review";
+    lineComparison = {
+      key: EXTRACTION_LINES_KEY,
+      kind: "lines",
+      label: "Lines",
+      current: linesSummary(lines.length, "draft line"),
+      extracted: linesSummary(result.Rows.length, "extracted line"),
+      outcome,
+      touched,
+    };
+    if (outcome === "conflict") conflicts.push(EXTRACTION_LINES_KEY);
+  } else if (lines.length > 0) {
+    // No rows were read: this is the "manual nonempty, extraction empty" case,
+    // so the current lines are kept and there is nothing to choose.
+    lineComparison = {
+      key: EXTRACTION_LINES_KEY,
+      kind: "lines",
+      label: "Lines",
+      current: linesSummary(lines.length, "draft line"),
+      extracted: "No extracted lines",
+      outcome: "keep",
+      touched: changes.anyLineChange,
+    };
+  }
+
+  for (let index = 0; index < result.Rows.length; index += 1) {
+    selection[proposalCellKey("row", String(index))] = false;
+  }
+
+  return { fields, lines: lineComparison, conflicts, selection };
+}
+
+export type ExtractionChoice = "manual" | "extracted";
+
+/**
+ * Folds the staff's choices and checkbox ticks into the one selection Apply
+ * consumes. A conflict applies extraction only when that choice was made; a
+ * line conflict resolved as "Keep my lines" disables every row regardless of
+ * an earlier tick, so a choice can never be silently undone by a stale tick.
+ */
+export function resolvedExtractionSelection(
+  plan: ExtractionConflictPlan,
+  choices: Record<string, ExtractionChoice>,
+  toggles: Record<string, boolean>
+): Record<string, boolean> {
+  const selection: Record<string, boolean> = { ...plan.selection };
+  for (const [key, value] of Object.entries(toggles)) {
+    if (plan.conflicts.includes(key) || key === EXTRACTION_LINES_KEY) continue;
+    selection[key] = value;
+  }
+  for (const key of plan.conflicts) {
+    if (key === EXTRACTION_LINES_KEY) continue;
+    selection[key] = choices[key] === "extracted";
+  }
+  if (
+    plan.lines?.outcome === "conflict" &&
+    choices[EXTRACTION_LINES_KEY] !== "extracted"
+  ) {
+    for (const key of Object.keys(selection)) {
+      if (key.startsWith("row:")) selection[key] = false;
+    }
+  }
+  return selection;
 }

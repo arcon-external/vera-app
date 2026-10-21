@@ -559,9 +559,13 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
     act(() => root.render(<Workspace />));
     await flush();
 
-    const poNumber = extractionCheckbox("Apply extracted Customer PO number");
-    expect(poNumber.checked).toBe(false);
-    act(() => poNumber.click());
+    // #479: the draft already held a different PO number, so it is a conflict
+    // with an explicit choice rather than a checkbox that would overwrite it.
+    const useExtracted = document.querySelector<HTMLInputElement>(
+      'input[type="radio"][aria-label="Use extracted Customer PO number"]'
+    );
+    expect(useExtracted?.checked).toBe(false);
+    act(() => useExtracted?.click());
     act(() => applySelectedButton().click());
 
     expect(inputValue("Customer PO number")).toBe("4500123456");
@@ -812,5 +816,178 @@ describe("PO extraction failure keeps the manual path (issue #477)", () => {
     expect(document.body.textContent).toContain("manual");
     expect(inputValue("Customer PO number")).toBe("PO-1");
     expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+  });
+});
+
+// Issue #479: staff keep entering values while extraction runs. A late result
+// is reconciled field by field: untouched empty fields fill in, a field the
+// draft already held (or that staff cleared) waits for an explicit choice, and
+// nothing reaches the editor until Apply. Retry keeps the working copy; a
+// replaced PDF discards the run and its tracked edits.
+describe("PO extraction reconciles manual edits (issue #479)", () => {
+  function radio(label: string): HTMLInputElement {
+    const found = document.querySelector<HTMLInputElement>(
+      `input[type="radio"][aria-label="${label}"]`
+    );
+    if (!found) throw new Error(`radio ${label} not found`);
+    return found;
+  }
+
+  function conflict(key: string): HTMLElement | null {
+    return document.querySelector<HTMLElement>(
+      `[data-testid="po-extraction-conflict-${key}"]`
+    );
+  }
+
+  it("asks only about values changed while extraction ran, and applies the chosen sides", async () => {
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayedStart = deferred<ReturnType<typeof extractionState>>();
+    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    // Staff edit one field and deliberately clear another while the run is
+    // still in flight.
+    typeInto("Customer PO number", "MANUAL-1");
+    typeInto("Payment terms", "");
+    act(() => button("Extract and compare").click());
+    await flush();
+    expect(startExtractionMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      delayedStart.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    // Only the two differing values get a choice. The untouched empty PO date
+    // is preselected without a prompt; an equal Incoterms value and an absent
+    // requested date are not conflicts.
+    expect(conflict("poNumber")).not.toBeNull();
+    expect(conflict("paymentTerms")).not.toBeNull();
+    expect(conflict("poDate")).toBeNull();
+    expect(conflict("incoterms")).toBeNull();
+    expect(conflict("requestedDeliveryDate")).toBeNull();
+    expect(extractionCheckbox("Apply extracted Customer PO date").checked).toBe(true);
+    expect(radio("Keep draft Customer PO number").checked).toBe(true);
+    expect(radio("Use extracted Payment terms").checked).toBe(false);
+
+    // Nothing has moved yet: the choices are a decision, not an edit.
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+    expect(inputValue("Payment terms")).toBe("");
+
+    // Keep the edited PO number, use the extracted payment terms.
+    act(() => radio("Use extracted Payment terms").click());
+    act(() => applySelectedButton().click());
+
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+    expect(inputValue("Payment terms")).toBe("30 days after delivery");
+    expect(inputValue("PO date")).toBe("2026-10-12");
+    expect(document.body.textContent).toContain("Applied 2 fields");
+  });
+
+  it("keeps manual edits and the reviewed choice through Extract again", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(conflict("paymentTerms")).not.toBeNull();
+    act(() => radio("Use extracted Payment terms").click());
+    typeInto("Customer PO number", "MANUAL-1");
+
+    const delayedRetry = deferred<ReturnType<typeof extractionState>>();
+    startExtractionMock.mockReturnValueOnce(delayedRetry.promise);
+    act(() => button("Extract and compare").click());
+    await flush();
+
+    // The retry is only a request: the editor keeps both values and the
+    // reviewed choice while the new run is pending.
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+    expect(inputValue("Payment terms")).toBe("45 days");
+    expect(radio("Use extracted Payment terms").checked).toBe(true);
+
+    await act(async () => {
+      delayedRetry.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+    expect(radio("Use extracted Payment terms").checked).toBe(true);
+    act(() => applySelectedButton().click());
+    expect(inputValue("Payment terms")).toBe("30 days after delivery");
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+  });
+
+  it("keeps unresolved conflicts when only an auto field is applied", async () => {
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayedStart = deferred<ReturnType<typeof extractionState>>();
+    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    // One cleared header and one edited line while the run is in flight.
+    typeInto("Payment terms", "");
+    typeInto("Line 1 description", "Typed by hand");
+    act(() => button("Extract and compare").click());
+    await flush();
+    await act(async () => {
+      delayedStart.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(conflict("paymentTerms")).not.toBeNull();
+    expect(document.querySelector('[data-testid="po-extraction-line-conflict"]')).not.toBeNull();
+
+    // Applying the untouched empty PO date must consume only that proposal.
+    act(() => applySelectedButton().click());
+    expect(inputValue("PO date")).toBe("2026-10-12");
+    expect(inputValue("Payment terms")).toBe("");
+    expect(inputValue("Line 1 description")).toBe("Typed by hand");
+
+    expect(conflict("paymentTerms")).not.toBeNull();
+    expect(document.querySelector('[data-testid="po-extraction-line-conflict"]')).not.toBeNull();
+    expect(extractionCheckbox("Apply extracted line 1").disabled).toBe(true);
+  });
+
+  it("discards a late result, its conflicts and its choices after the PDF is replaced", async () => {
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayedStart = deferred<ReturnType<typeof extractionState>>();
+    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
+    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
+    documentStateMock.mockResolvedValue(
+      extractionDocumentState(5, 2, "replacement-sha")
+    );
+    attachMock.mockResolvedValue(undefined);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    typeInto("Customer PO number", "MANUAL-1");
+    act(() => button("Extract and compare").click());
+    await flush();
+    chooseDocumentFile();
+    await flush();
+
+    expect(conflict("poNumber")).toBeNull();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+
+    await act(async () => {
+      delayedStart.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    // The result belonged to the replaced generation: it cannot bring back a
+    // conflict, a choice, or a proposal for the new document.
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(conflict("poNumber")).toBeNull();
+    expect(
+      document.querySelector('input[type="radio"][aria-label="Use extracted Customer PO number"]')
+    ).toBeNull();
+    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
   });
 });
