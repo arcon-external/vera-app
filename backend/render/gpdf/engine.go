@@ -213,7 +213,10 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	pages := e.layout(in)
+	pages, err := e.compose(in)
+	if err != nil {
+		return nil, err
+	}
 
 	var buf bytes.Buffer
 	w := pdf.NewWriter(&buf)
