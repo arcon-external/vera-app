@@ -357,8 +357,16 @@ For multiple commits per issue, each commit references the issue number.
 6. **Delete the branch** after merge (the flag above does it).
 7. Pick the next issue and repeat.
 
-> **No auto-deploy.** `vera-app` is a desktop application: merging to `main` does not
-> deploy anything. Build a release locally when needed (Section 14).
+> **Merging to `main` deploys the API, not the desktop.** `deploy.yml` builds and
+> deploys `veraserver` to Cloud Run on every push to `main`. Desktop installers and
+> the updater are built only by a release tag (`desktop.yml`); a merge is not a
+> release (Section 14).
+
+> **Sprint integration branch.** A parent issue with an approved set of child
+> tickets may use one integration branch and one PR. Every child is still planned,
+> implemented and judged on that branch; the PR body resolves the parent and every
+> child; each child's plan comment records its commit and verdict. This is the only
+> exception to the one-issue-per-branch rule.
 
 > **Cross-repo transfer is not available.** GitHub only allows issue transfer within
 > the same owner; `arcon-external/vera-app` and a personal-owner repo cannot exchange
@@ -446,10 +454,10 @@ without validation.
 
 | Role        | Model                                                                     | Job                                                                            |
 | ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Worker**  | `opencode-go/deepseek-v4.1-flash#max`, fallbacks `openai/gpt-6-sol`       | Writes code, writes and runs tests.                                            |
-| **Riddler** | `opencode-go/deepseek-v4.1-flash#max`                                     | Interrogates a problem into questions. It never verifies, never decides.       |
-| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh`                          | Advises on what to do next. It advises; it never decides.                      |
-| **Judge**   | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| **Worker**  | `opencode-go/deepseek-v4.1-flash` (default), fallbacks `opencode-go/muse-spark-1.3-contributor#xhigh` then `opencode-go/longcat-2.5-preview-free` | Writes code and tests. Loads `tdd` on every change and `diagnosing-bugs` for a bug; `prototype` only when the brief timeboxes it. |
+| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates with `grilling`; loads `research`/`domain-modeling` when facts or vocabulary are missing. Never verifies or decides. |
+| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` (the requested `#max` variant does not exist; `xhigh` is its highest) | Advises. Loads `codebase-design` for design forks and `karpathy-guideline` as the surgical lens; may evaluate a `prototype`. Never decides. |
+| **Judge**   | `opencode-go/deepseek-v4.1-flash#max`, fallback `opencode-go/longcat-2.5-preview-free` | Assumes everything is wrong; verifies by running; uses `tdd`, `diagnosing-bugs` and `code-review` as lenses. PASS/NOT PASS. |
 | **Checker** | `opencode-go/muse-spark-1.3-contributor`                                  | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
@@ -461,17 +469,19 @@ when the model before it times out or errors at dispatch, and a dispatch that fa
 back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule holds — the Advisor is Muse Spark, the Judge is GPT-6.1 Sol.
-What it costs is stated plainly: the Worker, the Riddler and the orchestrator are
-all DeepSeek — the executor and the orchestrator sharing a family is the pairing to
-watch — and the Judge's fallback is DeepSeek too, so the Advisor is the only Muse
-Spark role in the loop. The Riddler is not a reviewer, so the pairing rule does not
-bind it. The Judge is a **trial model on a billed OpenAI API account** — the ChatGPT
-Plus subscription does not fund it (the first dispatch proved it:
-`credit_balance_exhausted`) — and its limits are unmeasured: a quota wall falls back
-per the chain, and a dispatch that falls back says so in its report. If a future run
-shows correlated misses between a reviewer and its family-mate, re-deal the families
-rather than defending the table.
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family. That rule holds under this roster — the Advisor is Muse Spark, the Judge is DeepSeek.
+
+**This is the quota-fallback roster (2026-10-21) while the OpenAI models are
+rate-limited.** It contains no OpenAI dependency. The Worker and the Judge now share
+DeepSeek: the executor/judge pairing is the one to watch. The Riddler (LongCat) and
+the Checker are not reviewers, so the pairing rule does not bind them. The requested
+Advisor `#max` variant does not exist — `#xhigh` is Muse Spark's highest available
+variant, and an exact reference is what makes dispatch reliable. A dispatch that
+falls back says so in its report. When the OpenAI limits clear, restore the primary
+roster (Worker/Advisor Muse Spark `xhigh`, Judge GPT-6.1 `high`) after looking the
+variants up with the models tool; the cross-family rule still decides the pairing.
+If a future run shows correlated misses between a reviewer and its family-mate,
+re-deal the families rather than defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
@@ -484,7 +494,7 @@ with the gap named rather than filling it in from the diff — the diff shows wh
 changed, never what was tried and abandoned, and the abandoned attempt is often the
 most useful thing in the report.
 
-**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not.
+**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not. For a design fork it starts from `codebase-design`; for a failure, `diagnosing-bugs`; for a diff, `code-review`.
 
 **The Checker watches CI after every push.** It is dispatched in the background
 against the pushed SHA and reports **every** check, not just the first red one. A
@@ -509,23 +519,25 @@ the output is numbered and grouped by surface, so the consumers can lift it
 wholesale. It runs once per issue after the issue is understood and before the plan
 is frozen: the plan comment answers its questions, the Advisor's brief takes the
 design-fork subset, and the Judge's brief takes the full set as its verification
-checklist. A feature earns a second pass before merge. It never verifies and never
-decides — it widens the interrogation surface; the Judge deepens it.
+checklist. It loads `grilling` for the interrogation, `research` when the answer is
+outside the repo, and `domain-modeling` when the vocabulary is unsettled. A feature
+earns a second pass before merge. It never verifies and never decides — it widens the
+interrogation surface; the Judge deepens it.
 
 ### 12.2 The loop
 
 ```
-Riddler (questions, before the plan freezes)
+Discovery: research / grilling / domain-modeling / codebase-design / prototype
       |
-Orchestrator: decide the design, freeze the interfaces, write the todolist
+Riddler (questions) + plan comment: decide design, freeze interfaces, todolist
       |
-Worker waves  -->  Advisor (if a design decision)  -->  Judge
+Worker waves (tdd / diagnosing-bugs)  -->  Advisor (design forks)  -->  Judge
    ^                               |
    +--------- NOT PASS ------------+
                                    |
                                  PASS
                                    |
-              Orchestrator's second validation -> ship
+              code-review (behaviour/large changes) -> pr -> orchestrator validation -> ship
 ```
 
 - **On PASS** the orchestrator re-validates everything personally and then decides
@@ -681,6 +693,11 @@ build` writes `frontend/dist`, which `backend/**` embeds.
 | Behaviour, or anything staff see                            | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
 | Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7)                             |
 | Comments, docs, formatting only                             | One Worker, the gates (Section 13), and orchestrator validation                           |
+| Bug, regression or incident                                 | `diagnosing-bugs` first: a red loop and its permanent regression test, then the normal loop |
+| New term, schema or state                                   | `domain-modeling` before the plan; the glossary/ADR is part of the plan                   |
+| A question outside the repo                                 | `research` before the plan; write the evidence down                                       |
+| A design fork or decomposition                              | `codebase-design`; a timeboxed `prototype` when a runnable answer is needed               |
+| AGENTS.md, a skill or an agent brief                        | `writing-for-agents`; one Worker, the gates, and orchestrator validation                  |
 
 The floor is never zero: **a Worker writes the change and the orchestrator validates
 it.** Skipping the Judge is a decision the orchestrator states out loud, with its
@@ -708,9 +725,45 @@ corrupt. Every exit code is read directly (Section 12.5).
    one.
 6. The Checker's CI read for the pushed SHA — every check, or the failure with its
    decisive log line and whether it is code or infrastructure.
+7. Which skills were loaded, what each changed, and which were deliberately not
+   loaded.
 
 The report goes on the **issue**, because the written record is what §12.6 says does
 the enforcing; the reply to the user carries the same thing in short form.
+
+### 12.8 Skills — what to load, and who owns it
+
+Skills are loadable methods, not roles. **The orchestrator holds all of them and may
+load any directly at any point**; each subordinate loads the ones its job names. No
+skill is reserved to a subagent, and loading `code-review` does not make a session
+the Judge — it supplies the review method. Every dispatch and report names the skills
+loaded and the ones deliberately skipped, with the reason.
+
+| Phase | Skills | Who |
+| --- | --- | --- |
+| Discovery and plan | `research`, `grilling`, `domain-modeling`, `codebase-design`, `prototype` | orchestrator, Riddler, Advisor |
+| Build | `tdd`, `diagnosing-bugs`, `prototype`, `writing-for-agents` | Worker; the orchestrator may load them too |
+| Review and merge | `code-review`, `tdd`, `diagnosing-bugs`, `pr` | orchestrator, Judge, Checker for a red check |
+| Human handoff | `wizard` | orchestrator generates; the user runs it |
+
+| Skill | Load it when | It is done when |
+| --- | --- | --- |
+| `prototype` | a design fork needs a runnable answer before interfaces freeze | the question is answered and recorded; the prototype is thrown away or reduced to a test/fixture |
+| `diagnosing-bugs` | a bug, regression, incident or flaky check | a red-capable command names the symptom, the cause is verified, and a permanent regression test exists — or the missing seam is recorded |
+| `research` | the answer lives outside the repo, or a decision needs primary sources | findings are written to `docs/research/<slug>.md` or the issue with citations; no decision waits on memory |
+| `tdd` | any code or test change | the test failed first at an agreed seam; the least fix passes; the test remains |
+| `domain-modeling` | a new term, schema, state, ownership rule or money concept | `GLOSSARY.md`/ADR is updated, the plan uses the agreed words, and no schema lands before the words settle |
+| `codebase-design` | a module, seam, interface or decomposition decision | the interface is frozen in the brief; a single-worker serialization is justified |
+| `code-review` | before merging a behaviour change or after a large wave | standards and spec are reviewed; findings are fixed or recorded; the Judge still verifies |
+| `pr` | opening or updating a pull request | the title/body carry the summary, verification, `Resolves #NNN` and the Dependabot read |
+| `wizard` | a step only a human can do: credentials, dashboard, signing, cutover | a bash wizard walks the user through it and stops; the agent never fakes the step |
+| `grilling` | before freezing a high-risk plan | the plan answers the hard questions; unresolved answers block the freeze |
+| `writing-for-agents` | editing AGENTS.md, a skill, a brief or agent-facing docs | pointers are sharp, each rule has one home, the document is pruned, and its commands/links are verified |
+
+A skill's instructions do not override this guide; if they conflict, this guide wins
+and the conflict is reported. `prototype` and `research` produce evidence, not shipped
+code; `code-review` and `pr` do not replace the Judge. The `karpathy-guideline` remains
+the Advisor's default surgical lens.
 
 ---
 
@@ -738,6 +791,11 @@ are local evidence: they are never committed.
 If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
 test from Section 7.
+
+A bug fix also carries its `diagnosing-bugs` red loop and permanent regression test.
+A behaviour change gets a `code-review` before the PR, and the PR body is written with
+`pr`. Edits to this file, a skill or an agent brief use `writing-for-agents`. These
+are review gates, not substitutes for the Judge.
 
 On CI, PRs whose diff is _entirely_ `frontend/src/**` or `frontend/public/**` skip
 the Go suite's heavy steps via the scope step in `pr.yml` (the required "Go
