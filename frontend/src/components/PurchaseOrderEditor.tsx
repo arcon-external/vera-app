@@ -907,9 +907,10 @@ export function PurchaseOrderEditorPage({
   } | null>(null);
   const [dismissedExtractionId, setDismissedExtractionId] = useState<number | null>(null);
   // The active PDF generation as the document panel has reported it. Undefined
-  // means "not loaded yet"; null means the record deliberately has no PDF. The
-  // review panel and Apply compare the run against this, not against whatever
-  // document the last extraction response happened to mention.
+  // means "not loaded yet"; null means "no actionable document" -- either the
+  // record deliberately has no PDF, or a replacement's state read has not
+  // returned yet. The review panel and Apply compare the run against this, not
+  // against whatever document the last extraction response happened to mention.
   const [activeDocument, setActiveDocument] = useState<
     PurchaseOrderExtractionDocumentDTO | null | undefined
   >(undefined);
@@ -938,11 +939,19 @@ export function PurchaseOrderEditorPage({
    * (and on a successful attach/replace/remove before its refresh returns), so
    * old proposals stop being actionable at the moment the PDF changes rather
    * than one round trip later.
+   *
+   * The generation bump is what discards responses that were requested for the
+   * document this call ends. The retained reference is cleared as well, so a
+   * pre-change response cannot compare equal to an old document if a call site
+   * ever skips its generation check: until the document panel reports the
+   * replacement, no document is actionable.
    */
   const invalidateExtraction = () => {
     extractionGeneration.current += 1;
     extractionInitialized.current = null;
     clearExtractionPoll();
+    activeDocumentRef.current = null;
+    setActiveDocument(null);
     setExtractionState(null);
     setExtractionSelection({});
     setExtractionApplied(null);
@@ -963,8 +972,13 @@ export function PurchaseOrderEditorPage({
     clearExtractionPoll();
     extractionPoll.current = setTimeout(() => {
       void (async () => {
+        // The generation is captured when this read starts, not when the poll
+        // was scheduled: a replacement between the timer firing and the answer
+        // arriving must discard the answer.
+        const generation = extractionGeneration.current;
         try {
           const next = await GetPurchaseOrderExtraction(order.ID);
+          if (generation !== extractionGeneration.current) return;
           const run = next.Run;
           if (run !== null && run !== undefined && run.ID === runId && !isTerminalExtractionStatus(run.Status)) {
             setExtractionState(next);
@@ -973,6 +987,7 @@ export function PurchaseOrderEditorPage({
           }
           adoptExtraction(next);
         } catch (pollError) {
+          if (generation !== extractionGeneration.current) return;
           setExtractionError(errorText(pollError));
           clearExtractionPoll();
         }
@@ -1012,12 +1027,17 @@ export function PurchaseOrderEditorPage({
 
   useEffect(() => {
     let cancelled = false;
+    // The initial read belongs to the document generation that was active when
+    // it started. A replacement while it is in flight ends that generation.
+    const generation = extractionGeneration.current;
     void (async () => {
       try {
         const next = await GetPurchaseOrderExtraction(order.ID);
-        if (!cancelled) adoptExtraction(next);
+        if (cancelled || generation !== extractionGeneration.current) return;
+        adoptExtraction(next);
       } catch (loadError) {
-        if (!cancelled) setExtractionError(errorText(loadError));
+        if (cancelled || generation !== extractionGeneration.current) return;
+        setExtractionError(errorText(loadError));
       }
     })();
     return () => {
@@ -1055,19 +1075,26 @@ export function PurchaseOrderEditorPage({
         }
       : null;
     const previous = activeDocumentRef.current;
-    activeDocumentRef.current = document;
-    setActiveDocument(document);
     const run = extractionState?.Run ?? null;
     const changed =
       previous !== undefined
         ? !sameExtractionDocument(previous, document)
         : run != null && extractionIsStale(run, document);
+    // Invalidate before reporting the new document: the clear inside ends the
+    // old generation, and the value assigned next is the one every response
+    // from here on is compared against.
     if (changed) invalidateExtraction();
+    activeDocumentRef.current = document;
+    setActiveDocument(document);
     refreshExtraction();
   };
 
   const startExtraction = () => {
     if (extractionStarting) return;
+    // The start belongs to the document generation that is active when it is
+    // requested. A replacement while it is in flight ends that generation, and
+    // its run is never made actionable here.
+    const generation = extractionGeneration.current;
     clearExtractionPoll();
     setExtractionStarting(true);
     setExtractionError(null);
@@ -1075,8 +1102,11 @@ export function PurchaseOrderEditorPage({
     setDismissedExtractionId(null);
     void (async () => {
       try {
-        adoptExtraction(await StartPurchaseOrderExtraction(order.ID));
+        const next = await StartPurchaseOrderExtraction(order.ID);
+        if (generation !== extractionGeneration.current) return;
+        adoptExtraction(next);
       } catch (startError) {
+        if (generation !== extractionGeneration.current) return;
         setExtractionError(errorText(startError));
       } finally {
         setExtractionStarting(false);

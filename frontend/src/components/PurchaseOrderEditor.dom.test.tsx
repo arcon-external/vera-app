@@ -224,6 +224,14 @@ async function flush(): Promise<void> {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function extractionCell(value: string, status: string, page: number | null = 1) {
   return {
     Value: value,
@@ -628,6 +636,164 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
 
     expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
     expect(document.body.textContent).toContain("The PDF changed after this extraction");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+});
+
+// Issue #477, wave 3. The Judge replaced the PDF while a read that started
+// against the previous document was still in flight, then released that read:
+// the old proposals (and its PO date) came back. Every asynchronous acquisition
+// path captures the active-document generation when its request starts, and a
+// response from a generation that has ended is discarded instead of adopted.
+describe("PO extraction late responses cannot resurrect a replaced document (#477)", () => {
+  it("discards a delayed initial read after the PDF is replaced", async () => {
+    const delayedInitialRead = deferred<ReturnType<typeof extractionState>>();
+    extractionMock.mockReturnValueOnce(delayedInitialRead.promise);
+    // Every read after the initial one returns the old result, as a server that
+    // has not observed the replacement yet would.
+    extractionMock.mockResolvedValue(extractionState());
+    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
+    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
+    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
+    attachMock.mockResolvedValue(undefined);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    // The refresh the document panel triggered has already made the old result
+    // actionable, so this is the state the delayed response could restore.
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    expect(inputValue("PO date")).toBe("");
+
+    chooseDocumentFile();
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+
+    await act(async () => {
+      delayedInitialRead.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+    // The late response is discarded, not adopted as inert stale evidence: an
+    // adopted response would render its empty stale banner here.
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(inputValue("PO date")).toBe("");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+
+  it("discards a delayed start response after the PDF is replaced", async () => {
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayedStart = deferred<ReturnType<typeof extractionState>>();
+    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
+    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
+    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
+    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
+    attachMock.mockResolvedValue(undefined);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+
+    act(() => button("Extract and compare").click());
+    await flush();
+    expect(startExtractionMock).toHaveBeenCalledTimes(1);
+
+    chooseDocumentFile();
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+
+    await act(async () => {
+      delayedStart.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+    // Discarded, not adopted as inert stale evidence (an adopted response would
+    // render its empty stale banner here).
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(inputValue("PO date")).toBe("");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+
+  it("discards a delayed poll response after the PDF is replaced", async () => {
+    const running: any = extractionState();
+    running.Run.Status = "running";
+    running.Run.Result = null;
+    extractionMock.mockResolvedValueOnce(running);
+    extractionMock.mockResolvedValueOnce(running);
+    const delayedPoll = deferred<ReturnType<typeof extractionState>>();
+    extractionMock.mockReturnValueOnce(delayedPoll.promise);
+    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
+    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
+    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
+    attachMock.mockResolvedValue(undefined);
+
+    act(() => root.render(<Workspace />));
+    await flush();
+    expect(document.body.textContent).toContain("Reading the PDF text");
+
+    // Let the one-second poll fire; its response stays in flight.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    expect(extractionMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+    chooseDocumentFile();
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+
+    await act(async () => {
+      delayedPoll.resolve(extractionState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+    // Discarded, not adopted as inert stale evidence (an adopted response would
+    // render its empty stale banner here).
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(inputValue("PO date")).toBe("");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+
+  it("ignores a document panel read that lands after the replacement was read", async () => {
+    const delayedDocumentRead = deferred<PurchaseOrderDocumentStateDTO>();
+    documentStateMock.mockReturnValueOnce(delayedDocumentRead.promise);
+    documentStateMock.mockResolvedValueOnce(extractionDocumentState(5, 2, "replacement-sha"));
+    attachMock.mockResolvedValue(undefined);
+    extractionMock.mockResolvedValue(extractionState());
+
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    // The replacement has been read as version 2; its old extraction result is
+    // already discarded as stale.
+    chooseDocumentFile();
+    await flush();
+    expect(document.body.textContent).toContain("Version 2 of 1");
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+
+    // The panel's first read now lands with the replaced version 1 state. It
+    // must not restore the old document generation, its result, or Apply.
+    await act(async () => {
+      delayedDocumentRead.resolve(extractionDocumentState());
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain("Version 2 of 1");
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(applySelectedButtonOrNull()).toBeNull();
+    expect(inputValue("PO date")).toBe("");
     expect(inputValue("Customer PO number")).toBe("PO-1");
   });
 });
