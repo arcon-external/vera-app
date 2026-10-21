@@ -385,6 +385,8 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 			// does not copy them as plain values, so accept that form too.
 			want := `this.` + field + ` = source["` + field + `"];`
 			nested := structField.Type.Kind() == reflect.Struct ||
+				(structField.Type.Kind() == reflect.Ptr &&
+					structField.Type.Elem().Kind() == reflect.Struct) ||
 				(structField.Type.Kind() == reflect.Slice &&
 					structField.Type.Elem().Kind() == reflect.Struct)
 			if nested && strings.Contains(block, `this.`+field+` = this.convertValues(source["`+field+`"]`) {
