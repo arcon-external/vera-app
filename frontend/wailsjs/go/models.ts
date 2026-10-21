@@ -2160,6 +2160,338 @@ export namespace backend {
 	        this.Filename = source["Filename"];
 	    }
 	}
+	export class PurchaseOrderExtractionAbstentionsDTO {
+	    Fields: number;
+	    Rows: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionAbstentionsDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Fields = source["Fields"];
+	        this.Rows = source["Rows"];
+	    }
+	}
+	export class PurchaseOrderExtractionBBoxDTO {
+	    X: number;
+	    Y: number;
+	    Width: number;
+	    Height: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionBBoxDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.X = source["X"];
+	        this.Y = source["Y"];
+	        this.Width = source["Width"];
+	        this.Height = source["Height"];
+	    }
+	}
+	export class PurchaseOrderExtractionCellDTO {
+	    Value: string;
+	    Raw: string;
+	    Status: string;
+	    Page?: number;
+	    BBox?: PurchaseOrderExtractionBBoxDTO;
+	    Confidence?: number;
+	    Note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionCellDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Value = source["Value"];
+	        this.Raw = source["Raw"];
+	        this.Status = source["Status"];
+	        this.Page = source["Page"];
+	        this.BBox = this.convertValues(source["BBox"], PurchaseOrderExtractionBBoxDTO);
+	        this.Confidence = source["Confidence"];
+	        this.Note = source["Note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PurchaseOrderExtractionPageDTO {
+	    Number: number;
+	    Width: number;
+	    Height: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionPageDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Number = source["Number"];
+	        this.Width = source["Width"];
+	        this.Height = source["Height"];
+	    }
+	}
+	export class PurchaseOrderExtractionFieldDTO {
+	    Key: string;
+	    Cell: PurchaseOrderExtractionCellDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionFieldDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Key = source["Key"];
+	        this.Cell = this.convertValues(source["Cell"], PurchaseOrderExtractionCellDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PurchaseOrderExtractionRowDTO {
+	    LineNumber: PurchaseOrderExtractionCellDTO;
+	    Description: PurchaseOrderExtractionCellDTO;
+	    Quantity: PurchaseOrderExtractionCellDTO;
+	    UoM: PurchaseOrderExtractionCellDTO;
+	    UnitPrice: PurchaseOrderExtractionCellDTO;
+	    Amount: PurchaseOrderExtractionCellDTO;
+	    Status: string;
+	    Page: number;
+	    BBox?: PurchaseOrderExtractionBBoxDTO;
+	    Note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionRowDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.LineNumber = this.convertValues(source["LineNumber"], PurchaseOrderExtractionCellDTO);
+	        this.Description = this.convertValues(source["Description"], PurchaseOrderExtractionCellDTO);
+	        this.Quantity = this.convertValues(source["Quantity"], PurchaseOrderExtractionCellDTO);
+	        this.UoM = this.convertValues(source["UoM"], PurchaseOrderExtractionCellDTO);
+	        this.UnitPrice = this.convertValues(source["UnitPrice"], PurchaseOrderExtractionCellDTO);
+	        this.Amount = this.convertValues(source["Amount"], PurchaseOrderExtractionCellDTO);
+	        this.Status = source["Status"];
+	        this.Page = source["Page"];
+	        this.BBox = this.convertValues(source["BBox"], PurchaseOrderExtractionBBoxDTO);
+	        this.Note = source["Note"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PurchaseOrderExtractionResultDTO {
+	    Engine: string;
+	    EngineVersion: string;
+	    PageCount: number;
+	    PagesWithText: number;
+	    PagesWithoutText: number;
+	    DurationMs: number;
+	    SchemaVersion: number;
+	    Pages: PurchaseOrderExtractionPageDTO[];
+	    Fields: PurchaseOrderExtractionFieldDTO[];
+	    Rows: PurchaseOrderExtractionRowDTO[];
+	    Abstentions: PurchaseOrderExtractionAbstentionsDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Engine = source["Engine"];
+	        this.EngineVersion = source["EngineVersion"];
+	        this.PageCount = source["PageCount"];
+	        this.PagesWithText = source["PagesWithText"];
+	        this.PagesWithoutText = source["PagesWithoutText"];
+	        this.DurationMs = source["DurationMs"];
+	        this.SchemaVersion = source["SchemaVersion"];
+	        this.Pages = this.convertValues(source["Pages"], PurchaseOrderExtractionPageDTO);
+	        this.Fields = this.convertValues(source["Fields"], PurchaseOrderExtractionFieldDTO);
+	        this.Rows = this.convertValues(source["Rows"], PurchaseOrderExtractionRowDTO);
+	        this.Abstentions = this.convertValues(source["Abstentions"], PurchaseOrderExtractionAbstentionsDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PurchaseOrderExtractionDTO {
+	    UUID: string;
+	    Status: string;
+	    Engine: string;
+	    EngineVersion: string;
+	    DocumentSHA256: string;
+	    ErrorCode?: string;
+	    ErrorMessage?: string;
+	    Result?: PurchaseOrderExtractionResultDTO;
+	    ID: number;
+	    PurchaseOrderID: number;
+	    DocumentID: number;
+	    DocumentVersion: number;
+	    PageCount: number;
+	    RequestedBy: number;
+	    CreatedAt: string;
+	    StartedAt?: string;
+	    FinishedAt?: string;
+	    DurationMS?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.UUID = source["UUID"];
+	        this.Status = source["Status"];
+	        this.Engine = source["Engine"];
+	        this.EngineVersion = source["EngineVersion"];
+	        this.DocumentSHA256 = source["DocumentSHA256"];
+	        this.ErrorCode = source["ErrorCode"];
+	        this.ErrorMessage = source["ErrorMessage"];
+	        this.Result = this.convertValues(source["Result"], PurchaseOrderExtractionResultDTO);
+	        this.ID = source["ID"];
+	        this.PurchaseOrderID = source["PurchaseOrderID"];
+	        this.DocumentID = source["DocumentID"];
+	        this.DocumentVersion = source["DocumentVersion"];
+	        this.PageCount = source["PageCount"];
+	        this.RequestedBy = source["RequestedBy"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.StartedAt = source["StartedAt"];
+	        this.FinishedAt = source["FinishedAt"];
+	        this.DurationMS = source["DurationMS"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class PurchaseOrderExtractionDocumentDTO {
+	    ID: number;
+	    Version: number;
+	    SHA256: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionDocumentDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Version = source["Version"];
+	        this.SHA256 = source["SHA256"];
+	    }
+	}
+	export class PurchaseOrderExtractionStateDTO {
+	    Run?: PurchaseOrderExtractionDTO;
+	    Document?: PurchaseOrderExtractionDocumentDTO;
+	
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionStateDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Run = this.convertValues(source["Run"], PurchaseOrderExtractionDTO);
+	        this.Document = this.convertValues(source["Document"], PurchaseOrderExtractionDocumentDTO);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class PurchaseOrderFinalizeInput {
 	    ID: number;
 	    BillingAddress: string;

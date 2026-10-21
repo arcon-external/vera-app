@@ -25,14 +25,23 @@ import {
 // and the shared discard prompt. App supplies only the one-line wiring this
 // harness copies.
 
+const { extractionMock, startExtractionMock } = vi.hoisted(() => ({
+  extractionMock: vi.fn(),
+  startExtractionMock: vi.fn(),
+}));
+
 // The editor page now mounts the document panel, which reads the one optional
-// customer PO PDF through the desktop binding (#472). This suite is about tab
-// navigation, so the document read is a stable empty state.
+// customer PO PDF through the desktop binding (#472), and the extraction
+// review, which reads the latest run (#477). This suite is about tab
+// navigation, so both reads default to their empty state; individual tests
+// override the extraction answer where they exercise it.
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
   AttachPurchaseOrderDocument: vi.fn(),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
+  GetPurchaseOrderExtraction: (...args: unknown[]) => extractionMock(...args),
+  StartPurchaseOrderExtraction: (...args: unknown[]) => startExtractionMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
 }));
 
@@ -153,6 +162,9 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  extractionMock.mockReset();
+  extractionMock.mockResolvedValue({ Run: null, Document: null });
+  startExtractionMock.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -196,6 +208,102 @@ function prompt(): HTMLElement | null {
   return document.querySelector<HTMLElement>(
     '[role="alertdialog"][aria-label="Discard unsaved changes?"]'
   );
+}
+
+async function flush(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+function extractionCell(value: string, status: string, page: number | null = 1) {
+  return {
+    Value: value,
+    Raw: value,
+    Status: status,
+    Page: page,
+    BBox: page === null ? null : { X: 86, Y: 82, Width: 56, Height: 9 },
+    Confidence: null,
+    Note: "",
+  };
+}
+
+function extractionState() {
+  return {
+    Run: {
+      UUID: "run-1",
+      Status: "succeeded",
+      Engine: "poppler",
+      EngineVersion: "25.03.0",
+      DocumentSHA256: "doc-sha",
+      ErrorCode: null,
+      ErrorMessage: null,
+      Result: {
+        Engine: "poppler",
+        EngineVersion: "25.03.0",
+        PageCount: 1,
+        PagesWithText: 1,
+        PagesWithoutText: 0,
+        DurationMs: 20,
+        SchemaVersion: 1,
+        Pages: [{ Number: 1, Width: 595, Height: 842 }],
+        Fields: [
+          { Key: "poNumber", Cell: extractionCell("4500123456", "extracted") },
+          { Key: "poDate", Cell: extractionCell("2026-10-12", "extracted") },
+          { Key: "requestedDeliveryDate", Cell: extractionCell("", "absent", null) },
+          { Key: "currency", Cell: extractionCell("USD", "extracted") },
+          { Key: "paymentTerms", Cell: extractionCell("30 days after delivery", "needs_review") },
+          { Key: "incoterms", Cell: extractionCell("CIF", "extracted") },
+        ],
+        Rows: [
+          {
+            LineNumber: extractionCell("1", "extracted"),
+            Description: extractionCell("Extracted line", "extracted"),
+            Quantity: extractionCell("2", "extracted"),
+            UoM: extractionCell("Pc", "extracted"),
+            UnitPrice: extractionCell("1250.00", "extracted"),
+            Amount: extractionCell("2500.00", "extracted"),
+            Status: "extracted",
+            Page: 1,
+            BBox: { X: 50, Y: 225, Width: 490, Height: 10 },
+            Note: "",
+          },
+        ],
+        Abstentions: { Fields: 2, Rows: 0 },
+      },
+      ID: 9,
+      PurchaseOrderID: 7,
+      DocumentID: 4,
+      DocumentVersion: 1,
+      PageCount: 1,
+      RequestedBy: 3,
+      CreatedAt: "2026-10-21T10:00:00Z",
+      StartedAt: "2026-10-21T10:00:01Z",
+      FinishedAt: "2026-10-21T10:00:02Z",
+      DurationMS: 20,
+    },
+    Document: { ID: 4, Version: 1, SHA256: "doc-sha" },
+  };
+}
+
+function extractionCheckbox(label: string): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+  if (!found) throw new Error(`checkbox ${label} not found`);
+  return found;
+}
+
+function applySelectedButton(): HTMLButtonElement {
+  const found = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (candidate) => candidate.textContent?.startsWith("Apply selected")
+  );
+  if (!found) throw new Error("Apply selected button not found");
+  return found;
+}
+
+function inputValue(label: string): string | undefined {
+  return document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)?.value;
 }
 
 function dialogCount(): number {
@@ -375,5 +483,83 @@ describe("PO discard is one modal decision (issue #468, wave 3)", () => {
     expect(document.activeElement).toBe(keep);
     expect(dialogCount()).toBe(1);
     expect(prompt()?.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe("PO extraction applies only chosen proposals (issue #477)", () => {
+  it("shows the evidence and leaves every value unchanged until Apply", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("Page 1 · 86–142 × 82–91 pt");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+    expect(inputValue("Payment terms")).toBe("45 days");
+  });
+
+  it("applies a ticked header field and leaves an unticked one alone", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    const poNumber = extractionCheckbox("Apply extracted Customer PO number");
+    expect(poNumber.checked).toBe(false);
+    act(() => poNumber.click());
+    act(() => applySelectedButton().click());
+
+    expect(inputValue("Customer PO number")).toBe("4500123456");
+    expect(inputValue("Payment terms")).toBe("45 days");
+    // The empty PO date was preselected by the conservative default; the
+    // nonempty payment terms and quoted Incoterms were not.
+    expect(inputValue("PO date")).toBe("2026-10-12");
+    expect(document.body.textContent).toContain("Applied 2 fields");
+  });
+
+  it("replaces the line set only when a row is ticked", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(inputValue("Line 1 description")).toBe("Widget");
+    const row = extractionCheckbox("Apply extracted line 1");
+    expect(row.checked).toBe(false);
+    act(() => row.click());
+    act(() => applySelectedButton().click());
+
+    expect(inputValue("Line 1 description")).toBe("Extracted line");
+    expect(inputValue("Line 1 quantity")).toBe("2");
+    expect(inputValue("Line 1 unit price")).toBe("$1,250.00");
+  });
+
+  it("discards a stale result visibly and offers no Apply", async () => {
+    const stale = extractionState();
+    stale.Run.Status = "stale";
+    stale.Run.Result = null as unknown as typeof stale.Run.Result;
+    stale.Document.SHA256 = "different-document";
+    extractionMock.mockResolvedValue(stale);
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(document.body.textContent).toContain("The PDF changed after this extraction");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+});
+
+describe("PO extraction failure keeps the manual path (issue #477)", () => {
+  it("shows the typed reason and changes no field", async () => {
+    const failed: any = extractionState();
+    failed.Run.Status = "failed";
+    failed.Run.ErrorCode = "page_limit";
+    failed.Run.Result = null as unknown as typeof failed.Run.Result;
+    extractionMock.mockResolvedValue(failed);
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(document.body.textContent).toContain("more pages");
+    expect(document.body.textContent).toContain("manual");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
   });
 });

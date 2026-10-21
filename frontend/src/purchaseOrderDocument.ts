@@ -192,25 +192,41 @@ export function finalSaveSendsAbsenceConfirmation(
 export interface ExtractAvailability {
   enabled: boolean;
   reason: string;
+  /** The short line under the button, shown whether or not it is enabled. */
+  hint: string;
 }
 
 /**
- * "Extract and compare" is visible but disabled until #477 ships. The reason
- * changes with the state so the action is honest in both branches rather than
- * a dead button with no explanation.
+ * "Extract and compare" is available whenever a PDF is attached and the caller
+ * has somewhere to apply proposals (the draft/correction editor). A saved
+ * record is read-only, so its panel explains the correction path instead of
+ * starting a job whose result could not be used.
+ *
+ * The empty branch keeps the action visible but disabled with the exact
+ * remedy, rather than hiding a control staff will look for.
  */
 export function extractAndCompareAvailability(
-  documentState: PurchaseOrderDocumentState
+  documentState: PurchaseOrderDocumentState,
+  hasApplyTarget = true
 ): ExtractAvailability {
   if (documentState === "none") {
     return {
       enabled: false,
       reason: "Attach a customer PO PDF before extracting its data.",
+      hint: "Reads the selectable text layer only.",
+    };
+  }
+  if (!hasApplyTarget) {
+    return {
+      enabled: false,
+      reason: "Correct this record to apply extracted proposals.",
+      hint: "Saved values are protected until a correction is started.",
     };
   }
   return {
-    enabled: false,
-    reason: "Extraction is not available in this release.",
+    enabled: true,
+    reason: "",
+    hint: "Reads the selectable text layer only; scanned pages are not read.",
   };
 }
 

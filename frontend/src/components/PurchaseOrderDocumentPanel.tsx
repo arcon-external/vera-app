@@ -45,6 +45,15 @@ export interface PurchaseOrderDocumentPanelViewProps {
   /** True when the saved record recorded a deliberate no-PDF final save. */
   absenceConfirmed?: boolean;
   preview?: { url: string; filename: string } | null;
+  /**
+   * Starts a text extraction. Omitted by a read-only saved view, whose panel
+   * explains the correction path instead of starting an unappliable job.
+   */
+  onExtract?: () => void;
+  /** The run's queued/running status, for honest progress on the button. */
+  extractionStatus?: "queued" | "running" | null;
+  /** True while the start request itself is in flight. */
+  extractionStarting?: boolean;
   onChooseFile: () => void;
   onView: () => void;
   onRemove: () => void;
@@ -61,6 +70,9 @@ export function PurchaseOrderDocumentPanelView({
   pendingRemoval = false,
   absenceConfirmed = false,
   preview = null,
+  onExtract,
+  extractionStatus = null,
+  extractionStarting = false,
   onChooseFile,
   onView,
   onRemove,
@@ -70,10 +82,22 @@ export function PurchaseOrderDocumentPanelView({
 }: PurchaseOrderDocumentPanelViewProps) {
   const active: PurchaseOrderDocumentDTO | null = state.Document ?? null;
   const documentState = documentStateOf(state);
-  const extract = extractAndCompareAvailability(documentState);
+  const extract = extractAndCompareAvailability(documentState, onExtract != null);
+  const extractInFlight = extractionStatus === "queued" || extractionStatus === "running";
+  const extractBusy = extractionStarting || extractInFlight;
   const disabled = busy !== "idle" || loading;
   const versionLabel = documentVersionLabel(state);
   const uploadedDate = active?.UploadedAt ? active.UploadedAt.slice(0, 10) : "";
+  const extractHint =
+    extractionStarting
+      ? "Starting extraction…"
+      : extractionStatus === "queued"
+        ? "Queued for extraction…"
+        : extractionStatus === "running"
+          ? "Reading the PDF text…"
+          : extract.enabled
+            ? extract.hint
+            : extract.reason;
 
   return (
     <Card className="p-4">
@@ -187,13 +211,14 @@ export function PurchaseOrderDocumentPanelView({
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button
               aria-label="Extract and compare"
-              disabled
-              title={extract.reason}
+              onClick={onExtract}
+              disabled={disabled || extractBusy || !extract.enabled}
+              title={extract.enabled ? undefined : extract.reason}
             >
-              Extract and compare
+              {extractBusy ? "Extracting…" : "Extract and compare"}
             </Button>
             <span className="max-w-[18rem] text-caption text-ink-500">
-              {extract.reason}
+              {extractHint}
             </span>
           </div>
         </div>
@@ -230,6 +255,10 @@ export interface PurchaseOrderDocumentPanelProps {
   initialState?: PurchaseOrderDocumentStateDTO | null;
   absenceConfirmed?: boolean;
   onStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
+  /** Omitted by a saved view: its document panel explains the correction path. */
+  onExtract?: () => void;
+  extractionStatus?: "queued" | "running" | null;
+  extractionStarting?: boolean;
 }
 
 /**
@@ -243,6 +272,9 @@ export function PurchaseOrderDocumentPanel({
   initialState = null,
   absenceConfirmed = false,
   onStateChange,
+  onExtract,
+  extractionStatus = null,
+  extractionStarting = false,
 }: PurchaseOrderDocumentPanelProps) {
   const [state, setState] = useState<PurchaseOrderDocumentStateDTO>(
     initialState ?? { Document: null, Versions: [] }
@@ -399,6 +431,9 @@ export function PurchaseOrderDocumentPanel({
         pendingRemoval={pendingRemoval}
         absenceConfirmed={absenceConfirmed}
         preview={preview}
+        onExtract={onExtract}
+        extractionStatus={extractionStatus}
+        extractionStarting={extractionStarting}
         onChooseFile={chooseFile}
         onView={() => void view()}
         onRemove={() => setPendingRemoval(true)}
