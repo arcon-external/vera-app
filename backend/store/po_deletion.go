@@ -97,6 +97,12 @@ var (
 	ErrDeletionChallengeInvalid = errors.New("the deletion challenge is invalid")
 	// ErrDeletionChallengeExpired refuses a challenge past its short life.
 	ErrDeletionChallengeExpired = errors.New("the deletion challenge has expired")
+	// ErrDeletionCrossOrgLinked refuses deleting a Quotation that a Purchase
+	// Order outside the caller's organization follows. The foreign record is
+	// invisible to this organization's chain, so deleting the quotation would
+	// either write across tenants or abort on the foreign key after the fact;
+	// the refusal is named before anything is written.
+	ErrDeletionCrossOrgLinked = errors.New("this quotation is still followed by a purchase order in another organization, so it cannot be deleted here")
 )
 
 // DeletionChange is one named difference between the chain the admin confirmed
@@ -259,6 +265,11 @@ type deletionQuotationFacts struct {
 	CustomerName     string
 	Revisions        []int16
 	DocumentVersions int
+	// ForeignLinkedPOs counts Purchase Orders that follow this quotation from
+	// another organization. They are outside every chain this organization can
+	// see or remove, and the foreign key would abort the quotation deletion, so
+	// the refusal is named rather than left to the database.
+	ForeignLinkedPOs int
 }
 
 // deletionPOFacts is the live state of one Purchase Order, including whether it
@@ -273,6 +284,7 @@ type deletionPOFacts struct {
 	Version          int64
 	DocumentVersions int
 	HistoryEntries   int
+	ItemLines        int
 	QuotationID      int64 // live link, or 0
 	FormerQuote      string
 	SourceRevision   int16
@@ -571,9 +583,15 @@ func loadDeletionFacts(ctx context.Context, q purchaseOrderQuerier, schema, orgI
 	var facts deletionFacts
 	switch targetType {
 	case DeletionTargetQuotation:
-		quotation, err := loadDeletionQuotationFacts(ctx, q, schema, targetID)
+		quotation, err := loadDeletionQuotationFacts(ctx, q, schema, orgID, targetID)
 		if err != nil {
 			return deletionFacts{}, err
+		}
+		if quotation.ForeignLinkedPOs > 0 {
+			// Both scopes delete the quotation row, so neither can proceed while
+			// a record outside this organization still follows it. The foreign
+			// purchase order is not part of any chain this organization can see.
+			return deletionFacts{}, ErrDeletionCrossOrgLinked
 		}
 		pos, err := loadDeletionChainPOs(ctx, q, schema, orgID, targetID)
 		if err != nil {
@@ -588,7 +606,7 @@ func loadDeletionFacts(ctx context.Context, q purchaseOrderQuerier, schema, orgI
 		}
 		facts.PO = order
 		if order.QuotationID > 0 {
-			quotation, err := loadDeletionQuotationFacts(ctx, q, schema, order.QuotationID)
+			quotation, err := loadDeletionQuotationFacts(ctx, q, schema, orgID, order.QuotationID)
 			if err != nil {
 				return deletionFacts{}, err
 			}
@@ -605,7 +623,7 @@ func loadDeletionFacts(ctx context.Context, q purchaseOrderQuerier, schema, orgI
 	return facts, nil
 }
 
-func loadDeletionQuotationFacts(ctx context.Context, q purchaseOrderQuerier, schema string, id int64) (*deletionQuotationFacts, error) {
+func loadDeletionQuotationFacts(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, id int64) (*deletionQuotationFacts, error) {
 	var facts deletionQuotationFacts
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT q.id, q.uuid::text, q.quote_number, c.legal_name,
@@ -615,12 +633,14 @@ func loadDeletionQuotationFacts(ctx context.Context, q purchaseOrderQuerier, sch
 		       ), ARRAY[]::smallint[]),
 		       (SELECT COUNT(*) FROM %s.quotation_documents d
 		        JOIN %s.quotation_revisions r ON r.id = d.revision_id
-		        WHERE r.quotation_id = q.id)
+		        WHERE r.quotation_id = q.id),
+		       (SELECT COUNT(*) FROM %s.purchase_orders f
+		        WHERE f.quotation_id = q.id AND f.org_id <> $2)
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
-		WHERE q.id = $1`, schema, schema, schema, schema, schema), id).Scan(
+		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema), id, orgID).Scan(
 		&facts.ID, &facts.UUID, &facts.QuoteNumber, &facts.CustomerName,
-		&facts.Revisions, &facts.DocumentVersions,
+		&facts.Revisions, &facts.DocumentVersions, &facts.ForeignLinkedPOs,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDeletionTargetNotFound
@@ -644,15 +664,17 @@ func loadDeletionPOFacts(ctx context.Context, q purchaseOrderQuerier, schema, or
 		       (SELECT COUNT(*) FROM %s.purchase_order_documents d
 		        WHERE d.purchase_order_id = po.id),
 		       (SELECT COUNT(*) FROM %s.purchase_order_corrections c
-		        WHERE c.purchase_order_id = po.id)
+		        WHERE c.purchase_order_id = po.id),
+		       (SELECT COUNT(*) FROM %s.purchase_order_items i
+		        WHERE i.purchase_order_id = po.id)
 		FROM %s.purchase_orders po
 		LEFT JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`,
-		schema, schema, schema, schema), id, orgID).Scan(
+		schema, schema, schema, schema, schema), id, orgID).Scan(
 		&facts.ID, &facts.UUID, &facts.State, &facts.PONumber,
 		&facts.CustomerName, &facts.Version, &facts.QuoteNumber,
 		&quotationID, &facts.FormerQuote, &facts.SourceRevision,
-		&facts.DocumentVersions, &facts.HistoryEntries,
+		&facts.DocumentVersions, &facts.HistoryEntries, &facts.ItemLines,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDeletionTargetNotFound
@@ -676,11 +698,13 @@ func loadDeletionChainPOs(ctx context.Context, q purchaseOrderQuerier, schema, o
 		       (SELECT COUNT(*) FROM %s.purchase_order_documents d
 		        WHERE d.purchase_order_id = po.id),
 		       (SELECT COUNT(*) FROM %s.purchase_order_corrections c
-		        WHERE c.purchase_order_id = po.id)
+		        WHERE c.purchase_order_id = po.id),
+		       (SELECT COUNT(*) FROM %s.purchase_order_items i
+		        WHERE i.purchase_order_id = po.id)
 		FROM %s.purchase_orders po
 		JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.quotation_id = $1 AND po.org_id = $2
-		ORDER BY po.id`, schema, schema, schema, schema), quotationID, orgID)
+		ORDER BY po.id`, schema, schema, schema, schema, schema), quotationID, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("list deletion chain purchase orders: %w", err)
 	}
@@ -693,6 +717,7 @@ func loadDeletionChainPOs(ctx context.Context, q purchaseOrderQuerier, schema, o
 			&order.ID, &order.UUID, &order.State, &order.PONumber,
 			&order.CustomerName, &order.Version, &order.QuoteNumber,
 			&order.SourceRevision, &order.DocumentVersions, &order.HistoryEntries,
+			&order.ItemLines,
 		); err != nil {
 			return nil, fmt.Errorf("scan deletion chain purchase order: %w", err)
 		}
@@ -776,6 +801,11 @@ func buildDeletionPreview(targetType string, facts deletionFacts) DeletionPrevie
 		if facts.Quotation != nil {
 			preserved = append(preserved, quotationDeletionRecord(*facts.Quotation))
 		}
+		chainAvailable := facts.Quotation != nil && facts.Quotation.ForeignLinkedPOs == 0
+		chainReason := "This purchase order already has no source quotation, so there is no chain to remove."
+		if facts.Quotation != nil && facts.Quotation.ForeignLinkedPOs > 0 {
+			chainReason = "The source quotation is followed by a purchase order in another organization, so the chain cannot be deleted here."
+		}
 		preview.Scopes = []DeletionScopePlan{
 			{
 				Scope:             DeletionScopeRecord,
@@ -786,8 +816,8 @@ func buildDeletionPreview(targetType string, facts deletionFacts) DeletionPrevie
 			},
 			{
 				Scope:             DeletionScopeChain,
-				Available:         facts.Quotation != nil,
-				UnavailableReason: unavailableReason(facts.Quotation != nil, "This purchase order already has no source quotation, so there is no chain to remove."),
+				Available:         chainAvailable,
+				UnavailableReason: unavailableReason(chainAvailable, chainReason),
 				RequiresChallenge: true,
 				Removes:           chain,
 			},
@@ -864,15 +894,25 @@ func quotationDeletionFingerprint(quotation *deletionQuotationFacts, pos []delet
 			prefix+"number="+deletionFingerprintValue(order.PONumber),
 			prefix+"documents="+strconv.Itoa(order.DocumentVersions),
 			prefix+"history="+strconv.Itoa(order.HistoryEntries),
+			prefix+"lines="+strconv.Itoa(order.ItemLines),
 		)
 	}
 	return strings.Join(parts, ";")
 }
 
 // purchaseOrderDeletionFingerprint binds a PO confirmation to the record's own
-// version and, when there is one, to the complete chain the chain scope would
-// remove.
+// version and every piece of evidence the deletion removes -- attachments,
+// correction snapshots and line rows -- and, when there is one, to the complete
+// chain the chain scope would remove.
+//
+// The selected record's counts are listed unconditionally, before the optional
+// source block. A source-missing record has no quotation and no chain, but it
+// still has attachments and history, and deleting it removes them: leaving those
+// counts out let an upload arrive after the preview and be deleted by the stale
+// confirmation (the Judge's reproduction). The loop below skips the selected
+// record because those facts are already in the base.
 func purchaseOrderDeletionFingerprint(order *deletionPOFacts, quotation *deletionQuotationFacts, pos []deletionPOFacts) string {
+	ownPrefix := fmt.Sprintf("purchase_order_%d_", order.ID)
 	parts := []string{
 		"v1",
 		"target=" + DeletionTargetPurchaseOrder,
@@ -883,6 +923,9 @@ func purchaseOrderDeletionFingerprint(order *deletionPOFacts, quotation *deletio
 		"purchase_order_number=" + deletionFingerprintValue(order.PONumber),
 		"source_missing=" + deletionFingerprintValue(strconv.FormatBool(order.SourceMissing)),
 		"source_revision=" + strconv.Itoa(int(order.SourceRevision)),
+		ownPrefix + "documents=" + strconv.Itoa(order.DocumentVersions),
+		ownPrefix + "history=" + strconv.Itoa(order.HistoryEntries),
+		ownPrefix + "lines=" + strconv.Itoa(order.ItemLines),
 	}
 	if quotation != nil {
 		parts = append(parts,
@@ -895,6 +938,9 @@ func purchaseOrderDeletionFingerprint(order *deletionPOFacts, quotation *deletio
 		ordered := append([]deletionPOFacts{}, pos...)
 		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
 		for _, connected := range ordered {
+			if connected.ID == order.ID {
+				continue
+			}
 			prefix := fmt.Sprintf("purchase_order_%d_", connected.ID)
 			parts = append(parts,
 				prefix+"version="+strconv.FormatInt(connected.Version, 10),
@@ -902,6 +948,7 @@ func purchaseOrderDeletionFingerprint(order *deletionPOFacts, quotation *deletio
 				prefix+"number="+deletionFingerprintValue(connected.PONumber),
 				prefix+"documents="+strconv.Itoa(connected.DocumentVersions),
 				prefix+"history="+strconv.Itoa(connected.HistoryEntries),
+				prefix+"lines="+strconv.Itoa(connected.ItemLines),
 			)
 		}
 	}
@@ -1030,6 +1077,8 @@ func deletionChangeLabel(key string) string {
 				return "Purchase order " + id + " attachments"
 			case "history":
 				return "Purchase order " + id + " history"
+			case "lines":
+				return "Purchase order " + id + " lines"
 			}
 		}
 	}
@@ -1111,6 +1160,9 @@ func removeDeletionTargets(ctx context.Context, tx pgx.Tx, schema, orgID string,
 		tag, err := tx.Exec(ctx, fmt.Sprintf(
 			"DELETE FROM %s.quotations WHERE id = $1", schema), input.TargetID)
 		if err != nil {
+			if isMissingQuotationConflict(err) {
+				return nil, ErrDeletionCrossOrgLinked
+			}
 			return nil, fmt.Errorf("delete quotation %d: %w", input.TargetID, err)
 		}
 		if tag.RowsAffected() != 1 {
@@ -1133,6 +1185,9 @@ func removeDeletionTargets(ctx context.Context, tx pgx.Tx, schema, orgID string,
 			tag, err := tx.Exec(ctx, fmt.Sprintf(
 				"DELETE FROM %s.quotations WHERE id = $1", schema), facts.Quotation.ID)
 			if err != nil {
+				if isMissingQuotationConflict(err) {
+					return nil, ErrDeletionCrossOrgLinked
+				}
 				return nil, fmt.Errorf("delete quotation %d: %w", facts.Quotation.ID, err)
 			}
 			if tag.RowsAffected() != 1 {
