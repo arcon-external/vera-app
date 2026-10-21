@@ -912,6 +912,222 @@ func TestDeletionChallengesExpire(t *testing.T) {
 	}
 }
 
+// expireDeletionChallenge moves a challenge's life into the past without
+// deleting it, which is the state a challenge is in when it has outlived its
+// fifteen minutes.
+func expireDeletionChallenge(t *testing.T, database *Store, id string) {
+	t.Helper()
+	if _, err := database.pool.Exec(context.Background(), fmt.Sprintf(
+		"UPDATE %s.deletion_challenges SET created_at = NOW() - INTERVAL '20 minutes', expires_at = NOW() - INTERVAL '5 minutes' WHERE id = $1",
+		database.configSchema()), id); err != nil {
+		t.Fatalf("expire challenge: %v", err)
+	}
+}
+
+// assertNoChallengeFingerprintNames proves no challenge row still quotes one of
+// the deleted values. A fingerprint is a snapshot of a chain, so retaining one
+// after the chain is gone keeps the deleted document's number and counts alive.
+func assertNoChallengeFingerprintNames(t *testing.T, database *Store, values ...string) {
+	t.Helper()
+	rows, err := database.pool.Query(context.Background(), fmt.Sprintf(
+		"SELECT id::text, target_type, target_id, fingerprint FROM %s.deletion_challenges",
+		database.configSchema()))
+	if err != nil {
+		t.Fatalf("read deletion challenges: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, targetType, fingerprint string
+		var targetID int64
+		if err := rows.Scan(&id, &targetType, &targetID, &fingerprint); err != nil {
+			t.Fatalf("scan deletion challenge: %v", err)
+		}
+		for _, value := range values {
+			if value == "" {
+				continue
+			}
+			if strings.Contains(fingerprint, value) {
+				t.Errorf("challenge %s (%s %d) still retains %q in its fingerprint",
+					id, targetType, targetID, value)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate deletion challenges: %v", err)
+	}
+}
+
+// TestExpiredChallengeIsRemovedWhenAnotherChallengeDeletesTheChain is the
+// Judge's reproduction of the retention defect: challenge A expires, challenge
+// B is issued for the same chain, and B deletes it. A used to survive with its
+// full fingerprint -- the deleted quotation number, revisions and record counts
+// -- because cleanup only ran on later challenge creation and only for rows
+// expired over a day. A successful deletion must leave no challenge that names
+// a record it removed.
+func TestExpiredChallengeIsRemovedWhenAnotherChallengeDeletesTheChain(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_expired_sibling")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Sibling", "PO-480-SIBLING")
+	admin := deletionUser(t, database, "admin")
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+
+	createChallenge := func() DeletionChallenge {
+		t.Helper()
+		challenge, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+			TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+			Scope: DeletionScopeChain, ExpectedFingerprint: preview.Fingerprint,
+			ActorID: admin.ID,
+		})
+		if err != nil {
+			t.Fatalf("create challenge: %v", err)
+		}
+		return challenge
+	}
+
+	stale := createChallenge()
+	expireDeletionChallenge(t, database, stale.ID)
+
+	// Issuing B is itself a path that observes A's expiry, so A must already be
+	// gone here; the deletion below is the second, stronger path. This is not
+	// fatal so the run still reaches the deletion assertions on a regression.
+	fresh := createChallenge()
+	if n := countRows(t, database, "deletion_challenges", "id = $1", stale.ID); n != 0 {
+		t.Errorf("expired challenge A survived the creation of challenge B (%d row)", n)
+	}
+
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, Reason: "entered by mistake",
+		TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: preview.Fingerprint,
+		ChallengeID: fresh.ID, ChallengeLetters: fresh.Letters, ActorID: admin.ID,
+	}); err != nil {
+		t.Fatalf("delete the chain with challenge B: %v", err)
+	}
+	if n := countRows(t, database, "quotations", "id = $1", quotation.ID); n != 0 {
+		t.Fatal("challenge B did not delete the quotation")
+	}
+	if n := countRows(t, database, "purchase_orders", "id = $1", saved.ID); n != 0 {
+		t.Fatal("challenge B did not delete the purchase order")
+	}
+	if n := countRows(t, database, "deletion_challenges", "id = $1", fresh.ID); n != 0 {
+		t.Fatal("the spent challenge B survived its own deletion")
+	}
+	if n := countRows(t, database, "deletion_challenges", ""); n != 0 {
+		t.Errorf("challenges = %d after the deletion; want every challenge for a removed record purged", n)
+	}
+	assertNoChallengeFingerprintNames(t, database,
+		quotation.QuoteNumber, quotation.UUID, saved.PONumber)
+}
+
+// TestDeletionRemovesEveryChallengeItsOwnWriteInvalidated keeps the other
+// sibling: a challenge issued against the quotation and one issued against the
+// purchase order. Deleting the chain through the purchase order spends that
+// challenge and must take the quotation's still-usable one with it, because the
+// record it named is gone.
+func TestDeletionRemovesEveryChallengeItsOwnWriteInvalidated(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_sibling_challenge")
+	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Both", "PO-480-BOTH")
+	admin := deletionUser(t, database, "admin")
+
+	quotationPreview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	quotationChallenge, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, ExpectedFingerprint: quotationPreview.Fingerprint,
+		ActorID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("create quotation challenge: %v", err)
+	}
+	orderPreview := previewFor(t, database, admin, DeletionTargetPurchaseOrder, saved.ID)
+	orderChallenge, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+		TargetType: DeletionTargetPurchaseOrder, TargetID: saved.ID,
+		Scope: DeletionScopeChain, ExpectedFingerprint: orderPreview.Fingerprint,
+		ActorID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("create purchase order challenge: %v", err)
+	}
+
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType: DeletionTargetPurchaseOrder, TargetID: saved.ID,
+		Scope: DeletionScopeChain, Reason: "entered by mistake",
+		TypedNumber: saved.PONumber, ExpectedFingerprint: orderPreview.Fingerprint,
+		ChallengeID: orderChallenge.ID, ChallengeLetters: orderChallenge.Letters,
+		ActorID: admin.ID,
+	}); err != nil {
+		t.Fatalf("delete the chain through the purchase order: %v", err)
+	}
+	if n := countRows(t, database, "deletion_challenges", "id = $1", orderChallenge.ID); n != 0 {
+		t.Fatal("the spent purchase order challenge survived")
+	}
+	if n := countRows(t, database, "deletion_challenges", "id = $1", quotationChallenge.ID); n != 0 {
+		t.Fatal("a challenge for the deleted quotation survived the chain deletion")
+	}
+	if n := countRows(t, database, "deletion_challenges", ""); n != 0 {
+		t.Errorf("challenges = %d after the deletion; want none", n)
+	}
+}
+
+// TestExpiredChallengesArePurgedByEveryDeletionObservation pins the retention
+// contract: a challenge row is removed by the next preview, the next challenge
+// issuance, or the confirmation that observes it as expired -- not merely by a
+// later challenge for one target, and not only after an extra day.
+func TestExpiredChallengesArePurgedByEveryDeletionObservation(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_expired_paths")
+	quotation, _, _, ctx := savedDeletionPO(t, database, "PT. Paths", "PO-480-PATHS")
+	admin := deletionUser(t, database, "admin")
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+
+	createChallenge := func(fingerprint string) DeletionChallenge {
+		t.Helper()
+		challenge, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+			TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+			Scope: DeletionScopeChain, ExpectedFingerprint: fingerprint,
+			ActorID: admin.ID,
+		})
+		if err != nil {
+			t.Fatalf("create challenge: %v", err)
+		}
+		return challenge
+	}
+
+	// A preview observes the expiry.
+	observedByPreview := createChallenge(preview.Fingerprint)
+	expireDeletionChallenge(t, database, observedByPreview.ID)
+	preview = previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	if n := countRows(t, database, "deletion_challenges", "id = $1", observedByPreview.ID); n != 0 {
+		t.Fatal("a preview left an expired challenge in place")
+	}
+
+	// Issuing the next challenge observes it too.
+	observedByIssue := createChallenge(preview.Fingerprint)
+	expireDeletionChallenge(t, database, observedByIssue.ID)
+	renewed := createChallenge(preview.Fingerprint)
+	if n := countRows(t, database, "deletion_challenges", "id = $1", observedByIssue.ID); n != 0 {
+		t.Fatal("challenge issuance left an expired challenge in place")
+	}
+
+	// The confirmation that is refused for expiry removes the row it refused.
+	expireDeletionChallenge(t, database, renewed.ID)
+	_, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, Reason: "too late", TypedNumber: quotation.QuoteNumber,
+		ExpectedFingerprint: preview.Fingerprint, ChallengeID: renewed.ID,
+		ChallengeLetters: renewed.Letters, ActorID: admin.ID,
+	})
+	if !errors.Is(err, ErrDeletionChallengeExpired) {
+		t.Fatalf("expired confirmation error = %v; want ErrDeletionChallengeExpired", err)
+	}
+	if n := countRows(t, database, "deletion_challenges", "id = $1", renewed.ID); n != 0 {
+		t.Fatal("the confirmation left the expired challenge it refused")
+	}
+	if n := countRows(t, database, "deletion_challenges", ""); n != 0 {
+		t.Errorf("challenges = %d; want every expired row purged", n)
+	}
+	if n := countRows(t, database, "quotations", "id = $1", quotation.ID); n != 1 {
+		t.Fatal("an expired confirmation deleted the chain")
+	}
+}
+
 func TestDeletePurchaseOrderChainRemovesTheSourceAndEveryRevision(t *testing.T) {
 	database := openTestSchema(t, "vera_po_delete_po_chain")
 	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. From PO", "PO-480-FROM-PO")

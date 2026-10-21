@@ -318,6 +318,12 @@ func (s *Store) PreviewDeletion(ctx context.Context, input DeletionPreviewInput)
 	if err := requireDeletionAdmin(ctx, pool, schema, input.ActorID); err != nil {
 		return DeletionPreview{}, err
 	}
+	// A preview is one of the paths that can observe an expired challenge, so
+	// it is also one that removes it. See the retention contract on
+	// purgeExpiredDeletionChallenges.
+	if err := purgeExpiredDeletionChallenges(ctx, pool, schema, org.ID, ""); err != nil {
+		return DeletionPreview{}, err
+	}
 	facts, err := loadDeletionFacts(ctx, pool, schema, org.ID, input.TargetType, input.TargetID)
 	if err != nil {
 		return DeletionPreview{}, err
@@ -362,14 +368,11 @@ func (s *Store) CreateDeletionChallenge(ctx context.Context, input DeletionChall
 		}
 	}
 
-	// Expired challenges are dead weight and would outlive their purpose.
-	// Purging them here is opportunistic: no background job is needed for a
-	// table that only grows when an admin asks for a second confirmation.
-	if _, err := pool.Exec(ctx, fmt.Sprintf(`
-		DELETE FROM %s.deletion_challenges
-		WHERE org_id = $1 AND expires_at < NOW() - INTERVAL '1 day'`, schema),
-		org.ID); err != nil {
-		return DeletionChallenge{}, fmt.Errorf("purge expired deletion challenges: %w", err)
+	// Issuing a challenge is one of the paths that can observe an expired one,
+	// so it removes every expired row for the organization. See the retention
+	// contract on purgeExpiredDeletionChallenges.
+	if err := purgeExpiredDeletionChallenges(ctx, pool, schema, org.ID, ""); err != nil {
+		return DeletionChallenge{}, err
 	}
 	letters, err := newDeletionLetters()
 	if err != nil {
@@ -434,6 +437,31 @@ func (s *Store) ConfirmDeletion(ctx context.Context, input DeletionConfirmInput)
 	}
 	schema := s.configSchema()
 
+	// A confirmation is the third path that can observe an expired challenge.
+	// The sweep runs before the transaction, under the same stored-role gate the
+	// transaction will re-check, so a refused confirmation still cleans up; the
+	// submitted challenge is held back so an expired one is reported as expired
+	// and then removed, instead of being swept into a generic "invalid".
+	if err := requireDeletionAdmin(ctx, pool, schema, input.ActorID); err != nil {
+		return DeletionResult{}, err
+	}
+	submittedChallenge := ""
+	if input.Scope == DeletionScopeChain && isUUIDText(input.ChallengeID) {
+		submittedChallenge = input.ChallengeID
+	}
+	if err := purgeExpiredDeletionChallenges(ctx, pool, schema, org.ID, submittedChallenge); err != nil {
+		return DeletionResult{}, err
+	}
+	if submittedChallenge != "" {
+		expired, err := dropExpiredDeletionChallenge(ctx, pool, schema, org.ID, submittedChallenge)
+		if err != nil {
+			return DeletionResult{}, err
+		}
+		if expired {
+			return DeletionResult{}, ErrDeletionChallengeExpired
+		}
+	}
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return DeletionResult{}, fmt.Errorf("begin permanent deletion: %w", err)
@@ -490,6 +518,14 @@ func (s *Store) ConfirmDeletion(ctx context.Context, input DeletionConfirmInput)
 		if tag.RowsAffected() != 1 {
 			return DeletionResult{}, ErrDeletionChallengeInvalid
 		}
+	}
+	// The deletion just invalidated every challenge issued for any record in the
+	// chain: the removed ones no longer exist, and a surviving one now has a
+	// different fingerprint. They are rows of snapshots -- document numbers,
+	// revisions, counts -- so none of them may outlive the write that made them
+	// unusable. This runs in the same transaction as the removal.
+	if err := purgeDeletionChainChallenges(ctx, tx, schema, org.ID, facts); err != nil {
+		return DeletionResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return DeletionResult{}, fmt.Errorf("commit permanent deletion: %w", err)
@@ -1083,6 +1119,103 @@ func deletionChangeLabel(key string) string {
 		}
 	}
 	return key
+}
+
+// Challenge retention contract.
+//
+// A challenge row is a snapshot of a document chain: it stores the canonical
+// fingerprint, which carries document numbers, revisions and record counts.
+// It may therefore live only as long as it can be useful, and never past the
+// write that makes its snapshot describe something that no longer exists.
+//
+//   - A challenge is usable for deletionChallengeTTL and is spent (deleted) by
+//     the deletion that uses it.
+//   - Every path that can observe an expired challenge removes it: a preview,
+//     a challenge issuance, and a confirmation. The confirmation that is itself
+//     refused for expiry removes the row it refused.
+//   - A successful deletion removes every challenge issued for any record in
+//     the chain it touched, in the same transaction as the removal. That covers
+//     siblings -- a challenge for the other target, or one already expired --
+//     not just the submitted row.
+//
+// Together those rules mean an expired challenge never outlives the
+// organization's next preview, challenge issuance or confirmation, and a
+// challenge for a record the deletion touched never outlives the deletion.
+// There is no background job; a table that only grows when an admin asks for a
+// second confirmation does not need one.
+
+// purgeExpiredDeletionChallenges removes every challenge of one organization
+// whose life is over. keepID is left in place so a confirmation can report it as
+// expired before removing it; pass "" to sweep everything. Expiry is judged with
+// the caller's clock, the same one checkDeletionChallenge compares against, so
+// cleanup can never remove a challenge the confirmation would still accept.
+func purgeExpiredDeletionChallenges(ctx context.Context, q purchaseOrderQuerier, schema, orgID, keepID string) error {
+	query := fmt.Sprintf(`
+		DELETE FROM %s.deletion_challenges
+		WHERE org_id = $1 AND expires_at <= $2`, schema)
+	args := []any{orgID, time.Now()}
+	if keepID != "" {
+		query += ` AND id <> $3`
+		args = append(args, keepID)
+	}
+	if _, err := q.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("purge expired deletion challenges: %w", err)
+	}
+	return nil
+}
+
+// dropExpiredDeletionChallenge removes one challenge if its life is over and
+// reports whether it did. The confirmation calls this before its transaction so
+// an expired challenge is still refused as expired and does not linger.
+func dropExpiredDeletionChallenge(ctx context.Context, q purchaseOrderQuerier, schema, orgID, challengeID string) (bool, error) {
+	tag, err := q.Exec(ctx, fmt.Sprintf(`
+		DELETE FROM %s.deletion_challenges
+		WHERE id = $1 AND org_id = $2 AND expires_at <= $3`, schema),
+		challengeID, orgID, time.Now())
+	if err != nil {
+		return false, fmt.Errorf("remove expired deletion challenge: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// purgeDeletionChainChallenges removes every challenge issued for any record in
+// the chain the committed deletion changed. Every fingerprint lists the whole
+// chain, so a deletion of one member makes a challenge for any member stale --
+// whether the member was removed or survived with a new fingerprint.
+func purgeDeletionChainChallenges(ctx context.Context, tx pgx.Tx, schema, orgID string, facts deletionFacts) error {
+	types := make([]string, 0, 2+len(facts.ChainPOs))
+	ids := make([]int64, 0, 2+len(facts.ChainPOs))
+	add := func(targetType string, id int64) {
+		for index := range ids {
+			if types[index] == targetType && ids[index] == id {
+				return
+			}
+		}
+		types = append(types, targetType)
+		ids = append(ids, id)
+	}
+	if facts.Quotation != nil {
+		add(DeletionTargetQuotation, facts.Quotation.ID)
+	}
+	if facts.PO != nil {
+		add(DeletionTargetPurchaseOrder, facts.PO.ID)
+	}
+	for _, order := range facts.ChainPOs {
+		add(DeletionTargetPurchaseOrder, order.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		DELETE FROM %s.deletion_challenges c
+		WHERE c.org_id = $1
+		  AND (c.target_type, c.target_id) IN (
+		      SELECT target_type, target_id
+		      FROM unnest($2::text[], $3::bigint[]) AS target(target_type, target_id)
+		  )`, schema), orgID, types, ids); err != nil {
+		return fmt.Errorf("purge deletion chain challenges: %w", err)
+	}
+	return nil
 }
 
 // checkDeletionChallenge validates the second confirmation for a chain. It
