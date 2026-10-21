@@ -6,6 +6,7 @@ import {
   formatHistoryTime,
   type PurchaseOrderHistoryEntry,
 } from "../poCorrection";
+import { sourceRepairChoiceLabel, sourceRepairSummary } from "../poRepair";
 import { formatQuantityScaled } from "../purchaseOrder";
 import { Badge, Card, SectionHeading, StatusBanner } from "./ui";
 
@@ -131,6 +132,27 @@ export function PurchaseOrderHistoryPanel({
                 <span className="font-medium text-ink-900">Reason: </span>
                 {entry.Reason}
               </p>
+              {entry.Kind === "source_repair" && entry.Repair ? (
+                <div className="mt-2 rounded-lg border border-rule bg-white p-3">
+                  <p className="text-small font-medium text-ink-900">
+                    {sourceRepairSummary(entry.Repair)}
+                  </p>
+                  {entry.Repair.Decisions && entry.Repair.Decisions.length > 0 ? (
+                    <ul className="mt-1 grid gap-0.5 text-caption text-ink-600">
+                      {entry.Repair.Decisions.map((decision) => (
+                        <li key={decision.Key}>
+                          <span className="tnum">{decision.Key}</span> —{" "}
+                          {sourceRepairChoiceLabel(decision.Choice)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-caption text-ink-500">
+                      Every compared value matched the new revision.
+                    </p>
+                  )}
+                </div>
+              ) : null}
               <p className="mt-1 text-caption text-ink-500">
                 <span className="font-medium text-ink-600">Customer PO PDF: </span>
                 {attachmentReferenceLabel(entry.Attachment)}

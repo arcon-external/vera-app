@@ -74,6 +74,12 @@ export interface PurchaseOrderDifferenceReviewViewProps {
   source: PurchaseOrderSourceDTO;
   currency: CurrencyInfo;
   quoteNumber: string;
+  /**
+   * "finalize" is the draft -> saved review; "repair" (#475) is the admin
+   * source-link review. The same matching and choice rules apply; only the
+   * wording and the no-PDF finalization note differ.
+   */
+  mode?: "finalize" | "repair";
   /** "none" or "attached"; the final confirmation follows this branch. */
   documentState: PurchaseOrderDocumentState;
   decisions: POReviewDecisions;
@@ -96,6 +102,7 @@ export function PurchaseOrderDifferenceReviewView({
   source,
   currency,
   quoteNumber,
+  mode = "finalize",
   documentState,
   decisions,
   acknowledgedMissing,
@@ -107,6 +114,7 @@ export function PurchaseOrderDifferenceReviewView({
   onBack,
   onContinue,
 }: PurchaseOrderDifferenceReviewViewProps) {
+  const repairing = mode === "repair";
   const evaluation = evaluateReview(
     state,
     source,
@@ -133,16 +141,20 @@ export function PurchaseOrderDifferenceReviewView({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <SectionHeading
-            title="Review differences before saving"
+            title={
+              repairing
+                ? "Review differences against the new source"
+                : "Review differences before saving"
+            }
             hint={`${quoteNumber} · revision ${source.RevisionNumber}`}
           />
           <p className="mt-1 max-w-3xl text-body text-ink-500">
-            Finalizing records this purchase order's data so later documents can
-            use it. It is not a business approval — the customer's order was
-            already accepted before entry.
+            {repairing
+              ? "Repairing the link moves this saved purchase order to another issued revision. Its current values are the starting point; every value that differs needs an explicit choice before the repair can be saved."
+              : "Finalizing records this purchase order's data so later documents can use it. It is not a business approval — the customer's order was already accepted before entry."}
           </p>
         </div>
-        <Badge tone="accent">Final save</Badge>
+        <Badge tone="accent">{repairing ? "Source repair" : "Final save"}</Badge>
       </div>
 
       <StatusBanner tone="info">
@@ -215,8 +227,10 @@ export function PurchaseOrderDifferenceReviewView({
         )}
         <p className="mt-3 text-caption text-ink-500">
           No choice is selected for you. Use Quotation takes the quotation's
-          value when you continue; Use PO entry keeps what you entered. Back to
-          entry leaves the purchase order as entered.
+          value when you continue; Use PO entry keeps what you entered.{" "}
+          {repairing
+            ? "Back without repairing leaves the saved purchase order and its source link unchanged."
+            : "Back to entry leaves the purchase order as entered."}
         </p>
       </Card>
 
@@ -397,7 +411,7 @@ export function PurchaseOrderDifferenceReviewView({
           adjustment to reverse it. Record a signed adjustment with a reason
           only to reconcile what the customer's PO document actually printed.
         </p>
-        {documentState === "attached" ? (
+        {repairing ? null : documentState === "attached" ? (
           <p className="mt-1 text-caption text-ink-500">
             The customer PO PDF is attached and stays with this record. This
             save does not change it.
@@ -422,16 +436,19 @@ export function PurchaseOrderDifferenceReviewView({
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
-        <Button aria-label="Back to entry" onClick={onBack}>
-          Back to entry
+        <Button
+          aria-label={repairing ? "Back without repairing" : "Back to entry"}
+          onClick={onBack}
+        >
+          {repairing ? "Back without repairing" : "Back to entry"}
         </Button>
         <Button
           variant="primary"
-          aria-label="Continue final save"
+          aria-label={repairing ? "Continue to repair" : "Continue final save"}
           disabled={!evaluation.canContinue}
           onClick={onContinue}
         >
-          Continue
+          {repairing ? "Continue to repair" : "Continue"}
         </Button>
       </div>
     </div>
@@ -641,6 +658,13 @@ export interface PurchaseOrderSavedViewProps {
    */
   onCorrect?: () => void;
   /**
+   * #475: opens the source selector in repair mode. The action exists only for
+   * an admin on a saved record; both facts are stated here so a staff view can
+   * never render it by accident.
+   */
+  canRepairSource?: boolean;
+  onRepairSource?: () => void;
+  /**
    * Reports a later confirmation-number assignment so the page that owns the
    * record can keep showing it. The view also keeps its own copy, so it is
    * correct even when a parent does not provide this.
@@ -669,6 +693,8 @@ export function PurchaseOrderSavedView({
   currency,
   onBack,
   onCorrect,
+  canRepairSource = false,
+  onRepairSource,
   onAssigned,
   documentInitialState,
   onDocumentStateChange,
@@ -689,7 +715,14 @@ export function PurchaseOrderSavedView({
   );
   const [historyLoading, setHistoryLoading] = useState(historyInitial == null);
   const [historyError, setHistoryError] = useState<string | null>(historyInitialError);
-  const current = assignedOrder ?? order;
+  // A later write (a confirmation assignment, or #475's source repair) makes
+  // the record prop newer than the local assignment answer. Prefer whichever
+  // carries the higher version so a repair cannot leave the old source on
+  // screen behind a stale assigned copy.
+  const current =
+    assignedOrder !== null && assignedOrder.Version >= order.Version
+      ? assignedOrder
+      : order;
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
   const state = initialPurchaseOrderEditorState(order, currency);
@@ -793,6 +826,15 @@ export function PurchaseOrderSavedView({
               Correct
             </Button>
           ) : null}
+          {canRepairSource && onRepairSource !== undefined ? (
+            <Button
+              size="sm"
+              aria-label="Repair source link"
+              onClick={onRepairSource}
+            >
+              Repair source link
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -804,7 +846,9 @@ export function PurchaseOrderSavedView({
         Corrections need a reason and keep the values they replace in the
         correction history. The customer PO PDF can still be attached, replaced
         or removed; the customer, quotation link, currency and confirmation
-        number stay protected.
+        number stay protected. An admin can repair a wrong source link; that
+        repeats the difference review and is recorded with the old and new
+        source.
       </StatusBanner>
 
       <Card className="p-4">

@@ -56,6 +56,11 @@ export interface POSourceQuery {
   page: number;
   search: string;
   hideUsed: boolean;
+  /**
+   * Repair mode (#475): the one saved record being repaired, whose own
+   * Quotation must stay selectable. Absent for ordinary PO entry.
+   */
+  excludePOID?: number;
 }
 
 export type POSourceStep = 1 | 2 | 3;

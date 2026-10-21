@@ -297,6 +297,67 @@ type PurchaseOrderCorrectionInput struct {
 	Overwrite             bool
 }
 
+// PurchaseOrderSourceReviewInput asks for a saved record's difference review
+// against a candidate revision (#475). It writes nothing: the admin sees the
+// values that would need a choice before the repair is saved.
+type PurchaseOrderSourceReviewInput struct {
+	ID             int64
+	QuotationID    int64
+	RevisionNumber int16
+}
+
+// PurchaseOrderSourceRepairInput moves a saved record to another issued
+// revision (#475). It carries the same editable values as a correction plus
+// the target pair, the required reason and the #471 difference review. The
+// protected fields still have no entry here at all.
+type PurchaseOrderSourceRepairInput struct {
+	ID                    int64
+	TargetQuotationID     int64
+	TargetRevisionNumber  int16
+	BillingAddress        string
+	DeliveryAddress       string
+	ShipToCode            string
+	ContactEmail          string
+	ContactPhone          string
+	PONumber              string
+	PODate                string
+	ReceivedDate          string
+	RequestedDeliveryDate string
+	Incoterms             string
+	PaymentTerms          string
+	AdjustmentReason      string
+	Reason                string
+	Items                 []PurchaseOrderItemInput
+	Decisions             []PurchaseOrderDecisionInput
+	AcknowledgedMissing   []string
+	AcknowledgedExtra     []int
+	DiscountPercent       int16
+	AdjustmentMinor       int64
+	ExpectedVersion       int64
+}
+
+// PurchaseOrderSourceRepairDecisionDTO is one recorded difference choice.
+type PurchaseOrderSourceRepairDecisionDTO struct {
+	Key    string
+	Choice string
+}
+
+// PurchaseOrderSourceRepairDTO is the old and new link a repair kept in the
+// history, plus the choices made against the new revision.
+type PurchaseOrderSourceRepairDTO struct {
+	PreviousQuoteNumber    string
+	PreviousCustomerName   string
+	NewQuoteNumber         string
+	NewCustomerName        string
+	Decisions              []PurchaseOrderSourceRepairDecisionDTO
+	PreviousQuotationID    int64
+	PreviousSourceRevision int16
+	PreviousCustomerID     int64
+	NewQuotationID         int64
+	NewSourceRevision      int16
+	NewCustomerID          int64
+}
+
 // PurchaseOrderConflictDTO is the current state a stale save was refused
 // against, passed to the editor as typed data rather than error prose.
 type PurchaseOrderConflictDTO struct {
@@ -349,7 +410,10 @@ type PurchaseOrderCorrectionItemDTO struct {
 // correction replaced, its reason, actor and time, and the attachment version
 // the record referenced at that moment.
 type PurchaseOrderCorrectionDTO struct {
-	Attachment            *PurchaseOrderCorrectionAttachmentDTO
+	Attachment *PurchaseOrderCorrectionAttachmentDTO
+	// Repair is present only for a source repair (#475): the old and new link
+	// and the admin's choices. Nil for every other history kind.
+	Repair                *PurchaseOrderSourceRepairDTO
 	PODate                *string
 	RequestedDeliveryDate *string
 	UUID                  string
@@ -531,6 +595,94 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 	return purchaseOrderSaved(response), nil
 }
 
+// ReviewPurchaseOrderSource compares a saved record against a candidate
+// revision without writing anything (#475). The response is the same review
+// shape the final save reads, with the candidate as the source.
+func (q *Quotation) ReviewPurchaseOrderSource(input PurchaseOrderSourceReviewInput) (PurchaseOrderReviewDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	revision := input.RevisionNumber
+	var response apicontract.PurchaseOrderReviewRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/source-repair/review",
+		apicontract.PurchaseOrderSourceReviewRequest{
+			TargetQuotationID:    input.QuotationID,
+			TargetRevisionNumber: &revision,
+		}, &response); err != nil {
+		return PurchaseOrderReviewDTO{}, err
+	}
+	return mapPurchaseOrderReviewDTO(response), nil
+}
+
+// RepairPurchaseOrderSource moves a saved record to another issued revision
+// (#475). A stale version is a typed Conflict, exactly as a correction's is;
+// every other refusal stays an error so the panel names the server's answer.
+func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInput) (PurchaseOrderWriteResult, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
+	for _, item := range input.Items {
+		items = append(items, apicontract.PurchaseOrderItemInput{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			Description:     item.Description,
+			QuantityScaled:  item.QuantityScaled,
+			UoM:             item.UoM,
+			UnitPriceMinor:  item.UnitPriceMinor,
+			DiscountEnabled: item.DiscountEnabled,
+			DiscountPercent: item.DiscountPercent,
+		})
+	}
+	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
+	for _, decision := range input.Decisions {
+		decisions = append(decisions, apicontract.PurchaseOrderDecisionRequest{
+			Key:    decision.Key,
+			Choice: decision.Choice,
+		})
+	}
+	revision := input.TargetRevisionNumber
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/source-repair",
+		apicontract.PurchaseOrderSourceRepairRequest{
+			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
+				BillingAddress:        input.BillingAddress,
+				DeliveryAddress:       input.DeliveryAddress,
+				ShipToCode:            input.ShipToCode,
+				ContactEmail:          input.ContactEmail,
+				ContactPhone:          input.ContactPhone,
+				PONumber:              input.PONumber,
+				PODate:                input.PODate,
+				ReceivedDate:          input.ReceivedDate,
+				RequestedDeliveryDate: input.RequestedDeliveryDate,
+				PaymentTerms:          input.PaymentTerms,
+				Incoterms:             input.Incoterms,
+				Items:                 items,
+				DiscountPercent:       input.DiscountPercent,
+				AdjustmentMinor:       input.AdjustmentMinor,
+				AdjustmentReason:      input.AdjustmentReason,
+				ExpectedVersion:       input.ExpectedVersion,
+			},
+			TargetQuotationID:    input.TargetQuotationID,
+			TargetRevisionNumber: &revision,
+			Reason:               input.Reason,
+			Decisions:            decisions,
+			AcknowledgedMissing:  input.AcknowledgedMissing,
+			AcknowledgedExtra:    input.AcknowledgedExtra,
+		}, &response); err != nil {
+		return purchaseOrderWriteFailure(err)
+	}
+	return purchaseOrderSaved(response), nil
+}
+
 // purchaseOrderSaved wraps one successful write.
 func purchaseOrderSaved(row apicontract.PurchaseOrderRow) PurchaseOrderWriteResult {
 	order := mapPurchaseOrderDTO(row)
@@ -633,6 +785,28 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 			SHA256:   row.Attachment.SHA256,
 			Filename: row.Attachment.Filename,
 		}
+	}
+	if row.Repair != nil {
+		repair := &PurchaseOrderSourceRepairDTO{
+			PreviousQuotationID:    row.Repair.PreviousQuotationID,
+			PreviousSourceRevision: row.Repair.PreviousSourceRevision,
+			PreviousQuoteNumber:    row.Repair.PreviousQuoteNumber,
+			PreviousCustomerID:     row.Repair.PreviousCustomerID,
+			PreviousCustomerName:   row.Repair.PreviousCustomerName,
+			NewQuotationID:         row.Repair.NewQuotationID,
+			NewSourceRevision:      row.Repair.NewSourceRevision,
+			NewQuoteNumber:         row.Repair.NewQuoteNumber,
+			NewCustomerID:          row.Repair.NewCustomerID,
+			NewCustomerName:        row.Repair.NewCustomerName,
+			Decisions:              make([]PurchaseOrderSourceRepairDecisionDTO, 0, len(row.Repair.Decisions)),
+		}
+		for _, decision := range row.Repair.Decisions {
+			repair.Decisions = append(repair.Decisions, PurchaseOrderSourceRepairDecisionDTO{
+				Key:    decision.Key,
+				Choice: decision.Choice,
+			})
+		}
+		entry.Repair = repair
 	}
 	for _, item := range row.Items {
 		entry.Items = append(entry.Items, PurchaseOrderCorrectionItemDTO{

@@ -18,6 +18,7 @@ import {
   ValidatePOSource,
   CreatePurchaseOrderDraft,
   GetPurchaseOrder,
+  ReviewPurchaseOrderSource,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import { AppShell } from "./components/AppShell";
@@ -460,8 +461,11 @@ function App() {
     id: number;
     revision: number;
   } | null>(null);
-  // The PO source selector (#467) is shared by both PO entry paths.
+  // The PO source selector (#467) is shared by both PO entry paths and, in
+  // repair mode (#475), by the admin source-link repair.
   const [poSelectorOpen, setPOSelectorOpen] = useState(false);
+  const [poSelectorMode, setPOSelectorMode] = useState<"entry" | "repair">("entry");
+  const [poSelectorRepairID, setPOSelectorRepairID] = useState<number | null>(null);
   // The PO workspace (#468/#473) owns the open record and its phase in one
   // controller, so Cancel from a correction can re-read the saved record
   // instead of leaving a stale editor behind. The page renders the archive when
@@ -518,6 +522,22 @@ function App() {
   // #469: a row opens the exact stored draft by id through the #468 route.
   // The list already knows the id; the server is the authority on the record,
   // so it is fetched rather than passed in from the row.
+  // #475: the saved view's admin action opens the same selector with the
+  // record's own quotation exempt. The candidate review is read before the
+  // repair panel opens, so an ineligible target fails in the modal with the
+  // server's reason instead of leaving an unexplained empty panel.
+  const openSourceRepair = useCallback(() => {
+    const record = poWorkspace.draft;
+    if (record === null || record.State !== "saved") return;
+    setPOSelectorMode("repair");
+    setPOSelectorRepairID(record.ID);
+    setPOSelectorOpen(true);
+  }, [poWorkspace.draft]);
+  const closePOSourceSelector = useCallback(() => {
+    setPOSelectorOpen(false);
+    setPOSelectorMode("entry");
+    setPOSelectorRepairID(null);
+  }, []);
   const openPurchaseOrder = useCallback(
     async (id: number) => {
       try {
@@ -1715,6 +1735,7 @@ function App() {
         Search: query.search,
         Page: query.page,
         HideUsed: query.hideUsed,
+        ExcludePOID: query.excludePOID ?? 0,
       });
       return {
         quotations: page.Quotations.map((row) => ({
@@ -1773,8 +1794,25 @@ function App() {
       ) : null}
       <POQuotationSelector
         open={poSelectorOpen}
-        onClose={() => setPOSelectorOpen(false)}
+        mode={poSelectorMode}
+        excludePOID={poSelectorRepairID ?? undefined}
+        onClose={closePOSourceSelector}
         onConfirm={async (selection) => {
+          if (poSelectorMode === "repair") {
+            if (poSelectorRepairID === null) {
+              throw new Error("The saved purchase order is no longer open.");
+            }
+            const review = await ReviewPurchaseOrderSource({
+              ID: poSelectorRepairID,
+              QuotationID: selection.quotationId,
+              RevisionNumber: selection.revisionNumber,
+            });
+            poLeave.setDirty(false);
+            poWorkspace.repair(review);
+            closePOSourceSelector();
+            setPage("po");
+            return;
+          }
           const draft = await CreatePurchaseOrderDraft({
             QuotationID: selection.quotationId,
             RevisionNumber: selection.revisionNumber,
@@ -1782,7 +1820,7 @@ function App() {
           });
           poLeave.setDirty(false);
           poWorkspace.open(draft);
-          setPOSelectorOpen(false);
+          closePOSourceSelector();
           setPage("po");
           pushToast(
             "success",
@@ -1794,7 +1832,7 @@ function App() {
             const draft = await GetPurchaseOrder(activePO.id);
             poLeave.setDirty(false);
             poWorkspace.open(draft);
-            setPOSelectorOpen(false);
+            closePOSourceSelector();
             setPage("po");
           } catch (error) {
             pushToast(
@@ -1952,7 +1990,13 @@ function App() {
           currency={poEntry}
           uomOptions={storedUoMs ?? []}
           incotermOptions={INCOTERM_OPTIONS}
-          onAdd={() => setPOSelectorOpen(true)}
+          onAdd={() => {
+            setPOSelectorMode("entry");
+            setPOSelectorRepairID(null);
+            setPOSelectorOpen(true);
+          }}
+          isAdmin={user?.Role === "admin"}
+          onRepairSource={openSourceRepair}
           onOpen={(id) => void openPurchaseOrder(id)}
           onSaved={(updated, corrected) => {
             pushToast(
@@ -1962,6 +2006,12 @@ function App() {
                 : updated.State === "saved"
                   ? "Purchase order saved and finalized."
                   : "Purchase order draft saved."
+            );
+          }}
+          onRepaired={(updated) => {
+            pushToast(
+              "success",
+              `Source link repaired. The purchase order now follows quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}.`
             );
           }}
           onBack={() => {

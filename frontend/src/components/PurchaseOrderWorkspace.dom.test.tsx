@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import { usePurchaseOrderLeaveGuard } from "../poLeaveGuard";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import { usePurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderDiscardPrompt } from "./PurchaseOrderEditor";
 import { PurchaseOrderWorkspacePage } from "./PurchaseOrderWorkspace";
@@ -21,17 +22,19 @@ import { PurchaseOrderWorkspacePage } from "./PurchaseOrderWorkspace";
 // Bindings are replaced at their module boundary, which is what the desktop
 // provides; everything above it is production code.
 
-const { getMock, updateMock, correctMock, documentStateMock } = vi.hoisted(() => ({
+const { getMock, updateMock, correctMock, documentStateMock, repairMock } = vi.hoisted(() => ({
   getMock: vi.fn(),
   updateMock: vi.fn(),
   correctMock: vi.fn(),
   documentStateMock: vi.fn(),
+  repairMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrder: (...args: unknown[]) => getMock(...args),
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
   CorrectPurchaseOrder: (...args: unknown[]) => correctMock(...args),
+  RepairPurchaseOrderSource: (...args: unknown[]) => repairMock(...args),
   FinalizePurchaseOrder: vi.fn(),
   GetPurchaseOrderReview: vi.fn(),
   GetPurchaseOrderHistory: vi.fn(async () => []),
@@ -68,6 +71,11 @@ vi.mock("@backend/models", () => ({
       }
     },
     PurchaseOrderFinalizeInput: class {
+      constructor(source: Record<string, unknown>) {
+        Object.assign(this, source);
+      }
+    },
+    PurchaseOrderSourceRepairInput: class {
       constructor(source: Record<string, unknown>) {
         Object.assign(this, source);
       }
@@ -212,15 +220,26 @@ function typeInto(label: string, value: string) {
 function Harness({
   initialId,
   onRefreshError,
+  isAdmin = false,
+  onRepairSource = () => undefined,
+  repairReview,
 }: {
   initialId: number;
   onRefreshError?: (error: unknown) => void;
+  isAdmin?: boolean;
+  onRepairSource?: () => void;
+  repairReview?: PurchaseOrderReviewDTO;
 }) {
   const poLeave = usePurchaseOrderLeaveGuard("po", () => undefined);
   const workspace = usePurchaseOrderWorkspace({ onRefreshError });
   useEffect(() => {
     // App's open path: the row id is fetched, then the controller opens it.
-    void getMock(initialId).then((record: PurchaseOrderDTO) => workspace.open(record));
+    void getMock(initialId).then((record: PurchaseOrderDTO) => {
+      workspace.open(record);
+      // App's repair path: the candidate review is read after the record is
+      // open, then the workspace replaces the saved view with the panel.
+      if (repairReview !== undefined) workspace.repair(repairReview);
+    });
     // The open path runs once, as it does when a row is clicked.
   }, []);
   return (
@@ -231,6 +250,8 @@ function Harness({
         uomOptions={[{ value: "Pc", label: "Pc" }]}
         incotermOptions={[{ value: "CIF", label: "CIF" }]}
         onAdd={() => undefined}
+        isAdmin={isAdmin}
+        onRepairSource={onRepairSource}
         onOpen={() => undefined}
         onBack={() => {
           poLeave.setDirty(false);
@@ -425,4 +446,90 @@ describe("cancel from a saved-record correction (issue #473)", () => {
     expect(queryButton("Save correction")).toBeNull();
     expect(queryButton("Correct purchase order")).toBeNull();
   });
+
+describe("source-link repair from the saved view (issue #475)", () => {
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function repairReview(): PurchaseOrderReviewDTO {
+    const record = order();
+    return {
+      Order: record,
+      Source: {
+        QuotationID: 19,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260019",
+        CustomerID: record.CustomerID,
+        CustomerName: record.CustomerName,
+        Currency: "USD",
+        PaymentTerms: "30 days",
+        Incoterms: "CIF",
+        DiscountPercent: 0,
+        Lines: [
+          {
+            QuotationItemNo: 1,
+            QuotationSubNo: null,
+            LineLabel: "1",
+            Description: "Widget",
+            UoM: "Pc",
+            QuantityScaled: 20000,
+            UnitPriceMinor: 10000,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+          },
+        ],
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+      },
+      DocumentState: "none",
+    };
+  }
+
+  it("shows the action only to an admin", async () => {
+    getMock.mockResolvedValue(order());
+    await act(async () => {
+      root.render(<Harness initialId={7} isAdmin={false} />);
+    });
+    await flush();
+    expectSavedView();
+    expect(queryButton("Repair source link")).toBeNull();
+
+    await act(async () => {
+      root.render(<Harness initialId={7} isAdmin />);
+    });
+    await flush();
+    expect(queryButton("Repair source link")).not.toBeNull();
+  });
+
+  it("opens the repair view and Cancel returns to the saved record", async () => {
+    getMock.mockResolvedValue(order());
+    const opened: number[] = [];
+    await act(async () => {
+      root.render(
+        <Harness
+          initialId={7}
+          isAdmin
+          onRepairSource={() => opened.push(1)}
+          repairReview={repairReview()}
+        />
+      );
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Source link change");
+    expect(document.body.textContent).toContain("1502260019");
+
+    await act(async () => {
+      button("Back without repairing").click();
+    });
+    await flush();
+    expectSavedView();
+    expect(document.body.textContent).toContain("1502260012");
+  });
+});
+
 });

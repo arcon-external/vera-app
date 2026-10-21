@@ -80,6 +80,19 @@ export interface PurchaseOrderHistoryEntry {
   AdjustmentMinor: number;
   GrandTotalMinor: number;
   Attachment?: { Version: number; SHA256: string; Filename: string } | null;
+  /**
+   * Present only for kind "source_repair" (#475): the old and new link and the
+   * admin's difference choices. Nil for every other kind.
+   */
+  Repair?: {
+    PreviousQuoteNumber: string;
+    PreviousSourceRevision: number;
+    PreviousCustomerName: string;
+    NewQuoteNumber: string;
+    NewSourceRevision: number;
+    NewCustomerName: string;
+    Decisions?: Array<{ Key: string; Choice: string }>;
+  } | null;
   Items: PurchaseOrderHistoryItem[];
 }
 
@@ -173,9 +186,11 @@ export function conflictWarning(
   return `${saved} Overwriting applies your changes and keeps the previous version in the history.`;
 }
 
-/** "Correction" or "Draft overwritten", as the history panel labels a kind. */
+/** "Correction", "Draft overwritten" or "Source repaired", as the panel labels a kind. */
 export function correctionKindLabel(kind: string): string {
-  return kind === "draft_overwrite" ? "Draft overwritten" : "Correction";
+  if (kind === "draft_overwrite") return "Draft overwritten";
+  if (kind === "source_repair") return "Source repaired";
+  return "Correction";
 }
 
 /** The customer PO PDF version a snapshot referenced, as one readable line. */

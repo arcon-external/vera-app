@@ -18,6 +18,10 @@ type POSourceQuery struct {
 	Search   string
 	Page     int
 	HideUsed bool
+	// ExcludePOID is the repair-mode exemption (#475): the one saved record
+	// being repaired keeps its own Quotation selectable. Zero is the ordinary
+	// PO-entry path; a non-zero value is an admin operation server-side.
+	ExcludePOID int64
 }
 
 // POSourceActivePODTO is the active PO occupying a Quotation (issue #468).
@@ -103,6 +107,9 @@ func (q *Quotation) ListPOSourceQuotations(query POSourceQuery) (POSourcePageDTO
 	}
 	if query.HideUsed {
 		params.Set("hideUsed", "true")
+	}
+	if query.ExcludePOID > 0 {
+		params.Set("excludePOId", strconv.FormatInt(query.ExcludePOID, 10))
 	}
 	var response apicontract.POSourceListResponse
 	if err := client.Get("/v1/po-sources?"+params.Encode(), &response); err != nil {

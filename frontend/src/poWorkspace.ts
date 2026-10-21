@@ -15,7 +15,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { GetPurchaseOrder } from "@backend/backend/Quotation";
-import { isSavedPurchaseOrder } from "./poFinalize";
+import { isSavedPurchaseOrder, type PurchaseOrderReviewDTO } from "./poFinalize";
 import type { AppPage } from "./poLeaveGuard";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 
@@ -26,12 +26,16 @@ import type { PurchaseOrderDTO } from "./purchaseOrder";
  * - `refreshing` -- a correction was cancelled and the saved record is being
  *   re-read. Neither the stale editor nor a stale saved view is shown.
  * - `saved` -- a saved record, read-only.
+ * - `repair` -- an admin source-link repair is in progress on the saved record.
+ *   The saved view is replaced by the difference review and the required
+ *   reason; the record itself is unchanged until the repair commits.
  * - `editor` -- a draft, or a saved record in correction mode.
  */
 export type PurchaseOrderWorkspacePhase =
   | "list"
   | "refreshing"
   | "saved"
+  | "repair"
   | "editor";
 
 export interface PurchaseOrderWorkspaceOptions {
@@ -47,6 +51,8 @@ export interface PurchaseOrderWorkspace {
   draft: PurchaseOrderDTO | null;
   /** True while the open record is being edited as a correction. */
   correcting: boolean;
+  /** The candidate source review while a repair is in progress, else null. */
+  repairing: PurchaseOrderReviewDTO | null;
   phase: PurchaseOrderWorkspacePhase;
   /** Opens a record fetched by any entry path (list row, selector). */
   open: (order: PurchaseOrderDTO) => void;
@@ -63,6 +69,12 @@ export interface PurchaseOrderWorkspace {
   saved: (order: PurchaseOrderDTO) => void;
   /** The saved view assigned a confirmation number. */
   assigned: (order: PurchaseOrderDTO) => void;
+  /** Opens the admin repair review for the saved record. */
+  repair: (review: PurchaseOrderReviewDTO) => void;
+  /** The repair committed; the server's record becomes the saved view. */
+  repaired: (order: PurchaseOrderDTO) => void;
+  /** Leaves the repair without writing; the saved view still shows the old link. */
+  cancelRepair: () => void;
   /**
    * The editor's Cancel. A draft leaves the workspace through App's guard. A
    * correction exits only after the guard allows it, then re-reads the saved
@@ -81,6 +93,7 @@ export function usePurchaseOrderWorkspace(
   const [draft, setDraft] = useState<PurchaseOrderDTO | null>(null);
   const [correcting, setCorrecting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [repairing, setRepairing] = useState<PurchaseOrderReviewDTO | null>(null);
   // Every transition that replaces or closes the open record invalidates an
   // in-flight reload, so a slow read cannot reopen a record the user left.
   const loadToken = useRef(0);
@@ -89,6 +102,7 @@ export function usePurchaseOrderWorkspace(
     loadToken.current += 1;
     setRefreshing(false);
     setCorrecting(false);
+    setRepairing(null);
     setDraft(order);
   }, []);
 
@@ -96,11 +110,31 @@ export function usePurchaseOrderWorkspace(
     loadToken.current += 1;
     setRefreshing(false);
     setCorrecting(false);
+    setRepairing(null);
     setDraft(null);
   }, []);
 
   const correct = useCallback(() => {
     setCorrecting(true);
+  }, []);
+
+  const repair = useCallback((review: PurchaseOrderReviewDTO) => {
+    loadToken.current += 1;
+    setRefreshing(false);
+    setCorrecting(false);
+    setRepairing(review);
+  }, []);
+
+  const repaired = useCallback((order: PurchaseOrderDTO) => {
+    loadToken.current += 1;
+    setRefreshing(false);
+    setCorrecting(false);
+    setRepairing(null);
+    setDraft(order);
+  }, []);
+
+  const cancelRepair = useCallback(() => {
+    setRepairing(null);
   }, []);
 
   const correctionStarted = useCallback(() => {
@@ -111,6 +145,7 @@ export function usePurchaseOrderWorkspace(
     loadToken.current += 1;
     setRefreshing(false);
     setCorrecting(false);
+    setRepairing(null);
     setDraft(order);
   }, []);
 
@@ -174,13 +209,16 @@ export function usePurchaseOrderWorkspace(
       ? "list"
       : refreshing
         ? "refreshing"
-        : isSavedPurchaseOrder(draft) && !correcting
-          ? "saved"
-          : "editor";
+        : repairing !== null
+          ? "repair"
+          : isSavedPurchaseOrder(draft) && !correcting
+            ? "saved"
+            : "editor";
 
   return {
     draft,
     correcting,
+    repairing,
     phase,
     open,
     close,
@@ -188,6 +226,9 @@ export function usePurchaseOrderWorkspace(
     correctionStarted,
     saved,
     assigned,
+    repair,
+    repaired,
+    cancelRepair,
     cancel,
   };
 }

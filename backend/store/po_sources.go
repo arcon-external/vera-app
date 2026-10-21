@@ -97,14 +97,36 @@ const (
 // to the caller's organization. A draft and a saved record both occupy the
 // Quotation, so hideUsed filters on the joined row in the same predicate the
 // page uses.
-func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search string, hideUsed bool) ([]POSourceQuotation, int, error) {
+//
+// excludePOID is the repair mode #475 adds: the one record being repaired is
+// not "another active PO", so its own Quotation stays selectable while every
+// other occupied Quotation remains disabled. Zero is the ordinary entry path.
+// A non-zero id that is not an active PO of this organization is refused,
+// never silently treated as "nothing to exclude".
+func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search string, hideUsed bool, excludePOID int64) ([]POSourceQuotation, int, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
+	if excludePOID < 0 {
+		return nil, 0, fmt.Errorf("%w: the excluded purchase order id must not be negative", ErrPOSourceInvalid)
+	}
 	pool, err := s.poolOrError()
 	if err != nil {
 		return nil, 0, err
+	}
+	schema := s.configSchema()
+	if excludePOID > 0 {
+		var exists bool
+		if err := pool.QueryRow(ctx, fmt.Sprintf(`
+			SELECT EXISTS (
+				SELECT 1 FROM %s.purchase_orders WHERE id = $1 AND org_id = $2
+			)`, schema), excludePOID, org.ID).Scan(&exists); err != nil {
+			return nil, 0, fmt.Errorf("resolve the purchase order %d to exclude: %w", excludePOID, err)
+		}
+		if !exists {
+			return nil, 0, ErrPurchaseOrderNotFound
+		}
 	}
 	if page < 1 {
 		page = 1
@@ -121,7 +143,6 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 			"%w: page %d is past the largest representable offset", ErrPOSourceInvalid, page)
 	}
 	offset := int64(page-1) * POSourcePageSize
-	schema := s.configSchema()
 
 	// The latest revision supplies the row's subject and revision number. The
 	// search is not tied to it: the EXISTS clauses below reach every revision
@@ -142,30 +163,31 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 			GROUP BY quotation_id
 		) counts ON counts.quotation_id = q.id
 		LEFT JOIN %s.purchase_orders po
-		  ON po.quotation_id = q.id AND po.org_id = $2`, schema, schema, schema, schema, schema)
+		  ON po.quotation_id = q.id AND po.org_id = $2 AND po.id <> $3`,
+		schema, schema, schema, schema, schema)
 
 	where := " WHERE (NOT $1 OR po.id IS NULL)"
-	args := []any{hideUsed, org.ID}
+	args := []any{hideUsed, org.ID, excludePOID}
 	if term := strings.TrimSpace(search); term != "" {
 		pattern := "%" + escapeLike(term) + "%"
 		where += fmt.Sprintf(`
 			AND (
-				q.quote_number ILIKE $3 ESCAPE '\'
+				q.quote_number ILIKE $4 ESCAPE '\'
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revisions sr
-					WHERE sr.quotation_id = q.id AND sr.subject ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND sr.subject ILIKE $4 ESCAPE '\'
 				)
-				OR c.legal_name ILIKE $3 ESCAPE '\'
+				OR c.legal_name ILIKE $4 ESCAPE '\'
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_items i
 					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
-					WHERE sr.quotation_id = q.id AND i.description ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND i.description ILIKE $4 ESCAPE '\'
 				)
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_sub_items si
 					JOIN %s.quotation_revision_items i ON i.id = si.revision_item_id
 					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
-					WHERE sr.quotation_id = q.id AND si.description ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND si.description ILIKE $4 ESCAPE '\'
 				)
 			)`, schema, schema, schema, schema, schema, schema)
 		args = append(args, pattern)

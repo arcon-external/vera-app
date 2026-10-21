@@ -123,7 +123,11 @@ type PurchaseOrderCorrectionItem struct {
 // copied, so a later repair of the live record (#475) cannot change what the
 // history says the corrected version was.
 type PurchaseOrderCorrection struct {
-	Attachment            *PurchaseOrderCorrectionAttachment
+	Attachment *PurchaseOrderCorrectionAttachment
+	// Repair is the old and new source one source-link repair recorded (#475).
+	// Nil for every other kind; the snapshot fields above remain the values the
+	// record carried before the write either way.
+	Repair                *PurchaseOrderSourceRepair
 	CreatedAt             time.Time
 	UUID                  string
 	Kind                  string
@@ -296,7 +300,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+	if _, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
 		PurchaseOrderCorrectionKindCorrection, input.Reason, input.UpdatedBy); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -436,13 +440,13 @@ func insertPurchaseOrderCorrection(
 	order PurchaseOrder,
 	orgID, kind, reason string,
 	actor int64,
-) error {
+) (int64, error) {
 	if actor < 1 {
-		return fmt.Errorf("%w: the actor is required", ErrPurchaseOrderInvalid)
+		return 0, fmt.Errorf("%w: the actor is required", ErrPurchaseOrderInvalid)
 	}
 	attachment, err := loadActivePurchaseOrderAttachment(ctx, q, schema, order.ID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var attachmentVersion any
 	var attachmentSHA, attachmentFilename any
@@ -483,7 +487,7 @@ func insertPurchaseOrderCorrection(
 		attachmentVersion, attachmentSHA, attachmentFilename,
 	).Scan(&correctionID)
 	if err != nil {
-		return fmt.Errorf("store purchase order correction snapshot: %w", err)
+		return 0, fmt.Errorf("store purchase order correction snapshot: %w", err)
 	}
 	for index, item := range order.Items {
 		lineNumber := item.LineNumber
@@ -502,10 +506,10 @@ func insertPurchaseOrderCorrection(
 			item.UnitPriceMinor, item.DiscountEnabled, item.DiscountPercent,
 			item.GrossMinor, item.DiscountMinor, item.NetMinor,
 		); err != nil {
-			return fmt.Errorf("store purchase order correction line %d: %w", lineNumber, err)
+			return 0, fmt.Errorf("store purchase order correction line %d: %w", lineNumber, err)
 		}
 	}
-	return nil
+	return correctionID, nil
 }
 
 // loadActivePurchaseOrderAttachment reads the current customer PO PDF's
@@ -659,6 +663,69 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		if items, ok := byCorrection[history[index].ID]; ok {
 			history[index].Items = items
 		}
+	}
+
+	// #475: the old/new source and the choices a repair recorded. The rows are
+	// read separately rather than joined so a history with no repair (the
+	// overwhelming majority) pays one extra, empty query instead of widening
+	// every snapshot row.
+	repairRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT correction_id, previous_quotation_id, previous_source_revision,
+		       previous_quote_number, previous_customer_id, previous_customer_name,
+		       new_quotation_id, new_source_revision, new_quote_number,
+		       new_customer_id, new_customer_name
+		FROM %s.purchase_order_source_repairs
+		WHERE correction_id = ANY($1)`, schema), ids)
+	if err != nil {
+		return nil, fmt.Errorf("load purchase order %d repair links: %w", id, err)
+	}
+	defer repairRows.Close()
+	repairs := make(map[int64]*PurchaseOrderSourceRepair, len(history))
+	for repairRows.Next() {
+		var correctionID int64
+		var repair PurchaseOrderSourceRepair
+		if err := repairRows.Scan(&correctionID,
+			&repair.PreviousQuotationID, &repair.PreviousSourceRevision,
+			&repair.PreviousQuoteNumber, &repair.PreviousCustomerID,
+			&repair.PreviousCustomerName, &repair.NewQuotationID,
+			&repair.NewSourceRevision, &repair.NewQuoteNumber,
+			&repair.NewCustomerID, &repair.NewCustomerName,
+		); err != nil {
+			return nil, fmt.Errorf("scan purchase order %d repair link: %w", id, err)
+		}
+		repair.Decisions = make([]PurchaseOrderDecision, 0, 4)
+		repairs[correctionID] = &repair
+	}
+	if err := repairRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate purchase order %d repair links: %w", id, err)
+	}
+
+	if len(repairs) > 0 {
+		decisionRows, err := pool.Query(ctx, fmt.Sprintf(`
+			SELECT correction_id, key, choice
+			FROM %s.purchase_order_source_repair_decisions
+			WHERE correction_id = ANY($1)
+			ORDER BY correction_id, key`, schema), ids)
+		if err != nil {
+			return nil, fmt.Errorf("load purchase order %d repair choices: %w", id, err)
+		}
+		defer decisionRows.Close()
+		for decisionRows.Next() {
+			var correctionID int64
+			var decision PurchaseOrderDecision
+			if err := decisionRows.Scan(&correctionID, &decision.Key, &decision.Choice); err != nil {
+				return nil, fmt.Errorf("scan purchase order %d repair choice: %w", id, err)
+			}
+			if repair, ok := repairs[correctionID]; ok {
+				repair.Decisions = append(repair.Decisions, decision)
+			}
+		}
+		if err := decisionRows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate purchase order %d repair choices: %w", id, err)
+		}
+	}
+	for index := range history {
+		history[index].Repair = repairs[history[index].ID]
 	}
 	return history, nil
 }

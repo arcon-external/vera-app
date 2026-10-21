@@ -14,6 +14,7 @@ import type { PurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
+import { PurchaseOrderRepairPage } from "./PurchaseOrderRepair";
 import { StatusBanner } from "./ui";
 
 export interface PurchaseOrderWorkspacePageProps {
@@ -24,10 +25,19 @@ export interface PurchaseOrderWorkspacePageProps {
   incotermOptions: { value: string; label: string }[];
   /** Starts a new PO through the shared source selector. */
   onAdd: () => void;
+  /** Whether the signed-in user may repair a saved record's source link. */
+  isAdmin: boolean;
+  /**
+   * Opens the shared selector in repair mode for the open saved record. App
+   * loads the candidate review and hands it to the workspace.
+   */
+  onRepairSource: () => void;
   /** Opens one archive row by id (App fetches the record). */
   onOpen: (id: number) => void;
   /** A save succeeded; App words its success message. */
   onSaved?: (order: PurchaseOrderDTO, corrected?: boolean) => void;
+  /** A source repair committed; App words its success message. */
+  onRepaired?: (order: PurchaseOrderDTO) => void;
   /** App's discard guard on the way out of the saved view. */
   onBack: () => void;
   /** The editor's Cancel, delegating to the workspace controller. */
@@ -42,7 +52,10 @@ export function PurchaseOrderWorkspacePage({
   incotermOptions,
   onAdd,
   onOpen,
+  isAdmin,
+  onRepairSource,
   onSaved,
+  onRepaired,
   onBack,
   onCancel,
   onDirtyChange,
@@ -72,15 +85,37 @@ export function PurchaseOrderWorkspacePage({
     );
   }
 
+  if (phase === "repair" && workspace.repairing !== null) {
+    // #475: an admin source repair. The saved record is unchanged until the
+    // repair commits; Cancel returns to the saved view with the old link.
+    return (
+      <PurchaseOrderRepairPage
+        review={workspace.repairing}
+        currency={currency}
+        onCancel={() => {
+          onDirtyChange(false);
+          workspace.cancelRepair();
+        }}
+        onRepaired={(order) => {
+          workspace.repaired(order);
+          onRepaired?.(order);
+        }}
+        onDirtyChange={onDirtyChange}
+      />
+    );
+  }
+
   if (phase === "saved") {
     // #471/#473: a saved record opens read-only; Correct is the one entry into
     // the correction editor, which asks for a reason and records the replaced
-    // values.
+    // values. Repairing the source link is a separate admin action (#475).
     return (
       <PurchaseOrderSavedView
         order={draft}
         currency={currency}
         onCorrect={workspace.correct}
+        canRepairSource={isAdmin}
+        onRepairSource={onRepairSource}
         onAssigned={workspace.assigned}
         onBack={onBack}
       />

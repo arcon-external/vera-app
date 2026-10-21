@@ -530,7 +530,7 @@ func TestPurchaseOrdersAreOrganizationScoped(t *testing.T) {
 
 	// The selector occupancy query is scoped the same way: org B sees the
 	// Quotation but not org A's active PO.
-	rows, _, err := database.ListPOSourceQuotations(ctxB, 1, "Scoped", false)
+	rows, _, err := database.ListPOSourceQuotations(ctxB, 1, "Scoped", false, 0)
 	if err != nil {
 		t.Fatalf("list sources for org B: %v", err)
 	}

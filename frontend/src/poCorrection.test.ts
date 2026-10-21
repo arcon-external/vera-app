@@ -145,9 +145,10 @@ describe("conflict wording", () => {
 });
 
 describe("history labels", () => {
-  it("distinguishes a correction from a recovered draft", () => {
+  it("distinguishes a correction, a recovered draft and a source repair", () => {
     expect(correctionKindLabel("correction")).toBe("Correction");
     expect(correctionKindLabel("draft_overwrite")).toBe("Draft overwritten");
+    expect(correctionKindLabel("source_repair")).toBe("Source repaired");
     expect(correctionKindLabel("something-new")).toBe("Correction");
   });
 

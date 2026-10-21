@@ -483,6 +483,53 @@ type PurchaseOrderCorrectionRequest struct {
 	Reason string `json:"reason"`
 }
 
+// PurchaseOrderSourceReviewRequest asks for the difference review of one
+// saved record against a candidate revision (#475). It writes nothing; the
+// target is named separately from the editable payload on purpose.
+type PurchaseOrderSourceReviewRequest struct {
+	TargetQuotationID    int64  `json:"targetQuotationId"`
+	TargetRevisionNumber *int16 `json:"targetRevisionNumber"`
+}
+
+// PurchaseOrderSourceRepairRequest moves a saved record to another issued
+// revision (#475). The embedded payload is the same editable set a correction
+// carries and still refuses every protected value; the target pair and the
+// reason are the repair's own inputs, and decisions/acknowledgements repeat
+// the #471 difference review against the new source.
+type PurchaseOrderSourceRepairRequest struct {
+	PurchaseOrderUpdateRequest
+	Decisions            []PurchaseOrderDecisionRequest `json:"decisions"`
+	AcknowledgedMissing  []string                       `json:"acknowledgedMissing"`
+	AcknowledgedExtra    []int                          `json:"acknowledgedExtra"`
+	TargetQuotationID    int64                          `json:"targetQuotationId"`
+	TargetRevisionNumber *int16                         `json:"targetRevisionNumber"`
+	Reason               string                         `json:"reason"`
+}
+
+// PurchaseOrderSourceRepairDecisionRow is one difference choice a repair
+// recorded. The key is the stable review key ("line:2:unitPrice").
+type PurchaseOrderSourceRepairDecisionRow struct {
+	Key    string `json:"key"`
+	Choice string `json:"choice"`
+}
+
+// PurchaseOrderSourceRepairRow is the old and new link one repair recorded,
+// plus the choices made against the new revision. It hangs off the history
+// snapshot, which keeps the values the record carried before the repair.
+type PurchaseOrderSourceRepairRow struct {
+	PreviousQuoteNumber    string                                 `json:"previousQuoteNumber"`
+	PreviousCustomerName   string                                 `json:"previousCustomerName"`
+	NewQuoteNumber         string                                 `json:"newQuoteNumber"`
+	NewCustomerName        string                                 `json:"newCustomerName"`
+	Decisions              []PurchaseOrderSourceRepairDecisionRow `json:"decisions"`
+	PreviousQuotationID    int64                                  `json:"previousQuotationId"`
+	PreviousSourceRevision int16                                  `json:"previousSourceRevision"`
+	PreviousCustomerID     int64                                  `json:"previousCustomerId"`
+	NewQuotationID         int64                                  `json:"newQuotationId"`
+	NewSourceRevision      int16                                  `json:"newSourceRevision"`
+	NewCustomerID          int64                                  `json:"newCustomerId"`
+}
+
 // PurchaseOrderConflictResponse is the 409 body a stale save receives (#473).
 // It carries the current version and the last writer so the desktop can warn
 // with real values instead of asking the user to guess or reload blindly.
@@ -526,45 +573,49 @@ type PurchaseOrderCorrectionItemRow struct {
 // what the history panel reads; no line or field is derived from the live
 // record, so a later repair cannot rewrite what the history says.
 type PurchaseOrderCorrectionRow struct {
-	Attachment            *PurchaseOrderCorrectionAttachmentRow `json:"attachment"`
-	PODate                *string                               `json:"poDate"`
-	RequestedDeliveryDate *string                               `json:"requestedDeliveryDate"`
-	UUID                  string                                `json:"uuid"`
-	Kind                  string                                `json:"kind"`
-	State                 string                                `json:"state"`
-	Reason                string                                `json:"reason"`
-	QuoteNumber           string                                `json:"quoteNumber"`
-	CustomerName          string                                `json:"customerName"`
-	Currency              string                                `json:"currency"`
-	BillingAddress        string                                `json:"billingAddress"`
-	DeliveryAddress       string                                `json:"deliveryAddress"`
-	ShipToCode            string                                `json:"shipToCode"`
-	ContactEmail          string                                `json:"contactEmail"`
-	ContactPhone          string                                `json:"contactPhone"`
-	PONumber              string                                `json:"poNumber"`
-	PaymentTerms          string                                `json:"paymentTerms"`
-	Incoterms             string                                `json:"incoterms"`
-	TaxZone               string                                `json:"taxZone"`
-	TaxCategory           string                                `json:"taxCategory"`
-	AdjustmentReason      string                                `json:"adjustmentReason"`
-	ActorName             string                                `json:"actorName"`
-	ReceivedDate          string                                `json:"receivedDate"`
-	CreatedAt             string                                `json:"createdAt"`
-	Items                 []PurchaseOrderCorrectionItemRow      `json:"items"`
-	ID                    int64                                 `json:"id"`
-	QuotationID           int64                                 `json:"quotationId"`
-	SourceRevision        int16                                 `json:"sourceRevision"`
-	CustomerID            int64                                 `json:"customerId"`
-	PreviousVersion       int64                                 `json:"previousVersion"`
-	ResultingVersion      int64                                 `json:"resultingVersion"`
-	ActorID               int64                                 `json:"actorId"`
-	DiscountPercent       int16                                 `json:"discountPercent"`
-	SubtotalMinor         int64                                 `json:"subtotalMinor"`
-	DiscountMinor         int64                                 `json:"discountMinor"`
-	PpnBps                int16                                 `json:"ppnBps"`
-	PpnMinor              int64                                 `json:"ppnMinor"`
-	AdjustmentMinor       int64                                 `json:"adjustmentMinor"`
-	GrandTotalMinor       int64                                 `json:"grandTotalMinor"`
+	Attachment *PurchaseOrderCorrectionAttachmentRow `json:"attachment"`
+	// Repair is present only for kind "source_repair" (#475): the old and new
+	// link and the choices the admin made. Every other kind leaves it nil, so
+	// an older reader sees exactly the snapshot it always did.
+	Repair                *PurchaseOrderSourceRepairRow    `json:"repair,omitempty"`
+	PODate                *string                          `json:"poDate"`
+	RequestedDeliveryDate *string                          `json:"requestedDeliveryDate"`
+	UUID                  string                           `json:"uuid"`
+	Kind                  string                           `json:"kind"`
+	State                 string                           `json:"state"`
+	Reason                string                           `json:"reason"`
+	QuoteNumber           string                           `json:"quoteNumber"`
+	CustomerName          string                           `json:"customerName"`
+	Currency              string                           `json:"currency"`
+	BillingAddress        string                           `json:"billingAddress"`
+	DeliveryAddress       string                           `json:"deliveryAddress"`
+	ShipToCode            string                           `json:"shipToCode"`
+	ContactEmail          string                           `json:"contactEmail"`
+	ContactPhone          string                           `json:"contactPhone"`
+	PONumber              string                           `json:"poNumber"`
+	PaymentTerms          string                           `json:"paymentTerms"`
+	Incoterms             string                           `json:"incoterms"`
+	TaxZone               string                           `json:"taxZone"`
+	TaxCategory           string                           `json:"taxCategory"`
+	AdjustmentReason      string                           `json:"adjustmentReason"`
+	ActorName             string                           `json:"actorName"`
+	ReceivedDate          string                           `json:"receivedDate"`
+	CreatedAt             string                           `json:"createdAt"`
+	Items                 []PurchaseOrderCorrectionItemRow `json:"items"`
+	ID                    int64                            `json:"id"`
+	QuotationID           int64                            `json:"quotationId"`
+	SourceRevision        int16                            `json:"sourceRevision"`
+	CustomerID            int64                            `json:"customerId"`
+	PreviousVersion       int64                            `json:"previousVersion"`
+	ResultingVersion      int64                            `json:"resultingVersion"`
+	ActorID               int64                            `json:"actorId"`
+	DiscountPercent       int16                            `json:"discountPercent"`
+	SubtotalMinor         int64                            `json:"subtotalMinor"`
+	DiscountMinor         int64                            `json:"discountMinor"`
+	PpnBps                int16                            `json:"ppnBps"`
+	PpnMinor              int64                            `json:"ppnMinor"`
+	AdjustmentMinor       int64                            `json:"adjustmentMinor"`
+	GrandTotalMinor       int64                            `json:"grandTotalMinor"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.

@@ -17,14 +17,14 @@ func TestListPOSourceQuotationsRejectsAPageWhoseOffsetOverflows(t *testing.T) {
 	// 614891469123651722 = floor(MaxInt64/15)+2, so (page-1)*15 wraps
 	// negative and Postgres rejects the OFFSET. That must be invalid input,
 	// never a database error the caller sees as a server failure.
-	if _, _, err := database.ListPOSourceQuotations(ctx, 614891469123651722, "", false); !errors.Is(err, ErrPOSourceInvalid) {
+	if _, _, err := database.ListPOSourceQuotations(ctx, 614891469123651722, "", false, 0); !errors.Is(err, ErrPOSourceInvalid) {
 		t.Errorf("overflowing page error = %v; want ErrPOSourceInvalid", err)
 	}
 
 	// One less is representable: an empty page past the end, not a refusal.
 	// This pins that the guard rejects only the unrepresentable offset and
 	// never clamps.
-	rows, total, err := database.ListPOSourceQuotations(ctx, 614891469123651721, "", false)
+	rows, total, err := database.ListPOSourceQuotations(ctx, 614891469123651721, "", false, 0)
 	if err != nil {
 		t.Fatalf("largest representable page: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestPOSourcePageOverflowErrorIsNotNotFound(t *testing.T) {
 	database := openTestSchema(t, "vera_po_source_page_overflow_kind")
 	ctx := poContext(t, database)
 
-	_, _, err := database.ListPOSourceQuotations(ctx, 614891469123651722, "", false)
+	_, _, err := database.ListPOSourceQuotations(ctx, 614891469123651722, "", false, 0)
 	if errors.Is(err, ErrPOSourceNotFound) {
 		t.Fatalf("overflowing page error = %v; must not be ErrPOSourceNotFound", err)
 	}

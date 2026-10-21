@@ -432,7 +432,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		if err != nil {
 			return PurchaseOrder{}, err
 		}
-		if err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+		if _, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
 			PurchaseOrderCorrectionKindDraftOverwrite, PurchaseOrderDraftOverwriteReason,
 			input.UpdatedBy); err != nil {
 			return PurchaseOrder{}, err
