@@ -8,7 +8,10 @@
 
 import { describe, expect, it } from "vitest";
 import type { CurrencyInfo } from "./format";
-import type { PurchaseOrderDTO } from "./purchaseOrder";
+import {
+  initialPurchaseOrderEditorState,
+  type PurchaseOrderDTO,
+} from "./purchaseOrder";
 import type { PurchaseOrderReviewDTO, PurchaseOrderSourceDTO } from "./poFinalize";
 import {
   MAX_REPAIR_REASON_LENGTH,
@@ -154,7 +157,7 @@ describe("repair reason", () => {
 describe("buildSourceRepairInput", () => {
   it("starts from the current values and names the target and reason", () => {
     const result = buildSourceRepairInput(
-      order(),
+      initialPurchaseOrderEditorState(order(), USD),
       review(),
       USD,
       {},
@@ -173,7 +176,15 @@ describe("buildSourceRepairInput", () => {
   });
 
   it("refuses a blank reason before anything is sent", () => {
-    const result = buildSourceRepairInput(order(), review(), USD, {}, [], [], "  ");
+    const result = buildSourceRepairInput(
+      initialPurchaseOrderEditorState(order(), USD),
+      review(),
+      USD,
+      {},
+      [],
+      [],
+      "  "
+    );
     expect(result.input).toBeNull();
     expect(result.error).toBe("A source repair needs a reason.");
   });
@@ -181,7 +192,7 @@ describe("buildSourceRepairInput", () => {
   it("blocks an undecided difference and sends the chosen one", () => {
     const differing = review({ PaymentTerms: "30 days" });
     const blocked = buildSourceRepairInput(
-      order(),
+      initialPurchaseOrderEditorState(order(), USD),
       differing,
       USD,
       {},
@@ -193,7 +204,7 @@ describe("buildSourceRepairInput", () => {
     expect(blocked.error).toContain("Payment terms");
 
     const chosen = buildSourceRepairInput(
-      order(),
+      initialPurchaseOrderEditorState(order(), USD),
       differing,
       USD,
       { "header:paymentTerms": "quotation" },
@@ -227,7 +238,7 @@ describe("buildSourceRepairInput", () => {
       ],
     });
     const result = buildSourceRepairInput(
-      order(),
+      initialPurchaseOrderEditorState(order(), USD),
       missing,
       USD,
       {},
@@ -237,6 +248,55 @@ describe("buildSourceRepairInput", () => {
     );
     expect(result.error).toBeNull();
     expect(result.input?.AcknowledgedMissing).toEqual(["2"]);
+  });
+
+  it("builds from the reviewed state, so a corrected match is what is sent", () => {
+    const loaded = initialPurchaseOrderEditorState(order(), USD);
+    const corrected = {
+      ...loaded,
+      lines: loaded.lines.map((line) => ({
+        ...line,
+        quotationItemNo: 2,
+        quotationSubNo: null,
+      })),
+    };
+    const candidate = review({
+      PaymentTerms: "30 days",
+      Incoterms: "FOB",
+      Lines: [
+        {
+          QuotationItemNo: 2,
+          QuotationSubNo: null,
+          LineLabel: "2",
+          Description: "Revised widget",
+          UoM: "Pc",
+          QuantityScaled: 20000,
+          UnitPriceMinor: 12000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+        },
+      ],
+    });
+    const result = buildSourceRepairInput(
+      corrected,
+      candidate,
+      USD,
+      {
+        "header:paymentTerms": "quotation",
+        "header:incoterms": "quotation",
+        "line:1:description": "quotation",
+        "line:1:unitPrice": "quotation",
+      },
+      [],
+      [],
+      "the wrong quotation line was linked"
+    );
+    expect(result.error).toBeNull();
+    expect(result.input?.Items[0].QuotationItemNo).toBe(2);
+    expect(result.input?.Items[0].Description).toBe("Revised widget");
+    expect(result.input?.Items[0].UnitPriceMinor).toBe(12000);
+    expect(result.input?.PaymentTerms).toBe("30 days");
+    expect(result.input?.Incoterms).toBe("FOB");
   });
 });
 
