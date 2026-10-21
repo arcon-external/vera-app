@@ -431,6 +431,7 @@ export namespace backend {
 	    DisplayOriginalTotal: string;
 	    DisplayUnitPrice: string;
 	    DisplayTotal: string;
+	    DescriptionLines: quotation.DescriptionLine[];
 	    OriginalUnitPrice: number;
 	    OriginalTotal: number;
 	    UnitPrice: number;
@@ -453,6 +454,7 @@ export namespace backend {
 	        this.DisplayOriginalTotal = source["DisplayOriginalTotal"];
 	        this.DisplayUnitPrice = source["DisplayUnitPrice"];
 	        this.DisplayTotal = source["DisplayTotal"];
+	        this.DescriptionLines = this.convertValues(source["DescriptionLines"], quotation.DescriptionLine);
 	        this.OriginalUnitPrice = source["OriginalUnitPrice"];
 	        this.OriginalTotal = source["OriginalTotal"];
 	        this.UnitPrice = source["UnitPrice"];
@@ -462,6 +464,24 @@ export namespace backend {
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class CustomerPreview {
 	    Incoterm: string;
@@ -1242,6 +1262,25 @@ export namespace currency {
 	        this.groupSep = source["groupSep"];
 	        this.decimalSep = source["decimalSep"];
 	        this.symbolSpaced = source["symbolSpaced"];
+	    }
+	}
+
+}
+
+export namespace quotation {
+	
+	export class DescriptionLine {
+	    No: string;
+	    Text: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new DescriptionLine(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.No = source["No"];
+	        this.Text = source["Text"];
 	    }
 	}
 
