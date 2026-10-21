@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Issue #480: permanent deletion of one record or its document chain.
@@ -1337,5 +1339,219 @@ func TestChainDeletionRaceWithACorrectionNeverCascadesUnconfirmed(t *testing.T) 
 		if correctionErr != nil {
 			t.Fatalf("correction failed while the deletion was refused: %v", correctionErr)
 		}
+	}
+}
+
+// waitForBackendBlockedBy waits until some backend other than holderPID is
+// waiting on a lock the holder owns. It turns "the operation reached the lock"
+// into an observable state instead of a sleep, and fails when neither a wait nor
+// completion happens.
+func waitForBackendBlockedBy(t *testing.T, database *Store, holderPID int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiters int
+		if err := database.pool.QueryRow(context.Background(), `
+			SELECT COUNT(*) FROM pg_stat_activity
+			WHERE pid <> $1 AND $1 = ANY(pg_blocking_pids(pid))`, holderPID).Scan(&waiters); err != nil {
+			t.Fatalf("read lock waiters: %v", err)
+		}
+		if waiters > 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no backend waited for the chain lock held by backend %d", holderPID)
+}
+
+// TestPausedIssuanceFindsTheChainGoneAndStoresNoFingerprint is the Judge's
+// reproduction for the issuance race. Challenge issuance used to read the chain
+// and insert its row without sharing the deletion's chain lock, so a deletion
+// that committed while issuance was paused before the INSERT left one challenge
+// row holding a fingerprint of a chain that no longer existed.
+//
+// The deletion here is the real sequence: it takes the chain lock, reads the
+// chain, removes it, writes the audits and purges the chain's challenges on a
+// second connection, then commits. The pause is a BEFORE INSERT trigger that
+// waits on a lock the deletion transaction owns, so the ordering is deterministic
+// rather than a stress loop.
+func TestPausedIssuanceFindsTheChainGoneAndStoresNoFingerprint(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_issuance_race")
+	quotation, _, _, ctx := savedDeletionPO(t, database, "PT. Issuance Race", "PO-480-ISSUE-RACE")
+	admin := deletionUser(t, database, "admin")
+	org, err := database.RequireOrg(ctx)
+	if err != nil {
+		t.Fatalf("organization: %v", err)
+	}
+	schema := database.configSchema()
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+
+	// The deletion's own challenge, present while the chain is deleted.
+	existing, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, ExpectedFingerprint: preview.Fingerprint,
+		ActorID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("create the deletion challenge: %v", err)
+	}
+
+	// The issuance's INSERT waits on this lock, which the deletion transaction
+	// owns until it commits. Post-fix the issuance never reaches the INSERT: it
+	// waits for the chain lock first.
+	if _, err := database.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE OR REPLACE FUNCTION %s.vera480_pause_challenge_insert()
+		RETURNS trigger AS $function$
+		BEGIN
+			PERFORM pg_advisory_xact_lock(480, 2);
+			RETURN NEW;
+		END;
+		$function$ LANGUAGE plpgsql`, schema)); err != nil {
+		t.Fatalf("create the challenge insert pause: %v", err)
+	}
+	if _, err := database.pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TRIGGER vera480_pause_challenge_insert
+		BEFORE INSERT ON %s.deletion_challenges
+		FOR EACH ROW EXECUTE FUNCTION %s.vera480_pause_challenge_insert()`,
+		schema, schema)); err != nil {
+		t.Fatalf("install the challenge insert pause: %v", err)
+	}
+
+	conn, err := pgx.Connect(ctx, testDSN(t))
+	if err != nil {
+		t.Fatalf("connect the deletion: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var holderPID int
+	if err := conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holderPID); err != nil {
+		t.Fatalf("read the deletion backend: %v", err)
+	}
+	deletion, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the deletion: %v", err)
+	}
+	defer func() { _ = deletion.Rollback(context.Background()) }()
+	if _, err := deletion.Exec(ctx, "SELECT pg_advisory_xact_lock(480, 2)"); err != nil {
+		t.Fatalf("hold the challenge insert pause: %v", err)
+	}
+	if err := lockDeletionChain(ctx, deletion, schema, org.ID, DeletionTargetQuotation, quotation.ID); err != nil {
+		t.Fatalf("lock the deletion chain: %v", err)
+	}
+	facts, err := loadDeletionFacts(ctx, deletion, schema, org.ID, DeletionTargetQuotation, quotation.ID)
+	if err != nil {
+		t.Fatalf("load the deletion facts: %v", err)
+	}
+	deleting := buildDeletionPreview(DeletionTargetQuotation, facts)
+	plan, ok := deleting.ScopePlan(DeletionScopeChain)
+	if !ok || !plan.Available {
+		t.Fatalf("chain scope unavailable: %+v", deleting.Scopes)
+	}
+	input := DeletionConfirmInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, Reason: "issuance race",
+		TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: preview.Fingerprint,
+		ChallengeID: existing.ID, ChallengeLetters: existing.Letters, ActorID: admin.ID,
+	}
+	if _, err := removeDeletionTargets(ctx, deletion, schema, org.ID, input, facts, plan); err != nil {
+		t.Fatalf("remove the deletion targets: %v", err)
+	}
+	if _, err := insertDeletionAudits(ctx, deletion, schema, org.ID, input, plan.Removes); err != nil {
+		t.Fatalf("write the deletion audits: %v", err)
+	}
+	if err := purgeDeletionChainChallenges(ctx, deletion, schema, org.ID, facts); err != nil {
+		t.Fatalf("purge the deleted chain's challenges: %v", err)
+	}
+
+	issued := make(chan error, 1)
+	go func() {
+		_, issueErr := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+			TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+			Scope: DeletionScopeChain, ExpectedFingerprint: preview.Fingerprint,
+			ActorID: admin.ID,
+		})
+		issued <- issueErr
+	}()
+	waitForBackendBlockedBy(t, database, holderPID)
+	if err := deletion.Commit(ctx); err != nil {
+		t.Fatalf("commit the deletion: %v", err)
+	}
+	issueErr := <-issued
+
+	if n := countRows(t, database, "deletion_challenges", ""); n != 0 {
+		t.Errorf("challenges = %d after the chain deletion; an issuance that raced the deletion kept a fingerprint", n)
+	}
+	if !errors.Is(issueErr, ErrDeletionTargetNotFound) {
+		t.Errorf("issuance after the deletion = %v; want ErrDeletionTargetNotFound", issueErr)
+	}
+}
+
+// TestExpiryDuringTheChainLockWaitLeavesNoChallenge covers the second retention
+// race. A confirmation can pass the pre-transaction expiry sweep, wait for the
+// chain lock, and then find the challenge expired inside its transaction. The
+// rollback of the refused deletion must not leave that expired row behind.
+func TestExpiryDuringTheChainLockWaitLeavesNoChallenge(t *testing.T) {
+	database := openTestSchema(t, "vera_po_delete_expiry_race")
+	quotation, _, _, ctx := savedDeletionPO(t, database, "PT. Expiry Race", "PO-480-EXPIRY-RACE")
+	admin := deletionUser(t, database, "admin")
+	org, err := database.RequireOrg(ctx)
+	if err != nil {
+		t.Fatalf("organization: %v", err)
+	}
+	schema := database.configSchema()
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	challenge, err := database.CreateDeletionChallenge(ctx, DeletionChallengeInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeChain, ExpectedFingerprint: preview.Fingerprint,
+		ActorID: admin.ID,
+	})
+	if err != nil {
+		t.Fatalf("create challenge: %v", err)
+	}
+
+	conn, err := pgx.Connect(ctx, testDSN(t))
+	if err != nil {
+		t.Fatalf("connect the chain lock: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var holderPID int
+	if err := conn.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holderPID); err != nil {
+		t.Fatalf("read the lock backend: %v", err)
+	}
+	holder, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin the chain lock: %v", err)
+	}
+	defer func() { _ = holder.Rollback(context.Background()) }()
+	if err := lockDeletionChain(ctx, holder, schema, org.ID, DeletionTargetQuotation, quotation.ID); err != nil {
+		t.Fatalf("hold the chain lock: %v", err)
+	}
+
+	confirmed := make(chan error, 1)
+	go func() {
+		_, confirmErr := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+			TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+			Scope: DeletionScopeChain, Reason: "expiry race",
+			TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: preview.Fingerprint,
+			ChallengeID: challenge.ID, ChallengeLetters: challenge.Letters, ActorID: admin.ID,
+		})
+		confirmed <- confirmErr
+	}()
+	// The confirmation is past its pre-transaction sweep and waiting for the
+	// chain lock; the challenge has not expired yet.
+	waitForBackendBlockedBy(t, database, holderPID)
+	expireDeletionChallenge(t, database, challenge.ID)
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release the chain lock: %v", err)
+	}
+
+	confirmErr := <-confirmed
+	if !errors.Is(confirmErr, ErrDeletionChallengeExpired) {
+		t.Fatalf("confirmation error = %v; want ErrDeletionChallengeExpired", confirmErr)
+	}
+	if n := countRows(t, database, "deletion_challenges", ""); n != 0 {
+		t.Errorf("challenges = %d after the refused confirmation; the expired row outlived the rollback", n)
+	}
+	if countRows(t, database, "quotations", "id = $1", quotation.ID) != 1 {
+		t.Error("the expired confirmation removed the chain")
 	}
 }
