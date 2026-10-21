@@ -39,7 +39,11 @@ import {
 } from "./components/DeletionDialog";
 import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
 import { PurchaseOrderExtractionPanelView, PurchaseOrderExtractionRowCard } from "./components/PurchaseOrderExtractionPanel";
-import type { PurchaseOrderExtractionResultDTO } from "./poExtraction";
+import {
+  createExtractionEditTracker,
+  resolveExtractionConflicts,
+  type PurchaseOrderExtractionResultDTO,
+} from "./poExtraction";
 import { PurchaseOrderConflictPrompt } from "./components/PurchaseOrderConflictPrompt";
 import { PurchaseOrderHistoryPanel } from "./components/PurchaseOrderHistoryPanel";
 import { POQuotationSelectorView } from "./components/POQuotationSelector";
@@ -603,6 +607,36 @@ const PO_EXTRACTION_NO_TEXT: PurchaseOrderExtractionResultDTO = {
   Rows: [],
   Abstentions: { Fields: 6, Rows: 0 },
 };
+
+// Issue #479: the conflict layout. The draft held a PO number, staff cleared
+// the payment terms and edited a line while the run was active, so those wait
+// for a choice; the empty PO date is preselected without a prompt.
+const PO_EXTRACTION_CONFLICT_BASELINE = {
+  ...PO_EDITOR_INITIAL.header,
+  poNumber: "PO-1",
+  poDate: "",
+  paymentTerms: "45 days",
+};
+const PO_EXTRACTION_CONFLICT_HEADER = {
+  ...PO_EXTRACTION_CONFLICT_BASELINE,
+  poNumber: "MANUAL-1",
+  paymentTerms: "",
+};
+const PO_EXTRACTION_CONFLICT_LINES = [
+  { ...PO_EDITOR_INITIAL.lines[0]!, description: "Typed by hand" },
+  ...PO_EDITOR_INITIAL.lines.slice(1),
+];
+const PO_EXTRACTION_CONFLICT_PLAN = resolveExtractionConflicts(
+  PO_EXTRACTION_REVIEW,
+  PO_EXTRACTION_CONFLICT_HEADER,
+  PO_EXTRACTION_CONFLICT_LINES,
+  createExtractionEditTracker(
+    1,
+    PO_EXTRACTION_CONFLICT_BASELINE,
+    PO_EDITOR_INITIAL.lines
+  ),
+  PO_EDITOR_USD
+);
 
 // The final-save review (issue #471): the exact source revision beside the
 // entered PO. Two differing values (payment terms and the first line's price),
@@ -1744,6 +1778,28 @@ const CASES: SnapshotCase[] = [
         onToggle={() => undefined}
         onApply={() => undefined}
         onDiscard={() => undefined}
+      />
+    ),
+  },
+  {
+    // The extraction conflict layout (#479): an edited PO number and a cleared
+    // payment term each show Keep draft / Use extracted, while the untouched
+    // PO date is preselected. At 360 this proves the two radio labels wrap
+    // inside the card instead of overflowing.
+    name: "PurchaseOrderExtractionConflicts",
+    element: (
+      <PurchaseOrderExtractionPanelView
+        result={PO_EXTRACTION_REVIEW}
+        header={PO_EXTRACTION_CONFLICT_HEADER}
+        lines={PO_EXTRACTION_CONFLICT_LINES}
+        currency={PO_EDITOR_USD}
+        selection={PO_EXTRACTION_CONFLICT_PLAN.selection}
+        onToggle={() => undefined}
+        onApply={() => undefined}
+        onDiscard={() => undefined}
+        plan={PO_EXTRACTION_CONFLICT_PLAN}
+        choices={{}}
+        onChoose={() => undefined}
       />
     ),
   },
