@@ -1059,11 +1059,19 @@ func rowHeight(lines []string, subs []subLine, padY float64) float64 {
 // pass nothing through rowHeight, because they have no after cell.
 func rowHeightWithMin(lines []string, subs []subLine, padY float64, minPx float64) float64 {
 	content := float64(len(lines)) * descLinePx
-	if n := countItems(subs); n > 0 {
+	if len(subs) > 0 {
 		// The list's 6px top margin absorbs the first item's own 3px, so it
 		// stands once; then one 3px between each pair of items, and the last
 		// item's 3px bottom margin, which collapses with nothing.
-		content += 6 + 3*float64(n)
+		//
+		// The gap bands whenever the list draws anything: drawBullets adds
+		// it for any non-empty slice, so a continuation fragment that starts
+		// mid-bullet (no line opens an item, countItems == 0) still bands
+		// the gap its drawing carries. The 3px margins attach to item
+		// starts, of which a tails-only slice holds exactly the ones drawn
+		// (its first line opens no item), while a whole row holds every
+		// start -- so whole rows band exactly what they always have.
+		content += 6 + 3*float64(countItems(subs))
 		content += float64(len(subs)) * descLinePx
 	}
 	if content < minPx {

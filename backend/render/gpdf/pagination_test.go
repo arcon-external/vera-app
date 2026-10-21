@@ -16,6 +16,8 @@ package gpdf
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -266,6 +268,126 @@ func TestSpilledRowDoesNotRepeatTheHeader(t *testing.T) {
 	}
 	if got := countRuns(all, "No."); got != 1 {
 		t.Errorf("header label prints %d times in the document, want once", got)
+	}
+}
+
+// TestTailsOnlyRowHeightBandsTheList pins the #485 follow-up the Judge
+// caught: a continuation fragment that starts mid-bullet holds only wrapped
+// tails (first=false on every line), and its band must still carry the list
+// it draws. Before the fix the height gated on an item start existing in the
+// slice, so such a fragment collapsed to padding: compose took the fits
+// branch and drew the whole tail into a band far too short, losing it past
+// the card (or overlapping the trailer) in the PDF.
+func TestTailsOnlyRowHeightBandsTheList(t *testing.T) {
+	padY := 2 * px(tdPadPx)
+	// One bullet wrapping to three lines, exactly as measureRows builds it:
+	// the opening line carries the disc, the wrapped tails do not.
+	whole := []subLine{
+		{text: "first line", first: true},
+		{text: "wrapped tail one", first: false},
+		{text: "wrapped tail two", first: false},
+	}
+	// Whole rows band exactly what they always have. The expectation is the
+	// pre-fix formula restated (content: lines, the 6px list gap, one 3px
+	// margin per item, resolved down, plus padding and borders), so a drift
+	// in either the code or this restatement fails loudly.
+	oldWhole := math.Floor(3*descLinePx+6+3*1)*ptPerPx + padY + 2*px(1)
+	if got := rowHeightWithMin(nil, whole, padY, 0); got != oldWhole {
+		t.Errorf("whole-row height %.3f, want the long-standing %.3f", got, oldWhole)
+	}
+	// A tails-only slice: the continuation after the head kept line one.
+	tails := whole[1:]
+	if n := countItems(tails); n != 0 {
+		t.Fatalf("tails-only slice opens %d items, want none", n)
+	}
+	oldTails := padY + 2*px(1) // pre-fix: content collapsed to padding
+	got := rowHeightWithMin(nil, tails, padY, 0)
+	if got <= oldTails {
+		t.Errorf("tails-only height %.3f, want strictly more than the padding-only %.3f", got, oldTails)
+	}
+	// The band carries the 6px gap drawBullets draws for any non-empty list
+	// plus every line's box, and no item margin where no item starts.
+	wantTails := math.Floor(2*descLinePx+6)*ptPerPx + padY + 2*px(1)
+	if got != wantTails {
+		t.Errorf("tails-only height %.3f, want gap plus every line %.3f", got, wantTails)
+	}
+	// Tails that carry later item starts band one 3px margin per start --
+	// exactly the margins drawBullets draws for them, because every start
+	// sits past the slice's first line and each takes the interior margin.
+	mixed := []subLine{
+		{text: "wrapped tail", first: false},
+		{text: "second bullet", first: true},
+		{text: "its tail", first: false},
+	}
+	wantMixed := math.Floor(3*descLinePx+6+3*1)*ptPerPx + padY + 2*px(1)
+	if got := rowHeightWithMin(nil, mixed, padY, 0); got != wantMixed {
+		t.Errorf("mixed-tails height %.3f, want %.3f", got, wantMixed)
+	}
+}
+
+// TestSingleLongBulletSurvivesFragmentation is the Render regression for the
+// #485 follow-up: one item with one very long single bullet (300 repeats of
+// a mid-bullet token plus a unique terminator, ~6.9k characters). The bullet
+// wraps to one token per line, so every continuation but the last starts
+// mid-bullet with no item start in the slice -- the shape whose height the
+// pre-fix formula collapsed. The PDF must keep every line: the marker exactly
+// once, the mid token its full 300 times, and no bullet line past its page's
+// card bottom, where the table clip would remove it from the document.
+func TestSingleLongBulletSurvivesFragmentation(t *testing.T) {
+	const mid = "FILTER-INSPECTION-TOUR"
+	const marker = "TERMINUS-UNIQUE-XYZ123"
+	var sb strings.Builder
+	for i := 0; i < 300; i++ {
+		sb.WriteString(mid + " ")
+	}
+	sb.WriteString(marker)
+	bullet := sb.String()
+	t.Logf("single bullet length: %d characters", len(bullet))
+
+	in := sampleInput()
+	in.Items = []Item{{
+		No: 1, DescMain: "Maintenance scope",
+		SubItems: []string{bullet},
+		Qty:      "1", UoM: "Lot", UnitPrice: "1", Disc: "—", Total: "1",
+	}}
+	in.QRPNG = nil
+
+	data := renderBounded(t, in)
+	if len(data) == 0 {
+		t.Fatal("Render returned no bytes")
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF")) {
+		t.Fatalf("Render returned %d bytes without a %%PDF header", len(data))
+	}
+
+	pages := layoutBounded(t, in)
+	if len(pages) <= 1 {
+		t.Fatalf("long bullet laid out to %d page(s), want more than one", len(pages))
+	}
+	mids, marks := 0, 0
+	for pi, pg := range pages {
+		for _, prim := range pg.prims {
+			r, ok := prim.(run)
+			if !ok {
+				continue
+			}
+			mids += strings.Count(r.text, mid)
+			marks += strings.Count(r.text, marker)
+			if strings.Contains(r.text, mid) || strings.Contains(r.text, marker) {
+				// The trailer fit carries a two-pixel tolerance; a past-the-card
+				// tail misses by thousands of points, so this stays strict.
+				if r.baseline > pg.bottom+2*ptPerPx {
+					t.Errorf("page %d: bullet run %q at %.2fpt, past the %.2fpt card bottom",
+						pi+1, r.text, r.baseline, pg.bottom)
+				}
+			}
+		}
+	}
+	if mids != 300 {
+		t.Errorf("mid-bullet token appears %d times in the display list, want 300", mids)
+	}
+	if marks != 1 {
+		t.Errorf("terminating marker appears %d times in the display list, want once", marks)
 	}
 }
 
