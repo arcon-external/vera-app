@@ -78,13 +78,13 @@ export function PreviewTemplateHTML(arg1:Array<backend.CompanyLabelEntry>,arg2:s
 
 export function RefreshCompanyIdentity():Promise<void>;
 
-export function RepairPurchaseOrderSource(arg1:backend.PurchaseOrderSourceRepairInput):Promise<backend.PurchaseOrderWriteResult>;
-
-export function ReviewPurchaseOrderSource(arg1:backend.PurchaseOrderSourceReviewInput):Promise<backend.PurchaseOrderReviewDTO>;
-
 export function RemovePurchaseOrderDocument(arg1:number,arg2:boolean):Promise<backend.PurchaseOrderDocumentDTO>;
 
 export function RenderPDF():Promise<Array<number>>;
+
+export function RepairPurchaseOrderSource(arg1:backend.PurchaseOrderSourceRepairInput):Promise<backend.PurchaseOrderWriteResult>;
+
+export function ReviewPurchaseOrderSource(arg1:backend.PurchaseOrderSourceReviewInput):Promise<backend.PurchaseOrderReviewDTO>;
 
 export function SaveDraft(arg1:backend.SavedDraft):Promise<number>;
 
