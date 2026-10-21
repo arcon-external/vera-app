@@ -33,6 +33,22 @@ export interface PurchaseOrderExtractionPageDTO {
   Height: number;
 }
 
+/**
+ * One page's processing evidence (#478). Older stored results (schema 1) have
+ * no page modes; the panel then says nothing about OCR rather than pretending
+ * the page was read one way or the other.
+ */
+export interface PurchaseOrderExtractionPageModeDTO {
+  Number: number;
+  Mode: string;
+  TextWords: number;
+  TextChars: number;
+  OCRWords: number;
+  DPI?: number;
+  Confidence?: number | null;
+  Reason?: string;
+}
+
 export interface PurchaseOrderExtractionCellDTO {
   Value: string;
   Raw: string;
@@ -64,12 +80,17 @@ export interface PurchaseOrderExtractionRowDTO {
 export interface PurchaseOrderExtractionResultDTO {
   Engine: string;
   EngineVersion: string;
+  /** Present only when at least one page was OCRed (schema 2, #478). */
+  OCREngine?: string;
+  OCREngineVersion?: string;
   PageCount: number;
   PagesWithText: number;
   PagesWithoutText: number;
+  PagesWithOCR?: number;
   DurationMs: number;
   SchemaVersion: number;
   Pages: PurchaseOrderExtractionPageDTO[];
+  PageModes?: PurchaseOrderExtractionPageModeDTO[];
   Fields: PurchaseOrderExtractionFieldDTO[];
   Rows: PurchaseOrderExtractionRowDTO[];
   Abstentions: { Fields: number; Rows: number };
@@ -156,7 +177,7 @@ export function isTerminalExtractionStatus(status: string): boolean {
 /** Honest progress: queued/running only, never a fabricated percentage. */
 export function extractionProgressText(status: string): string {
   if (status === "queued") return "Queued for extraction…";
-  if (status === "running") return "Reading the PDF text…";
+  if (status === "running") return "Reading the PDF pages (text layers and scans)…";
   return "";
 }
 
@@ -203,12 +224,18 @@ export function extractionErrorMessage(run: {
   }
   if (run.Status !== "failed") return "";
   switch (run.ErrorCode ?? "") {
+    case "invalid_output":
+      return "The extracted pages could not be read into usable values. Enter the values manually.";
     case "page_limit":
       return "This PDF has more pages than this release extracts. Read it and enter the order manually.";
+    case "ocr_page_limit":
+      return "This PDF has more scanned pages than this release reads. Read it and enter the order manually.";
+    case "page_too_large":
+      return "A page in this PDF is too large to read automatically. Enter the values manually.";
+    case "ocr_unavailable":
+      return "This server could not read the scanned pages. Enter the values manually.";
     case "timeout":
       return "Extraction took too long. Try again, or enter the values manually.";
-    case "invalid_output":
-      return "No readable text layer was found. The PDF may be a scan; this release does not read scanned pages. Enter the values manually.";
     case "output_too_large":
       return "The extractor returned more data than this release accepts. Enter the values manually.";
     case "extractor_unavailable":
@@ -487,8 +514,81 @@ export function extractionAbstentionSummary(result: PurchaseOrderExtractionResul
   return `${fields} of ${result.Fields.length} header fields need review or were not found · ${rows} of ${result.Rows.length} lines need review.`;
 }
 
-/** True when the text layer produced nothing at all. */
+/**
+ * The confidence floor, matching DefaultMinConfidence in the extractor. It is a
+ * release policy, not a measured optimum: #476 §2.5 has not been validated.
+ */
+export const EXTRACTION_MIN_CONFIDENCE = 70;
+
+/** Whether any page was read by OCR, which changes how "no text" reads. */
+export function extractionUsesOCR(result: PurchaseOrderExtractionResultDTO): boolean {
+  if ((result.PagesWithOCR ?? 0) > 0) return true;
+  return (result.PageModes ?? []).some((page) => page.Mode === "ocr");
+}
+
+/** Which engines produced this result, and how many pages OCR read. */
+export function extractionEngineSummary(result: PurchaseOrderExtractionResultDTO): string {
+  const text = `Text layer: ${result.Engine || "unknown"} ${result.EngineVersion || ""}`.trim();
+  const hasEvidence = (result.PageModes?.length ?? 0) > 0 || result.PagesWithOCR != null;
+  if (!hasEvidence) {
+    // A stored schema-1 result predates OCR and has no page evidence. Saying
+    // "no page needed OCR" would be a claim the result cannot support.
+    return `${text} · OCR evidence not recorded`;
+  }
+  if (!extractionUsesOCR(result)) return `${text} · no page needed OCR`;
+  const ocr = `OCR: ${result.OCREngine || "unknown"} ${result.OCREngineVersion || ""}`.trim();
+  const pages = (result.PageModes ?? []).filter((page) => page.Mode === "ocr").length ||
+    result.PagesWithOCR || 0;
+  return `${text} · ${ocr} (${pages} of ${result.PageCount} pages)`;
+}
+
+/** One page's processing mode, with the evidence that decided it. */
+export function extractionPageModeSummary(mode: PurchaseOrderExtractionPageModeDTO): string {
+  const page = `Page ${mode.Number}`;
+  if (mode.Mode === "ocr") {
+    const dpi = mode.DPI ? ` at ${mode.DPI} DPI` : "";
+    const words = `${mode.OCRWords} ${mode.OCRWords === 1 ? "word" : "words"}`;
+    const confidence =
+      mode.Confidence == null
+        ? "confidence not reported"
+        : `${Math.round(mode.Confidence)}% mean confidence`;
+    return `${page}: OCR${dpi} (${words}, ${confidence})`;
+  }
+  return `${page}: text layer (${mode.TextChars} letters/digits)`;
+}
+
+/**
+ * The confidence label for one cell. A text-layer value has no confidence, and
+ * this returns nothing rather than inventing a score for it.
+ */
+export function extractionCellConfidenceLabel(cell: PurchaseOrderExtractionCellDTO): string {
+  if (cell.Confidence == null) return "";
+  const value = Math.round(cell.Confidence);
+  if (cell.Confidence < EXTRACTION_MIN_CONFIDENCE) {
+    return `OCR confidence ${value}% (below the ${EXTRACTION_MIN_CONFIDENCE}% floor)`;
+  }
+  return `OCR confidence ${value}%`;
+}
+
+/** Which cells of a row are below the floor, e.g. "quantity 55%, amount 61%". */
+export function extractionLowConfidenceCellLabels(row: PurchaseOrderExtractionRowDTO): string {
+  const cells: Array<[string, PurchaseOrderExtractionCellDTO]> = [
+    ["line number", row.LineNumber],
+    ["description", row.Description],
+    ["quantity", row.Quantity],
+    ["unit", row.UoM],
+    ["unit price", row.UnitPrice],
+    ["amount", row.Amount],
+  ];
+  return cells
+    .filter(([, cell]) => cell.Confidence != null && cell.Confidence < EXTRACTION_MIN_CONFIDENCE)
+    .map(([label, cell]) => `${label} ${Math.round(cell.Confidence ?? 0)}%`)
+    .join(", ");
+}
+
+/** True when the text layer produced nothing and no page was OCRed. */
 export function extractionFoundNoText(result: PurchaseOrderExtractionResultDTO): boolean {
   if (result.Rows.length > 0) return false;
+  if (extractionUsesOCR(result)) return false;
   return result.Fields.every((field) => field.Cell.Status === "absent");
 }

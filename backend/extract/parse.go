@@ -24,24 +24,54 @@ var (
 	// ErrPageLimit is the bounded-document refusal. It is an error, not an
 	// abstention: the document was not read, so nothing can be proposed.
 	ErrPageLimit = errors.New("the PDF has more pages than this release extracts")
+	// ErrOCRLimit refuses a document with more scanned pages than this release
+	// reads. It is a whole-run refusal, never a partial result: a half-read
+	// table looks like a complete one.
+	ErrOCRLimit = errors.New("the PDF has more scanned pages than this release reads")
+	// ErrPixelLimit refuses a page whose bounded render geometry cannot fit.
+	ErrPixelLimit = errors.New("a page is too large to render for OCR")
+	// ErrOCREngine means the OCR engine could not be started. It is a
+	// deployment failure; the manual path is unchanged.
+	ErrOCREngine = errors.New("the OCR engine is not available")
+	// ErrInvalidOCRTSV rejects an OCR word map that cannot be read. An empty
+	// map is valid (OCR found no words); a malformed one is not.
+	ErrInvalidOCRTSV = errors.New("the OCR engine returned no readable word map")
 )
 
 // Word is one printed word and its box in PDF points, with the origin at the
 // page's top-left as pdftotext prints it.
+//
+// Confidence is nil when the engine does not report one, which is every
+// text-layer word. It is never zero-to-mean-unknown: zero is a real Tesseract
+// confidence and must stay distinguishable from "not measured" (#478).
 type Word struct {
-	Text string
-	XMin float64
-	YMin float64
-	XMax float64
-	YMax float64
+	Text       string
+	XMin       float64
+	YMin       float64
+	XMax       float64
+	YMax       float64
+	Confidence *float64
 }
 
 // Page is one PDF page's size and words, in reading order.
+//
+// Mode and the OCR fields are processing evidence (#478). The text-layer parser
+// leaves them empty; the pipeline fills them from the per-page decision, so a
+// page read from its own text layer and a page read by OCR are distinguishable
+// in the stored result.
 type Page struct {
 	Number int
 	Width  float64
 	Height float64
 	Words  []Word
+
+	Mode          string
+	TextWords     int
+	TextChars     int
+	OCRWords      int
+	DPI           int
+	OCRConfidence *float64
+	Note          string
 }
 
 type bboxXMLDocument struct {

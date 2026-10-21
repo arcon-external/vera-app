@@ -2314,6 +2314,32 @@ export namespace backend {
 		    return a;
 		}
 	}
+	export class PurchaseOrderExtractionPageModeDTO {
+	    Number: number;
+	    Mode: string;
+	    TextWords: number;
+	    TextChars: number;
+	    OCRWords: number;
+	    DPI: number;
+	    Confidence?: number;
+	    Reason: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionPageModeDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Number = source["Number"];
+	        this.Mode = source["Mode"];
+	        this.TextWords = source["TextWords"];
+	        this.TextChars = source["TextChars"];
+	        this.OCRWords = source["OCRWords"];
+	        this.DPI = source["DPI"];
+	        this.Confidence = source["Confidence"];
+	        this.Reason = source["Reason"];
+	    }
+	}
 	export class PurchaseOrderExtractionPageDTO {
 	    Number: number;
 	    Width: number;
@@ -2333,12 +2359,16 @@ export namespace backend {
 	export class PurchaseOrderExtractionResultDTO {
 	    Engine: string;
 	    EngineVersion: string;
+	    OCREngine: string;
+	    OCREngineVersion: string;
 	    PageCount: number;
 	    PagesWithText: number;
 	    PagesWithoutText: number;
+	    PagesWithOCR: number;
 	    DurationMs: number;
 	    SchemaVersion: number;
 	    Pages: PurchaseOrderExtractionPageDTO[];
+	    PageModes: PurchaseOrderExtractionPageModeDTO[];
 	    Fields: PurchaseOrderExtractionFieldDTO[];
 	    Rows: PurchaseOrderExtractionRowDTO[];
 	    Abstentions: PurchaseOrderExtractionAbstentionsDTO;
@@ -2351,12 +2381,16 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Engine = source["Engine"];
 	        this.EngineVersion = source["EngineVersion"];
+	        this.OCREngine = source["OCREngine"];
+	        this.OCREngineVersion = source["OCREngineVersion"];
 	        this.PageCount = source["PageCount"];
 	        this.PagesWithText = source["PagesWithText"];
 	        this.PagesWithoutText = source["PagesWithoutText"];
+	        this.PagesWithOCR = source["PagesWithOCR"];
 	        this.DurationMs = source["DurationMs"];
 	        this.SchemaVersion = source["SchemaVersion"];
 	        this.Pages = this.convertValues(source["Pages"], PurchaseOrderExtractionPageDTO);
+	        this.PageModes = this.convertValues(source["PageModes"], PurchaseOrderExtractionPageModeDTO);
 	        this.Fields = this.convertValues(source["Fields"], PurchaseOrderExtractionFieldDTO);
 	        this.Rows = this.convertValues(source["Rows"], PurchaseOrderExtractionRowDTO);
 	        this.Abstentions = this.convertValues(source["Abstentions"], PurchaseOrderExtractionAbstentionsDTO);

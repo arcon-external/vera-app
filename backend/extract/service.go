@@ -190,12 +190,18 @@ func extractionFailure(err error, timeout time.Duration) (string, string) {
 	switch {
 	case errors.Is(err, ErrPageLimit):
 		return "page_limit", "This PDF has more pages than this release extracts. Read it and enter the order manually."
+	case errors.Is(err, ErrOCRLimit):
+		return "ocr_page_limit", "This PDF has more scanned pages than this release reads. Read it and enter the order manually."
+	case errors.Is(err, ErrPixelLimit):
+		return "page_too_large", "A page in this PDF is too large to read automatically. Enter the values manually."
+	case errors.Is(err, ErrOCREngine):
+		return "ocr_unavailable", "This server could not read the scanned pages. Enter the values manually."
 	case errors.Is(err, ErrTimeout), errors.Is(err, context.DeadlineExceeded):
 		return "timeout", fmt.Sprintf("Extraction took longer than %s. Try again or enter the values manually.", timeout.Round(time.Second))
 	case errors.Is(err, ErrOutputTooLarge):
 		return "output_too_large", "The extractor returned more data than this release accepts. Enter the values manually."
 	case errors.Is(err, ErrInvalidOutput):
-		return "invalid_output", "The extractor could not read this PDF's text layer. Enter the values manually."
+		return "invalid_output", "The extractor could not read this PDF's pages into usable values. Enter the values manually."
 	case errors.Is(err, ErrExtractorUnavailable):
 		return "extractor_unavailable", "Automatic extraction is not configured on this server. Enter the values manually."
 	case errors.Is(err, ErrInputTooLarge):

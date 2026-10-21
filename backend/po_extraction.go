@@ -73,16 +73,33 @@ type PurchaseOrderExtractionAbstentionsDTO struct {
 	Rows   int
 }
 
+// PurchaseOrderExtractionPageModeDTO is one page's processing evidence: whether
+// the page's own text layer was used or it was OCRed, why, and what OCR read.
+type PurchaseOrderExtractionPageModeDTO struct {
+	Number     int
+	Mode       string
+	TextWords  int
+	TextChars  int
+	OCRWords   int
+	DPI        int
+	Confidence *float64
+	Reason     string
+}
+
 // PurchaseOrderExtractionResultDTO is the typed extraction contract.
 type PurchaseOrderExtractionResultDTO struct {
 	Engine           string
 	EngineVersion    string
+	OCREngine        string
+	OCREngineVersion string
 	PageCount        int
 	PagesWithText    int
 	PagesWithoutText int
+	PagesWithOCR     int
 	DurationMs       int64
 	SchemaVersion    int
 	Pages            []PurchaseOrderExtractionPageDTO
+	PageModes        []PurchaseOrderExtractionPageModeDTO
 	Fields           []PurchaseOrderExtractionFieldDTO
 	Rows             []PurchaseOrderExtractionRowDTO
 	Abstentions      PurchaseOrderExtractionAbstentionsDTO
@@ -221,11 +238,15 @@ func mapPurchaseOrderExtractionResult(output apicontract.ExtractionOutput) Purch
 		SchemaVersion:    output.SchemaVersion,
 		Engine:           output.Engine,
 		EngineVersion:    output.EngineVersion,
+		OCREngine:        output.OCREngine,
+		OCREngineVersion: output.OCREngineVersion,
 		PageCount:        output.PageCount,
 		PagesWithText:    output.PagesWithText,
 		PagesWithoutText: output.PagesWithoutText,
+		PagesWithOCR:     output.PagesWithOCR,
 		DurationMs:       output.DurationMs,
 		Pages:            make([]PurchaseOrderExtractionPageDTO, 0, len(output.Pages)),
+		PageModes:        make([]PurchaseOrderExtractionPageModeDTO, 0, len(output.PageModes)),
 		Fields:           make([]PurchaseOrderExtractionFieldDTO, 0, len(output.Fields)),
 		Rows:             make([]PurchaseOrderExtractionRowDTO, 0, len(output.Rows)),
 		Abstentions: PurchaseOrderExtractionAbstentionsDTO{
@@ -238,6 +259,18 @@ func mapPurchaseOrderExtractionResult(output apicontract.ExtractionOutput) Purch
 			Number: page.Number,
 			Width:  page.Width,
 			Height: page.Height,
+		})
+	}
+	for _, mode := range output.PageModes {
+		result.PageModes = append(result.PageModes, PurchaseOrderExtractionPageModeDTO{
+			Number:     mode.Number,
+			Mode:       mode.Mode,
+			TextWords:  mode.TextWords,
+			TextChars:  mode.TextChars,
+			OCRWords:   mode.OCRWords,
+			DPI:        mode.DPI,
+			Confidence: mode.Confidence,
+			Reason:     mode.Reason,
 		})
 	}
 	for _, field := range output.Fields {

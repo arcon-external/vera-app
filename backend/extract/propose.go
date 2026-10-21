@@ -28,14 +28,23 @@ import (
 
 // Options bounds the work. MaxPages is enforced here as well as by the
 // extractor process, so a caller that parses XML directly cannot slip past it.
+// MinConfidence gates OCR-read values: a cell whose lowest contributing word
+// confidence is below it becomes needs_review. Zero means DefaultMinConfidence.
 type Options struct {
-	MaxPages int
+	MaxPages      int
+	MinConfidence float64
 }
 
 // DefaultMaxPages is the page cap this release extracts. It is intentionally
 // modest: a customer PO longer than this is a document staff should read, not
 // a table an assistant should guess at.
 const DefaultMaxPages = 40
+
+// DefaultMinConfidence is the confidence floor for an OCR-read value. It is a
+// release policy, not a measured optimum: the benchmark (#476 §2.5) has not
+// been run, so the floor is deliberately conservative and documented rather
+// than tuned against customer documents.
+const DefaultMinConfidence = 70
 
 // Propose reads the word map and returns the extraction result. The engine
 // name, version and duration are filled by the caller; this function is pure.
@@ -47,10 +56,15 @@ func Propose(pages []Page, options Options) (apicontract.ExtractionOutput, error
 	if len(pages) > maxPages {
 		return apicontract.ExtractionOutput{}, fmt.Errorf("%w: %d pages, limit %d", ErrPageLimit, len(pages), maxPages)
 	}
+	minConfidence := options.MinConfidence
+	if minConfidence <= 0 {
+		minConfidence = DefaultMinConfidence
+	}
 	result := apicontract.ExtractionOutput{
 		SchemaVersion: apicontract.ExtractionSchemaVersion,
 		PageCount:     len(pages),
 		Pages:         make([]apicontract.ExtractionPageInfo, 0, len(pages)),
+		PageModes:     make([]apicontract.ExtractionPageMode, 0, len(pages)),
 		Fields:        make([]apicontract.ExtractionField, 0, len(apicontract.ExtractionFieldKeys)),
 		Rows:          make([]apicontract.ExtractionRow, 0),
 	}
@@ -60,16 +74,34 @@ func Propose(pages []Page, options Options) (apicontract.ExtractionOutput, error
 			Width:  page.Width,
 			Height: page.Height,
 		})
-		if len(page.Words) == 0 {
+		// The pipeline always sets the mode. An empty mode means a caller fed
+		// the parser directly, which is the text-layer path.
+		mode := page.Mode
+		if mode == "" {
+			mode = apicontract.ExtractionPageModeText
+		}
+		if mode == apicontract.ExtractionPageModeOCR {
 			result.PagesWithoutText++
+			result.PagesWithOCR++
 		} else {
+			mode = apicontract.ExtractionPageModeText
 			result.PagesWithText++
 		}
+		result.PageModes = append(result.PageModes, apicontract.ExtractionPageMode{
+			Number:     page.Number,
+			Mode:       mode,
+			TextWords:  page.TextWords,
+			TextChars:  page.TextChars,
+			OCRWords:   page.OCRWords,
+			DPI:        page.DPI,
+			Confidence: page.OCRConfidence,
+			Reason:     page.Note,
+		})
 	}
 
 	headerLines := headerArea(pages)
-	result.Fields = proposeFields(headerLines)
-	result.Rows = proposeRows(pages)
+	result.Fields = proposeFields(headerLines, minConfidence)
+	result.Rows = proposeRows(pages, minConfidence)
 	for _, row := range result.Rows {
 		if row.Status != apicontract.ExtractionStatusExtracted {
 			result.Abstentions.Rows++
@@ -233,7 +265,7 @@ var fieldPatterns = map[string]*regexp.Regexp{
 		`(?i)\b(?:incoterms?|terms\s+of\s+delivery|delivery\s+terms|syarat\s+pengiriman)\s*[:#-]?\s*(.*)$`),
 }
 
-func proposeFields(lines []visualLine) []apicontract.ExtractionField {
+func proposeFields(lines []visualLine, minConfidence float64) []apicontract.ExtractionField {
 	matches := make(map[string][]fieldMatch, len(fieldPatterns))
 	for _, line := range lines {
 		text, spans := textWithSpans(line.Words)
@@ -257,7 +289,7 @@ func proposeFields(lines []visualLine) []apicontract.ExtractionField {
 
 	fields := make([]apicontract.ExtractionField, 0, len(apicontract.ExtractionFieldKeys))
 	for _, key := range apicontract.ExtractionFieldKeys {
-		fields = append(fields, proposeField(key, matches[key], lines))
+		fields = append(fields, proposeField(key, matches[key], lines, minConfidence))
 	}
 	return fields
 }
@@ -272,7 +304,7 @@ func trimRange(text string, start, end int) (int, int) {
 	return start, end
 }
 
-func proposeField(key string, matches []fieldMatch, headerLines []visualLine) apicontract.ExtractionField {
+func proposeField(key string, matches []fieldMatch, headerLines []visualLine, minConfidence float64) apicontract.ExtractionField {
 	field := apicontract.ExtractionField{
 		Key: key,
 		ExtractionCell: apicontract.ExtractionCell{
@@ -320,6 +352,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine) ap
 		field.Status = apicontract.ExtractionStatusNeedsReview
 		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(matches, chosen.raw))
 	}
+	applyConfidence(&field.ExtractionCell, chosen.words, minConfidence)
 	return field
 }
 
@@ -338,6 +371,48 @@ func bboxOf(words []Word) *apicontract.ExtractionBBox {
 	}
 	xMin, yMin, xMax, yMax := unionBox(words)
 	return &apicontract.ExtractionBBox{X: xMin, Y: yMin, Width: xMax - xMin, Height: yMax - yMin}
+}
+
+// applyConfidence records the lowest word confidence behind a cell and turns a
+// low-confidence value into needs_review. A cell whose words are not all
+// measured claims no confidence: mixing measured and unmeasured words would
+// present a text-layer word as if OCR had scored it.
+func applyConfidence(cell *apicontract.ExtractionCell, words []Word, minConfidence float64) {
+	confidence := cellConfidence(words)
+	if confidence == nil {
+		return
+	}
+	cell.Confidence = confidence
+	if *confidence >= minConfidence {
+		return
+	}
+	if cell.Status == apicontract.ExtractionStatusExtracted {
+		cell.Status = apicontract.ExtractionStatusNeedsReview
+	}
+	cell.Note = appendNote(cell.Note, fmt.Sprintf(
+		"Read with OCR confidence %.0f%%, below the %.0f%% this release accepts; confirm the printed value.",
+		*confidence, minConfidence))
+}
+
+func cellConfidence(words []Word) *float64 {
+	var minimum *float64
+	for _, word := range words {
+		if word.Confidence == nil {
+			return nil
+		}
+		if minimum == nil || *word.Confidence < *minimum {
+			value := *word.Confidence
+			minimum = &value
+		}
+	}
+	return minimum
+}
+
+func appendNote(existing, addition string) string {
+	if existing == "" {
+		return addition
+	}
+	return existing + " " + addition
 }
 
 var currencyCandidates = map[string]bool{
@@ -682,8 +757,12 @@ func tableColumns(line visualLine) ([]tableColumn, bool) {
 	return unique, true
 }
 
-func proposeRows(pages []Page) []apicontract.ExtractionRow {
+func proposeRows(pages []Page, minConfidence float64) []apicontract.ExtractionRow {
 	rows := make([]apicontract.ExtractionRow, 0, 16)
+	var previous *apicontract.ExtractionRow
+	var carried []tableColumn
+	carriedFrom := 0
+	tableOpen := false
 	for pageIndex := range pages {
 		page := &pages[pageIndex]
 		lines := linesOf(page)
@@ -696,16 +775,45 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 				break
 			}
 		}
-		if headerIndex < 0 {
+		continuation := false
+		switch {
+		case headerIndex >= 0:
+			carried = columns
+			carriedFrom = page.Number
+			// A fresh table header starts a new table: a wrapped description
+			// above its first row must not be appended to another page's row.
+			previous = nil
+		case tableOpen && len(carried) > 0:
+			// The previous page ended inside a table and this page repeats no
+			// column header. The columns are carried, and every row read this
+			// way is needs_review: carrying positions is an inference.
+			columns = carried
+			continuation = true
+		default:
+			tableOpen = false
+			previous = nil
 			continue
 		}
-		var previous *apicontract.ExtractionRow
-		for index := headerIndex + 1; index < len(lines); index++ {
+
+		start := headerIndex + 1
+		if continuation {
+			start = 0
+		}
+		ended := false
+		started := headerIndex >= 0
+		pageRows := 0
+		for index := start; index < len(lines); index++ {
 			line := lines[index]
 			if _, isHeader := tableColumns(line); isHeader {
 				continue
 			}
 			if totalLinePattern.MatchString(line.Text) || footerLinePattern.MatchString(line.Text) {
+				if continuation && !started {
+					// A running page header ("Page 2 of 3") above a continued
+					// table is not the table's end.
+					continue
+				}
+				ended = true
 				break
 			}
 			cells := assignCells(line, columns)
@@ -714,6 +822,10 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 			}
 			if footerLabelPattern.MatchString(cells.descriptionText) ||
 				footerLabelPattern.MatchString(cells.lineNumberRaw) {
+				if continuation && !started {
+					continue
+				}
+				ended = true
 				break
 			}
 			if cells.numericEmpty() {
@@ -722,6 +834,11 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 				// whole text and a region covering every wrapped line: a value
 				// whose raw or bbox shows only the first line is worse than an
 				// abstention.
+				if continuation && !started {
+					// Above a continued table sits a page header, not the
+					// previous line's description.
+					continue
+				}
 				if previous != nil {
 					full := strings.TrimSpace(previous.Description.Value + " " + cells.descriptionText)
 					previous.Description.Value = full
@@ -732,9 +849,30 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 				}
 				continue
 			}
-			row := buildRow(page, line, cells, columns)
+			if continuation && !started {
+				// Before a continued table starts: skip the running page header
+				// at the top of the page, then require a numeric token. A header
+				// that happens to print a number in the amount column
+				// ("Page 2") must not become a line item.
+				if line.Box.Y < page.Height*0.10 {
+					continue
+				}
+				if !hasNumericToken(cells) {
+					continue
+				}
+				started = true
+			}
+			started = true
+			row := buildRow(page, line, cells, columns, minConfidence)
+			if continuation {
+				row.Status = apicontract.ExtractionStatusNeedsReview
+				row.Note = appendNote(row.Note, fmt.Sprintf(
+					"The column header is on page %d; this row continues that table without a repeated header. Confirm the line and its column positions.",
+					carriedFrom))
+			}
 			rows = append(rows, row)
 			previous = &rows[len(rows)-1]
+			pageRows++
 			// A table row must carry at least one readable quantity or price.
 			// If neither parses, the line is more likely prose below the table
 			// than a malformed row; stop rather than propose the rest of the
@@ -742,12 +880,36 @@ func proposeRows(pages []Page) []apicontract.ExtractionRow {
 			// abstention.
 			if row.Quantity.Status != apicontract.ExtractionStatusExtracted &&
 				row.UnitPrice.Status != apicontract.ExtractionStatusExtracted {
+				ended = true
 				break
 			}
 		}
+		tableOpen = pageRows > 0 && !ended
 	}
-	markDuplicateRows(rows)
+	markRowRisks(rows)
 	return rows
+}
+
+// hasNumericToken reports whether a line's quantity, unit-price or amount
+// column carries at least one digit. It is the start test for a continued
+// table: a running page header above the table usually has text in the
+// description column and, at most, a page number in the amount column, which
+// the top-margin skip keeps out. A first row whose quantity was unreadable but
+// whose amount is printed still starts the table instead of being dropped.
+func hasNumericToken(cells rowCells) bool {
+	if containsDigit(cells.quantityRaw) || containsDigit(cells.unitPriceRaw) {
+		return true
+	}
+	return containsDigit(cells.amountRaw) && !containsLetter(cells.amountRaw)
+}
+
+func containsLetter(value string) bool {
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
+			return true
+		}
+	}
+	return false
 }
 
 type rowCells struct {
@@ -810,14 +972,14 @@ func assignCells(line visualLine, columns []tableColumn) rowCells {
 	return cells
 }
 
-func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn) apicontract.ExtractionRow {
+func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn, minConfidence float64) apicontract.ExtractionRow {
 	row := apicontract.ExtractionRow{
-		LineNumber:  cellForLineNumber(cells.lineNumberRaw, page, cells.lineNumber),
-		Description: textCell(cells.descriptionText, page, cells.description),
-		Quantity:    decimalCell(cells.quantityRaw, page, cells.quantity, decimalQuantity),
-		UoM:         uomCell(cells.uomRaw, page, cells.uom),
-		UnitPrice:   decimalCell(cells.unitPriceRaw, page, cells.unitPrice, decimalMoney),
-		Amount:      decimalCell(cells.amountRaw, page, cells.amount, decimalMoney),
+		LineNumber:  cellForLineNumber(cells.lineNumberRaw, page, cells.lineNumber, minConfidence),
+		Description: textCell(cells.descriptionText, page, cells.description, minConfidence),
+		Quantity:    decimalCell(cells.quantityRaw, page, cells.quantity, decimalQuantity, minConfidence),
+		UoM:         uomCell(cells.uomRaw, page, cells.uom, minConfidence),
+		UnitPrice:   decimalCell(cells.unitPriceRaw, page, cells.unitPrice, decimalMoney, minConfidence),
+		Amount:      decimalCell(cells.amountRaw, page, cells.amount, decimalMoney, minConfidence),
 		Page:        page.Number,
 		BBox:        &line.Box,
 	}
@@ -835,6 +997,20 @@ func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn
 	if lineColumnPresent && row.LineNumber.Status != apicontract.ExtractionStatusExtracted {
 		required = false
 	}
+	// A low-confidence cell anywhere in the row -- including the amount or line
+	// number, which are not required for "extracted" -- makes the whole line a
+	// review item. Applying a line whose printed amount may be misread is not
+	// assistance.
+	for _, cell := range []apicontract.ExtractionCell{
+		row.LineNumber, row.Description, row.Quantity, row.UoM, row.UnitPrice, row.Amount,
+	} {
+		if cell.Confidence != nil && *cell.Confidence < minConfidence {
+			required = false
+			row.Note = appendNote(row.Note,
+				"One or more cells were read with low OCR confidence; confirm the line.")
+			break
+		}
+	}
 	if required {
 		row.Status = apicontract.ExtractionStatusExtracted
 	} else {
@@ -843,7 +1019,7 @@ func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn
 	return row
 }
 
-func cellForLineNumber(raw string, page *Page, words []Word) apicontract.ExtractionCell {
+func cellForLineNumber(raw string, page *Page, words []Word, minConfidence float64) apicontract.ExtractionCell {
 	cell := emptyCell()
 	trimmed := strings.TrimSpace(strings.TrimRight(raw, ".)"))
 	cell.Raw = raw
@@ -859,6 +1035,7 @@ func cellForLineNumber(raw string, page *Page, words []Word) apicontract.Extract
 		cell.Status = apicontract.ExtractionStatusNeedsReview
 		cell.Note = "The printed line number is not a plain number."
 	}
+	applyConfidence(&cell, words, minConfidence)
 	return cell
 }
 
@@ -868,7 +1045,7 @@ func validLineNumber(value string) bool {
 	return lineNumberPattern.MatchString(value)
 }
 
-func textCell(raw string, page *Page, words []Word) apicontract.ExtractionCell {
+func textCell(raw string, page *Page, words []Word, minConfidence float64) apicontract.ExtractionCell {
 	cell := emptyCell()
 	cell.Raw = raw
 	trimmed := strings.Join(strings.Fields(raw), " ")
@@ -879,10 +1056,11 @@ func textCell(raw string, page *Page, words []Word) apicontract.ExtractionCell {
 	cell.Page = pointerTo(page.Number)
 	cell.BBox = bboxOf(words)
 	cell.Status = apicontract.ExtractionStatusExtracted
+	applyConfidence(&cell, words, minConfidence)
 	return cell
 }
 
-func uomCell(raw string, page *Page, words []Word) apicontract.ExtractionCell {
+func uomCell(raw string, page *Page, words []Word, minConfidence float64) apicontract.ExtractionCell {
 	cell := emptyCell()
 	cell.Raw = raw
 	trimmed := strings.Join(strings.Fields(raw), " ")
@@ -898,6 +1076,7 @@ func uomCell(raw string, page *Page, words []Word) apicontract.ExtractionCell {
 		cell.Status = apicontract.ExtractionStatusNeedsReview
 		cell.Note = "The printed unit of measure is not a short unit name."
 	}
+	applyConfidence(&cell, words, minConfidence)
 	return cell
 }
 
@@ -919,7 +1098,7 @@ const (
 
 var decimalPattern = regexp.MustCompile(`^-?\d+(?:\.\d+)?$`)
 
-func decimalCell(raw string, page *Page, words []Word, kind decimalKind) apicontract.ExtractionCell {
+func decimalCell(raw string, page *Page, words []Word, kind decimalKind, minConfidence float64) apicontract.ExtractionCell {
 	cell := emptyCell()
 	cell.Raw = raw
 	trimmed := strings.TrimSpace(raw)
@@ -928,11 +1107,112 @@ func decimalCell(raw string, page *Page, words []Word, kind decimalKind) apicont
 	}
 	cell.Page = pointerTo(page.Number)
 	cell.BBox = bboxOf(words)
+	if len(words) > 1 {
+		// OCR regularly splits one printed number into several words. Removing
+		// the spaces blindly can turn a split decimal ("1250" "00") into a
+		// number ten times too large, so only a grouping-shaped token sequence
+		// is joined; anything else abstains with the printed text kept.
+		joined, ok := groupedNumericText(words)
+		if !ok {
+			cell.Value = trimmed
+			cell.Status = apicontract.ExtractionStatusNeedsReview
+			cell.Note = "The number is printed as separate tokens that do not form a clear grouping; confirm the printed value."
+			applyConfidence(&cell, words, minConfidence)
+			return cell
+		}
+		trimmed = joined
+	}
 	value, status, note := normaliseDecimal(trimmed, kind)
 	cell.Value = value
 	cell.Status = status
 	cell.Note = note
+	applyConfidence(&cell, words, minConfidence)
 	return cell
+}
+
+// groupedNumericText joins a multi-word numeric cell only when the words form
+// a thousands-grouped number: an optional currency token, one to three leading
+// digits, then groups of exactly three digits (the last may carry a decimal
+// fraction), and an optional trailing punctuation token. "1 250.00" is
+// grouping; "1250 00" and "10" "." "5" are splits whose meaning is unknown.
+func groupedNumericText(words []Word) (string, bool) {
+	tokens := make([]string, 0, len(words))
+	for _, word := range words {
+		text := strings.TrimSpace(word.Text)
+		if text != "" {
+			tokens = append(tokens, text)
+		}
+	}
+	if len(tokens) < 2 {
+		return "", false
+	}
+	start, end := 0, len(tokens)
+	if isCurrencyToken(tokens[start]) {
+		start++
+	}
+	if end > start && isPunctuationToken(tokens[end-1]) {
+		end--
+	}
+	if end-start < 1 {
+		return "", false
+	}
+	body := tokens[start:end]
+	if len(body) == 1 {
+		// "Rp 1.250,00": the only split is between the currency and the
+		// number, which normaliseDecimal already understands exactly.
+		return strings.Join(tokens, ""), true
+	}
+	if !leadingGroupPattern.MatchString(body[0]) {
+		return "", false
+	}
+	for index, token := range body[1:] {
+		last := index == len(body)-2
+		if last {
+			if !trailingGroupPattern.MatchString(token) {
+				return "", false
+			}
+			continue
+		}
+		if len(token) != 3 || !digitsOnly(token) {
+			return "", false
+		}
+	}
+	return strings.Join(tokens, ""), true
+}
+
+var (
+	leadingGroupPattern  = regexp.MustCompile(`^\d{1,3}$`)
+	trailingGroupPattern = regexp.MustCompile(`^\d{3}(?:[.,]\d{1,6})?$`)
+)
+
+func digitsOnly(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, character := range value {
+		if character < '0' || character > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+var currencyTokenPattern = regexp.MustCompile(
+	`(?i)^(rp|idr|usd|eur|gbp|jpy|sgd|myr|thb|hkd|aud|nzd|chf|cad|krw|inr|php|vnd|sar|aed)\.?$`)
+
+func isCurrencyToken(token string) bool {
+	if currencyTokenPattern.MatchString(token) {
+		return true
+	}
+	switch token {
+	case "$", "€", "£", "¥", "₩", "₹", "฿":
+		return true
+	}
+	return false
+}
+
+func isPunctuationToken(token string) bool {
+	return strings.Trim(token, ".,-–—") == ""
 }
 
 var currencyPrefix = regexp.MustCompile(`(?i)^(rp|idr|usd|eur|gbp|jpy|sgd|myr|thb|hkd|aud|nzd|chf|cad|krw|inr|php|vnd|sar|aed)\.?\s*`)
@@ -1110,8 +1390,13 @@ func maxFloat(left, right float64) float64 {
 	return right
 }
 
-func markDuplicateRows(rows []apicontract.ExtractionRow) {
-	seen := map[string]bool{}
+// markRowRisks flags duplicate and missing line numbers. It never dedupes,
+// merges, renumbers or drops a row: a duplicate delivered as two review items
+// is recoverable, a silently removed row is not. A gap in numbered lines is
+// flagged on the row after the gap, never filled with an invented row.
+func markRowRisks(rows []apicontract.ExtractionRow) {
+	contentCounts := map[string]int{}
+	keys := make([]string, len(rows))
 	for index := range rows {
 		row := &rows[index]
 		key := strings.Join([]string{
@@ -1124,11 +1409,70 @@ func markDuplicateRows(rows []apicontract.ExtractionRow) {
 		if row.LineNumber.Value == "" && row.Description.Value == "" {
 			continue
 		}
-		if seen[key] {
-			row.Status = apicontract.ExtractionStatusNeedsReview
-			row.Note = "This row appears more than once in the document; confirm the duplicate."
+		keys[index] = key
+		contentCounts[key]++
+	}
+	lineCounts := map[int]int{}
+	lineNumbers := make([]int, len(rows))
+	for index := range rows {
+		number, ok := wholeLineNumber(rows[index])
+		if !ok {
+			lineNumbers[index] = 0
 			continue
 		}
-		seen[key] = true
+		lineNumbers[index] = number
+		lineCounts[number]++
 	}
+
+	previous := 0
+	previousPrinted := ""
+	for index := range rows {
+		row := &rows[index]
+		if keys[index] != "" && contentCounts[keys[index]] > 1 {
+			row.Status = apicontract.ExtractionStatusNeedsReview
+			row.Note = appendNote(row.Note,
+				"This line appears more than once in the document; confirm that both printed lines are separate.")
+		}
+		number := lineNumbers[index]
+		if number == 0 {
+			continue
+		}
+		if lineCounts[number] > 1 {
+			row.Status = apicontract.ExtractionStatusNeedsReview
+			row.Note = appendNote(row.Note, fmt.Sprintf(
+				"Line number %d appears more than once; confirm which printed line each is.", number))
+		}
+		if previous > 0 && number > previous+1 {
+			row.Status = apicontract.ExtractionStatusNeedsReview
+			row.Note = appendNote(row.Note, fmt.Sprintf(
+				"Line number %s is not printed between line %s and line %d; a line may be missing from the rows this extractor read.",
+				missingRange(previous, number), previousPrinted, number))
+		}
+		if number > previous {
+			previous = number
+			previousPrinted = row.LineNumber.Value
+		}
+	}
+}
+
+// wholeLineNumber returns the printed line number only when it is a plain
+// integer. A sub-line ("2.1") is a different numbering scheme and is not used
+// for gap detection.
+func wholeLineNumber(row apicontract.ExtractionRow) (int, bool) {
+	value := strings.TrimSpace(row.LineNumber.Value)
+	if value == "" || strings.Contains(value, ".") {
+		return 0, false
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+func missingRange(previous, current int) string {
+	if current == previous+2 {
+		return strconv.Itoa(previous + 1)
+	}
+	return fmt.Sprintf("%d–%d", previous+1, current-1)
 }

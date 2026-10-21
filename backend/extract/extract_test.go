@@ -271,18 +271,26 @@ func TestProposeExtractsTableRowsWithCellsAndEvidence(t *testing.T) {
 	}
 }
 
-func TestProposeAbstainsOnImageOnlyPages(t *testing.T) {
-	result := parseFixture(t, []testWord{})
-	if result.PagesWithoutText != 1 || result.PagesWithText != 0 {
-		t.Errorf("page counts = %d with text, %d without; want 0/1",
-			result.PagesWithText, result.PagesWithoutText)
+func TestProposeAbstainsWhenOCRFindsNoWords(t *testing.T) {
+	parsed, err := ParseBBoxLayout(bboxXML([]testWord{}))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	parsed[0].Mode = apicontract.ExtractionPageModeOCR
+	result, err := Propose(parsed, Options{MaxPages: 40})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if result.PagesWithText != 0 || result.PagesWithoutText != 1 || result.PagesWithOCR != 1 {
+		t.Errorf("page counts = %d text, %d without, %d ocr; want 0/1/1",
+			result.PagesWithText, result.PagesWithoutText, result.PagesWithOCR)
 	}
 	if len(result.Rows) != 0 {
-		t.Errorf("rows = %d; an image-only page must not invent rows", len(result.Rows))
+		t.Errorf("rows = %d; an OCR page with no words must not invent rows", len(result.Rows))
 	}
 	for _, field := range result.Fields {
 		if field.Status != apicontract.ExtractionStatusAbsent {
-			t.Errorf("%s status = %q; want absent (no OCR in this slice)", field.Key, field.Status)
+			t.Errorf("%s status = %q; want absent", field.Key, field.Status)
 		}
 	}
 	if result.Abstentions.Fields != len(apicontract.ExtractionFieldKeys) {
@@ -461,13 +469,18 @@ func TestProposeMarksIncompleteAndDuplicateRowsNeedsReview(t *testing.T) {
 		!strings.Contains(strings.ToLower(duplicate.Note), "more than once") {
 		t.Errorf("duplicate row = %+v; want needs_review with a duplicate note", duplicate)
 	}
+	// Both occurrences are flagged: the extractor cannot know which printed
+	// line is the repeat, and it must not pick one by dropping the other.
+	if result.Rows[0].Status != apicontract.ExtractionStatusNeedsReview {
+		t.Errorf("first occurrence status = %q; want needs_review as well", result.Rows[0].Status)
+	}
 	unparseable := result.Rows[3]
 	if unparseable.Quantity.Status != apicontract.ExtractionStatusNeedsReview ||
 		unparseable.Quantity.Raw != "abc" {
 		t.Errorf("unparseable quantity = %+v; want needs_review with the printed text", unparseable.Quantity)
 	}
-	if result.Abstentions.Rows != 3 {
-		t.Errorf("abstention rows = %d; want 3", result.Abstentions.Rows)
+	if result.Abstentions.Rows != 4 {
+		t.Errorf("abstention rows = %d; want 4 (both duplicates, the incomplete row and the unparseable one)", result.Abstentions.Rows)
 	}
 }
 
@@ -514,5 +527,235 @@ func TestProposeStopsAtFooterTextAfterTheTable(t *testing.T) {
 	result := parseFixture(t, words)
 	if len(result.Rows) != 1 {
 		t.Fatalf("rows = %d; want only the table row (%+v)", len(result.Rows), result.Rows)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Issue #478: multipage tables, OCR confidence and line-number risks
+// ---------------------------------------------------------------------------
+
+func TestProposeContinuesRowsAcrossAPageWithoutARepeatedHeader(t *testing.T) {
+	pageOne := append(headerWords(), tableHeaderWords()...)
+	pageOne = append(pageOne, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	pageOne = append(pageOne, rowWords("2", "Cable termination", "10.5", "M", "42.00", "441.00", 243)...)
+	// The continued page has a running header and the next two rows, but no
+	// repeated column header. The rows continue the first page's table; the
+	// running header is not appended to the previous row.
+	pageTwo := []testWord{
+		word("PURCHASE", 50, 50, 70), word("ORDER", 125, 50, 45),
+		word("Page", 500, 50, 30), word("2", 534, 50, 8),
+	}
+	pageTwo = append(pageTwo, rowWords("3", "Freight", "1", "Lot", "150.00", "150.00", 225)...)
+	pageTwo = append(pageTwo, rowWords("4", "Packing", "2", "Pc", "25.00", "50.00", 243)...)
+	result := parseFixture(t, pageOne, pageTwo)
+
+	if len(result.Rows) != 4 {
+		t.Fatalf("rows = %d; want 4 across the page break (%+v)", len(result.Rows), result.Rows)
+	}
+	third := result.Rows[2]
+	if third.Page != 2 || third.Description.Value != "Freight" ||
+		third.Quantity.Value != "1" || third.UnitPrice.Value != "150.00" {
+		t.Errorf("continued row = %+v; want page 2 row 3 read with the carried columns", third)
+	}
+	if third.Status != apicontract.ExtractionStatusNeedsReview ||
+		!strings.Contains(third.Note, "column header is on page 1") {
+		t.Errorf("continued row = %+v; want needs_review naming the carried header", third)
+	}
+	if strings.Contains(result.Rows[1].Description.Value, "PURCHASE") {
+		t.Errorf("page 2's running header was appended to page 1's last row: %q",
+			result.Rows[1].Description.Value)
+	}
+	if result.Rows[1].Status != apicontract.ExtractionStatusExtracted {
+		t.Errorf("page 1 row 2 status = %q; want extracted", result.Rows[1].Status)
+	}
+}
+
+func TestProposeDoesNotCarryColumnsPastATableTerminator(t *testing.T) {
+	pageOne := append(headerWords(), tableHeaderWords()...)
+	pageOne = append(pageOne, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	pageOne = append(pageOne, totalWords("2500.00", 300)...)
+	// Page 2 has no header and no open table: rows must not be invented from a
+	// table that already ended on page 1.
+	pageTwo := rowWords("2", "Cable termination", "10.5", "M", "42.00", "441.00", 225)
+	result := parseFixture(t, pageOne, pageTwo)
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %d; want only page 1's row (%+v)", len(result.Rows), result.Rows)
+	}
+}
+
+func TestProposeFlagsAMissingLineNumberWithoutInventingTheRow(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	words = append(words, rowWords("2", "Cable termination", "10.5", "M", "42.00", "441.00", 243)...)
+	words = append(words, rowWords("4", "Freight", "1", "Lot", "150.00", "150.00", 261)...)
+	result := parseFixture(t, words)
+	if len(result.Rows) != 3 {
+		t.Fatalf("rows = %d; want the three printed rows and no invented row 3", len(result.Rows))
+	}
+	gap := result.Rows[2]
+	if gap.Status != apicontract.ExtractionStatusNeedsReview ||
+		!strings.Contains(gap.Note, "3 is not printed") {
+		t.Errorf("row 4 = %+v; want needs_review naming the missing line 3", gap)
+	}
+	if result.Rows[0].Status != apicontract.ExtractionStatusExtracted ||
+		result.Rows[1].Status != apicontract.ExtractionStatusExtracted {
+		t.Errorf("rows before the gap = %q/%q; want extracted", result.Rows[0].Status, result.Rows[1].Status)
+	}
+}
+
+func TestProposeFlagsDuplicateLineNumbersWithoutDroppingEitherRow(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	words = append(words, rowWords("2", "Cable termination", "10.5", "M", "42.00", "441.00", 243)...)
+	words = append(words, rowWords("2", "Freight", "1", "Lot", "150.00", "150.00", 261)...)
+	result := parseFixture(t, words)
+	if len(result.Rows) != 3 {
+		t.Fatalf("rows = %d; a duplicate line number must not remove a row", len(result.Rows))
+	}
+	for _, index := range []int{1, 2} {
+		row := result.Rows[index]
+		if row.Status != apicontract.ExtractionStatusNeedsReview ||
+			!strings.Contains(row.Note, "appears more than once") {
+			t.Errorf("row %d = %+v; want needs_review naming the duplicated line number", index, row)
+		}
+	}
+	if result.Rows[0].Status != apicontract.ExtractionStatusExtracted {
+		t.Errorf("row 1 status = %q; want extracted", result.Rows[0].Status)
+	}
+}
+
+func TestProposeMarksLowConfidenceOCRValuesNeedsReview(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	parsed, err := ParseBBoxLayout(bboxXML(words))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	parsed[0].Mode = apicontract.ExtractionPageModeOCR
+	parsed[0].Words = withConfidence(parsed[0].Words, 55)
+	result, err := Propose(parsed, Options{MaxPages: 40})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	poNumber := assertField(t, result, apicontract.ExtractionFieldPONumber, "4500123456", apicontract.ExtractionStatusNeedsReview)
+	if poNumber.Confidence == nil || *poNumber.Confidence != 55 {
+		t.Errorf("poNumber confidence = %v; want the measured 55", poNumber.Confidence)
+	}
+	if !strings.Contains(poNumber.Note, "OCR confidence") {
+		t.Errorf("poNumber note = %q; want the low-confidence reason", poNumber.Note)
+	}
+	row := result.Rows[0]
+	if row.Status != apicontract.ExtractionStatusNeedsReview {
+		t.Errorf("row status = %q; want needs_review", row.Status)
+	}
+	if row.Quantity.Status != apicontract.ExtractionStatusNeedsReview ||
+		!strings.Contains(row.Quantity.Note, "55%") {
+		t.Errorf("quantity = %+v; want needs_review naming the 55%% confidence", row.Quantity)
+	}
+	if !strings.Contains(row.Note, "low OCR confidence") {
+		t.Errorf("row note = %q; want the low-confidence warning", row.Note)
+	}
+}
+
+func TestProposeKeepsAConfidentOCRValueExtracted(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	parsed, err := ParseBBoxLayout(bboxXML(words))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	parsed[0].Mode = apicontract.ExtractionPageModeOCR
+	parsed[0].Words = withConfidence(parsed[0].Words, 96)
+	result, err := Propose(parsed, Options{MaxPages: 40})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	assertField(t, result, apicontract.ExtractionFieldPONumber, "4500123456", apicontract.ExtractionStatusExtracted)
+	if result.Rows[0].Status != apicontract.ExtractionStatusExtracted {
+		t.Errorf("row status = %q; a confident OCR value stays extracted", result.Rows[0].Status)
+	}
+	if result.Rows[0].Quantity.Confidence == nil || *result.Rows[0].Quantity.Confidence != 96 {
+		t.Errorf("quantity confidence = %v; want 96", result.Rows[0].Quantity.Confidence)
+	}
+}
+
+func TestProposeKeepsAConfidenceFloorAboveTheDefault(t *testing.T) {
+	words := append(headerWords(), tableHeaderWords()...)
+	words = append(words, rowWords("1", "Electrical panel", "2", "Pc", "1250.00", "2500.00", 225)...)
+	parsed, err := ParseBBoxLayout(bboxXML(words))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	parsed[0].Mode = apicontract.ExtractionPageModeOCR
+	parsed[0].Words = withConfidence(parsed[0].Words, 80)
+	result, err := Propose(parsed, Options{MaxPages: 40, MinConfidence: 90})
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if result.Rows[0].Status != apicontract.ExtractionStatusNeedsReview {
+		t.Errorf("row status = %q; 80%% is below a configured 90%% floor", result.Rows[0].Status)
+	}
+	if !strings.Contains(result.Rows[0].Quantity.Note, "90%") {
+		t.Errorf("quantity note = %q; want the configured floor named", result.Rows[0].Quantity.Note)
+	}
+}
+
+func TestProposeJoinsAThousandsGroupedNumberButNotASplitDecimal(t *testing.T) {
+	// OCR and text layers both split a printed number across words. A
+	// grouping-shaped split is joined ("1" "250.00" is 1250.00); a split that
+	// does not form a grouping ("1250" "00") must abstain, because joining it
+	// would silently turn 1,250.00 into 125000.
+	grouped := append(headerWords(), tableHeaderWords()...)
+	grouped = append(grouped,
+		word("1", 50, 225, 6), word("Panel", 90, 225, 40),
+		word("2", 300, 225, 5), word("Pc", 350, 225, 20),
+		word("1", 400, 225, 5), word("250.00", 410, 225, 40),
+		word("2500.00", 500, 225, 40))
+	result := parseFixture(t, grouped)
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %d; want 1", len(result.Rows))
+	}
+	if result.Rows[0].UnitPrice.Value != "1250.00" ||
+		result.Rows[0].UnitPrice.Status != apicontract.ExtractionStatusExtracted {
+		t.Errorf("unit price = %+v; want the grouped 1250.00", result.Rows[0].UnitPrice)
+	}
+
+	split := append(headerWords(), tableHeaderWords()...)
+	split = append(split,
+		word("1", 50, 225, 6), word("Panel", 90, 225, 40),
+		word("2", 300, 225, 5), word("Pc", 350, 225, 20),
+		word("1250", 400, 225, 30), word("00", 430, 225, 10),
+		word("2500.00", 500, 225, 40))
+	result = parseFixture(t, split)
+	if len(result.Rows) != 1 {
+		t.Fatalf("rows = %d; want 1", len(result.Rows))
+	}
+	price := result.Rows[0].UnitPrice
+	if price.Status != apicontract.ExtractionStatusNeedsReview ||
+		!strings.Contains(price.Note, "separate tokens") {
+		t.Errorf("unit price = %+v; want needs_review with the split-token reason", price)
+	}
+	if price.Value != "1250 00" {
+		t.Errorf("unit price value = %q; want the printed tokens preserved", price.Value)
+	}
+}
+
+func TestProposeCarriesAWrappedDescriptionAfterManyRows(t *testing.T) {
+	// The proposer holds a pointer to the last row so a wrapped description can
+	// extend it. That pointer must survive the slice growing: with more rows
+	// than the initial capacity, append reallocates and a stale pointer would
+	// silently drop the continuation text.
+	words := append(headerWords(), tableHeaderWords()...)
+	for index := 1; index <= 20; index++ {
+		words = append(words, rowWords(strconv.Itoa(index), "Panel", "1", "Pc", "10.00", "10.00", 225+float64(index-1)*18)...)
+	}
+	words = append(words, word("extension", 90, 225+20*18, 55))
+	result := parseFixture(t, words)
+	if len(result.Rows) != 20 {
+		t.Fatalf("rows = %d; want 20", len(result.Rows))
+	}
+	last := result.Rows[len(result.Rows)-1]
+	if last.Description.Value != "Panel extension" {
+		t.Errorf("last description = %q; want the wrapped text carried after 20 rows", last.Description.Value)
 	}
 }

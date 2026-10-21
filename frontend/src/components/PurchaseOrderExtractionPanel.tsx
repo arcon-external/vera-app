@@ -3,11 +3,17 @@ import {
   APPLICABLE_HEADER_KEYS,
   EXTRACTION_FIELD_LABELS,
   EXTRACTION_FIELD_ORDER,
+  EXTRACTION_MIN_CONFIDENCE,
   EXTRACTION_STATUS_LABELS,
   extractionAbstentionSummary,
+  extractionCellConfidenceLabel,
+  extractionEngineSummary,
   extractionEvidenceLabel,
   extractionFoundNoText,
+  extractionLowConfidenceCellLabels,
+  extractionPageModeSummary,
   extractionRegion,
+  extractionUsesOCR,
   headerProposalApplicable,
   proposalCellKey,
   rowProposalApplicable,
@@ -166,6 +172,11 @@ function FieldProposal({
         {field.Cell.Note ? (
           <p className="mt-1 text-caption text-ink-600">{field.Cell.Note}</p>
         ) : null}
+        {field.Cell.Confidence != null ? (
+          <p className="mt-1 text-caption text-ink-500" data-testid={`po-extraction-confidence-${field.Key}`}>
+            {extractionCellConfidenceLabel(field.Cell)}
+          </p>
+        ) : null}
       </div>
       <span className="tnum whitespace-nowrap text-caption text-ink-500 sm:text-right">
         {extractionEvidenceLabel(field.Cell)}
@@ -177,6 +188,10 @@ function FieldProposal({
 function rowValue(cell: PurchaseOrderExtractionCellDTO, suffix = ""): string {
   if (cell.Status === "absent" || cell.Value.trim() === "") return "—";
   return `${cell.Value}${suffix}`;
+}
+
+function lowConfidence(cell: PurchaseOrderExtractionCellDTO): boolean {
+  return cell.Confidence != null && cell.Confidence < EXTRACTION_MIN_CONFIDENCE;
 }
 
 export function PurchaseOrderExtractionRowCard({
@@ -220,25 +235,58 @@ export function PurchaseOrderExtractionRowCard({
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-caption sm:grid-cols-4">
         <div>
           <dt className="text-ink-500">Quantity</dt>
-          <dd className="tnum whitespace-nowrap text-ink-900">{rowValue(row.Quantity)}</dd>
+          <dd className="tnum whitespace-nowrap text-ink-900">
+            {rowValue(row.Quantity)}
+            {lowConfidence(row.Quantity) ? (
+              <span className="block text-caption text-ink-500">
+                {extractionCellConfidenceLabel(row.Quantity)}
+              </span>
+            ) : null}
+          </dd>
         </div>
         <div>
           <dt className="text-ink-500">UoM</dt>
-          <dd className="text-ink-900">{rowValue(row.UoM)}</dd>
+          <dd className="text-ink-900">
+            {rowValue(row.UoM)}
+            {lowConfidence(row.UoM) ? (
+              <span className="block text-caption text-ink-500">
+                {extractionCellConfidenceLabel(row.UoM)}
+              </span>
+            ) : null}
+          </dd>
         </div>
         <div>
           <dt className="text-ink-500">Unit price ({currency.code.toUpperCase()})</dt>
-          <dd className="tnum whitespace-nowrap text-ink-900">{rowValue(row.UnitPrice)}</dd>
+          <dd className="tnum whitespace-nowrap text-ink-900">
+            {rowValue(row.UnitPrice)}
+            {lowConfidence(row.UnitPrice) ? (
+              <span className="block text-caption text-ink-500">
+                {extractionCellConfidenceLabel(row.UnitPrice)}
+              </span>
+            ) : null}
+          </dd>
         </div>
         <div>
           <dt className="text-ink-500">Amount ({currency.code.toUpperCase()})</dt>
-          <dd className="tnum whitespace-nowrap text-ink-900">{rowValue(row.Amount)}</dd>
+          <dd className="tnum whitespace-nowrap text-ink-900">
+            {rowValue(row.Amount)}
+            {lowConfidence(row.Amount) ? (
+              <span className="block text-caption text-ink-500">
+                {extractionCellConfidenceLabel(row.Amount)}
+              </span>
+            ) : null}
+          </dd>
         </div>
       </dl>
       {!applicable ? (
         <p className="text-caption text-ink-600">
           This line cannot be applied exactly: a required value is missing or not a
           number the draft can hold. Correct it by hand.
+        </p>
+      ) : null}
+      {extractionLowConfidenceCellLabels(row) !== "" ? (
+        <p className="text-caption text-ink-600" data-testid={`po-extraction-row-confidence-${index}`}>
+          Low OCR confidence: {extractionLowConfidenceCellLabels(row)}.
         </p>
       ) : null}
       {row.Note ? <p className="text-caption text-ink-600">{row.Note}</p> : null}
@@ -283,18 +331,38 @@ export function PurchaseOrderExtractionPanelView({
         values to apply, then review the draft. Nothing changes until you press Apply.
       </p>
       <p className="mt-1 text-caption text-ink-500">{extractionAbstentionSummary(result)}</p>
+      <p className="mt-1 text-caption text-ink-600" data-testid="po-extraction-provenance">
+        {extractionEngineSummary(result)}
+      </p>
+      {(result.PageModes ?? []).length > 0 ? (
+        <ul className="mt-1 grid gap-0.5 text-caption text-ink-500" data-testid="po-extraction-pages">
+          {(result.PageModes ?? []).map((page) => (
+            <li key={page.Number}>{extractionPageModeSummary(page)}</li>
+          ))}
+        </ul>
+      ) : null}
 
       {extractionFoundNoText(result) ? (
         <StatusBanner tone="info">
-          No selectable text was found on any page. This release does not read scanned
-          pages; enter the values manually.
+          No readable text was found on any page. Enter the values manually.
         </StatusBanner>
       ) : null}
 
       {result.PagesWithoutText > 0 && !extractionFoundNoText(result) ? (
         <p className="mt-2 text-caption text-ink-600">
-          {result.PagesWithoutText} of {result.PageCount} pages have no selectable text
-          and were not read. This release does not OCR scans.
+          {result.PagesWithoutText} of {result.PageCount} pages{" "}
+          {extractionUsesOCR(result) ? (
+            <>
+              had no usable text layer and were read with OCR
+              {result.OCREngine ? ` (${result.OCREngine} ${result.OCREngineVersion})` : ""}.
+              Check every line that needs review against the page image.
+            </>
+          ) : (
+            <>
+              had no selectable text and were not read. This stored result predates
+              scanned-page extraction; run Extract again to read those pages.
+            </>
+          )}
         </p>
       ) : null}
 

@@ -1,12 +1,11 @@
-// Package pdfgen builds small synthetic text PDFs for tests and manual
-// verification.
+// Package pdfgen builds small synthetic PDFs for tests and manual verification.
 //
 // It exists so the extraction tests can use a real PDF with known words and
 // positions without committing a customer document. The generator writes a
 // classic-xref, single-font document; Poppler reads it as ordinary text. This
 // is test support, not a production renderer: it supports the Helvetica
-// base-14 face, ASCII text and multi-page tables, which is all the fixtures
-// need.
+// base-14 face, ASCII text, multi-page tables and full-page image pages (for
+// synthetic scans), which is all the fixtures need.
 package pdfgen
 
 import (
@@ -30,41 +29,65 @@ type Line struct {
 	Size float64
 }
 
+// Page is one synthetic page: either text lines or one full-page image.
+// Exactly one of Lines and Image is used; an image page has no text layer, so
+// it is the fixture for a scan.
+type Page struct {
+	Lines []Line
+	Image *ImagePage
+}
+
 // Build renders pages of lines into a valid PDF.
 func Build(pages [][]Line) []byte {
-	objects := make([]string, 0, 4+len(pages)*2)
+	converted := make([]Page, len(pages))
+	for index, lines := range pages {
+		converted[index] = Page{Lines: lines}
+	}
+	return BuildMixed(converted)
+}
+
+// BuildMixed renders text pages and image-only pages into one PDF, which is
+// what a mixed text-header/scanned-table fixture needs.
+func BuildMixed(pages []Page) []byte {
+	objects := make([][]byte, 0, 3+len(pages)*3)
 	objects = append(objects,
-		"<< /Type /Catalog /Pages 2 0 R >>",
-		"", // page tree, filled once the page object numbers are known
-		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+		[]byte("<< /Type /Catalog /Pages 2 0 R >>"),
+		nil, // page tree, filled once the page object numbers are known
+		[]byte("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"),
 	)
 	pageObjects := make([]int, 0, len(pages))
 	for _, page := range pages {
+		if page.Image != nil {
+			imageObject := len(objects) + 1
+			objects = append(objects, imageStream(*page.Image))
+			contentObject := len(objects) + 1
+			objects = append(objects, contentStreamBytes(imageContent(*page.Image)))
+			pageObject := len(objects) + 1
+			objects = append(objects, pageDictionaryWithImage(imageObject, contentObject))
+			pageObjects = append(pageObjects, pageObject)
+			continue
+		}
+		contentObject := len(objects) + 1
+		objects = append(objects, contentStreamBytes(textContentStream(page.Lines)))
 		pageObject := len(objects) + 1
+		objects = append(objects, pageDictionaryWithFont(contentObject))
 		pageObjects = append(pageObjects, pageObject)
-		objects = append(objects, "") // page object
-		objects = append(objects, contentStream(page))
 	}
 	kids := make([]string, 0, len(pageObjects))
 	for _, number := range pageObjects {
 		kids = append(kids, fmt.Sprintf("%d 0 R", number))
 	}
-	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>",
-		strings.Join(kids, " "), len(pageObjects))
-	for _, pageObject := range pageObjects {
-		contentObject := pageObject + 1
-		objects[pageObject-1] = fmt.Sprintf(
-			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] "+
-				"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>",
-			pageWidth, pageHeight, contentObject)
-	}
+	objects[1] = []byte(fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>",
+		strings.Join(kids, " "), len(pageObjects)))
 
 	var buffer bytes.Buffer
 	buffer.WriteString("%PDF-1.4\n")
 	offsets := make([]int, 0, len(objects))
 	for index, object := range objects {
 		offsets = append(offsets, buffer.Len())
-		fmt.Fprintf(&buffer, "%d 0 obj\n%s\nendobj\n", index+1, object)
+		fmt.Fprintf(&buffer, "%d 0 obj\n", index+1)
+		buffer.Write(object)
+		buffer.WriteString("\nendobj\n")
 	}
 	xref := buffer.Len()
 	fmt.Fprintf(&buffer, "xref\n0 %d\n", len(objects)+1)
@@ -77,7 +100,7 @@ func Build(pages [][]Line) []byte {
 	return buffer.Bytes()
 }
 
-func contentStream(lines []Line) string {
+func textContentStream(lines []Line) string {
 	var content strings.Builder
 	content.WriteString("BT\n")
 	for _, line := range lines {
@@ -90,8 +113,18 @@ func contentStream(lines []Line) string {
 			size, line.X, y, escape(line.Text))
 	}
 	content.WriteString("ET\n")
-	body := content.String()
-	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body)
+	return content.String()
+}
+
+func contentStreamBytes(content string) []byte {
+	return []byte(fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content))
+}
+
+func pageDictionaryWithFont(contentObject int) []byte {
+	return []byte(fmt.Sprintf(
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.0f %.0f] "+
+			"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>",
+		pageWidth, pageHeight, contentObject))
 }
 
 func escape(text string) string {
