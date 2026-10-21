@@ -1,6 +1,7 @@
 package gpdf
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/gpdf-dev/gpdf/document"
@@ -619,16 +620,43 @@ type subLine struct {
 // Subtracting the footer's height from every page's available space instead
 // would leave the table with almost a fifth of a page to fill and push rows onto
 // pages they do not belong on.
+//
+// layout is the test seam over compose: it drops the error because a test that
+// feeds an unplaceable row has no pages to assert against. Production renders
+// through compose and propagates the error to the caller. A row that fits an
+// empty page always composes, so for every placeable input the two agree.
 func (e *Engine) layout(in Input) []*page {
+	pages, err := e.compose(in)
+	if err != nil {
+		panic(err)
+	}
+	return pages
+}
+
+// compose is the layout that can fail: rows taller than a page fragment across
+// pages, and a row that cannot yield even one line on an empty page is an
+// error, not another page.
+//
+// A fitting row is never split -- the stylesheet's break-inside: avoid on
+// .items-body-table tr (issue #391) enforces that in the browser too -- so the
+// table fills into the content's bottom reserve when a row would otherwise be
+// stranded and only gives up once the next row will not fit at all. A row
+// taller than an empty page cannot honour avoid on any page: the old loop
+// placed whole rows or nothing, so the cursor never advanced while a fresh
+// page was appended and the same row retried forever (issue #485). Such a row
+// splits its description content (lines, then sub lines) at line boundaries:
+// the head fragment keeps the numeric cells and the leading piece, each
+// continuation carries only description, and the row is consumed piece by
+// piece until nothing remains.
+func (e *Engine) compose(in Input) ([]*page, error) {
 	in = withEffectiveLabels(in)
 	m := e.derive(in)
 	rows := e.measureRows(in, m)
 	// The table runs to the page's bottom edge rather than to the content box's.
-	// `.content` reserves 26px of bottom padding, but a row is never split across
-	// pages -- the stylesheet's break-inside: avoid on .items-body-table tr
-	// (issue #391) enforces that in the browser too -- so the browser fills into
-	// that reserve when a row would otherwise be stranded and only gives up once
-	// the next row will not fit at all.
+	// `.content` reserves 26px of bottom padding, but a fitting row is never
+	// split across pages, so the browser fills into that reserve when a row
+	// would otherwise be stranded and only gives up once the next row will not
+	// fit at all.
 	bottom := m.cardBottom
 
 	var pages []*page
@@ -643,30 +671,97 @@ func (e *Engine) layout(in Input) []*page {
 		p.prims = append(e.cardFor(p, m, bottom), p.prims...)
 	}
 
+	// An empty continuation page holds this much: the card less its top border.
+	// Every whole-row placement is measured against it before a new page is
+	// opened, and every fragment is measured against it before an error is
+	// returned, so the loop always advances its cursor or fails.
+	freshAvail := bottom - (m.cardY + px(1))
+
 	tableTop := m.tableTop
 	avail := bottom - tableTop
 	used := 0.0
 	first := 0
+	// cont marks a row whose head fragment is already drawn: its numeric
+	// cells are printed, so what remains draws description only.
+	cont := false
+	// pageFirst marks the page carrying the header. The row cursor cannot
+	// serve: while row zero fragments, it stays zero across pages that must
+	// not repeat the header.
+	pageFirst := true
 
 	for {
 		// The header row belongs to the first page only.
-		if first == 0 {
+		if pageFirst {
 			e.drawTableHead(cur, m, tableClip(m, tableTop, bottom, true), tableTop, in)
 			used += headRowH
 		}
-		placed := 0
-		for first+placed < len(rows) {
-			rb := rows[first+placed]
-			if used+rb.height > avail {
+		for first < len(rows) {
+			rb := rows[first]
+			if used+rb.height <= avail {
+				// A row that fits in the remaining space takes the
+				// existing path unchanged: a whole row draws through
+				// drawTableRow, a fragment remainder through the
+				// description-only continuation.
+				clip := tableClip(m, tableTop, bottom, pageFirst)
+				if cont {
+					e.drawTableRowCont(cur, m, clip, tableTop+used, rb, (rb.item.No-1)%2 == 1)
+				} else {
+					e.drawTableRow(cur, m, clip, tableTop+used, rb, (rb.item.No-1)%2 == 1)
+				}
+				used += rb.height
+				first++
+				cont = false
+				continue
+			}
+			if rb.height <= freshAvail {
+				// The row fits on an empty page, just not in what this
+				// one has left: it belongs on the next page, exactly as
+				// the old loop placed it.
 				break
 			}
-			// first == 0 marks the page carrying the header, and only that page
-			// has a rounded top to the table.
-			e.drawTableRow(cur, m, tableClip(m, tableTop, bottom, first == 0), tableTop+used, rb, (rb.item.No-1)%2 == 1)
-			used += rb.height
-			placed++
+			// The row is taller than an empty page, so no whole-page
+			// placement can ever take it. Split off the largest leading
+			// piece that fits what this page has left.
+			nl, ns, fh, err := e.planFragment(rb.lines, rb.subs, rb.kind, !cont, avail-used)
+			if err != nil {
+				if freshAvail-(avail-used) > 1e-9 {
+					// This page already carries content; retry the
+					// split on a fresh page rather than forcing a
+					// sliver the error path would reject.
+					break
+				}
+				return nil, fmt.Errorf("layout: row %d cannot fit on an empty page", first+1)
+			}
+			frag := rowBlock{
+				item: rb.item, part: rb.part, kind: rb.kind,
+				lines: rb.lines[:nl], subs: rb.subs[:ns], height: fh,
+			}
+			clip := tableClip(m, tableTop, bottom, pageFirst)
+			if cont {
+				e.drawTableRowCont(cur, m, clip, tableTop+used, frag, (rb.item.No-1)%2 == 1)
+			} else {
+				e.drawTableRow(cur, m, clip, tableTop+used, frag, (rb.item.No-1)%2 == 1)
+			}
+			used += fh
+			// What remains is description only: the head fragment
+			// carried the numeric cells, so its floor drops the
+			// priced-row minimum, which belonged to the
+			// after-discount cell.
+			remPadY, remMin := fragPadMin(rb.kind, false)
+			remLines := rb.lines[nl:]
+			remSubs := rb.subs[ns:]
+			rows[first] = rowBlock{
+				item: rb.item, part: rb.part, kind: rb.kind,
+				lines: remLines, subs: remSubs,
+				height: rowHeightWithMin(remLines, remSubs, remPadY, remMin),
+			}
+			if len(remLines)+len(remSubs) == 0 {
+				first++
+				cont = false
+				continue
+			}
+			cont = true
 		}
-		first += placed
 
 		if first >= len(rows) {
 			// The trailer is three atomic blocks -- the cards grid, the closing
@@ -739,8 +834,108 @@ func (e *Engine) layout(in Input) []*page {
 		tableTop = m.cardY + px(1)
 		avail = bottom - tableTop
 		used = 0
+		pageFirst = false
 	}
-	return pages
+	return pages, nil
+}
+
+// fragPadMin is the cell padding and content floor one fragment bands with.
+//
+// It mirrors measureRows exactly: a head fragment of a priced row keeps the
+// after-discount cell's floor, because the head still carries the numeric
+// cells; every continuation drops it, because it carries description only,
+// like a merged row. A head fragment of some content therefore bands at
+// exactly the height a short row of the same content measures, which is what
+// keeps the normal path byte-identical: whole rows never pass through here.
+func fragPadMin(kind rowKind, head bool) (padY, minPx float64) {
+	switch kind {
+	case rowParentTitle:
+		return px(parentPadTopPx) + px(parentPadBotPx), 0
+	case rowScope:
+		return 2 * px(subRowPadPx), 0
+	case rowPart:
+		if head {
+			return 2 * px(subRowPadPx), afterCellPx
+		}
+		return 2 * px(subRowPadPx), 0
+	default:
+		if head {
+			return 2 * px(tdPadPx), afterCellPx
+		}
+		return 2 * px(tdPadPx), 0
+	}
+}
+
+// planFragment splits a row's description content into the largest leading
+// piece that fits in avail points.
+//
+// The row reads as one ordered run -- description lines, then sub lines --
+// because that is the order the drawers paint them in, and the split never
+// cuts inside a line: text is wrapped before layout, so line boundaries are
+// the finest unit either side understands. A wrapped bullet may therefore
+// straddle two fragments, and that is correct: the piece keeps its wrapped
+// lines and their marker flags, so the continuation draws no second disc and
+// no line is lost or duplicated.
+//
+// It returns how many description lines and sub lines the fragment takes and
+// the fragment's height in the same measure the drawers band it with, so the
+// layout's accounting and the drawing agree by construction. At least one
+// line is always consumed; when not even one fits, it returns an error
+// instead of an empty fragment, so the layout loop either advances its cursor
+// or fails -- it never allocates a zero-progress page.
+func (e *Engine) planFragment(lines []string, subs []subLine, kind rowKind, head bool, avail float64) (int, int, float64, error) {
+	padY, minPx := fragPadMin(kind, head)
+	height := func(nl, ns int) float64 {
+		return rowHeightWithMin(lines[:nl], subs[:ns], padY, minPx)
+	}
+	fail := func() (int, int, float64, error) {
+		return 0, 0, 0, fmt.Errorf("gpdf: no description line fits in %.2fpt", avail)
+	}
+	if len(lines)+len(subs) == 0 {
+		return fail()
+	}
+	// Heights grow line by line -- content only gains, and the floor only
+	// rounds down -- so the first miss ends each scan.
+	if len(lines) > 0 {
+		if height(len(lines), 0) > avail {
+			// The description alone overflows: take as many leading
+			// lines as fit, and no sub lines yet.
+			best := 0
+			for a := 1; a <= len(lines); a++ {
+				if height(a, 0) <= avail {
+					best = a
+				} else {
+					break
+				}
+			}
+			if best == 0 {
+				return fail()
+			}
+			return best, 0, height(best, 0), nil
+		}
+		// The whole description fits; extend into the sub lines.
+		best := 0
+		for b := 1; b <= len(subs); b++ {
+			if height(len(lines), b) <= avail {
+				best = b
+			} else {
+				break
+			}
+		}
+		return len(lines), best, height(len(lines), best), nil
+	}
+	best := 0
+	for b := 1; b <= len(subs); b++ {
+		if height(0, b) <= avail {
+			best = b
+		} else {
+			break
+		}
+	}
+	if best == 0 {
+		return fail()
+	}
+	return 0, best, height(0, best), nil
 }
 
 // descLinePx is the description cell's line box in CSS pixels. The stylesheet
@@ -793,10 +988,24 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 		}
 
 		if it.Package == nil {
+			// A plain line is its main row plus one scope row per
+			// description line: the merged, unpriced row the state-B side
+			// draws, reusing its number style, indent and rail. The lines
+			// are rows of their own, not bullets inside the main cell,
+			// and the main row keeps its own values, never a sum of the
+			// lines.
 			out = append(out, rowBlock{
 				item: it, kind: rowMain, lines: lines, subs: subs,
 				height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 			})
+			for _, dl := range it.DescLines {
+				plines := e.Wrap(dl.Text, px(bodyPx), scopeW, false)
+				part := &Part{SubNo: dl.No, Desc: dl.Text}
+				out = append(out, rowBlock{
+					item: it, part: part, kind: rowScope, lines: plines,
+					height: rowHeight(plines, nil, subPadY),
+				})
+			}
 			continue
 		}
 
@@ -864,11 +1073,19 @@ func rowHeight(lines []string, subs []subLine, padY float64) float64 {
 // pass nothing through rowHeight, because they have no after cell.
 func rowHeightWithMin(lines []string, subs []subLine, padY float64, minPx float64) float64 {
 	content := float64(len(lines)) * descLinePx
-	if n := countItems(subs); n > 0 {
+	if len(subs) > 0 {
 		// The list's 6px top margin absorbs the first item's own 3px, so it
 		// stands once; then one 3px between each pair of items, and the last
 		// item's 3px bottom margin, which collapses with nothing.
-		content += 6 + 3*float64(n)
+		//
+		// The gap bands whenever the list draws anything: drawBullets adds
+		// it for any non-empty slice, so a continuation fragment that starts
+		// mid-bullet (no line opens an item, countItems == 0) still bands
+		// the gap its drawing carries. The 3px margins attach to item
+		// starts, of which a tails-only slice holds exactly the ones drawn
+		// (its first line opens no item), while a whole row holds every
+		// start -- so whole rows band exactly what they always have.
+		content += 6 + 3*float64(countItems(subs))
 		content += float64(len(subs)) * descLinePx
 	}
 	if content < minPx {

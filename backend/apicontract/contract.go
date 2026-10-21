@@ -717,6 +717,20 @@ type QuotationDetail struct {
 	MarginalizedGrandAfterTax   int64              `json:"marginalizedGrandAfterTax"`
 	PpnAmount                   int64              `json:"ppnAmount"`
 	DiscountPercent             int16              `json:"discountPercent"`
+	// CustomerCode is the client-directory code the editor resolves: the copy
+	// path pastes by code and refuses when the code is not in the served
+	// list, so a revision must carry the code it was issued under.
+	CustomerCode int16 `json:"customerCode"`
+	// CustomerAddress and RecipientAddress are the client-directory snapshot
+	// the revision stored. The editor has no address inputs -- Prepare
+	// resolves both from the client on the next export -- so the copy payload
+	// carries them as information, never as applied values.
+	CustomerAddress  string `json:"customerAddress"`
+	RecipientAddress string `json:"recipientAddress"`
+	// ValidityDays and PaymentTermDays are the revision's own terms:
+	// history, not the live profile's defaults.
+	ValidityDays    int16 `json:"validityDays"`
+	PaymentTermDays int16 `json:"paymentTermDays"`
 	// LeadTimeYears/Months/Weeks/Days are the lead time as the revision stated
 	// it, each 0..255, all zero meaning none was stated. They are the stored
 	// figures rather than a display so the editor restores the units.

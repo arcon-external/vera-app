@@ -169,9 +169,12 @@
 						{{end}}
 
 					{{else}}
-					{{/* State A: one full-value row, exactly as this template has
-					     always rendered. Text bullets inside the description
-					     (legacy sub-lines) keep drawing from DisplayDesc. */}}
+					{{/* State A: one full-value row carrying the line's own
+					     values, then one merged sub-row per description line
+					     numbered X.Y -- the same merged row the state-B side
+					     draws, so the existing sub-row CSS (number style,
+					     indent, rail) applies unchanged. The lines carry no
+					     prices; the main row is not derived from them. */}}
 					<tbody class="item">
 						<tr>
 							<td>{{.No}}</td>
@@ -184,6 +187,16 @@
 							<td class="after" style="font-size: {{priceSizePx .DisplayUnitPrice}}px">{{.DisplayUnitPrice}}</td>
 							<td style="font-size: {{priceSizePx .DisplayTotal}}px">{{.DisplayTotal}}</td>
 						</tr>
+						{{range .DescriptionLines}}
+						<tr class="sub-row">
+							<td>{{.No}}</td>
+							<td colspan="6">
+								<div class="item-desc">
+									<div class="desc-main">{{.Text}}</div>
+								</div>
+							</td>
+						</tr>
+						{{end}}
 					</tbody>
 					{{end}}
 

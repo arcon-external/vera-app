@@ -48,10 +48,19 @@ import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
+  applyQuotationCopy,
+  archivedToEditorDraft,
+  formatCopyRevision,
+  currencyMismatchMessage,
+  missingCurrencyMessage,
+  pasteSuccessMessage,
+  resolveCopyPasteText,
+  unknownCustomerMessage,
+  type QuotationCopyPayload,
+} from "./quotationClipboard";
+import {
   TAX_TYPE_OPTIONS,
   TAX_ZONE_OPTIONS,
-  legacyServiceCategory,
-  legacyTaxType,
   normalizeServiceCategory,
   normalizeTaxType,
   normalizeTaxZone,
@@ -509,6 +518,10 @@ function App() {
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
   const [confirmingNew, setConfirmingNew] = useState(false);
   const newConfirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A copied archived quotation waiting for the user to confirm replacing the
+  // current editor content (#485). Set by a marked paste onto a dirty editor;
+  // cleared by Replace, Keep editing, or Esc.
+  const [pendingPaste, setPendingPaste] = useState<QuotationCopyPayload | null>(null);
   const [customerPreview, setCustomerPreview] = useState<CustomerPreview | null>(null);
   const [breakdown, setBreakdown] = useState<InternalBreakdown | null>(null);
   const [quotationHTML, setQuotationHTML] = useState<string | null>(null);
@@ -970,6 +983,89 @@ function App() {
     []
   );
 
+  // Whether the editor holds anything worth confirming before it is
+  // replaced: a revision/draft context, a header field, or any line content.
+  // Declared up here (rather than with ready/loading below) because the paste
+  // capture below reads it in its dependency array.
+  const dirty =
+    editingQuote !== null ||
+    details.subject.trim() !== "" ||
+    details.recipientName.trim() !== "" ||
+    items.some(
+      (item) =>
+        item.description.trim() !== "" ||
+        item.unitPrice.trim() !== "" ||
+        item.bullets.some((line) => line.trim() !== "") ||
+        item.subItems.some((sub) => sub.description.trim() !== "")
+    );
+
+  // A pasted copy always starts a new, unsaved quotation: no archived
+  // number, revision, draft or preview travels with it, and the recalculation
+  // and dirty tracking pick it up like typed input.
+  const applyCopyPayload = useCallback(
+    (payload: QuotationCopyPayload) => {
+      const applied = applyQuotationCopy(payload, customerOptions);
+      if (!applied.ok) {
+        pushToast("error", unknownCustomerMessage(applied.customerCode));
+        return;
+      }
+      void ClearRevisionContext().catch(() => undefined);
+      void ClearDraftContext().catch(() => undefined);
+      nextKey.current = applied.items.length;
+      nextSubId.current = applied.nextSubId;
+      setItems(applied.items);
+      setDetails(applied.details);
+      setCustomerId(applied.customerCode);
+      setEditingQuote(null);
+      setActiveDraftId(0);
+      setDraftSavedAt(null);
+      setPendingPaste(null);
+      clearPreview();
+      setStatus({ type: "idle", message: "" });
+      pushToast("success", pasteSuccessMessage(payload));
+    },
+    [customerOptions, clearPreview, pushToast]
+  );
+
+  // A marked archived-quotation payload pasted anywhere on the editor page
+  // refills the whole form (#485). Capture runs before the cell and
+  // description handlers below: only the marked payload is intercepted, and
+  // ordinary text falls through to them untouched.
+  const handleCopyPasteCapture = useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const raw = event.clipboardData?.getData("text");
+      const decision = resolveCopyPasteText(raw, {
+        dirty,
+        customerOptions,
+        liveCurrency: companyCurrency,
+      });
+      if (decision.action === "ignore") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (decision.action === "refuse-currency-mismatch") {
+        pushToast(
+          "error",
+          currencyMismatchMessage(decision.payloadCurrency, decision.liveCurrency)
+        );
+        return;
+      }
+      if (decision.action === "refuse-missing-currency") {
+        pushToast("error", missingCurrencyMessage());
+        return;
+      }
+      if (decision.action === "refuse-unknown-customer") {
+        pushToast("error", unknownCustomerMessage(decision.customerCode));
+        return;
+      }
+      if (decision.action === "confirm") {
+        setPendingPaste(decision.payload);
+        return;
+      }
+      applyCopyPayload(decision.payload);
+    },
+    [dirty, customerOptions, companyCurrency, pushToast, applyCopyPayload]
+  );
+
   const handleOpenQuotation = useCallback((id: number, revision: number) => {
     setSelectedQuotation({ id, revision });
     setPage("detail");
@@ -995,57 +1091,21 @@ function App() {
           quotation.QuoteNumber,
           quotation.RevisionNumber + 1
         );
-        nextKey.current = quotation.Items.length;
+        // One archive -> editor rule for Edit and copy/paste alike (#485):
+        // the shared draft maps raw stored values, split descriptions and
+        // legacy tax; the keys below give the lines their React identity.
+        const draft = archivedToEditorDraft(quotation);
+        nextKey.current = draft.items.length;
         nextSubId.current = 1;
         setItems(
-          quotation.Items.map((item, index) => {
-            const parsed = parseSubItems(item.Description);
-            const subs = (item.Subs ?? []).map((sub) => ({
-              ...newSubItem(nextSubId.current++, sub.Description),
-              qty: String(sub.Qty),
-              uom: sub.UoM,
-              unitCost: String(sub.OriginalUnitPrice),
-              marginEnabled: sub.MarginEnabled,
-              marginPercent: String(sub.MarginPercent),
-              discountEnabled: sub.DiscountEnabled ?? false,
-              discountPercent: String(sub.DiscountPercent ?? 0),
-              bullets: [...(sub.Details ?? [])],
-            }));
-            return {
-              key: index,
-              description: parsed.description,
-              bullets: parsed.subItems,
-              qty: String(item.Qty),
-              uom: item.UoM,
-              unitPrice: String(item.UnitPrice),
-              marginEnabled: item.MarginEnabled,
-              marginPercent: String(item.MarginPercent),
-              // An old revision has no per-row discount, which reads as "this
-              // row carries none" -- so there is no legacy editor mode.
-              discountEnabled: item.DiscountEnabled ?? false,
-              discountPercent: String(item.DiscountPercent ?? 0),
-              subItems: subs,
-              showSubPrices: item.ShowSubPrices ?? false,
-            };
-          })
+          draft.items.map((item, index) => ({
+            ...item,
+            key: index,
+            subItems: item.subItems.map((sub) => ({ ...sub, id: nextSubId.current++ })),
+          }))
         );
-        setDetails({
-          subject: quotation.Subject,
-          recipientName: quotation.RecipientName,
-          validity: quotation.ValidityDays,
-          paymentTerm: quotation.PaymentTermDays,
-          leadTimeYears: quotation.LeadTimeYears,
-          leadTimeMonths: quotation.LeadTimeMonths,
-          leadTimeWeeks: quotation.LeadTimeWeeks,
-          leadTimeDays: quotation.LeadTimeDays,
-          discountPercent: quotation.DiscountPercent,
-          incoterm: quotation.Incoterm,
-          taxZone: quotation.TaxZone,
-          taxType: quotation.TaxType || legacyTaxType(quotation.TaxCategory),
-          serviceCategory:
-            quotation.ServiceCategory || legacyServiceCategory(quotation.TaxCategory),
-        });
-        setCustomerId(quotation.CustomerCode);
+        setDetails(draft.details);
+        setCustomerId(draft.customerCode);
         setEditingQuote({
           number: quotation.QuoteNumber,
           revision: quotation.RevisionNumber + 1,
@@ -1615,17 +1675,6 @@ function App() {
       item.bullets.some((line) => line.trim() !== "") ||
       item.subItems.some((sub) => sub.description.trim() !== "")
   );
-  const dirty =
-    editingQuote !== null ||
-    details.subject.trim() !== "" ||
-    details.recipientName.trim() !== "" ||
-    items.some(
-      (item) =>
-        item.description.trim() !== "" ||
-        item.unitPrice.trim() !== "" ||
-        item.bullets.some((line) => line.trim() !== "") ||
-        item.subItems.some((sub) => sub.description.trim() !== "")
-    );
   const loading = status.type === "loading";
 
   const requestNewQuotation = () => {
@@ -1669,6 +1718,10 @@ function App() {
         if (confirmingNew) {
           if (newConfirmTimer.current) clearTimeout(newConfirmTimer.current);
           setConfirmingNew(false);
+          return;
+        }
+        if (pendingPaste) {
+          setPendingPaste(null);
           return;
         }
         if (page === "detail") {
@@ -1724,7 +1777,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, user, showHelp, confirmingNew, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing]);
+  }, [page, user, showHelp, confirmingNew, pendingPaste, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing]);
 
   // PO source selector loaders (#467). The modal owns the three steps; these
   // callbacks are its only transport, so the component stays free of hidden
@@ -1876,7 +1929,24 @@ function App() {
         page === "create" ? (
           <>
             <div className="flex min-w-0 items-center gap-2">
-              {confirmingNew ? (
+              {pendingPaste ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-caption text-ink-600">
+                    Replace this quotation with {pendingPaste.source.quoteNumber}{" "}
+                    revision {formatCopyRevision(pendingPaste.source.revision)}?
+                  </span>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => applyCopyPayload(pendingPaste)}
+                  >
+                    Replace
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setPendingPaste(null)}>
+                    Keep editing
+                  </Button>
+                </span>
+              ) : confirmingNew ? (
                 <span className="flex items-center gap-2">
                   <span className="text-caption text-ink-600">
                     Discard this quotation and start a new one?
@@ -2024,7 +2094,7 @@ function App() {
       ) : null}
 
       {page === "create" ? (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6" onPasteCapture={handleCopyPasteCapture}>
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (

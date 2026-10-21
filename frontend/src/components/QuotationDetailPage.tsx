@@ -41,11 +41,33 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
   return quotation.TaxCategory || quotation.TaxZone;
 }
 import { useToast } from "../toast";
+import { copyQuotationToClipboard } from "../quotationClipboard";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
 function padRevision(revision: number): string {
   return String(revision).padStart(2, "0");
+}
+
+/**
+ * Copies the viewed revision's entry values as versioned JSON text. Exported
+ * for the SSR pin: the button renders with its label and disabled state, and
+ * the write itself is unit-tested through copyQuotationToClipboard.
+ */
+export function QuotationCopyButton({
+  quotation,
+  disabled,
+  onCopy,
+}: {
+  quotation: ArchivedQuotation;
+  disabled: boolean;
+  onCopy: (quotation: ArchivedQuotation) => void;
+}) {
+  return (
+    <Button variant="secondary" disabled={disabled} onClick={() => onCopy(quotation)}>
+      Copy to clipboard
+    </Button>
+  );
 }
 
 interface QuotationDetailPageProps {
@@ -70,6 +92,9 @@ export interface QuotationDetailHeaderProps {
   onBack: () => void;
   onEdit: () => void;
   onAddPurchaseOrder: () => void;
+  /** Copy is optional so the header's PO-only pins keep rendering without it. */
+  onCopy?: (quotation: ArchivedQuotation) => void;
+  copyDisabled?: boolean;
 }
 
 // The issued-Quotation header, exported so its two entry actions can be
@@ -83,6 +108,8 @@ export function QuotationDetailHeader({
   onBack,
   onEdit,
   onAddPurchaseOrder,
+  onCopy,
+  copyDisabled = false,
 }: QuotationDetailHeaderProps) {
   return (
     <header>
@@ -129,6 +156,13 @@ export function QuotationDetailHeader({
           >
             Add Purchase Order from a Quotation
           </Button>
+          {onCopy ? (
+            <QuotationCopyButton
+              quotation={quotation}
+              disabled={copyDisabled}
+              onCopy={onCopy}
+            />
+          ) : null}
           <Button variant="primary" onClick={onEdit}>
             Edit revision {padRevision(quotation.RevisionNumber)}
           </Button>
@@ -261,6 +295,10 @@ export function QuotationDetailPage({
         onBack={onBack}
         onEdit={() => onEdit(quotation)}
         onAddPurchaseOrder={onAddPurchaseOrder}
+        copyDisabled={switching}
+        onCopy={(current) =>
+          void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
+        }
       />
 
       <Card className="border-internal-200 bg-internal-50/40 p-5">
