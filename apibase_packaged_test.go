@@ -31,6 +31,16 @@ func TestAPIBaseURLPackagedIgnoresDevelopmentOverrides(t *testing.T) {
 	}
 }
 
+// TestProductionAPIURLIsPinned pins the exact production host. Comparing
+// against the constant alone would accept any valid replacement, including a
+// loopback or attacker HTTPS host.
+func TestProductionAPIURLIsPinned(t *testing.T) {
+	const want = "https://api.arconpentapersada.co.id"
+	if productionAPIURL != want {
+		t.Fatalf("productionAPIURL = %q; want %q", productionAPIURL, want)
+	}
+}
+
 // TestProductionAPIURLIsValid keeps the compiled literal usable by the same
 // validator every desktop request passes through.
 func TestProductionAPIURLIsValid(t *testing.T) {

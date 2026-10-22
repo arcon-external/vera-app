@@ -164,6 +164,12 @@ jobs:
         # compiles them: without this step a broken dev branch stays invisible
         # until someone runs `wails dev`.
         #
+        # `dev` and `production` select Wails' real Linux frontend, which
+        # cgo-links GTK/WebKit; only the default tags use Wails' no-cgo stub.
+        # Ubuntu 24.04 ships WebKit 4.1, so every root command adds
+        # `webkit2_41` and the packages below supply it. Without them the first
+        # command fails in pkg-config before any #495 test runs.
+        #
         # Root package covers default, packaged, dev and debug-packaged. The
         # Wails-free auth package covers those plus dev+production, which pins
         # the exclusive predicate (dev && !production versus !dev || production).
@@ -172,14 +178,16 @@ jobs:
         # combination is executable.
         if: steps.scope.outputs.needs_go != 'false'
         run: |
-          go vet -tags dev ./ ./backend/auth
-          go test -count=1 -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyringIdentity' ./ ./backend/auth
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
+          go vet -tags dev,webkit2_41 ./ ./backend/auth
+          go test -count=1 -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
           for tags in production dev production,debug; do
-            go test -tags "$tags" -count=1 \
-              -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyringIdentity' ./ ./backend/auth
+            go test -tags "$tags,webkit2_41" -count=1 \
+              -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
           done
           go test -tags dev,production -count=1 \
-            -run 'TestKeyringIdentity' ./backend/auth
+            -run 'TestKeyring' ./backend/auth
 
       - name: Build the chromedp tag (the renderer-equivalence oracle)
         # The default suite never builds this tag, so without this step the
