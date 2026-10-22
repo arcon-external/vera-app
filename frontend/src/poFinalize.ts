@@ -121,7 +121,8 @@ function labelOf(line: PurchaseOrderLine): string | null {
     : `${line.quotationItemNo}.${line.quotationSubNo}`;
 }
 
-function sourceLabel(line: PurchaseOrderSourceLineDTO): string {
+/** The stable review label of one source line: "3" or "3.1". */
+export function sourceLabel(line: PurchaseOrderSourceLineDTO): string {
   return line.LineLabel !== ""
     ? line.LineLabel
     : line.QuotationSubNo === null || line.QuotationSubNo === undefined

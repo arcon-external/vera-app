@@ -5,6 +5,8 @@ import {
   FinalizePurchaseOrder,
   GetPurchaseOrderExtraction,
   GetPurchaseOrderReview,
+  LinkPurchaseOrderDraftSource,
+  PreviewPurchaseOrderDraftLink,
   StartPurchaseOrderExtraction,
   UpdatePurchaseOrderDraft,
 } from "@backend/backend/Quotation";
@@ -58,6 +60,12 @@ import {
   type PurchaseOrderExtractionStateDTO,
 } from "../poExtraction";
 import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
+import {
+  draftLinkConflictWarning,
+  planDraftLink,
+  type PurchaseOrderDraftLinkReviewDTO,
+  type PurchaseOrderDraftTaxChoice,
+} from "../poDraftLink";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderExtractionPanelView } from "./PurchaseOrderExtractionPanel";
 import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
@@ -65,6 +73,10 @@ import {
   PurchaseOrderDifferenceReviewView,
   PurchaseOrderFinalConfirmationView,
 } from "./PurchaseOrderFinalize";
+import {
+  PurchaseOrderDraftLinkReviewPanel,
+  PurchaseOrderSourceLinkPanel,
+} from "./PurchaseOrderSourceLinkPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import {
@@ -140,6 +152,15 @@ export interface PurchaseOrderEditorPageProps {
   onCorrectionStart?: () => void;
   /** "correction" edits a saved record; every save then needs a reason. */
   mode?: "draft" | "correction";
+  /**
+   * #497: the exact source App's shared selector confirmed for this draft.
+   * The editor persists its working copy, loads the review and clears the
+   * target through onLinkTargetHandled.
+   */
+  pendingLinkTarget?: { quotationId: number; revisionNumber: number } | null;
+  onLinkTargetHandled?: () => void;
+  /** #497: the link committed; App words its success message. */
+  onLinked?: (order: PurchaseOrderDTO) => void;
 }
 
 /**
@@ -619,30 +640,14 @@ export function PurchaseOrderEditorView({
         </div>
       </div>
 
-      {sourceLess && !correcting ? (
-        <Card className="p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <SectionHeading
-                title="Link a Quotation"
-                hint="Linking repeats the difference review and keeps every value you enter"
-              />
-              <p className="mt-1 max-w-2xl text-small leading-relaxed text-ink-500">
-                {neverLinked
-                  ? "This draft has no source yet. Enter the customer's order now; linking a quotation is the next step and will not replace these fields."
-                  : "This draft's quotation was deleted. The values below are kept; an administrator can link a new quotation later."}
-              </p>
-            </div>
-            <Button
-              aria-label="Link a Quotation"
-              onClick={onLinkQuotation}
-              disabled={onLinkQuotation === undefined}
-              title="Linking a quotation is the next step; your entries are kept."
-            >
-              Link a Quotation
-            </Button>
-          </div>
-        </Card>
+      {!correcting ? (
+        <PurchaseOrderSourceLinkPanel
+          sourceState={state.sourceState}
+          quoteNumber={state.quoteNumber}
+          sourceRevision={state.sourceRevision}
+          correcting={correcting}
+          onChooseSource={onLinkQuotation}
+        />
       ) : null}
 
       {state.error !== null ? (
@@ -1056,6 +1061,9 @@ export function PurchaseOrderEditorPage({
   uomOptions,
   incotermOptions,
   onLinkQuotation,
+  pendingLinkTarget = null,
+  onLinkTargetHandled,
+  onLinked,
   onSaved,
   onCancel,
   onDirtyChange,
@@ -1099,6 +1107,16 @@ export function PurchaseOrderEditorPage({
   const [conflict, setConflict] = useState<PurchaseOrderConflictDTO | null>(null);
   // Which write the warning belongs to: Overwrite resumes the same one.
   const [pendingWrite, setPendingWrite] = useState<"save" | "finalize">("save");
+
+  // #497: the Staff draft link. The review is loaded from the server after the
+  // working copy is persisted, so the review compares the values the link will
+  // actually keep. Decisions are separate from the final-save review: a link
+  // decision is not a finalize decision.
+  const [linkReview, setLinkReview] = useState<PurchaseOrderDraftLinkReviewDTO | null>(null);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkTaxChoice, setLinkTaxChoice] = useState<PurchaseOrderDraftTaxChoice>("");
+  const [linking, setLinking] = useState(false);
 
   // #477: the extraction review. The run is the server's, the selection is
   // local, and applying is the one action that moves a proposal into the
@@ -1570,6 +1588,172 @@ export function PurchaseOrderEditorPage({
     }
   };
 
+  /**
+   * #497: persists the working copy before the link review. The review and the
+   * link compare the stored values, so an unsaved edit must be saved first or
+   * the review would describe values the link does not keep. Nothing is
+   * overwritten: this is the same draft save, through the same builder.
+   */
+  const persistWorkingCopy = async (): Promise<PurchaseOrderDTO> => {
+    const persisted = await ensurePersisted();
+    const working = {
+      ...editorStateRef.current,
+      orderId: persisted.id,
+      version: persisted.version,
+    };
+    const result = buildPurchaseOrderUpdate(working, activeCurrency);
+    if (result.input === null) {
+      throw new Error(result.error ?? "The draft is incomplete.");
+    }
+    const answer = await UpdatePurchaseOrderDraft(
+      new backend.PurchaseOrderUpdateInput({
+        ...result.input,
+        ID: persisted.id,
+        ExpectedVersion: persisted.version,
+        Overwrite: false,
+        Items: result.input.Items.map((item) => new backend.PurchaseOrderItemInput(item)),
+      })
+    );
+    const outcome = writeOutcome(answer);
+    if (outcome.kind === "conflict") {
+      throw new Error(draftLinkConflictWarning(outcome.conflict));
+    }
+    if (outcome.kind === "savedRecord") {
+      throw new Error("This purchase order was saved by someone else; reopen it before linking.");
+    }
+    if (outcome.kind !== "saved") {
+      throw new Error("The draft could not be saved before the review.");
+    }
+    dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+    return outcome.order;
+  };
+
+  /** Loads the link review for the selector's confirmed exact pair. */
+  async function startDraftLinkReview(target: {
+    quotationId: number;
+    revisionNumber: number;
+  }) {
+    setLinkLoading(true);
+    setLinkError(null);
+    try {
+      const persisted = await persistWorkingCopy();
+      const loaded = await PreviewPurchaseOrderDraftLink(
+        persisted.ID,
+        target.quotationId,
+        target.revisionNumber
+      );
+      setLinkReview(loaded);
+      setDecisions({});
+      setAcknowledgedMissing([]);
+      setAcknowledgedExtra([]);
+      setLinkTaxChoice(loaded.TaxChoiceRequired ? "" : "keep");
+    } catch (error) {
+      setLinkError(errorText(error));
+    } finally {
+      setLinkLoading(false);
+    }
+  }
+
+  // App confirms the shared selector's exact pair; the editor owns persistence
+  // and the review because it owns the working copy.
+  const handledLinkTarget = useRef<object | null>(null);
+  useEffect(() => {
+    if (pendingLinkTarget === null) return;
+    if (handledLinkTarget.current === pendingLinkTarget) return;
+    handledLinkTarget.current = pendingLinkTarget;
+    onLinkTargetHandled?.();
+    void startDraftLinkReview(pendingLinkTarget);
+    // The target object is the trigger; the callbacks read current values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingLinkTarget]);
+
+  /**
+   * #497: commits the link. The applied review is saved as an ordinary draft
+   * first -- so every "Use Quotation" choice and corrected line match is what
+   * the server compares -- and then the link request commits identity and the
+   * chosen tax basis against that saved version.
+   */
+  const commitDraftLink = async () => {
+    if (linkReview === null || linking) return;
+    const plan = planDraftLink(
+      state,
+      linkReview,
+      activeCurrency,
+      decisions,
+      acknowledgedMissing,
+      acknowledgedExtra,
+      linkTaxChoice
+    );
+    if (plan.input === null || plan.update === null) {
+      setLinkError(plan.error ?? "Resolve the review before linking.");
+      return;
+    }
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const answer = await UpdatePurchaseOrderDraft(
+        new backend.PurchaseOrderUpdateInput({
+          ...plan.update,
+          ID: state.orderId,
+          ExpectedVersion: state.version,
+          Overwrite: false,
+          Items: plan.update.Items.map((item) => new backend.PurchaseOrderItemInput(item)),
+        })
+      );
+      const outcome = writeOutcome(answer);
+      if (outcome.kind === "conflict") {
+        setLinkError(draftLinkConflictWarning(outcome.conflict));
+        return;
+      }
+      if (outcome.kind === "savedRecord") {
+        setLinkError("This purchase order was saved by someone else; reopen it before linking.");
+        return;
+      }
+      if (outcome.kind !== "saved") {
+        setLinkError("The reviewed values could not be saved before linking.");
+        return;
+      }
+      dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+
+      const linkedAnswer = await LinkPurchaseOrderDraftSource(
+        new backend.PurchaseOrderDraftLinkInput({
+          ID: outcome.order.ID,
+          ExpectedVersion: outcome.order.Version,
+          TargetQuotationID: plan.input.TargetQuotationID,
+          TargetRevisionNumber: plan.input.TargetRevisionNumber,
+          Decisions: plan.input.Decisions,
+          AcknowledgedMissing: plan.input.AcknowledgedMissing,
+          AcknowledgedExtra: plan.input.AcknowledgedExtra,
+          TaxChoice: plan.input.TaxChoice,
+        })
+      );
+      const linked = writeOutcome(linkedAnswer);
+      if (linked.kind === "conflict") {
+        setLinkError(draftLinkConflictWarning(linked.conflict));
+        return;
+      }
+      if (linked.kind === "savedRecord") {
+        setLinkError("This purchase order was saved by someone else; reopen it before linking.");
+        return;
+      }
+      if (linked.kind !== "saved") {
+        setLinkError("The server answered without a linked purchase order.");
+        return;
+      }
+      dispatch({ type: "saveSucceeded", order: linked.order, currency: activeCurrency });
+      setLinkReview(null);
+      setDecisions({});
+      setAcknowledgedMissing([]);
+      setAcknowledgedExtra([]);
+      setLinkTaxChoice("");
+      onLinked?.(linked.order);
+    } catch (error) {
+      setLinkError(errorText(error));
+    } finally {
+      setLinking(false);
+    }
+  };
+
   const save = async (expectedVersion: number, overwrite: boolean) => {
     if (correcting) {
       const reasonProblem = correctionReasonError(reason);
@@ -1767,6 +1951,58 @@ export function PurchaseOrderEditorPage({
           acknowledgedExtra
         );
 
+  // #497: the link review replaces the editor view while it is open, exactly as
+  // the final-save review does. The working copy is already saved, so Back
+  // returns to the same values without an unsaved-change prompt.
+  if (linkReview !== null) {
+    return (
+      <PurchaseOrderDraftLinkReviewPanel
+        state={state}
+        review={linkReview}
+        currency={activeCurrency}
+        decisions={decisions}
+        acknowledgedMissing={acknowledgedMissing}
+        acknowledgedExtra={acknowledgedExtra}
+        taxChoice={linkTaxChoice}
+        linking={linking}
+        error={linkError ?? state.error}
+        onDecision={(key: string, choice: POReviewChoice) =>
+          setDecisions((current) => ({ ...current, [key]: choice }))
+        }
+        onToggleMissing={(label) =>
+          setAcknowledgedMissing((current) =>
+            current.includes(label)
+              ? current.filter((value) => value !== label)
+              : [...current, label]
+          )
+        }
+        onToggleExtra={(lineNumber) =>
+          setAcknowledgedExtra((current) =>
+            current.includes(lineNumber)
+              ? current.filter((value) => value !== lineNumber)
+              : [...current, lineNumber]
+          )
+        }
+        onMatchChange={(lineKey, source: PurchaseOrderSourceLineDTO | null) =>
+          dispatch({
+            type: "lineChanged",
+            key: lineKey,
+            patch: {
+              quotationItemNo: source === null ? null : source.QuotationItemNo,
+              quotationSubNo: source === null ? null : (source.QuotationSubNo ?? null),
+            },
+          })
+        }
+        onTaxChoice={setLinkTaxChoice}
+        onBack={() => {
+          setLinkReview(null);
+          setLinkError(null);
+        }}
+        onLink={() => void commitDraftLink()}
+      />
+    );
+  }
+
   // Cancel hands the whole decision to App's guard: there is no separate
   // editor confirmation, so Cancel followed by a tab click replaces one
   // pending action instead of opening a second dialog. Leaving the review
@@ -1898,6 +2134,14 @@ export function PurchaseOrderEditorPage({
 
   return (
     <div className="flex flex-col gap-6">
+      {linkLoading ? (
+        <StatusBanner tone="info">
+          <span role="status">Saving the draft and loading the source review…</span>
+        </StatusBanner>
+      ) : null}
+      {linkError !== null && linkReview === null ? (
+        <StatusBanner tone="danger">{linkError}</StatusBanner>
+      ) : null}
       <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
         resolvePurchaseOrderId={async () => (await ensurePersisted()).id}

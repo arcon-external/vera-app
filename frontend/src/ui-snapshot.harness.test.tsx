@@ -65,11 +65,13 @@ import {
   type PurchaseOrderReviewDTO,
   type PurchaseOrderSourceDTO,
 } from "./poFinalize";
+import type { PurchaseOrderDraftLinkReviewDTO } from "./poDraftLink";
 import { PurchaseOrderTotals } from "./components/PurchaseOrderTotals";
 import {
   PurchaseOrderRepairConfirmationView,
   PurchaseOrderSourceChange,
 } from "./components/PurchaseOrderRepair";
+import { PurchaseOrderDraftLinkReviewPanel } from "./components/PurchaseOrderSourceLinkPanel";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
 import {
   deletionReducer,
@@ -752,6 +754,135 @@ const PO_REVIEW_EVALUATION = evaluateReview(
   [],
   []
 );
+
+// Issue #497: the Staff draft-link review. A never-linked USD draft whose three
+// manual lines already matched the source, with a differing tax basis: the tax
+// choice is required and unpressed, so the screenshot shows the choice cards and
+// the blocked Link source action beside the same difference review the final
+// save uses.
+const PO_LINK_ORDER: PurchaseOrderDTO = {
+  ...blankPurchaseOrderDraft({
+    currency: "USD",
+    taxZone: "FTZ",
+    taxType: "Goods",
+    serviceCategory: "",
+    receivedDate: "2026-10-02",
+    paymentTerms: "45 days",
+    incoterms: "CIF",
+  }),
+  ID: 7,
+  UUID: "uuid-po-link",
+  Version: 3,
+  PONumber: "PO-INF-2026-091",
+  BillingAddress: "Jl. Billing entered before linking",
+  DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+  Items: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Supply and installation of electrical panels",
+      QuantityScaled: 25000,
+      UoM: "Lot",
+      UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+      GrossMinor: 312625,
+      DiscountMinor: 31262,
+      NetMinor: 281363,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineNumber: 2,
+      Description: "Mounting and cable termination",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
+    },
+    {
+      QuotationItemNo: 3,
+      QuotationSubNo: null,
+      LineNumber: 3,
+      Description: "Electrical commissioning report",
+      QuantityScaled: 10000,
+      UoM: "Lot",
+      UnitPriceMinor: 0,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 0,
+      DiscountMinor: 0,
+      NetMinor: 0,
+    },
+  ],
+};
+const PO_LINK_STATE = initialPurchaseOrderEditorState(PO_LINK_ORDER, PO_EDITOR_USD);
+const PO_LINK_REVIEW: PurchaseOrderDraftLinkReviewDTO = {
+  Order: PO_LINK_ORDER,
+  Source: {
+    ...PO_REVIEW_SOURCE,
+    Currency: "USD",
+    PaymentTerms: "45 days",
+    Incoterms: "CIF",
+    DiscountPercent: 0,
+    Lines: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        LineLabel: "1",
+        Description: "Supply and installation of electrical panels",
+        UoM: "Lot",
+        QuantityScaled: 25000,
+        UnitPriceMinor: 125050,
+        DiscountEnabled: true,
+        DiscountPercent: 10,
+      },
+      {
+        QuotationItemNo: 2,
+        QuotationSubNo: 1,
+        LineLabel: "2.1",
+        Description: "Mounting and cable termination",
+        UoM: "Unit",
+        QuantityScaled: 10000,
+        UnitPriceMinor: 42000,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+      {
+        QuotationItemNo: 3,
+        QuotationSubNo: null,
+        LineLabel: "3",
+        Description: "Electrical commissioning report",
+        UoM: "Lot",
+        QuantityScaled: 10000,
+        UnitPriceMinor: 0,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+    ],
+  },
+  DocumentState: "none",
+  DraftTax: {
+    TaxZone: "FTZ",
+    TaxType: "Goods",
+    ServiceCategory: "",
+    TaxCategory: "",
+    PpnBps: 0,
+  },
+  SourceTax: {
+    TaxZone: "NonFTZ",
+    TaxType: "Goods",
+    ServiceCategory: "",
+    TaxCategory: "",
+    PpnBps: 1100,
+  },
+  TaxChoiceRequired: true,
+};
 
 // The source repair (issue #475) compares the same record against a genuinely
 // different link, so the old → new pair in the evidence is not two identical
@@ -1688,6 +1819,37 @@ const CASES: SnapshotCase[] = [
         onCancel={() => undefined}
         onFinalSave={() => undefined}
         finalSaving={false}
+      />
+    ),
+  },
+  {
+    // Issue #497: the Staff draft-link review with a required tax choice. The
+    // tax cards, the reused difference review and the blocked Link source action
+    // are the whole slice's user-visible surface. At 360 the two basis cards
+    // stack and the line-match grid reflows; at 1280 they sit side by side.
+    //
+    // What this case cannot show: choosing a basis, matching a line, the link
+    // request, and the post-link "Linked source" state stay hand-driven (the DOM
+    // suite covers them).
+    name: "PurchaseOrderDraftLink497",
+    element: (
+      <PurchaseOrderDraftLinkReviewPanel
+        state={PO_LINK_STATE}
+        review={PO_LINK_REVIEW}
+        currency={PO_EDITOR_USD}
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        taxChoice=""
+        linking={false}
+        error={null}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onTaxChoice={() => undefined}
+        onBack={() => undefined}
+        onLink={() => undefined}
       />
     ),
   },

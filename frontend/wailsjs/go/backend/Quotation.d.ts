@@ -62,6 +62,8 @@ export function GetQuotationPreviewHTML():Promise<string>;
 
 export function GetQuotationRevision(arg1:number,arg2:number):Promise<backend.ArchivedQuotation>;
 
+export function LinkPurchaseOrderDraftSource(arg1:backend.PurchaseOrderDraftLinkInput):Promise<backend.PurchaseOrderWriteResult>;
+
 export function ListCustomers():Promise<Array<backend.ManagedClient>>;
 
 export function ListDrafts():Promise<Array<backend.DraftSummaryDTO>>;
@@ -79,6 +81,8 @@ export function PickDirectory():Promise<string>;
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
 
 export function PreviewDeletion(arg1:backend.DeletionPreviewInput):Promise<backend.DeletionPreviewDTO>;
+
+export function PreviewPurchaseOrderDraftLink(arg1:number,arg2:number,arg3:number):Promise<backend.PurchaseOrderDraftLinkReviewDTO>;
 
 export function PreviewTemplateDocument(arg1:Array<backend.CompanyLabelEntry>,arg2:string,arg3:string,arg4:string,arg5:string):Promise<Array<number>>;
 

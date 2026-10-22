@@ -144,6 +144,42 @@ type PurchaseOrderReviewDTO struct {
 	DocumentState string
 }
 
+// PurchaseOrderDraftTaxBasisDTO is one side of the draft link's tax decision:
+// the persisted basis and the PPN rate the server derives from it.
+type PurchaseOrderDraftTaxBasisDTO struct {
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	TaxCategory     string
+	PpnBps          int16
+}
+
+// PurchaseOrderDraftLinkReviewDTO is the same review shape the final save reads
+// plus the tax decision a Staff draft link needs (#497).
+type PurchaseOrderDraftLinkReviewDTO struct {
+	Order             PurchaseOrderDTO
+	Source            PurchaseOrderSourceDTO
+	DocumentState     string
+	DraftTax          PurchaseOrderDraftTaxBasisDTO
+	SourceTax         PurchaseOrderDraftTaxBasisDTO
+	TaxChoiceRequired bool
+}
+
+// PurchaseOrderDraftLinkInput commits one Staff draft link (#497). It carries
+// no editable PO values: the working copy is saved through the ordinary draft
+// save first. TaxChoice is "keep"/"source" and is required only when the two
+// tax bases differ.
+type PurchaseOrderDraftLinkInput struct {
+	ID                   int64
+	ExpectedVersion      int64
+	TargetQuotationID    int64
+	TargetRevisionNumber int16
+	Decisions            []PurchaseOrderDecisionInput
+	AcknowledgedMissing  []string
+	AcknowledgedExtra    []int
+	TaxChoice            string
+}
+
 // PurchaseOrderDocumentDTO is one stored version of the optional customer PO
 // PDF. It is metadata only; the bytes come from a content call.
 type PurchaseOrderDocumentDTO struct {
@@ -749,6 +785,63 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 	return purchaseOrderSaved(response), nil
 }
 
+// PreviewPurchaseOrderDraftLink reads a Staff draft-link review (#497). It
+// writes nothing; the store refuses a saved record and a live draft by name.
+func (q *Quotation) PreviewPurchaseOrderDraftLink(id, quotationID int64, revisionNumber int16) (PurchaseOrderDraftLinkReviewDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDraftLinkReviewDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDraftLinkReviewDTO{}, err
+	}
+	revision := revisionNumber
+	var response apicontract.PurchaseOrderDraftLinkReviewRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/source-link/review",
+		apicontract.PurchaseOrderDraftLinkReviewRequest{
+			TargetQuotationID:    quotationID,
+			TargetRevisionNumber: &revision,
+		}, &response); err != nil {
+		return PurchaseOrderDraftLinkReviewDTO{}, err
+	}
+	return mapPurchaseOrderDraftLinkReviewDTO(response), nil
+}
+
+// LinkPurchaseOrderDraftSource commits one Staff draft link (#497). A stale
+// version is the same typed Conflict a draft save produces; every other
+// refusal stays an error so the panel names the server's answer.
+func (q *Quotation) LinkPurchaseOrderDraftSource(input PurchaseOrderDraftLinkInput) (PurchaseOrderWriteResult, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderWriteResult{}, err
+	}
+	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
+	for _, decision := range input.Decisions {
+		decisions = append(decisions, apicontract.PurchaseOrderDecisionRequest{
+			Key:    decision.Key,
+			Choice: decision.Choice,
+		})
+	}
+	revision := input.TargetRevisionNumber
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/source-link",
+		apicontract.PurchaseOrderDraftLinkRequest{
+			TargetQuotationID:    input.TargetQuotationID,
+			TargetRevisionNumber: &revision,
+			ExpectedVersion:      input.ExpectedVersion,
+			TaxChoice:            input.TaxChoice,
+			Decisions:            decisions,
+			AcknowledgedMissing:  input.AcknowledgedMissing,
+			AcknowledgedExtra:    input.AcknowledgedExtra,
+		}, &response); err != nil {
+		return purchaseOrderWriteFailure(err)
+	}
+	return purchaseOrderSaved(response), nil
+}
+
 // purchaseOrderSaved wraps one successful write.
 func purchaseOrderSaved(row apicontract.PurchaseOrderRow) PurchaseOrderWriteResult {
 	order := mapPurchaseOrderDTO(row)
@@ -1291,4 +1384,30 @@ func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseO
 		})
 	}
 	return review
+}
+
+func mapPurchaseOrderDraftLinkReviewDTO(row apicontract.PurchaseOrderDraftLinkReviewRow) PurchaseOrderDraftLinkReviewDTO {
+	base := mapPurchaseOrderReviewDTO(apicontract.PurchaseOrderReviewRow{
+		Order:         row.Order,
+		Source:        row.Source,
+		DocumentState: row.DocumentState,
+	})
+	return PurchaseOrderDraftLinkReviewDTO{
+		Order:             base.Order,
+		Source:            base.Source,
+		DocumentState:     base.DocumentState,
+		DraftTax:          mapPurchaseOrderDraftTaxBasisDTO(row.DraftTax),
+		SourceTax:         mapPurchaseOrderDraftTaxBasisDTO(row.SourceTax),
+		TaxChoiceRequired: row.TaxChoiceRequired,
+	}
+}
+
+func mapPurchaseOrderDraftTaxBasisDTO(row apicontract.PurchaseOrderDraftTaxBasisRow) PurchaseOrderDraftTaxBasisDTO {
+	return PurchaseOrderDraftTaxBasisDTO{
+		TaxZone:         row.TaxZone,
+		TaxType:         row.TaxType,
+		ServiceCategory: row.ServiceCategory,
+		TaxCategory:     row.TaxCategory,
+		PpnBps:          row.PpnBps,
+	}
 }

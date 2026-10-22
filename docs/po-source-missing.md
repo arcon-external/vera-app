@@ -11,19 +11,59 @@ until it is repaired.
 | Row shape      | `quotation_id` | `former_*` columns | Archive |
 | -------------- | -------------- | ------------------ | ------- |
 | Live link      | set            | all null           | normal  |
-| Source missing | null           | all set            | `Source missing` badge |
+| Former source  | null           | all set            | `Source missing` badge |
+| Never linked   | null           | all null           | `Source missing` badge; draft only |
 
-`Source missing` is **independent of Draft/Saved**. The stored entry state is
-still the record's own state, and the archive shows both. The row keeps its
-customer PO number, customer snapshot, received date, currency, lines and
-totals; `quote_number` and `source_revision` name the **former** source only.
+`Source missing` covers both a draft that was never linked (#496) and a record
+whose former source quotation was deleted; the latter keeps its former-source
+reference. It is **independent of Draft/Saved** for a formerly-linked record.
+A never-linked row is **draft-only** at the schema level: finalizing it or
+reviewing it requires a live source first. A linked revision `00` is a real live
+link, not an absence.
+
+The row keeps its customer PO number, customer snapshot, received date, currency,
+lines and totals. A formerly-linked row's `quote_number` and `source_revision`
+name the **former** source only; a never-linked row has no source identity at
+all.
 
 The archive finds the row by the former Quotation number because search reads
 `COALESCE(live quote number, former quote number)`. The independent filter is
 `sourceMissing=only` / `sourceMissing=exclude` (default `any`); it counts as one
 active filter and Reset clears it with the rest.
 
-## Repair: Link Quotation
+## Draft link: Link a Quotation (Staff, #497)
+
+A **draft** with no live source is linked by Staff through the Source link panel
+at the top of the editor:
+
+1. Staff picks the exact issued revision with the shared **entry** selector. The
+   selector is not repair mode: no admin gate and no `excludePOId`.
+2. The editor saves the working copy as an ordinary draft first, so the review
+   and the link compare the values the record will actually keep.
+3. The review repeats the #471 matching and difference rules. A manual line is
+   extra and an unclaimed source line is missing until it is explicitly matched
+   or acknowledged; matches are by quotation reference, never by position.
+4. Source identity (customer, quote number, revision, quotation line references,
+   printed totals) comes from the revision. Every PO-owned value — number, dates,
+   addresses, ship-to, contact, payment terms, Incoterm, lines, prices,
+   discounts, adjustment — stays as entered. A changed customer also brings the
+   revision's billing address, exactly as the saved-record repair does.
+5. The draft and revision must be in one currency; a mismatch is `422`
+   (`po_currency_mismatch`) and is never converted. A never-linked draft's
+   currency can be edited before retrying; a formerly-linked draft's basis is
+   frozen, so another revision in its currency must be chosen.
+6. A differing tax basis needs an explicit `keep`/`source` choice (`422`
+   `po_tax_choice_required` when missing). The server recomputes PPN from the
+   chosen basis, and the basis is frozen again after the link.
+7. Occupancy and the version are rechecked in the transaction: an occupied
+   target is `409` (`po_target_occupied`), a stale version is `409`
+   (`po_version_conflict`), and no live draft is re-linked. A saved record is
+   refused as `409` (`po_not_draft`), not by the admin gate.
+8. A draft link is an ordinary draft write. It needs no reason and writes no
+   correction snapshot or `036` repair satellite. It is **not** a finalize
+   review: Finalize still requires a live source and its own completed review.
+
+## Finalized repair: Link Quotation (Admin)
 
 1. An **admin** opens the saved record. Staff see the banner and no action; the
    API answers a non-admin with `403` and `code: "po_repair_forbidden"` — the
@@ -56,11 +96,15 @@ than inventing their own answer.
 
 ## Seams
 
-- Store: `ReviewPurchaseOrderSource`, `RepairPurchaseOrderSource`,
+- Store: `PreviewPurchaseOrderDraftLink`, `LinkPurchaseOrderDraftSource`,
+  `ReviewPurchaseOrderSource`, `RepairPurchaseOrderSource`,
   `ListPurchaseOrders` in `backend/store`.
-- HTTP: `POST /v1/purchase-orders/:id/source-repair/review`,
+- HTTP: `POST /v1/purchase-orders/:id/source-link/review`,
+  `POST /v1/purchase-orders/:id/source-link`,
+  `POST /v1/purchase-orders/:id/source-repair/review`,
   `POST /v1/purchase-orders/:id/source-repair`,
   `GET /v1/purchase-orders?sourceMissing=only|exclude`.
 - UI: `PurchaseOrderListPage` (badge, former reference, Source filter),
-  `PurchaseOrderSavedView` (banner, Link Quotation), and the shared
+  `PurchaseOrderSourceLinkPanel` and `PurchaseOrderDraftLinkReviewPanel` (Staff
+  draft link), `PurchaseOrderSavedView` (banner, Link Quotation), and the shared
   `PurchaseOrderRepairPage` / `PurchaseOrderSourceChange` flow.

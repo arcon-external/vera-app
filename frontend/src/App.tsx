@@ -527,8 +527,15 @@ function App() {
   // The PO source selector (#467) is shared by both PO entry paths and, in
   // repair mode (#475), by the admin source-link repair.
   const [poSelectorOpen, setPOSelectorOpen] = useState(false);
-  const [poSelectorMode, setPOSelectorMode] = useState<"entry" | "repair">("entry");
+  const [poSelectorMode, setPOSelectorMode] = useState<"entry" | "repair" | "link">("entry");
   const [poSelectorRepairID, setPOSelectorRepairID] = useState<number | null>(null);
+  // #497: the exact pair the selector confirmed for the open source-less draft.
+  // The editor owns persistence and the review, so App only carries the choice
+  // until the editor consumes it.
+  const [pendingLinkTarget, setPendingLinkTarget] = useState<{
+    quotationId: number;
+    revisionNumber: number;
+  } | null>(null);
   // The PO workspace (#468/#473) owns the open record and its phase in one
   // controller, so Cancel from a correction can re-read the saved record
   // instead of leaving a stale editor behind. The page renders the archive when
@@ -675,6 +682,7 @@ function App() {
   const openSourceRepair = useCallback(() => {
     const record = poWorkspace.draft;
     if (record === null || record.State !== "saved") return;
+    setPendingLinkTarget(null);
     setPOSelectorMode("repair");
     setPOSelectorRepairID(record.ID);
     setPOSelectorOpen(true);
@@ -687,6 +695,7 @@ function App() {
   const openPurchaseOrder = useCallback(
     async (id: number) => {
       try {
+        setPendingLinkTarget(null);
         const draft = await GetPurchaseOrder(id);
         poLeave.setDirty(false);
         poWorkspace.open(draft);
@@ -2094,7 +2103,7 @@ function App() {
       ) : null}
       <POQuotationSelector
         open={poSelectorOpen}
-        mode={poSelectorMode}
+        mode={poSelectorMode === "repair" ? "repair" : "entry"}
         excludePOID={poSelectorRepairID ?? undefined}
         onClose={closePOSourceSelector}
         onConfirm={async (selection) => {
@@ -2109,6 +2118,17 @@ function App() {
             });
             poLeave.setDirty(false);
             poWorkspace.repair(review);
+            closePOSourceSelector();
+            setPage("po");
+            return;
+          }
+          if (poSelectorMode === "link") {
+            // #497: the shared entry selector's exact pair. The editor saves
+            // the working copy and loads the difference review itself.
+            setPendingLinkTarget({
+              quotationId: selection.quotationId,
+              revisionNumber: selection.revisionNumber,
+            });
             closePOSourceSelector();
             setPage("po");
             return;
@@ -2317,15 +2337,26 @@ function App() {
           pageSize={workspaceSettings.purchaseOrder.listPageSize}
           blankDraft={blankPODraft}
           currencyOptions={currencyCatalogue ?? []}
-          onLinkQuotation={() =>
+          onLinkQuotation={() => {
+            setPOSelectorMode("link");
+            setPOSelectorRepairID(null);
+            setPOSelectorOpen(true);
+          }}
+          pendingLinkTarget={pendingLinkTarget}
+          onLinkTargetHandled={() => setPendingLinkTarget(null)}
+          onLinked={(updated) => {
+            // The workspace adopts the server's linked record so the editor
+            // remounts on its stored source instead of the transient draft.
+            poWorkspace.saved(updated);
             pushToast(
-              "info",
-              "Linking a quotation is the next step; your entries stay here until an explicit review."
-            )
-          }
+              "success",
+              `Linked to quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}. Your entered values were kept.`
+            );
+          }}
           onAdd={() => {
             setPOSelectorMode("entry");
             setPOSelectorRepairID(null);
+            setPendingLinkTarget(null);
             setPOSelectorOpen(true);
           }}
           isAdmin={isAdmin}

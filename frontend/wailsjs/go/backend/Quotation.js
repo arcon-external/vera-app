@@ -118,6 +118,10 @@ export function GetQuotationRevision(arg1, arg2) {
   return window['go']['backend']['Quotation']['GetQuotationRevision'](arg1, arg2);
 }
 
+export function LinkPurchaseOrderDraftSource(arg1) {
+  return window['go']['backend']['Quotation']['LinkPurchaseOrderDraftSource'](arg1);
+}
+
 export function ListCustomers() {
   return window['go']['backend']['Quotation']['ListCustomers']();
 }
@@ -152,6 +156,10 @@ export function Prepare(arg1) {
 
 export function PreviewDeletion(arg1) {
   return window['go']['backend']['Quotation']['PreviewDeletion'](arg1);
+}
+
+export function PreviewPurchaseOrderDraftLink(arg1, arg2, arg3) {
+  return window['go']['backend']['Quotation']['PreviewPurchaseOrderDraftLink'](arg1, arg2, arg3);
 }
 
 export function PreviewTemplateDocument(arg1, arg2, arg3, arg4, arg5) {

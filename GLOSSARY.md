@@ -371,7 +371,7 @@ The exact issued quotation revision a purchase order follows.
 _Avoid_: Parent revision, linked quote
 
 **Source selector**:
-The page where staff choose the quotation revision for a purchase order or a source repair.
+The page where staff choose the quotation revision for a purchase order, a source link or an admin source repair.
 _Avoid_: Picker, dropdown
 
 **Used revision**:
@@ -390,9 +390,17 @@ _Avoid_: Broken PO, orphan, unlinked PO
 The quote number and revision a source-missing purchase order used to follow.
 _Avoid_: Old quote
 
+**Source link**:
+The Staff action that links a source-missing draft to an issued quotation revision through the difference review. It preserves the draft's entered values, needs no reason, keeps no repair history, and is not offered once a draft has a live source.
+_Avoid_: Relink, source repair, attach
+
+**Tax choice**:
+The explicit decision a source link makes between keeping the draft's tax basis and adopting the quotation revision's. PPN is recomputed from the chosen basis.
+_Avoid_: Tax override, tax sync
+
 **Source repair**:
-The admin action that links a source-missing purchase order to a new quotation revision, with a reason and a repeated review.
-_Avoid_: Relink, fix
+The admin action that links a finalized source-missing purchase order to a new quotation revision, with a reason and a repeated review.
+_Avoid_: Relink, fix, source link
 
 **PO version**:
 The number that advances on every write to a purchase order; a save with a stale version is a version conflict.

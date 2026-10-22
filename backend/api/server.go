@@ -151,6 +151,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// would return, so the link-repair contract has one answer at every layer.
 	server.echo.POST("/v1/purchase-orders/:id/source-repair/review", server.reviewPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
 	server.echo.POST("/v1/purchase-orders/:id/source-repair", server.repairPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
+	// #497: Staff link a never/formerly-linked draft to an issued revision.
+	// These routes have no admin gate; the store refuses a saved record by name
+	// and a live draft as not eligible.
+	server.echo.POST("/v1/purchase-orders/:id/source-link/review", server.previewPurchaseOrderDraftLink, server.requireSession)
+	server.echo.POST("/v1/purchase-orders/:id/source-link", server.linkPurchaseOrderDraftSource, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.

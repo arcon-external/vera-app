@@ -36,8 +36,13 @@ export interface PurchaseOrderWorkspacePageProps {
   blankDraft?: PurchaseOrderDTO | null;
   /** The loaded currency catalogue, for editing the basis before linking. */
   currencyOptions?: CurrencyInfo[];
-  /** Safe deferred linking for #497; it must not create or replace a record. */
+  /** #497: opens the shared selector for this draft's source link. */
   onLinkQuotation?: () => void;
+  /** #497: the selector's confirmed pair, consumed by the editor. */
+  pendingLinkTarget?: { quotationId: number; revisionNumber: number } | null;
+  onLinkTargetHandled?: () => void;
+  /** #497: the link committed; App words its success message. */
+  onLinked?: (order: PurchaseOrderDTO) => void;
   /**
    * Issue #492: the account's remembered archive page size. Only the initial
    * list state uses it; the server's own page size takes over once a page
@@ -115,6 +120,9 @@ export function PurchaseOrderWorkspacePage({
   blankDraft = null,
   currencyOptions = [],
   onLinkQuotation,
+  pendingLinkTarget = null,
+  onLinkTargetHandled,
+  onLinked,
   onAdd,
   onOpen,
   isAdmin,
@@ -152,6 +160,9 @@ export function PurchaseOrderWorkspacePage({
           uomOptions={uomOptions}
           incotermOptions={incotermOptions}
           onLinkQuotation={onLinkQuotation}
+          pendingLinkTarget={pendingLinkTarget}
+          onLinkTargetHandled={onLinkTargetHandled}
+          onLinked={onLinked}
           onDirtyChange={onDirtyChange}
           onSaved={(updated, corrected) => {
             workspace.saved(updated);
@@ -253,6 +264,9 @@ export function PurchaseOrderWorkspacePage({
       uomOptions={uomOptions}
       incotermOptions={incotermOptions}
       onLinkQuotation={onLinkQuotation}
+      pendingLinkTarget={pendingLinkTarget}
+      onLinkTargetHandled={onLinkTargetHandled}
+      onLinked={onLinked}
       mode={workspace.correcting ? "correction" : "draft"}
       onCorrectionStart={workspace.correctionStarted}
       onDirtyChange={onDirtyChange}

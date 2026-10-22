@@ -551,6 +551,53 @@ type PurchaseOrderSourceReviewRequest struct {
 	TargetRevisionNumber *int16 `json:"targetRevisionNumber"`
 }
 
+// PurchaseOrderDraftLinkReviewRequest asks for the Staff draft-link review
+// (#497). It writes nothing; the target is the candidate source revision.
+type PurchaseOrderDraftLinkReviewRequest struct {
+	TargetQuotationID    int64  `json:"targetQuotationId"`
+	TargetRevisionNumber *int16 `json:"targetRevisionNumber"`
+}
+
+// PurchaseOrderDraftLinkRequest commits one Staff draft link (#497). It carries
+// no editable PO values: the working copy is saved as an ordinary draft first,
+// and this request changes only the source link, the chosen tax basis and the
+// recorded review. Protected identity values are still refused by name.
+type PurchaseOrderDraftLinkRequest struct {
+	PurchaseOrderProtectedFieldsRequest
+	Decisions            []PurchaseOrderDecisionRequest `json:"decisions"`
+	AcknowledgedMissing  []string                       `json:"acknowledgedMissing"`
+	AcknowledgedExtra    []int                          `json:"acknowledgedExtra"`
+	TargetQuotationID    int64                          `json:"targetQuotationId"`
+	TargetRevisionNumber *int16                         `json:"targetRevisionNumber"`
+	// ExpectedVersion is the version the editor loaded (#473). Like a draft
+	// save, a link with a stale version is a named conflict.
+	ExpectedVersion int64 `json:"expectedVersion"`
+	// TaxChoice is "keep" or "source"; required only when the draft and source
+	// tax bases differ. Empty is refused in that case, never adopted silently.
+	TaxChoice string `json:"taxChoice"`
+}
+
+// PurchaseOrderDraftTaxBasisRow is one side of the link's tax decision: the
+// persisted basis and the PPN rate the server derives from it.
+type PurchaseOrderDraftTaxBasisRow struct {
+	TaxZone         string `json:"taxZone"`
+	TaxType         string `json:"taxType"`
+	ServiceCategory string `json:"serviceCategory"`
+	TaxCategory     string `json:"taxCategory"`
+	PpnBps          int16  `json:"ppnBps"`
+}
+
+// PurchaseOrderDraftLinkReviewRow is the same review the final save reads plus
+// the tax decision a draft link needs.
+type PurchaseOrderDraftLinkReviewRow struct {
+	Order             PurchaseOrderRow              `json:"order"`
+	Source            PurchaseOrderSourceRow        `json:"source"`
+	DocumentState     string                        `json:"documentState"`
+	DraftTax          PurchaseOrderDraftTaxBasisRow `json:"draftTax"`
+	SourceTax         PurchaseOrderDraftTaxBasisRow `json:"sourceTax"`
+	TaxChoiceRequired bool                          `json:"taxChoiceRequired"`
+}
+
 // PurchaseOrderSourceRepairRequest moves a saved record to another issued
 // revision (#475). The embedded payload is the same editable set a correction
 // carries and still refuses every protected value; the target pair and the

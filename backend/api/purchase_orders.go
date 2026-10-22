@@ -229,6 +229,80 @@ func (s *Server) repairPurchaseOrderSource(context echo.Context) error {
 	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
 }
 
+// previewPurchaseOrderDraftLink reads a Staff draft-link review (#497). It has
+// no admin gate: a never-linked or formerly-linked draft is a Staff object, and
+// the store refuses a saved record and a live draft by name.
+func (s *Server) previewPurchaseOrderDraftLink(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	var request apicontract.PurchaseOrderDraftLinkReviewRequest
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	review, err := s.database.PreviewPurchaseOrderDraftLink(
+		requestContext, id, request.TargetQuotationID, *request.TargetRevisionNumber)
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrderDraftLinkReview(review))
+}
+
+// linkPurchaseOrderDraftSource commits one Staff draft link (#497). The server
+// re-reads the source, the occupancy, the currency, the version and the full
+// difference review inside one transaction; no correction or repair history is
+// written.
+func (s *Server) linkPurchaseOrderDraftSource(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	var request apicontract.PurchaseOrderDraftLinkRequest
+	if err := context.Bind(&request); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+	if protected := request.Named(); protected != "" {
+		return purchaseOrderProtectedField(context, protected)
+	}
+	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
+	}
+	decisions := make([]store.PurchaseOrderDecision, 0, len(request.Decisions))
+	for _, decision := range request.Decisions {
+		decisions = append(decisions, store.PurchaseOrderDecision{
+			Key:    decision.Key,
+			Choice: decision.Choice,
+		})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	order, err := s.database.LinkPurchaseOrderDraftSource(requestContext, store.PurchaseOrderDraftLinkInput{
+		ID:                  id,
+		ExpectedVersion:     request.ExpectedVersion,
+		QuotationID:         request.TargetQuotationID,
+		RevisionNumber:      *request.TargetRevisionNumber,
+		Decisions:           decisions,
+		AcknowledgedMissing: request.AcknowledgedMissing,
+		AcknowledgedExtra:   request.AcknowledgedExtra,
+		TaxChoice:           request.TaxChoice,
+		UpdatedBy:           requestUser(context).ID,
+	})
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, mapPurchaseOrder(order))
+}
+
 // getPurchaseOrderHistory returns the immutable snapshots of one record,
 // newest first.
 func (s *Server) getPurchaseOrderHistory(context echo.Context) error {
@@ -397,6 +471,16 @@ func purchaseOrderError(context echo.Context, err error) error {
 		return context.JSON(http.StatusConflict, map[string]string{
 			"error": "only a draft can be edited",
 			"code":  "po_not_draft",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDraftLinkNotEligible):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_link_not_eligible",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDraftLinkTaxChoiceRequired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_tax_choice_required",
 		})
 	case errors.Is(err, store.ErrPurchaseOrderSourceNotFound):
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation revision not found"})
@@ -769,6 +853,31 @@ func formatPurchaseOrderDate(value *time.Time) *string {
 // mapPurchaseOrderReview exposes the exact source beside the stored record. The
 // source is the customer-facing composition, so internal cost, margin, PPH22
 // and profit never cross this boundary (parent story 42).
+// mapPurchaseOrderDraftLinkReview exposes the draft-link review: the same
+// record/source/document shape a final save reads, plus the two tax bases and
+// whether a keep/source choice is required.
+func mapPurchaseOrderDraftLinkReview(review store.PurchaseOrderDraftLinkReview) apicontract.PurchaseOrderDraftLinkReviewRow {
+	base := mapPurchaseOrderReview(review.PurchaseOrderReview)
+	return apicontract.PurchaseOrderDraftLinkReviewRow{
+		Order:             base.Order,
+		Source:            base.Source,
+		DocumentState:     base.DocumentState,
+		DraftTax:          mapPurchaseOrderDraftTaxBasis(review.DraftTax),
+		SourceTax:         mapPurchaseOrderDraftTaxBasis(review.SourceTax),
+		TaxChoiceRequired: review.TaxChoiceRequired,
+	}
+}
+
+func mapPurchaseOrderDraftTaxBasis(basis store.PurchaseOrderDraftTaxBasis) apicontract.PurchaseOrderDraftTaxBasisRow {
+	return apicontract.PurchaseOrderDraftTaxBasisRow{
+		TaxZone:         basis.TaxZone,
+		TaxType:         basis.TaxType,
+		ServiceCategory: basis.ServiceCategory,
+		TaxCategory:     basis.TaxCategory,
+		PpnBps:          basis.PpnBps,
+	}
+}
+
 func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.PurchaseOrderReviewRow {
 	source := review.Source
 	row := apicontract.PurchaseOrderReviewRow{

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import {
   AssignPurchaseOrderConfirmationNumber,
   GetPurchaseOrderHistory,
@@ -77,10 +78,10 @@ export interface PurchaseOrderDifferenceReviewViewProps {
   quoteNumber: string;
   /**
    * "finalize" is the draft -> saved review; "repair" (#475) is the admin
-   * source-link review. The same matching and choice rules apply; only the
-   * wording and the no-PDF finalization note differ.
+   * source-link review; "link" (#497) is the Staff draft link. The same matching
+   * and choice rules apply; only the wording and the link/tax controls differ.
    */
-  mode?: "finalize" | "repair";
+  mode?: "finalize" | "repair" | "link";
   /** "none" or "attached"; the final confirmation follows this branch. */
   documentState: PurchaseOrderDocumentState;
   decisions: POReviewDecisions;
@@ -92,6 +93,23 @@ export interface PurchaseOrderDifferenceReviewViewProps {
   onMatchChange: (lineKey: number, source: PurchaseOrderSourceLineDTO | null) => void;
   onBack: () => void;
   onContinue: () => void;
+  /**
+   * #497: the PPN rate the link's chosen tax basis would produce. The link's
+   * totals must show the number the server will recompute, not the draft's old
+   * rate. Finalize/repair leave it unset.
+   */
+  ppnBpsOverride?: number;
+  /** #497: the explicit currency-mismatch remedy shown in link mode. */
+  currencyRemedy?: string;
+  /** The link write is in flight: the continue action is disabled. */
+  busy?: boolean;
+  /** A required choice (the tax basis) is still unmade. */
+  blocked?: boolean;
+  /**
+   * #497: content rendered after the currency banner and before the differences.
+   * The link's tax decision lives here so there is one page header, not two.
+   */
+  beforeDifferences?: ReactNode;
 }
 
 function differenceValue(value: string): string {
@@ -114,8 +132,15 @@ export function PurchaseOrderDifferenceReviewView({
   onMatchChange,
   onBack,
   onContinue,
+  ppnBpsOverride,
+  currencyRemedy,
+  busy = false,
+  blocked = false,
+  beforeDifferences,
 }: PurchaseOrderDifferenceReviewViewProps) {
   const repairing = mode === "repair";
+  const linking = mode === "link";
+  const currencyMismatch = source.Currency !== state.currency;
   const evaluation = evaluateReview(
     state,
     source,
@@ -139,30 +164,48 @@ export function PurchaseOrderDifferenceReviewView({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <SectionHeading
-            title={
-              repairing
-                ? "Review differences against the new source"
-                : "Review differences before saving"
-            }
-            hint={`${quoteNumber} · revision ${source.RevisionNumber}`}
-          />
-          <p className="mt-1 max-w-3xl text-body text-ink-500">
-            {repairing
-              ? "Repairing the link moves this saved purchase order to another issued revision. Its current values are the starting point; every value that differs needs an explicit choice before the repair can be saved."
-              : "Finalizing records this purchase order's data so later documents can use it. It is not a business approval — the customer's order was already accepted before entry."}
-          </p>
+      {linking ? null : (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <SectionHeading
+              title={
+                repairing
+                  ? "Review differences against the new source"
+                  : "Review differences before saving"
+              }
+              hint={`${quoteNumber} · revision ${source.RevisionNumber}`}
+            />
+            <p className="mt-1 max-w-3xl text-body text-ink-500">
+              {repairing
+                ? "Repairing the link moves this saved purchase order to another issued revision. Its current values are the starting point; every value that differs needs an explicit choice before the repair can be saved."
+                : "Finalizing records this purchase order's data so later documents can use it. It is not a business approval — the customer's order was already accepted before entry."}
+            </p>
+          </div>
+          <Badge tone="accent">{repairing ? "Source repair" : "Final save"}</Badge>
         </div>
-        <Badge tone="accent">{repairing ? "Source repair" : "Final save"}</Badge>
-      </div>
+      )}
 
-      <StatusBanner tone="info">
-        The purchase order is kept in {currency.code}, the currency of quotation{" "}
-        {quoteNumber} revision {source.RevisionNumber}. Amounts are compared only
-        inside that currency; Vera does not convert between currencies.
-      </StatusBanner>
+      {currencyMismatch ? (
+        <StatusBanner tone="danger">
+          <span className="block font-medium">
+            This purchase order is in {state.currency.toUpperCase()}; quotation{" "}
+            {quoteNumber} revision {source.RevisionNumber} is in{" "}
+            {source.Currency.toUpperCase()}.
+          </span>
+          <span className="mt-1 block">
+            {currencyRemedy ??
+              "Amounts in different currencies are never compared or converted."}
+          </span>
+        </StatusBanner>
+      ) : (
+        <StatusBanner tone="info">
+          The purchase order is kept in {currency.code}, the currency of quotation{" "}
+          {quoteNumber} revision {source.RevisionNumber}. Amounts are compared only
+          inside that currency; Vera does not convert between currencies.
+        </StatusBanner>
+      )}
+
+      {beforeDifferences}
 
       <Card className="p-4">
         <SectionHeading
@@ -231,7 +274,9 @@ export function PurchaseOrderDifferenceReviewView({
           value when you continue; Use PO entry keeps what you entered.{" "}
           {repairing
             ? "Back without repairing leaves the saved purchase order and its source link unchanged."
-            : "Back to entry leaves the purchase order as entered."}
+            : linking
+              ? "Back without linking leaves the draft unlinked and its entered values unchanged."
+              : "Back to entry leaves the purchase order as entered."}
         </p>
       </Card>
 
@@ -366,7 +411,7 @@ export function PurchaseOrderDifferenceReviewView({
         totals={evaluation.totals}
         currency={currency}
         discountPercent={parseDiscountPercent(evaluation.applied.header.discountPercent)}
-        ppnBps={state.ppnBps}
+        ppnBps={ppnBpsOverride ?? state.ppnBps}
         adjustmentReason={evaluation.applied.header.adjustmentReason.trim()}
         printedTotals={{
           subtotalMinor: source.PrintedSubtotalMinor,
@@ -412,7 +457,7 @@ export function PurchaseOrderDifferenceReviewView({
           adjustment to reverse it. Record a signed adjustment with a reason
           only to reconcile what the customer's PO document actually printed.
         </p>
-        {repairing ? null : documentState === "attached" ? (
+        {repairing || linking ? null : documentState === "attached" ? (
           <p className="mt-1 text-caption text-ink-500">
             The customer PO PDF is attached and stays with this record. This
             save does not change it.
@@ -427,7 +472,9 @@ export function PurchaseOrderDifferenceReviewView({
 
       {evaluation.blockers.length > 0 ? (
         <StatusBanner tone="danger">
-          <span className="block font-medium">Resolve before saving:</span>
+          <span className="block font-medium">
+            {linking ? "Resolve before linking:" : "Resolve before saving:"}
+          </span>
           <ul className="mt-1 list-disc pl-5">
             {evaluation.blockers.map((blocker) => (
               <li key={blocker}>{blocker}</li>
@@ -438,18 +485,40 @@ export function PurchaseOrderDifferenceReviewView({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <Button
-          aria-label={repairing ? "Back without repairing" : "Back to entry"}
+          aria-label={
+            repairing
+              ? "Back without repairing"
+              : linking
+                ? "Back without linking"
+                : "Back to entry"
+          }
           onClick={onBack}
         >
-          {repairing ? "Back without repairing" : "Back to entry"}
+          {repairing
+            ? "Back without repairing"
+            : linking
+              ? "Back without linking"
+              : "Back to entry"}
         </Button>
         <Button
           variant="primary"
-          aria-label={repairing ? "Continue to repair" : "Continue final save"}
-          disabled={!evaluation.canContinue}
+          aria-label={
+            repairing
+              ? "Continue to repair"
+              : linking
+                ? "Link source"
+                : "Continue final save"
+          }
+          disabled={!evaluation.canContinue || busy || blocked}
           onClick={onContinue}
         >
-          {repairing ? "Continue to repair" : "Continue"}
+          {repairing
+            ? "Continue to repair"
+            : linking
+              ? busy
+                ? "Linking…"
+                : "Link source"
+              : "Continue"}
         </Button>
       </div>
     </div>
