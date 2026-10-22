@@ -4,6 +4,15 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.5] - 2026-10-22
+
+### Security
+
+- **Rebuilt Vera with patched Go.** The desktop and CLI now build with Go
+  1.26.10, and the API builds with Go 1.27.3. These versions include the
+  October 2026 Go security fixes, including rejection of compromised eMudhra
+  certificates (CVE-2026-111943). No screen or quotation behavior changes.
+
 ## [0.14.4] - 2026-10-22
 
 ### Security
