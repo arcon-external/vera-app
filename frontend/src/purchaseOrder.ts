@@ -1118,10 +1118,13 @@ export function buildPurchaseOrderUpdate(
       Items: items,
       DiscountPercent: discountPercent,
       AdjustmentMinor: adjustment,
-      Currency: state.currency,
-      TaxZone: state.taxZone,
-      TaxType: state.taxType,
-      ServiceCategory: state.serviceCategory,
+      // Only a never-linked draft may move currency/basis. A linked or former
+      // row's stored basis is frozen; empty means "keep" and prevents the
+      // editor's legacy display derivation from being submitted as a change.
+      Currency: state.sourceState === "never" ? state.currency : "",
+      TaxZone: state.sourceState === "never" ? state.taxZone : "",
+      TaxType: state.sourceState === "never" ? state.taxType : "",
+      ServiceCategory: state.sourceState === "never" ? state.serviceCategory : "",
       ExpectedVersion: state.version,
       Overwrite: false,
     },

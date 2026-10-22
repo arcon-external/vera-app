@@ -346,3 +346,69 @@ func TestBlankDraftCreationRejectsARevisionWithoutAQuotation(t *testing.T) {
 		t.Errorf("revision without quotation = %d (%v); want 400", code, body)
 	}
 }
+
+func TestDeletingANeverLinkedDraftOverHTTP(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_first_delete_never")
+	_, body := createBlankPODraft(t, server, token, nil)
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	code, body := doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": draft.Version,
+		"poNumber":        "PO-NEVER-API",
+		"receivedDate":    draft.ReceivedDate,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("name never-linked draft = %d (%v)", code, body)
+	}
+	named := decodePurchaseOrder(t, body)
+
+	// The preview must not crash on the nullable source_revision.
+	preview := previewDeletionOverAPI(t, server, token, "purchase_order", named.ID)
+	if preview.PONumber != "PO-NEVER-API" || preview.DocumentNumber != "PO-NEVER-API" {
+		t.Errorf("preview document = %q / %q; want the customer PO number",
+			preview.PONumber, preview.DocumentNumber)
+	}
+	if preview.QuoteNumber != "" {
+		t.Errorf("preview invented a source quote number %q", preview.QuoteNumber)
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "purchase_order", "targetId": named.ID, "scope": "record",
+		"reason": "never-linked cleanup", "typedNumber": "PO-NEVER-API",
+		"expectedFingerprint": preview.Fingerprint,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("delete never-linked draft = %d (%v); want 200", code, body)
+	}
+	code, _ = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusNotFound {
+		t.Errorf("deleted never-linked draft = %d; want 404", code)
+	}
+}
+
+func TestPartialNeverDraftBasisUpdateKeepsTheOmittedZoneOverHTTP(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_first_partial_basis")
+	_, body := createBlankPODraft(t, server, token, map[string]any{
+		"taxZone": "NonFTZ",
+		"taxType": "Goods",
+	})
+	draft := decodePurchaseOrder(t, body)
+	code, body := doJSON(t, server, http.MethodPut,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, map[string]any{
+			"expectedVersion": draft.Version,
+			"taxType":         "Services",
+			"serviceCategory": "NonConstruction",
+			"receivedDate":    draft.ReceivedDate,
+		})
+	if code != http.StatusOK {
+		t.Fatalf("partial basis update = %d (%v)", code, body)
+	}
+	updated := decodePurchaseOrder(t, body)
+	if updated.TaxZone != "NonFTZ" {
+		t.Errorf("partial basis zone = %q; want the omitted NonFTZ kept", updated.TaxZone)
+	}
+	if updated.TaxType != "Services" || updated.ServiceCategory != "NonConstruction" {
+		t.Errorf("partial basis = %q/%q; want Services/NonConstruction",
+			updated.TaxType, updated.ServiceCategory)
+	}
+}

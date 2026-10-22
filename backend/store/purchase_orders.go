@@ -560,6 +560,10 @@ func resolveBlankPurchaseOrderBasis(companyCurrency string, input PurchaseOrderB
 // frozen and lets only a never-linked draft move them. Empty submitted values
 // mean "keep the stored value"; a never-linked draft is allowed to clear its
 // service category when it switches to Goods.
+//
+// A pre-007 source revision stored an empty tax_type/service_category and only
+// the legacy tax_category. Such a row may be populated once from the matching
+// legacy basis; a stored non-empty basis remains frozen.
 func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input PurchaseOrderUpdate) (purchaseOrderBasis, error) {
 	if lock.SourceState != PurchaseOrderSourceStateNever {
 		if input.Currency != "" && !strings.EqualFold(strings.TrimSpace(input.Currency), lock.Currency) {
@@ -570,26 +574,69 @@ func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input Purchase
 			return purchaseOrderBasis{}, fmt.Errorf(
 				"%w: the tax zone is fixed while a source is linked", ErrPurchaseOrderInvalid)
 		}
-		if input.TaxType != "" && strings.TrimSpace(input.TaxType) != lock.TaxType {
-			return purchaseOrderBasis{}, fmt.Errorf(
-				"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
-		}
-		if input.ServiceCategory != "" && strings.TrimSpace(input.ServiceCategory) != lock.ServiceCategory {
-			return purchaseOrderBasis{}, fmt.Errorf(
-				"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
-		}
-		if input.TaxCategory != "" && strings.TrimSpace(input.TaxCategory) != lock.TaxCategory {
+		legacyCategory := strings.TrimSpace(input.TaxCategory)
+		if legacyCategory != "" && legacyCategory != lock.TaxCategory {
 			return purchaseOrderBasis{}, fmt.Errorf(
 				"%w: the tax category is fixed while a source is linked", ErrPurchaseOrderInvalid)
 		}
-		return purchaseOrderBasis{
-			Currency:        lock.Currency,
-			TaxZone:         lock.TaxZone,
-			TaxType:         lock.TaxType,
-			ServiceCategory: lock.ServiceCategory,
-			TaxCategory:     lock.TaxCategory,
-			PpnBps:          lock.PpnBps,
-		}, nil
+
+		basis := basisFromLock(lock)
+		submittedType := strings.TrimSpace(input.TaxType)
+		submittedService := strings.TrimSpace(input.ServiceCategory)
+		if lock.TaxType != "" {
+			if submittedType != "" && submittedType != lock.TaxType {
+				return purchaseOrderBasis{}, fmt.Errorf(
+					"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
+			}
+		} else if submittedType != "" {
+			// Legacy row: the stored type is truly empty. Populate it once, but
+			// only with the value the stored legacy category actually means.
+			expectedType, expectedService, ok := legacyBasisFor(lock.TaxCategory)
+			if !ok || submittedType != expectedType {
+				return purchaseOrderBasis{}, fmt.Errorf(
+					"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
+			}
+			if submittedService != "" && submittedService != expectedService {
+				return purchaseOrderBasis{}, fmt.Errorf(
+					"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+			}
+			basis.TaxType = submittedType
+			if submittedService != "" {
+				basis.ServiceCategory = submittedService
+			} else {
+				basis.ServiceCategory = expectedService
+			}
+		} else {
+			// The UI correctly submits no basis for a linked/former row. A
+			// legacy stored type is still empty, so resolve its own legacy
+			// category for validation and one-time population.
+			expectedType, expectedService, ok := legacyBasisFor(lock.TaxCategory)
+			if ok {
+				basis.TaxType = expectedType
+				if basis.ServiceCategory == "" {
+					basis.ServiceCategory = expectedService
+				}
+			}
+		}
+		if lock.ServiceCategory != "" {
+			if submittedService != "" && submittedService != lock.ServiceCategory {
+				return purchaseOrderBasis{}, fmt.Errorf(
+					"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+			}
+		} else if basis.TaxType == "Services" && submittedService != "" {
+			basis.ServiceCategory = submittedService
+		} else if basis.TaxType == "Goods" && submittedService != "" {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		if _, err := PurchaseOrderPPNBps(
+			basis.TaxZone, basis.TaxType, basis.ServiceCategory, basis.TaxCategory); err != nil {
+			return purchaseOrderBasis{}, err
+		}
+		// The stored PPN rate was frozen at creation; populating a legacy label
+		// never recalculates the money.
+		basis.PpnBps = lock.PpnBps
+		return basis, nil
 	}
 
 	currencyCode := lock.Currency
@@ -601,15 +648,29 @@ func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input Purchase
 		currencyCode = validated
 	}
 	zone := strings.TrimSpace(input.TaxZone)
-	taxType := strings.TrimSpace(input.TaxType)
-	serviceCategory := strings.TrimSpace(input.ServiceCategory)
-	legacyCategory := strings.TrimSpace(input.TaxCategory)
-	if zone == "" && taxType == "" && serviceCategory == "" && legacyCategory == "" {
-		zone, taxType = lock.TaxZone, lock.TaxType
-		serviceCategory, legacyCategory = lock.ServiceCategory, lock.TaxCategory
+	if zone == "" {
+		zone = lock.TaxZone
 	}
 	if zone == "" {
 		zone = "FTZ"
+	}
+	taxType := strings.TrimSpace(input.TaxType)
+	if taxType == "" {
+		taxType = lock.TaxType
+	}
+	serviceCategory := strings.TrimSpace(input.ServiceCategory)
+	if serviceCategory == "" && taxType == "Services" {
+		serviceCategory = lock.ServiceCategory
+		if serviceCategory == "" {
+			serviceCategory = "NonConstruction"
+		}
+	}
+	if taxType == "Goods" {
+		serviceCategory = ""
+	}
+	legacyCategory := strings.TrimSpace(input.TaxCategory)
+	if legacyCategory == "" {
+		legacyCategory = lock.TaxCategory
 	}
 	ppnBps, err := PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory)
 	if err != nil {
@@ -623,6 +684,15 @@ func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input Purchase
 		TaxCategory:     legacyCategory,
 		PpnBps:          ppnBps,
 	}, nil
+}
+
+// legacyBasisFor resolves the stored legacy category to the type/service an
+// editor derives for display. An empty category is legacy FTZ/Goods.
+func legacyBasisFor(category string) (taxType, serviceCategory string, ok bool) {
+	if strings.TrimSpace(category) == "" {
+		return "Goods", "", true
+	}
+	return legacyPOToTaxType(strings.TrimSpace(category))
 }
 
 func (s *Store) GetPurchaseOrder(ctx context.Context, id int64) (PurchaseOrder, error) {

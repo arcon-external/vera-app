@@ -511,14 +511,15 @@ func insertPurchaseOrderCorrection(
 		attachmentFilename = attachment.Filename
 	}
 
-	// #496: a never-linked draft has no prior source or Customer identity. The
-	// snapshot stores SQL NULL for them, never 0: revision 00 is a real linked
-	// revision, and a zero in the audit trail would fabricate a reference. The
-	// quote number stays an empty display copy.
+	// #496: any non-live snapshot (never-linked or formerly linked) has no live
+	// prior source or Customer identity. The snapshot stores SQL NULL for them,
+	// never 0: revision 00 is a real linked revision, and a zero in the audit
+	// trail would fabricate a reference. The quote number may stay as a
+	// historical display copy.
 	var snapshotQuotationID any = order.QuotationID
 	var snapshotRevision any = order.SourceRevision
 	var snapshotCustomerID any = order.CustomerID
-	if order.SourceState == PurchaseOrderSourceStateNever {
+	if order.SourceState != PurchaseOrderSourceStateLive {
 		snapshotQuotationID = nil
 		snapshotRevision = nil
 		snapshotCustomerID = nil

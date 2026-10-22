@@ -723,6 +723,7 @@ func loadDeletionQuotationFacts(ctx context.Context, q purchaseOrderQuerier, sch
 func loadDeletionPOFacts(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, id int64) (*deletionPOFacts, error) {
 	var facts deletionPOFacts
 	var quotationID pgtype.Int8
+	var sourceRevision pgtype.Int2
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT po.id, po.uuid::text, po.state, COALESCE(po.po_number, ''),
 		       po.customer_name, po.version,
@@ -742,7 +743,7 @@ func loadDeletionPOFacts(ctx context.Context, q purchaseOrderQuerier, schema, or
 		schema, schema, schema, schema, schema), id, orgID).Scan(
 		&facts.ID, &facts.UUID, &facts.State, &facts.PONumber,
 		&facts.CustomerName, &facts.Version, &facts.QuoteNumber,
-		&quotationID, &facts.FormerQuote, &facts.SourceRevision,
+		&quotationID, &facts.FormerQuote, &sourceRevision,
 		&facts.DocumentVersions, &facts.HistoryEntries, &facts.ItemLines,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -750,6 +751,9 @@ func loadDeletionPOFacts(ctx context.Context, q purchaseOrderQuerier, schema, or
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load deletion purchase order %d: %w", id, err)
+	}
+	if sourceRevision.Valid {
+		facts.SourceRevision = sourceRevision.Int16
 	}
 	if quotationID.Valid {
 		facts.QuotationID = quotationID.Int64
@@ -782,13 +786,17 @@ func loadDeletionChainPOs(ctx context.Context, q purchaseOrderQuerier, schema, o
 	pos := make([]deletionPOFacts, 0, 2)
 	for rows.Next() {
 		var order deletionPOFacts
+		var sourceRevision pgtype.Int2
 		if err := rows.Scan(
 			&order.ID, &order.UUID, &order.State, &order.PONumber,
 			&order.CustomerName, &order.Version, &order.QuoteNumber,
-			&order.SourceRevision, &order.DocumentVersions, &order.HistoryEntries,
+			&sourceRevision, &order.DocumentVersions, &order.HistoryEntries,
 			&order.ItemLines,
 		); err != nil {
 			return nil, fmt.Errorf("scan deletion chain purchase order: %w", err)
+		}
+		if sourceRevision.Valid {
+			order.SourceRevision = sourceRevision.Int16
 		}
 		order.QuotationID = quotationID
 		pos = append(pos, order)

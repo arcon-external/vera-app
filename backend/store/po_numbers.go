@@ -123,7 +123,7 @@ func allocatePurchaseOrderConfirmationTx(ctx context.Context, tx pgx.Tx, schema,
 	orderID, assignedBy int64, now time.Time) error {
 	var state string
 	var existing pgtype.Text
-	var customerID int64
+	var customerID pgtype.Int8
 	err := tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT state, confirmation_number, customer_id
 		FROM %s.purchase_orders
@@ -143,12 +143,17 @@ func allocatePurchaseOrderConfirmationTx(ctx context.Context, tx pgx.Tx, schema,
 	if state != PurchaseOrderStateSaved {
 		return ErrPurchaseOrderNotSaved
 	}
+	if !customerID.Valid {
+		return fmt.Errorf(
+			"%w: a saved purchase order needs its customer for a confirmation number",
+			ErrPurchaseOrderIncomplete)
+	}
 
 	var customerCode int16
 	if err := tx.QueryRow(ctx, fmt.Sprintf(
 		`SELECT customer_code FROM %s.customers WHERE id = $1`, schema),
-		customerID).Scan(&customerCode); err != nil {
-		return fmt.Errorf("read customer %d for confirmation: %w", customerID, err)
+		customerID.Int64).Scan(&customerCode); err != nil {
+		return fmt.Errorf("read customer %d for confirmation: %w", customerID.Int64, err)
 	}
 	yy := poAssignmentYY(now)
 	sequence, _, err := nextPOConfirmationSequenceTx(ctx, tx, schema, int(customerCode), yy)

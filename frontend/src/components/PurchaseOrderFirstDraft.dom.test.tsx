@@ -231,7 +231,13 @@ function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
   });
 }
 
-function Harness({ onLink }: { onLink?: () => void }) {
+function Harness({
+  onLink,
+  draft,
+}: {
+  onLink?: () => void;
+  draft?: PurchaseOrderDTO;
+}) {
   const workspace = usePurchaseOrderWorkspace();
   const [saved, setSaved] = useState<PurchaseOrderDTO | null>(null);
   return (
@@ -243,7 +249,7 @@ function Harness({ onLink }: { onLink?: () => void }) {
         uomOptions={UOMS}
         incotermOptions={INCOTERMS}
         tab="editor"
-        blankDraft={blank()}
+        blankDraft={draft ?? blank()}
         onLinkQuotation={onLink}
         onAdd={() => {}}
         onOpen={() => {}}
@@ -259,11 +265,43 @@ function Harness({ onLink }: { onLink?: () => void }) {
   );
 }
 
-async function render(): Promise<void> {
+async function render(draft?: PurchaseOrderDTO): Promise<void> {
   await act(async () => {
-    root.render(<Harness />);
+    root.render(<Harness draft={draft} />);
   });
   await flush();
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function legacyDraft(state: "live" | "former"): PurchaseOrderDTO {
+  return {
+    ...blank(),
+    ID: 7,
+    UUID: "legacy-496",
+    Version: 1,
+    QuotationID: 12,
+    CustomerID: 2,
+    SourceRevision: 0,
+    SourceState: state,
+    SourceMissing: state === "former",
+    PrintedTotalsKnown: true,
+    QuoteNumber: "1502260001",
+    CustomerName: "PT. Legacy Basis",
+    TaxZone: "NonFTZ",
+    TaxType: undefined,
+    ServiceCategory: undefined,
+    TaxCategory: "SupplyInstall",
+    Items: [],
+  };
 }
 
 describe("PO-first draft (issue #496)", () => {
@@ -370,6 +408,83 @@ describe("PO-first draft (issue #496)", () => {
     expect(payload.Currency).toBe("USD");
     expect(payload.TaxZone).toBe("NonFTZ");
     expect(payload.TaxType).toBe("Goods");
+    expect(payload.ServiceCategory).toBe("");
+  });
+
+  it("shares one in-flight create between Save and an upload", async () => {
+    const gate = deferred<PurchaseOrderDTO>();
+    createMock.mockReset();
+    createMock.mockReturnValue(gate.promise);
+    attachMock.mockResolvedValue({
+      ID: 1,
+      UUID: "doc-race",
+      PurchaseOrderID: 41,
+      Version: 1,
+      Active: true,
+    });
+    await render();
+    type("Customer PO number", "RACE-496");
+    await flush();
+
+    act(() => button("Save draft").click());
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+
+    // The file input stays enabled while Save is in flight. Both actions must
+    // await the same persistence promise, not create a second row.
+    chooseFile();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+
+    gate.resolve(createdRow());
+    await flush();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(attachMock).toHaveBeenCalledTimes(1);
+    expect(
+      (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
+    ).toBe(41);
+  });
+
+  it("retries a failed update on the created row without creating again", async () => {
+    updateMock.mockRejectedValueOnce(new Error("the update was interrupted"));
+    await render();
+    type("Customer PO number", "RETRY-496");
+    await flush();
+
+    act(() => button("Save draft").click());
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+
+    act(() => button("Save draft").click());
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    const second = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(second.ID).toBe(41);
+  });
+
+  it("does not submit a derived basis for a legacy linked draft", async () => {
+    await render(legacyDraft("live"));
+    act(() => button("Save draft").click());
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    // The row's stored type is empty (legacy); the derived Services value is
+    // display-only and must not be submitted as a frozen-basis change.
+    expect(payload.TaxType).toBe("");
+    expect(payload.ServiceCategory).toBe("");
+  });
+
+  it("does not submit a derived basis for a legacy former draft", async () => {
+    await render(legacyDraft("former"));
+    act(() => button("Save draft").click());
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(payload.TaxType).toBe("");
     expect(payload.ServiceCategory).toBe("");
   });
 });

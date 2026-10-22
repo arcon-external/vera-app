@@ -1379,8 +1379,8 @@ export function PurchaseOrderEditorPage({
     setDismissedExtractionId(null);
     void (async () => {
       try {
-        const id = await ensurePersisted();
-        const next = await StartPurchaseOrderExtraction(id);
+        const persisted = await ensurePersisted();
+        const next = await StartPurchaseOrderExtraction(persisted.id);
         if (generation !== extractionGeneration.current) return;
         adoptExtraction(next);
       } catch (startError) {
@@ -1533,14 +1533,22 @@ export function PurchaseOrderEditorPage({
    * a failed attach or update retries against the same row instead of creating
    * a second one.
    */
-  const persisting = useRef<Promise<number> | null>(null);
-  const ensurePersisted = async (): Promise<number> => {
-    if (editorStateRef.current.orderId > 0) {
-      return editorStateRef.current.orderId;
+  type PersistedDraft = { id: number; version: number };
+  const persisting = useRef<Promise<PersistedDraft> | null>(null);
+  // Retained beyond the in-flight promise so a trigger that arrives after the
+  // create resolves but before React renders the `created` action still sees
+  // the one row.
+  const persistedRef = useRef<PersistedDraft | null>(null);
+  const ensurePersisted = async (): Promise<PersistedDraft> => {
+    if (persistedRef.current !== null) return persistedRef.current;
+    const current = editorStateRef.current;
+    if (current.orderId > 0) {
+      const existing = { id: current.orderId, version: current.version };
+      persistedRef.current = existing;
+      return existing;
     }
     if (persisting.current !== null) return persisting.current;
     const promise = (async () => {
-      const current = editorStateRef.current;
       const created = await CreatePurchaseOrderBlankDraft(
         new backend.PurchaseOrderBlankCreateInput({
           ReceivedDate: current.header.receivedDate,
@@ -1550,7 +1558,9 @@ export function PurchaseOrderEditorPage({
         })
       );
       dispatch({ type: "created", orderId: created.ID, version: created.Version });
-      return created.ID;
+      const result = { id: created.ID, version: created.Version };
+      persistedRef.current = result;
+      return result;
     })();
     persisting.current = promise;
     try {
@@ -1577,18 +1587,13 @@ export function PurchaseOrderEditorPage({
     }
     dispatch({ type: "saveStarted" });
     try {
-      let working = state;
-      if (!correcting && working.orderId === 0) {
-        const created = await CreatePurchaseOrderBlankDraft(
-          new backend.PurchaseOrderBlankCreateInput({
-            ReceivedDate: state.header.receivedDate,
-            TaxZone: state.taxZone,
-            TaxType: state.taxType,
-            ServiceCategory: state.serviceCategory,
-          })
-        );
-        dispatch({ type: "created", orderId: created.ID, version: created.Version });
-        working = { ...working, orderId: created.ID, version: created.Version };
+      // Save, upload and extraction share one in-flight create. A Save whose
+      // create is still running and a file choice made at the same time must
+      // await the same row, never create a second one.
+      let working = editorStateRef.current;
+      if (!correcting) {
+        const persisted = await ensurePersisted();
+        working = { ...working, orderId: persisted.id, version: persisted.version };
       }
       const result = buildPurchaseOrderUpdate(working, activeCurrency);
       if (result.input === null) {
@@ -1653,8 +1658,8 @@ export function PurchaseOrderEditorPage({
     }
     setReviewLoading(true);
     try {
-      const id = await ensurePersisted();
-      const loaded = await GetPurchaseOrderReview(id);
+      const persisted = await ensurePersisted();
+      const loaded = await GetPurchaseOrderReview(persisted.id);
       const initial = initialFinalizeReviewState();
       setReview(loaded);
       setDecisions(initial.decisions);
@@ -1895,7 +1900,7 @@ export function PurchaseOrderEditorPage({
     <div className="flex flex-col gap-6">
       <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
-        resolvePurchaseOrderId={ensurePersisted}
+        resolvePurchaseOrderId={async () => (await ensurePersisted()).id}
         onExtract={startExtraction}
         extractionStatus={
           extractionRun?.Status === "queued" || extractionRun?.Status === "running"
