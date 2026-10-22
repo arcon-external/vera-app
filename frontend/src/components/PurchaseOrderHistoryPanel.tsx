@@ -169,7 +169,11 @@ export function PurchaseOrderHistoryPanel({
                       <HistoryField label="Customer" value={entry.CustomerName} />
                       <HistoryField
                         label="Source revision"
-                        value={String(entry.SourceRevision)}
+                        value={
+                          entry.SourceMissing === true
+                            ? "Source missing"
+                            : String(entry.SourceRevision)
+                        }
                         className="tnum"
                       />
                       <HistoryField label="State" value={entry.State} />

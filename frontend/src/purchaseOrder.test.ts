@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CurrencyInfo } from "./format";
 import {
+  blankPurchaseOrderDraft,
   buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
   canAssignConfirmationNumber,
@@ -18,9 +19,12 @@ import {
   parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
+  printedTotalsKnownOf,
+  purchaseOrderEditorReducer,
+  purchaseOrderPpnBps,
+  sourceStateOf,
   MAX_ADJUSTMENT_REASON_LENGTH,
   MAX_EXACT_MINOR,
-  purchaseOrderEditorReducer,
   validDateField,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
@@ -1099,6 +1103,186 @@ describe("confirmation number decisions (issue #474)", () => {
     // identifier, so the action is still offered.
     expect(
       canAssignConfirmationNumber(order({ State: "saved", ConfirmationNumber: "" }))
+    ).toBe(true);
+  });
+});
+
+// Issue #496: a PO-first draft has no source, no Customer and no printed
+// totals. Presence is decided by the additive state, never by a zero id, so a
+// real revision 00 stays a live link.
+describe("PO-first draft states (issue #496)", () => {
+  it("derives the source state from an older payload without inventing never", () => {
+    // An old server could send only live or former. Revision 00 is live.
+    expect(
+      sourceStateOf(
+        order({ SourceState: undefined, SourceMissing: false, QuotationID: 7 })
+      )
+    ).toBe("live");
+    expect(
+      sourceStateOf(
+        order({ SourceState: undefined, SourceMissing: true, QuotationID: 7 })
+      )
+    ).toBe("former");
+    // The new enum is authoritative even when the numeric fields are zero.
+    expect(
+      sourceStateOf(
+        order({ SourceState: "never", SourceMissing: true, QuotationID: 0 })
+      )
+    ).toBe("never");
+    expect(
+      sourceStateOf(
+        order({ SourceState: "live", SourceMissing: false, QuotationID: 9 })
+      )
+    ).toBe("live");
+  });
+
+  it("knows printed totals for live and former, never for a never-linked draft", () => {
+    expect(printedTotalsKnownOf(order({ PrintedTotalsKnown: undefined }))).toBe(true);
+    expect(
+      printedTotalsKnownOf(
+        order({ PrintedTotalsKnown: false, SourceState: "never" })
+      )
+    ).toBe(false);
+    expect(
+      printedTotalsKnownOf(
+        order({ PrintedTotalsKnown: true, SourceState: "former" })
+      )
+    ).toBe(true);
+  });
+
+  it("builds a transient blank draft with the company currency and user tax defaults", () => {
+    const blank = blankPurchaseOrderDraft({
+      currency: "IDR",
+      taxZone: "NonFTZ",
+      taxType: "Goods",
+      serviceCategory: "",
+      receivedDate: "2026-10-22",
+      paymentTerms: "50% advance",
+      incoterms: "FOB",
+    });
+    expect(blank.ID).toBe(0);
+    expect(blank.Version).toBe(0);
+    expect(blank.SourceState).toBe("never");
+    expect(blank.SourceMissing).toBe(true);
+    expect(blank.PrintedTotalsKnown).toBe(false);
+    expect(blank.QuotationID).toBe(0);
+    expect(blank.CustomerID).toBe(0);
+    expect(blank.SourceRevision).toBe(0);
+    expect(blank.QuoteNumber).toBe("");
+    expect(blank.CustomerName).toBe("");
+    expect(blank.Currency).toBe("IDR");
+    expect(blank.TaxType).toBe("Goods");
+    expect(blank.PpnBps).toBe(1100);
+    expect(blank.Items).toEqual([]);
+    expect(blank.ReceivedDate).toBe("2026-10-22");
+    expect(blank.PaymentTerms).toBe("50% advance");
+    expect(blank.Incoterms).toBe("FOB");
+  });
+
+  it("mirrors the server's PPN resolution from the full triple", () => {
+    expect(purchaseOrderPpnBps("NonFTZ", "Goods", "", "")).toBe(1100);
+    expect(purchaseOrderPpnBps("FTZ", "Goods", "", "")).toBe(0);
+    expect(purchaseOrderPpnBps("NonFTZ", "Services", "NonConstruction", "")).toBe(0);
+    expect(purchaseOrderPpnBps("NonFTZ", "Services", "Construction", "")).toBe(0);
+    // The legacy category maps forward when the type is absent.
+    expect(purchaseOrderPpnBps("NonFTZ", "", "", "SupplyOnly")).toBe(1100);
+    expect(purchaseOrderPpnBps("NonFTZ", "", "", "SupplyInstall")).toBe(0);
+    // Invalid combinations are named, not silently treated as zero.
+    expect(purchaseOrderPpnBps("NonFTZ", "Goods", "Construction", "")).toBeNull();
+    expect(purchaseOrderPpnBps("NonFTZ", "Services", "", "")).toBeNull();
+  });
+
+  it("keeps the typed header and lines when the first create adopts an id", () => {
+    const base = initialPurchaseOrderEditorState(
+      blankPurchaseOrderDraft({
+        currency: "IDR",
+        taxZone: "FTZ",
+        taxType: "Goods",
+        serviceCategory: "",
+        receivedDate: "2026-10-22",
+      }),
+      IDR
+    );
+    const typed = purchaseOrderEditorReducer(base, {
+      type: "headerChanged",
+      patch: { poNumber: "CUSTOMER-1" },
+    });
+    const created = purchaseOrderEditorReducer(typed, {
+      type: "created",
+      orderId: 41,
+      version: 1,
+    });
+    expect(created.orderId).toBe(41);
+    expect(created.version).toBe(1);
+    expect(created.header.poNumber).toBe("CUSTOMER-1");
+    expect(created.lines).toEqual(typed.lines);
+  });
+
+  it("sends the editable basis in the update payload", () => {
+    const base = initialPurchaseOrderEditorState(
+      blankPurchaseOrderDraft({
+        currency: "IDR",
+        taxZone: "FTZ",
+        taxType: "Goods",
+        serviceCategory: "",
+        receivedDate: "2026-10-22",
+      }),
+      IDR
+    );
+    const nonFtz = purchaseOrderEditorReducer(base, {
+      type: "sourceBasisChanged",
+      patch: { taxZone: "NonFTZ" },
+    });
+    expect(nonFtz.ppnBps).toBe(1100);
+    const services = purchaseOrderEditorReducer(nonFtz, {
+      type: "sourceBasisChanged",
+      patch: { taxType: "Services" },
+    });
+    expect(services.serviceCategory).toBe("NonConstruction");
+    expect(services.ppnBps).toBe(0);
+    const goods = purchaseOrderEditorReducer(services, {
+      type: "sourceBasisChanged",
+      patch: { taxType: "Goods" },
+    });
+    expect(goods.serviceCategory).toBe("");
+
+    const built = buildPurchaseOrderUpdate(nonFtz, IDR);
+    expect(built.input).not.toBeNull();
+    expect(built.input?.Currency).toBe("IDR");
+    expect(built.input?.TaxZone).toBe("NonFTZ");
+    expect(built.input?.TaxType).toBe("Goods");
+    expect(built.input?.ServiceCategory).toBe("");
+  });
+
+  it("marks a currency or basis edit dirty, so the leave guard sees it", () => {
+    const base = initialPurchaseOrderEditorState(
+      blankPurchaseOrderDraft({
+        currency: "IDR",
+        taxZone: "FTZ",
+        taxType: "Goods",
+        serviceCategory: "",
+        receivedDate: "2026-10-22",
+      }),
+      IDR
+    );
+    expect(isPurchaseOrderDirty(base)).toBe(false);
+    expect(
+      isPurchaseOrderDirty(
+        purchaseOrderEditorReducer(base, {
+          type: "sourceBasisChanged",
+          patch: { taxZone: "NonFTZ" },
+        })
+      )
+    ).toBe(true);
+    expect(
+      isPurchaseOrderDirty(
+        purchaseOrderEditorReducer(base, {
+          type: "currencyChanged",
+          code: "USD",
+          from: IDR,
+          to: USD,
+        })
+      )
     ).toBe(true);
   });
 });

@@ -226,4 +226,27 @@ describe("PurchaseOrderHistoryPanel source repair (issue #475)", () => {
   });
 });
 
+describe("PurchaseOrderHistoryPanel source-less snapshots (issue #496)", () => {
+  it("says Source missing instead of printing a fabricated revision 0", () => {
+    const html = renderToStaticMarkup(
+      <PurchaseOrderHistoryPanel
+        entries={[
+          {
+            ...CORRECTION,
+            UUID: "corr-never",
+            QuoteNumber: "",
+            CustomerName: "",
+            SourceRevision: 0,
+            SourceMissing: true,
+          },
+        ]}
+        currency={USD}
+        expandPreviousValues
+      />
+    );
+    expect(html).toContain("Source missing");
+    expect(html).not.toContain("Former quotation");
+  });
+});
+
 });

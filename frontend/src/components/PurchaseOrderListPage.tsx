@@ -4,12 +4,15 @@ import {
   activeFilterCount,
   buildPOListQuery,
   canOpenRow,
+  customerCellLabel,
   initialPOListState,
   initialPOListStateFor,
   modeState,
   poListQueryDelay,
   poListReducer,
   poNumberLabel,
+  quotationCellLabel,
+  sourceRevisionLabel,
   toggleCustomerFilter,
   type POListAction,
   type POListMode,
@@ -396,17 +399,15 @@ export function PurchaseOrderListView({
                       </td>
                       <td className="px-4 py-3 align-middle">
                         <span className="tnum text-body text-ink-700">
-                          {row.QuoteNumber}
+                          {quotationCellLabel(row)}
                         </span>
                         <p className="text-caption text-ink-400">
-                          {row.SourceMissing
-                            ? `Former quotation · revision ${row.SourceRevision}`
-                            : `Revision ${row.SourceRevision}`}
+                          {sourceRevisionLabel(row)}
                         </p>
                         {row.SourceMissing ? <SourceMissingBadge /> : null}
                       </td>
                       <td className="px-4 py-3 align-middle text-body text-ink-700">
-                        {row.CustomerName}
+                        {customerCellLabel(row)}
                       </td>
                       <td className="tnum whitespace-nowrap px-4 py-3 align-middle text-body text-ink-700">
                         {row.ReceivedDate}

@@ -28,9 +28,13 @@ type PurchaseOrderListRow struct {
 	CustomerID     int64  `json:"customerId"`
 	SourceRevision int16  `json:"sourceRevision"`
 	// SourceMissing is independent of the stored draft/saved state: true when
-	// the followed Quotation was permanently deleted (#480) and the row now
-	// carries a former-source reference until an admin repairs it (#481).
+	// the followed Quotation was permanently deleted (#480) or the draft was
+	// never linked at all (#496), and the row carries either a former-source
+	// reference or none until a source is linked.
 	SourceMissing bool `json:"sourceMissing"`
+	// SourceState is "live", "never" or "former" (#496). The copy branches on
+	// it so a never-linked draft is not described as a former revision 0.
+	SourceState string `json:"sourceState"`
 }
 
 // PurchaseOrderCustomerRow is one option of the customer multi-select. The

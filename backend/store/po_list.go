@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Issue #469: the Purchase Order archive. A PO is found by its customer PO
@@ -60,6 +62,10 @@ type PurchaseOrderListRow struct {
 	CustomerID     int64
 	SourceRevision int16
 	SourceMissing  bool
+	// SourceState is "live", "never" or "former" (#496). The row keeps numeric
+	// ids for older readers; this state is what the copy branches on, so a
+	// never-linked draft is not described as a former revision 0.
+	SourceState string
 }
 
 // PurchaseOrderListCustomer is one option of the customer multi-select. The
@@ -202,7 +208,10 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		SELECT po.id, po.uuid::text, po.state, COALESCE(po.po_number, ''),
 		       COALESCE(q.quote_number, po.former_quote_number, ''), po.source_revision,
 		       po.customer_id, po.customer_name, po.received_date, po.currency,
-		       (q.id IS NULL)
+		       (q.id IS NULL),
+		       CASE WHEN po.quotation_id IS NOT NULL THEN 'live'
+		            WHEN po.former_quotation_id IS NOT NULL THEN 'former'
+		            ELSE 'never' END
 		%s%s
 		ORDER BY po.received_date DESC, po.id DESC
 		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),
@@ -215,20 +224,29 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 	result := make([]PurchaseOrderListRow, 0, pageSize)
 	for rows.Next() {
 		var row PurchaseOrderListRow
+		var sourceRevision pgtype.Int2
+		var customerID pgtype.Int8
 		if err := rows.Scan(
 			&row.ID,
 			&row.UUID,
 			&row.State,
 			&row.PONumber,
 			&row.QuoteNumber,
-			&row.SourceRevision,
-			&row.CustomerID,
+			&sourceRevision,
+			&customerID,
 			&row.CustomerName,
 			&row.ReceivedDate,
 			&row.Currency,
 			&row.SourceMissing,
+			&row.SourceState,
 		); err != nil {
 			return PurchaseOrderListPage{}, fmt.Errorf("scan purchase order row: %w", err)
+		}
+		if sourceRevision.Valid {
+			row.SourceRevision = sourceRevision.Int16
+		}
+		if customerID.Valid {
+			row.CustomerID = customerID.Int64
 		}
 		result = append(result, row)
 	}
@@ -287,7 +305,7 @@ func listPurchaseOrderCustomers(ctx context.Context, q purchaseOrderQuerier, sch
 		SELECT customer_id, customer_name FROM (
 			SELECT DISTINCT ON (customer_id) customer_id, customer_name
 			FROM %s.purchase_orders
-			WHERE org_id = $1
+			WHERE org_id = $1 AND customer_id IS NOT NULL
 			ORDER BY customer_id, received_date DESC, id DESC
 		) latest
 		ORDER BY customer_name, customer_id`, schema), orgID)

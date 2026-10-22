@@ -306,4 +306,58 @@ describe("Sign out is guarded (issue #491 follow-up)", () => {
     expect(prompt()).toBeNull();
     expect(signInButton()).not.toBeNull();
   });
+
+  it("signs out an untouched PO-first editor without a prompt", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain("New purchase order");
+
+    await openMenuAndSignOut();
+    await flush();
+    expect(prompt()).toBeNull();
+    expect(signInButton()).not.toBeNull();
+    expect(mocks.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("guards a dirty PO-first editor and keeps its values on Keep editing", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+    const poNumber = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Customer PO number"]'
+    );
+    if (poNumber === null) throw new Error("customer PO number field not found");
+    typeInto(poNumber, "KEEP-PO-496");
+    expect(document.body.textContent).toContain("Unsaved changes");
+
+    await openMenuAndSignOut();
+    expect(prompt()).not.toBeNull();
+    expect(signInButton()).toBeNull();
+
+    await act(async () => {
+      button("Keep editing").click();
+    });
+    await flush();
+    expect(prompt()).toBeNull();
+    expect(signInButton()).toBeNull();
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[aria-label="Customer PO number"]'
+      )?.value
+    ).toBe("KEEP-PO-496");
+
+    await openMenuAndSignOut();
+    await act(async () => {
+      button("Discard changes").click();
+    });
+    await flush();
+    expect(prompt()).toBeNull();
+    expect(signInButton()).not.toBeNull();
+    expect(mocks.logout).toHaveBeenCalledTimes(1);
+  });
 });

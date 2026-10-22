@@ -20,14 +20,14 @@ import (
 // it, copies the customer-facing snapshot inside the same transaction, and
 // refuses a second active record for the same Quotation.
 
-// createPurchaseOrderDraft creates the one active record for a Quotation.
+// createPurchaseOrderDraft creates either the one active record for a
+// Quotation or, when no Quotation is named, a source-less blank draft (#496).
+// A linked create keeps its exact source and occupancy guard; a blank create
+// never occupies a Quotation and seeds the company currency.
 func (s *Server) createPurchaseOrderDraft(context echo.Context) error {
 	var request apicontract.PurchaseOrderCreateRequest
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-	}
-	if request.QuotationID < 1 || request.RevisionNumber == nil || *request.RevisionNumber < 0 {
-		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation source"})
 	}
 	received, err := parsePurchaseOrderDate(request.ReceivedDate, "receivedDate")
 	if err != nil {
@@ -38,6 +38,27 @@ func (s *Server) createPurchaseOrderDraft(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
 	}
 	user := requestUser(context)
+
+	if request.QuotationID == 0 {
+		if request.RevisionNumber != nil {
+			return context.JSON(http.StatusBadRequest, map[string]string{"error": "a revision needs a quotation source"})
+		}
+		order, err := s.database.CreatePurchaseOrderBlankDraft(requestContext, store.PurchaseOrderBlankCreate{
+			ReceivedDate:    received,
+			TaxZone:         request.TaxZone,
+			TaxType:         request.TaxType,
+			ServiceCategory: request.ServiceCategory,
+			TaxCategory:     request.TaxCategory,
+			CreatedBy:       user.ID,
+		})
+		if err != nil {
+			return purchaseOrderError(context, err)
+		}
+		return context.JSON(http.StatusCreated, mapPurchaseOrder(order))
+	}
+	if request.QuotationID < 0 || request.RevisionNumber == nil || *request.RevisionNumber < 0 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation source"})
+	}
 	order, err := s.database.CreatePurchaseOrderDraft(requestContext, store.PurchaseOrderCreate{
 		QuotationID:    request.QuotationID,
 		RevisionNumber: *request.RevisionNumber,
@@ -77,7 +98,7 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 	if err := context.Bind(&request); err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 	}
-	if protected := request.Named(); protected != "" {
+	if protected := request.NamedExceptSourceBasis(); protected != "" {
 		return purchaseOrderProtectedField(context, protected)
 	}
 	update, err := purchaseOrderUpdateFromRequest(request, requestUser(context).ID)
@@ -507,6 +528,8 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		Incoterms:              order.Incoterms,
 		Currency:               order.Currency,
 		TaxZone:                order.TaxZone,
+		TaxType:                order.TaxType,
+		ServiceCategory:        order.ServiceCategory,
 		TaxCategory:            order.TaxCategory,
 		DiscountPercent:        order.DiscountPercent,
 		SubtotalMinor:          order.SubtotalMinor,
@@ -522,6 +545,8 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		PrintedGrandTotalMinor: order.PrintedGrandTotalMinor,
 		PdfAbsentConfirmed:     order.PDFAbsentConfirmed,
 		SourceMissing:          order.SourceMissing,
+		SourceState:            order.SourceState,
+		PrintedTotalsKnown:     order.PrintedTotalsKnown,
 		SavedBy:                order.SavedBy,
 		ConfirmationNumber:     order.ConfirmationNumber,
 		ConfirmationWarn:       order.ConfirmationWarn,
@@ -619,6 +644,11 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 		RequestedDeliveryDate: requested,
 		PaymentTerms:          request.PaymentTerms,
 		Incoterms:             request.Incoterms,
+		Currency:              stringOrEmpty(request.Currency),
+		TaxZone:               stringOrEmpty(request.TaxZone),
+		TaxType:               stringOrEmpty(request.TaxType),
+		ServiceCategory:       stringOrEmpty(request.ServiceCategory),
+		TaxCategory:           stringOrEmpty(request.TaxCategory),
 		UpdatedBy:             updatedBy,
 		Items:                 items,
 		DiscountPercent:       request.DiscountPercent,
@@ -627,6 +657,13 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 		ExpectedVersion:       request.ExpectedVersion,
 		Overwrite:             request.Overwrite,
 	}, nil
+}
+
+func stringOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // mapPurchaseOrderCorrection exposes one retained snapshot. Nothing here reads
@@ -638,6 +675,7 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 		Kind:                  entry.Kind,
 		State:                 entry.State,
 		Reason:                entry.Reason,
+		SourceMissing:         entry.SourceMissing,
 		ActorID:               entry.ActorID,
 		ActorName:             entry.ActorName,
 		CreatedAt:             entry.CreatedAt.Format(time.RFC3339),

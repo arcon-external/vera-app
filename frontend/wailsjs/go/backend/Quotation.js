@@ -30,6 +30,10 @@ export function CreateDeletionChallenge(arg1) {
   return window['go']['backend']['Quotation']['CreateDeletionChallenge'](arg1);
 }
 
+export function CreatePurchaseOrderBlankDraft(arg1) {
+  return window['go']['backend']['Quotation']['CreatePurchaseOrderBlankDraft'](arg1);
+}
+
 export function CreatePurchaseOrderDraft(arg1) {
   return window['go']['backend']['Quotation']['CreatePurchaseOrderDraft'](arg1);
 }

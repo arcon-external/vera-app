@@ -7,13 +7,16 @@ import {
   activeFilterCount,
   buildPOListQuery,
   canOpenRow,
+  customerCellLabel,
   initialPOListFilters,
   initialPOListState,
   initialPOListStateFor,
   poListQueryDelay,
   poListReducer,
   poNumberLabel,
+  quotationCellLabel,
   resetPOListFilters,
+  sourceRevisionLabel,
   toggleCustomerFilter,
   type POListPageDTO,
   type POListRowDTO,
@@ -328,5 +331,49 @@ describe("row decisions (issue #469)", () => {
     // rather than the draft editor, and editing stays gated until #473.
     expect(canOpenRow(row({ State: "draft" }))).toBe(true);
     expect(canOpenRow(row({ State: "saved" }))).toBe(true);
+  });
+});
+
+// Issue #496: a never-linked row must not be described as a former revision 0,
+// while a linked revision 00 is real and says so.
+describe("source copy (issue #496)", () => {
+  it("distinguishes never, former and a real revision 00", () => {
+    expect(
+      sourceRevisionLabel(
+        row({ SourceState: "never", SourceMissing: true, SourceRevision: 0 })
+      )
+    ).toBe("No quotation linked");
+    expect(
+      sourceRevisionLabel(
+        row({ SourceState: "former", SourceMissing: true, SourceRevision: 1 })
+      )
+    ).toBe("Former quotation · revision 1");
+    expect(
+      sourceRevisionLabel(
+        row({ SourceState: "live", SourceMissing: false, SourceRevision: 0 })
+      )
+    ).toBe("Revision 0");
+    // An older payload has no SourceState; SourceMissing still distinguishes
+    // a former row from a live one.
+    expect(
+      sourceRevisionLabel(
+        row({ SourceState: undefined, SourceMissing: true, SourceRevision: 2 })
+      )
+    ).toBe("Former quotation · revision 2");
+  });
+
+  it("shows no fabricated quotation or Customer for a never-linked row", () => {
+    const never = row({
+      SourceState: "never",
+      SourceMissing: true,
+      QuoteNumber: "",
+      CustomerName: "",
+      CustomerID: 0,
+    });
+    expect(quotationCellLabel(never)).toBe("—");
+    expect(customerCellLabel(never)).toBe("—");
+    // A live row keeps its real number and customer.
+    expect(quotationCellLabel(row())).toBe("1502260001");
+    expect(customerCellLabel(row())).toBe("PT. Alpha");
   });
 });

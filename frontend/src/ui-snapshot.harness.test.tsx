@@ -89,6 +89,7 @@ import {
 } from "./poList";
 import type { POListRowDTO, POListState } from "./poList";
 import {
+  blankPurchaseOrderDraft,
   buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
   initialPurchaseOrderEditorState,
@@ -225,6 +226,16 @@ const PO_EDITOR_USD: CurrencyInfo = {
   position: "before",
   groupSep: ",",
   decimalSep: ".",
+  symbolSpaced: false,
+};
+// Issue #496: a source-less draft starts in the live company currency.
+const PO_EDITOR_IDR: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
   symbolSpaced: false,
 };
 const PO_EDITOR_ORDER: PurchaseOrderDTO = {
@@ -853,8 +864,66 @@ const PO_LIST_ARCHIVE: POListState = {
   total: 23,
   totalPages: 2,
 };
-const PO_LIST_NO_MATCH: POListState = {
-  ...initialPOListStateFor("archive"),
+// Issue #496: the three source states the archive copy must keep distinct. A
+// never-linked draft has no quotation or Customer; a former row keeps its
+// former source; a live revision 00 is a real link. The case exists so the
+// copy is read at both widths, not only asserted in SSR.
+const PO_LIST_SOURCE_MISSING_496: POListState = {
+  ...initialPOListStateFor("drafts"),
+  rows: [
+    {
+      UUID: "uuid-po-never",
+      State: "draft",
+      PONumber: "",
+      QuoteNumber: "",
+      CustomerName: "",
+      ReceivedDate: "2026-10-22",
+      Currency: "IDR",
+      ID: 41,
+      CustomerID: 0,
+      SourceRevision: 0,
+      SourceMissing: true,
+      SourceState: "never",
+    },
+    {
+      UUID: "uuid-po-former",
+      State: "draft",
+      PONumber: "PO-FORMER-496",
+      QuoteNumber: "1502250007",
+      CustomerName: "PT. Former Source",
+      ReceivedDate: "2026-10-21",
+      Currency: "IDR",
+      ID: 40,
+      CustomerID: 3,
+      SourceRevision: 1,
+      SourceMissing: true,
+      SourceState: "former",
+    },
+    {
+      UUID: "uuid-po-live0",
+      State: "draft",
+      PONumber: "PO-LIVE-REV00",
+      QuoteNumber: "1502260008",
+      CustomerName: "PT. Live Source",
+      ReceivedDate: "2026-10-20",
+      Currency: "IDR",
+      ID: 39,
+      CustomerID: 2,
+      SourceRevision: 0,
+      SourceMissing: false,
+      SourceState: "live",
+    },
+  ],
+  customers: [
+    { ID: 2, Name: "PT. Live Source" },
+    { ID: 3, Name: "PT. Former Source" },
+  ],
+  page: 1,
+  pageSize: 15,
+  total: 3,
+  totalPages: 1,
+};
+const PO_LIST_NO_MATCH: POListState = {  ...initialPOListStateFor("archive"),
   filters: {
     ...initialPOListFilters,
     search: "datalec",
@@ -1475,6 +1544,24 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // Issue #496: never-linked, formerly-linked and a real revision 00 in one
+    // list. The first row must read "No quotation linked" with no fabricated
+    // Customer, the second keeps its former source, and the third keeps
+    // "Revision 0". The Source missing badge is shared, because the filter and
+    // the user-facing state are shared.
+    name: "PurchaseOrderSourceMissing496",
+    element: (
+      <PurchaseOrderListView
+        mode="drafts"
+        state={PO_LIST_SOURCE_MISSING_496}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
     // The PO source selector, step 1 (issue #467): search, the checked
     // filter, pagination, and a used Quotation greyed with its reason. The
     // list scrolls inside the dialog rather than growing the page.
@@ -1562,6 +1649,41 @@ const CASES: SnapshotCase[] = [
         currency={PO_EDITOR_USD}
         uomOptions={PO_EDITOR_UOM_OPTIONS}
         incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // Issue #496: the PO-first blank editor. It has no source, Customer,
+    // quote number, revision or printed totals, but it is the full manual-entry
+    // form: Link a Quotation at the top, the editable source basis (currency
+    // and tax triple) and the PO-owned header/lines. At 360 the link card,
+    // basis grid and header wrap instead of overflowing, and the header must
+    // never read "Draft 0" or "revision 0".
+    name: "PurchaseOrderFirstDraft496",
+    element: (
+      <PurchaseOrderEditorView
+        state={initialPurchaseOrderEditorState(
+          blankPurchaseOrderDraft({
+            currency: "IDR",
+            taxZone: "NonFTZ",
+            taxType: "Goods",
+            serviceCategory: "",
+            receivedDate: "2026-10-22",
+            paymentTerms: "50% advance",
+            incoterms: "EXW",
+          }),
+          PO_EDITOR_IDR
+        )}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_IDR}
+        currencyOptions={[PO_EDITOR_IDR, PO_EDITOR_USD]}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onLinkQuotation={() => undefined}
         onSave={() => undefined}
         onCancel={() => undefined}
         onFinalSave={() => undefined}

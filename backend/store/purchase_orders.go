@@ -22,6 +22,20 @@ const (
 	PurchaseOrderStateSaved = "saved"
 )
 
+// The three live source shapes (#496). A row is exactly one of them:
+//
+//	live   quotation_id IS NOT NULL
+//	former quotation_id IS NULL and every former_* column set
+//	never  quotation_id IS NULL and every former_* column NULL (draft only)
+//
+// Machine logic keys off this state, never off a zero id or a missing field: a
+// linked revision 00 is a real link and serialises its revision as absent.
+const (
+	PurchaseOrderSourceStateLive   = "live"
+	PurchaseOrderSourceStateNever  = "never"
+	PurchaseOrderSourceStateFormer = "former"
+)
+
 // QuantityScale is the fixed four-decimal representation of a PO quantity.
 // Every quantity travels as an integer count of 1/10000 units so no float and
 // no locale-dependent decimal string enters the database.
@@ -84,10 +98,12 @@ var (
 	// with the revision it names (a customer, for instance). Like the currency
 	// refusal, it is a broken link rather than something staff entered.
 	ErrPurchaseOrderSourceMismatch = errors.New("purchase order source does not match the record")
-	// ErrPurchaseOrderSourceMissing is the #480 state a deletion can create:
-	// the record's Quotation was permanently deleted, so the rules that compare
-	// against the frozen revision cannot run until an admin repairs the link.
-	ErrPurchaseOrderSourceMissing = errors.New("purchase order source quotation was deleted; repair the source link first")
+	// ErrPurchaseOrderSourceMissing is the #480/#496 state a draft can be in:
+	// it was never linked, or the Quotation it followed was permanently
+	// deleted. The rules that compare against the frozen revision cannot run
+	// until a source is linked. The wording is deliberately neutral because a
+	// never-linked draft was not deleted.
+	ErrPurchaseOrderSourceMissing = errors.New("purchase order has no live source quotation; link a quotation before this action")
 )
 
 // PurchaseOrderDecision is one explicit difference-review choice for a review
@@ -139,6 +155,8 @@ type PurchaseOrder struct {
 	Incoterms              string
 	Currency               string
 	TaxZone                string
+	TaxType                string
+	ServiceCategory        string
 	TaxCategory            string
 	AdjustmentReason       string
 	Items                  []PurchaseOrderItem
@@ -169,10 +187,17 @@ type PurchaseOrder struct {
 	// and the row's trigger moves it forward on every write, so a save must
 	// state the version it loaded.
 	Version int64
-	// SourceMissing is the #480 state: the record followed a Quotation that was
-	// deleted, so it keeps its own values and a former-source reference.
-	// QuotationID and QuoteNumber then name the former link, not a live one.
+	// SourceMissing is true for both a never-linked draft and a record whose
+	// source quotation was deleted. SourceState names which one it is.
 	SourceMissing bool
+	// SourceState is "live", "never" or "former" (#496). It is the only
+	// presence signal: QuotationID/CustomerID/SourceRevision stay numeric for
+	// old readers and are zero when absent, which is also a real revision 00.
+	SourceState string
+	// PrintedTotalsKnown is false exactly for a never-linked draft, whose
+	// printed source figures do not exist yet. Formerly-linked and live records
+	// copied them when they were created.
+	PrintedTotalsKnown bool
 	// Finalization (#471). SavedAt/SavedBy are set exactly once, by the
 	// transition from draft to saved. PDFAbsentConfirmed records the deliberate
 	// confirmation a save needs while no customer PDF exists.
@@ -235,6 +260,19 @@ type PurchaseOrderCreate struct {
 	CreatedBy      int64
 }
 
+// PurchaseOrderBlankCreate starts a draft with no source and no Customer
+// (#496). Currency is deliberately absent: the server seeds the company
+// currency. The tax triple is the user's Quotation default carried by the
+// desktop; the server validates it and computes PPN from the persisted basis.
+type PurchaseOrderBlankCreate struct {
+	ReceivedDate    *time.Time
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	TaxCategory     string
+	CreatedBy       int64
+}
+
 // PurchaseOrderUpdate replaces the editable draft header, the whole-order
 // discount and adjustment, and every line. The source link, snapshots, currency
 // and tax basis are not editable here.
@@ -256,6 +294,15 @@ type PurchaseOrderUpdate struct {
 	Items                 []PurchaseOrderItem
 	DiscountPercent       int16
 	AdjustmentMinor       int64
+	// Currency and the tax triple are editable only while a draft has never
+	// been linked (#496). Empty means "keep what the row already carries"; a
+	// linked row refuses any non-empty value that differs from its frozen
+	// basis, so a stale client cannot move it by accident.
+	Currency        string
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	TaxCategory     string
 	// ExpectedVersion is the version the editor loaded (#473). It is required:
 	// a missing base is refused rather than treated as "no check".
 	ExpectedVersion int64
@@ -338,12 +385,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			discount_minor, ppn_bps, ppn_minor, adjustment_minor,
 			adjustment_reason, grand_total_minor, printed_subtotal_minor,
 			printed_discount_minor, printed_ppn_minor, printed_grand_total_minor,
-			created_by, updated_by
+			created_by, updated_by, tax_type, service_category
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,
 			$10,$11,$12,$13,$14,
 			$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,
-			$27,$27)
+			$27,$27,$28,$29)
 		RETURNING id, uuid::text`, schema),
 		org.ID, input.QuotationID, input.RevisionNumber, PurchaseOrderStateDraft,
 		source.CustomerID, source.CustomerName, source.BillingAddress,
@@ -355,6 +402,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		calculation.GrandTotalMinor, source.PrintedSubtotalMinor,
 		source.PrintedDiscountMinor, source.PrintedPpnMinor,
 		source.PrintedGrandTotalMinor, input.CreatedBy,
+		source.TaxType, source.ServiceCategory,
 	).Scan(&id, &uuid)
 	if err != nil {
 		if isActivePurchaseOrderConflict(err) {
@@ -383,7 +431,200 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	return created, nil
 }
 
-// GetPurchaseOrder reopens one PO by id inside the caller's organization.
+// CreatePurchaseOrderBlankDraft creates a draft with no source and no Customer
+// (#496). The server owns the company currency; the desktop supplies the user's
+// tax defaults, which are validated here and persisted as the full triple. The
+// row is a never-linked draft: no Quotation, no revision, no Customer, no
+// printed source totals and no invented former-source reference.
+func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input PurchaseOrderBlankCreate) (PurchaseOrder, error) {
+	org, err := s.RequireOrg(ctx)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if input.CreatedBy < 1 {
+		return PurchaseOrder{}, fmt.Errorf("%w: the creator is required", ErrPurchaseOrderInvalid)
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	schema := s.configSchema()
+
+	profile, err := s.GetCompanyProfile(ctx)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	basis, err := resolveBlankPurchaseOrderBasis(profile.Currency, input)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+
+	received := normalizeDate(input.ReceivedDate)
+	if received.IsZero() {
+		received = companyToday(time.Now())
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return PurchaseOrder{}, fmt.Errorf("begin blank purchase order transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var id int64
+	var uuid string
+	err = tx.QueryRow(ctx, fmt.Sprintf(`
+		INSERT INTO %s.purchase_orders (
+			org_id, quotation_id, source_revision, state, customer_id,
+			customer_name, billing_address, delivery_address, ship_to_code,
+			contact_email, contact_phone, po_number, po_date, received_date,
+			requested_delivery_date, payment_terms, incoterms, currency,
+			tax_zone, tax_category, discount_percent, subtotal_minor,
+			discount_minor, ppn_bps, ppn_minor, adjustment_minor,
+			adjustment_reason, grand_total_minor, printed_subtotal_minor,
+			printed_discount_minor, printed_ppn_minor, printed_grand_total_minor,
+			created_by, updated_by, tax_type, service_category
+		) VALUES (
+			$1,NULL,NULL,$2,NULL,
+			'','','','','','',NULL,NULL,$3,
+			NULL,'','',$4,
+			$5,$10,0,0,
+			0,$6,0,0,
+			'',0,0,0,0,0,
+			$7,$7,$8,$9)
+		RETURNING id, uuid::text`, schema),
+		org.ID, PurchaseOrderStateDraft, received, basis.Currency,
+		basis.TaxZone, basis.PpnBps, input.CreatedBy,
+		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
+	).Scan(&id, &uuid)
+	if err != nil {
+		return PurchaseOrder{}, fmt.Errorf("insert blank purchase order: %w", err)
+	}
+
+	if err := replacePurchaseOrderItems(ctx, tx, schema, id, nil); err != nil {
+		return PurchaseOrder{}, err
+	}
+
+	created, err := getPurchaseOrder(ctx, tx, schema, org.ID, id)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PurchaseOrder{}, fmt.Errorf("commit blank purchase order draft: %w", err)
+	}
+	return created, nil
+}
+
+// purchaseOrderBasis is the persisted currency and tax triple a write resolves.
+type purchaseOrderBasis struct {
+	Currency        string
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	TaxCategory     string
+	PpnBps          int16
+}
+
+// resolveBlankPurchaseOrderBasis validates the desktop's tax defaults and
+// seeds the currency from the company profile. An empty triple falls back to
+// FTZ goods, the same safe default a quotation uses.
+func resolveBlankPurchaseOrderBasis(companyCurrency string, input PurchaseOrderBlankCreate) (purchaseOrderBasis, error) {
+	currencyCode, err := checkDraftCurrency(companyCurrency)
+	if err != nil {
+		return purchaseOrderBasis{}, err
+	}
+	zone := strings.TrimSpace(input.TaxZone)
+	taxType := strings.TrimSpace(input.TaxType)
+	serviceCategory := strings.TrimSpace(input.ServiceCategory)
+	legacyCategory := strings.TrimSpace(input.TaxCategory)
+	if zone == "" && taxType == "" && serviceCategory == "" && legacyCategory == "" {
+		zone, taxType = "FTZ", "Goods"
+	}
+	if zone == "" {
+		zone = "FTZ"
+	}
+	ppnBps, err := PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory)
+	if err != nil {
+		return purchaseOrderBasis{}, err
+	}
+	return purchaseOrderBasis{
+		Currency:        currencyCode,
+		TaxZone:         zone,
+		TaxType:         taxType,
+		ServiceCategory: serviceCategory,
+		TaxCategory:     legacyCategory,
+		PpnBps:          ppnBps,
+	}, nil
+}
+
+// resolvePurchaseOrderUpdateBasis keeps a linked row's currency and tax basis
+// frozen and lets only a never-linked draft move them. Empty submitted values
+// mean "keep the stored value"; a never-linked draft is allowed to clear its
+// service category when it switches to Goods.
+func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input PurchaseOrderUpdate) (purchaseOrderBasis, error) {
+	if lock.SourceState != PurchaseOrderSourceStateNever {
+		if input.Currency != "" && !strings.EqualFold(strings.TrimSpace(input.Currency), lock.Currency) {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the currency is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		if input.TaxZone != "" && strings.TrimSpace(input.TaxZone) != lock.TaxZone {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the tax zone is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		if input.TaxType != "" && strings.TrimSpace(input.TaxType) != lock.TaxType {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		if input.ServiceCategory != "" && strings.TrimSpace(input.ServiceCategory) != lock.ServiceCategory {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		if input.TaxCategory != "" && strings.TrimSpace(input.TaxCategory) != lock.TaxCategory {
+			return purchaseOrderBasis{}, fmt.Errorf(
+				"%w: the tax category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+		}
+		return purchaseOrderBasis{
+			Currency:        lock.Currency,
+			TaxZone:         lock.TaxZone,
+			TaxType:         lock.TaxType,
+			ServiceCategory: lock.ServiceCategory,
+			TaxCategory:     lock.TaxCategory,
+			PpnBps:          lock.PpnBps,
+		}, nil
+	}
+
+	currencyCode := lock.Currency
+	if strings.TrimSpace(input.Currency) != "" {
+		validated, err := checkDraftCurrency(input.Currency)
+		if err != nil {
+			return purchaseOrderBasis{}, err
+		}
+		currencyCode = validated
+	}
+	zone := strings.TrimSpace(input.TaxZone)
+	taxType := strings.TrimSpace(input.TaxType)
+	serviceCategory := strings.TrimSpace(input.ServiceCategory)
+	legacyCategory := strings.TrimSpace(input.TaxCategory)
+	if zone == "" && taxType == "" && serviceCategory == "" && legacyCategory == "" {
+		zone, taxType = lock.TaxZone, lock.TaxType
+		serviceCategory, legacyCategory = lock.ServiceCategory, lock.TaxCategory
+	}
+	if zone == "" {
+		zone = "FTZ"
+	}
+	ppnBps, err := PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory)
+	if err != nil {
+		return purchaseOrderBasis{}, err
+	}
+	return purchaseOrderBasis{
+		Currency:        currencyCode,
+		TaxZone:         zone,
+		TaxType:         taxType,
+		ServiceCategory: serviceCategory,
+		TaxCategory:     legacyCategory,
+		PpnBps:          ppnBps,
+	}, nil
+}
+
 func (s *Store) GetPurchaseOrder(ctx context.Context, id int64) (PurchaseOrder, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
@@ -440,7 +681,11 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := requirePurchaseOrderSource(lock); err != nil {
+	// #496: a never-linked or formerly-linked draft still saves its own
+	// PO-owned values. Only the paths that need the frozen revision (review,
+	// finalize, corrections, repairs) require a live source.
+	basis, err := resolvePurchaseOrderUpdateBasis(lock, input)
+	if err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -456,13 +701,18 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		}
 	}
 
-	if err := validatePurchaseOrderReferences(ctx, tx, schema,
-		lock.QuotationID, lock.SourceRevision, input.Items); err != nil {
-		return PurchaseOrder{}, err
+	// Reference validation needs a frozen revision to validate against. A
+	// source-less draft has none; its preserved references stay as entered and
+	// are checked again if and when a source is linked (#497).
+	if lock.SourceState == PurchaseOrderSourceStateLive {
+		if err := validatePurchaseOrderReferences(ctx, tx, schema,
+			lock.QuotationID, lock.SourceRevision, input.Items); err != nil {
+			return PurchaseOrder{}, err
+		}
 	}
 	lines, calculation, err := calculatePurchaseOrderLines(
 		input.Items, input.DiscountPercent, input.AdjustmentMinor,
-		input.AdjustmentReason, lock.PpnBps)
+		input.AdjustmentReason, basis.PpnBps)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -470,7 +720,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	// A draft keeps its number free while staff prepare it: the key is cleared,
 	// so two people may still compete for one order. Only the final save writes
 	// it.
-	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, nil); err != nil {
+	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
@@ -893,7 +1143,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	var confirmationYear, confirmationCustomerCode pgtype.Int2
 	var confirmationAssignedAt pgtype.Timestamptz
 	var confirmationAssignedBy pgtype.Int8
-	var sourceMissing bool
+	var customerID pgtype.Int8
+	var sourceRevision pgtype.Int2
 	err := q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT po.id, po.version, po.uuid::text, po.org_id::text,
 		       COALESCE(po.quotation_id, po.former_quotation_id, 0),
@@ -903,7 +1154,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.ship_to_code, po.contact_email, po.contact_phone,
 		       COALESCE(po.po_number, ''), po.po_date, po.received_date,
 		       po.requested_delivery_date, po.payment_terms, po.incoterms,
-		       po.currency, po.tax_zone, po.tax_category, po.created_by,
+		       po.currency, po.tax_zone, po.tax_type, po.service_category,
+		       po.tax_category, po.created_by,
 		       po.updated_by, po.created_at, po.updated_at,
 		       po.subtotal_minor, po.discount_minor, po.ppn_bps, po.ppn_minor,
 		       po.adjustment_minor, po.adjustment_reason, po.grand_total_minor,
@@ -915,7 +1167,9 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.confirmation_number, po.confirmation_sequence,
 		       po.confirmation_year, po.confirmation_customer_code,
 		       po.confirmation_assigned_at, po.confirmation_assigned_by,
-		       (po.quotation_id IS NULL)
+		       CASE WHEN po.quotation_id IS NOT NULL THEN 'live'
+		            WHEN po.former_quotation_id IS NOT NULL THEN 'former'
+		            ELSE 'never' END
 		FROM %s.purchase_orders po
 		LEFT JOIN %s.quotations q ON q.id = po.quotation_id
 		WHERE po.id = $1 AND po.org_id = $2`, schema, schema), id, orgID).Scan(
@@ -924,10 +1178,10 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&order.UUID,
 		&order.OrgID,
 		&order.QuotationID,
-		&order.SourceRevision,
+		&sourceRevision,
 		&order.QuoteNumber,
 		&order.State,
-		&order.CustomerID,
+		&customerID,
 		&order.CustomerName,
 		&order.BillingAddress,
 		&order.DeliveryAddress,
@@ -942,6 +1196,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&order.Incoterms,
 		&order.Currency,
 		&order.TaxZone,
+		&order.TaxType,
+		&order.ServiceCategory,
 		&order.TaxCategory,
 		&order.CreatedBy,
 		&order.UpdatedBy,
@@ -968,7 +1224,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&confirmationCustomerCode,
 		&confirmationAssignedAt,
 		&confirmationAssignedBy,
-		&sourceMissing,
+		&order.SourceState,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PurchaseOrder{}, ErrPurchaseOrderNotFound
@@ -976,7 +1232,14 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	if err != nil {
 		return PurchaseOrder{}, fmt.Errorf("load purchase order %d: %w", id, err)
 	}
-	order.SourceMissing = sourceMissing
+	if sourceRevision.Valid {
+		order.SourceRevision = sourceRevision.Int16
+	}
+	if customerID.Valid {
+		order.CustomerID = customerID.Int64
+	}
+	order.SourceMissing = order.SourceState != PurchaseOrderSourceStateLive
+	order.PrintedTotalsKnown = order.SourceState != PurchaseOrderSourceStateNever
 	if savedAt.Valid {
 		value := savedAt.Time
 		order.SavedAt = &value

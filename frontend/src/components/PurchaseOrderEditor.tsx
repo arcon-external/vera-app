@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
+  CreatePurchaseOrderBlankDraft,
   FinalizePurchaseOrder,
   GetPurchaseOrderExtraction,
   GetPurchaseOrderReview,
@@ -66,6 +67,11 @@ import {
 } from "./PurchaseOrderFinalize";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
+import {
+  SERVICE_CATEGORY_OPTIONS,
+  TAX_TYPE_OPTIONS,
+  TAX_ZONE_OPTIONS,
+} from "../tax";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
 // Issue #468: the PO draft workspace. The header keeps the customer snapshot
@@ -83,8 +89,12 @@ export interface PurchaseOrderEditorViewProps {
   state: PurchaseOrderEditorState;
   dispatch: (action: PurchaseOrderEditorAction) => void;
   currency: CurrencyInfo;
+  /** The loaded currency catalogue; the basis is editable before linking. */
+  currencyOptions?: CurrencyInfo[];
   uomOptions: CompanyUnitOption[];
   incotermOptions: { value: string; label: string }[];
+  /** Safe deferred linking for #497; it never replaces or creates a record. */
+  onLinkQuotation?: () => void;
   onSave: () => void;
   onCancel: () => void;
   /** Opens the final-save difference review (#471). */
@@ -102,8 +112,11 @@ export interface PurchaseOrderEditorViewProps {
 export interface PurchaseOrderEditorPageProps {
   order: PurchaseOrderDTO;
   currency: CurrencyInfo;
+  currencyOptions?: CurrencyInfo[];
   uomOptions: CompanyUnitOption[];
   incotermOptions: { value: string; label: string }[];
+  /** Safe deferred linking for #497; App currently explains the next step. */
+  onLinkQuotation?: () => void;
   /**
    * Reports the stored record. `corrected` is true when this save went through
    * the correction flow, including a draft that was transitioned into one after
@@ -284,6 +297,20 @@ function sameExtractionDocument(
     left.Version === right.Version &&
     left.SHA256 === right.SHA256
   );
+}
+
+/**
+ * The correction payload must not carry the source-basis fields, even when a
+ * never-linked draft happens to hold them: a saved-record correction has no
+ * editable currency or tax basis and the server refuses those fields by name.
+ */
+function withoutSourceBasis(input: PurchaseOrderUpdateInput): Record<string, unknown> {
+  const { Currency, TaxZone, TaxType, ServiceCategory, ...rest } = input;
+  void Currency;
+  void TaxZone;
+  void TaxType;
+  void ServiceCategory;
+  return rest;
 }
 
 function errorText(error: unknown): string {
@@ -509,8 +536,10 @@ export function PurchaseOrderEditorView({
   state,
   dispatch,
   currency,
+  currencyOptions = [],
   uomOptions,
   incotermOptions,
+  onLinkQuotation,
   onSave,
   onCancel,
   onFinalSave,
@@ -522,38 +551,99 @@ export function PurchaseOrderEditorView({
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
+  const activeCurrency =
+    currencyOptions.find((option) => option.code === state.currency) ?? currency;
   // The panel and the save guard read the same pure calculation, so the number
   // on screen is the number the payload will carry.
-  const calculation = calculatePurchaseOrder(state, currency);
+  const calculation = calculatePurchaseOrder(state, activeCurrency);
   const wholeDiscountPercent = parseDiscountPercent(state.header.discountPercent);
+  const neverLinked = state.sourceState === "never";
+  const sourceLess = state.sourceState !== "live";
+  const transient = state.orderId === 0;
+  const basisLabel =
+    state.taxType !== ""
+      ? `${state.taxType}${state.serviceCategory !== "" ? ` / ${state.serviceCategory}` : ""}`
+      : state.taxCategory;
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <SectionHeading
             title="Purchase Order"
-            hint={correcting ? `Saved record ${state.orderId} · correction` : `Draft ${state.orderId}`}
+            hint={
+              correcting
+                ? `Saved record ${state.orderId} · correction`
+                : transient
+                  ? "New purchase order"
+                  : `Draft ${state.orderId}`
+            }
           />
           <h1 className="tnum text-display font-semibold text-ink-950">
-            {state.quoteNumber}
+            {neverLinked ? "New purchase order" : state.quoteNumber}
           </h1>
           <p className="mt-1 text-body text-ink-500">
-            {state.customerName} · revision {state.sourceRevision} ·{" "}
-            {state.currency.toUpperCase()}
-            {state.taxZone !== ""
-              ? ` · ${state.taxZone}${
-                  state.taxCategory !== "" ? ` / ${state.taxCategory}` : ""
-                }`
-              : ""}
+            {neverLinked ? (
+              <>
+                Source missing · {state.currency.toUpperCase()}
+                {state.taxZone !== "" ? ` · ${state.taxZone}` : ""}
+                {basisLabel !== "" ? ` / ${basisLabel}` : ""}
+              </>
+            ) : (
+              <>
+                {state.customerName} ·{" "}
+                {state.sourceState === "former"
+                  ? `former quotation revision ${state.sourceRevision}`
+                  : `revision ${state.sourceRevision}`}{" "}
+                · {state.currency.toUpperCase()}
+                {state.taxZone !== ""
+                  ? ` · ${state.taxZone}${
+                      state.taxCategory !== ""
+                        ? ` / ${state.taxCategory}`
+                        : ""
+                    }`
+                  : ""}
+              </>
+            )}
           </p>
           <p className="mt-1 text-caption text-ink-500">
             {correcting
               ? `Editing version ${state.version}. The previous values are kept in the correction history.`
-              : `Loaded at version ${state.version}.`}
+              : transient
+                ? "Not saved yet. Save draft stores it so you can continue later."
+                : `Loaded at version ${state.version}.`}
           </p>
         </div>
-        <Badge tone="accent">{correcting ? "Correction" : "Draft"}</Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {sourceLess ? <Badge tone="danger">Source missing</Badge> : null}
+          <Badge tone="accent">{correcting ? "Correction" : "Draft"}</Badge>
+        </div>
       </div>
+
+      {sourceLess && !correcting ? (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <SectionHeading
+                title="Link a Quotation"
+                hint="Linking repeats the difference review and keeps every value you enter"
+              />
+              <p className="mt-1 max-w-2xl text-small leading-relaxed text-ink-500">
+                {neverLinked
+                  ? "This draft has no source yet. Enter the customer's order now; linking a quotation is the next step and will not replace these fields."
+                  : "This draft's quotation was deleted. The values below are kept; an administrator can link a new quotation later."}
+              </p>
+            </div>
+            <Button
+              aria-label="Link a Quotation"
+              onClick={onLinkQuotation}
+              disabled={onLinkQuotation === undefined}
+              title="Linking a quotation is the next step; your entries are kept."
+            >
+              Link a Quotation
+            </Button>
+          </div>
+        </Card>
+      ) : null}
 
       {state.error !== null ? (
         <StatusBanner tone="danger">{state.error}</StatusBanner>
@@ -592,6 +682,102 @@ export function PurchaseOrderEditorView({
               repairing a quotation link is its own permission (#475).
             </p>
           </div>
+        </Card>
+      ) : null}
+
+      {state.sourceState === "never" && !correcting ? (
+        <Card className="p-4">
+          <SectionHeading
+            title="Source basis"
+            hint="Editable until a quotation is linked; the server computes PPN"
+          />
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <span className="text-small font-medium text-ink-700">Currency</span>
+              <Select
+                ariaLabel="Currency"
+                value={state.currency}
+                options={currencyOptions.map((option) => ({
+                  value: option.code,
+                  label: `${option.code} (${option.symbol})`,
+                }))}
+                onChange={(value) => {
+                  const next = currencyOptions.find(
+                    (option) => option.code === value
+                  );
+                  if (next === undefined || next.code === state.currency) return;
+                  dispatch({
+                    type: "currencyChanged",
+                    code: next.code,
+                    from: activeCurrency,
+                    to: next,
+                  });
+                }}
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-small font-medium text-ink-700">Tax zone</span>
+              <Select
+                ariaLabel="Tax zone"
+                value={state.taxZone}
+                options={TAX_ZONE_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onChange={(value) =>
+                  dispatch({
+                    type: "sourceBasisChanged",
+                    patch: { taxZone: String(value) },
+                  })
+                }
+              />
+            </div>
+            <div className="grid gap-1.5">
+              <span className="text-small font-medium text-ink-700">Tax type</span>
+              <Select
+                ariaLabel="Tax type"
+                value={state.taxType}
+                options={TAX_TYPE_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+                onChange={(value) =>
+                  dispatch({
+                    type: "sourceBasisChanged",
+                    patch: { taxType: String(value) },
+                  })
+                }
+              />
+            </div>
+            {state.taxType === "Services" ? (
+              <div className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  Service category
+                </span>
+                <Select
+                  ariaLabel="Service category"
+                  value={state.serviceCategory || "NonConstruction"}
+                  options={SERVICE_CATEGORY_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                  onChange={(value) =>
+                    dispatch({
+                      type: "sourceBasisChanged",
+                      patch: { serviceCategory: String(value) },
+                    })
+                  }
+                />
+              </div>
+            ) : null}
+          </div>
+          <p className="mt-3 text-caption text-ink-500">
+            Currency and tax basis are PO-owned until a quotation is linked.
+            Choosing a different currency never converts an amount; amounts are
+            entered in the selected currency. PPN is derived by the server from
+            this basis, and linking a quotation replaces it only through an
+            explicit review.
+          </p>
         </Card>
       ) : null}
 
@@ -689,8 +875,9 @@ export function PurchaseOrderEditorView({
           </div>
         </div>
         <p className="mt-4 text-caption text-ink-500">
-          Customer, currency and tax basis are snapshots of the issued
-          quotation revision and cannot be edited here.
+          {state.sourceState === "never"
+            ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis above are editable until then."
+            : "Customer, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
         </p>
       </Card>
 
@@ -721,7 +908,7 @@ export function PurchaseOrderEditorView({
                 key={line.key}
                 line={line}
                 index={index}
-                currency={currency}
+                currency={activeCurrency}
                 uomOptions={uomOptions}
                 calculation={calculation.lines[index] ?? null}
                 dispatch={dispatch}
@@ -756,7 +943,7 @@ export function PurchaseOrderEditorView({
           </label>
           <label className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">
-              Adjustment ({currency.code})
+              Adjustment ({activeCurrency.code})
             </span>
             <input
               inputMode="decimal"
@@ -804,12 +991,13 @@ export function PurchaseOrderEditorView({
 
       <PurchaseOrderTotals
         totals={calculation.totals}
-        currency={currency}
+        currency={activeCurrency}
         discountPercent={wholeDiscountPercent}
         ppnBps={state.ppnBps}
         adjustmentReason={state.header.adjustmentReason.trim()}
         printedTotals={state.printedTotals}
         sourceRevision={state.sourceRevision}
+        printedTotalsKnown={state.printedTotalsKnown}
       />
 
       {state.error !== null ? (
@@ -821,7 +1009,9 @@ export function PurchaseOrderEditorView({
           {dirty ? "Unsaved changes" : "All changes saved"} ·{" "}
           {correcting
             ? "Saving keeps the replaced values and reason in the correction history."
-            : "Final Save reviews every difference against the exact quotation revision."}
+            : sourceLess
+              ? "Link a Quotation before Final Save; this draft stays editable and keeps its values."
+              : "Final Save reviews every difference against the exact quotation revision."}
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <Button aria-label={correcting ? "Cancel correction" : "Cancel draft"} onClick={onCancel}>
@@ -842,7 +1032,12 @@ export function PurchaseOrderEditorView({
             <Button
               variant="primary"
               aria-label="Final Save"
-              disabled={state.saving || finalSaving}
+              disabled={state.saving || finalSaving || sourceLess}
+              title={
+                sourceLess
+                  ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
+                  : undefined
+              }
               onClick={onFinalSave}
             >
               {finalSaving ? "Loading review…" : "Final Save"}
@@ -857,8 +1052,10 @@ export function PurchaseOrderEditorView({
 export function PurchaseOrderEditorPage({
   order,
   currency,
+  currencyOptions = [],
   uomOptions,
   incotermOptions,
+  onLinkQuotation,
   onSaved,
   onCancel,
   onDirtyChange,
@@ -875,6 +1072,8 @@ export function PurchaseOrderEditorPage({
     undefined,
     () => initialPurchaseOrderEditorState(order, currency)
   );
+  const activeCurrency =
+    currencyOptions.find((option) => option.code === state.currency) ?? currency;
   // The final-save flow is a view of this page, not a separate route: the
   // review reads the exact source from the server, and every choice edits the
   // one editor state, so the totals on screen are the totals that will be sent.
@@ -1032,7 +1231,7 @@ export function PurchaseOrderEditorPage({
         // arriving must discard the answer.
         const generation = extractionGeneration.current;
         try {
-          const next = await GetPurchaseOrderExtraction(order.ID);
+          const next = await GetPurchaseOrderExtraction(editorStateRef.current.orderId);
           if (generation !== extractionGeneration.current) return;
           const run = next.Run;
           if (run !== null && run !== undefined && run.ID === runId && !isTerminalExtractionStatus(run.Status)) {
@@ -1077,7 +1276,7 @@ export function PurchaseOrderEditorPage({
           editor.header,
           editor.lines,
           ensureExtractionTracker(),
-          currency
+          activeCurrency
         );
         setExtractionSelection(plan.selection);
       }
@@ -1095,6 +1294,9 @@ export function PurchaseOrderEditorPage({
 
   useEffect(() => {
     let cancelled = false;
+    // A transient editor has no row to read; the first upload/save adopts one
+    // and the explicit refresh paths use that id.
+    if (order.ID < 1) return;
     // The initial read belongs to the document generation that was active when
     // it started. A replacement while it is in flight ends that generation.
     const generation = extractionGeneration.current;
@@ -1124,7 +1326,7 @@ export function PurchaseOrderEditorPage({
     setExtractionApplied(null);
     void (async () => {
       try {
-        const next = await GetPurchaseOrderExtraction(order.ID);
+        const next = await GetPurchaseOrderExtraction(editorStateRef.current.orderId);
         if (generation !== extractionGeneration.current) return;
         adoptExtraction(next);
       } catch (refreshError) {
@@ -1177,7 +1379,8 @@ export function PurchaseOrderEditorPage({
     setDismissedExtractionId(null);
     void (async () => {
       try {
-        const next = await StartPurchaseOrderExtraction(order.ID);
+        const id = await ensurePersisted();
+        const next = await StartPurchaseOrderExtraction(id);
         if (generation !== extractionGeneration.current) return;
         adoptExtraction(next);
       } catch (startError) {
@@ -1209,7 +1412,7 @@ export function PurchaseOrderEditorPage({
       state.header,
       state.lines,
       ensureExtractionTracker(),
-      currency
+      activeCurrency
     );
     const selection = resolvedExtractionSelection(
       plan,
@@ -1222,7 +1425,7 @@ export function PurchaseOrderEditorPage({
       state.header,
       state.lines,
       state.nextKey,
-      currency
+      activeCurrency
     );
     if (applied.appliedFields === 0 && applied.appliedRows === 0) return;
     dispatch({
@@ -1283,7 +1486,7 @@ export function PurchaseOrderEditorPage({
       const applied = evaluateReview(
         state,
         review.Source,
-        currency,
+        activeCurrency,
         decisions,
         acknowledgedMissing,
         acknowledgedExtra
@@ -1324,6 +1527,39 @@ export function PurchaseOrderEditorPage({
     onDirtyChange?.(isPurchaseOrderDirty(state));
   }, [state, onDirtyChange]);
 
+  /**
+   * Persists the transient row the first time an action needs an id (Save
+   * draft, PDF upload or extraction). The created id is adopted immediately, so
+   * a failed attach or update retries against the same row instead of creating
+   * a second one.
+   */
+  const persisting = useRef<Promise<number> | null>(null);
+  const ensurePersisted = async (): Promise<number> => {
+    if (editorStateRef.current.orderId > 0) {
+      return editorStateRef.current.orderId;
+    }
+    if (persisting.current !== null) return persisting.current;
+    const promise = (async () => {
+      const current = editorStateRef.current;
+      const created = await CreatePurchaseOrderBlankDraft(
+        new backend.PurchaseOrderBlankCreateInput({
+          ReceivedDate: current.header.receivedDate,
+          TaxZone: current.taxZone,
+          TaxType: current.taxType,
+          ServiceCategory: current.serviceCategory,
+        })
+      );
+      dispatch({ type: "created", orderId: created.ID, version: created.Version });
+      return created.ID;
+    })();
+    persisting.current = promise;
+    try {
+      return await promise;
+    } finally {
+      persisting.current = null;
+    }
+  };
+
   const save = async (expectedVersion: number, overwrite: boolean) => {
     if (correcting) {
       const reasonProblem = correctionReasonError(reason);
@@ -1332,25 +1568,46 @@ export function PurchaseOrderEditorPage({
         return;
       }
     }
-    const result = buildPurchaseOrderUpdate(state, currency);
-    if (result.input === null) {
-      dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
+    // Validate before creating anything: an invalid form must not leave an
+    // empty row behind.
+    const preview = buildPurchaseOrderUpdate(state, activeCurrency);
+    if (preview.input === null) {
+      dispatch({ type: "saveFailed", error: preview.error ?? "The draft is incomplete." });
       return;
     }
-    const payload = {
-      ...result.input,
-      ExpectedVersion: expectedVersion,
-      Overwrite: overwrite,
-    };
     dispatch({ type: "saveStarted" });
     try {
+      let working = state;
+      if (!correcting && working.orderId === 0) {
+        const created = await CreatePurchaseOrderBlankDraft(
+          new backend.PurchaseOrderBlankCreateInput({
+            ReceivedDate: state.header.receivedDate,
+            TaxZone: state.taxZone,
+            TaxType: state.taxType,
+            ServiceCategory: state.serviceCategory,
+          })
+        );
+        dispatch({ type: "created", orderId: created.ID, version: created.Version });
+        working = { ...working, orderId: created.ID, version: created.Version };
+      }
+      const result = buildPurchaseOrderUpdate(working, activeCurrency);
+      if (result.input === null) {
+        dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
+        return;
+      }
+      const payload = {
+        ...result.input,
+        ID: working.orderId,
+        ExpectedVersion: expectedVersion < 1 ? working.version : expectedVersion,
+        Overwrite: overwrite,
+      };
       const items = payload.Items.map(
         (item) => new backend.PurchaseOrderItemInput(item)
       );
       const answer = correcting
         ? await CorrectPurchaseOrder(
             new backend.PurchaseOrderCorrectionInput({
-              ...payload,
+              ...withoutSourceBasis(payload),
               Reason: trimCorrectionReason(reason),
               Items: items,
             })
@@ -1360,7 +1617,7 @@ export function PurchaseOrderEditorPage({
           );
       const outcome = writeOutcome(answer);
       if (outcome.kind === "saved") {
-        dispatch({ type: "saveSucceeded", order: outcome.order, currency });
+        dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
         onSaved(outcome.order, correcting);
         return;
@@ -1389,14 +1646,15 @@ export function PurchaseOrderEditorPage({
   };
 
   const startReview = async () => {
-    const result = buildPurchaseOrderUpdate(state, currency);
+    const result = buildPurchaseOrderUpdate(state, activeCurrency);
     if (result.input === null) {
       dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
       return;
     }
     setReviewLoading(true);
     try {
-      const loaded = await GetPurchaseOrderReview(order.ID);
+      const id = await ensurePersisted();
+      const loaded = await GetPurchaseOrderReview(id);
       const initial = initialFinalizeReviewState();
       setReview(loaded);
       setDecisions(initial.decisions);
@@ -1417,7 +1675,7 @@ export function PurchaseOrderEditorPage({
     const result = buildFinalizeInput(
       state,
       review.Source,
-      currency,
+      activeCurrency,
       review.DocumentState,
       decisions,
       acknowledgedMissing,
@@ -1441,7 +1699,7 @@ export function PurchaseOrderEditorPage({
       );
       const outcome = writeOutcome(saved);
       if (outcome.kind === "saved") {
-        dispatch({ type: "saveSucceeded", order: outcome.order, currency });
+        dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
         onSaved(outcome.order, correcting);
         setReview(null);
@@ -1515,7 +1773,7 @@ export function PurchaseOrderEditorPage({
       <PurchaseOrderDifferenceReviewView
         state={state}
         source={review.Source}
-        currency={currency}
+        currency={activeCurrency}
         quoteNumber={order.QuoteNumber}
         documentState={review.DocumentState === "attached" ? "attached" : "none"}
         decisions={decisions}
@@ -1581,7 +1839,7 @@ export function PurchaseOrderEditorPage({
         review={review}
         evaluation={evaluation}
         payload={confirmPayload}
-        currency={currency}
+        currency={activeCurrency}
         documentConfirmed={documentConfirmed}
         onToggleDocumentConfirmed={() => setDocumentConfirmed((current) => !current)}
         assignConfirmation={assignConfirmation}
@@ -1621,7 +1879,7 @@ export function PurchaseOrderEditorPage({
           state.header,
           state.lines,
           extractionTracker,
-          currency
+          activeCurrency
         )
       : null;
   const extractionResolvedSelection =
@@ -1636,7 +1894,8 @@ export function PurchaseOrderEditorPage({
   return (
     <div className="flex flex-col gap-6">
       <PurchaseOrderDocumentPanel
-        purchaseOrderId={order.ID}
+        purchaseOrderId={state.orderId}
+        resolvePurchaseOrderId={ensurePersisted}
         onExtract={startExtraction}
         extractionStatus={
           extractionRun?.Status === "queued" || extractionRun?.Status === "running"
@@ -1677,7 +1936,7 @@ export function PurchaseOrderEditorPage({
           result={extractionRun.Result}
           header={state.header}
           lines={state.lines}
-          currency={currency}
+          currency={activeCurrency}
           selection={extractionResolvedSelection}
           onToggle={toggleExtraction}
           onApply={applyExtraction}
@@ -1695,9 +1954,11 @@ export function PurchaseOrderEditorPage({
       <PurchaseOrderEditorView
         state={state}
         dispatch={dispatch}
-        currency={currency}
+        currency={activeCurrency}
+        currencyOptions={currencyOptions}
         uomOptions={uomOptions}
         incotermOptions={incotermOptions}
+        onLinkQuotation={onLinkQuotation}
         onSave={() => void save(state.version, false)}
         onCancel={onCancel}
         onFinalSave={() => void startReview()}

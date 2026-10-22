@@ -202,6 +202,61 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     expect(missing).toContain(">Source missing<");
   });
 
+  it("distinguishes never-linked, formerly-linked and a real revision 00", () => {
+    const never = render({
+      state: state({
+        rows: [
+          row({
+            SourceState: "never",
+            SourceMissing: true,
+            QuoteNumber: "",
+            CustomerName: "",
+            CustomerID: 0,
+            SourceRevision: 0,
+          }),
+        ],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(never).toContain("No quotation linked");
+    expect(never).toContain(">Source missing<");
+    expect(never).not.toContain("Former quotation · revision 0");
+    expect(never).not.toContain("Revision 0");
+
+    const former = render({
+      state: state({
+        rows: [
+          row({
+            SourceState: "former",
+            SourceMissing: true,
+            SourceRevision: 1,
+          }),
+        ],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(former).toContain("Former quotation · revision 1");
+    expect(former).toContain(">Source missing<");
+
+    const liveZero = render({
+      state: state({
+        rows: [
+          row({
+            SourceState: "live",
+            SourceMissing: false,
+            SourceRevision: 0,
+          }),
+        ],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(liveZero).toContain("Revision 0");
+    expect(liveZero).not.toContain(">Source missing<");
+  });
+
   it("offers the Source missing filter as an independent, enabled predicate", () => {
     const html = render({
       state: state({

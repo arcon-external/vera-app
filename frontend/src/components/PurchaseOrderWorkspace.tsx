@@ -30,6 +30,15 @@ export interface PurchaseOrderWorkspacePageProps {
   /** Issue #491: the active workspace tab when no record is open. */
   tab: PurchaseOrderTab;
   /**
+   * #496: the transient source-less draft the Editor tab shows before any row
+   * exists. Null keeps the old entry page (used by tests and as a fallback).
+   */
+  blankDraft?: PurchaseOrderDTO | null;
+  /** The loaded currency catalogue, for editing the basis before linking. */
+  currencyOptions?: CurrencyInfo[];
+  /** Safe deferred linking for #497; it must not create or replace a record. */
+  onLinkQuotation?: () => void;
+  /**
    * Issue #492: the account's remembered archive page size. Only the initial
    * list state uses it; the server's own page size takes over once a page
    * loads, because the archive is server-paged.
@@ -103,6 +112,9 @@ export function PurchaseOrderWorkspacePage({
   incotermOptions,
   tab,
   pageSize,
+  blankDraft = null,
+  currencyOptions = [],
+  onLinkQuotation,
   onAdd,
   onOpen,
   isAdmin,
@@ -116,6 +128,39 @@ export function PurchaseOrderWorkspacePage({
   const { draft, phase } = workspace;
 
   if (phase === "list" || draft === null) {
+    if (tab === "editor" && blankDraft !== null) {
+      const blankCurrency =
+        currencyOptions.find((option) => option.code === blankDraft.Currency) ??
+        currency;
+      if (blankCurrency === null) {
+        return (
+          <StatusBanner tone="danger">
+            The purchase order's currency ({blankDraft.Currency}) is not in the
+            loaded currency catalogue, so money cannot be edited safely yet.
+          </StatusBanner>
+        );
+      }
+      // #496: the editor opens on the full blank manual-entry form. It is
+      // transient until Save draft, an upload or an extraction asks for a row;
+      // merely opening it creates nothing.
+      return (
+        <PurchaseOrderEditorPage
+          key={0}
+          order={blankDraft}
+          currency={blankCurrency}
+          currencyOptions={currencyOptions}
+          uomOptions={uomOptions}
+          incotermOptions={incotermOptions}
+          onLinkQuotation={onLinkQuotation}
+          onDirtyChange={onDirtyChange}
+          onSaved={(updated, corrected) => {
+            workspace.saved(updated);
+            onSaved?.(updated, corrected);
+          }}
+          onCancel={onCancel}
+        />
+      );
+    }
     if (tab === "drafts") {
       return (
         <PurchaseOrderListPage
@@ -204,8 +249,10 @@ export function PurchaseOrderWorkspacePage({
       key={draft.ID}
       order={draft}
       currency={currency}
+      currencyOptions={currencyOptions}
       uomOptions={uomOptions}
       incotermOptions={incotermOptions}
+      onLinkQuotation={onLinkQuotation}
       mode={workspace.correcting ? "correction" : "draft"}
       onCorrectionStart={workspace.correctionStarted}
       onDirtyChange={onDirtyChange}

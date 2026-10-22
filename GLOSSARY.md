@@ -363,8 +363,8 @@ The quantity the customer ordered on a PO line; it may differ from the quotation
 _Avoid_: Order quantity, qty
 
 **Source**:
-The issued quotation revision or customer PO document a purchase order is built from.
-_Avoid_: Origin, reference, parent
+The issued quotation revision a purchase order is linked to. A purchase order may be entered before a source exists; the customer PO document is attached evidence, not the source.
+_Avoid_: Origin, reference, parent, customer PO document
 
 **Source revision**:
 The exact issued quotation revision a purchase order follows.
@@ -379,12 +379,12 @@ A quotation revision already linked to a purchase order; the source selector sho
 _Avoid_: Taken quotation
 
 **Manual entry**:
-Typing purchase-order values after choosing a source, as opposed to extracting them from a customer PO PDF.
+Typing purchase-order values, with or without a linked source, as opposed to accepting values extracted from a customer PO PDF.
 _Avoid_: Manual PO, standalone PO
 
 **Source missing**:
-The state of a purchase order whose source quotation or customer PO document is no longer available; its own values and former source remain.
-_Avoid_: Broken PO, orphan
+The state of a purchase order with no live source. It covers a draft that was never linked and a record whose former source quotation was deleted; the record keeps its own values, and only a formerly-linked record keeps a former source.
+_Avoid_: Broken PO, orphan, unlinked PO
 
 **Former source**:
 The quote number and revision a source-missing purchase order used to follow.

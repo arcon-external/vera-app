@@ -50,6 +50,8 @@ export interface PurchaseOrderHistoryEntry {
   Kind: string;
   State: string;
   Reason: string;
+  /** True when the snapshot had no live source (#496). */
+  SourceMissing?: boolean;
   ActorName: string;
   CreatedAt: string;
   QuoteNumber: string;

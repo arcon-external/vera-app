@@ -145,5 +145,6 @@ func mapPurchaseOrderListRow(row store.PurchaseOrderListRow) apicontract.Purchas
 		ReceivedDate:   row.ReceivedDate.Format(time.DateOnly),
 		Currency:       row.Currency,
 		SourceMissing:  row.SourceMissing,
+		SourceState:    row.SourceState,
 	}
 }

@@ -57,6 +57,8 @@ type PurchaseOrderDTO struct {
 	Incoterms              string
 	Currency               string
 	TaxZone                string
+	TaxType                string
+	ServiceCategory        string
 	TaxCategory            string
 	AdjustmentReason       string
 	CreatedAt              string
@@ -81,9 +83,16 @@ type PurchaseOrderDTO struct {
 	SavedAt                *string
 	SavedBy                *int64
 	PdfAbsentConfirmed     bool
-	// SourceMissing is the #480 state: the record's Quotation was deleted and
-	// it now carries only a former-source reference.
+	// SourceMissing is true for a never-linked draft and for a record whose
+	// Quotation was deleted. SourceState names which one it is (#496).
 	SourceMissing bool
+	// SourceState is "live", "never" or "former". It is the only presence
+	// signal: the numeric ids stay numeric for old readers and revision 00 is
+	// a real link.
+	SourceState string
+	// PrintedTotalsKnown is false exactly for a never-linked draft, whose
+	// printed source figures do not exist yet.
+	PrintedTotalsKnown bool
 	// The optional customer-system confirmation reference (#474). Null until
 	// assigned, then immutable; ConfirmationWarn follows the stored sequence.
 	ConfirmationNumber     *string
@@ -233,6 +242,16 @@ type PurchaseOrderCreateInput struct {
 	RevisionNumber int16
 }
 
+// PurchaseOrderBlankCreateInput starts a source-less draft (#496). The server
+// seeds the company currency; the tax triple is the user's Quotation default
+// and is editable again on the draft until a quotation is linked.
+type PurchaseOrderBlankCreateInput struct {
+	ReceivedDate    string
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+}
+
 // PurchaseOrderItemInput is one replace-lines entry. Line numbers come from
 // array order; a row discount is a flag plus a 0-100 percentage, mirroring the
 // quotation.
@@ -270,8 +289,14 @@ type PurchaseOrderUpdateInput struct {
 	Items                 []PurchaseOrderItemInput
 	DiscountPercent       int16
 	AdjustmentMinor       int64
-	ExpectedVersion       int64
-	Overwrite             bool
+	// Currency and the tax triple are editable only while a draft has never
+	// been linked (#496). A linked row keeps its frozen basis.
+	Currency        string
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	ExpectedVersion int64
+	Overwrite       bool
 }
 
 // PurchaseOrderCorrectionInput replaces a saved record. It carries the same
@@ -423,6 +448,7 @@ type PurchaseOrderCorrectionDTO struct {
 	Kind                  string
 	State                 string
 	Reason                string
+	SourceMissing         bool
 	QuoteNumber           string
 	CustomerName          string
 	Currency              string
@@ -479,6 +505,30 @@ func (q *Quotation) CreatePurchaseOrderDraft(input PurchaseOrderCreateInput) (Pu
 	return mapPurchaseOrderDTO(response), nil
 }
 
+// CreatePurchaseOrderBlankDraft starts a draft with no source and no Customer
+// (#496). The server supplies the company currency, validates the user's tax
+// defaults, and returns the stored draft. Opening the editor does not call
+// this; the first Save draft, PDF upload or extraction does.
+func (q *Quotation) CreatePurchaseOrderBlankDraft(input PurchaseOrderBlankCreateInput) (PurchaseOrderDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	var response apicontract.PurchaseOrderRow
+	if err := client.Post("/v1/purchase-orders", apicontract.PurchaseOrderCreateRequest{
+		ReceivedDate:    input.ReceivedDate,
+		TaxZone:         input.TaxZone,
+		TaxType:         input.TaxType,
+		ServiceCategory: input.ServiceCategory,
+	}, &response); err != nil {
+		return PurchaseOrderDTO{}, err
+	}
+	return mapPurchaseOrderDTO(response), nil
+}
+
 // GetPurchaseOrder reopens one PO by id.
 func (q *Quotation) GetPurchaseOrder(id int64) (PurchaseOrderDTO, error) {
 	if err := q.requireUser(q.ctx); err != nil {
@@ -522,6 +572,12 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 	var response apicontract.PurchaseOrderRow
 	if err := client.Put("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10),
 		apicontract.PurchaseOrderUpdateRequest{
+			PurchaseOrderProtectedFieldsRequest: apicontract.PurchaseOrderProtectedFieldsRequest{
+				Currency:        stringPointer(input.Currency),
+				TaxZone:         stringPointer(input.TaxZone),
+				TaxType:         stringPointer(input.TaxType),
+				ServiceCategory: stringPointer(input.ServiceCategory),
+			},
 			BillingAddress:        input.BillingAddress,
 			DeliveryAddress:       input.DeliveryAddress,
 			ShipToCode:            input.ShipToCode,
@@ -543,6 +599,13 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 		return purchaseOrderWriteFailure(err)
 	}
 	return purchaseOrderSaved(response), nil
+}
+
+func stringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 // CorrectPurchaseOrder replaces a saved record. Like a draft save, the version
@@ -748,6 +811,7 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 		Kind:                  row.Kind,
 		State:                 row.State,
 		Reason:                row.Reason,
+		SourceMissing:         row.SourceMissing,
 		ActorID:               row.ActorID,
 		ActorName:             row.ActorName,
 		CreatedAt:             row.CreatedAt,
@@ -830,7 +894,25 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 	return entry
 }
 
+// purchaseOrderSourceStateOf normalizes the wire state. An older server had
+// only two shapes: a live link or a deleted (former) one, so an absent enum is
+// derived from the fields it did send. A new server always sends the enum.
+func purchaseOrderSourceStateOf(row apicontract.PurchaseOrderRow) string {
+	switch row.SourceState {
+	case "live", "never", "former":
+		return row.SourceState
+	}
+	if row.SourceMissing {
+		return "former"
+	}
+	if row.QuotationID > 0 {
+		return "live"
+	}
+	return "never"
+}
+
 func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
+	sourceState := purchaseOrderSourceStateOf(row)
 	dto := PurchaseOrderDTO{
 		ID:                     row.ID,
 		UUID:                   row.UUID,
@@ -853,6 +935,8 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		Incoterms:              row.Incoterms,
 		Currency:               row.Currency,
 		TaxZone:                row.TaxZone,
+		TaxType:                row.TaxType,
+		ServiceCategory:        row.ServiceCategory,
 		TaxCategory:            row.TaxCategory,
 		DiscountPercent:        row.DiscountPercent,
 		PpnBps:                 row.PpnBps,
@@ -869,7 +953,9 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		SavedAt:                row.SavedAt,
 		SavedBy:                row.SavedBy,
 		PdfAbsentConfirmed:     row.PdfAbsentConfirmed,
-		SourceMissing:          row.SourceMissing,
+		SourceMissing:          sourceState != "live",
+		SourceState:            sourceState,
+		PrintedTotalsKnown:     sourceState != "never",
 		Version:                row.Version,
 		ConfirmationNumber:     row.ConfirmationNumber,
 		ConfirmationAssignedAt: row.ConfirmationAssignedAt,

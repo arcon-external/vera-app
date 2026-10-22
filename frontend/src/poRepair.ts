@@ -14,6 +14,7 @@ import {
 } from "./poFinalize";
 import {
   buildPurchaseOrderUpdate,
+  sourceStateOf,
   trimAdjustmentReason,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
@@ -68,6 +69,9 @@ export function sourceRepairActionLabel(order: PurchaseOrderDTO): string {
  * instead of presenting a deleted quotation as current.
  */
 export function sourceReferenceLabel(order: PurchaseOrderDTO): string {
+  if (sourceStateOf(order) === "never") {
+    return "no quotation linked";
+  }
   const link = `quotation ${order.QuoteNumber} revision ${order.SourceRevision}`;
   return order.SourceMissing === true ? `former ${link}` : link;
 }

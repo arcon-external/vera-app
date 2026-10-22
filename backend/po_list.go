@@ -45,6 +45,8 @@ type PurchaseOrderListRowDTO struct {
 	CustomerID     int64
 	SourceRevision int16
 	SourceMissing  bool
+	// SourceState is "live", "never" or "former" (#496).
+	SourceState string
 }
 
 // PurchaseOrderListCustomerDTO is one option of the customer multi-select.
@@ -124,6 +126,7 @@ func (q *Quotation) ListPurchaseOrders(query PurchaseOrderListQuery) (PurchaseOr
 			ReceivedDate:   row.ReceivedDate,
 			Currency:       row.Currency,
 			SourceMissing:  row.SourceMissing,
+			SourceState:    row.SourceState,
 		})
 	}
 	customers := make([]PurchaseOrderListCustomerDTO, 0, len(response.Customers))

@@ -385,6 +385,12 @@ func (s *Store) GetPurchaseOrderReview(ctx context.Context, id int64) (PurchaseO
 	if err != nil {
 		return PurchaseOrderReview{}, err
 	}
+	// #496: a never-linked or formerly-linked draft has no frozen revision to
+	// compare against. The server refuses the review by name so the UI can
+	// show its Link guidance without a broken source read.
+	if order.SourceState != PurchaseOrderSourceStateLive {
+		return PurchaseOrderReview{}, ErrPurchaseOrderSourceMissing
+	}
 	source, err := loadPurchaseOrderSourceDetail(ctx, pool, schema, order.QuotationID, order.SourceRevision)
 	if err != nil {
 		return PurchaseOrderReview{}, err
@@ -488,6 +494,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #496: a never-linked or formerly-linked draft cannot be finalized. The
+	// refusal happens here, at the server boundary, before any confirmation
+	// number or saved state is written.
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}

@@ -26,6 +26,8 @@ export interface PurchaseOrderTotalsProps {
   adjustmentReason: string;
   printedTotals: PurchaseOrderPrintedTotals;
   sourceRevision: number;
+  /** False for a never-linked draft: there is no printed source document yet. */
+  printedTotalsKnown?: boolean;
 }
 
 function printedTotalsAvailable(printed: PurchaseOrderPrintedTotals): boolean {
@@ -97,6 +99,7 @@ export function PurchaseOrderTotals({
   adjustmentReason,
   printedTotals,
   sourceRevision,
+  printedTotalsKnown = true,
 }: PurchaseOrderTotalsProps) {
   const showRowDiscounts =
     totals !== null &&
@@ -166,36 +169,50 @@ export function PurchaseOrderTotals({
       )}
 
       <div className="mt-4 border-t border-rule pt-3">
-        <p className="text-caption font-medium uppercase tracking-wide text-ink-500">
-          Printed on quotation revision {sourceRevision}
-        </p>
-        {printedAvailable ? (
-          <dl className="mt-1">
-            <Row
-              label="Printed subtotal"
-              value={formatMoney(currency, printedTotals.subtotalMinor)}
-            />
-            {printedTotals.discountMinor > 0 ? (
-              <Row
-                label="Printed discount"
-                value={formatMoney(currency, -printedTotals.discountMinor)}
-              />
-            ) : null}
-            {printedTotals.ppnMinor > 0 ? (
-              <Row label="Printed PPN" value={formatMoney(currency, printedTotals.ppnMinor)} />
-            ) : null}
-            <Row
-              label="Printed grand total"
-              value={formatMoney(currency, printedTotals.grandTotalMinor)}
-            />
-          </dl>
+        {!printedTotalsKnown ? (
+          <>
+            <p className="text-caption font-medium uppercase tracking-wide text-ink-500">
+              Printed totals
+            </p>
+            <p className="mt-1 text-small text-ink-500">
+              Available after a quotation revision is linked. This draft has no
+              source document to compare against yet.
+            </p>
+          </>
         ) : (
-          <p className="mt-1 text-small text-ink-500">Printed totals unavailable.</p>
+          <>
+            <p className="text-caption font-medium uppercase tracking-wide text-ink-500">
+              Printed on quotation revision {sourceRevision}
+            </p>
+            {printedAvailable ? (
+              <dl className="mt-1">
+                <Row
+                  label="Printed subtotal"
+                  value={formatMoney(currency, printedTotals.subtotalMinor)}
+                />
+                {printedTotals.discountMinor > 0 ? (
+                  <Row
+                    label="Printed discount"
+                    value={formatMoney(currency, -printedTotals.discountMinor)}
+                  />
+                ) : null}
+                {printedTotals.ppnMinor > 0 ? (
+                  <Row label="Printed PPN" value={formatMoney(currency, printedTotals.ppnMinor)} />
+                ) : null}
+                <Row
+                  label="Printed grand total"
+                  value={formatMoney(currency, printedTotals.grandTotalMinor)}
+                />
+              </dl>
+            ) : (
+              <p className="mt-1 text-small text-ink-500">Printed totals unavailable.</p>
+            )}
+            <p className="mt-2 text-caption text-ink-400">
+              Source-document evidence, kept as printed. Differences are reviewed
+              before the order is finalized.
+            </p>
+          </>
         )}
-        <p className="mt-2 text-caption text-ink-400">
-          Source-document evidence, kept as printed. Differences are reviewed
-          before the order is finalized.
-        </p>
       </div>
     </Card>
   );

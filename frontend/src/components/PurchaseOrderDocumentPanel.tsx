@@ -251,6 +251,11 @@ export function PurchaseOrderDocumentPanelView({
 
 export interface PurchaseOrderDocumentPanelProps {
   purchaseOrderId: number;
+  /**
+   * Persists a transient draft the first time an upload needs a stored owner.
+   * Returns the created (or existing) id; the panel never creates a second row.
+   */
+  resolvePurchaseOrderId?: () => Promise<number>;
   /** Server state when the parent already has it (snapshots, saved views). */
   initialState?: PurchaseOrderDocumentStateDTO | null;
   absenceConfirmed?: boolean;
@@ -276,6 +281,7 @@ export interface PurchaseOrderDocumentPanelProps {
  */
 export function PurchaseOrderDocumentPanel({
   purchaseOrderId,
+  resolvePurchaseOrderId,
   initialState = null,
   absenceConfirmed = false,
   onStateChange,
@@ -304,11 +310,11 @@ export function PurchaseOrderDocumentPanel({
     onStateChange?.(next);
   };
 
-  const refresh = async () => {
+  const refresh = async (id: number = purchaseOrderId) => {
     const generation = stateGeneration.current + 1;
     stateGeneration.current = generation;
     try {
-      const next = await GetPurchaseOrderDocumentState(purchaseOrderId);
+      const next = await GetPurchaseOrderDocumentState(id);
       if (generation !== stateGeneration.current) return;
       applyState(next);
     } finally {
@@ -319,6 +325,12 @@ export function PurchaseOrderDocumentPanel({
   useEffect(() => {
     let cancelled = false;
     if (initialState != null) {
+      setLoading(false);
+      return;
+    }
+    if (purchaseOrderId < 1) {
+      // A transient draft has no row to read. The first upload asks
+      // resolvePurchaseOrderId to create one and then refreshes with that id.
       setLoading(false);
       return;
     }
@@ -365,11 +377,26 @@ export function PurchaseOrderDocumentPanel({
     }
     setBusy("uploading");
     setError(null);
+    let id = purchaseOrderId;
+    if (id < 1) {
+      if (resolvePurchaseOrderId === undefined) {
+        setError("Save the draft before attaching a customer PO PDF.");
+        setBusy("idle");
+        return;
+      }
+      try {
+        id = await resolvePurchaseOrderId();
+      } catch (createError) {
+        setError(documentErrorMessage(createError));
+        setBusy("idle");
+        return;
+      }
+    }
     try {
       const buffer = await file.arrayBuffer();
       await AttachPurchaseOrderDocument(
         new backend.PurchaseOrderDocumentUploadInput({
-          PurchaseOrderID: purchaseOrderId,
+          PurchaseOrderID: id,
           DataBase64: bytesToBase64(new Uint8Array(buffer)),
           Filename: file.name,
         })
@@ -377,7 +404,7 @@ export function PurchaseOrderDocumentPanel({
       // Notify before refreshing: the editor must not keep showing proposals
       // for the previous PDF while the new state is still being read.
       onDocumentChanged?.();
-      await refresh();
+      await refresh(id);
       setPendingRemoval(false);
     } catch (uploadError) {
       setError(documentErrorMessage(uploadError));

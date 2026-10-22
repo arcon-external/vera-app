@@ -85,6 +85,7 @@ import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
 import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import { usePurchaseOrderWorkspace } from "./poWorkspace";
+import { blankPurchaseOrderDraft } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { QuotationSettingsPage } from "./components/QuotationSettingsPage";
@@ -96,6 +97,7 @@ import {
   clearQuotationSettings,
   quotationDefaultsFromSettings,
   readWorkspaceSettings,
+  todayWIB,
   writePurchaseOrderSettings,
   writeQuotationSettings,
   type QuotationSettings,
@@ -892,20 +894,45 @@ function App() {
     [currencyCatalogue, companyCurrency]
   );
 
+  // #496: the transient Editor draft. It is built from the company currency
+  // and the user's Quotation tax defaults; no row exists until Save draft or an
+  // upload asks for one. It is deliberately a DTO, so the existing editor and
+  // reducer are reused rather than a second blank-form implementation.
+  const blankPODraft = useMemo(
+    () =>
+      blankPurchaseOrderDraft({
+        currency: liveEntry?.code ?? companyCurrency,
+        taxZone: workspaceSettings.quotation.taxZone,
+        taxType: workspaceSettings.quotation.taxType,
+        serviceCategory:
+          workspaceSettings.quotation.taxType === "Services"
+            ? workspaceSettings.quotation.serviceCategory
+            : "",
+        receivedDate:
+          workspaceSettings.purchaseOrder.receivedDate !== ""
+            ? workspaceSettings.purchaseOrder.receivedDate
+            : todayWIB(),
+        paymentTerms: workspaceSettings.purchaseOrder.paymentTerms,
+        incoterms: workspaceSettings.purchaseOrder.incoterms,
+      }),
+    [liveEntry?.code, companyCurrency, workspaceSettings]
+  );
+  const poDraft = poWorkspace.draft ?? blankPODraft;
+
   // The PO's own currency, resolved from its snapshot rather than the live
   // profile (#390's rule applied to the new surface): an IDR default over a
   // USD PO would be wrong by a factor of 100. Null gates the editor's money
   // fields until the catalogue can name the denomination.
   const poEntry = useMemo(
     () =>
-      poWorkspace.draft === null
+      poDraft === null
         ? null
         : resolveLiveEntry(
             currencyCatalogue,
-            poWorkspace.draft.Currency,
+            poDraft.Currency,
             IDR_FALLBACK_ENTRY
           ),
-    [currencyCatalogue, poWorkspace.draft]
+    [currencyCatalogue, poDraft]
   );
 
   // The resolved canonical unit every default falls back to: the profile's
@@ -2288,6 +2315,14 @@ function App() {
           incotermOptions={INCOTERM_OPTIONS}
           tab={purchaseOrderTab(visiblePage)}
           pageSize={workspaceSettings.purchaseOrder.listPageSize}
+          blankDraft={blankPODraft}
+          currencyOptions={currencyCatalogue ?? []}
+          onLinkQuotation={() =>
+            pushToast(
+              "info",
+              "Linking a quotation is the next step; your entries stay here until an explicit review."
+            )
+          }
           onAdd={() => {
             setPOSelectorMode("entry");
             setPOSelectorRepairID(null);

@@ -11,6 +11,7 @@ import {
   tryParseMoneyInput,
   type CurrencyInfo,
 } from "./format";
+import { legacyServiceCategory, legacyTaxType } from "./tax";
 
 /** The fixed four-decimal quantity scale shared with the Go store. */
 export const QUANTITY_SCALE = 10000;
@@ -39,6 +40,12 @@ export interface PurchaseOrderPrintedTotals {
   grandTotalMinor: number;
 }
 
+/**
+ * The three live source states (#496). Machine logic keys off this, never off
+ * a zero id: a linked revision 00 is a real link with SourceState "live".
+ */
+export type PurchaseOrderSourceState = "live" | "never" | "former";
+
 /** One PO draft as the desktop binding returns it. */
 export interface PurchaseOrderDTO {
   PODate?: string | null;
@@ -57,6 +64,8 @@ export interface PurchaseOrderDTO {
   Incoterms: string;
   Currency: string;
   TaxZone: string;
+  TaxType?: string;
+  ServiceCategory?: string;
   TaxCategory: string;
   AdjustmentReason: string;
   CreatedAt: string;
@@ -90,6 +99,17 @@ export interface PurchaseOrderDTO {
    * (#481).
    */
   SourceMissing?: boolean;
+  /**
+   * The three live source states (#496). Older payloads omit it; derive from
+   * SourceMissing/QuotationID with `sourceStateOf`.
+   */
+  SourceState?: string;
+  /**
+   * False exactly for a never-linked draft, whose printed source totals do not
+   * exist yet. Older payloads omit it; `printedTotalsKnownOf` treats every
+   * older shape as known because an old server could only send live/former.
+   */
+  PrintedTotalsKnown?: boolean;
   /**
    * The optional customer-system confirmation reference (#474). Null until
    * staff assign it; after that it is immutable. ConfirmationWarn follows the
@@ -143,8 +163,13 @@ export interface PurchaseOrderEditorState {
   quoteNumber: string;
   customerName: string;
   sourceRevision: number;
+  sourceState: PurchaseOrderSourceState;
+  /** False for a never-linked draft: there are no printed source figures. */
+  printedTotalsKnown: boolean;
   currency: string;
   taxZone: string;
+  taxType: string;
+  serviceCategory: string;
   taxCategory: string;
   header: PurchaseOrderHeader;
   lines: PurchaseOrderLine[];
@@ -166,6 +191,17 @@ export type PurchaseOrderEditorAction =
   | { type: "lineChanged"; key: number; patch: Partial<PurchaseOrderLine> }
   | { type: "lineAdded"; uom: string }
   | { type: "lineRemoved"; key: number }
+  | {
+      type: "sourceBasisChanged";
+      patch: Partial<
+        Pick<
+          PurchaseOrderEditorState,
+          "taxZone" | "taxType" | "serviceCategory" | "taxCategory"
+        >
+      >;
+    }
+  | { type: "currencyChanged"; code: string; from: CurrencyInfo; to: CurrencyInfo }
+  | { type: "created"; orderId: number; version: number }
   | { type: "saveStarted" }
   | { type: "saveConflict" }
   | { type: "versionAdopted"; version: number }
@@ -209,6 +245,11 @@ export interface PurchaseOrderUpdateInput {
   Items: PurchaseOrderItemInput[];
   DiscountPercent: number;
   AdjustmentMinor: number;
+  /** The currency and tax triple, editable only before a source is linked. */
+  Currency: string;
+  TaxZone: string;
+  TaxType: string;
+  ServiceCategory: string;
   /** The version the editor loaded (#473). */
   ExpectedVersion: number;
   /** True only after the Overwrite choice; keeps the replaced draft. */
@@ -291,6 +332,172 @@ export const MAX_DISCOUNT_PERCENT = 100;
  * MaxExactMinor in backend/store/po_calc.go.
  */
 export const MAX_EXACT_MINOR = Number.MAX_SAFE_INTEGER;
+
+/**
+ * The customer-facing PPN rate for a persisted tax basis, mirroring
+ * PurchaseOrderPPNBps in backend/store/po_calc.go. The server is authoritative;
+ * this is the editor's live display and the same rule the save payload relies
+ * on. Null means the triple is not a supported combination.
+ */
+export function purchaseOrderPpnBps(
+  zone: string,
+  taxType: string,
+  serviceCategory: string,
+  legacyCategory: string
+): number | null {
+  let type = taxType;
+  let service = serviceCategory;
+  if (type === "") {
+    if (zone === "FTZ") {
+      if (legacyCategory !== "") return null;
+      type = "Goods";
+    } else {
+      const mapped = legacyPOToTaxType(legacyCategory);
+      if (mapped === null) return null;
+      type = mapped.taxType;
+      service = mapped.serviceCategory;
+    }
+  }
+  if (zone !== "FTZ" && zone !== "NonFTZ") return null;
+  if (type === "Goods") {
+    if (service !== "") return null;
+    return zone === "NonFTZ" ? 1100 : 0;
+  }
+  if (type === "Services") {
+    if (service !== "NonConstruction" && service !== "Construction") return null;
+    return 0;
+  }
+  return null;
+}
+
+function legacyPOToTaxType(
+  category: string
+): { taxType: string; serviceCategory: string } | null {
+  switch (category) {
+    case "SupplyOnly":
+      return { taxType: "Goods", serviceCategory: "" };
+    case "SupplyInstall":
+      return { taxType: "Services", serviceCategory: "NonConstruction" };
+    case "SupplyInstallConstruction":
+      return { taxType: "Services", serviceCategory: "Construction" };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Reads the source state from a payload. An older server sent only a live or a
+ * former link, so an absent state is derived from the fields it did send. A
+ * linked revision 00 keeps SourceState "live": zero is not absence.
+ */
+export function sourceStateOf(
+  order: Pick<PurchaseOrderDTO, "SourceState" | "SourceMissing" | "QuotationID">
+): PurchaseOrderSourceState {
+  if (
+    order.SourceState === "live" ||
+    order.SourceState === "never" ||
+    order.SourceState === "former"
+  ) {
+    return order.SourceState;
+  }
+  if (order.SourceMissing === true) return "former";
+  if ((order.QuotationID ?? 0) > 0) return "live";
+  return "never";
+}
+
+/**
+ * Whether the printed source totals are real evidence. Only a never-linked
+ * draft is unknown; an older payload could only be live or former, both of
+ * which copied the printed figures when they were created.
+ */
+export function printedTotalsKnownOf(
+  order: Pick<PurchaseOrderDTO, "PrintedTotalsKnown" | "SourceState" | "SourceMissing" | "QuotationID">
+): boolean {
+  if (order.PrintedTotalsKnown !== undefined) return order.PrintedTotalsKnown;
+  return sourceStateOf(order) !== "never";
+}
+
+/** The inputs a transient PO-first draft starts from. */
+export interface BlankPurchaseOrderOptions {
+  currency: string;
+  taxZone: string;
+  taxType: string;
+  serviceCategory: string;
+  taxCategory?: string;
+  receivedDate: string;
+  paymentTerms?: string;
+  incoterms?: string;
+}
+
+/**
+ * Builds the transient editor DTO for a source-less draft. It is never stored
+ * until Save draft, a PDF upload or an extraction asks for a row; opening the
+ * editor creates nothing. Every identity field is empty, and SourceState
+ * "never" tells the UI not to show a Customer, a quotation revision or printed
+ * totals.
+ */
+export function blankPurchaseOrderDraft(
+  options: BlankPurchaseOrderOptions
+): PurchaseOrderDTO {
+  const taxCategory = options.taxCategory ?? "";
+  return {
+    PODate: null,
+    RequestedDeliveryDate: null,
+    UUID: "",
+    State: "draft",
+    QuoteNumber: "",
+    CustomerName: "",
+    BillingAddress: "",
+    DeliveryAddress: "",
+    ShipToCode: "",
+    ContactEmail: "",
+    ContactPhone: "",
+    PONumber: "",
+    ReceivedDate: options.receivedDate,
+    Incoterms: options.incoterms ?? "",
+    Currency: options.currency,
+    TaxZone: options.taxZone,
+    TaxType: options.taxType,
+    ServiceCategory: options.serviceCategory,
+    TaxCategory: taxCategory,
+    AdjustmentReason: "",
+    CreatedAt: "",
+    UpdatedAt: "",
+    Items: [],
+    ID: 0,
+    QuotationID: 0,
+    SourceRevision: 0,
+    CustomerID: 0,
+    PaymentTerms: options.paymentTerms ?? "",
+    DiscountPercent: 0,
+    PpnBps:
+      purchaseOrderPpnBps(
+        options.taxZone,
+        options.taxType,
+        options.serviceCategory,
+        taxCategory
+      ) ?? 0,
+    SubtotalMinor: 0,
+    DiscountMinor: 0,
+    PpnMinor: 0,
+    AdjustmentMinor: 0,
+    GrandTotalMinor: 0,
+    PrintedSubtotalMinor: 0,
+    PrintedDiscountMinor: 0,
+    PrintedPpnMinor: 0,
+    PrintedGrandTotalMinor: 0,
+    SavedAt: null,
+    SavedBy: null,
+    PdfAbsentConfirmed: false,
+    SourceMissing: true,
+    SourceState: "never",
+    PrintedTotalsKnown: false,
+    ConfirmationNumber: null,
+    ConfirmationAssignedAt: null,
+    ConfirmationWarn: false,
+    Version: 0,
+  };
+}
 
 /** The Go store's bound on an adjustment reason, in Unicode code points. */
 export const MAX_ADJUSTMENT_REASON_LENGTH = 200;
@@ -709,8 +916,18 @@ export function initialPurchaseOrderEditorState(
     quoteNumber: order.QuoteNumber,
     customerName: order.CustomerName,
     sourceRevision: order.SourceRevision,
+    sourceState: sourceStateOf(order),
+    printedTotalsKnown: printedTotalsKnownOf(order),
     currency: order.Currency,
     taxZone: order.TaxZone,
+    taxType:
+      order.TaxType !== undefined && order.TaxType !== ""
+        ? order.TaxType
+        : legacyTaxType(order.TaxCategory),
+    serviceCategory:
+      order.ServiceCategory !== undefined && order.ServiceCategory !== ""
+        ? order.ServiceCategory
+        : legacyServiceCategory(order.TaxCategory),
     taxCategory: order.TaxCategory,
     header: headerFromOrder(order, currency),
     lines,
@@ -741,6 +958,11 @@ export function serializePurchaseOrderEditor(
 ): string {
   return JSON.stringify({
     header: state.header,
+    currency: state.currency,
+    taxZone: state.taxZone,
+    taxType: state.taxType,
+    serviceCategory: state.serviceCategory,
+    taxCategory: state.taxCategory,
     lines: state.lines.map((line) => ({
       description: line.description,
       quantity: line.quantity,
@@ -896,6 +1118,10 @@ export function buildPurchaseOrderUpdate(
       Items: items,
       DiscountPercent: discountPercent,
       AdjustmentMinor: adjustment,
+      Currency: state.currency,
+      TaxZone: state.taxZone,
+      TaxType: state.taxType,
+      ServiceCategory: state.serviceCategory,
       ExpectedVersion: state.version,
       Overwrite: false,
     },
@@ -945,6 +1171,51 @@ export function purchaseOrderEditorReducer(
         ...state,
         lines: state.lines.filter((line) => line.key !== action.key),
       };
+    case "sourceBasisChanged": {
+      const next = { ...state, ...action.patch };
+      if (action.patch.taxType === "Goods") next.serviceCategory = "";
+      if (
+        action.patch.taxType === "Services" &&
+        (next.serviceCategory === "" || next.serviceCategory === undefined)
+      ) {
+        next.serviceCategory = "NonConstruction";
+      }
+      next.ppnBps =
+        purchaseOrderPpnBps(
+          next.taxZone,
+          next.taxType,
+          next.serviceCategory,
+          next.taxCategory
+        ) ?? 0;
+      return next;
+    }
+    case "currencyChanged": {
+      // No conversion: the stored minor units stay the same. Only the display
+      // changes, so a currency edited before amounts are entered reads
+      // correctly in the new denomination.
+      const lines = state.lines.map((line) => {
+        const minor = parseUnitPriceMinor(action.from, line.unitPrice);
+        return minor === null
+          ? line
+          : { ...line, unitPrice: formatMoney(action.to, minor) };
+      });
+      const adjustment = parseAdjustmentMinor(action.from, state.header.adjustment);
+      const header = {
+        ...state.header,
+        adjustment:
+          adjustment === null
+            ? state.header.adjustment
+            : adjustment === 0
+              ? ""
+              : formatMoney(action.to, adjustment),
+      };
+      return { ...state, currency: action.code, header, lines };
+    }
+    case "created":
+      // The first Save/upload persisted the transient row. Keep the working
+      // copy and only adopt the server identity, so a failed follow-up update
+      // retries against this row instead of creating a second one.
+      return { ...state, orderId: action.orderId, version: action.version };
     case "saveStarted":
       return { ...state, saving: true, error: null };
     case "saveConflict":

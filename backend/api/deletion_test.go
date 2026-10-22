@@ -541,9 +541,9 @@ func TestSourceMissingDraftIsReadableButCannotBeSaved(t *testing.T) {
 		t.Fatalf("surviving draft = %+v; want a source-missing draft", surviving)
 	}
 
-	// The draft's own values are readable, but the save rules need the frozen
-	// source revision. The named refusal is the contract #481's relink UI binds
-	// to.
+	// #496 moved this expectation deliberately: the formerly-linked draft keeps
+	// saving its own values. Review and finalize still require a live source,
+	// and that server-boundary refusal is pinned below.
 	code, body = doJSON(t, server, http.MethodPut,
 		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, map[string]any{
 			"billingAddress": "Jl. New", "deliveryAddress": "Jl. New",
@@ -554,7 +554,24 @@ func TestSourceMissingDraftIsReadableButCannotBeSaved(t *testing.T) {
 			}},
 			"expectedVersion": surviving.Version,
 		})
+	if code != http.StatusOK {
+		t.Fatalf("save source-missing draft = %d (%v); want 200", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if saved.BillingAddress != "Jl. New" || saved.SourceState != "former" {
+		t.Errorf("saved source-missing draft = %+v; want the edited value and former state", saved)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/review", token, nil)
 	if code != http.StatusConflict || body["code"] != "po_source_missing" {
-		t.Fatalf("save source-missing draft = %d (%v); want 409/po_source_missing", code, body)
+		t.Fatalf("review source-missing draft = %d (%v); want 409/po_source_missing", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10)+"/finalize", token, map[string]any{
+			"expectedVersion": saved.Version,
+		})
+	if code != http.StatusConflict || body["code"] != "po_source_missing" {
+		t.Fatalf("finalize source-missing draft = %d (%v); want 409/po_source_missing", code, body)
 	}
 }

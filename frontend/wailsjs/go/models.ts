@@ -1557,6 +1557,24 @@ export namespace backend {
 	        this.Valid = source["Valid"];
 	    }
 	}
+	export class PurchaseOrderBlankCreateInput {
+	    ReceivedDate: string;
+	    TaxZone: string;
+	    TaxType: string;
+	    ServiceCategory: string;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderBlankCreateInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ReceivedDate = source["ReceivedDate"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
+	    }
+	}
 	export class PurchaseOrderConflictDTO {
 	    CurrentState: string;
 	    UpdatedByName: string;
@@ -1700,6 +1718,7 @@ export namespace backend {
 	    Kind: string;
 	    State: string;
 	    Reason: string;
+	    SourceMissing: boolean;
 	    QuoteNumber: string;
 	    CustomerName: string;
 	    Currency: string;
@@ -1747,6 +1766,7 @@ export namespace backend {
 	        this.Kind = source["Kind"];
 	        this.State = source["State"];
 	        this.Reason = source["Reason"];
+	        this.SourceMissing = source["SourceMissing"];
 	        this.QuoteNumber = source["QuoteNumber"];
 	        this.CustomerName = source["CustomerName"];
 	        this.Currency = source["Currency"];
@@ -1959,6 +1979,8 @@ export namespace backend {
 	    Incoterms: string;
 	    Currency: string;
 	    TaxZone: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    TaxCategory: string;
 	    AdjustmentReason: string;
 	    CreatedAt: string;
@@ -1984,6 +2006,8 @@ export namespace backend {
 	    SavedBy?: number;
 	    PdfAbsentConfirmed: boolean;
 	    SourceMissing: boolean;
+	    SourceState: string;
+	    PrintedTotalsKnown: boolean;
 	    ConfirmationNumber?: string;
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
@@ -2011,6 +2035,8 @@ export namespace backend {
 	        this.Incoterms = source["Incoterms"];
 	        this.Currency = source["Currency"];
 	        this.TaxZone = source["TaxZone"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.TaxCategory = source["TaxCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.CreatedAt = source["CreatedAt"];
@@ -2036,6 +2062,8 @@ export namespace backend {
 	        this.SavedBy = source["SavedBy"];
 	        this.PdfAbsentConfirmed = source["PdfAbsentConfirmed"];
 	        this.SourceMissing = source["SourceMissing"];
+	        this.SourceState = source["SourceState"];
+	        this.PrintedTotalsKnown = source["PrintedTotalsKnown"];
 	        this.ConfirmationNumber = source["ConfirmationNumber"];
 	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
@@ -2653,6 +2681,7 @@ export namespace backend {
 	    CustomerID: number;
 	    SourceRevision: number;
 	    SourceMissing: boolean;
+	    SourceState: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListRowDTO(source);
@@ -2671,6 +2700,7 @@ export namespace backend {
 	        this.CustomerID = source["CustomerID"];
 	        this.SourceRevision = source["SourceRevision"];
 	        this.SourceMissing = source["SourceMissing"];
+	        this.SourceState = source["SourceState"];
 	    }
 	}
 	export class PurchaseOrderListPageDTO {
@@ -2969,6 +2999,10 @@ export namespace backend {
 	    Items: PurchaseOrderItemInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
+	    Currency: string;
+	    TaxZone: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
 	
@@ -2994,6 +3028,10 @@ export namespace backend {
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
+	        this.Currency = source["Currency"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	    }

@@ -1218,13 +1218,33 @@ func TestDeleteQuotationRecordKeepsADraftAsSourceMissing(t *testing.T) {
 	if !surviving.SourceMissing || surviving.State != PurchaseOrderStateDraft {
 		t.Errorf("surviving draft = %+v; want a source-missing draft", surviving)
 	}
-	// The draft cannot be saved while it has no source; the refusal is named so
-	// #481's relink surface can explain it.
-	if _, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
+	// #496 moved this expectation deliberately: a formerly-linked draft keeps
+	// saving its own PO-owned values. The source-dependent paths (review and
+	// finalize) still refuse, and that refusal is pinned below.
+	saved, err := database.UpdatePurchaseOrderDraft(ctx, PurchaseOrderUpdate{
 		ID: draft.ID, ExpectedVersion: surviving.Version, UpdatedBy: user.ID,
-		Items: []PurchaseOrderItem{{Description: "still editable", QuantityScaled: 10000, UoM: "Pc", UnitPriceMinor: 1}},
+		BillingAddress: "Jl. Kept after deletion",
+		Items:          []PurchaseOrderItem{{Description: "still editable", QuantityScaled: 10000, UoM: "Pc", UnitPriceMinor: 1}},
+	})
+	if err != nil {
+		t.Fatalf("save a formerly-linked draft: %v; want the PO-owned values kept", err)
+	}
+	if saved.BillingAddress != "Jl. Kept after deletion" || saved.SourceState != PurchaseOrderSourceStateFormer {
+		t.Errorf("saved former draft = %+v; want the edited value and former state", saved)
+	}
+	if _, err := database.GetPurchaseOrderReview(ctx, draft.ID); !errors.Is(err, ErrPurchaseOrderSourceMissing) {
+		t.Errorf("review after deletion = %v; want ErrPurchaseOrderSourceMissing", err)
+	}
+	if _, err := database.FinalizePurchaseOrder(ctx, PurchaseOrderFinalize{
+		PurchaseOrderUpdate: PurchaseOrderUpdate{
+			ID: draft.ID, ExpectedVersion: saved.Version, UpdatedBy: user.ID,
+			PONumber:     "PO-FORMER-1",
+			ReceivedDate: &saved.ReceivedDate,
+			Items:        []PurchaseOrderItem{{Description: "finalize attempt", QuantityScaled: 10000, UoM: "Pc", UnitPriceMinor: 1}},
+		},
+		DocumentConfirmed: true,
 	}); !errors.Is(err, ErrPurchaseOrderSourceMissing) {
-		t.Fatalf("update of a source-missing draft = %v; want ErrPurchaseOrderSourceMissing", err)
+		t.Errorf("finalize after deletion = %v; want ErrPurchaseOrderSourceMissing", err)
 	}
 }
 

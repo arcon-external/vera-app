@@ -216,6 +216,8 @@ type PurchaseOrderRow struct {
 	Incoterms              string                 `json:"incoterms"`
 	Currency               string                 `json:"currency"`
 	TaxZone                string                 `json:"taxZone,omitempty"`
+	TaxType                string                 `json:"taxType,omitempty"`
+	ServiceCategory        string                 `json:"serviceCategory,omitempty"`
 	TaxCategory            string                 `json:"taxCategory,omitempty"`
 	AdjustmentReason       string                 `json:"adjustmentReason"`
 	CreatedAt              string                 `json:"createdAt"`
@@ -243,9 +245,17 @@ type PurchaseOrderRow struct {
 	SavedAt            *string `json:"savedAt"`
 	SavedBy            *int64  `json:"savedBy"`
 	PdfAbsentConfirmed bool    `json:"pdfAbsentConfirmed"`
-	// SourceMissing is the #480 state: the record's Quotation was permanently
-	// deleted and it keeps a former-source reference instead.
+	// SourceMissing is true for both a never-linked draft and a record whose
+	// source Quotation was permanently deleted. SourceState names which one it
+	// is; it is the only presence signal, because revision 00 is a real link
+	// and the numeric fields stay numeric for older readers.
 	SourceMissing bool `json:"sourceMissing"`
+	// SourceState is "live", "never" or "former" (#496).
+	SourceState string `json:"sourceState"`
+	// PrintedTotalsKnown is false exactly for a never-linked draft, whose
+	// printed source figures do not exist yet. It is never inferred from a
+	// zero total: a real quotation may print 0.
+	PrintedTotalsKnown bool `json:"printedTotalsKnown"`
 	// The optional customer-system confirmation reference (#474). It is null
 	// until assigned, and then immutable. ConfirmationWarn turns true once the
 	// customer-year cycle reaches the shared 8000 warning threshold.
@@ -366,10 +376,21 @@ type PurchaseOrderFinalizeRequest struct {
 // RevisionNumber is a pointer because revision 0 is real and an absent field
 // must not read as it. ReceivedDate is optional; the server defaults it to
 // today.
+//
+// #496: a request with no QuotationID (zero or absent) creates a source-less
+// blank draft instead. RevisionNumber must then be absent. The tax fields are
+// the user's Quotation defaults for a blank draft; the server validates them,
+// seeds the currency from the company profile, and computes PPN from the
+// persisted basis. A linked create ignores them because the revision owns the
+// basis.
 type PurchaseOrderCreateRequest struct {
-	QuotationID    int64  `json:"quotationId"`
-	RevisionNumber *int16 `json:"revisionNumber"`
-	ReceivedDate   string `json:"receivedDate,omitempty"`
+	QuotationID     int64  `json:"quotationId"`
+	RevisionNumber  *int16 `json:"revisionNumber"`
+	ReceivedDate    string `json:"receivedDate,omitempty"`
+	TaxZone         string `json:"taxZone,omitempty"`
+	TaxType         string `json:"taxType,omitempty"`
+	ServiceCategory string `json:"serviceCategory,omitempty"`
+	TaxCategory     string `json:"taxCategory,omitempty"`
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. LineNumber is assigned by
@@ -430,6 +451,8 @@ type PurchaseOrderProtectedFieldsRequest struct {
 	SourceRevision     *int16  `json:"sourceRevision,omitempty"`
 	Currency           *string `json:"currency,omitempty"`
 	TaxZone            *string `json:"taxZone,omitempty"`
+	TaxType            *string `json:"taxType,omitempty"`
+	ServiceCategory    *string `json:"serviceCategory,omitempty"`
 	TaxCategory        *string `json:"taxCategory,omitempty"`
 	OrgID              *string `json:"orgId,omitempty"`
 	State              *string `json:"state,omitempty"`
@@ -459,7 +482,41 @@ func (request PurchaseOrderProtectedFieldsRequest) Named() string {
 		{"sourceRevision", request.SourceRevision == nil},
 		{"currency", request.Currency == nil},
 		{"taxZone", request.TaxZone == nil},
+		{"taxType", request.TaxType == nil},
+		{"serviceCategory", request.ServiceCategory == nil},
 		{"taxCategory", request.TaxCategory == nil},
+		{"orgId", request.OrgID == nil},
+		{"state", request.State == nil},
+		{"savedAt", request.SavedAt == nil},
+		{"savedBy", request.SavedBy == nil},
+		{"pdfAbsentConfirmed", request.PdfAbsentConfirmed == nil},
+		{"version", request.Version == nil},
+		{"id", request.ID == nil},
+		{"poNumberKey", request.PONumberKey == nil},
+	}
+	for _, check := range checks {
+		if !check.absent {
+			return check.name
+		}
+	}
+	return ""
+}
+
+// NamedExceptSourceBasis is the draft-update variant: currency and the tax
+// triple are editable before a source is linked (#496), so a draft save may
+// carry them. Every other protected value is still refused, and the store
+// freezes the basis on a row that already has a live or former source.
+func (request PurchaseOrderProtectedFieldsRequest) NamedExceptSourceBasis() string {
+	checks := []struct {
+		name   string
+		absent bool
+	}{
+		{"confirmationNumber", request.ConfirmationNumber == nil},
+		{"confirmationWarn", request.ConfirmationWarn == nil},
+		{"uuid", request.UUID == nil},
+		{"customerId", request.CustomerID == nil},
+		{"quotationId", request.QuotationID == nil},
+		{"sourceRevision", request.SourceRevision == nil},
 		{"orgId", request.OrgID == nil},
 		{"state", request.State == nil},
 		{"savedAt", request.SavedAt == nil},
@@ -580,45 +637,50 @@ type PurchaseOrderCorrectionRow struct {
 	// Repair is present only for kind "source_repair" (#475): the old and new
 	// link and the choices the admin made. Every other kind leaves it nil, so
 	// an older reader sees exactly the snapshot it always did.
-	Repair                *PurchaseOrderSourceRepairRow    `json:"repair,omitempty"`
-	PODate                *string                          `json:"poDate"`
-	RequestedDeliveryDate *string                          `json:"requestedDeliveryDate"`
-	UUID                  string                           `json:"uuid"`
-	Kind                  string                           `json:"kind"`
-	State                 string                           `json:"state"`
-	Reason                string                           `json:"reason"`
-	QuoteNumber           string                           `json:"quoteNumber"`
-	CustomerName          string                           `json:"customerName"`
-	Currency              string                           `json:"currency"`
-	BillingAddress        string                           `json:"billingAddress"`
-	DeliveryAddress       string                           `json:"deliveryAddress"`
-	ShipToCode            string                           `json:"shipToCode"`
-	ContactEmail          string                           `json:"contactEmail"`
-	ContactPhone          string                           `json:"contactPhone"`
-	PONumber              string                           `json:"poNumber"`
-	PaymentTerms          string                           `json:"paymentTerms"`
-	Incoterms             string                           `json:"incoterms"`
-	TaxZone               string                           `json:"taxZone"`
-	TaxCategory           string                           `json:"taxCategory"`
-	AdjustmentReason      string                           `json:"adjustmentReason"`
-	ActorName             string                           `json:"actorName"`
-	ReceivedDate          string                           `json:"receivedDate"`
-	CreatedAt             string                           `json:"createdAt"`
-	Items                 []PurchaseOrderCorrectionItemRow `json:"items"`
-	ID                    int64                            `json:"id"`
-	QuotationID           int64                            `json:"quotationId"`
-	SourceRevision        int16                            `json:"sourceRevision"`
-	CustomerID            int64                            `json:"customerId"`
-	PreviousVersion       int64                            `json:"previousVersion"`
-	ResultingVersion      int64                            `json:"resultingVersion"`
-	ActorID               int64                            `json:"actorId"`
-	DiscountPercent       int16                            `json:"discountPercent"`
-	SubtotalMinor         int64                            `json:"subtotalMinor"`
-	DiscountMinor         int64                            `json:"discountMinor"`
-	PpnBps                int16                            `json:"ppnBps"`
-	PpnMinor              int64                            `json:"ppnMinor"`
-	AdjustmentMinor       int64                            `json:"adjustmentMinor"`
-	GrandTotalMinor       int64                            `json:"grandTotalMinor"`
+	Repair                *PurchaseOrderSourceRepairRow `json:"repair,omitempty"`
+	PODate                *string                       `json:"poDate"`
+	RequestedDeliveryDate *string                       `json:"requestedDeliveryDate"`
+	UUID                  string                        `json:"uuid"`
+	Kind                  string                        `json:"kind"`
+	State                 string                        `json:"state"`
+	Reason                string                        `json:"reason"`
+	// SourceMissing is true when the snapshot had no live source: a
+	// never-linked draft overwrite or a formerly-linked record. The numeric
+	// QuotationID/SourceRevision stay 0 for older readers, so the history
+	// panel must branch on this rather than print a fabricated revision 0.
+	SourceMissing    bool                             `json:"sourceMissing"`
+	QuoteNumber      string                           `json:"quoteNumber"`
+	CustomerName     string                           `json:"customerName"`
+	Currency         string                           `json:"currency"`
+	BillingAddress   string                           `json:"billingAddress"`
+	DeliveryAddress  string                           `json:"deliveryAddress"`
+	ShipToCode       string                           `json:"shipToCode"`
+	ContactEmail     string                           `json:"contactEmail"`
+	ContactPhone     string                           `json:"contactPhone"`
+	PONumber         string                           `json:"poNumber"`
+	PaymentTerms     string                           `json:"paymentTerms"`
+	Incoterms        string                           `json:"incoterms"`
+	TaxZone          string                           `json:"taxZone"`
+	TaxCategory      string                           `json:"taxCategory"`
+	AdjustmentReason string                           `json:"adjustmentReason"`
+	ActorName        string                           `json:"actorName"`
+	ReceivedDate     string                           `json:"receivedDate"`
+	CreatedAt        string                           `json:"createdAt"`
+	Items            []PurchaseOrderCorrectionItemRow `json:"items"`
+	ID               int64                            `json:"id"`
+	QuotationID      int64                            `json:"quotationId"`
+	SourceRevision   int16                            `json:"sourceRevision"`
+	CustomerID       int64                            `json:"customerId"`
+	PreviousVersion  int64                            `json:"previousVersion"`
+	ResultingVersion int64                            `json:"resultingVersion"`
+	ActorID          int64                            `json:"actorId"`
+	DiscountPercent  int16                            `json:"discountPercent"`
+	SubtotalMinor    int64                            `json:"subtotalMinor"`
+	DiscountMinor    int64                            `json:"discountMinor"`
+	PpnBps           int16                            `json:"ppnBps"`
+	PpnMinor         int64                            `json:"ppnMinor"`
+	AdjustmentMinor  int64                            `json:"adjustmentMinor"`
+	GrandTotalMinor  int64                            `json:"grandTotalMinor"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.

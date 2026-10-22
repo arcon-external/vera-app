@@ -133,6 +133,7 @@ type PurchaseOrderCorrection struct {
 	Kind                  string
 	State                 string
 	Reason                string
+	SourceMissing         bool
 	QuoteNumber           string
 	CustomerName          string
 	Currency              string
@@ -172,22 +173,24 @@ type PurchaseOrderCorrection struct {
 // read FOR UPDATE in the caller's organization, so the version check and the
 // write cannot be separated by another save.
 type purchaseOrderWriteLock struct {
-	UpdatedAt      time.Time
-	ReceivedDate   time.Time
-	State          string
-	CustomerName   string
-	Currency       string
-	TaxZone        string
-	TaxCategory    string
-	Version        int64
-	QuotationID    int64
-	CustomerID     int64
-	SourceRevision int16
-	PpnBps         int16
-	UpdatedBy      int64
-	// SourceMissing is #480: the live quotation link was released by a
-	// deletion. Reads still work; writes that need the frozen source revision
-	// are refused with a named error instead of a missing-row surprise.
+	UpdatedAt       time.Time
+	ReceivedDate    time.Time
+	State           string
+	CustomerName    string
+	Currency        string
+	TaxZone         string
+	TaxType         string
+	ServiceCategory string
+	TaxCategory     string
+	Version         int64
+	QuotationID     int64
+	CustomerID      int64
+	SourceRevision  int16
+	PpnBps          int16
+	UpdatedBy       int64
+	// SourceState is "live", "never" or "former" (#496). SourceMissing is the
+	// unified UI predicate; SourceState is what the write rules branch on.
+	SourceState   string
 	SourceMissing bool
 }
 
@@ -208,24 +211,37 @@ func lockPurchaseOrderWrite(
 		return purchaseOrderWriteLock{}, ErrPurchaseOrderVersionRequired
 	}
 	var lock purchaseOrderWriteLock
+	var customerID pgtype.Int8
+	var sourceRevision pgtype.Int2
 	err := tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT state, version, COALESCE(quotation_id, former_quotation_id, 0),
 		       source_revision, customer_id,
-		       customer_name, currency, tax_zone, tax_category, ppn_bps,
-		       received_date, updated_by, updated_at, (quotation_id IS NULL)
+		       customer_name, currency, tax_zone, tax_type, service_category,
+		       tax_category, ppn_bps,
+		       received_date, updated_by, updated_at,
+		       CASE WHEN quotation_id IS NOT NULL THEN 'live'
+		            WHEN former_quotation_id IS NOT NULL THEN 'former'
+		            ELSE 'never' END
 		FROM %s.purchase_orders
 		WHERE id = $1 AND org_id = $2
 		FOR UPDATE`, schema), id, orgID).Scan(
-		&lock.State, &lock.Version, &lock.QuotationID, &lock.SourceRevision,
-		&lock.CustomerID, &lock.CustomerName, &lock.Currency, &lock.TaxZone,
-		&lock.TaxCategory, &lock.PpnBps, &lock.ReceivedDate, &lock.UpdatedBy,
-		&lock.UpdatedAt, &lock.SourceMissing)
+		&lock.State, &lock.Version, &lock.QuotationID, &sourceRevision,
+		&customerID, &lock.CustomerName, &lock.Currency, &lock.TaxZone,
+		&lock.TaxType, &lock.ServiceCategory, &lock.TaxCategory, &lock.PpnBps,
+		&lock.ReceivedDate, &lock.UpdatedBy, &lock.UpdatedAt, &lock.SourceState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return purchaseOrderWriteLock{}, ErrPurchaseOrderNotFound
 	}
 	if err != nil {
 		return purchaseOrderWriteLock{}, fmt.Errorf("lock purchase order %d: %w", id, err)
 	}
+	if sourceRevision.Valid {
+		lock.SourceRevision = sourceRevision.Int16
+	}
+	if customerID.Valid {
+		lock.CustomerID = customerID.Int64
+	}
+	lock.SourceMissing = lock.SourceState != PurchaseOrderSourceStateLive
 	// The version is checked first: a record that moved since the editor loaded
 	// is a conflict the caller can see and overwrite deliberately, even when the
 	// intervening write also changed its state (a draft finalized by someone
@@ -256,8 +272,9 @@ func lockPurchaseOrderWrite(
 }
 
 // requirePurchaseOrderSource refuses a write whose rules need the frozen source
-// revision when #480 released the link. Reads and the #475 repair stay open: the
-// record is not broken, it is waiting for a new source.
+// revision when the record has no live source (#480/#496). Reads and the #475
+// repair stay open, and a draft save deliberately does not call this: a
+// never-linked or formerly-linked draft keeps its own editable values.
 func requirePurchaseOrderSource(lock purchaseOrderWriteLock) error {
 	if lock.SourceMissing {
 		return ErrPurchaseOrderSourceMissing
@@ -334,7 +351,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	}
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
 	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID,
-		input.PurchaseOrderUpdate, calculation, numberKey); err != nil {
+		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), numberKey); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
@@ -402,6 +419,7 @@ func updatePurchaseOrderEditable(
 	schema, orgID string,
 	input PurchaseOrderUpdate,
 	calculation PurchaseOrderCalc,
+	basis purchaseOrderBasis,
 	numberKey any,
 ) error {
 	_, err := q.Exec(ctx, fmt.Sprintf(`
@@ -427,6 +445,11 @@ func updatePurchaseOrderEditable(
 			adjustment_minor = $21,
 			adjustment_reason = $22,
 			grand_total_minor = $23,
+			currency = $24,
+			tax_zone = $25,
+			tax_type = $26,
+			service_category = $27,
+			tax_category = $28,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
 		input.ID, orgID, input.BillingAddress, input.DeliveryAddress,
@@ -437,7 +460,8 @@ func updatePurchaseOrderEditable(
 		input.DiscountPercent, calculation.SubtotalMinor,
 		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
 		calculation.AdjustmentMinor, calculation.AdjustmentReason,
-		calculation.GrandTotalMinor,
+		calculation.GrandTotalMinor, basis.Currency, basis.TaxZone,
+		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {
@@ -446,6 +470,19 @@ func updatePurchaseOrderEditable(
 		return fmt.Errorf("update purchase order %d: %w", input.ID, err)
 	}
 	return nil
+}
+
+// basisFromLock is the frozen basis a correction writes back unchanged. It is
+// also what finalization and the saved-record paths compare against.
+func basisFromLock(lock purchaseOrderWriteLock) purchaseOrderBasis {
+	return purchaseOrderBasis{
+		Currency:        lock.Currency,
+		TaxZone:         lock.TaxZone,
+		TaxType:         lock.TaxType,
+		ServiceCategory: lock.ServiceCategory,
+		TaxCategory:     lock.TaxCategory,
+		PpnBps:          lock.PpnBps,
+	}
 }
 
 // insertPurchaseOrderCorrection writes one immutable snapshot of the values a
@@ -474,6 +511,19 @@ func insertPurchaseOrderCorrection(
 		attachmentFilename = attachment.Filename
 	}
 
+	// #496: a never-linked draft has no prior source or Customer identity. The
+	// snapshot stores SQL NULL for them, never 0: revision 00 is a real linked
+	// revision, and a zero in the audit trail would fabricate a reference. The
+	// quote number stays an empty display copy.
+	var snapshotQuotationID any = order.QuotationID
+	var snapshotRevision any = order.SourceRevision
+	var snapshotCustomerID any = order.CustomerID
+	if order.SourceState == PurchaseOrderSourceStateNever {
+		snapshotQuotationID = nil
+		snapshotRevision = nil
+		snapshotCustomerID = nil
+	}
+
 	var correctionID int64
 	err = q.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.purchase_order_corrections (
@@ -493,8 +543,8 @@ func insertPurchaseOrderCorrection(
 			$33,$34,$35,$36,$37,$38
 		) RETURNING id`, schema),
 		orgID, order.ID, order.Version, order.Version+1, kind, order.State,
-		reason, actor, order.QuotationID, order.SourceRevision, order.QuoteNumber,
-		order.CustomerID, order.CustomerName, order.Currency, order.TaxZone,
+		reason, actor, snapshotQuotationID, snapshotRevision, order.QuoteNumber,
+		snapshotCustomerID, order.CustomerName, order.Currency, order.TaxZone,
 		order.TaxCategory, order.BillingAddress, order.DeliveryAddress,
 		order.ShipToCode, order.ContactEmail, order.ContactPhone,
 		nilIfEmptyString(order.PONumber), dateOrNil(order.PODate),
@@ -571,6 +621,7 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		       COALESCE(NULLIF(btrim(u.display_name), ''), u.email),
 		       c.created_at, c.previous_version, c.resulting_version,
 		       c.quotation_id, c.source_revision, c.quote_number, c.customer_id,
+		       (c.quotation_id IS NULL),
 		       c.customer_name, c.currency, c.tax_zone, c.tax_category,
 		       c.billing_address, c.delivery_address, c.ship_to_code,
 		       c.contact_email, c.contact_phone, COALESCE(c.po_number, ''),
@@ -594,13 +645,17 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		var entry PurchaseOrderCorrection
 		var poDate, requestedDelivery pgtype.Date
 		var attachmentVersion pgtype.Int4
+		var quotationID pgtype.Int8
+		var sourceRevision pgtype.Int2
+		var customerID pgtype.Int8
 		var attachmentSHA, attachmentFilename string
 		if err := rows.Scan(
 			&entry.ID, &entry.UUID, &entry.Kind, &entry.State, &entry.Reason,
 			&entry.ActorID, &entry.ActorName, &entry.CreatedAt,
 			&entry.PreviousVersion, &entry.ResultingVersion,
-			&entry.QuotationID, &entry.SourceRevision, &entry.QuoteNumber,
-			&entry.CustomerID, &entry.CustomerName, &entry.Currency,
+			&quotationID, &sourceRevision, &entry.QuoteNumber,
+			&customerID, &entry.SourceMissing,
+			&entry.CustomerName, &entry.Currency,
 			&entry.TaxZone, &entry.TaxCategory, &entry.BillingAddress,
 			&entry.DeliveryAddress, &entry.ShipToCode, &entry.ContactEmail,
 			&entry.ContactPhone, &entry.PONumber, &poDate, &entry.ReceivedDate,
@@ -611,6 +666,15 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 			&attachmentSHA, &attachmentFilename,
 		); err != nil {
 			return nil, fmt.Errorf("scan purchase order %d history: %w", id, err)
+		}
+		if quotationID.Valid {
+			entry.QuotationID = quotationID.Int64
+		}
+		if sourceRevision.Valid {
+			entry.SourceRevision = sourceRevision.Int16
+		}
+		if customerID.Valid {
+			entry.CustomerID = customerID.Int64
 		}
 		if poDate.Valid {
 			value := poDate.Time

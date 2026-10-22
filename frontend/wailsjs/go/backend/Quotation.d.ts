@@ -18,6 +18,8 @@ export function CorrectPurchaseOrder(arg1:backend.PurchaseOrderCorrectionInput):
 
 export function CreateDeletionChallenge(arg1:backend.DeletionChallengeInput):Promise<backend.DeletionChallengeResult>;
 
+export function CreatePurchaseOrderBlankDraft(arg1:backend.PurchaseOrderBlankCreateInput):Promise<backend.PurchaseOrderDTO>;
+
 export function CreatePurchaseOrderDraft(arg1:backend.PurchaseOrderCreateInput):Promise<backend.PurchaseOrderDTO>;
 
 export function CustomerID():Promise<number>;

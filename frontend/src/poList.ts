@@ -35,16 +35,58 @@ export interface POListRowDTO {
   SourceRevision: number;
   /**
    * Independent of Draft/Saved. True when the followed Quotation was
-   * permanently deleted (#480); QuoteNumber/SourceRevision then name the
-   * former source.
+   * permanently deleted (#480) or the draft was never linked (#496).
+   * QuoteNumber/SourceRevision then name the former source, if any.
    */
   SourceMissing: boolean;
+  /** #496: "live", "never" or "former". Optional so an older payload and older
+   * test fixtures still type-check; `sourceStateOfRow` derives it. */
+  SourceState?: string;
 }
 
 /** One option of the customer multi-select. */
 export interface POListCustomerDTO {
   Name: string;
   ID: number;
+}
+
+/**
+ * The row's live source state. An older payload omitted SourceState, so it is
+ * derived from the fields it did send: a linked row has a QuotationID, and a
+ * formerly-linked one carries SourceMissing. A never-linked row has neither.
+ */
+export function sourceStateOfRow(
+  row: Pick<POListRowDTO, "SourceState" | "SourceMissing" | "CustomerID" | "QuoteNumber">
+): "live" | "never" | "former" {
+  if (row.SourceState === "live" || row.SourceState === "never" || row.SourceState === "former") {
+    return row.SourceState;
+  }
+  if (row.SourceMissing === true) return "former";
+  return "live";
+}
+
+/**
+ * The quotation column's second line. A never-linked row must not be described
+ * as a "former revision 0": it has no source at all, while a linked revision 00
+ * is real and renders "Revision 0".
+ */
+export function sourceRevisionLabel(row: POListRowDTO): string {
+  const state = sourceStateOfRow(row);
+  if (state === "never") return "No quotation linked";
+  if (state === "former") return `Former quotation · revision ${row.SourceRevision}`;
+  return `Revision ${row.SourceRevision}`;
+}
+
+/** The quotation number cell. A never-linked row has no number yet. */
+export function quotationCellLabel(row: POListRowDTO): string {
+  if (sourceStateOfRow(row) === "never") return "—";
+  return row.QuoteNumber;
+}
+
+/** The customer cell. A never-linked row has no Customer identity yet. */
+export function customerCellLabel(row: POListRowDTO): string {
+  if (row.CustomerName.trim() !== "") return row.CustomerName;
+  return sourceStateOfRow(row) === "never" ? "—" : "";
 }
 
 /** One page plus the org-wide customer facet. */

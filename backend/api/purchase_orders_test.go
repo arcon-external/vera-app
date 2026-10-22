@@ -36,6 +36,8 @@ type purchaseOrderRow struct {
 	Incoterms             string  `json:"incoterms"`
 	Currency              string  `json:"currency"`
 	TaxZone               string  `json:"taxZone"`
+	TaxType               string  `json:"taxType"`
+	ServiceCategory       string  `json:"serviceCategory"`
 	TaxCategory           string  `json:"taxCategory"`
 	Items                 []struct {
 		QuotationItemNo *int   `json:"quotationItemNo"`
@@ -76,6 +78,8 @@ type purchaseOrderRow struct {
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
 	Version                int64   `json:"version"`
 	SourceMissing          bool    `json:"sourceMissing"`
+	SourceState            string  `json:"sourceState"`
+	PrintedTotalsKnown     bool    `json:"printedTotalsKnown"`
 }
 
 func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {

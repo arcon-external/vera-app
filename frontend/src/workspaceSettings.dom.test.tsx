@@ -3,7 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import type { PurchaseOrderDTO } from "./purchaseOrder";
+import {
+  blankPurchaseOrderDraft,
+  type PurchaseOrderDTO,
+} from "./purchaseOrder";
 import {
   DEFAULT_PURCHASE_ORDER_SETTINGS,
   DEFAULT_QUOTATION_SETTINGS,
@@ -61,6 +64,17 @@ const mocks = vi.hoisted(() => ({
   listPOSourceRevisions: vi.fn((..._args: unknown[]): unknown => undefined),
   validatePOSource: vi.fn(async (..._args: unknown[]) => ({ Valid: true, Reason: "" })),
   createPurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
+  createBlankPurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
+  updatePurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
+  getPurchaseOrder: vi.fn((..._args: unknown[]): unknown => undefined),
+  listPurchaseOrders: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown>> => ({
+    PurchaseOrders: [],
+    Customers: [],
+    Page: 1,
+    PageSize: 15,
+    Total: 0,
+    TotalPages: 1,
+  })),
   getPurchaseOrderExtraction: vi.fn(async (..._args: unknown[]) => ({
     Run: null,
     Document: null,
@@ -116,10 +130,18 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     ValidatePOSource: (...args: unknown[]) => mocks.validatePOSource(...args),
     CreatePurchaseOrderDraft: (...args: unknown[]) =>
       mocks.createPurchaseOrderDraft(...args),
+    CreatePurchaseOrderBlankDraft: (...args: unknown[]) =>
+      mocks.createBlankPurchaseOrderDraft(...args),
+    UpdatePurchaseOrderDraft: (...args: unknown[]) =>
+      mocks.updatePurchaseOrderDraft(...args),
+    GetPurchaseOrder: (...args: unknown[]) =>
+      mocks.getPurchaseOrder(...args),
     GetPurchaseOrderExtraction: (...args: unknown[]) =>
       mocks.getPurchaseOrderExtraction(...args),
     GetPurchaseOrderDocumentState: (...args: unknown[]) =>
       mocks.getPurchaseOrderDocumentState(...args),
+    ListPurchaseOrders: (...args: unknown[]) =>
+      mocks.listPurchaseOrders(...args),
   };
 });
 
@@ -228,6 +250,63 @@ beforeEach(() => {
     Revisions: [{ Revision: 0, IssuedAt: "2026-10-20T10:00:00+07:00" }],
   });
   mocks.createPurchaseOrderDraft.mockResolvedValue(purchaseOrder());
+  mocks.createBlankPurchaseOrderDraft.mockResolvedValue(
+    purchaseOrder({
+      ID: 41,
+      UUID: "po-first-496",
+      QuotationID: 0,
+      CustomerID: 0,
+      SourceRevision: 0,
+      SourceState: "never",
+      SourceMissing: true,
+      PrintedTotalsKnown: false,
+      QuoteNumber: "",
+      CustomerName: "",
+      Items: [],
+      Version: 1,
+    })
+  );
+  mocks.updatePurchaseOrderDraft.mockImplementation(async (input: unknown) => {
+    const fields = input as Record<string, unknown>;
+    return {
+      Order: purchaseOrder({
+        ID: 41,
+        UUID: "po-first-496",
+        QuotationID: 0,
+        CustomerID: 0,
+        SourceRevision: 0,
+        SourceState: "never",
+        SourceMissing: true,
+        PrintedTotalsKnown: false,
+        QuoteNumber: "",
+        CustomerName: "",
+        Items: [],
+        Version: 2,
+        PONumber: String(fields.PONumber ?? ""),
+        Currency: String(fields.Currency ?? "IDR"),
+        TaxZone: String(fields.TaxZone ?? "FTZ"),
+        TaxType: String(fields.TaxType ?? "Goods"),
+        ServiceCategory: String(fields.ServiceCategory ?? ""),
+      }),
+    };
+  });
+  mocks.getPurchaseOrder.mockResolvedValue(
+    purchaseOrder({
+      ID: 41,
+      UUID: "po-first-496",
+      QuotationID: 0,
+      CustomerID: 0,
+      SourceRevision: 0,
+      SourceState: "never",
+      SourceMissing: true,
+      PrintedTotalsKnown: false,
+      QuoteNumber: "",
+      CustomerName: "",
+      Items: [],
+      Version: 2,
+      PONumber: "CUSTOMER-APP-496",
+    })
+  );
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -744,10 +823,174 @@ describe("new drafts take the defaults (issue #492)", () => {
   });
 });
 
+// Issue #496: PO-first entry through the real top-level App, not just the PO
+// workspace composition. The only replacements are the desktop bindings; the
+// shell, the workspace controller, the editor, the leave guard and the toast
+// provider are production code.
+describe("PO-first draft (issue #496)", () => {
+  it("creates no record on an untouched visit, then saves and reopens the same row", async () => {
+    const blank = blankPurchaseOrderDraft({
+      currency: "IDR",
+      taxZone: "FTZ",
+      taxType: "Goods",
+      serviceCategory: "",
+      receivedDate: "2026-10-22",
+      incoterms: "EXW",
+    });
+    mocks.createBlankPurchaseOrderDraft.mockResolvedValue({
+      ...blank,
+      ID: 41,
+      UUID: "po-first-496",
+      Version: 1,
+    });
+    mocks.updatePurchaseOrderDraft.mockImplementation(
+      async (input: unknown) => {
+        const fields = input as Record<string, unknown>;
+        return {
+          Order: {
+            ...blank,
+            ID: 41,
+            UUID: "po-first-496",
+            Version: 2,
+            PONumber: String(fields.PONumber ?? ""),
+            Currency: String(fields.Currency ?? "IDR"),
+            TaxZone: String(fields.TaxZone ?? "FTZ"),
+            TaxType: String(fields.TaxType ?? "Goods"),
+            ServiceCategory: String(fields.ServiceCategory ?? ""),
+          },
+        };
+      }
+    );
+    mocks.getPurchaseOrder.mockResolvedValue({
+      ...blank,
+      ID: 41,
+      UUID: "po-first-496",
+      Version: 2,
+      PONumber: "CUSTOMER-APP-496",
+    });
+    mocks.listPurchaseOrders.mockResolvedValue({
+      PurchaseOrders: [
+        {
+          UUID: "po-first-496",
+          State: "draft",
+          PONumber: "CUSTOMER-APP-496",
+          QuoteNumber: "",
+          CustomerName: "",
+          ReceivedDate: "2026-10-22",
+          Currency: "IDR",
+          ID: 41,
+          CustomerID: 0,
+          SourceRevision: 0,
+          SourceMissing: true,
+          SourceState: "never",
+        },
+      ],
+      Customers: [],
+      Page: 1,
+      PageSize: 15,
+      Total: 1,
+      TotalPages: 1,
+    });
+
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+
+    // Opening the Editor creates no row and shows no fabricated source.
+    expect(mocks.createBlankPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("New purchase order");
+    expect(document.body.textContent).toContain("Source missing");
+    expect(document.body.textContent).not.toContain("Draft 0");
+    expect(document.body.textContent).not.toContain("revision 0");
+
+    typeInto(input("Customer PO number"), "CUSTOMER-APP-496");
+    await flush();
+    await act(async () => {
+      button("Save draft").click();
+    });
+    await flush();
+    expect(mocks.createBlankPurchaseOrderDraft).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePurchaseOrderDraft).toHaveBeenCalledTimes(1);
+
+    // The Drafts tab reads the stored row through the same App wiring.
+    await act(async () => {
+      navTab("Drafts").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    const open = button("Open purchase order CUSTOMER-APP-496");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    expect(mocks.getPurchaseOrder).toHaveBeenCalledWith(41);
+    expect(input("Customer PO number").value).toBe("CUSTOMER-APP-496");
+  });
+
+  it("leaves untouched without a prompt and keeps dirty values on Keep editing", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+
+    // Untouched: leaving asks nothing.
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+    expect(discardPrompt()).toBeNull();
+
+    // Return and type; leaving now asks.
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+    typeInto(input("Customer PO number"), "KEEP-PO-496");
+    await flush();
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+    expect(discardPrompt()).not.toBeNull();
+
+    await act(async () => {
+      button("Keep editing").click();
+    });
+    await flush();
+    expect(discardPrompt()).toBeNull();
+    expect(input("Customer PO number").value).toBe("KEEP-PO-496");
+
+    // Discard leaves the transient work behind and navigates.
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+    expect(discardPrompt()).not.toBeNull();
+    await act(async () => {
+      button("Discard changes").click();
+    });
+    await flush();
+    expect(discardPrompt()).toBeNull();
+    expect(document.body.textContent).not.toContain("New purchase order");
+  });
+});
+
 /** Opens the PO workspace and creates a draft through the real selector. */
 async function createPurchaseOrder(): Promise<void> {
   await act(async () => {
     button("Open Purchase Orders").click();
+  });
+  await flush();
+  // #496: the Editor tab opens the blank PO-first form. Linked creation still
+  // lives on the Drafts tab's Add action, which is the path this #492 test
+  // exercises.
+  await act(async () => {
+    navTab("Drafts").click();
   });
   await flush();
   await act(async () => {
