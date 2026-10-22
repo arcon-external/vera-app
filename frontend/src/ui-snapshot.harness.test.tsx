@@ -95,6 +95,12 @@ import type { PurchaseOrderHistoryEntry } from "./poCorrection";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 import type { PurchaseOrderDocumentStateDTO } from "./purchaseOrderDocument";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
+import { QuotationSettingsPage } from "./components/QuotationSettingsPage";
+import { PurchaseOrderSettingsPage } from "./components/PurchaseOrderSettingsPage";
+import {
+  DEFAULT_PURCHASE_ORDER_SETTINGS,
+  DEFAULT_QUOTATION_SETTINGS,
+} from "./workspaceSettings";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
@@ -2181,6 +2187,47 @@ const CASES: SnapshotCase[] = [
         onRemoveSubBullet={() => undefined}
         onSubBulletChange={() => undefined}
         onPasteItems={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #492: the Quotation defaults surface, at both widths. A
+    // representative saved set (Services with a category, a default subject)
+    // shows every control the page can render, including the conditional
+    // service-category field.
+    name: "QuotationSettings",
+    element: (
+      <QuotationSettingsPage
+        settings={{
+          ...DEFAULT_QUOTATION_SETTINGS,
+          validityDays: 45,
+          paymentTermDays: 30,
+          taxZone: "NonFTZ",
+          taxType: "Services",
+          serviceCategory: "Construction",
+          subject: "Supply and installation of electrical and mechanical systems",
+        }}
+        onChange={() => undefined}
+        onClear={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #492: the Purchase Order defaults surface. The received date is
+    // filled, so the date control reads as an entered value rather than an
+    // empty box.
+    name: "PurchaseOrderSettings",
+    element: (
+      <PurchaseOrderSettingsPage
+        settings={{
+          ...DEFAULT_PURCHASE_ORDER_SETTINGS,
+          paymentTerms: "50% advance, balance 30 days after delivery",
+          incoterms: "FOB",
+          receivedDate: "2026-10-01",
+          listPageSize: 25,
+        }}
+        onChange={() => undefined}
+        onClear={() => undefined}
       />
     ),
   },

@@ -11,7 +11,14 @@ import type { AppPage } from "../poLeaveGuard";
 // Team left the Quotation nav because they are admin features, not quotation
 // pages.
 
-export type WorkspaceId = "quotation" | "purchase-order" | "admin" | "account";
+export type WorkspaceId =
+  | "quotation"
+  | "purchase-order"
+  | "admin"
+  | "account"
+  | "quotation-settings"
+  | "purchase-order-settings";
+
 
 interface WorkspaceTab {
   label: string;
@@ -38,12 +45,15 @@ const ADMIN_TABS: WorkspaceTab[] = [
 ];
 
 /**
- * Which workspace a page belongs to. Home belongs to none; Account settings is
- * a profile surface with no tabs of its own.
+ * Which workspace a page belongs to. Home belongs to none; Account settings,
+ * Quotation settings and Purchase Order settings are profile surfaces with no
+ * tabs of their own.
  */
 export function workspaceForPage(page: AppPage): WorkspaceId | null {
   if (page === "home") return null;
   if (page === "settings") return "account";
+  if (page === "quotation-settings") return "quotation-settings";
+  if (page === "po-settings") return "purchase-order-settings";
   if (page.startsWith("admin-")) return "admin";
   if (page === "po" || page === "po-drafts" || page === "po-archive") {
     return "purchase-order";
@@ -61,6 +71,10 @@ export function workspaceName(workspace: WorkspaceId | null): string {
       return "Admin Dashboard";
     case "account":
       return "Account settings";
+    case "quotation-settings":
+      return "Quotation settings";
+    case "purchase-order-settings":
+      return "Purchase Order settings";
     default:
       return "Vera";
   }

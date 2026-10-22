@@ -29,6 +29,12 @@ export interface PurchaseOrderWorkspacePageProps {
   incotermOptions: { value: string; label: string }[];
   /** Issue #491: the active workspace tab when no record is open. */
   tab: PurchaseOrderTab;
+  /**
+   * Issue #492: the account's remembered archive page size. Only the initial
+   * list state uses it; the server's own page size takes over once a page
+   * loads, because the archive is server-paged.
+   */
+  pageSize?: number;
   /** Starts a new PO through the shared source selector. */
   onAdd: () => void;
   /** Whether the signed-in user may repair a saved record's source link. */
@@ -96,6 +102,7 @@ export function PurchaseOrderWorkspacePage({
   uomOptions,
   incotermOptions,
   tab,
+  pageSize,
   onAdd,
   onOpen,
   isAdmin,
@@ -114,6 +121,7 @@ export function PurchaseOrderWorkspacePage({
         <PurchaseOrderListPage
           key="drafts"
           mode="drafts"
+          pageSize={pageSize}
           onAdd={onAdd}
           onOpen={onOpen}
           isAdmin={isAdmin}
@@ -125,6 +133,7 @@ export function PurchaseOrderWorkspacePage({
         <PurchaseOrderListPage
           key="archive"
           mode="archive"
+          pageSize={pageSize}
           onAdd={onAdd}
           onOpen={onOpen}
           isAdmin={isAdmin}

@@ -7,6 +7,7 @@ import {
   canOpenRow,
   initialPOListFilters,
   initialPOListState,
+  initialPOListStateFor,
   poListQueryDelay,
   poListReducer,
   poNumberLabel,
@@ -173,6 +174,16 @@ describe("poListReducer (issue #469)", () => {
     expect(initialPOListState.rows).toEqual([]);
     expect(initialPOListState.loading).toBe(false);
     expect(initialPOListState.error).toBeNull();
+  });
+
+  it("uses the remembered page size for a tab's initial state, never below one", () => {
+    // Issue #492: the preference seeds the initial state only. The loaded page
+    // stays authoritative, and a bad preference cannot make PageSize zero.
+    expect(initialPOListStateFor("archive", 30).pageSize).toBe(30);
+    expect(initialPOListStateFor("drafts", 1).pageSize).toBe(1);
+    expect(initialPOListStateFor("archive", 0).pageSize).toBe(PO_LIST_PAGE_SIZE);
+    expect(initialPOListStateFor("archive", -5).pageSize).toBe(PO_LIST_PAGE_SIZE);
+    expect(initialPOListStateFor("archive", 2.5).pageSize).toBe(PO_LIST_PAGE_SIZE);
   });
 
   it("resets the page whenever a filter changes", () => {

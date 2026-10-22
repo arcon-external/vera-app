@@ -45,6 +45,11 @@ export interface PurchaseOrderListPageProps {
    * stored state the tab is about; the other filters are unchanged.
    */
   mode?: POListMode;
+  /**
+   * Issue #492: the account's remembered page size, used for the initial list
+   * state. The server's own page size is authoritative once a page loads.
+   */
+  pageSize?: number;
 }
 
 export interface PurchaseOrderListViewProps {
@@ -484,9 +489,12 @@ export function PurchaseOrderListPage({
   onAdd,
   isAdmin = false,
   mode,
+  pageSize,
 }: PurchaseOrderListPageProps) {
   const [state, dispatch] = useReducer(poListReducer, undefined, () =>
-    mode === undefined ? initialPOListState : initialPOListStateFor(mode)
+    mode === undefined
+      ? initialPOListState
+      : initialPOListStateFor(mode, pageSize)
   );
   // Every effect run is a new request; the reducer drops an older answer that
   // lands after a newer one started. `reload` is the explicit retry token.

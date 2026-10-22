@@ -138,3 +138,22 @@ describe("AppShell account settings", () => {
     expect(html).not.toContain('aria-label="Primary"');
   });
 });
+
+describe("AppShell workspace settings (issue #492)", () => {
+  it("names Quotation settings as its own tab-less surface", () => {
+    const html = renderShell("quotation-settings");
+    // The shell brand is the page title, not "Account settings".
+    expect(html).toContain(">Quotation settings<");
+    expect(html).not.toContain(">Account settings<");
+    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(html).not.toContain('aria-label="Primary"');
+  });
+
+  it("names Purchase Order settings as its own tab-less surface", () => {
+    const html = renderShell("po-settings");
+    expect(html).toContain(">Purchase Order settings<");
+    expect(html).not.toContain(">Purchase Orders<");
+    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(html).not.toContain('aria-label="Primary"');
+  });
+});

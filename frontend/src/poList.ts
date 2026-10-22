@@ -139,9 +139,19 @@ export function modeState(mode: POListMode): POListStateFilter {
 }
 
 /** A fresh list state pinned to one workspace tab's stored state. */
-export function initialPOListStateFor(mode: POListMode): POListState {
+export function initialPOListStateFor(
+  mode: POListMode,
+  pageSize: number = PO_LIST_PAGE_SIZE
+): POListState {
   return {
     ...initialPOListState,
+    // Issue #492: the account's remembered size is the initial state only. The
+    // archive is server-paged at a fixed 15, and the first loaded page replaces
+    // this figure with the answer's own PageSize.
+    pageSize:
+      Number.isInteger(pageSize) && pageSize >= 1
+        ? pageSize
+        : PO_LIST_PAGE_SIZE,
     filters: resetPOListFilters(modeState(mode)),
   };
 }

@@ -83,6 +83,21 @@ import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import { usePurchaseOrderWorkspace } from "./poWorkspace";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
+import { QuotationSettingsPage } from "./components/QuotationSettingsPage";
+import { PurchaseOrderSettingsPage } from "./components/PurchaseOrderSettingsPage";
+import {
+  DEFAULT_WORKSPACE_SETTINGS,
+  applyPurchaseOrderDefaults,
+  clearPurchaseOrderSettings,
+  clearQuotationSettings,
+  quotationDefaultsFromSettings,
+  readWorkspaceSettings,
+  writePurchaseOrderSettings,
+  writeQuotationSettings,
+  type QuotationSettings,
+  type PurchaseOrderSettings,
+  type WorkspaceSettings,
+} from "./workspaceSettings";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
@@ -96,6 +111,19 @@ interface StatusState {
 }
 
 const DEFAULT_COMPANY_NAME = "PT Arcon Penta Persada";
+
+/**
+ * The device store for per-user settings. Access itself can throw under a
+ * locked-down browser profile, so a missing store is `null` -- the settings
+ * module then answers the built-in defaults instead of breaking the page.
+ */
+function localSettingsStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function pickCustomerId(options: { value: number }[], current: number): number {
   if (options.some((option) => option.value === current)) return current;
@@ -610,6 +638,69 @@ function App() {
     [poLeave, poWorkspace.open, pushToast]
   );
   const [user, setUser] = useState<SignedInUser | null>(null);
+  // Issue #492: the account's device-local Quotation and PO defaults. They are
+  // read when the signed-in account changes and written by the settings pages;
+  // signing out resets this copy but never removes the saved records.
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>(
+    DEFAULT_WORKSPACE_SETTINGS
+  );
+  const settingsUserId = user?.ID ?? null;
+  // Which account's defaults have already been applied to the mounted blank
+  // editor. The form exists before sign-in resolves, so this is what stops a
+  // later render (or a settings save) from overwriting work the user has
+  // started.
+  const defaultsAppliedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (settingsUserId === null) {
+      setWorkspaceSettings(DEFAULT_WORKSPACE_SETTINGS);
+      defaultsAppliedFor.current = null;
+      return;
+    }
+    const next = readWorkspaceSettings(localSettingsStorage(), settingsUserId);
+    setWorkspaceSettings(next);
+    if (defaultsAppliedFor.current === settingsUserId) return;
+    defaultsAppliedFor.current = settingsUserId;
+    // The first blank editor of a signed-in session is a new draft too. Apply
+    // the account's defaults only while nothing else has claimed the editor: a
+    // reset, a draft, a revision or a paste writes details afterwards (and the
+    // reset path applies the defaults itself).
+    if (dirty || activeDraftId !== 0 || editingQuote !== null) return;
+    setDetails({
+      ...DEFAULT_DETAILS,
+      ...quotationDefaultsFromSettings(next.quotation),
+    });
+    // Keyed to the account on purpose: the values are read at the moment the
+    // account changes, and a later settings save reaches the next draft through
+    // resetForm rather than by rewriting an editor already in use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsUserId]);
+  const saveQuotationSettings = useCallback(
+    (next: QuotationSettings) => {
+      const storage = localSettingsStorage();
+      writeQuotationSettings(storage, settingsUserId, next);
+      setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+    },
+    [settingsUserId]
+  );
+  const clearSavedQuotationSettings = useCallback(() => {
+    const storage = localSettingsStorage();
+    clearQuotationSettings(storage, settingsUserId);
+    setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+  }, [settingsUserId]);
+  const savePurchaseOrderSettings = useCallback(
+    (next: PurchaseOrderSettings) => {
+      const storage = localSettingsStorage();
+      writePurchaseOrderSettings(storage, settingsUserId, next);
+      setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+    },
+    [settingsUserId]
+  );
+  const clearSavedPurchaseOrderSettings = useCallback(() => {
+    const storage = localSettingsStorage();
+    clearPurchaseOrderSettings(storage, settingsUserId);
+    setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+  }, [settingsUserId]);
+
   const [checkingSession, setCheckingSession] = useState(true);
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   // The live company currency: the denomination fresh input is written in,
@@ -816,7 +907,13 @@ function App() {
     nextKey.current = 1;
     nextSubId.current = 1;
     setItems([newItem(0, canonicalUnit)]);
-    setDetails(DEFAULT_DETAILS);
+    // Issue #492: a brand-new quotation starts from this account's saved
+    // defaults. A pasted copy or a reopened draft writes its own details
+    // afterwards, so those values always win.
+    setDetails({
+      ...DEFAULT_DETAILS,
+      ...quotationDefaultsFromSettings(workspaceSettings.quotation),
+    });
     setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
     // The editor is no longer a resumed draft, so the next export must not try
@@ -826,7 +923,7 @@ function App() {
     void ClearDraftContext().catch(() => undefined);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview, customerOptions, canonicalUnit]);
+  }, [clearPreview, customerOptions, canonicalUnit, workspaceSettings.quotation]);
 
   // Server-owned client directory: the editor dropdown reads here, and new
   // clients appear without a rebuild. Prepare validates server-side.
@@ -1914,10 +2011,17 @@ function App() {
           const draft = await CreatePurchaseOrderDraft({
             QuotationID: selection.quotationId,
             RevisionNumber: selection.revisionNumber,
-            ReceivedDate: "",
+            // Issue #492: the received date is a PO fact the source revision
+            // never supplies. Blank means the server stores today in WIB.
+            ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
           });
           poLeave.setDirty(false);
-          poWorkspace.open(draft);
+          // Payment terms and Incoterms come from the revision; the saved
+          // defaults only fill a field it left empty, and the received date is
+          // applied when the server stored none.
+          poWorkspace.open(
+            applyPurchaseOrderDefaults(draft, workspaceSettings.purchaseOrder)
+          );
           closePOSourceSelector();
           setPage("po");
           pushToast(
@@ -1964,6 +2068,8 @@ function App() {
       onSignOut={() =>
         poLeave.request(visiblePage, () => void handleSignOut())
       }
+      onOpenQuotationSettings={() => poLeave.request("quotation-settings")}
+      onOpenPurchaseOrderSettings={() => poLeave.request("po-settings")}
       actionBar={
         visiblePage === "create" ? (
           <>
@@ -2102,6 +2208,7 @@ function App() {
           uomOptions={storedUoMs ?? []}
           incotermOptions={INCOTERM_OPTIONS}
           tab={purchaseOrderTab(visiblePage)}
+          pageSize={workspaceSettings.purchaseOrder.listPageSize}
           onAdd={() => {
             setPOSelectorMode("entry");
             setPOSelectorRepairID(null);
@@ -2341,6 +2448,22 @@ function App() {
           isAdmin={isAdmin}
           user={user}
           onProfileChanged={setUser}
+        />
+      ) : null}
+
+      {visiblePage === "quotation-settings" && user !== null ? (
+        <QuotationSettingsPage
+          settings={workspaceSettings.quotation}
+          onChange={saveQuotationSettings}
+          onClear={clearSavedQuotationSettings}
+        />
+      ) : null}
+
+      {visiblePage === "po-settings" && user !== null ? (
+        <PurchaseOrderSettingsPage
+          settings={workspaceSettings.purchaseOrder}
+          onChange={savePurchaseOrderSettings}
+          onClear={clearSavedPurchaseOrderSettings}
         />
       ) : null}
     </AppShell>

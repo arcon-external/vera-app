@@ -25,7 +25,9 @@ export type AppPage =
   | "admin-team"
   | "admin-company"
   | "admin-backups"
-  | "settings";
+  | "settings"
+  | "quotation-settings"
+  | "po-settings";
 
 export interface LeaveGuardOptions {
   /**

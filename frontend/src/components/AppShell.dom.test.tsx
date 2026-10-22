@@ -78,6 +78,14 @@ function menuItems(): string[] {
   );
 }
 
+function menuItem(label: string): HTMLButtonElement {
+  const found = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+  ).find((node) => node.textContent?.trim() === label);
+  if (found === undefined) throw new Error(`no menu item ${label}`);
+  return found;
+}
+
 describe("AppShell profile menu (issue #491)", () => {
   it("offers Account settings, Admin Dashboard and Sign out to an admin", () => {
     render(ADMIN);
@@ -101,6 +109,46 @@ describe("AppShell profile menu (issue #491)", () => {
       "Admin Dashboard",
       "Sign out",
     ]);
+  });
+
+  it("gives staff the same settings entries without the Admin Dashboard", () => {
+    render(STAFF, { quotationSettings: () => {}, poSettings: () => {} });
+    openMenu(STAFF);
+    expect(menuItems()).toEqual([
+      "Account settings",
+      "Quotation settings",
+      "Purchase Order settings",
+      "Sign out",
+    ]);
+  });
+
+  it("calls the supplied settings callbacks instead of navigating", () => {
+    const onNavigate = vi.fn();
+    const quotationSettings = vi.fn();
+    const poSettings = vi.fn();
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <AppShell
+            page="home"
+            onNavigate={onNavigate}
+            user={STAFF}
+            onOpenQuotationSettings={quotationSettings}
+            onOpenPurchaseOrderSettings={poSettings}
+          >
+            <div>body</div>
+          </AppShell>
+        </ToastProvider>
+      );
+    });
+    openMenu(STAFF);
+    act(() => menuItem("Quotation settings").click());
+    expect(quotationSettings).toHaveBeenCalledTimes(1);
+    openMenu(STAFF);
+    act(() => menuItem("Purchase Order settings").click());
+    expect(poSettings).toHaveBeenCalledTimes(1);
+    // The caller's guard owns the route, so the shell itself navigates nowhere.
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("navigates through the caller's guard when Account settings is chosen", () => {
