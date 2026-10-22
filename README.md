@@ -108,7 +108,9 @@ wails build
 
 The compiled binary will be available in the `build/bin/` directory. It always
 talks to the production API, even when `VERA_API_URL` is exported in the shell
-that launches it; that override belongs to `wails dev` only.
+that launches it; that override belongs to `wails dev` only. The `vera` CLI is
+unchanged and still resolves `--api`, then `VERA_API_URL`, then its stored
+session (`docs/cli.md`).
 
 ## 📄 License
 

@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -15,6 +17,7 @@ func TestRequireLocalDevelopmentTargetAcceptsLocalTargets(t *testing.T) {
 		"postgres://vera@LOCALHOST:5432/quotes",
 		"postgres://vera@[::1]:5432/quotes",
 		"postgres://vera@127.0.0.2:5432/quotes", // the whole 127/8 range is loopback
+		"postgres://vera@localhost:5432/quotes?host=127.0.0.1",
 		"postgres:///quotes?host=/var/run/postgresql",
 		"postgres:///quotes?host=/tmp",
 		"host=/var/run/postgresql dbname=quotes user=vera",
@@ -39,6 +42,7 @@ func TestRequireLocalDevelopmentTargetRefusesRemoteAndAmbiguous(t *testing.T) {
 		"postgres://vera@127.0.0.1:5432,remote.invalid:5432/quotes",
 		"postgres://vera@localhost,127.0.0.1:5432/quotes",
 		"postgres://vera@127.0.0.1:5432,127.0.0.1:5433/quotes?sslmode=disable",
+		"postgres://vera:secret@localhost:5432/quotes?host=remote.invalid",
 		"host=remote.invalid dbname=dev user=vera password=fake-password",
 		"not-a-dsn",
 	} {
@@ -108,6 +112,38 @@ func TestRequireLocalDevelopmentTargetUsesResolvedPGFallback(t *testing.T) {
 	}
 	if err := RequireLocalDevelopmentTarget(config); err != nil {
 		t.Fatalf("explicit loopback DSN should win over remote PG*: %v", err)
+	}
+}
+
+// TestRequireLocalDevelopmentTargetResolvesServiceFiles covers pgx's service /
+// servicefile inputs: a remote service must be refused, a local one accepted,
+// and an explicit loopback host must win over a remote service.
+func TestRequireLocalDevelopmentTargetResolvesServiceFiles(t *testing.T) {
+	dir := t.TempDir()
+	serviceFile := filepath.Join(dir, "pg_service.conf")
+	body := "[remote]\n" +
+		"host=remote.invalid\nport=5432\ndbname=dev\nuser=vera\npassword=fake-password\n\n" +
+		"[local]\nhost=127.0.0.1\nport=5432\ndbname=quotes\nuser=vera\n"
+	if err := os.WriteFile(serviceFile, []byte(body), 0o600); err != nil {
+		t.Fatalf("write service file: %v", err)
+	}
+	t.Setenv("PGSERVICEFILE", serviceFile)
+
+	if err := RequireLocalDevelopmentTarget(Config{DSN: "service=local"}); err != nil {
+		t.Fatalf("local service refused: %v", err)
+	}
+	err := RequireLocalDevelopmentTarget(Config{DSN: "service=remote"})
+	if err == nil {
+		t.Fatal("remote service accepted")
+	}
+	if strings.Contains(err.Error(), "fake-password") {
+		t.Fatalf("service refusal leaks the service password: %v", err)
+	}
+	if err := RequireLocalDevelopmentTarget(Config{DSN: "service=remote servicefile=" + serviceFile}); err == nil {
+		t.Fatal("remote servicefile accepted")
+	}
+	if err := RequireLocalDevelopmentTarget(Config{DSN: "service=remote host=127.0.0.1"}); err != nil {
+		t.Fatalf("explicit loopback host should win over the remote service: %v", err)
 	}
 }
 

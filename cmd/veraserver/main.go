@@ -28,6 +28,17 @@ func run(args []string) error {
 	return runWith(args, os.Getenv, store.Open, 10, 3*time.Second)
 }
 
+// defaultAPIAddr is Cloud Run's contract: the bare production entrypoint binds
+// every interface on :8080. scripts/dev-api.sh overrides it to loopback.
+const defaultAPIAddr = ":8080"
+
+func serverAddr(getenv func(string) string) string {
+	if addr := getenv("VERA_API_ADDR"); addr != "" {
+		return addr
+	}
+	return defaultAPIAddr
+}
+
 // parseServerFlags accepts only the flags the server owns. The local guard is
 // opt-in so Cloud Run's bare invocation keeps its existing behaviour.
 func parseServerFlags(args []string) (bool, error) {
@@ -58,10 +69,7 @@ func runWith(args []string, getenv func(string) string,
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	addr := getenv("VERA_API_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
+	addr := serverAddr(getenv)
 
 	config, err := store.LoadConfig(getenv)
 	if err != nil {
