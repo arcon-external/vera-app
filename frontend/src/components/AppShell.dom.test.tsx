@@ -310,4 +310,83 @@ describe("profile menu keyboard operation (issue #494)", () => {
     expect(menuItems()).toHaveLength(0);
     expect(document.activeElement).toBe(trigger(STAFF));
   });
+
+  it.each(["Enter", " "])(
+    "opens from the trigger with %j on the first entry and closes with Escape there",
+    (key) => {
+      render(STAFF, { page: "create", ...SETTINGS });
+      focus(trigger(STAFF));
+      pressKey(trigger(STAFF), key);
+      expect(menuItems()).toHaveLength(3);
+      expect(document.activeElement).toBe(menuItem("Account settings"));
+
+      // A keyboard user may Shift+Tab back to the trigger while the menu is
+      // open; Escape there must dismiss it, not only Escape from an entry.
+      focus(trigger(STAFF));
+      pressKey(trigger(STAFF), "Escape");
+      expect(menuItems()).toHaveLength(0);
+      expect(document.activeElement).toBe(trigger(STAFF));
+    }
+  );
+
+  it("closes when focus leaves an arrow-opened menu", () => {
+    render(STAFF, { page: "create", ...SETTINGS });
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    try {
+      focus(trigger(STAFF));
+      pressKey(trigger(STAFF), "ArrowDown");
+      expect(menuItems()).toHaveLength(3);
+      // Tab-out: focus moves to a control outside the trigger+popover group.
+      focus(outside);
+      expect(menuItems()).toHaveLength(0);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it("closes on a pointerdown outside an arrow-opened menu", () => {
+    render(STAFF, { page: "create", ...SETTINGS });
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    try {
+      focus(trigger(STAFF));
+      pressKey(trigger(STAFF), "ArrowDown");
+      expect(menuItems()).toHaveLength(3);
+      // A click on a non-focusable area still has to dismiss the popover.
+      act(() => {
+        outside.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+      });
+      expect(menuItems()).toHaveLength(0);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it("keeps the click-open blur close and returns focus on Escape", () => {
+    render(STAFF, { page: "create", ...SETTINGS });
+    const outside = document.createElement("button");
+    outside.textContent = "outside";
+    document.body.appendChild(outside);
+    try {
+      openMenu(STAFF);
+      expect(menuItems()).toHaveLength(3);
+      // A pointer press focuses the trigger first (jsdom's click() does not),
+      // then the pre-#494 dismissal applies: focus leaving the trigger group
+      // closes it.
+      focus(trigger(STAFF));
+      focus(outside);
+      expect(menuItems()).toHaveLength(0);
+
+      openMenu(STAFF);
+      focus(trigger(STAFF));
+      pressKey(trigger(STAFF), "Escape");
+      expect(menuItems()).toHaveLength(0);
+      expect(document.activeElement).toBe(trigger(STAFF));
+    } finally {
+      outside.remove();
+    }
+  });
 });

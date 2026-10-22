@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 import { NotificationBell } from "./NotificationBell";
 import { VeraLogo } from "./VeraLogo";
 import type { SignedInUser } from "./LoginPage";
@@ -218,6 +218,9 @@ export function AppShell({
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // The trigger and its popover are one dismissal group: focus or a pointer
+  // leaving this node closes the menu, whichever gesture opened it.
+  const menuGroupRef = useRef<HTMLDivElement>(null);
   // Set only when a keyboard gesture opens the menu, so a pointer click does
   // not steal focus from the trigger.
   const focusOnOpen = useRef<"first" | "last" | null>(null);
@@ -254,16 +257,46 @@ export function AppShell({
     target?.focus();
   }, [menuOpen]);
 
-  // Issue #494: the menu keeps its menu/menuitem roles, so it honours the keys
-  // that pattern promises. Escape closes and returns focus to the trigger;
-  // arrows move with wrapping, Home/End jump to the ends. Tab is left alone.
-  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
+  // A pointer on anything outside the trigger+popover group dismisses it even
+  // when the target is not focusable, so no focusout ever fires. Inside the
+  // group the menu's own items and the trigger keep their click behaviour.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menuGroupRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
+
+  const closeMenu = () => {
+    setMenuOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  // Escape belongs to the whole group, not just the list: a keyboard user can
+  // Shift+Tab back to the trigger while the menu is open, and Enter/Space opens
+  // with focus inside the list. Either way Escape closes and returns focus.
+  const onMenuGroupKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!menuOpen || event.key !== "Escape") return;
+    event.preventDefault();
+    closeMenu();
+  };
+
+  // Focus leaving the group closes the popover. Moving between the trigger and
+  // its items stays inside and does not close it.
+  const onMenuGroupBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!menuGroupRef.current?.contains(event.relatedTarget as Node | null)) {
       setMenuOpen(false);
-      triggerRef.current?.focus();
-      return;
     }
+  };
+
+  // Issue #494: the menu keeps its menu/menuitem roles, so it honours the keys
+  // that pattern promises. Arrow keys move with wrapping, Home/End jump to the
+  // ends; Escape is handled for the whole group above. Tab is left alone.
+  const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = menuItems();
     if (items.length === 0) return;
     const current = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -289,10 +322,14 @@ export function AppShell({
   };
 
   return (
+    // Issue #494: data-settings-origin exposes the remembered context the menu
+    // reads, the same way data-workspace exposes the page's workspace, so the
+    // Home-reset and no-capture-on-Keep behaviours are observable in tests.
     <div
       className="flex min-h-full flex-col bg-paper"
       data-app-shell=""
       data-workspace={workspace ?? "home"}
+      data-settings-origin={settingsOrigin ?? undefined}
       aria-hidden={inert ? true : undefined}
       inert={inert ? true : undefined}
     >
@@ -404,25 +441,34 @@ export function AppShell({
                 user={user}
                 onOpenTeam={isAdmin ? () => onNavigate("admin-team") : undefined}
               />
-              <div className="relative ml-auto flex items-center gap-2 lg:ml-0">
+              <div
+                ref={menuGroupRef}
+                className="relative ml-auto flex items-center gap-2 lg:ml-0"
+                onKeyDown={onMenuGroupKeyDown}
+                onBlur={onMenuGroupBlur}
+              >
                 <button
                   ref={triggerRef}
                   type="button"
                   onClick={() => setMenuOpen((open) => !open)}
                   onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      // Enter/Space take the same opener path as ArrowDown:
+                      // open on the first entry. The keydown default would
+                      // otherwise synthesise a second, toggling click.
+                      event.preventDefault();
+                      if (menuOpen) {
+                        setMenuOpen(false);
+                        return;
+                      }
+                      focusOnOpen.current = "first";
+                      setMenuOpen(true);
+                      return;
+                    }
                     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
                     event.preventDefault();
                     focusOnOpen.current = event.key === "ArrowUp" ? "last" : "first";
                     setMenuOpen(true);
-                  }}
-                  onBlur={(event) => {
-                    if (
-                      !event.currentTarget.parentElement?.contains(
-                        event.relatedTarget as Node
-                      )
-                    ) {
-                      setMenuOpen(false);
-                    }
                   }}
                   aria-haspopup="menu"
                   aria-expanded={menuOpen}
