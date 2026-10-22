@@ -151,7 +151,7 @@ only**, never in images, repos, or logs.
 
 | Variable | Where | Required | Default / notes |
 |---|---|---|---|
-| `VERA_API_URL` | desktop dev builds | no | Loopback http(s) only, from env or project `.env`; packaged builds ignore it |
+| `VERA_API_URL` | desktop dev builds | no | Loopback http(s) only, from env or project `.env`; packaged builds ignore it. The `vera` CLI retains its own `--api`/`VERA_API_URL`/session resolution |
 | `VERA_API_ADDR` | API | no | `:8080`; `scripts/dev-api.sh` forces `127.0.0.1:8081` locally |
 | `VERA_POSTGRES_DSN` | API | **yes** | Full DSN, `sslmode=require` for cloud; **never log, never commit** |
 | `VERA_POSTGRES_SCHEMA` | API | no | `vera` |

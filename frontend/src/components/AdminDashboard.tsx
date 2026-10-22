@@ -24,13 +24,6 @@ export const ADMIN_TABS: { id: AdminTabId; label: string }[] = [
   { id: "backups", label: "Backups" },
 ];
 
-export const ADMIN_TAB_PAGES: Record<AdminTabId, AppPage> = {
-  clients: "admin-clients",
-  team: "admin-team",
-  company: "admin-company",
-  backups: "admin-backups",
-};
-
 export function adminTabForPage(page: AppPage): AdminTabId {
   switch (page) {
     case "admin-team":
@@ -42,10 +35,6 @@ export function adminTabForPage(page: AppPage): AdminTabId {
     default:
       return "clients";
   }
-}
-
-export function adminPageForTab(tab: AdminTabId): AppPage {
-  return ADMIN_TAB_PAGES[tab];
 }
 
 const DESCRIPTIONS: Record<AdminTabId, string> = {

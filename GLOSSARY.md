@@ -559,7 +559,7 @@ The workspace tab listing issued quotation revisions or finalized purchase order
 _Avoid_: History, backup
 
 **Profile menu**:
-The user menu with Account settings and Sign out everywhere. Inside a workspace it also offers that workspace's own settings — Quotation settings in Quotation, Purchase Order settings in Purchase Order — and a settings page keeps the entry of the workspace it was opened from.
+The user menu with Account settings and Sign out everywhere. Inside Quotation or Purchase Order it also offers that workspace's own settings — Quotation settings or Purchase Order settings — and a settings page keeps the entry of the workspace it was opened from. The Admin Dashboard has no settings entry.
 _Avoid_: User menu, account menu
 
 **Account settings**:

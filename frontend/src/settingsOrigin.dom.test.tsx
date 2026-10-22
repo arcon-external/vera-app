@@ -231,6 +231,15 @@ function workspace(): string | null {
   );
 }
 
+/** The origin the shell was handed; absent means "no remembered context". */
+function originAttr(): string | null {
+  return (
+    document
+      .querySelector<HTMLElement>("[data-app-shell]")
+      ?.getAttribute("data-settings-origin") ?? null
+  );
+}
+
 function typeInto(element: HTMLInputElement, value: string): void {
   act(() => {
     const setter = Object.getOwnPropertyDescriptor(
@@ -276,6 +285,7 @@ describe("settings origin capture (issue #494)", () => {
     await reachSettingsFromQuotation();
 
     expect(document.querySelector("#settings-heading")).not.toBeNull();
+    expect(originAttr()).toBe("quotation");
     openMenu();
     expect(menuItems()).toEqual([
       "Account settings",
@@ -290,6 +300,7 @@ describe("settings origin capture (issue #494)", () => {
     await flush();
     expect(workspace()).toBe("quotation-settings");
     expect(document.querySelector("#quotation-settings-heading")).not.toBeNull();
+    expect(originAttr()).toBe("quotation");
     openMenu();
     expect(menuItems()).toEqual([
       "Account settings",
@@ -301,15 +312,22 @@ describe("settings origin capture (issue #494)", () => {
   it("does not navigate or capture while the user keeps editing", async () => {
     await renderApp();
     await dirtyQuotation();
+    // No context is remembered yet: the app started on Home.
+    expect(originAttr()).toBeNull();
 
     await openMenuItem("Account settings");
     expect(prompt()).not.toBeNull();
+    // The origin is recorded in the allowed-navigation callback, so asking the
+    // question must not record anything yet.
+    expect(originAttr()).toBeNull();
     await act(async () => {
       button("Keep editing").click();
     });
     expect(prompt()).toBeNull();
-    // The refused navigation left the editor mounted and rendered no settings
-    // surface; the menu still speaks for the Quotation workspace.
+    // The refused navigation left the editor mounted, rendered no settings
+    // surface and captured nothing; the menu still speaks for the current
+    // workspace.
+    expect(originAttr()).toBeNull();
     expect(workspace()).toBe("quotation");
     expect(document.querySelector("#settings-heading")).toBeNull();
     expect(subjectField().value).toBe("Unsaved quotation work");
@@ -327,6 +345,7 @@ describe("settings origin capture (issue #494)", () => {
     });
     await flush();
     expect(workspace()).toBe("account");
+    expect(originAttr()).toBe("quotation");
     openMenu();
     expect(menuItems()).toEqual([
       "Account settings",
@@ -338,17 +357,22 @@ describe("settings origin capture (issue #494)", () => {
   it("clears the origin on a return to Home", async () => {
     await renderApp();
     await reachSettingsFromQuotation();
+    expect(originAttr()).toBe("quotation");
 
     await act(async () => {
       button("Back to Home").click();
     });
     await flush();
     expect(workspace()).toBe("home");
+    // The successful return to Home ends the remembered context itself, not
+    // merely hiding it behind Home's own null context.
+    expect(originAttr()).toBeNull();
     openMenu();
     expect(menuItems()).toEqual(["Account settings", "Sign out"]);
 
     await chooseMenuItem("Account settings");
     expect(workspace()).toBe("account");
+    expect(originAttr()).toBeNull();
     openMenu();
     expect(menuItems()).toEqual(["Account settings", "Sign out"]);
   });
@@ -356,6 +380,7 @@ describe("settings origin capture (issue #494)", () => {
   it("does not carry the origin across sign-out and sign-in", async () => {
     await renderApp();
     await reachSettingsFromQuotation();
+    expect(originAttr()).toBe("quotation");
 
     openMenu();
     await act(async () => {
@@ -382,9 +407,54 @@ describe("settings origin capture (issue #494)", () => {
     await flush();
 
     expect(workspace()).toBe("home");
+    expect(originAttr()).toBeNull();
     await openMenuItem("Account settings");
     expect(workspace()).toBe("account");
+    expect(originAttr()).toBeNull();
     openMenu();
     expect(menuItems()).toEqual(["Account settings", "Sign out"]);
+  });
+});
+
+describe("Purchase Order settings origin (issue #494)", () => {
+  async function openPurchaseOrders(): Promise<void> {
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+    expect(workspace()).toBe("purchase-order");
+  }
+
+  it("captures purchase-order from the Purchase Order settings entry", async () => {
+    await renderApp();
+    await openPurchaseOrders();
+    // The PO workspace names its own context before anything is remembered.
+    expect(originAttr()).toBeNull();
+
+    await openMenuItem("Purchase Order settings");
+    expect(workspace()).toBe("purchase-order-settings");
+    expect(originAttr()).toBe("purchase-order");
+    openMenu();
+    expect(menuItems()).toEqual([
+      "Account settings",
+      "Purchase Order settings",
+      "Sign out",
+    ]);
+  });
+
+  it("retains purchase-order through Account settings", async () => {
+    await renderApp();
+    await openPurchaseOrders();
+    expect(originAttr()).toBeNull();
+
+    await openMenuItem("Account settings");
+    expect(workspace()).toBe("account");
+    expect(originAttr()).toBe("purchase-order");
+    openMenu();
+    expect(menuItems()).toEqual([
+      "Account settings",
+      "Purchase Order settings",
+      "Sign out",
+    ]);
   });
 });

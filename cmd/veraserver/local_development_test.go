@@ -98,6 +98,17 @@ func TestRunWithoutLocalDevelopmentKeepsProductionStartup(t *testing.T) {
 	}
 }
 
+// TestServerAddrDefaultsToProductionPort pins Cloud Run's bare :8080 default
+// and the explicit override the launcher uses.
+func TestServerAddrDefaultsToProductionPort(t *testing.T) {
+	if got := serverAddr(envLookup(nil)); got != ":8080" {
+		t.Fatalf("serverAddr() = %q; want the production default :8080", got)
+	}
+	if got := serverAddr(envLookup(map[string]string{"VERA_API_ADDR": "127.0.0.1:8081"})); got != "127.0.0.1:8081" {
+		t.Fatalf("serverAddr() = %q; want the explicit override", got)
+	}
+}
+
 func TestParseServerFlags(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
