@@ -412,3 +412,155 @@ func TestPartialNeverDraftBasisUpdateKeepsTheOmittedZoneOverHTTP(t *testing.T) {
 			updated.TaxType, updated.ServiceCategory)
 	}
 }
+
+func TestLegacyServiceOnlyBasisCannotDriftOverHTTP(t *testing.T) {
+	schema := "vera_api_po_f2b_linked"
+	server, token := testQuotationServer(t, schema)
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	_, body := createPODraft(t, server, token, quotationID, 0, nil)
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	setPurchaseOrderLegacyBasisForTest(t, schema, draft.ID, "SupplyInstallConstruction")
+	code, body := doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("read legacy linked draft = %d (%v)", code, body)
+	}
+	legacy := decodePurchaseOrder(t, body)
+	if legacy.TaxType != "" || legacy.ServiceCategory != "" ||
+		legacy.TaxCategory != "SupplyInstallConstruction" {
+		t.Fatalf("legacy shape = %q/%q/%q", legacy.TaxType, legacy.ServiceCategory, legacy.TaxCategory)
+	}
+
+	// The reported F2b: a service-only update differing from the legacy
+	// Construction value must be refused, not written.
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+		"serviceCategory": "NonConstruction",
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Fatalf("legacy service-only drift = %d (%v); want 422", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reread after refused drift = %d (%v)", code, body)
+	}
+	unchanged := decodePurchaseOrder(t, body)
+	if unchanged.TaxType != "" || unchanged.ServiceCategory != "" ||
+		unchanged.TaxCategory != "SupplyInstallConstruction" {
+		t.Errorf("refused drift wrote basis %q/%q/%q",
+			unchanged.TaxType, unchanged.ServiceCategory, unchanged.TaxCategory)
+	}
+
+	// A matching service-only update is a legitimate one-time population.
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": unchanged.Version,
+		"serviceCategory": "Construction",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("matching legacy service-only = %d (%v); want 200", code, body)
+	}
+	populated := decodePurchaseOrder(t, body)
+	if populated.TaxType != "Services" || populated.ServiceCategory != "Construction" {
+		t.Errorf("populated basis = %q/%q; want Services/Construction",
+			populated.TaxType, populated.ServiceCategory)
+	}
+
+	// Once populated, the basis is frozen: the old mismatching value is refused.
+	code, _ = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": populated.Version,
+		"serviceCategory": "NonConstruction",
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("frozen service drift = %d; want 422", code)
+	}
+
+	// Type-only matching is a legitimate population; type-only differing is not.
+	setPurchaseOrderLegacyBasisForTest(t, schema, draft.ID, "SupplyInstallConstruction")
+	_, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	legacy = decodePurchaseOrder(t, body)
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+		"taxType":         "Services",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("matching legacy type-only = %d (%v); want 200", code, body)
+	}
+	typed := decodePurchaseOrder(t, body)
+	if typed.TaxType != "Services" || typed.ServiceCategory != "Construction" {
+		t.Errorf("type-only population = %q/%q", typed.TaxType, typed.ServiceCategory)
+	}
+
+	setPurchaseOrderLegacyBasisForTest(t, schema, draft.ID, "SupplyInstallConstruction")
+	_, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	legacy = decodePurchaseOrder(t, body)
+	code, _ = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+		"taxType":         "Goods",
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("legacy type-only drift = %d; want 422", code)
+	}
+
+	// Empty/omitted basis keeps the legacy fallback and populates exactly it.
+	setPurchaseOrderLegacyBasisForTest(t, schema, draft.ID, "SupplyInstallConstruction")
+	_, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	legacy = decodePurchaseOrder(t, body)
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("empty legacy basis = %d (%v); want 200", code, body)
+	}
+	kept := decodePurchaseOrder(t, body)
+	if kept.TaxType != "Services" || kept.ServiceCategory != "Construction" {
+		t.Errorf("empty legacy keep = %q/%q; want Services/Construction",
+			kept.TaxType, kept.ServiceCategory)
+	}
+}
+
+func TestLegacyFormerServiceOnlyBasisCannotDriftOverHTTP(t *testing.T) {
+	schema := "vera_api_po_f2b_former"
+	server, token := testQuotationServer(t, schema)
+	quotationID, quoteNumber := exportForSelector(t, server, token, quotationInput())
+	_, body := createPODraft(t, server, token, quotationID, 0, nil)
+	draft := decodePurchaseOrder(t, body)
+	preview := previewDeletionOverAPI(t, server, token, "quotation", quotationID)
+	code, body := doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "quotation", "targetId": quotationID, "scope": "record",
+		"reason": "f2b former", "typedNumber": quoteNumber,
+		"expectedFingerprint": preview.Fingerprint,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("delete legacy former source = %d (%v)", code, body)
+	}
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	setPurchaseOrderLegacyBasisForTest(t, schema, draft.ID, "SupplyInstallConstruction")
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("read legacy former draft = %d (%v)", code, body)
+	}
+	legacy := decodePurchaseOrder(t, body)
+	if legacy.SourceState != "former" {
+		t.Fatalf("legacy former source state = %q", legacy.SourceState)
+	}
+
+	code, _ = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+		"serviceCategory": "NonConstruction",
+	})
+	if code != http.StatusUnprocessableEntity {
+		t.Errorf("legacy former service drift = %d; want 422", code)
+	}
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": legacy.Version,
+		"serviceCategory": "Construction",
+	})
+	if code != http.StatusOK {
+		t.Fatalf("matching legacy former service = %d (%v); want 200", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if saved.TaxType != "Services" || saved.ServiceCategory != "Construction" {
+		t.Errorf("legacy former population = %q/%q", saved.TaxType, saved.ServiceCategory)
+	}
+}

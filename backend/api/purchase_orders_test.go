@@ -137,6 +137,28 @@ func createPODraft(t *testing.T, server *Server, token string, quotationID int64
 	return doJSON(t, server, http.MethodPost, "/v1/purchase-orders", token, body)
 }
 
+// setPurchaseOrderLegacyBasisForTest rewrites a stored row to the pre-007
+// legacy shape: an empty type/service and only the legacy category. It is the
+// only way an API test can reach the legacy population arm.
+func setPurchaseOrderLegacyBasisForTest(t *testing.T, schema string, id int64, taxCategory string) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
+	if dsn == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
+	}
+	pool, err := pgxpool.New(context.Background(), dsn)
+	if err != nil {
+		t.Fatalf("connect for legacy basis: %v", err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.purchase_orders
+		SET tax_type = '', service_category = '', tax_category = $2
+		WHERE id = $1`, quoteIdentForTest(schema)), id, taxCategory); err != nil {
+		t.Fatalf("set legacy basis on purchase order %d: %v", id, err)
+	}
+}
+
 func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_draft")
 	quotationID, quoteNumber := exportForSelector(t, server, token, quotationInput())

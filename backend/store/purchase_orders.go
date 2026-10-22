@@ -583,49 +583,55 @@ func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input Purchase
 		basis := basisFromLock(lock)
 		submittedType := strings.TrimSpace(input.TaxType)
 		submittedService := strings.TrimSpace(input.ServiceCategory)
-		if lock.TaxType != "" {
+		if lock.TaxType == "" {
+			// Legacy row: the stored type is truly empty. Derive the effective
+			// basis from the stored legacy category and accept only an exact
+			// match. A service-only submission must not drift the effective
+			// basis just because the type was omitted.
+			expectedType, expectedService, ok := legacyBasisFor(lock.TaxCategory)
+			if !ok {
+				if submittedType != "" || submittedService != "" {
+					return purchaseOrderBasis{}, fmt.Errorf(
+						"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
+				}
+			} else {
+				if submittedType != "" && submittedType != expectedType {
+					return purchaseOrderBasis{}, fmt.Errorf(
+						"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
+				}
+				if submittedService != "" && submittedService != expectedService {
+					return purchaseOrderBasis{}, fmt.Errorf(
+						"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+				}
+				// Populate only fields that are truly empty. A stored service is
+				// never overwritten by the legacy fallback.
+				basis.TaxType = expectedType
+				if lock.ServiceCategory == "" {
+					basis.ServiceCategory = expectedService
+				}
+			}
+		} else {
 			if submittedType != "" && submittedType != lock.TaxType {
 				return purchaseOrderBasis{}, fmt.Errorf(
 					"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
 			}
-		} else if submittedType != "" {
-			// Legacy row: the stored type is truly empty. Populate it once, but
-			// only with the value the stored legacy category actually means.
-			expectedType, expectedService, ok := legacyBasisFor(lock.TaxCategory)
-			if !ok || submittedType != expectedType {
-				return purchaseOrderBasis{}, fmt.Errorf(
-					"%w: the tax type is fixed while a source is linked", ErrPurchaseOrderInvalid)
-			}
-			if submittedService != "" && submittedService != expectedService {
-				return purchaseOrderBasis{}, fmt.Errorf(
-					"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
-			}
-			basis.TaxType = submittedType
-			if submittedService != "" {
-				basis.ServiceCategory = submittedService
-			} else {
-				basis.ServiceCategory = expectedService
-			}
-		} else {
-			// The UI correctly submits no basis for a linked/former row. A
-			// legacy stored type is still empty, so resolve its own legacy
-			// category for validation and one-time population.
-			expectedType, expectedService, ok := legacyBasisFor(lock.TaxCategory)
-			if ok {
-				basis.TaxType = expectedType
-				if basis.ServiceCategory == "" {
-					basis.ServiceCategory = expectedService
+			if lock.ServiceCategory != "" {
+				if submittedService != "" && submittedService != lock.ServiceCategory {
+					return purchaseOrderBasis{}, fmt.Errorf(
+						"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
 				}
+			} else if submittedService != "" {
+				if lock.TaxType == "Goods" {
+					return purchaseOrderBasis{}, fmt.Errorf(
+						"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
+				}
+				basis.ServiceCategory = submittedService
 			}
 		}
-		if lock.ServiceCategory != "" {
-			if submittedService != "" && submittedService != lock.ServiceCategory {
-				return purchaseOrderBasis{}, fmt.Errorf(
-					"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
-			}
-		} else if basis.TaxType == "Services" && submittedService != "" {
-			basis.ServiceCategory = submittedService
-		} else if basis.TaxType == "Goods" && submittedService != "" {
+		// A stored service remains frozen even when a legacy type population
+		// also applies: a submitted value must match it as well.
+		if lock.ServiceCategory != "" && submittedService != "" &&
+			submittedService != lock.ServiceCategory {
 			return purchaseOrderBasis{}, fmt.Errorf(
 				"%w: the service category is fixed while a source is linked", ErrPurchaseOrderInvalid)
 		}
