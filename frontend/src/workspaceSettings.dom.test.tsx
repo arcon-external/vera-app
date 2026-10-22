@@ -308,6 +308,20 @@ function input(ariaLabel: string): HTMLInputElement {
   return found;
 }
 
+function discardPrompt(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    '[role="alertdialog"][aria-label="Discard unsaved changes?"]'
+  );
+}
+
+function workspace(): string | null {
+  return (
+    document
+      .querySelector<HTMLElement>("[data-app-shell]")
+      ?.getAttribute("data-workspace") ?? null
+  );
+}
+
 function textarea(ariaLabel: string): HTMLTextAreaElement {
   const found = document.querySelector<HTMLTextAreaElement>(
     `textarea[aria-label="${ariaLabel}"]`
@@ -500,6 +514,64 @@ describe("new drafts take the defaults (issue #492)", () => {
         'input[placeholder="Supply and installation of electrical and mechanical systems"]'
       )?.value
     ).toBe("Turbine overhaul");
+  });
+
+  it("a default subject is not an edit until the user changes it", async () => {
+    writeQuotationSettings(window.localStorage, USER.ID, {
+      ...DEFAULT_QUOTATION_SETTINGS,
+      subject: "Turbine overhaul",
+    });
+    await renderApp();
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    const subjectField = document.querySelector<HTMLInputElement>(
+      'input[placeholder="Supply and installation of electrical and mechanical systems"]'
+    );
+    if (subjectField === null) throw new Error("subject field not found");
+    expect(subjectField.value).toBe("Turbine overhaul");
+
+    // The applied default is not work: leaving a fresh editor does not ask.
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    expect(discardPrompt()).toBeNull();
+    expect(workspace()).toBe("home");
+
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    const reopened = document.querySelector<HTMLInputElement>(
+      'input[placeholder="Supply and installation of electrical and mechanical systems"]'
+    );
+    if (reopened === null) throw new Error("subject field not found again");
+    typeInto(reopened, "Turbine overhaul, revised");
+
+    // The first real edit is unsaved work, so the same navigation asks.
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    expect(discardPrompt()).not.toBeNull();
+    expect(workspace()).toBe("quotation");
+    await act(async () => {
+      button("Keep editing").click();
+    });
+    expect(discardPrompt()).toBeNull();
+    expect(workspace()).toBe("quotation");
+    expect(
+      document.querySelector<HTMLInputElement>(
+        'input[placeholder="Supply and installation of electrical and mechanical systems"]'
+      )?.value
+    ).toBe("Turbine overhaul, revised");
+
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await act(async () => {
+      button("Discard changes").click();
+    });
+    expect(discardPrompt()).toBeNull();
+    expect(workspace()).toBe("home");
   });
 
   it("a new quotation starts from the saved defaults", async () => {

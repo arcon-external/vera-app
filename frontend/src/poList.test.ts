@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  PO_LIST_MAX_PAGE_SIZE,
+  PO_LIST_MIN_PAGE_SIZE,
   PO_LIST_PAGE_SIZE,
   PO_LIST_SEARCH_PAUSE_MS,
   activeFilterCount,
@@ -54,7 +56,11 @@ function page(overrides: Partial<POListPageDTO> = {}): POListPageDTO {
 
 describe("buildPOListQuery (issue #469)", () => {
   it("builds the unfiltered first page", () => {
-    const { query, error } = buildPOListQuery(initialPOListFilters, 1);
+    const { query, error } = buildPOListQuery(
+      initialPOListFilters,
+      1,
+      PO_LIST_PAGE_SIZE
+    );
     expect(error).toBeNull();
     expect(query).toEqual({
       Search: "",
@@ -64,10 +70,11 @@ describe("buildPOListQuery (issue #469)", () => {
       ReceivedTo: "",
       SourceMissing: "any",
       Page: 1,
+      PageSize: PO_LIST_PAGE_SIZE,
     });
   });
 
-  it("carries every filter and the page the caller asked for", () => {
+  it("carries every filter, the page and the requested page size", () => {
     const { query, error } = buildPOListQuery(
       {
         search: "  infineon  ",
@@ -77,7 +84,8 @@ describe("buildPOListQuery (issue #469)", () => {
         state: "saved",
         sourceMissing: "only",
       },
-      3
+      3,
+      25
     );
     expect(error).toBeNull();
     expect(query).toEqual({
@@ -88,13 +96,34 @@ describe("buildPOListQuery (issue #469)", () => {
       ReceivedTo: "2026-12-31",
       SourceMissing: "only",
       Page: 3,
+      PageSize: 25,
     });
+  });
+
+  it("refuses a page size outside the server's range", () => {
+    // Issue #492: the API accepts 1..100; 0 or absent means the 15-row default.
+    for (const bad of [0, PO_LIST_MAX_PAGE_SIZE + 1, 2.5]) {
+      const { query, error } = buildPOListQuery(
+        initialPOListFilters,
+        1,
+        bad
+      );
+      expect(query).toBeNull();
+      expect(error).toContain("Page size");
+    }
+    const { query } = buildPOListQuery(
+      initialPOListFilters,
+      1,
+      PO_LIST_MIN_PAGE_SIZE
+    );
+    expect(query?.PageSize).toBe(PO_LIST_MIN_PAGE_SIZE);
   });
 
   it("refuses a received range that starts after it ends", () => {
     const { query, error } = buildPOListQuery(
       { ...initialPOListFilters, receivedFrom: "2026-02-11", receivedTo: "2026-02-10" },
-      1
+      1,
+      PO_LIST_PAGE_SIZE
     );
     expect(query).toBeNull();
     expect(error).toBe("Received from must be on or before received to.");
@@ -103,12 +132,17 @@ describe("buildPOListQuery (issue #469)", () => {
   it("refuses an impossible date or page instead of sending it", () => {
     const badDate = buildPOListQuery(
       { ...initialPOListFilters, receivedFrom: "2026-02-30" },
-      1
+      1,
+      PO_LIST_PAGE_SIZE
     );
     expect(badDate.query).toBeNull();
     expect(badDate.error).toContain("YYYY-MM-DD");
 
-    const badPage = buildPOListQuery(initialPOListFilters, 0);
+    const badPage = buildPOListQuery(
+      initialPOListFilters,
+      0,
+      PO_LIST_PAGE_SIZE
+    );
     expect(badPage.query).toBeNull();
     expect(badPage.error).toContain("Page");
   });

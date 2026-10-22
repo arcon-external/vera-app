@@ -553,6 +553,12 @@ function App() {
   // canonical unit on this first line once GetCompanyUnits() answers.
   const [items, setItems] = useState<EditorItem[]>([newItem(0, "")]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
+  // The subject a fresh draft was initialized with -- the saved default, or "".
+  // Applying a default subject is not an edit, so the editor must not read as
+  // dirty until the subject differs from this. Null means "no pristine
+  // subject": a loaded draft, revision or pasted copy, whose own header counts
+  // as work exactly as it did before (issue #492).
+  const [pristineSubject, setPristineSubject] = useState<string | null>("");
 
   // Whether the editor holds anything worth confirming before it is replaced:
   // a revision/draft context, a header field, or any line content. Issue #491
@@ -560,9 +566,10 @@ function App() {
   // editor through the shell asks before the page (and its draft context) goes.
   // Declared up here because the leave guard is built around it and because the
   // paste capture below reads it in its dependency array.
+  const subject = details.subject.trim();
   const dirty =
     editingQuote !== null ||
-    details.subject.trim() !== "" ||
+    (subject !== "" && subject !== (pristineSubject ?? "")) ||
     details.recipientName.trim() !== "" ||
     items.some(
       (item) =>
@@ -669,6 +676,8 @@ function App() {
       ...DEFAULT_DETAILS,
       ...quotationDefaultsFromSettings(next.quotation),
     });
+    // The applied subject is the baseline, not an edit.
+    setPristineSubject(next.quotation.subject.trim());
     // Keyed to the account on purpose: the values are read at the moment the
     // account changes, and a later settings save reaches the next draft through
     // resetForm rather than by rewriting an editor already in use.
@@ -914,6 +923,8 @@ function App() {
       ...DEFAULT_DETAILS,
       ...quotationDefaultsFromSettings(workspaceSettings.quotation),
     });
+    // A fresh draft's default subject is the baseline, not an edit.
+    setPristineSubject(workspaceSettings.quotation.subject.trim());
     setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
     // The editor is no longer a resumed draft, so the next export must not try
@@ -1092,6 +1103,9 @@ function App() {
           ) + 1;
         setItems(restored.items);
         setDetails(restored.details);
+        // A loaded draft keeps its own semantics: its header is work, not a
+        // freshly applied default.
+        setPristineSubject(null);
         setCustomerId(
           restored.customerId ||
             draft.CustomerID ||
@@ -1140,6 +1154,8 @@ function App() {
       nextSubId.current = applied.nextSubId;
       setItems(applied.items);
       setDetails(applied.details);
+      // A pasted copy is entered work, never a pristine default.
+      setPristineSubject(null);
       setCustomerId(applied.customerCode);
       setEditingQuote(null);
       setActiveDraftId(0);
@@ -1230,6 +1246,8 @@ function App() {
           }))
         );
         setDetails(draft.details);
+        // A revision being edited is work regardless of its subject.
+        setPristineSubject(null);
         setCustomerId(draft.customerCode);
         setEditingQuote({
           number: quotation.QuoteNumber,
@@ -1719,6 +1737,8 @@ function App() {
       const pastedType = (cols[9] || "").trim();
       const pastedServiceCategory = (cols[10] || "").trim();
 
+      // A pasted row is an edit, even when a cell happens to equal a default.
+      setPristineSubject(null);
       setDetails((current) => {
         const next: DetailsState = {
           ...current,

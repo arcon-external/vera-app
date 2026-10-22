@@ -21,6 +21,9 @@ func TestListPurchaseOrdersSendsTheFiltersAndMapsThePage(t *testing.T) {
 		if query.Get("page") != "3" {
 			t.Errorf("page = %q; want 3", query.Get("page"))
 		}
+		if query.Get("page_size") != "25" {
+			t.Errorf("page_size = %q; want the caller's 25", query.Get("page_size"))
+		}
 		if query.Get("search") != "  infineon  " {
 			t.Errorf("search = %q; want the caller's term", query.Get("search"))
 		}
@@ -38,8 +41,8 @@ func TestListPurchaseOrdersSendsTheFiltersAndMapsThePage(t *testing.T) {
 		}
 		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderListResponse{
 			Page:       3,
-			PageSize:   15,
-			Total:      31,
+			PageSize:   25,
+			Total:      61,
 			TotalPages: 3,
 			PurchaseOrders: []apicontract.PurchaseOrderListRow{{
 				ID: 7, UUID: "uuid-7", State: "draft", PONumber: "PO-INF-1",
@@ -57,6 +60,7 @@ func TestListPurchaseOrdersSendsTheFiltersAndMapsThePage(t *testing.T) {
 	q := newTestQuotation()
 	page, err := q.ListPurchaseOrders(PurchaseOrderListQuery{
 		Page:          3,
+		PageSize:      25,
 		Search:        "  infineon  ",
 		CustomerIDs:   []int64{2, 4},
 		ReceivedFrom:  "2026-01-01",
@@ -67,8 +71,8 @@ func TestListPurchaseOrdersSendsTheFiltersAndMapsThePage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPurchaseOrders failed: %v", err)
 	}
-	if page.Page != 3 || page.PageSize != 15 || page.Total != 31 || page.TotalPages != 3 {
-		t.Errorf("page metadata = %+v; want 3/15/31/3", page)
+	if page.Page != 3 || page.PageSize != 25 || page.Total != 61 || page.TotalPages != 3 {
+		t.Errorf("page metadata = %+v; want 3/25/61/3", page)
 	}
 	if len(page.PurchaseOrders) != 1 {
 		t.Fatalf("rows = %d; want 1", len(page.PurchaseOrders))
@@ -94,7 +98,7 @@ func TestListPurchaseOrdersOmitsEmptyFiltersAndDefaultsThePage(t *testing.T) {
 		if query.Get("page") != "1" {
 			t.Errorf("page = %q; want the default 1", query.Get("page"))
 		}
-		for _, key := range []string{"search", "state", "sourceMissing", "receivedFrom", "receivedTo", "customerId"} {
+		for _, key := range []string{"search", "state", "sourceMissing", "receivedFrom", "receivedTo", "customerId", "page_size"} {
 			if _, present := query[key]; present {
 				t.Errorf("%s = %v; an empty filter must not be sent", key, query[key])
 			}

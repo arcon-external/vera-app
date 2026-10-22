@@ -10,10 +10,10 @@ import (
 )
 
 // Issue #469: the PO archive reads purchase_orders, not quotations. These
-// tests drive the real store against a disposable schema: the fixed 15-row
-// page, newest received first, search over the three promised fields, the
-// customer/date/state filters, the source-missing predicate, and the #465
-// organization boundary.
+// tests drive the real store against a disposable schema: the default 15-row
+// page and a caller-chosen one (#492), newest received first, search over the
+// three promised fields, the customer/date/state filters, the source-missing
+// predicate, and the #465 organization boundary.
 //
 // They observe stored behaviour only: the returned rows and their count. The
 // SQL behind them may change entirely.
@@ -157,7 +157,7 @@ func TestListPurchaseOrdersPaginatesFifteenPerPageNewestReceivedFirst(t *testing
 		t.Fatalf("list page 1: %v", err)
 	}
 	if first.PageSize != PurchaseOrderListPageSize || PurchaseOrderListPageSize != 15 {
-		t.Errorf("page size = %d (contract %d); want 15", first.PageSize, PurchaseOrderListPageSize)
+		t.Errorf("default page size = %d (constant %d); want 15", first.PageSize, PurchaseOrderListPageSize)
 	}
 	if first.Page != 1 || first.Total != 16 || first.TotalPages != 2 {
 		t.Errorf("page meta = page %d total %d pages %d; want 1/16/2",
@@ -215,6 +215,73 @@ func TestListPurchaseOrdersPaginatesFifteenPerPageNewestReceivedFirst(t *testing
 	}
 	if first.Customers[0].Name != "PT. Alpha" || first.Customers[1].Name != "PT. Beta" {
 		t.Errorf("customer facet order = %+v; want alphabetical", first.Customers)
+	}
+}
+
+func TestListPurchaseOrdersHonoursARequestedPageSize(t *testing.T) {
+	database := openTestSchema(t, "vera_po_list_page_size")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	const total = 21
+	for index := 1; index <= total; index++ {
+		quotation := seedPOListQuotation(t, database, 2, "PT. Alpha",
+			fmt.Sprintf("Page-size quotation %02d", index))
+		createPOForList(t, database, ctx, quotation, user, fmt.Sprintf("2026-01-%02d", index))
+	}
+
+	// Each case pins one thing: the effective size the response reports, the
+	// rows LIMIT actually returned, and the page count derived from the same
+	// size. 21 rows make 15, 20, 8, 1 and 100 all distinguishable.
+	cases := []struct {
+		name      string
+		pageSize  int
+		wantSize  int
+		wantRows  int
+		wantPages int
+	}{
+		{"absent keeps the default", 0, 15, 15, 2},
+		{"custom twenty", 20, 20, 20, 2},
+		{"custom eight", 8, 8, 8, 3},
+		{"custom one", 1, 1, 1, 21},
+		{"upper bound is accepted", PurchaseOrderListMaxPageSize, 100, 21, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			page, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{Page: 1, PageSize: tc.pageSize})
+			if err != nil {
+				t.Fatalf("page size %d: %v", tc.pageSize, err)
+			}
+			if page.PageSize != tc.wantSize {
+				t.Errorf("reported page size = %d; want the effective %d", page.PageSize, tc.wantSize)
+			}
+			if len(page.Rows) != tc.wantRows {
+				t.Errorf("rows = %d; want %d", len(page.Rows), tc.wantRows)
+			}
+			if page.Total != total || page.TotalPages != tc.wantPages {
+				t.Errorf("total = %d pages = %d; want %d/%d",
+					page.Total, page.TotalPages, total, tc.wantPages)
+			}
+		})
+	}
+
+	// Offset uses the same effective size as LIMIT: at 20 a page, page 2 holds
+	// exactly the oldest PO instead of repeating page 1's rows.
+	second, err := database.ListPurchaseOrders(ctx, PurchaseOrderListQuery{Page: 2, PageSize: 20})
+	if err != nil {
+		t.Fatalf("page 2 at size 20: %v", err)
+	}
+	if len(second.Rows) != 1 || dateOnly(second.Rows[0].ReceivedDate) != "2026-01-01" {
+		t.Fatalf("page 2 at size 20 = %+v; want the oldest row only", second.Rows)
+	}
+
+	// Out-of-range sizes are refused, never clamped to the nearest bound: a
+	// silently shortened page would look like a correct answer.
+	for _, invalid := range []int{-1, PurchaseOrderListMaxPageSize + 1} {
+		if _, err := database.ListPurchaseOrders(ctx,
+			PurchaseOrderListQuery{Page: 1, PageSize: invalid}); !errors.Is(err, ErrPurchaseOrderInvalid) {
+			t.Errorf("page size %d error = %v; want ErrPurchaseOrderInvalid", invalid, err)
+		}
 	}
 }
 

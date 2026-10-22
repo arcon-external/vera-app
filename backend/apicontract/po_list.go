@@ -1,8 +1,16 @@
 package apicontract
 
 // Issue #469: the Purchase Order archive's HTTP contract. These shapes are
-// stable API for the desktop binding and any later client. PageSize is fixed
-// by the server; the caller only names a page.
+// stable API for the desktop binding and any later client. The caller names a
+// page and, optionally, a page size (#492): absent keeps the server's default of
+// 15, and the accepted range is 1..100. The response always reports the
+// effective size, so the caller never has to assume which one it got.
+
+// PurchaseOrderListPageSizeParam is the request field carrying the optional page
+// size. It lives in the contract because the HTTP handler and the desktop
+// wrapper must name it identically; a divergence would silently drop the
+// caller's requested size.
+const PurchaseOrderListPageSizeParam = "page_size"
 
 // PurchaseOrderListRow is one archive row. PONumber is the customer's own
 // number and stays empty until it is entered; QuoteNumber identifies the exact

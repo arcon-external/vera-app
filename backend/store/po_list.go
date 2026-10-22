@@ -10,12 +10,18 @@ import (
 
 // Issue #469: the Purchase Order archive. A PO is found by its customer PO
 // number, its source Quotation number, or its customer snapshot; the list is
-// paged 15 rows at a time by the server and never leaves the caller's
-// organization.
+// paged 15 rows at a time unless the caller asks for another size (#492), and
+// never leaves the caller's organization.
 
-// PurchaseOrderListPageSize is the archive's fixed page size. It is part of the
-// API contract, not a caller preference.
+// PurchaseOrderListPageSize is the archive's default page size: what an absent
+// page size means. It is part of the API contract, not a caller preference.
 const PurchaseOrderListPageSize = 15
+
+// PurchaseOrderListMaxPageSize bounds a caller-supplied page size (#492). A
+// larger request is refused rather than silently clamped, so the caller learns
+// its page size was not honoured instead of paging through a shorter list than
+// it asked for.
+const PurchaseOrderListMaxPageSize = 100
 
 // The source-missing filter values. "any" is the default; "only" and "exclude"
 // make the source-missing state an independent predicate. #480 makes the state
@@ -27,7 +33,8 @@ const (
 	PurchaseOrderSourceMissingExclude = "exclude"
 )
 
-// PurchaseOrderListQuery is one archive page request.
+// PurchaseOrderListQuery is one archive page request. PageSize 0 keeps the
+// default; otherwise it must be 1..PurchaseOrderListMaxPageSize.
 type PurchaseOrderListQuery struct {
 	Search        string
 	State         string
@@ -36,6 +43,7 @@ type PurchaseOrderListQuery struct {
 	ReceivedTo    *time.Time
 	SourceMissing string
 	Page          int
+	PageSize      int
 }
 
 // PurchaseOrderListRow is one archive row. The customer name is the PO's own
@@ -75,6 +83,11 @@ type PurchaseOrderListPage struct {
 
 // ListPurchaseOrders returns one page of the archive, newest received first.
 //
+// PageSize is the caller's page size: 0 keeps the contract default of
+// PurchaseOrderListPageSize, and any other value must be 1..100. Everything
+// paging-related -- LIMIT, OFFSET and the reported total pages -- uses that same
+// effective size, and the returned PageSize echoes it.
+//
 // Search is case-insensitive over the customer PO number, the source Quotation
 // number and the customer snapshot; LIKE wildcards in the term are escaped, so
 // "50%" is a literal and not "everything". The customer filter takes one or
@@ -100,18 +113,23 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 	if page < 1 {
 		page = 1
 	}
+	pageSize, err := purchaseOrderEffectivePageSize(query.PageSize)
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
 	// PostgreSQL's OFFSET is a signed 64-bit integer and the offset is
-	// (page-1)*PurchaseOrderListPageSize. Validate before multiplying: the
-	// product wraps for a page this function otherwise accepts, and the
-	// negative offset that reaches Postgres is a database error, not a
-	// malformed query (issue #469). This is the one authoritative guard: the
-	// HTTP handler maps ErrPurchaseOrderInvalid to 400, and the desktop
-	// binding sends its page through that same endpoint.
-	if int64(page-1) > math.MaxInt64/PurchaseOrderListPageSize {
+	// (page-1)*pageSize. Validate before multiplying: the product wraps for a
+	// page this function otherwise accepts, and the negative offset that
+	// reaches Postgres is a database error, not a malformed query (issue #469).
+	// This is the one authoritative guard: the HTTP handler maps
+	// ErrPurchaseOrderInvalid to 400, and the desktop binding sends its page
+	// through that same endpoint.
+	size := int64(pageSize)
+	if int64(page-1) > math.MaxInt64/size {
 		return PurchaseOrderListPage{}, fmt.Errorf(
 			"%w: page %d is past the largest representable offset", ErrPurchaseOrderInvalid, page)
 	}
-	offset := int64(page-1) * PurchaseOrderListPageSize
+	offset := int64(page-1) * size
 	state := strings.TrimSpace(query.State)
 	switch state {
 	case "", PurchaseOrderStateDraft, PurchaseOrderStateSaved:
@@ -188,13 +206,13 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		%s%s
 		ORDER BY po.received_date DESC, po.id DESC
 		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),
-		append(args, PurchaseOrderListPageSize, offset)...)
+		append(args, pageSize, offset)...)
 	if err != nil {
 		return PurchaseOrderListPage{}, fmt.Errorf("list purchase orders: %w", err)
 	}
 	defer rows.Close()
 
-	result := make([]PurchaseOrderListRow, 0, PurchaseOrderListPageSize)
+	result := make([]PurchaseOrderListRow, 0, pageSize)
 	for rows.Next() {
 		var row PurchaseOrderListRow
 		if err := rows.Scan(
@@ -223,11 +241,12 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		return PurchaseOrderListPage{}, err
 	}
 
-	// Divide before adding: `total + 14` is the same add-before-divide class
-	// as the old offset. COUNT(*) cannot reach MaxInt-14 in a real table, but
-	// the safe form costs nothing and leaves no wrapping arithmetic here.
-	totalPages := total / PurchaseOrderListPageSize
-	if total%PurchaseOrderListPageSize != 0 {
+	// Divide before adding: `total + pageSize - 1` is the same
+	// add-before-divide class as the old offset. COUNT(*) cannot reach
+	// MaxInt-pageSize in a real table, but the safe form costs nothing and
+	// leaves no wrapping arithmetic here.
+	totalPages := total / pageSize
+	if total%pageSize != 0 {
 		totalPages++
 	}
 	if totalPages < 1 {
@@ -239,10 +258,24 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		Rows:       result,
 		Customers:  customers,
 		Page:       page,
-		PageSize:   PurchaseOrderListPageSize,
+		PageSize:   pageSize,
 		Total:      total,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// purchaseOrderEffectivePageSize resolves a requested page size into the LIMIT
+// this query uses. Zero means the default (PurchaseOrderListPageSize); a value
+// outside 1..PurchaseOrderListMaxPageSize is invalid input, never a clamp.
+func purchaseOrderEffectivePageSize(requested int) (int, error) {
+	switch {
+	case requested == 0:
+		return PurchaseOrderListPageSize, nil
+	case requested < 0 || requested > PurchaseOrderListMaxPageSize:
+		return 0, fmt.Errorf("%w: page size %d is outside 1..%d",
+			ErrPurchaseOrderInvalid, requested, PurchaseOrderListMaxPageSize)
+	}
+	return requested, nil
 }
 
 // listPurchaseOrderCustomers returns the customers that actually own POs in

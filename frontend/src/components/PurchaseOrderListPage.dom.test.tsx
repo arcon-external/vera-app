@@ -3,6 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
+import type { POListQuery } from "../poList";
 
 // Issue #481: the archive's Source missing filter is a real request, not a
 // disabled promise. This suite drives the real page with the Wails binding
@@ -11,16 +12,18 @@ import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
 // back to "any" when the filters reset. The SSR suite owns the markup; this one
 // owns the decision that reaches the binding.
 
-const { listMock } = vi.hoisted(() => ({ listMock: vi.fn() }));
+const { listMock } = vi.hoisted(() => ({
+  listMock: vi.fn<(query: POListQuery) => Promise<unknown>>(),
+}));
 
 vi.mock("@backend/backend/Quotation", () => ({
-  ListPurchaseOrders: (...args: unknown[]) => listMock(...args),
+  ListPurchaseOrders: (query: POListQuery) => listMock(query),
 }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 
-function page() {
+function page(overrides: { PageSize?: number } = {}) {
   return {
     PurchaseOrders: [],
     Customers: [],
@@ -28,6 +31,7 @@ function page() {
     PageSize: 15,
     Total: 0,
     TotalPages: 1,
+    ...overrides,
   };
 }
 
@@ -80,6 +84,8 @@ describe("PurchaseOrderListPage source-missing filter (issue #481)", () => {
     await flush();
     expect(listMock).toHaveBeenCalledTimes(1);
     expect(listMock.mock.calls[0][0].SourceMissing).toBe("any");
+    // Issue #492: every query states the list's page size; the default is 15.
+    expect(listMock.mock.calls[0][0].PageSize).toBe(15);
 
     // The control is enabled and opens the three real modes.
     click(button("Source"));
@@ -118,5 +124,24 @@ describe("PurchaseOrderListPage source-missing filter (issue #481)", () => {
     await flush();
     expect(listMock.mock.calls[3][0].SourceMissing).toBe("any");
     expect(container.textContent).toContain("No filters");
+  });
+
+  it("sends the remembered page size, and the answer's size stays authoritative", async () => {
+    // A real server echoes the requested size. One request proves the page
+    // sends the remembered size and adopts the answer's size without re-asking.
+    listMock.mockResolvedValue(page({ PageSize: 25 }));
+    await act(async () => {
+      root.render(
+        <PurchaseOrderListPage
+          mode="archive"
+          pageSize={25}
+          onOpen={() => undefined}
+          onAdd={() => undefined}
+        />
+      );
+    });
+    await flush();
+    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(listMock.mock.calls[0][0].PageSize).toBe(25);
   });
 });

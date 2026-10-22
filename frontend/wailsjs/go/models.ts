@@ -2721,6 +2721,7 @@ export namespace backend {
 	    ReceivedTo: string;
 	    SourceMissing: string;
 	    Page: number;
+	    PageSize: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListQuery(source);
@@ -2735,6 +2736,7 @@ export namespace backend {
 	        this.ReceivedTo = source["ReceivedTo"];
 	        this.SourceMissing = source["SourceMissing"];
 	        this.Page = source["Page"];
+	        this.PageSize = source["PageSize"];
 	    }
 	}
 	

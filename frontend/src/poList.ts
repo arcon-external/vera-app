@@ -6,8 +6,17 @@
 // overwriting a newer one. No totals, fulfilment or payment status exists --
 // the stored entry state is draft or saved, and nothing else is invented.
 
-/** The server's fixed page size (15). Part of the API contract. */
+/** The server's fixed page size when no size is requested (issue #469). */
 export const PO_LIST_PAGE_SIZE = 15;
+
+/**
+ * The list API's page-size bounds (issue #492). The backend accepts an
+ * optional PageSize of 1..100; 0 or absent keeps the 15-row default. The
+ * settings page uses the same range, so a saved preference is always
+ * requestable.
+ */
+export const PO_LIST_MIN_PAGE_SIZE = 1;
+export const PO_LIST_MAX_PAGE_SIZE = 100;
 
 /** Typing pause for the search box, matching the source selector. */
 export const PO_LIST_SEARCH_PAUSE_MS = 250;
@@ -57,6 +66,8 @@ export interface POListQuery {
   ReceivedTo: string;
   SourceMissing: string;
   Page: number;
+  /** Issue #492: the requested rows per page (1..100). */
+  PageSize: number;
 }
 
 export type POListStateFilter = "" | "draft" | "saved";
@@ -145,9 +156,9 @@ export function initialPOListStateFor(
 ): POListState {
   return {
     ...initialPOListState,
-    // Issue #492: the account's remembered size is the initial state only. The
-    // archive is server-paged at a fixed 15, and the first loaded page replaces
-    // this figure with the answer's own PageSize.
+    // Issue #492: the account's remembered size seeds the initial state; every
+    // request carries it, and the server's effective PageSize replaces it once
+    // a page loads.
     pageSize:
       Number.isInteger(pageSize) && pageSize >= 1
         ? pageSize
@@ -180,10 +191,21 @@ function validFilterDate(raw: string): boolean {
  */
 export function buildPOListQuery(
   filters: POListFilters,
-  page: number
+  page: number,
+  pageSize: number
 ): { query: POListQuery | null; error: string | null } {
   if (!Number.isInteger(page) || page < 1) {
     return { query: null, error: "Page must be a positive whole number." };
+  }
+  if (
+    !Number.isInteger(pageSize) ||
+    pageSize < PO_LIST_MIN_PAGE_SIZE ||
+    pageSize > PO_LIST_MAX_PAGE_SIZE
+  ) {
+    return {
+      query: null,
+      error: `Page size must be between ${PO_LIST_MIN_PAGE_SIZE} and ${PO_LIST_MAX_PAGE_SIZE}.`,
+    };
   }
   if (filters.state !== "" && filters.state !== "draft" && filters.state !== "saved") {
     return { query: null, error: "State must be draft or saved." };
@@ -221,6 +243,7 @@ export function buildPOListQuery(
       ReceivedTo: to,
       SourceMissing: filters.sourceMissing,
       Page: page,
+      PageSize: pageSize,
     },
     error: null,
   };

@@ -11,10 +11,11 @@ import (
 
 // Issue #469: the authenticated HTTP surface of the PO archive. These tests
 // drive the real server and disposable Postgres through public behaviour: the
-// page shape, the three search fields, the customer/date/state filters, the
-// source-missing predicate, the customer facet, validation and the
-// session gate. The two-organization proof lives at the store seam, where a
-// second organization can exist without breaking the single seeded one.
+// page shape and its page size (#492), the three search fields, the
+// customer/date/state filters, the source-missing predicate, the customer
+// facet, validation and the session gate. The two-organization proof lives at
+// the store seam, where a second organization can exist without breaking the
+// single seeded one.
 
 type poListRow struct {
 	UUID           string `json:"uuid"`
@@ -135,6 +136,59 @@ func TestPurchaseOrderListPaginatesFifteenPerPage(t *testing.T) {
 	}
 	if got := second.PurchaseOrders[0].ReceivedDate; got != "2026-01-01" {
 		t.Errorf("page 2 received date = %s; want the oldest 2026-01-01", got)
+	}
+}
+
+func TestPurchaseOrderListHonoursTheRequestedPageSize(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_list_page_size")
+
+	for index := 1; index <= 16; index++ {
+		quotationID, _ := exportForPOList(t, server, token, 2,
+			fmt.Sprintf("Page-size quotation %02d", index))
+		createPOForAPITest(t, server, token, quotationID, fmt.Sprintf("2026-01-%02d", index))
+	}
+
+	cases := []struct {
+		name      string
+		query     string
+		wantSize  int
+		wantRows  int
+		wantPages int
+	}{
+		{"absent keeps the default", "?page=1", 15, 15, 2},
+		{"explicit zero keeps the default", "?page=1&page_size=0", 15, 15, 2},
+		{"custom twenty", "?page=1&page_size=20", 20, 16, 1},
+		{"custom eight", "?page=1&page_size=8", 8, 8, 2},
+		{"upper bound is accepted", "?page=1&page_size=100", 100, 16, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			page := listPurchaseOrders(t, server, token, tc.query)
+			if page.PageSize != tc.wantSize {
+				t.Errorf("page size = %d; want the effective %d", page.PageSize, tc.wantSize)
+			}
+			if len(page.PurchaseOrders) != tc.wantRows {
+				t.Errorf("rows = %d; want %d", len(page.PurchaseOrders), tc.wantRows)
+			}
+			if page.Total != 16 || page.TotalPages != tc.wantPages {
+				t.Errorf("total = %d pages = %d; want 16/%d",
+					page.Total, page.TotalPages, tc.wantPages)
+			}
+		})
+	}
+
+	// The second page continues where the first stopped: the offset follows the
+	// requested size, so page 2 at 8 starts at the ninth-newest row.
+	second := listPurchaseOrders(t, server, token, "?page=2&page_size=8")
+	if second.PageSize != 8 || len(second.PurchaseOrders) != 8 {
+		t.Fatalf("page 2 at size 8 = size %d rows %d; want 8/8",
+			second.PageSize, len(second.PurchaseOrders))
+	}
+	if got := second.PurchaseOrders[0].ReceivedDate; got != "2026-01-08" {
+		t.Errorf("page 2 first received date = %s; want 2026-01-08", got)
+	}
+	if got := second.PurchaseOrders[7].ReceivedDate; got != "2026-01-01" {
+		t.Errorf("page 2 last received date = %s; want the oldest 2026-01-01", got)
 	}
 }
 
@@ -300,6 +354,9 @@ func TestPurchaseOrderListRejectsMalformedFilters(t *testing.T) {
 	}{
 		{"page zero", "?page=0"},
 		{"page not a number", "?page=one"},
+		{"page size negative", "?page_size=-1"},
+		{"page size above the bound", "?page_size=101"},
+		{"page size not a number", "?page_size=one"},
 		{"unknown state", "?state=fulfilled"},
 		{"unknown source-missing filter", "?sourceMissing=maybe"},
 		{"customer not a number", "?customerId=alpha"},

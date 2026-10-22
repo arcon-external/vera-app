@@ -19,7 +19,8 @@ import (
 
 // PurchaseOrderListQuery is one archive page request. Empty strings mean "no
 // filter"; State is the stored entry state (draft or saved); SourceMissing is
-// "only", "exclude" or empty for any. CustomerIDs is a multi-select.
+// "only", "exclude" or empty for any. CustomerIDs is a multi-select. PageSize 0
+// keeps the server default (15); the server accepts 1..100 and refuses the rest.
 type PurchaseOrderListQuery struct {
 	Search        string
 	State         string
@@ -28,6 +29,7 @@ type PurchaseOrderListQuery struct {
 	ReceivedTo    string
 	SourceMissing string
 	Page          int
+	PageSize      int
 }
 
 // PurchaseOrderListRowDTO is one archive row.
@@ -61,8 +63,9 @@ type PurchaseOrderListPageDTO struct {
 	TotalPages     int
 }
 
-// ListPurchaseOrders fetches one page of the PO archive. The server fixes the
-// page size at 15 and scopes every query to the caller's organization.
+// ListPurchaseOrders fetches one page of the PO archive. The server defaults the
+// page size to 15, honours a caller's 1..100 (#492), and scopes every query to
+// the caller's organization.
 func (q *Quotation) ListPurchaseOrders(query PurchaseOrderListQuery) (PurchaseOrderListPageDTO, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return PurchaseOrderListPageDTO{}, err
@@ -77,6 +80,12 @@ func (q *Quotation) ListPurchaseOrders(query PurchaseOrderListQuery) (PurchaseOr
 	}
 	params := url.Values{}
 	params.Set("page", strconv.Itoa(page))
+	// An absent page size means "use the server default", so only a caller who
+	// named one sends the field. Its range is the server's guard, not this
+	// wrapper's: an out-of-range value comes back as the API's 400.
+	if query.PageSize != 0 {
+		params.Set(apicontract.PurchaseOrderListPageSizeParam, strconv.Itoa(query.PageSize))
+	}
 	if strings.TrimSpace(query.Search) != "" {
 		params.Set("search", query.Search)
 	}

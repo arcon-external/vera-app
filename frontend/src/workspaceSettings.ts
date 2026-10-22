@@ -17,6 +17,7 @@ import {
   validDateField,
   type PurchaseOrderDTO,
 } from "./purchaseOrder";
+import { PO_LIST_MAX_PAGE_SIZE, PO_LIST_MIN_PAGE_SIZE } from "./poList";
 
 /** The record shape version. A mismatch reads as "no settings yet". */
 export const WORKSPACE_SETTINGS_VERSION = 1;
@@ -29,11 +30,12 @@ export const MAX_QUOTATION_DAYS = 255;
 export const MAX_SUBJECT_LENGTH = 200;
 
 /**
- * The list-page preference bounds. The archive itself is server-paged at a
- * fixed 15; this is the client's remembered size for when it can be honoured.
+ * The list-page preference bounds, aliased from the list API's own range so a
+ * saved size is always requestable. The archive server is paged, and the
+ * response's effective PageSize replaces the preference after each load.
  */
-export const MIN_PO_LIST_PAGE_SIZE = 1;
-export const MAX_PO_LIST_PAGE_SIZE = 100;
+export const MIN_PO_LIST_PAGE_SIZE = PO_LIST_MIN_PAGE_SIZE;
+export const MAX_PO_LIST_PAGE_SIZE = PO_LIST_MAX_PAGE_SIZE;
 
 export type SettingsTaxZone = "FTZ" | "NonFTZ";
 export type SettingsTaxType = "Goods" | "Services";

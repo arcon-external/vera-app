@@ -97,13 +97,13 @@ export function PurchaseOrderSettingsPage({
             ) : null}
           </SettingsField>
           <NumberSetting
-            label="Archive page size"
+            label="List page size"
             ariaLabel="Default PO list page size"
             value={settings.listPageSize}
             min={MIN_PO_LIST_PAGE_SIZE}
             max={MAX_PO_LIST_PAGE_SIZE}
             suffix="rows"
-            hint="Remembered for the archive; the server currently returns 15 rows per page."
+            hint="Applies to the Purchase Order Drafts and Archive lists. Default 15, from 1 to 100."
             onChange={(listPageSize) => patch({ listPageSize })}
           />
         </div>

@@ -26,7 +26,9 @@ import { Badge, Button, Card, fieldClass } from "./ui";
 // Issue #469: the Purchase Order archive. Staff find a PO by its customer
 // number, its source Quotation number, or its customer, then open the exact
 // draft by id through the #468 editor. The server owns filtering, ordering and
-// the 15-row page; this page only says which filters and page are current.
+// paging; this page only says which filters, page and page size are current.
+// Issue #492: the page size is the account's saved preference (default 15),
+// and the server's effective PageSize is authoritative after each load.
 //
 // #480 adds the admin-only permanent-deletion entry point. A row whose source
 // Quotation was deleted renders the Source missing badge from #469's contract;
@@ -511,7 +513,11 @@ export function PurchaseOrderListPage({
     const previous = lastSearch.current;
     lastSearch.current = state.filters.search;
     const delay = poListQueryDelay(previous, state.filters.search);
-    const { query, error } = buildPOListQuery(state.filters, state.page);
+    const { query, error } = buildPOListQuery(
+      state.filters,
+      state.page,
+      state.pageSize
+    );
     if (query === null) {
       dispatch({ type: "queryStarted", seq });
       dispatch({
@@ -542,7 +548,7 @@ export function PurchaseOrderListPage({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [state.filters, state.page, reload]);
+  }, [state.filters, state.page, state.pageSize, reload]);
 
   return (
     <>

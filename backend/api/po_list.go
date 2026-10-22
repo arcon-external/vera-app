@@ -14,9 +14,10 @@ import (
 )
 
 // Issue #469: the PO archive. One authenticated read lists the caller's
-// organization's purchase orders 15 at a time, newest received first, with
-// search, one-or-more customers, an inclusive received-date range, the stored
-// Draft/Saved state and the independent source-missing predicate.
+// organization's purchase orders 15 at a time by default (#492 lets the caller
+// ask for 1..100), newest received first, with search, one-or-more customers,
+// an inclusive received-date range, the stored Draft/Saved state and the
+// independent source-missing predicate.
 //
 // Filters are validated here before any query runs: an unknown state or
 // wildcard filter is a 400, not an empty page that quietly means "everything".
@@ -29,6 +30,18 @@ func (s *Server) listPurchaseOrders(context echo.Context) error {
 			return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid page"})
 		}
 		page = parsed
+	}
+
+	// page_size is optional (#492). Its range is the store's guard, exactly like
+	// the page-offset guard, so malformed input surfaces as ErrPurchaseOrderInvalid
+	// and a 400; only "not a number" is refused here, where the parse happens.
+	pageSize := 0
+	if raw := context.QueryParam(apicontract.PurchaseOrderListPageSizeParam); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid page_size"})
+		}
+		pageSize = parsed
 	}
 
 	customerIDs := make([]int64, 0, 4)
@@ -89,6 +102,7 @@ func (s *Server) listPurchaseOrders(context echo.Context) error {
 		ReceivedTo:    receivedTo,
 		SourceMissing: sourceMissing,
 		Page:          page,
+		PageSize:      pageSize,
 	})
 	if errors.Is(err, store.ErrPurchaseOrderInvalid) {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
