@@ -1,6 +1,6 @@
 module vera-app
 
-go 1.26.1
+go 1.26.10
 
 require (
 	cloud.google.com/go/storage v1.69.0

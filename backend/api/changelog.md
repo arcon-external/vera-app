@@ -4,6 +4,25 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.14.5] - 2026-10-22
+
+### Security
+
+- **Rebuilt Vera with patched Go.** The desktop and CLI now build with Go
+  1.26.10, and the API builds with Go 1.27.3. These versions include the
+  October 2026 Go security fixes, including rejection of compromised eMudhra
+  certificates (CVE-2026-111943). No screen or quotation behavior changes.
+
+## [0.14.4] - 2026-10-22
+
+### Security
+
+- **The build pipeline now uses patched Node.js.** The front-end build and release
+  pipeline moved to Node.js 22.23.4, which fixes the October 2026 Node.js security
+  issues (CVE-2026-111497 and related). The shipped Vera desktop app and API are Go
+  and do not run Node.js; this is a build-chain fix, not a change to the client
+  runtime.
+
 ## [0.14.3] - 2026-10-21
 
 ### Added
