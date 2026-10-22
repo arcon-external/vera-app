@@ -158,6 +158,29 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go vet ./...
 
+      - name: API configuration and session build modes (#495)
+        # The development API resolver and the dev keychain identity are
+        # //go:build dev && !production variants, and the ordinary suite never
+        # compiles them: without this step a broken dev branch stays invisible
+        # until someone runs `wails dev`.
+        #
+        # Root package covers default, packaged, dev and debug-packaged. The
+        # Wails-free auth package covers those plus dev+production, which pins
+        # the exclusive predicate (dev && !production versus !dev || production).
+        # Wails v2.16 itself declares App twice when both tags are set, so the
+        # dev+production root package cannot link; auth is where that
+        # combination is executable.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          go vet -tags dev ./ ./backend/auth
+          go test -count=1 -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyringIdentity' ./ ./backend/auth
+          for tags in production dev production,debug; do
+            go test -tags "$tags" -count=1 \
+              -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyringIdentity' ./ ./backend/auth
+          done
+          go test -tags dev,production -count=1 \
+            -run 'TestKeyringIdentity' ./backend/auth
+
       - name: Build the chromedp tag (the renderer-equivalence oracle)
         # The default suite never builds this tag, so without this step the
         # oracle's adapter could rot while everything else stays green --

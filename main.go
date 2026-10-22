@@ -23,14 +23,12 @@ func main() {
 	quotationApp := &backend.Quotation{}
 
 	// The desktop never touches Postgres directly. All data flows through
-	// veraserver; VERA_API_URL points at it (Cloud Run primary by default,
-	// override for dev, tailnet, or a future custom domain).
-	apiBase := os.Getenv("VERA_API_URL")
-	if apiBase == "" {
-		apiBase = "https://api.arconpentapersada.co.id"
-	}
-	if err := apiclient.ValidateBaseURL(apiBase); err != nil {
-		fmt.Fprintf(os.Stderr, "invalid VERA_API_URL: %v\n", err)
+	// veraserver. The endpoint is chosen by build mode (see apibase_*.go):
+	// packaged builds always use production, development builds read the
+	// loopback VERA_API_URL from the environment or the project .env.
+	apiBase, err := apiBaseURL()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "configure API endpoint: %v\n", err)
 		os.Exit(1)
 	}
 	client := apiclient.New(apiBase, backend.SessionToken)
@@ -42,7 +40,7 @@ func main() {
 	adminAPI := backend.NewAdminAPI()
 	updateAPI := backend.NewUpdateAPI()
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:            "Vera",
 		Width:            1024,
 		Height:           768,

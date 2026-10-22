@@ -13,8 +13,9 @@ the rest of this guide is applied.
 - **App:** Wails v2 desktop quotation generator for PT Arcon Penta Persada.
 - **Backend:** Go in `backend/` — quotation pricing, HTML templating, PDF rendering
   via `chromedp` (headless Chrome `PrintToPDF`).
-- **Persistence:** PostgreSQL via `backend/store` (pgx v5), configured entirely by
-  environment variables.
+- **Persistence:** PostgreSQL via `backend/store` (pgx v5), used by `cmd/veraserver`
+  and the CLI integration tests, configured entirely by environment variables. The
+  desktop never opens a database; it talks to the API over HTTP.
 - **Frontend:** React 19 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
   (v4).
 - **Go module:** `vera-app` (Go 1.26).
@@ -25,7 +26,7 @@ the rest of this guide is applied.
 
 | Path                                        | Purpose                                                                    |
 | ------------------------------------------- | -------------------------------------------------------------------------- |
-| `main.go`                                   | Wails startup, Postgres open, binding registration                         |
+| `main.go`                                   | Wails startup, API endpoint resolution, binding registration               |
 | `cmd/vera/`                                 | The `vera` CLI: every feature as a command, plus local validate/render     |
 | `cmd/veraserver/`                           | The API server binary                                                      |
 | `docs/cli.md`                               | The CLI guide: every command, the input format, exit codes                 |
@@ -58,7 +59,8 @@ npm --prefix frontend install
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-Postgres must be configured for the app to start. Create a local, gitignored `.env`:
+Postgres must be configured for the API server (`cmd/veraserver`) to start; the
+desktop does not open a database. Create a local, gitignored `.env`:
 
 ```bash
 VERA_POSTGRES_DSN=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
@@ -66,13 +68,16 @@ VERA_POSTGRES_SCHEMA=vera
 ```
 
 Never commit credentials or a real DSN. `.env.example` documents the variable names.
-Startup runs versioned migrations in the configured schema.
+The server runs versioned migrations in the configured schema at startup.
 
 ## 4. Development Commands
 
 ```bash
-# Load Postgres configuration into the shell, then run the desktop loop
-set -a; source .env; set +a
+# Terminal 1: local API on 127.0.0.1:8081 (sources .env, forces the loopback bind
+# and --local-development, which refuses non-local database targets before open)
+scripts/dev-api.sh
+
+# Terminal 2: desktop dev loop (reads only VERA_API_URL from the environment or .env)
 wails dev
 
 # Frontend-only loop
@@ -212,8 +217,10 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   It needs no Wails CLI — the generated files are text and the Go side is
   reflection.
 - Keep `Startup` initialization safe for both runtime and tests.
-- `main.go` opens Postgres before `wails.Run`; startup must fail clearly when the
-  database is misconfigured.
+- `main.go` resolves the API endpoint through the build-selected `apiBaseURL`
+  before `wails.Run`: packaged builds use the production API, `wails dev` builds
+  read only a loopback `VERA_API_URL` and fail clearly when it is absent.
+  `cmd/veraserver` opens Postgres; the desktop never does.
 
 ## 10. Domain Invariants (do not break)
 
@@ -997,9 +1004,11 @@ found`). `gh release create` creates the tag as well, so there is no
 
 | Variable                                                                                                                                                          | Purpose                                                               |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `VERA_POSTGRES_DSN`                                                                                                                                               | Primary Postgres connection string                                    |
-| `VERA_POSTGRES_SCHEMA`                                                                                                                                            | Schema name (default `vera`)                                          |
-| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE`                                                                                        | Fallback                                                              |
+| `VERA_API_URL`                                                                                                                                                    | Desktop `wails dev` only: loopback http(s) API URL (env or project `.env`); packaged builds ignore it |
+| `VERA_API_ADDR`                                                                                                                                                   | API server listen address (default `:8080`; `scripts/dev-api.sh` forces `127.0.0.1:8081`) |
+| `VERA_POSTGRES_DSN`                                                                                                                                               | API server: primary Postgres connection string (never read by the desktop) |
+| `VERA_POSTGRES_SCHEMA`                                                                                                                                            | API server: schema name (default `vera`)                              |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE`                                                                                        | API server fallback                                                   |
 | `VERA_POSTGRES_TEST_DSN`                                                                                                                                          | Test-only DSN for `backend/store` integration tests                   |
 | `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_WINDOWS_ARM64` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
 

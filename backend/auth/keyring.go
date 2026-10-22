@@ -6,9 +6,6 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const keyringService = "vera-app"
-const keyringAccount = "session"
-
 // SaveSessionToken persists the session token in the OS keychain.
 func SaveSessionToken(token string) error {
 	if err := keyring.Set(keyringService, keyringAccount, token); err != nil {

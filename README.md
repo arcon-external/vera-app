@@ -44,14 +44,17 @@ Before you begin, ensure you have the following installed:
     npm install
     ```
 
-3. Configure the desktop app to reach the API server:
+3. Configure local development (optional — packaged builds need no configuration):
    ```bash
-   export VERA_API_URL='http://100.93.103.83:8081'
+   cp .env.example .env
    ```
 
-   The desktop holds no database credentials. All data flows through
-   `veraserver` over TLS; see `docs/api-deploy.md`. For local development
-   against a server on the same machine, `http://127.0.0.1:8080` works.
+   `wails dev` reads only `VERA_API_URL` from the gitignored project `.env`, or
+   from an exported value (which wins), and requires a loopback `http(s)` host.
+   Packaged and debug-packaged builds ignore that file and every exported
+   override: they always use the production API. The desktop holds no database
+   credentials; all data flows through `veraserver` over TLS; see
+   `docs/api-deploy.md`.
 
 4. Configure PostgreSQL before starting the **server** (not the desktop app):
    ```bash
@@ -68,13 +71,27 @@ Before you begin, ensure you have the following installed:
 
 Vera supports a seamless live-development workflow.
 
-1. **Run Wails in Dev Mode** — In the project root, run:
+1. **Start the local API** — in one terminal, from the project root:
+   ```bash
+   scripts/dev-api.sh
+   ```
+   It sources the server-owned `.env` and forces `VERA_API_ADDR=127.0.0.1:8081`;
+   Cloud Run's compiled default stays `:8080`. The desktop never starts the
+   database or the server. It also passes `--local-development`, so the server
+   refuses a remote, multi-host, or unparseable Postgres target before opening
+   the store; only `localhost`, a loopback address, or a local Unix socket is
+   accepted.
+
+2. **Run Wails in Dev Mode** — in a second terminal, from the project root:
    ```bash
    wails dev
    ```
-   This handles the Go backend and bridges communication with the frontend.
+   The development build reads `VERA_API_URL` from the exported environment or
+   `.env`, accepts only a loopback `http(s)` host, and fails clearly when neither
+   supplies one instead of falling back to production. Restarting follows the
+   same two steps.
 
-2. **Frontend Hot Reloading** — In a separate terminal, navigate to the frontend directory:
+3. **Frontend Hot Reloading** — In a separate terminal, navigate to the frontend directory:
    ```bash
    cd frontend
    npm run dev
@@ -89,7 +106,9 @@ To create a redistributable, production-ready package for your current platform:
 wails build
 ```
 
-The compiled binary will be available in the `build/bin/` directory.
+The compiled binary will be available in the `build/bin/` directory. It always
+talks to the production API, even when `VERA_API_URL` is exported in the shell
+that launches it; that override belongs to `wails dev` only.
 
 ## 📄 License
 
