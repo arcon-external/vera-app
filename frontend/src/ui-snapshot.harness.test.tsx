@@ -32,6 +32,7 @@ import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
+import { AppShell } from "./components/AppShell";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import {
   DeletionChallengePanel,
@@ -82,7 +83,7 @@ import {
 import type { POSourceQuotation } from "./poSelector";
 import {
   initialPOListFilters,
-  initialPOListState,
+  initialPOListStateFor,
 } from "./poList";
 import type { POListRowDTO, POListState } from "./poList";
 import {
@@ -824,17 +825,28 @@ const PO_LIST_CUSTOMERS = [
   { ID: 3, Name: "PT. H-Tech Oilfield Equipment, NOV XL Systems" },
   { ID: 4, Name: "PT. Datalec Global Solution" },
 ];
-const PO_LIST_ARCHIVE: POListState = {
-  ...initialPOListState,
-  rows: PO_LIST_ROWS,
+const PO_DRAFT_ROWS = PO_LIST_ROWS.filter((row) => row.State === "draft");
+const PO_SAVED_ROWS = PO_LIST_ROWS.filter((row) => row.State === "saved");
+const PO_LIST_DRAFTS: POListState = {
+  ...initialPOListStateFor("drafts"),
+  rows: PO_DRAFT_ROWS,
   customers: PO_LIST_CUSTOMERS,
   page: 1,
   pageSize: 15,
-  total: 31,
-  totalPages: 3,
+  total: 8,
+  totalPages: 1,
+};
+const PO_LIST_ARCHIVE: POListState = {
+  ...initialPOListStateFor("archive"),
+  rows: PO_SAVED_ROWS,
+  customers: PO_LIST_CUSTOMERS,
+  page: 1,
+  pageSize: 15,
+  total: 23,
+  totalPages: 2,
 };
 const PO_LIST_NO_MATCH: POListState = {
-  ...initialPOListState,
+  ...initialPOListStateFor("archive"),
   filters: {
     ...initialPOListFilters,
     search: "datalec",
@@ -1312,15 +1324,28 @@ const CASES: SnapshotCase[] = [
     element: <LoginPage onSignedIn={() => undefined} />,
   },
   {
-    // The document home (issue #466): the four destinations staff land on
-    // after sign-in. Quotation and Purchase Order are enabled; Delivery Order
-    // and Invoice render disabled with their Coming later badges, so the
-    // screenshot shows unavailable features are not misleading.
+    // The document home (issue #466, now the global workspace dashboard in
+    // #491): five destinations for an admin. Quotation, Purchase Order and
+    // Admin are enabled; Delivery Order and Invoice render disabled with their
+    // Coming later badges.
     //
     // What this case cannot show, stated so it is not assumed: the clicks
-    // behind the two enabled buttons, keyboard order, and focus visibility
+    // behind the enabled buttons, keyboard order, and focus visibility
     // stay hand-driven.
     name: "DocumentHome",
+    element: (
+      <DocumentHomePage
+        isAdmin
+        onOpenQuotation={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onOpenAdmin={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #491: Home for a staff member. The Admin card is absent, so the
+    // screenshot proves the gate is visual as well as logical.
+    name: "DocumentHomeStaff",
     element: (
       <DocumentHomePage
         onOpenQuotation={() => undefined}
@@ -1329,17 +1354,69 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The Purchase Order archive (issue #469): search, the customer
-    // multi-select, the inclusive received range, the stored Draft/Saved
-    // state, the disabled Source missing filter with its honest note, a mixed
-    // page of rows and the server pager. At 360 the table scrolls inside its
-    // card, like the Quotation archive; the filter grid stacks.
+    // Issue #491: the shell on Home — Vera + Business Suite, no workspace tabs,
+    // no back arrow.
+    name: "AppShellHome",
+    element: (
+      <AppShell page="home" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Workspace cards sit here.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the Quotation workspace's three tabs beside the back arrow.
+    name: "AppShellQuotation",
+    element: (
+      <AppShell page="create" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Quotation editor body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the PO workspace's tabs with Drafts active.
+    name: "AppShellPurchaseOrder",
+    element: (
+      <AppShell page="po-drafts" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Draft purchase orders body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the Admin workspace's four tabs with Company active.
+    name: "AppShellAdmin",
+    element: (
+      <AppShell page="admin-company" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Company settings body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the Drafts tab (issue #469's list with the state pinned to
+    // draft). Search, the customer multi-select, the received range and the
+    // Source filter remain; the State control does not, because the tab owns
+    // it. At 360 the table scrolls inside its card; the filter grid stacks.
     //
     // What this case cannot show: typing, opening a row, the fetch effect,
     // focus order and the real scrollbar stay hand-driven.
+    name: "PurchaseOrderDrafts",
+    element: (
+      <PurchaseOrderListView
+        mode="drafts"
+        state={PO_LIST_DRAFTS}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #491: the Archive tab. The state is pinned to saved records, so the
+    // State control is gone while search, dates, customers and source remain.
     name: "PurchaseOrderArchive",
     element: (
       <PurchaseOrderListView
+        mode="archive"
         state={PO_LIST_ARCHIVE}
         dispatch={() => undefined}
         onOpen={() => undefined}
@@ -1356,6 +1433,7 @@ const CASES: SnapshotCase[] = [
     name: "PurchaseOrderArchiveNoMatch",
     element: (
       <PurchaseOrderListView
+        mode="archive"
         state={PO_LIST_NO_MATCH}
         dispatch={() => undefined}
         onOpen={() => undefined}

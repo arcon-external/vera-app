@@ -129,10 +129,7 @@ function Workspace() {
       <AppShell
         page={page}
         inert={open}
-        onOpenHome={() => leave.request("home")}
-        onOpenEditor={() => leave.request("create")}
-        onOpenDrafts={() => leave.request("drafts")}
-        onOpenArchive={() => leave.request("archive")}
+        onNavigate={leave.request}
         companyName="PT Arcon Penta Persada"
         user={null}
       >
@@ -394,7 +391,7 @@ function button(label: string, scope: ParentNode = document): HTMLButtonElement 
 }
 
 describe("PO tab navigation leaves unsaved edits (issue #468)", () => {
-  it("asks before a tab unmounts an edited draft, and Keep editing keeps it", () => {
+  it("asks before leaving an edited draft, and Keep editing keeps it", () => {
     act(() => root.render(<Workspace />));
 
     typeInto("Payment terms", "50% advance");
@@ -403,10 +400,10 @@ describe("PO tab navigation leaves unsaved edits (issue #468)", () => {
         ?.value
     ).toBe("50% advance");
 
-    click(tab("Editor"));
+    click(button("Back to Home"));
     expect(prompt()).not.toBeNull();
     // Still on the PO page: the editor is mounted underneath the prompt.
-    expect(document.querySelector('[data-testid="page-create"]')).toBeNull();
+    expect(document.querySelector('[data-testid="page-home"]')).toBeNull();
 
     click(button("Keep editing"));
     expect(prompt()).toBeNull();
@@ -425,7 +422,7 @@ describe("PO tab navigation leaves unsaved edits (issue #468)", () => {
 
     click(button("Discard changes"));
     expect(prompt()).toBeNull();
-    expect(document.querySelector('[data-testid="page-archive"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="page-po-archive"]')).not.toBeNull();
     expect(
       document.querySelector('input[aria-label="Payment terms"]')
     ).toBeNull();
@@ -436,7 +433,7 @@ describe("PO tab navigation leaves unsaved edits (issue #468)", () => {
 
     click(tab("Drafts"));
     expect(prompt()).toBeNull();
-    expect(document.querySelector('[data-testid="page-drafts"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="page-po-drafts"]')).not.toBeNull();
   });
 });
 
@@ -467,7 +464,7 @@ describe("PO discard is one modal decision (issue #468, wave 3)", () => {
 
     click(button("Keep editing"));
     expect(dialogCount()).toBe(0);
-    expect(document.querySelector('[data-testid="page-archive"]')).toBeNull();
+    expect(document.querySelector('[data-testid="page-po-archive"]')).toBeNull();
     expect(paymentTermsValue()).toBe("50% advance");
     expect(document.activeElement).toBe(cancel);
     expect(shell?.getAttribute("aria-hidden")).toBeNull();
@@ -486,7 +483,7 @@ describe("PO discard is one modal decision (issue #468, wave 3)", () => {
 
     click(button("Discard changes"));
     expect(dialogCount()).toBe(0);
-    expect(document.querySelector('[data-testid="page-archive"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="page-po-archive"]')).not.toBeNull();
     expect(paymentTermsValue()).toBeUndefined();
   });
 

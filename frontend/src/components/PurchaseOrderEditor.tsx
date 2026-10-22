@@ -152,6 +152,7 @@ export function PurchaseOrderDiscardPrompt({
   onKeepEditing,
   onDiscard,
   returnFocus,
+  description = "The draft was saved earlier. Changes since then will be lost.",
 }: {
   onKeepEditing: () => void;
   onDiscard: () => void;
@@ -160,6 +161,12 @@ export function PurchaseOrderDiscardPrompt({
    * became inert. Null falls back to whatever holds focus at mount.
    */
   returnFocus?: HTMLElement | null;
+  /**
+   * Issue #491: the same modal now covers Quotation and Company edits, so the
+   * sentence names what is actually being discarded. The default keeps the PO
+   * draft wording for every existing call site.
+   */
+  description?: string;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   // The effect owns the mounting decision; callbacks stay in refs so a parent
@@ -247,9 +254,7 @@ export function PurchaseOrderDiscardPrompt({
             <p className="text-lead font-medium text-ink-900">
               Discard unsaved changes?
             </p>
-            <p className="mt-1 text-small text-ink-500">
-              The draft was saved earlier. Changes since then will be lost.
-            </p>
+            <p className="mt-1 text-small text-ink-500">{description}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button aria-label="Keep editing" onClick={onKeepEditing}>
                 Keep editing

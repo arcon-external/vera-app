@@ -68,6 +68,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
+import { AdminDashboard, adminPageForTab, adminTabForPage } from "./components/AdminDashboard";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
   POSourcePage,
@@ -81,8 +82,6 @@ import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace"
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import { usePurchaseOrderWorkspace } from "./poWorkspace";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
-import { UsersPage } from "./components/UsersPage";
-import { ClientsPage } from "./components/ClientsPage";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
@@ -455,14 +454,28 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Issue #491: the three PO tabs share one workspace. */
+export function isPurchaseOrderPage(page: AppPage): boolean {
+  return page === "po" || page === "po-drafts" || page === "po-archive";
+}
+
+export function purchaseOrderTab(page: AppPage): "editor" | "drafts" | "archive" {
+  if (page === "po-drafts") return "drafts";
+  if (page === "po-archive") return "archive";
+  return "editor";
+}
+
+export function isAdminPage(page: AppPage): boolean {
+  return page.startsWith("admin-");
+}
+
 function App() {
-  // The document home (#466) is the landing page after sign-in and session
-  // restore: "home" holds the four destinations, "po" the honest Purchase
-  // Order placeholder until the entry workspace lands. The Quotation pages
-  // ("create", "drafts", "archive", "detail") keep their existing meanings.
-  const [page, setPage] = useState<
-    "home" | "po" | "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
-  >("home");
+  // Issue #491: the workspace page model. "home" is the global dashboard; the
+  // Quotation pages keep their meanings; "po"/"po-drafts"/"po-archive" are the
+  // three Purchase Order tabs; "admin-*" are the Admin Dashboard tabs; and
+  // "settings" is the signed-in person's account settings. There is no router:
+  // one page state still drives the whole app.
+  const [page, setPage] = useState<AppPage>("home");
   // #468 wave 2: the PO editor owns its reducer state, so a tab that unmounts
   // it loses unsaved work. The editor lifts only its dirty flag; this gate
   // asks through the same discard panel before any navigation leaves it.
@@ -501,7 +514,6 @@ function App() {
     },
     [closePurchaseOrder]
   );
-  const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage);
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
     revision: number;
@@ -513,6 +525,36 @@ function App() {
   // canonical unit on this first line once GetCompanyUnits() answers.
   const [items, setItems] = useState<EditorItem[]>([newItem(0, "")]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
+
+  // Whether the editor holds anything worth confirming before it is replaced:
+  // a revision/draft context, a header field, or any line content. Issue #491
+  // also uses this as the Quotation tab's unsaved-work flag, so leaving the
+  // editor through the shell asks before the page (and its draft context) goes.
+  // Declared up here because the leave guard is built around it and because the
+  // paste capture below reads it in its dependency array.
+  const dirty =
+    editingQuote !== null ||
+    details.subject.trim() !== "" ||
+    details.recipientName.trim() !== "" ||
+    items.some(
+      (item) =>
+        item.description.trim() !== "" ||
+        item.unitPrice.trim() !== "" ||
+        item.bullets.some((line) => line.trim() !== "") ||
+        item.subItems.some((sub) => sub.description.trim() !== "")
+    );
+
+  // The Company tab reports its own unsaved-work flag; the leave guard asks
+  // before another workspace or Admin tab unmounts it.
+  const [companyDirty, setCompanyDirty] = useState(false);
+  const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage, {
+    dirtyPages: { create: dirty, "admin-company": companyDirty },
+    onDiscard: (source) => {
+      if (source === "create") resetForm();
+      if (source === "admin-company") setCompanyDirty(false);
+    },
+  });
+
   const [customerId, setCustomerId] = useState(2);
   const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
@@ -812,6 +854,7 @@ function App() {
     } finally {
       setUser(null);
       resetForm();
+      setCompanyDirty(false);
       setPage("home");
     }
   }, [resetForm]);
@@ -830,6 +873,7 @@ function App() {
           if (message.startsWith("reach the quotation server")) return;
           setUser(null);
           resetForm();
+          setCompanyDirty(false);
           setPage("home");
           pushToast(
             "error",
@@ -982,22 +1026,6 @@ function App() {
     },
     []
   );
-
-  // Whether the editor holds anything worth confirming before it is
-  // replaced: a revision/draft context, a header field, or any line content.
-  // Declared up here (rather than with ready/loading below) because the paste
-  // capture below reads it in its dependency array.
-  const dirty =
-    editingQuote !== null ||
-    details.subject.trim() !== "" ||
-    details.recipientName.trim() !== "" ||
-    items.some(
-      (item) =>
-        item.description.trim() !== "" ||
-        item.unitPrice.trim() !== "" ||
-        item.bullets.some((line) => line.trim() !== "") ||
-        item.subItems.some((sub) => sub.description.trim() !== "")
-    );
 
   // A pasted copy always starts a new, unsaved quotation: no archived
   // number, revision, draft or preview travels with it, and the recalculation
@@ -1745,25 +1773,36 @@ function App() {
           return;
         case "newQuotation":
           event.preventDefault();
-          // On a dirty PO this asks first; once allowed, the Editor page is
-          // shown before the existing new-quotation confirmation can render
-          // in its action bar.
+          // Already in the Quotation editor: the editor's own confirm owns the
+          // discard. Anywhere else, the leave guard runs first; once allowed,
+          // the Editor page is shown before the existing confirmation can
+          // render in its action bar.
+          if (page === "create") {
+            requestNewQuotation();
+            return;
+          }
           poLeave.request("create", () => {
             setPage("create");
             requestNewQuotation();
           });
           return;
+        case "gotoHome":
+          poLeave.request("home");
+          return;
         case "gotoEditor":
           poLeave.request("create");
+          return;
+        case "gotoDrafts":
+          poLeave.request("drafts");
           return;
         case "gotoArchive":
           poLeave.request("archive");
           return;
-        case "gotoClients":
-          if (user?.Role === "admin") poLeave.request("clients");
+        case "gotoPurchaseOrder":
+          poLeave.request("po");
           return;
-        case "gotoTeam":
-          if (user?.Role === "admin") poLeave.request("users");
+        case "gotoAdmin":
+          if (user?.Role === "admin") poLeave.request("admin-clients");
           return;
         case "gotoSettings":
           poLeave.request("settings");
@@ -1836,6 +1875,12 @@ function App() {
     },
     []
   );
+
+  // Issue #491: admin pages are never shown to staff, even if a stale page
+  // state or a shortcut somehow names one. The shell and the render below both
+  // use this resolved page, so the Admin workspace cannot leak.
+  const isAdmin = user?.Role === "admin";
+  const visiblePage: AppPage = isAdminPage(page) && !isAdmin ? "home" : page;
 
   return (
     <>
@@ -1910,23 +1955,15 @@ function App() {
         <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
       ) : null}
       <AppShell
-      page={page}
+      page={visiblePage}
       inert={poLeave.pendingPage !== null}
-      onOpenHome={() => poLeave.request("home")}
-      onOpenEditor={() => poLeave.request("create")}
-      onOpenDrafts={() => poLeave.request("drafts")}
-      onOpenArchive={() => poLeave.request("archive")}
+      onNavigate={(next) => poLeave.request(next)}
       draftCount={draftCount}
-      onOpenUsers={() => poLeave.request("users")}
-      onOpenClients={() => poLeave.request("clients")}
-      onOpenSettings={() => poLeave.request("settings")}
-      showUsersTab={user?.Role === "admin"}
-      showClientsTab={user?.Role === "admin"}
       companyName={companyName}
       user={user}
       onSignOut={() => void handleSignOut()}
       actionBar={
-        page === "create" ? (
+        visiblePage === "create" ? (
           <>
             <div className="flex min-w-0 items-center gap-2">
               {pendingPaste ? (
@@ -2047,25 +2084,28 @@ function App() {
         ) : null
       }
     >
-      {page === "home" ? (
+      {visiblePage === "home" ? (
         <DocumentHomePage
-          onOpenQuotation={() => setPage("create")}
-          onOpenPurchaseOrder={() => setPage("po")}
+          isAdmin={isAdmin}
+          onOpenQuotation={() => poLeave.request("create")}
+          onOpenPurchaseOrder={() => poLeave.request("po")}
+          onOpenAdmin={() => poLeave.request("admin-clients")}
         />
       ) : null}
 
-      {page === "po" ? (
+      {isPurchaseOrderPage(visiblePage) ? (
         <PurchaseOrderWorkspacePage
           workspace={poWorkspace}
           currency={poEntry}
           uomOptions={storedUoMs ?? []}
           incotermOptions={INCOTERM_OPTIONS}
+          tab={purchaseOrderTab(visiblePage)}
           onAdd={() => {
             setPOSelectorMode("entry");
             setPOSelectorRepairID(null);
             setPOSelectorOpen(true);
           }}
-          isAdmin={user?.Role === "admin"}
+          isAdmin={isAdmin}
           onRepairSource={openSourceRepair}
           onOpen={(id) => void openPurchaseOrder(id)}
           onSaved={(updated, corrected) => {
@@ -2087,13 +2127,14 @@ function App() {
           onBack={() => {
             poLeave.setDirty(false);
             poWorkspace.close();
+            setPage("po-archive");
           }}
           onCancel={() => poWorkspace.cancel(poLeave.request, poLeave.setDirty)}
           onDirtyChange={poLeave.setDirty}
         />
       ) : null}
 
-      {page === "create" ? (
+      {visiblePage === "create" ? (
         <div className="flex flex-col gap-6" onPasteCapture={handleCopyPasteCapture}>
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
@@ -2223,14 +2264,14 @@ function App() {
         </div>
       ) : null}
 
-      {page === "drafts" ? (
+      {visiblePage === "drafts" ? (
         <DraftsPage
           onOpenDraft={handleOpenDraft}
           onNewQuotation={handleNewQuotation}
         />
       ) : null}
 
-      {page === "archive" ? (
+      {visiblePage === "archive" ? (
         // #390: every row's grand total is live-currency chrome until the
         // catalogue loads, so nothing renders while the entry is unknown.
         liveEntry === null ? (
@@ -2253,7 +2294,7 @@ function App() {
         )
       ) : null}
 
-      {page === "detail" && selectedQuotation !== null ? (
+      {visiblePage === "detail" && selectedQuotation !== null ? (
         // #390: the detail page shows margin, tax and nett in the live
         // currency until the revision's own is resolved.
         liveEntry === null ? (
@@ -2277,15 +2318,11 @@ function App() {
         )
       ) : null}
 
-      {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
-
-      {page === "clients" && user?.Role === "admin" ? <ClientsPage /> : null}
-
-      {page === "settings" && user !== null ? (
-        <SettingsPage
-          isAdmin={user.Role === "admin"}
-          user={user}
-          onProfileChanged={setUser}
+      {isAdminPage(visiblePage) && isAdmin ? (
+        <AdminDashboard
+          tab={adminTabForPage(visiblePage)}
+          onTabChange={(tab) => poLeave.request(adminPageForTab(tab))}
+          onCompanyDirtyChange={setCompanyDirty}
           onCompanyChanged={() => {
             // A company save (name, currency, canonical unit, or the unit list
             // itself) reaches the editor through here: re-read the profile and
@@ -2296,12 +2333,21 @@ function App() {
           }}
         />
       ) : null}
+
+      {visiblePage === "settings" && user !== null ? (
+        <SettingsPage
+          isAdmin={isAdmin}
+          user={user}
+          onProfileChanged={setUser}
+        />
+      ) : null}
     </AppShell>
     {poLeave.pendingPage !== null ? (
       <PurchaseOrderDiscardPrompt
         onKeepEditing={poLeave.keepEditing}
         onDiscard={poLeave.discard}
         returnFocus={poLeave.pendingReturnFocus}
+        description={poLeave.pendingDescription}
       />
     ) : null}
     </>

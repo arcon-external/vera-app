@@ -251,6 +251,7 @@ function Harness({
         currency={USD}
         uomOptions={[{ value: "Pc", label: "Pc" }]}
         incotermOptions={[{ value: "CIF", label: "CIF" }]}
+        tab="editor"
         onAdd={() => undefined}
         isAdmin={isAdmin}
         onRepairSource={onRepairSource}
@@ -441,10 +442,10 @@ describe("cancel from a saved-record correction (issue #473)", () => {
     });
     await cancelCorrectionAndDiscard();
 
-    // There is no truthful record to show, so the archive is shown rather than
-    // the stale correction editor.
+    // There is no truthful record to show, so the Editor tab's entry surface is
+    // shown rather than the stale correction editor.
     expect(onRefreshError).toHaveBeenCalledTimes(1);
-    expect(document.body.textContent).toContain("Purchase orders");
+    expect(document.body.textContent).toContain("New purchase order");
     expect(queryButton("Save correction")).toBeNull();
     expect(queryButton("Correct purchase order")).toBeNull();
   });

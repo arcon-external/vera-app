@@ -16,7 +16,10 @@ import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
 import { PurchaseOrderRepairPage } from "./PurchaseOrderRepair";
-import { StatusBanner } from "./ui";
+import { Button, Card, SectionHeading, StatusBanner } from "./ui";
+
+/** Which tab of the PO workspace a page belongs to (issue #491). */
+export type PurchaseOrderTab = "editor" | "drafts" | "archive";
 
 export interface PurchaseOrderWorkspacePageProps {
   workspace: PurchaseOrderWorkspace;
@@ -24,6 +27,8 @@ export interface PurchaseOrderWorkspacePageProps {
   currency: CurrencyInfo | null;
   uomOptions: CompanyUnitOption[];
   incotermOptions: { value: string; label: string }[];
+  /** Issue #491: the active workspace tab when no record is open. */
+  tab: PurchaseOrderTab;
   /** Starts a new PO through the shared source selector. */
   onAdd: () => void;
   /** Whether the signed-in user may repair a saved record's source link. */
@@ -46,11 +51,51 @@ export interface PurchaseOrderWorkspacePageProps {
   onDirtyChange: (dirty: boolean) => void;
 }
 
+/**
+ * The Editor tab before a record is open: the entry point to the shared
+ * quotation selector. Kept separate from the archive so "Editor" never reads
+ * as a record list.
+ */
+export function PurchaseOrderEntryPage({ onAdd }: { onAdd: () => void }) {
+  return (
+    <section aria-labelledby="po-entry-heading" className="flex flex-col gap-5">
+      <div>
+        <h1 id="po-entry-heading" className="text-title font-semibold text-ink-950">
+          New purchase order
+        </h1>
+        <p className="mt-1 max-w-2xl text-body text-ink-500">
+          Start a purchase order from an issued quotation revision. The
+          quotation supplies the customer, currency and line items; the
+          customer PO number and dates are entered here.
+        </p>
+      </div>
+      <Card className="p-6">
+        <SectionHeading title="From a quotation" />
+        <p className="max-w-2xl text-body leading-relaxed text-ink-500">
+          Choose an issued quotation and revision. A draft is created so the
+          entry can be saved and continued later; finalizing it stores the
+          record in the Archive.
+        </p>
+        <div className="mt-4">
+          <Button
+            variant="primary"
+            aria-label="Add Purchase Order from a Quotation"
+            onClick={onAdd}
+          >
+            Add Purchase Order from a Quotation
+          </Button>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
 export function PurchaseOrderWorkspacePage({
   workspace,
   currency,
   uomOptions,
   incotermOptions,
+  tab,
   onAdd,
   onOpen,
   isAdmin,
@@ -64,9 +109,29 @@ export function PurchaseOrderWorkspacePage({
   const { draft, phase } = workspace;
 
   if (phase === "list" || draft === null) {
-    return (
-      <PurchaseOrderListPage onAdd={onAdd} onOpen={onOpen} isAdmin={isAdmin} />
-    );
+    if (tab === "drafts") {
+      return (
+        <PurchaseOrderListPage
+          key="drafts"
+          mode="drafts"
+          onAdd={onAdd}
+          onOpen={onOpen}
+          isAdmin={isAdmin}
+        />
+      );
+    }
+    if (tab === "archive") {
+      return (
+        <PurchaseOrderListPage
+          key="archive"
+          mode="archive"
+          onAdd={onAdd}
+          onOpen={onOpen}
+          isAdmin={isAdmin}
+        />
+      );
+    }
+    return <PurchaseOrderEntryPage onAdd={onAdd} />;
   }
 
   // Neither the discarded working copy nor a stale saved snapshot is shown

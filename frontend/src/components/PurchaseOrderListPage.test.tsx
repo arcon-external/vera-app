@@ -4,6 +4,8 @@ import {
   activeFilterCount,
   initialPOListFilters,
   initialPOListState,
+  initialPOListStateFor,
+  poListReducer,
   resetPOListFilters,
   type POListPageDTO,
   type POListRowDTO,
@@ -338,6 +340,57 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     const trigger = buttonTagFor(html, "State");
     expect(trigger).toContain('aria-haspopup="listbox"');
     expect(html).toContain("Saved");
+  });
+});
+
+describe("PurchaseOrderListView workspace tabs (issue #491)", () => {
+  it("Drafts pins the stored state and keeps the other filters", () => {
+    const html = render({
+      mode: "drafts",
+      state: { ...initialPOListStateFor("drafts"), rows: [row()], total: 1, totalPages: 1 },
+    });
+    expect(html).toContain(">Draft purchase orders<");
+    // The tab owns the state; there is no second State control to contradict it.
+    expect(html).not.toContain('aria-label="State"');
+    for (const label of ["Search purchase orders", "Received from", "Received to", "Source"]) {
+      expect(html).toContain(`aria-label="${label}"`);
+    }
+    // The pinned state is not counted as an active filter.
+    expect(html).toContain("No filters");
+  });
+
+  it("Archive pins the stored state and names the read-only archive", () => {
+    const html = render({
+      mode: "archive",
+      state: {
+        ...initialPOListStateFor("archive"),
+        rows: [row({ State: "saved" })],
+        total: 1,
+        totalPages: 1,
+      },
+    });
+    expect(html).toContain(">Purchase order archive<");
+    expect(html).not.toContain('aria-label="State"');
+    expect(html).toContain("No filters");
+  });
+
+  it("keeps the tab's pinned state when filters reset", () => {
+    const drafts = initialPOListStateFor("drafts");
+    const withSearch = {
+      ...drafts,
+      filters: { ...drafts.filters, search: "zzz" },
+    };
+    expect(activeFilterCount(withSearch.filters)).toBe(2);
+    // The view subtracts the pinned state, so one search reads as one filter.
+    const html = render({ mode: "drafts", state: withSearch });
+    expect(html).toContain("1 filter active");
+
+    const reset = poListReducer(withSearch, {
+      type: "resetFilters",
+      state: "draft",
+    });
+    expect(reset.filters.state).toBe("draft");
+    expect(reset.filters.search).toBe("");
   });
 });
 

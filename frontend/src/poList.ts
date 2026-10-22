@@ -95,18 +95,23 @@ export interface POListState {
 export type POListAction =
   | { type: "filtersChanged"; patch: Partial<POListFilters> }
   | { type: "pageChanged"; page: number }
-  | { type: "resetFilters" }
+  | { type: "resetFilters"; state?: POListStateFilter }
   | { type: "queryStarted"; seq: number }
   | { type: "queryLoaded"; seq: number; page: POListPageDTO }
   | { type: "queryFailed"; seq: number; error: string };
 
-export function resetPOListFilters(): POListFilters {
+/**
+ * The starting filters for one PO workspace tab. The Drafts and Archive tabs
+ * pin the state the tab is about; the State control is then not offered, and
+ * Reset returns to that pinned state rather than to every-record.
+ */
+export function resetPOListFilters(state: POListStateFilter = ""): POListFilters {
   return {
     search: "",
     customerIds: [],
     receivedFrom: "",
     receivedTo: "",
-    state: "",
+    state,
     sourceMissing: "any",
   };
 }
@@ -125,6 +130,21 @@ export const initialPOListState: POListState = {
   error: null,
   seq: 0,
 };
+
+export type POListMode = "drafts" | "archive";
+
+/** The pinned state a workspace tab asks the server for. */
+export function modeState(mode: POListMode): POListStateFilter {
+  return mode === "drafts" ? "draft" : "saved";
+}
+
+/** A fresh list state pinned to one workspace tab's stored state. */
+export function initialPOListStateFor(mode: POListMode): POListState {
+  return {
+    ...initialPOListState,
+    filters: resetPOListFilters(modeState(mode)),
+  };
+}
 
 /** True for a blank field or a real YYYY-MM-DD calendar date. */
 function validFilterDate(raw: string): boolean {
@@ -271,7 +291,12 @@ export function poListReducer(state: POListState, action: POListAction): POListS
       return { ...state, page };
     }
     case "resetFilters":
-      return { ...state, filters: resetPOListFilters(), page: 1, error: null };
+      return {
+        ...state,
+        filters: resetPOListFilters(action.state ?? ""),
+        page: 1,
+        error: null,
+      };
     case "queryStarted":
       return { ...state, seq: action.seq, loading: true, error: null };
     case "queryLoaded": {

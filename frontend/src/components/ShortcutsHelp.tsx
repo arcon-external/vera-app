@@ -14,7 +14,7 @@ const GROUPS: { title: string; ids: ActionId[] }[] = [
   },
   {
     title: "Pages",
-    ids: ["gotoEditor", "gotoArchive", "gotoClients", "gotoTeam", "gotoSettings", "toggleHelp"],
+    ids: ["gotoHome", "gotoEditor", "gotoDrafts", "gotoArchive", "gotoPurchaseOrder", "gotoAdmin", "gotoSettings", "toggleHelp"],
   },
   {
     title: "Archive",
@@ -72,7 +72,8 @@ export function ShortcutsHelp({ onClose }: { onClose: () => void }) {
         </div>
         <p className="mt-4 text-caption leading-relaxed text-ink-400">
           Grid keys: arrows move, Tab advances right, Enter advances down,
-          Shift reverses either. Change any binding in Settings → Keyboard.
+          Shift reverses either. Change any binding in Account settings →
+          Keyboard.
         </p>
       </div>
     </div>

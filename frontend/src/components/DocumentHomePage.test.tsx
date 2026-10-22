@@ -2,90 +2,73 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DocumentHomePage } from "./DocumentHomePage";
 
-// Issues #466/#469: after sign-in staff land on a document home with four
-// destinations. Quotation and the PO archive open their pages; Delivery Order
-// and Invoice are visible but disabled with "Coming later".
+// Issue #491: Home is the global workspace dashboard. Five cards at admin
+// (Quotation, Purchase Order, Delivery Order disabled, Invoice disabled,
+// Admin Dashboard) and four for staff; each carries an inline-SVG icon.
 //
-// The suite runs in node with no DOM (see vitest.config.ts), so the pages are
+// The suite runs in node with no DOM (see vitest.config.ts), so the page is
 // rendered to a string and asserted on as markup -- the same house pattern as
-// ui.test.tsx and TabBar.test.tsx. renderToString prints the attributes React
-// will actually set on the node, so `disabled` in the output is the button's
-// real disabled state, not a source scan.
+// ui.test.tsx and TabBar.test.tsx.
 //
-// What this test does NOT prove: that a click reaches the right page, that
-// focus order is sane, or that the assembled page reads well at 360/1280.
-// Those stay hand-driven plus the ui-snapshot harness case.
+// What this test does NOT prove: that a click reaches the right workspace, the
+// focus order, or that the assembled page reads well at 360/1280. Those stay
+// hand-driven plus the ui-snapshot harness cases.
 
 /** Splits the rendered output into one string per <button> element. */
 function buttons(html: string): string[] {
   return html.split("<button").slice(1);
 }
 
-/** The opening tag of the <button> carrying the given accessible label. Throws
- *  when no such button exists, so a destination that stops rendering as a
- *  button fails loudly rather than matching nothing. Only the opening tag is
- *  returned, so trailing card markup can never leak another button's
- *  attributes into the assertion. */
+/** The opening tag of the <button> carrying the given accessible label. */
 function buttonTagFor(html: string, label: string): string {
   const found = buttons(html).find((chunk) =>
     chunk.slice(0, chunk.indexOf(">")).includes(`aria-label="${label}"`)
   );
-  if (!found)
-    throw new Error(`no <button aria-label="${label}"> in: ${html}`);
+  if (!found) throw new Error(`no <button aria-label="${label}"> in: ${html}`);
   return found.slice(0, found.indexOf(">") + 1);
 }
 
-function renderHome(): string {
+function renderHome(isAdmin = true): string {
   return renderToString(
     <DocumentHomePage
+      isAdmin={isAdmin}
       onOpenQuotation={() => {}}
       onOpenPurchaseOrder={() => {}}
+      onOpenAdmin={() => {}}
     />
   ).replace(/<!-- -->/g, "");
 }
 
-describe("DocumentHomePage destinations (issues #466, #469)", () => {
-  it("shows all four document destinations", () => {
+describe("DocumentHomePage workspaces (issue #491)", () => {
+  it("labels the section Workspaces", () => {
+    expect(renderHome()).toContain(">Workspaces<");
+  });
+
+  it("shows all five workspaces to an admin", () => {
     const html = renderHome();
     for (const label of [
       "Open Quotation",
-      "Find purchase orders",
+      "Open Purchase Orders",
       "Delivery Order (coming later)",
       "Invoice (coming later)",
+      "Open Admin Dashboard",
     ]) {
       expect(buttonTagFor(html, label)).toContain(label);
     }
   });
 
-  it("keeps Quotation and the PO archive enabled", () => {
-    // The attribute, not the substring: the house Button's class list always
-    // carries `disabled:cursor-not-allowed` and friends, so a bare "disabled"
-    // match would pass on a button that is actually disabled.
+  it("keeps Quotation, Purchase Orders and Admin enabled", () => {
     const html = renderHome();
-    expect(buttonTagFor(html, "Open Quotation")).not.toContain(" disabled=");
-    expect(buttonTagFor(html, "Find purchase orders")).not.toContain(
-      " disabled="
-    );
+    for (const label of [
+      "Open Quotation",
+      "Open Purchase Orders",
+      "Open Admin Dashboard",
+    ]) {
+      expect(buttonTagFor(html, label)).not.toContain(" disabled=");
+    }
   });
 
-  it("names the PO surface for what it does, without pretending later slices exist", () => {
-    const html = renderHome();
-    expect(html).toContain(
-      "Find purchase orders and enter a new one against an issued quotation."
-    );
-    // No attachments, history, fulfilment or payment vocabulary belongs on
-    // the home card: none of those is implemented.
-    expect(html).not.toContain("Attachment");
-    expect(html).not.toContain("Payment status");
-    expect(html).not.toContain("Fulfilment");
-  });
-
-  it("renders Delivery Order and Invoice as truly disabled buttons marked Coming later", () => {
-    // The key guard: a future restyle that drops `disabled` (leaving only a
-    // grey look, or an aria-disabled div that still fires onClick) must fail
-    // here. renderToString prints the real disabled attribute, and a <button>
-    // with it cannot be clicked, focused, or submitted with -- keyboard and
-    // mouse alike stay out.
+  it("renders Delivery Order and Invoice as truly disabled with Coming later", () => {
     const html = renderHome();
     for (const label of [
       "Delivery Order (coming later)",
@@ -96,5 +79,27 @@ describe("DocumentHomePage destinations (issues #466, #469)", () => {
       expect(tag).toContain('aria-disabled="true"');
     }
     expect(html).toContain("Coming later");
+  });
+
+  it("gives every card an inline-SVG icon", () => {
+    const html = renderHome();
+    // Five cards, five 24×24 inline icons; the house Button draws none.
+    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(5);
+  });
+
+  it("lays out two columns at wide with Admin full-width, one at 360", () => {
+    const html = renderHome();
+    expect(html).toContain("sm:grid-cols-2");
+    expect(html).toContain("sm:col-span-2");
+  });
+
+  it("hides the Admin card for a non-admin", () => {
+    const html = renderHome(false);
+    expect(html).not.toContain("Open Admin Dashboard");
+    expect(html).not.toContain(">Admin Dashboard<");
+    // Four cards, four icons; the other destinations are untouched.
+    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(4);
+    expect(buttonTagFor(html, "Open Quotation")).toBeDefined();
+    expect(buttonTagFor(html, "Open Purchase Orders")).toBeDefined();
   });
 });

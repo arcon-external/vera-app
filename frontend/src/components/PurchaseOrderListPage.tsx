@@ -5,11 +5,14 @@ import {
   buildPOListQuery,
   canOpenRow,
   initialPOListState,
+  initialPOListStateFor,
+  modeState,
   poListQueryDelay,
   poListReducer,
   poNumberLabel,
   toggleCustomerFilter,
   type POListAction,
+  type POListMode,
   type POListPageDTO,
   type POListRowDTO,
   type POListSourceMissingFilter,
@@ -37,6 +40,11 @@ export interface PurchaseOrderListPageProps {
   onAdd: () => void;
   /** Whether the signed-in user may permanently delete a record. */
   isAdmin?: boolean;
+  /**
+   * Issue #491: Drafts and Archive are separate tabs now. The mode pins the
+   * stored state the tab is about; the other filters are unchanged.
+   */
+  mode?: POListMode;
 }
 
 export interface PurchaseOrderListViewProps {
@@ -45,6 +53,8 @@ export interface PurchaseOrderListViewProps {
   onOpen: (id: number) => void;
   onAdd: () => void;
   onRetry: () => void;
+  /** Pins the stored state to one tab; absent keeps the State control. */
+  mode?: POListMode;
   /** Present only for an admin; absent renders no delete control at all. */
   onDelete?: (row: POListRowDTO) => void;
 }
@@ -88,10 +98,40 @@ export function PurchaseOrderListView({
   onOpen,
   onAdd,
   onRetry,
+  mode,
   onDelete,
 }: PurchaseOrderListViewProps) {
-  const filterCount = activeFilterCount(state.filters);
+  const pinnedState = mode === undefined ? null : modeState(mode);
+  const filterCount =
+    activeFilterCount(state.filters) -
+    (pinnedState !== null && state.filters.state !== "" ? 1 : 0);
   const filtered = filterCount > 0;
+  const heading =
+    mode === "drafts"
+      ? "Draft purchase orders"
+      : mode === "archive"
+        ? "Purchase order archive"
+        : "Purchase orders";
+  const description =
+    mode === "drafts"
+      ? "Purchase orders that are still being entered. Open one to continue entry."
+      : mode === "archive"
+        ? "Saved purchase orders, read-only in this release. Find one by its customer PO number, quotation number, or customer."
+        : "Find a purchase order by its customer PO number, quotation number, or customer. Open a draft to continue entry, or a saved record to read it. Saved records are read-only in this release.";
+  const emptyTitle = filtered
+    ? "No purchase order matches these filters"
+    : mode === "drafts"
+      ? "No draft purchase orders"
+      : mode === "archive"
+        ? "No saved purchase orders yet"
+        : "No purchase orders yet";
+  const emptyBody = filtered
+    ? "Clear the filters to see the whole archive."
+    : mode === "drafts"
+      ? "Start one from an issued quotation revision."
+      : mode === "archive"
+        ? "Saved records appear here after a draft is finalized."
+        : "Start one from an issued quotation revision.";
   return (
     <section aria-labelledby="po-list-heading" className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -100,13 +140,9 @@ export function PurchaseOrderListView({
             id="po-list-heading"
             className="text-title font-semibold text-ink-950"
           >
-            Purchase orders
+            {heading}
           </h1>
-          <p className="mt-1 max-w-2xl text-body text-ink-500">
-            Find a purchase order by its customer PO number, quotation number,
-            or customer. Open a draft to continue entry, or a saved record to
-            read it. Saved records are read-only in this release.
-          </p>
+          <p className="mt-1 max-w-2xl text-body text-ink-500">{description}</p>
         </div>
         <Button
           variant="primary"
@@ -118,7 +154,11 @@ export function PurchaseOrderListView({
       </header>
 
       <Card className="p-4">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div
+          className={`grid gap-4 sm:grid-cols-2 ${
+            pinnedState === null ? "xl:grid-cols-5" : "xl:grid-cols-4"
+          }`}
+        >
           <label className="grid gap-1.5 sm:col-span-2">
             <span className="text-small font-medium text-ink-700">
               Search purchase orders
@@ -137,20 +177,22 @@ export function PurchaseOrderListView({
               }
             />
           </label>
-          <div className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">State</span>
-            <Select
-              ariaLabel="State"
-              value={state.filters.state}
-              options={STATE_OPTIONS}
-              onChange={(value) =>
-                dispatch({
-                  type: "filtersChanged",
-                  patch: { state: value as POListStateFilter },
-                })
-              }
-            />
-          </div>
+          {pinnedState === null ? (
+            <div className="grid gap-1.5">
+              <span className="text-small font-medium text-ink-700">State</span>
+              <Select
+                ariaLabel="State"
+                value={state.filters.state}
+                options={STATE_OPTIONS}
+                onChange={(value) =>
+                  dispatch({
+                    type: "filtersChanged",
+                    patch: { state: value as POListStateFilter },
+                  })
+                }
+              />
+            </div>
+          ) : null}
           <label className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">
               Received from
@@ -253,7 +295,12 @@ export function PurchaseOrderListView({
             <Button
               aria-label="Reset filters"
               disabled={!filtered}
-              onClick={() => dispatch({ type: "resetFilters" })}
+              onClick={() =>
+                dispatch({
+                  type: "resetFilters",
+                  state: pinnedState ?? undefined,
+                })
+              }
             >
               Reset filters
             </Button>
@@ -280,20 +327,17 @@ export function PurchaseOrderListView({
           </div>
         ) : state.rows.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-            <p className="text-lead font-medium text-ink-900">
-              {filtered
-                ? "No purchase order matches these filters"
-                : "No purchase orders yet"}
-            </p>
-            <p className="max-w-md text-body text-ink-500">
-              {filtered
-                ? "Clear the filters to see the whole archive."
-                : "Start one from an issued quotation revision."}
-            </p>
+            <p className="text-lead font-medium text-ink-900">{emptyTitle}</p>
+            <p className="max-w-md text-body text-ink-500">{emptyBody}</p>
             {filtered ? (
               <Button
                 aria-label="Reset filters"
-                onClick={() => dispatch({ type: "resetFilters" })}
+                onClick={() =>
+                  dispatch({
+                    type: "resetFilters",
+                    state: pinnedState ?? undefined,
+                  })
+                }
               >
                 Reset filters
               </Button>
@@ -439,11 +483,10 @@ export function PurchaseOrderListPage({
   onOpen,
   onAdd,
   isAdmin = false,
+  mode,
 }: PurchaseOrderListPageProps) {
-  const [state, dispatch] = useReducer(
-    poListReducer,
-    undefined,
-    () => initialPOListState
+  const [state, dispatch] = useReducer(poListReducer, undefined, () =>
+    mode === undefined ? initialPOListState : initialPOListStateFor(mode)
   );
   // Every effect run is a new request; the reducer drops an older answer that
   // lands after a newer one started. `reload` is the explicit retry token.
@@ -500,6 +543,7 @@ export function PurchaseOrderListPage({
         dispatch={dispatch}
         onOpen={onOpen}
         onAdd={onAdd}
+        mode={mode}
         onRetry={() => setReload((current) => current + 1)}
         onDelete={
           isAdmin
