@@ -27,7 +27,7 @@ Vera is a professional, high-performance desktop application for generating busi
 Before you begin, ensure you have the following installed:
 
 - [Go](https://go.dev/) (1.18+)
-- [Node.js](https://nodejs.org/) (LTS recommended)
+- [Node.js](https://nodejs.org/) 22.23.4, 24.22.1+, or 26.12.1+ (see `.nvmrc`)
 - Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
 
 ### Installation
