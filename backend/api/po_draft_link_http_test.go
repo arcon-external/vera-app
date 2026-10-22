@@ -379,6 +379,61 @@ func TestDraftLinkStaleVersionAndCurrencyMismatchOverHTTP(t *testing.T) {
 	}
 }
 
+func TestDraftLinkRefusesALiveDraftAndAProtectedCustomerOverHTTP(t *testing.T) {
+	server, adminToken := testQuotationServer(t, "vera_api_po_497_live_protected")
+	liveSourceID, liveSourceNumber := exportForSelector(t, server, adminToken, quotationInput())
+	targetID, _ := exportForSelector(t, server, adminToken, quotationInput())
+	seedStaff(t, server.database, "live-staff@example.com", "staff-password")
+	staffToken := doLogin(t, server, "live-staff@example.com", "staff-password")
+
+	code, body := createPODraft(t, server, staffToken, liveSourceID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create live draft = %d (%v)", code, body)
+	}
+	live := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(live.ID, 10)
+
+	// A draft that already follows a live source is not re-linked by this
+	// slice, on either route.
+	code, body = doJSON(t, server, http.MethodPost, path+"/source-link/review", staffToken,
+		draftLinkReviewRequest(targetID, 0))
+	if code != http.StatusConflict || body["code"] != "po_link_not_eligible" {
+		t.Errorf("live draft review = %d %v; want 409 po_link_not_eligible", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodPost, path+"/source-link", staffToken,
+		draftLinkRequestBody(live, targetID, 0, nil, nil, nil, ""))
+	if code != http.StatusConflict || body["code"] != "po_link_not_eligible" {
+		t.Errorf("live draft link = %d %v; want 409 po_link_not_eligible", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet, path, staffToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen live draft = %d (%v)", code, body)
+	}
+	unchanged := decodePurchaseOrder(t, body)
+	if unchanged.QuotationID != liveSourceID || unchanged.QuoteNumber != liveSourceNumber ||
+		unchanged.SourceState != "live" {
+		t.Errorf("refused re-link changed the live draft: %+v", unchanged)
+	}
+
+	// The link route refuses a client-supplied customer identity by name; the
+	// handler's protected-field guard runs before the store.
+	draft := prepareSourceLessDraft(t, server, staffToken, nil)
+	draftPath := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	protected := draftLinkRequestBody(draft, targetID, 0, nil, []string{"1", "2"}, nil, "")
+	protected["customerId"] = 2
+	code, body = doJSON(t, server, http.MethodPost, draftPath+"/source-link", staffToken, protected)
+	if code != http.StatusUnprocessableEntity || body["code"] != "po_protected_field" {
+		t.Errorf("protected customerId link = %d %v; want 422 po_protected_field", code, body)
+	}
+	code, body = doJSON(t, server, http.MethodGet, draftPath, staffToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen after the protected refusal = %d (%v)", code, body)
+	}
+	if decodePurchaseOrder(t, body).SourceState != "never" {
+		t.Error("a protected-field refusal linked or moved the draft")
+	}
+}
+
 func TestDraftLinkTaxChoiceOverHTTP(t *testing.T) {
 	server, adminToken := testQuotationServer(t, "vera_api_po_497_tax")
 	input := quotationInput()

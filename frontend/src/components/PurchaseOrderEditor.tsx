@@ -1595,6 +1595,13 @@ export function PurchaseOrderEditorPage({
    * overwritten: this is the same draft save, through the same builder.
    */
   const persistWorkingCopy = async (): Promise<PurchaseOrderDTO> => {
+    // Validate the working copy before creating anything. An incomplete
+    // transient draft must not leave a blank stored row behind just because
+    // Link was clicked; the same rule Save follows.
+    const preflight = buildPurchaseOrderUpdate(editorStateRef.current, activeCurrency);
+    if (preflight.input === null) {
+      throw new Error(preflight.error ?? "The draft is incomplete.");
+    }
     const persisted = await ensurePersisted();
     const working = {
       ...editorStateRef.current,

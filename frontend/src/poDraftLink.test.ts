@@ -174,7 +174,8 @@ describe("draft link tax vocabulary", () => {
 
   it("words the currency remedy differently for an editable and a frozen draft", () => {
     const never = draftLinkCurrencyRemedy("never", "IDR", "USD");
-    expect(never).toContain("Change the draft currency");
+    expect(never).toContain("Back without linking");
+    expect(never).toContain("Source basis");
     expect(never).toContain("never converted");
     const former = draftLinkCurrencyRemedy("former", "IDR", "USD");
     expect(former).toContain("Choose a quotation in IDR");

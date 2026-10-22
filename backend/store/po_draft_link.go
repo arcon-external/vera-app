@@ -308,13 +308,14 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		return PurchaseOrder{}, err
 	}
 
-	// A changed customer brings that customer's name and billing address, the
-	// same rule the saved-record repair uses. Every other entered snapshot --
-	// including a same-customer billing address -- is PO-owned and untouched.
-	customerName := stored.CustomerName
+	// The customer name is source-owned unconditionally: the revision's customer
+	// is the authority even when the customer did not change but was renamed in
+	// the directory. The billing address is the one conditional: a changed
+	// customer brings the revision's address, while a same-customer link keeps
+	// the PO-owned address (the saved-record repair's rule).
+	customerName := source.CustomerName
 	billingAddress := stored.BillingAddress
 	if source.CustomerID != stored.CustomerID {
-		customerName = source.CustomerName
 		billingAddress = source.BillingAddress
 	}
 

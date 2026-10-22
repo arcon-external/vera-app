@@ -706,6 +706,58 @@ func TestDraftLinkStaleVersionLeavesTheDraftUntouched(t *testing.T) {
 	}
 }
 
+func TestDraftLinkFormerSameCustomerTakesTheRenamedSourceName(t *testing.T) {
+	database := openTestSchema(t, "vera_po_497_rename")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	quotation := seedRepairQuotation(t, database, 2, "PT. Name Before", "Original source", "Jl. Old Billing", 100, 45)
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	admin := deletionUser(t, database, "admin")
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeRecord, Reason: "issued by mistake",
+		TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: preview.Fingerprint,
+		ActorID: admin.ID,
+	}); err != nil {
+		t.Fatalf("delete the source quotation: %v", err)
+	}
+	former, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("read the former draft: %v", err)
+	}
+	if former.SourceState != PurchaseOrderSourceStateFormer {
+		t.Fatalf("source state = %q; want former", former.SourceState)
+	}
+	if former.CustomerName != "PT. Name Before" {
+		t.Fatalf("former customer name = %q; want the pre-rename snapshot", former.CustomerName)
+	}
+
+	// The Customer directory is the name authority. Renaming the same customer
+	// must be visible after the draft is linked to a replacement revision: the
+	// name is source-owned even when the customer did not change.
+	customerID := customerIDByCode(t, database, 2)
+	if _, err := database.UpdateClient(ctx, customerID, "PT. Name After", "Jl. Directory Address"); err != nil {
+		t.Fatalf("rename the customer: %v", err)
+	}
+	replacement := seedRepairQuotation(t, database, 2, "PT. Name After", "Replacement source", "Jl. New Billing", 100, 45)
+	source := linkReviewSource(t, database, replacement)
+	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
+		former, replacement, user, nil, nil, nil, ""))
+	if err != nil {
+		t.Fatalf("link the former draft to the same customer's replacement: %v", err)
+	}
+	if linked.CustomerID != source.CustomerID {
+		t.Errorf("customer id = %d; want the source's %d", linked.CustomerID, source.CustomerID)
+	}
+	if linked.CustomerName != "PT. Name After" {
+		t.Errorf("customer name = %q; the source-owned name is %q", linked.CustomerName, source.CustomerName)
+	}
+	if linked.BillingAddress != "Jl. Old Billing" {
+		t.Errorf("billing address = %q; a same-customer link keeps the PO-owned address", linked.BillingAddress)
+	}
+}
+
 func TestDraftLinkIsNotAFinalizeReview(t *testing.T) {
 	database := openTestSchema(t, "vera_po_497_finalize")
 	staff := poTestUser(t, database)

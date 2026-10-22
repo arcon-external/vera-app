@@ -399,6 +399,7 @@ function Harness({ draft }: { draft?: PurchaseOrderDTO }) {
 }
 
 async function render(draft?: PurchaseOrderDTO): Promise<void> {
+  latestOrder = draft ?? createdRow();
   await act(async () => {
     root.render(<Harness draft={draft} />);
   });
@@ -471,7 +472,8 @@ describe("draft source link (issue #497)", () => {
     expect(document.body.textContent).toContain(
       "This purchase order is in IDR; quotation 1502260001 revision 0 is in USD."
     );
-    expect(document.body.textContent).toContain("Change the draft currency");
+    expect(document.body.textContent).toContain("Back without linking");
+    expect(document.body.textContent).toContain("Source basis");
     expect(button("Link source").disabled).toBe(true);
     expect(linkMock).not.toHaveBeenCalled();
   });
@@ -502,6 +504,95 @@ describe("draft source link (issue #497)", () => {
 
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.TaxChoice).toBe("source");
+  });
+
+  it("edits the currency and retries the link after the mismatch", async () => {
+    reviewForTest = review({ Source: source({ Currency: "USD" }) });
+    await render();
+    await openReview();
+
+    expect(button("Link source").disabled).toBe(true);
+    expect(document.body.textContent).toContain("Back without linking");
+    act(() => button("Back without linking").click());
+    await flush();
+
+    // Back returns to the editor, where a never-linked draft's currency is
+    // editable. No amount is converted; the same amounts are relabelled USD.
+    chooseSelect("Currency", "USD");
+    await flush();
+    act(() => button("Link a Quotation").click());
+    await flush();
+    await flush();
+
+    expect(button("Link source").disabled).toBe(true);
+    act(() => input("Acknowledge omission of quotation line 1").click());
+    await flush();
+    expect(button("Link source").disabled).toBe(false);
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    const preSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(preSave.Currency).toBe("USD");
+    expect(linkMock).toHaveBeenCalledTimes(1);
+    const linked = document.querySelector('[data-testid="linked"]')?.textContent;
+    expect(linked).toBe("1502260001:0");
+  });
+
+  it("links a formerly-linked draft through the same panel and review", async () => {
+    reviewForTest = review();
+    await render(
+      blank({
+        ID: 7,
+        UUID: "former-497",
+        Version: 2,
+        SourceState: "former",
+        SourceMissing: true,
+        PrintedTotalsKnown: true,
+        QuotationID: 0,
+        QuoteNumber: "1502260099",
+        SourceRevision: 1,
+        CustomerID: 2,
+        CustomerName: "PT. Former",
+      })
+    );
+
+    expect(document.body.textContent).toContain(
+      "The quotation this draft followed was deleted."
+    );
+    await openReview();
+    expect(previewMock).toHaveBeenCalledWith(7, 12, 0);
+    act(() => input("Acknowledge omission of quotation line 1").click());
+    await flush();
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    expect(linkMock).toHaveBeenCalledTimes(1);
+    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
+    expect(linkInput.ID).toBe(7);
+    expect(linkInput.TargetQuotationID).toBe(12);
+    expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
+      "1502260001:0"
+    );
+    expect(document.body.textContent).toContain("Linked source");
+  });
+
+  it("validates the working copy before creating a stored draft", async () => {
+    reviewForTest = review();
+    await render();
+    type("Received date", "");
+    await flush();
+
+    act(() => button("Link a Quotation").click());
+    await flush();
+    await flush();
+
+    // An incomplete transient draft must not leave a blank stored row behind:
+    // the builder refuses it before ensurePersisted can create one.
+    expect(createMock).not.toHaveBeenCalled();
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Received date must be YYYY-MM-DD.");
   });
 
   it("matches ten manual lines one by one and links them explicitly", async () => {
