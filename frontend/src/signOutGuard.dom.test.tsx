@@ -165,6 +165,16 @@ function prompt(): HTMLElement | null {
   );
 }
 
+/** A tab in the shell's primary navigation (issue #494: the only Admin nav). */
+function navTab(label: string): HTMLButtonElement {
+  const nav = document.querySelector<HTMLElement>('nav[aria-label="Primary"]');
+  const found = Array.from(
+    nav?.querySelectorAll<HTMLButtonElement>("button") ?? []
+  ).find((node) => node.textContent?.trim() === label);
+  if (found === undefined) throw new Error(`no tab labelled ${label}`);
+  return found;
+}
+
 function signInButton(): HTMLButtonElement | null {
   return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
     (node) => node.textContent?.trim() === "Sign in"
@@ -245,20 +255,14 @@ describe("Sign out is guarded (issue #491 follow-up)", () => {
   it("asks before discarding dirty Company work", async () => {
     await renderApp();
 
-    // Profile menu -> Admin Dashboard -> Company.
+    // Home -> Admin Dashboard -> Company (issue #494: the Admin workspace is
+    // reached from Home; its sections are the shell's primary tabs).
     await act(async () => {
-      button("Account menu for Ada Admin").click();
-    });
-    await act(async () => {
-      menuItem("Admin Dashboard").click();
+      button("Open Admin Dashboard").click();
     });
     await flush();
-    const companyTab = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-    ).find((node) => node.textContent?.trim() === "Company");
-    if (companyTab === undefined) throw new Error("Company tab not found");
     await act(async () => {
-      companyTab.click();
+      navTab("Company").click();
     });
     await flush();
 
@@ -278,7 +282,7 @@ describe("Sign out is guarded (issue #491 follow-up)", () => {
     });
     expect(prompt()).toBeNull();
     expect(signInButton()).toBeNull();
-    expect(document.querySelector("#admin-panel-company")).not.toBeNull();
+    expect(document.querySelector('[aria-label="Company section"]')).not.toBeNull();
     expect(
       document.querySelector<HTMLInputElement>(
         'input[placeholder="PT Arcon Penta Persada"]'

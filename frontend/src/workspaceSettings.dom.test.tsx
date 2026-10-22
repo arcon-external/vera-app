@@ -300,6 +300,27 @@ async function openMenuItem(label: string): Promise<void> {
   await flush();
 }
 
+// Issue #494: a workspace's settings entry appears only inside that workspace,
+// so these cases enter it from Home first -- the same path a person takes.
+async function openWorkspaceSettings(
+  workspace: "Open Quotation" | "Open Purchase Orders",
+  label: string
+): Promise<void> {
+  await act(async () => {
+    button(workspace).click();
+  });
+  await flush();
+  await openMenuItem(label);
+}
+
+function openQuotationSettingsPage(): Promise<void> {
+  return openWorkspaceSettings("Open Quotation", "Quotation settings");
+}
+
+function openPurchaseOrderSettingsPage(): Promise<void> {
+  return openWorkspaceSettings("Open Purchase Orders", "Purchase Order settings");
+}
+
 function input(ariaLabel: string): HTMLInputElement {
   const found = document.querySelector<HTMLInputElement>(
     `input[aria-label="${ariaLabel}"]`
@@ -360,7 +381,7 @@ function detailsInput(label: string): HTMLInputElement {
 describe("Quotation settings page (issue #492)", () => {
   it("saves as the user edits and reloads from this device", async () => {
     await renderApp();
-    await openMenuItem("Quotation settings");
+    await openQuotationSettingsPage();
 
     // Its own surface: the shell names it, and it has no workspace tabs.
     expect(document.body.textContent).toContain("Quotation settings");
@@ -381,7 +402,7 @@ describe("Quotation settings page (issue #492)", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await renderApp();
-    await openMenuItem("Quotation settings");
+    await openQuotationSettingsPage();
     expect(input("Default validity days").value).toBe("45");
     expect(input("Default subject").value).toBe("Turbine overhaul");
   });
@@ -392,7 +413,7 @@ describe("Quotation settings page (issue #492)", () => {
       validityDays: 45,
     });
     await renderApp();
-    await openMenuItem("Quotation settings");
+    await openQuotationSettingsPage();
     expect(input("Default validity days").value).toBe("45");
 
     await act(async () => {
@@ -406,7 +427,7 @@ describe("Quotation settings page (issue #492)", () => {
 
   it("clamps numbers to the bounds the editors accept", async () => {
     await renderApp();
-    await openMenuItem("Quotation settings");
+    await openQuotationSettingsPage();
 
     typeInto(input("Default validity days"), "0");
     expect(input("Default validity days").value).toBe("1");
@@ -450,7 +471,7 @@ describe("Quotation settings page (issue #492)", () => {
 describe("Purchase Order settings page (issue #492)", () => {
   it("saves, reloads and clears the PO defaults", async () => {
     await renderApp();
-    await openMenuItem("Purchase Order settings");
+    await openPurchaseOrderSettingsPage();
 
     expect(document.querySelector('nav[aria-label="Primary"]')).toBeNull();
     typeInto(textarea("Default payment terms"), "50% advance, balance 30 days");
@@ -467,7 +488,7 @@ describe("Purchase Order settings page (issue #492)", () => {
     document.body.appendChild(container);
     root = createRoot(container);
     await renderApp();
-    await openMenuItem("Purchase Order settings");
+    await openPurchaseOrderSettingsPage();
     expect(textarea("Default payment terms").value).toBe(
       "50% advance, balance 30 days"
     );
@@ -487,7 +508,7 @@ describe("Purchase Order settings page (issue #492)", () => {
 
   it("clamps the page size to its bounds", async () => {
     await renderApp();
-    await openMenuItem("Purchase Order settings");
+    await openPurchaseOrderSettingsPage();
     typeInto(input("Default PO list page size"), "0");
     expect(input("Default PO list page size").value).toBe("1");
     typeInto(input("Default PO list page size"), "500");

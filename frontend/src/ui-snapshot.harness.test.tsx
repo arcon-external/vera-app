@@ -33,6 +33,8 @@ import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
+import { AdminDashboard } from "./components/AdminDashboard";
+import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import {
   DeletionChallengePanel,
@@ -1394,6 +1396,30 @@ const CASES: SnapshotCase[] = [
       <AppShell page="admin-company" onNavigate={() => undefined}>
         <p className="text-body text-ink-500">Company settings body.</p>
       </AppShell>
+    ),
+  },
+  {
+    // Issue #494: the assembled Admin Company page, not the shell alone. The
+    // primary bar is the only Clients/Team/Company/Backups navigation, and the
+    // Company profile's own General/Units/Quotation/Portal bar sits in the body
+    // where the duplicate main tablist used to be. The card's effects do not
+    // run under renderToString, so the panel below the bar is its loading
+    // state; that is enough for the placement question, because the bar renders
+    // before the fetch resolves.
+    //
+    // What this case cannot show: the Company panels' loaded content, tab
+    // switching, keyboard order and focus stay hand-driven.
+    name: "AppShellAdminCompany",
+    element: (
+      <ToastProvider>
+        <AppShell
+          page="admin-company"
+          settingsOrigin="admin"
+          onNavigate={() => undefined}
+        >
+          <AdminDashboard tab="company" />
+        </AppShell>
+      </ToastProvider>
     ),
   },
   {

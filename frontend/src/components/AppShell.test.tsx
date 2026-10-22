@@ -1,6 +1,6 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { AppShell } from "./AppShell";
+import { AppShell, profileMenuContext } from "./AppShell";
 import type { AppPage } from "../poLeaveGuard";
 
 // Issue #491: the shell belongs to one workspace at a time. Home is global and
@@ -64,6 +64,36 @@ function nav(html: string): string {
   return html.slice(start, end);
 }
 
+describe("profile menu context (issue #494)", () => {
+  it("names the domain a workspace page belongs to", () => {
+    expect(profileMenuContext("create")).toBe("quotation");
+    expect(profileMenuContext("drafts")).toBe("quotation");
+    expect(profileMenuContext("detail")).toBe("quotation");
+    expect(profileMenuContext("po")).toBe("purchase-order");
+    expect(profileMenuContext("po-drafts")).toBe("purchase-order");
+    expect(profileMenuContext("admin-clients")).toBe("admin");
+    expect(profileMenuContext("admin-company")).toBe("admin");
+  });
+
+  it("retains the origin on a settings page", () => {
+    expect(profileMenuContext("settings", "quotation")).toBe("quotation");
+    expect(profileMenuContext("settings", "purchase-order")).toBe("purchase-order");
+    expect(profileMenuContext("quotation-settings", "quotation")).toBe("quotation");
+    expect(profileMenuContext("po-settings", "purchase-order")).toBe("purchase-order");
+    // A settings page is always a profile surface: the current page never
+    // becomes its own origin.
+    expect(profileMenuContext("quotation-settings", "purchase-order")).toBe(
+      "purchase-order"
+    );
+  });
+
+  it("has no context on Home, whatever origin is remembered", () => {
+    expect(profileMenuContext("home", "quotation")).toBeNull();
+    expect(profileMenuContext("home", "admin")).toBeNull();
+    expect(profileMenuContext("settings", null)).toBeNull();
+  });
+});
+
 describe("AppShell global Home (issue #491)", () => {
   it("shows Vera + Business Suite and no workspace tabs on Home", () => {
     const html = renderShell("home");
@@ -72,6 +102,22 @@ describe("AppShell global Home (issue #491)", () => {
     expect(html).not.toContain('aria-label="Primary"');
     expect(html).not.toContain(">Editor</button>");
     expect(html).not.toContain('aria-label="Back to Home"');
+  });
+
+  it("reads as one Vera | Business Suite group with a literal separator", () => {
+    const html = renderShell("home");
+    // Issue #494: the brand is three runs in one vertically centred group,
+    // in reading order, and the divider is a real glyph rather than a border.
+    const vera = html.indexOf(">Vera</span>");
+    const divider = html.indexOf('aria-hidden="true" class="text-caption leading-none text-ink-300">|</span>');
+    const suite = html.indexOf(">Business Suite</span>");
+    expect(vera).toBeGreaterThan(-1);
+    expect(divider).toBeGreaterThan(vera);
+    expect(suite).toBeGreaterThan(divider);
+    // The group centres all three runs on the same cross axis.
+    expect(html).toContain(
+      'class="flex items-center gap-2 leading-none"'
+    );
   });
 });
 
@@ -136,6 +182,22 @@ describe("AppShell account settings", () => {
     expect(html).toContain(">Account settings<");
     expect(buttonTagFor(html, "Back to Home")).toBeDefined();
     expect(html).not.toContain('aria-label="Primary"');
+  });
+
+  it("keeps its title, back arrow and tab-less shape when a workspace context is retained", () => {
+    // Issue #494: the retained origin changes only the profile menu, never the
+    // page title, the back target or the absence of workspace tabs.
+    const html = renderToString(
+      <AppShell page="settings" settingsOrigin="quotation" onNavigate={() => {}}>
+        <div>page body</div>
+      </AppShell>
+    );
+    expect(html).toContain(">Account settings<");
+    expect(html).not.toContain(">Quotation settings<");
+    expect(html).not.toContain(">Quotation<");
+    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(html).not.toContain('aria-label="Primary"');
+    expect(html).toContain('data-workspace="account"');
   });
 });
 

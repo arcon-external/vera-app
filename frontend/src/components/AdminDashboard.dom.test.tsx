@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
-import { useState } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AdminDashboard, type AdminTabId } from "./AdminDashboard";
+import { AdminDashboard } from "./AdminDashboard";
 import { ToastProvider } from "../toast";
 
-// Issue #491: Admin Dashboard tab switching. The real panel components render;
-// only the Wails bindings are replaced at their module boundary. Clients and
-// Team each load their own list through their own binding, which is what proves
-// the tab switch reached the right panel rather than merely repainting the bar.
+// Issue #494: the body follows the page the shell navigated to. With the
+// duplicate tablist gone, the prop is the only driver, so rendering the same
+// dashboard with a different tab must swap the panel. The real panel
+// components render; only the Wails bindings are replaced at their module
+// boundary, which is what proves the swap reached the right panel.
 
 const { listClientsMock, listUsersMock } = vi.hoisted(() => ({
   listClientsMock: vi.fn(async (..._args: unknown[]) => []),
@@ -67,15 +67,6 @@ vi.mock("@backend/backend/UpdateAPI", () => ({
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 
-function Harness() {
-  const [tab, setTab] = useState<AdminTabId>("clients");
-  return (
-    <ToastProvider>
-      <AdminDashboard tab={tab} onTabChange={setTab} />
-    </ToastProvider>
-  );
-}
-
 let container: HTMLDivElement;
 let root: Root;
 
@@ -93,41 +84,35 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-function tab(label: string): HTMLButtonElement {
-  const found = Array.from(
-    document.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-  ).find((node) => node.textContent?.trim() === label);
-  if (found === undefined) throw new Error(`tab ${label} not found`);
-  return found;
+async function renderTab(tab: "clients" | "team"): Promise<void> {
+  await act(async () => {
+    root.render(
+      <ToastProvider>
+        <AdminDashboard tab={tab} />
+      </ToastProvider>
+    );
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
-describe("AdminDashboard tab switching (issue #491)", () => {
-  it("opens Clients first and switches to Team and back", async () => {
-    await act(async () => {
-      root.render(<Harness />);
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+describe("AdminDashboard body follows the page (issue #494)", () => {
+  it("opens Clients first and swaps to Team when the page changes", async () => {
+    await renderTab("clients");
     expect(document.querySelector("#clients-heading")).not.toBeNull();
+    expect(listClientsMock).toHaveBeenCalledTimes(1);
 
-    await act(async () => {
-      tab("Team").click();
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await renderTab("team");
     expect(document.querySelector("#users-heading")).not.toBeNull();
     expect(document.querySelector("#clients-heading")).toBeNull();
     expect(listUsersMock).toHaveBeenCalledTimes(1);
+  });
 
-    await act(async () => {
-      tab("Clients").click();
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(document.querySelector("#clients-heading")).not.toBeNull();
-    expect(document.querySelector("#users-heading")).toBeNull();
+  it("renders no Admin tablist of its own", async () => {
+    await renderTab("clients");
+    expect(document.querySelector('[aria-label="Admin sections"]')).toBeNull();
+    expect(document.querySelector("[role=tablist]")).toBeNull();
+    expect(document.querySelector("[role=tabpanel]")).toBeNull();
   });
 });

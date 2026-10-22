@@ -539,7 +539,7 @@ The workspace for the PO Editor, Drafts and Archive tabs.
 _Avoid_: PO module
 
 **Admin Dashboard**:
-The admin workspace containing the Client directory, Team, Company profile and Backups tabs.
+The admin workspace containing the Client directory, Team, Company profile and Backups tabs; those tabs live in the shell's primary navigation, not in the page body.
 _Avoid_: Admin (the role), dashboard
 
 **Tab**:
@@ -559,7 +559,7 @@ The workspace tab listing issued quotation revisions or finalized purchase order
 _Avoid_: History, backup
 
 **Profile menu**:
-The user menu with Account settings, Quotation settings, Purchase Order settings, the Admin Dashboard for admins, and Sign out.
+The user menu with Account settings and Sign out everywhere. Inside a workspace it also offers that workspace's own settings — Quotation settings in Quotation, Purchase Order settings in Purchase Order — and a settings page keeps the entry of the workspace it was opened from.
 _Avoid_: User menu, account menu
 
 **Account settings**:

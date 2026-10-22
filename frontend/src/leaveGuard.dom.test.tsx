@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./components/AppShell";
-import { AdminDashboard, adminPageForTab, adminTabForPage } from "./components/AdminDashboard";
+import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
 import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import { ToastProvider } from "./toast";
@@ -163,7 +163,6 @@ function CompanyHarness() {
       >
         <AdminDashboard
           tab={adminTabForPage(page)}
-          onTabChange={(tab) => leave.request(adminPageForTab(tab))}
           onCompanyDirtyChange={setDirty}
         />
       </AppShell>
@@ -248,7 +247,7 @@ describe("Admin/Company exercise: leaving unsaved edits asks (issue #491)", () =
     expect(document.body.textContent).toContain(
       "The company profile has unsaved changes."
     );
-    expect(document.querySelector("#admin-panel-company")).not.toBeNull();
+    expect(document.querySelector('[aria-label="Company section"]')).not.toBeNull();
 
     await act(async () => {
       button("Discard changes").click();

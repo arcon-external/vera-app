@@ -1,13 +1,19 @@
 import type { AppPage } from "../poLeaveGuard";
 import { ClientsPage } from "./ClientsPage";
 import { BackupCard, CompanyProfileCard, RestoreCard } from "./SettingsPage";
-import { TabBar, tabId, tabPanelId } from "./TabBar";
 import { UsersPage } from "./UsersPage";
 
 // Issue #491: the admin surfaces used to sit in the same Settings page as the
 // signed-in person's own account. They are company-wide tools, so they moved
 // to their own workspace with their own tabs. Theme stays inside Company, and
 // Account settings (General/Keyboard) stays in the profile menu.
+//
+// Issue #494: that workspace's main navigation exists only in the shell's
+// primary bar. The dashboard used to render a second Clients/Team/Company/
+// Backups tablist whose panel then pointed back at it with aria-labelledby;
+// both are gone. What remains is one named section for the page the shell
+// navigated to, with the Company profile's own General/Units/Quotation/Portal
+// sub-tabs still living in the body where the duplicate bar used to sit.
 
 export type AdminTabId = "clients" | "team" | "company" | "backups";
 
@@ -52,57 +58,37 @@ const DESCRIPTIONS: Record<AdminTabId, string> = {
 
 export function AdminDashboard({
   tab,
-  onTabChange,
   onCompanyChanged,
   onCompanyDirtyChange,
 }: {
   tab: AdminTabId;
-  /** Every tab switch goes through App's leave guard. */
-  onTabChange: (tab: AdminTabId) => void;
   /** A company save landed; App re-reads the profile and served unit list. */
   onCompanyChanged?: () => void;
   /** The Company card's unsaved-work flag, for the leave guard. */
   onCompanyDirtyChange?: (dirty: boolean) => void;
 }) {
+  const label = ADMIN_TABS.find((item) => item.id === tab)?.label ?? "Admin";
   return (
-    <section aria-labelledby="admin-heading" className="space-y-6">
-      <div>
-        <h1 id="admin-heading" className="text-display font-semibold text-ink-950">
-          Admin Dashboard
-        </h1>
-        <p className="mt-1.5 max-w-3xl text-body text-ink-500">
-          {DESCRIPTIONS[tab]}
-        </p>
-      </div>
+    <section aria-label={`${label} section`} className="space-y-6">
+      {/* The shell brand already announces "Admin Dashboard", so the body keeps
+          only the contextual sentence. That is what lets the Company sub-tabs
+          sit at the position the duplicate main tabs occupied (#494). */}
+      <p className="max-w-3xl text-body text-ink-500">{DESCRIPTIONS[tab]}</p>
 
-      <TabBar
-        items={ADMIN_TABS}
-        active={tab}
-        onSelect={(id) => onTabChange(id as AdminTabId)}
-        label="Admin sections"
-        idPrefix="admin"
-      />
-
-      <div
-        role="tabpanel"
-        id={tabPanelId("admin", tab)}
-        aria-labelledby={tabId("admin", tab)}
-      >
-        {tab === "clients" ? <ClientsPage /> : null}
-        {tab === "team" ? <UsersPage /> : null}
-        {tab === "company" ? (
-          <CompanyProfileCard
-            onSaved={onCompanyChanged}
-            onDirtyChange={onCompanyDirtyChange}
-          />
-        ) : null}
-        {tab === "backups" ? (
-          <div className="grid gap-6">
-            <BackupCard />
-            <RestoreCard />
-          </div>
-        ) : null}
-      </div>
+      {tab === "clients" ? <ClientsPage /> : null}
+      {tab === "team" ? <UsersPage /> : null}
+      {tab === "company" ? (
+        <CompanyProfileCard
+          onSaved={onCompanyChanged}
+          onDirtyChange={onCompanyDirtyChange}
+        />
+      ) : null}
+      {tab === "backups" ? (
+        <div className="grid gap-6">
+          <BackupCard />
+          <RestoreCard />
+        </div>
+      ) : null}
     </section>
   );
 }

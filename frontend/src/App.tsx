@@ -21,7 +21,11 @@ import {
   ReviewPurchaseOrderSource,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
-import { AppShell } from "./components/AppShell";
+import {
+  AppShell,
+  profileMenuContext,
+  type SettingsOrigin,
+} from "./components/AppShell";
 import { ArchivePage } from "./components/ArchivePage";
 import { DraftsPage } from "./components/DraftsPage";
 import {
@@ -68,7 +72,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
-import { AdminDashboard, adminPageForTab, adminTabForPage } from "./components/AdminDashboard";
+import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
   POSourcePage,
@@ -504,6 +508,13 @@ function App() {
   // "settings" is the signed-in person's account settings. There is no router:
   // one page state still drives the whole app.
   const [page, setPage] = useState<AppPage>("home");
+  // Issue #494: the profile menu offers a workspace's settings only while that
+  // workspace is the context. A settings page is a profile surface with no
+  // tabs, so this is the one thing a settings page must remember about where
+  // it was opened from; it widens the menu and changes nothing else. It is
+  // recorded only when the leave guard actually allows the navigation, and
+  // cleared on Home and on sign-out.
+  const [settingsOrigin, setSettingsOrigin] = useState<SettingsOrigin>(null);
   // #468 wave 2: the PO editor owns its reducer state, so a tab that unmounts
   // it loses unsaved work. The editor lifts only its dirty flag; this gate
   // asks through the same discard panel before any navigation leaves it.
@@ -538,6 +549,10 @@ function App() {
   const navigatePage = useCallback(
     (next: AppPage) => {
       if (next !== "po") closePurchaseOrder();
+      // Issue #494: a successful return to Home ends the remembered workspace
+      // context. Only the allowed navigation reaches here; a refused one has
+      // no way to clear it.
+      if (next === "home") setSettingsOrigin(null);
       setPage(next);
     },
     [closePurchaseOrder]
@@ -589,6 +604,45 @@ function App() {
       if (source === "admin-company") setCompanyDirty(false);
     },
   });
+
+  // Issue #494: every settings entry goes through the guard, and the origin is
+  // recorded in the allowed-navigation callback — the same place `after`
+  // already runs for mod+N. Keep editing never invokes it, so a refused visit
+  // leaves the previous context untouched.
+  const openAccountSettings = useCallback(() => {
+    poLeave.request("settings", () => {
+      setSettingsOrigin(profileMenuContext(page, settingsOrigin));
+      setPage("settings");
+    });
+  }, [poLeave.request, page, settingsOrigin]);
+
+  const openQuotationSettings = useCallback(() => {
+    poLeave.request("quotation-settings", () => {
+      setSettingsOrigin("quotation");
+      setPage("quotation-settings");
+    });
+  }, [poLeave.request]);
+
+  const openPurchaseOrderSettings = useCallback(() => {
+    poLeave.request("po-settings", () => {
+      setSettingsOrigin("purchase-order");
+      setPage("po-settings");
+    });
+  }, [poLeave.request]);
+
+  // The shell's own navigation (workspace tabs, the back arrow, Account
+  // settings) still runs through the guard; only Account settings needs the
+  // origin captured on the way.
+  const navigateFromShell = useCallback(
+    (next: AppPage) => {
+      if (next === "settings") {
+        openAccountSettings();
+        return;
+      }
+      poLeave.request(next);
+    },
+    [openAccountSettings, poLeave.request]
+  );
 
   const [customerId, setCustomerId] = useState(2);
   const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
@@ -963,6 +1017,9 @@ function App() {
       setUser(null);
       resetForm();
       setCompanyDirty(false);
+      // Issue #494: the remembered workspace context belongs to the session
+      // that opened it; the next sign-in starts from Home with none.
+      setSettingsOrigin(null);
       setPage("home");
     }
   }, [resetForm]);
@@ -982,6 +1039,7 @@ function App() {
           setUser(null);
           resetForm();
           setCompanyDirty(false);
+          setSettingsOrigin(null);
           setPage("home");
           pushToast(
             "error",
@@ -1922,7 +1980,7 @@ function App() {
           if (user?.Role === "admin") poLeave.request("admin-clients");
           return;
         case "gotoSettings":
-          poLeave.request("settings");
+          openAccountSettings();
           return;
         case "toggleHelp":
           setShowHelp((visible) => !visible);
@@ -1933,7 +1991,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, user, showHelp, confirmingNew, pendingPaste, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing]);
+  }, [page, user, showHelp, confirmingNew, pendingPaste, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing, openAccountSettings]);
 
   // PO source selector loaders (#467). The modal owns the three steps; these
   // callbacks are its only transport, so the component stays free of hidden
@@ -2080,16 +2138,17 @@ function App() {
       ) : null}
       <AppShell
       page={visiblePage}
+      settingsOrigin={settingsOrigin}
       inert={poLeave.pendingPage !== null}
-      onNavigate={(next) => poLeave.request(next)}
+      onNavigate={navigateFromShell}
       draftCount={draftCount}
       companyName={companyName}
       user={user}
       onSignOut={() =>
         poLeave.request(visiblePage, () => void handleSignOut())
       }
-      onOpenQuotationSettings={() => poLeave.request("quotation-settings")}
-      onOpenPurchaseOrderSettings={() => poLeave.request("po-settings")}
+      onOpenQuotationSettings={openQuotationSettings}
+      onOpenPurchaseOrderSettings={openPurchaseOrderSettings}
       actionBar={
         visiblePage === "create" ? (
           <>
@@ -2450,7 +2509,6 @@ function App() {
       {isAdminPage(visiblePage) && isAdmin ? (
         <AdminDashboard
           tab={adminTabForPage(visiblePage)}
-          onTabChange={(tab) => poLeave.request(adminPageForTab(tab))}
           onCompanyDirtyChange={setCompanyDirty}
           onCompanyChanged={() => {
             // A company save (name, currency, canonical unit, or the unit list
