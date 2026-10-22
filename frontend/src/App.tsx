@@ -1961,7 +1961,9 @@ function App() {
       draftCount={draftCount}
       companyName={companyName}
       user={user}
-      onSignOut={() => void handleSignOut()}
+      onSignOut={() =>
+        poLeave.request(visiblePage, () => void handleSignOut())
+      }
       actionBar={
         visiblePage === "create" ? (
           <>
