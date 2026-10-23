@@ -275,7 +275,7 @@ _Avoid_: Dollar, USD
 ### Purchase orders
 
 **Purchase order (PO)**:
-Vera's record of a customer's order; it always follows a source (an issued quotation revision or a customer PO document) and is finalized after review.
+Vera's record of a customer's order; it may be entered before a source exists, shows Source missing until one is linked, and is finalized only after review with a live source.
 _Avoid_: Order, customer order
 
 **Customer PO**:
@@ -527,6 +527,10 @@ _Avoid_: Import, rollback
 **Deletion request**:
 A request to permanently delete a quotation, purchase order or document chain; an admin approves it.
 _Avoid_: Delete, purge
+
+**Mock fixture**:
+A clearly labelled fictional record created only in an explicitly confirmed local database for manual testing; it is not an issued document, carries synthetic PDFs, and makes no extraction-accuracy claim.
+_Avoid_: Test data, demo data, sample data
 
 ### Workspaces and settings
 
