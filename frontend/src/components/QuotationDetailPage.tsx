@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GetPOSourceOccupancy,
   GetQuotationRevision,
@@ -251,6 +251,10 @@ export function QuotationDetailPage({
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [activeRevision, setActiveRevision] = useState(revision);
+  // R4: the revision the mounted record actually belongs to. A failed fetch
+  // must not leave the selector naming a revision this page never displayed,
+  // so the catch puts the selector back on this one.
+  const loadedRevision = useRef<number | null>(null);
   // #499: the occupancy answer and the create attempt. The answer chooses the
   // label; the attempt is in flight only long enough to hand the record to the
   // PO workspace.
@@ -324,6 +328,7 @@ export function QuotationDetailPage({
   useEffect(() => {
     setActiveRevision(revision);
     setQuotation(null);
+    loadedRevision.current = null;
   }, [revision, quotationID]);
 
   useEffect(() => {
@@ -335,13 +340,24 @@ export function QuotationDetailPage({
     }
     void GetQuotationRevision(quotationID, activeRevision)
       .then((result) => {
-        if (active) setQuotation(result as ArchivedQuotation);
+        if (active) {
+          loadedRevision.current = result.RevisionNumber;
+          setQuotation(result as ArchivedQuotation);
+        }
       })
       .catch(() => {
         pushToast(
           "error",
           "We couldn't load this quotation. Return to the archive and try again."
         );
+        // R4: the failed revision never reached the page. Put the selector
+        // back on the record that is still mounted so the action, the content
+        // and the selector cannot disagree; a first-load failure has no
+        // record to return to and keeps the not-found card.
+        const fallback = loadedRevision.current;
+        if (active && fallback !== null && fallback !== activeRevision) {
+          setActiveRevision(fallback);
+        }
       })
       .finally(() => {
         if (active) {
@@ -354,6 +370,7 @@ export function QuotationDetailPage({
     };
     // `quotation` is intentionally excluded: it only distinguishes the first
     // load from a revision switch and would otherwise re-trigger the fetch.
+    // The loaded record's revision is read through loadedRevision instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quotationID, activeRevision, pushToast]);
 
@@ -372,6 +389,13 @@ export function QuotationDetailPage({
   // any code the catalogue cannot resolve.
   const entry = resolveCurrencyEntry(catalogue, quotation?.Currency, currency);
 
+  // R4: creation is only offered for the record on screen. The selector and
+  // the mounted record can differ while a switch is loading (and, without the
+  // rollback above, after it fails), so the action is gated on both naming the
+  // same revision -- never on activeRevision alone.
+  const revisionAligned =
+    quotation !== null && quotation.RevisionNumber === activeRevision;
+
   // #499: create from the revision on screen. App owns the source-bound create
   // call and the PO workspace; this page only supplies the exact displayed
   // pair (the header is disabled while a switch is in flight, so the pair it
@@ -379,7 +403,8 @@ export function QuotationDetailPage({
   // occupancy: a concurrent create answers 409, and that must switch the action
   // to Open PO draft / View PO rather than retry.
   const handleCreatePurchaseOrder = useCallback(async () => {
-    if (quotation === null || creatingPurchaseOrder) return;
+    if (quotation === null || quotation.RevisionNumber !== activeRevision) return;
+    if (creatingPurchaseOrder) return;
     setCreatingPurchaseOrder(true);
     try {
       await onCreatePurchaseOrder(quotation.ID, quotation.RevisionNumber);
@@ -412,6 +437,7 @@ export function QuotationDetailPage({
     }
   }, [
     quotation,
+    activeRevision,
     creatingPurchaseOrder,
     onCreatePurchaseOrder,
     readPurchaseOrder,
@@ -453,7 +479,7 @@ export function QuotationDetailPage({
         onEdit={() => onEdit(quotation)}
         purchaseOrder={purchaseOrder}
         purchaseOrderPending={purchaseOrderPending}
-        revisionSwitching={switching || creatingPurchaseOrder}
+        revisionSwitching={switching || !revisionAligned || creatingPurchaseOrder}
         onCreatePurchaseOrder={() => void handleCreatePurchaseOrder()}
         onOpenPurchaseOrder={onOpenPurchaseOrder}
         onCopy={(current) =>

@@ -511,4 +511,61 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
       "This quotation already has a purchase order draft. Use Open PO draft to continue it."
     );
   });
+
+  it("returns to the loaded revision after a failed older-revision switch, and creates only what is shown", async () => {
+    // R4: a failed switch used to leave the selector on Revision 00 while the
+    // mounted record, its Edit label and the create payload stayed revision 02.
+    // The failure must put the selector back on the record that is displayed,
+    // and Create must never fire while the two disagree.
+    let rejectOlder!: (error: unknown) => void;
+    mocks.getRevision.mockImplementation((_id: number, revision: number) => {
+      if (revision === 0) {
+        return new Promise((_resolve, reject) => {
+          rejectOlder = reject;
+        });
+      }
+      return Promise.resolve(archived(revision));
+    });
+    await openArchivedQuotation();
+    expect(button("Create PO from this Quotation").disabled).toBe(false);
+
+    act(() => button("Quotation revision").click());
+    await flush();
+    act(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
+        .find((option) => option.textContent?.trim() === "Revision 00")!
+        .click()
+    );
+    await flush();
+
+    // The older revision is still loading: the action cannot fire against the
+    // record that is still mounted.
+    expect(button("Quotation revision").textContent).toContain("Revision 00");
+    expect(button("Create PO from this Quotation").disabled).toBe(true);
+
+    // The fetch fails. The selector returns to the revision the page is
+    // actually showing instead of claiming the older one.
+    act(() => rejectOlder(new Error("revision unavailable")));
+    await flush();
+    await flush();
+
+    expect(button("Quotation revision").textContent).toContain(
+      "Revision 02 — latest"
+    );
+    expect(button("Quotation revision").textContent).not.toContain("Revision 00");
+    expect(document.body.textContent).toContain("Edit revision 02");
+    // The rollback re-reads the record the selector now names.
+    expect(mocks.getRevision).toHaveBeenCalledTimes(3);
+    expect(mocks.getRevision).toHaveBeenLastCalledWith(QUOTATION_ID, 2);
+    expect(button("Create PO from this Quotation").disabled).toBe(false);
+
+    act(() => button("Create PO from this Quotation").click());
+    await flush();
+    await flush();
+
+    expect(mocks.createDraft).toHaveBeenCalledTimes(1);
+    expect(mocks.createDraft.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ QuotationID: QUOTATION_ID, RevisionNumber: 2 })
+    );
+  });
 });
