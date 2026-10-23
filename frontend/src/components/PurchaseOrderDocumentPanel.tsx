@@ -57,6 +57,12 @@ export interface PurchaseOrderDocumentPanelViewProps {
   extractionStarting?: boolean;
   /** The typed deployment probe: false disables Extract and shows a banner. */
   extractorAvailable?: boolean | null;
+  /**
+   * Blocks every document control, including the hidden file input. The editor
+   * sets it while a draft Save is in flight, so an upload cannot attach to a row
+   * the Save is about to remount.
+   */
+  disabled?: boolean;
   onChooseFile: () => void;
   onView: () => void;
   onRemove: () => void;
@@ -77,6 +83,7 @@ export function PurchaseOrderDocumentPanelView({
   extractionStatus = null,
   extractionStarting = false,
   extractorAvailable = null,
+  disabled: disabledProp = false,
   onChooseFile,
   onView,
   onRemove,
@@ -89,7 +96,7 @@ export function PurchaseOrderDocumentPanelView({
   const extract = extractAndCompareAvailability(documentState, onExtract != null, extractorAvailable);
   const extractInFlight = extractionStatus === "queued" || extractionStatus === "running";
   const extractBusy = extractionStarting || extractInFlight;
-  const disabled = busy !== "idle" || loading;
+  const disabled = busy !== "idle" || loading || disabledProp;
   const versionLabel = documentVersionLabel(state);
   const uploadedDate = active?.UploadedAt ? active.UploadedAt.slice(0, 10) : "";
   const extractHint =
@@ -284,6 +291,12 @@ export interface PurchaseOrderDocumentPanelProps {
   onExtract?: () => void;
   extractionStatus?: "queued" | "running" | null;
   extractionStarting?: boolean;
+  /**
+   * Blocks every document control, including the hidden file input, and makes
+   * `attach` refuse a synthetic or stale file event. The editor sets it while a
+   * draft Save is in flight.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -302,6 +315,7 @@ export function PurchaseOrderDocumentPanel({
   onExtract,
   extractionStatus = null,
   extractionStarting = false,
+  disabled = false,
 }: PurchaseOrderDocumentPanelProps) {
   const [state, setState] = useState<PurchaseOrderDocumentStateDTO>(
     initialState ?? { Document: null, Versions: [] }
@@ -400,11 +414,16 @@ export function PurchaseOrderDocumentPanel({
     };
   }, [preview]);
 
+  // The hidden input follows the view's disabled rule, plus the parent's block.
+  // The view also disables every visible control while `disabled` is true.
+  const controlsDisabled = disabled || busy !== "idle" || loading;
+
   const chooseFile = () => {
     fileInput.current?.click();
   };
 
   const attach = async (file: File) => {
+    if (disabled) return;
     if (file.size > MAX_PURCHASE_ORDER_DOCUMENT_BYTES) {
       setError(documentErrorMessage(new Error("the customer PO PDF is larger than 20 MB")));
       return;
@@ -507,6 +526,7 @@ export function PurchaseOrderDocumentPanel({
         accept="application/pdf,.pdf"
         aria-label="Customer PO PDF file"
         className="sr-only"
+        disabled={controlsDisabled}
         onChange={(event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
@@ -521,6 +541,7 @@ export function PurchaseOrderDocumentPanel({
         pendingRemoval={pendingRemoval}
         absenceConfirmed={absenceConfirmed}
         preview={preview}
+        disabled={disabled}
         onExtract={onExtract}
         extractionStatus={extractionStatus}
         extractionStarting={extractionStarting}

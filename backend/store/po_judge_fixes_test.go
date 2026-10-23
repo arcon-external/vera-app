@@ -112,6 +112,18 @@ func TestLegacyFormerDraftSavesWithTheEditorBasis(t *testing.T) {
 		t.Errorf("legacy former basis after save = %q/%q; want Services/NonConstruction",
 			saved.TaxType, saved.ServiceCategory)
 	}
+	// The stored PPN is frozen at creation. Populating the display labels must
+	// not recalculate the money on a former legacy row.
+	if saved.PpnBps != 0 {
+		t.Errorf("legacy former PPN = %d bps after the editor basis save; want the frozen 0", saved.PpnBps)
+	}
+	if saved.PpnMinor != 0 {
+		t.Errorf("legacy former PPN amount = %d; want the frozen 0", saved.PpnMinor)
+	}
+	if saved.GrandTotalMinor != former.GrandTotalMinor {
+		t.Errorf("legacy former grand total = %d; want the unchanged %d",
+			saved.GrandTotalMinor, former.GrandTotalMinor)
+	}
 }
 
 func TestDeletingANeverLinkedDraftPreviewsAndCommits(t *testing.T) {

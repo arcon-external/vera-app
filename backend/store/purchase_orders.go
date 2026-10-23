@@ -558,10 +558,12 @@ func resolveBlankPurchaseOrderBasis(companyCurrency string, input PurchaseOrderB
 
 // keepsFormerLegacyPopulation reports whether a formerly-linked legacy row
 // should keep the one-time legacy population instead of taking the editable
-// path. It is true only when the stored tax type is empty (a pre-007 row) and
-// the submission names no tax type, currency or zone change: the editor's
-// display-derived basis is not an edit. A submission that names a type, or that
-// moves the commercial basis, is an ordinary editable former-draft save.
+// path. It is true only when the stored tax type is empty (a pre-039 row) and
+// the submission names no tax type, currency or zone change: that is the
+// editor's display-derived legacy basis, which is not an edit. A submission
+// that names a type takes the editable path; there the effective commercial
+// basis is compared with the stored one so a derived label still keeps the
+// frozen rate (sameFormerCommercialBasis).
 func keepsFormerLegacyPopulation(lock purchaseOrderWriteLock, input PurchaseOrderUpdate) bool {
 	if lock.SourceState != PurchaseOrderSourceStateFormer || strings.TrimSpace(lock.TaxType) != "" {
 		return false
@@ -580,6 +582,38 @@ func keepsFormerLegacyPopulation(lock purchaseOrderWriteLock, input PurchaseOrde
 		return false
 	}
 	return true
+}
+
+// sameFormerCommercialBasis reports whether an editable former-draft save
+// leaves the commercial tax basis exactly as stored. The stored side derives
+// its type/service labels from the legacy category when a pre-039 row has no
+// tax type, because that is what the editor derives for display: sending those
+// derived labels back is not a tax edit. The legacy category is compared too,
+// since it is a stored label a client could otherwise move silently.
+//
+// An unrepresentable stored legacy category never matches: any save of it is a
+// real basis change and recomputes.
+func sameFormerCommercialBasis(lock purchaseOrderWriteLock, submitted purchaseOrderBasis) bool {
+	zone := strings.TrimSpace(lock.TaxZone)
+	if zone == "" {
+		zone = "FTZ"
+	}
+	taxType := strings.TrimSpace(lock.TaxType)
+	serviceCategory := strings.TrimSpace(lock.ServiceCategory)
+	if taxType == "" {
+		derivedType, derivedService, ok := legacyBasisFor(lock.TaxCategory)
+		if !ok {
+			return false
+		}
+		taxType = derivedType
+		if serviceCategory == "" {
+			serviceCategory = derivedService
+		}
+	}
+	return zone == strings.TrimSpace(submitted.TaxZone) &&
+		taxType == strings.TrimSpace(submitted.TaxType) &&
+		serviceCategory == strings.TrimSpace(submitted.ServiceCategory) &&
+		strings.TrimSpace(lock.TaxCategory) == strings.TrimSpace(submitted.TaxCategory)
 }
 
 // resolvePurchaseOrderUpdateBasis keeps only a LIVE row's currency and tax
@@ -711,18 +745,27 @@ func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input Purchase
 	if legacyCategory == "" {
 		legacyCategory = lock.TaxCategory
 	}
-	ppnBps, err := PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory)
-	if err != nil {
-		return purchaseOrderBasis{}, err
-	}
-	return purchaseOrderBasis{
+	basis := purchaseOrderBasis{
 		Currency:        currencyCode,
 		TaxZone:         zone,
 		TaxType:         taxType,
 		ServiceCategory: serviceCategory,
 		TaxCategory:     legacyCategory,
-		PpnBps:          ppnBps,
-	}, nil
+	}
+	// A former row keeps its stored PPN rate when the save leaves the effective
+	// commercial basis alone: the editor submits the display-derived legacy
+	// labels, and those are not a tax edit. Only a real basis or zone change
+	// recomputes the money, so a pre-039 row cannot silently gain PPN.
+	if lock.SourceState == PurchaseOrderSourceStateFormer && sameFormerCommercialBasis(lock, basis) {
+		basis.PpnBps = lock.PpnBps
+		return basis, nil
+	}
+	ppnBps, err := PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory)
+	if err != nil {
+		return purchaseOrderBasis{}, err
+	}
+	basis.PpnBps = ppnBps
+	return basis, nil
 }
 
 // legacyBasisFor resolves the stored legacy category to the type/service an

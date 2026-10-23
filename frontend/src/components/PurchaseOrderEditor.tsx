@@ -2366,6 +2366,10 @@ export function PurchaseOrderEditorPage({
       ) : null}
       <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
+        // A draft Save remounts this editor through onSaved. Blocking the
+        // document controls while it is in flight keeps an attach from starting
+        // against a panel that is about to disappear (and losing its error).
+        disabled={state.saving}
         // #493/#498: an upload must persist the working copy before attaching,
         // so a reload cannot lose the values staff saw when they chose the file.
         // It notifies no one: onSaved would remount this editor mid-attach and a

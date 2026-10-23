@@ -240,18 +240,23 @@ function type(label: string, value: string): void {
   });
 }
 
-function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
-  const fileInput = document.querySelector<HTMLInputElement>(
+function fileInput(): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(
     'input[aria-label="Customer PO PDF file"]'
   );
-  if (fileInput === null) throw new Error("file input not found");
+  if (found === null) throw new Error("file input not found");
+  return found;
+}
+
+function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
+  const input = fileInput();
   const file = new File([content], name, { type: "application/pdf" });
-  Object.defineProperty(fileInput, "files", {
+  Object.defineProperty(input, "files", {
     configurable: true,
     value: [file],
   });
   act(() => {
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
 
@@ -577,28 +582,69 @@ describe("PO-first draft (issue #496)", () => {
     expect(payload.ServiceCategory).toBe("");
   });
 
-  it("shares one persistence between a concurrent Save and an upload", async () => {
+  it("does not start an upload while a Save is in flight", async () => {
     const gate = deferred<PurchaseOrderDTO>();
     createMock.mockReset();
     createMock.mockReturnValue(gate.promise);
-    attachMock.mockResolvedValue({
-      ID: 1,
-      UUID: "doc-race",
-      PurchaseOrderID: 41,
-      Version: 1,
-      Active: true,
-    });
     await render();
-    type("Customer PO number", "RACE-496");
+    type("Customer PO number", "SAVE-BLOCKS-UPLOAD");
     await flush();
 
     act(() => button("Save draft").click());
     await flush();
     expect(createMock).toHaveBeenCalledTimes(1);
 
-    // The file input stays enabled while Save is in flight. Both actions must
-    // await the same persistence promise, not create a second row.
+    // A forced file event is captured with the control state so a red run shows
+    // both halves: the controls must be blocked and no attach may start.
+    const whileSaving = {
+      inputDisabled: fileInput().disabled,
+      attachButtonDisabled:
+        document.querySelector<HTMLButtonElement>(
+          'button[aria-label="Attach customer PO PDF"]'
+        )?.disabled ?? null,
+    };
     chooseFile();
+    await flush();
+
+    gate.resolve(createdRow());
+    await flush();
+    await flush();
+    expect({
+      whileSaving,
+      attachStarted: attachMock.mock.calls.length,
+    }).toEqual({
+      whileSaving: { inputDisabled: true, attachButtonDisabled: true },
+      attachStarted: 0,
+    });
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    // The controls return once the draft write settles.
+    expect(fileInput().disabled).toBe(false);
+  });
+
+  it("shares one persistence when an upload is in flight and Save is pressed", async () => {
+    const gate = deferred<PurchaseOrderDTO>();
+    createMock.mockReset();
+    createMock.mockReturnValue(gate.promise);
+    attachMock.mockResolvedValue({
+      ID: 1,
+      UUID: "doc-upload-first",
+      PurchaseOrderID: 41,
+      Version: 1,
+      Active: true,
+    });
+    await render();
+    type("Customer PO number", "UPLOAD-FIRST");
+    await flush();
+
+    chooseFile();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).not.toHaveBeenCalled();
+
+    // Save joins the same in-flight persistence rather than creating a second
+    // row or writing the same version twice.
+    act(() => button("Save draft").click());
     await flush();
     expect(createMock).toHaveBeenCalledTimes(1);
 
@@ -606,21 +652,9 @@ describe("PO-first draft (issue #496)", () => {
     await flush();
     await flush();
     expect(createMock).toHaveBeenCalledTimes(1);
-    // One update carries the typed values; the upload does not write again on
-    // the same version, so there is no conflict and no second row.
     expect(updateMock).toHaveBeenCalledTimes(1);
-    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
-    expect(payload.ID).toBe(41);
-    expect(payload.ExpectedVersion).toBe(1);
-    expect(payload.PONumber).toBe("RACE-496");
     expect(attachMock).toHaveBeenCalledTimes(1);
-    expect(updateMock.mock.invocationCallOrder[0]).toBeLessThan(
-      attachMock.mock.invocationCallOrder[0]
-    );
-    expect(
-      (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
-    ).toBe(41);
-    // Save and upload notify the page once between them.
+    // The Save path still notifies the page exactly once.
     expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("41");
   });
 
