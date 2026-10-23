@@ -1732,8 +1732,9 @@ export function PurchaseOrderEditorPage({
    * upload produce one create and one successful update -- never a second row
    * or a version conflict. The retained version advances after the update, so a
    * failed attach retries at the latest version. The notification is delivered
-   * once even when two callers await the same save: the upload must not double
-   * notify a Save that already did.
+   * once even when two callers await the same save: a Save and an upload never
+   * notify twice. The upload itself passes `false`, so its save cannot remount
+   * the editor and discard a failed attach's error.
    */
   type WorkingCopyOutcome =
     | { kind: "saved"; order: PurchaseOrderDTO }
@@ -2367,9 +2368,13 @@ export function PurchaseOrderEditorPage({
         purchaseOrderId={state.orderId}
         // #493/#498: an upload must persist the working copy before attaching,
         // so a reload cannot lose the values staff saw when they chose the file.
-        // The panel's interface is unchanged: it still only asks for an id.
+        // It notifies no one: onSaved would remount this editor mid-attach and a
+        // failed upload's error would be set on the unmounted panel. The shared
+        // save still dispatches saveSucceeded, which keeps the editor's local
+        // id and version. The panel's interface is unchanged: it still only asks
+        // for an id.
         resolvePurchaseOrderId={async () => {
-          const outcome = await persistWorkingCopy(true);
+          const outcome = await persistWorkingCopy(false);
           if (outcome.kind === "saved") return outcome.order.ID;
           if (outcome.kind === "conflict") {
             throw new Error(draftLinkConflictWarning(outcome.conflict));

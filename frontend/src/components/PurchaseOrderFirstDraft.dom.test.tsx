@@ -741,8 +741,28 @@ describe("PO-first draft (issue #496)", () => {
       (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
     ).toBe(41);
     expect(input("Customer PO number").value).toBe("TYPED-BEFORE-UPLOAD");
-    // The save notified the page once, exactly as a Save does.
-    expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("41");
+    // An upload saves the working copy but does not report the page as saved:
+    // its own saveSucceeded keeps the editor's id/version, and no onSaved
+    // remount can discard a failed attach's error.
+    expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("0");
+  });
+
+  it("keeps a failed attach error visible without notifying the page", async () => {
+    attachMock.mockRejectedValue(new Error("the upload was interrupted"));
+    await render();
+    type("Customer PO number", "ERROR-STAYS");
+    await flush();
+
+    chooseFile();
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(attachMock).toHaveBeenCalledTimes(1);
+    // The upload must not remount the editor through onSaved: the panel that
+    // showed the failure is still the one on screen, so the error is readable.
+    expect(document.body.textContent).toContain("the upload was interrupted");
+    expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("0");
   });
 
   it("attaches nothing when the transient working copy is invalid", async () => {

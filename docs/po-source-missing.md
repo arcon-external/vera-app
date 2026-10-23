@@ -45,12 +45,12 @@ at the top of the editor:
    or acknowledged; matches are by quotation reference, never by position.
 4. Source identity (customer, quote number, revision, quotation line references,
    printed totals) comes from the revision. Every PO-owned value — number, dates,
-   addresses, ship-to, contact, payment terms, Incoterm, lines, prices,
-   discounts, adjustment — stays as entered. A changed customer also brings the
-   revision's billing address, exactly as the saved-record repair does.
+   addresses (including billing), ship-to, contact, payment terms, Incoterm,
+   lines, prices, discounts, adjustment — stays as entered. A Staff draft link
+   never replaces a PO-owned value, even when the customer changes.
 5. The draft and revision must be in one currency; a mismatch is `422`
-   (`po_currency_mismatch`) and is never converted. A never-linked draft's
-   currency can be edited before retrying; a formerly-linked draft's basis is
+   (`po_currency_mismatch`) and is never converted. A never- or formerly-linked
+   draft's currency and tax basis stay editable before retrying; a live draft is
    frozen, so another revision in its currency must be chosen.
 6. A differing tax basis needs an explicit `keep`/`source` choice (`422`
    `po_tax_choice_required` when missing). The server recomputes PPN from the
@@ -73,7 +73,9 @@ at the top of the editor:
    the record being repaired has no live Quotation to exempt.
 3. The saved record's **current values are the starting point**. The review
    repeats the #471 matching and difference rules against the target revision
-   (no choice preselected), and the admin can correct line matches.
+   (no choice preselected), and the admin can correct line matches. A **changed
+   customer** is the one repair case that follows the revision: the record takes
+   the source's customer name and billing address.
 4. A **reason** is required. The write records the replaced values, the actor
    and time, the old and new source and every difference choice.
 5. An **assigned confirmation number is preserved** for a same-customer repair.
