@@ -793,8 +793,14 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	if len(matches) == 0 {
 		return derivedDeliveryField(field, derived, minConfidence)
 	}
+	// A field label can be a lookalike in prose ("... issued to the supplier")
+	// or a section title ("Incoterm Location"). Prefer candidates that the
+	// field's normalizer actually accepts; only fall back to an unwelcome
+	// candidate when the document printed no valid value, so a real invalid
+	// value still arrives as needs_review rather than disappearing.
+	selection := validFieldSelection(key, matches)
 	hasValue := false
-	for _, match := range matches {
+	for _, match := range selection {
 		if strings.TrimSpace(match.raw) != "" {
 			hasValue = true
 			break
@@ -808,8 +814,8 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 		field.Note = "The label was found but no value followed it."
 		return field
 	}
-	chosen := matches[0]
-	for _, match := range matches {
+	chosen := selection[0]
+	for _, match := range selection {
 		if strings.TrimSpace(match.raw) != "" {
 			chosen = match
 			break
@@ -820,7 +826,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	field.BBox = bboxOf(chosen.words)
 
 	distinct := map[string]bool{}
-	for _, match := range matches {
+	for _, match := range selection {
 		raw := strings.TrimSpace(match.raw)
 		if raw == "" {
 			continue
@@ -840,10 +846,36 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	field.Note = note
 	if len(distinct) > 1 {
 		field.Status = apicontract.ExtractionStatusNeedsReview
-		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(matches, chosen.raw))
+		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(selection, chosen.raw))
 	}
 	applyConfidence(&field.ExtractionCell, chosen.words, minConfidence)
 	return field
+}
+
+// validFieldSelection prefers candidates the field's own normalizer accepts.
+// A legal sentence after a lookalike label, a section title ("Incoterm
+// Location"), or an address below a label must not outrank the real value that
+// follows. If nothing is valid, the raw candidates remain so a genuinely
+// malformed printed value still becomes a reviewable field, never a silent
+// absence.
+func validFieldSelection(key string, matches []fieldMatch) []fieldMatch {
+	valid := make([]fieldMatch, 0, len(matches))
+	for _, match := range matches {
+		raw := strings.TrimSpace(match.raw)
+		if raw == "" {
+			continue
+		}
+		if key == apicontract.ExtractionFieldPaymentTerms && !plausiblePaymentTerms(raw) {
+			continue
+		}
+		if _, status, _ := normaliseField(key, raw); status == apicontract.ExtractionStatusExtracted {
+			valid = append(valid, match)
+		}
+	}
+	if len(valid) > 0 {
+		return valid
+	}
+	return matches
 }
 
 // derivedDeliveryField fills the delivery date from the row that actually
