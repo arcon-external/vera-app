@@ -98,6 +98,17 @@ Vera supports a seamless live-development workflow.
    ```
    The dev server usually runs on http://localhost:34115.
 
+4. **Optional: fictional local data** — After the local API has bootstrapped an
+   admin, fill the confirmed local database with six fake Quotations and eight
+   fake Purchase Orders for manual testing:
+   ```bash
+   scripts/seed-local.sh --target vera_local
+   ```
+   It refuses anything but one explicitly confirmed local database before it
+   migrates or writes, never touches production, and preserves edits on rerun.
+   See `docs/local-seed.md` for the exact fixture inventory, rerun semantics and
+   cleanup boundary.
+
 ## 📦 Building for Production
 
 To create a redistributable, production-ready package for your current platform:
