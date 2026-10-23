@@ -1,14 +1,17 @@
 # PO PDF extraction — decision and benchmark protocol (#476)
 
-Status: **proposed, not yet validated on real POs.** No authorized customer
-PDFs exist in this environment, so no accuracy, latency, or memory number in
-this document is a measurement. Every threshold in §2 is a proposal awaiting
-pilot signoff. #477 and #478 implement text extraction and selective OCR
-plumbing respectively; neither claims reliability, and the §2.5 scan/mixed
-bars remain **unmeasured**. The release position for scans is the explicit
-limitations list in [`po-extraction.md`](po-extraction.md), not an acceptance
-result. The protocol below still has to run on authorized samples before any
-reliability claim is made.
+Status: **first authorized holdout measured 2026-10-23; FAIL; text-only
+scope.** The 47-PO development set is one SAP Ariba layout (46 text, 1 mixed,
+0 scanned); the §2.5 thresholds were approved and the engine missed the
+critical-field, complete-row and silent missing/duplicate bars. No accuracy
+claim is made. The measured run is frozen; the 47 are now a seen development
+set and cannot be reused as a validation holdout. #477 and #478 implement text
+extraction and selective OCR plumbing respectively; neither claims
+reliability, and the §2.5 scan/mixed bars remain **unmeasured**. The release
+position for scans is the explicit limitations list in
+[`po-extraction.md`](po-extraction.md), not an acceptance result. A layout-
+agnostic parser must be validated on a **new** authorized frozen holdout
+before any reliability claim is made.
 
 ## 1. Decision: proposed pipeline and candidates
 
@@ -111,7 +114,7 @@ explicit abstentions", not "reliable fully-automatic extraction".
   normalization; descriptions compared whitespace-insensitively per the
   parent spec (whitespace ignored, meaningful changes not hidden).
 
-### 2.5 Proposed acceptance thresholds (agree before measuring)
+### 2.5 Agreed acceptance thresholds (approved 2026-10-23, before measuring)
 
 | Metric | Proposed bar (holdout) |
 | --- | --- |
@@ -123,8 +126,9 @@ explicit abstentions", not "reliable fully-automatic extraction".
 | p95 latency | within the async UX budget set by #477 (extraction must not block manual entry) |
 | Failures | 0 crashes/hangs on hostile/oversized/encrypted/invalid inputs (clean rejection instead) |
 
-These are proposals for pilot signoff, not agreed bars. If the pilot misses
-them, the decision is scoped assistance + abstentions — not threshold shopping.
+These bars were approved by the user on 2026-10-23, before the first run. The
+first authorized holdout missed them; the decision is scoped assistance +
+abstentions, not threshold shopping.
 
 ## 3. Security and operations
 
@@ -209,10 +213,55 @@ Extraction results are evidence, never facts. Later tickets consume:
 5. This plan proves plumbing and contract shape only — it says nothing about
    real-PO accuracy, which waits on §6.
 
-## 6. Blocker: what is required from the user
+## 6. First authorized holdout — measured FAIL (2026-10-23)
 
-#477 (text-PDF extraction) and #478 (scanned/mixed) cannot claim accuracy
-until the user provides **authorized sample customer PDFs** meeting §2.1
-(stratified text/scan/mixed, ground-truth correctable, holdout-capable), plus
-**signoff on the §2.5 thresholds**. Until then the honest status of this
-ticket is: decision proposed, protocol ready, validation blocked.
+The first authorized batch was 47 POs / 80 priced lines / 145 pages from one
+SAP Ariba customer layout: 46 text PDFs, 1 mixed, **0 scanned**, 7 template
+variants. The §2.5 thresholds were approved before the run. The truth was
+built from the documents only (PyMuPDF text/layout plus Poppler
+`pdftotext -layout`, arithmetic reconciliation) and frozen before the engine
+ran; the two passes agreed on every header, row, quantity, unit, price, amount
+and description (0 mismatches).
+
+The shipped poppler 25.03.0 engine completed all 47 runs with no crashes. It
+scored:
+
+| Metric | Result |
+| --- | --- |
+| Critical header fields | 47 / 282 = **16.7%** (only currency; 235 absent) |
+| Complete rows | **0 / 80** |
+| Missing truth rows | **19** |
+| Unmatched/extra proposed rows | **42** |
+| Matched rows | 61, all 61 abstained |
+| Printed subtotal/amount | 40 / 47 |
+| Silent monetary/quantity errors | 0 (122 numeric cells matched; 122 flagged) |
+| Duplicate line numbers | 0 |
+| Failures | 0 |
+| p95 latency | 0.445 s wall; 32 ms internal |
+
+The engine did not recognise the Ariba header labels or table geometry: it
+split one printed line into multiple proposed rows, lost 19 rows, emitted 42
+unmatched rows, and returned `needs_review` for the mapped UoM/price cells.
+The numeric cells were often correct, but the document could not be
+reconstructed. **Critical-field, complete-row and silent missing/duplicate
+thresholds failed.** There is no accuracy claim; extraction remains
+assistance/manual entry.
+
+The 47 documents are now a seen development set. No parser was tuned on this
+holdout after the run. A layout-agnostic parser must be developed against
+synthetic varied layouts (and, if authorized, these as development data) and
+validated on a **new authorized frozen holdout**; it must abstain rather than
+guess on an unrecognised layout. Under the §2.1 minimum-scale rule, the
+text-only re-scope was approved; the scanned/mixed bars remain unmeasured.
+
+The customer PDFs, truth and raw results stay local (mode 700) and are not
+committed. Only aggregate evidence is recorded here and on #476/#482.
+
+## 7. Remaining input for a tuned parser
+
+A tuned or layout-agnostic parser cannot earn a reliability claim on the
+already-seen 47 documents. The next validation needs a **new authorized
+batch** of customer POs (text and, if possible, scanned/mixed layouts). The
+truth will be built by the reviewer from the documents, not the parser, and
+frozen before the tuned engine runs. The 47 development set may be used for
+layout development and regression, but not as the final holdout.
