@@ -17,7 +17,7 @@
 # /etc/vextract-ocr-version, and every extraction result carries them, so a
 # repeat run is comparable and a regression is attributable to a version. The
 # license review basis and source-offer notes live in the RUN comment below.
-FROM golang:1.26-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c AS build
+FROM golang:1.26.10-bookworm@sha256:88750ccdd0f2a77fcc00a14b1a48d6409bd8ddb5d7c2dd6ec0b4a2e916daf9d9 AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./
