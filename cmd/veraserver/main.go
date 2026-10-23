@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,29 +18,74 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "veraserver: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(args []string) error {
+	return runWith(args, os.Getenv, store.Open, 10, 3*time.Second)
+}
+
+// defaultAPIAddr is Cloud Run's contract: the bare production entrypoint binds
+// every interface on :8080. scripts/dev-api.sh overrides it to loopback.
+const defaultAPIAddr = ":8080"
+
+func serverAddr(getenv func(string) string) string {
+	if addr := getenv("VERA_API_ADDR"); addr != "" {
+		return addr
+	}
+	return defaultAPIAddr
+}
+
+// parseServerFlags accepts only the flags the server owns. The local guard is
+// opt-in so Cloud Run's bare invocation keeps its existing behaviour.
+func parseServerFlags(args []string) (bool, error) {
+	flags := flag.NewFlagSet("veraserver", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	localDevelopment := flags.Bool("local-development", false,
+		"refuse non-local Postgres targets before opening the store")
+	if err := flags.Parse(args); err != nil {
+		return false, fmt.Errorf("parse veraserver flags: %w", err)
+	}
+	if flags.NArg() > 0 {
+		return false, fmt.Errorf("unexpected veraserver argument %q", flags.Arg(0))
+	}
+	return *localDevelopment, nil
+}
+
+// runWith keeps the startup sequence testable without a database. Only
+// --local-development gates the local target policy; a bare production launch
+// behaves exactly as before.
+func runWith(args []string, getenv func(string) string,
+	open func(context.Context, store.Config) (*store.Store, error),
+	maxAttempts int, retryDelay time.Duration) error {
+	localDevelopment, err := parseServerFlags(args)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	addr := os.Getenv("VERA_API_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
+	addr := serverAddr(getenv)
 
-	config, err := store.LoadConfigFromEnvironment()
+	config, err := store.LoadConfig(getenv)
 	if err != nil {
 		return err
+	}
+	if localDevelopment {
+		// Before any network, migration, or bootstrap: a copied production
+		// environment must be refused here, not discovered by opening it.
+		if err := store.RequireLocalDevelopmentTarget(config); err != nil {
+			return err
+		}
 	}
 	// Neon sleeps after 5 idle minutes; the first connection attempt of a
 	// cold deploy may catch it waking. Retry briefly so sleepy databases
 	// don't fail rollouts, then fail fast for real outages.
-	database, err := openStoreWithRetry(ctx, config, 10, 3*time.Second, store.Open)
+	database, err := openStoreWithRetry(ctx, config, maxAttempts, retryDelay, open)
 	if err != nil {
 		return err
 	}
@@ -47,14 +94,18 @@ func run() error {
 	// Cleanup is best-effort: an outage must not prevent the API from starting.
 	cleanStaleSessions(ctx, database)
 	go cleanupSessionsDaily(ctx, database)
+	// #477: no extraction worker survives a restart. Fail those runs cleanly
+	// rather than leaving them "running" forever. Best-effort: a failure here
+	// is logged, and the run stays visible rather than blocking startup.
+	recoverInterruptedExtractions(ctx, database)
 
-	bootstrapName := os.Getenv("VERA_BOOTSTRAP_ADMIN_NAME")
-	bootstrapEmail := os.Getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
+	bootstrapName := getenv("VERA_BOOTSTRAP_ADMIN_NAME")
+	bootstrapEmail := getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
 	if bootstrapName == "" {
 		bootstrapName = bootstrapEmail
 	}
 	if err := ensureBootstrap(ctx, database, bootstrapEmail, bootstrapName,
-		os.Getenv("VERA_BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
+		getenv("VERA_BOOTSTRAP_ADMIN_PASSWORD")); err != nil {
 		return fmt.Errorf("auth bootstrap failed: %w", err)
 	}
 
@@ -102,6 +153,22 @@ func cleanStaleSessions(ctx context.Context, database *store.Store) {
 	defer cancel()
 	if _, err := database.DeleteStaleSessions(cleanupCtx, time.Now().Add(-30*24*time.Hour)); err != nil {
 		fmt.Fprintf(os.Stderr, "veraserver: session cleanup failed: %v\n", err)
+	}
+}
+
+// recoverInterruptedExtractions fails extraction runs a previous process left
+// queued or running. There is no worker to resume them, so the honest state is
+// failed with an "interrupted" reason the review panel can show.
+func recoverInterruptedExtractions(ctx context.Context, database *store.Store) {
+	cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	count, err := database.RecoverInterruptedPurchaseOrderExtractions(cleanupCtx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "veraserver: extraction recovery failed: %v\n", err)
+		return
+	}
+	if count > 0 {
+		fmt.Printf("veraserver: marked %d interrupted extraction run(s) failed\n", count)
 	}
 }
 

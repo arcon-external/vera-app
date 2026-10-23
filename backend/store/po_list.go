@@ -1,0 +1,329 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// Issue #469: the Purchase Order archive. A PO is found by its customer PO
+// number, its source Quotation number, or its customer snapshot; the list is
+// paged 15 rows at a time unless the caller asks for another size (#492), and
+// never leaves the caller's organization.
+
+// PurchaseOrderListPageSize is the archive's default page size: what an absent
+// page size means. It is part of the API contract, not a caller preference.
+const PurchaseOrderListPageSize = 15
+
+// PurchaseOrderListMaxPageSize bounds a caller-supplied page size (#492). A
+// larger request is refused rather than silently clamped, so the caller learns
+// its page size was not honoured instead of paging through a shorter list than
+// it asked for.
+const PurchaseOrderListMaxPageSize = 100
+
+// The source-missing filter values. "any" is the default; "only" and "exclude"
+// make the source-missing state an independent predicate. #480 makes the state
+// real: deletion releases purchase_orders.quotation_id and keeps a former
+// source reference, while #481 repairs it through the admin link flow.
+const (
+	PurchaseOrderSourceMissingAny     = "any"
+	PurchaseOrderSourceMissingOnly    = "only"
+	PurchaseOrderSourceMissingExclude = "exclude"
+)
+
+// PurchaseOrderListQuery is one archive page request. PageSize 0 keeps the
+// default; otherwise it must be 1..PurchaseOrderListMaxPageSize.
+type PurchaseOrderListQuery struct {
+	Search        string
+	State         string
+	CustomerIDs   []int64
+	ReceivedFrom  *time.Time
+	ReceivedTo    *time.Time
+	SourceMissing string
+	Page          int
+	PageSize      int
+}
+
+// PurchaseOrderListRow is one archive row. The customer name is the PO's own
+// snapshot, not the live client directory, so a rename never rewrites history.
+type PurchaseOrderListRow struct {
+	UUID           string
+	State          string
+	PONumber       string
+	QuoteNumber    string
+	CustomerName   string
+	ReceivedDate   time.Time
+	Currency       string
+	ID             int64
+	CustomerID     int64
+	SourceRevision int16
+	SourceMissing  bool
+	// SourceState is "live", "never" or "former" (#496). The row keeps numeric
+	// ids for older readers; this state is what the copy branches on, so a
+	// never-linked draft is not described as a former revision 0.
+	SourceState string
+}
+
+// PurchaseOrderListCustomer is one option of the customer multi-select. The
+// facet is org-wide: filtering by another field must not hide a customer from
+// the picker.
+type PurchaseOrderListCustomer struct {
+	Name string
+	ID   int64
+}
+
+// PurchaseOrderListPage is one page plus the unpaged match count and the
+// org-wide customer facet.
+type PurchaseOrderListPage struct {
+	Rows       []PurchaseOrderListRow
+	Customers  []PurchaseOrderListCustomer
+	Page       int
+	PageSize   int
+	Total      int
+	TotalPages int
+}
+
+// ListPurchaseOrders returns one page of the archive, newest received first.
+//
+// PageSize is the caller's page size: 0 keeps the contract default of
+// PurchaseOrderListPageSize, and any other value must be 1..100. Everything
+// paging-related -- LIMIT, OFFSET and the reported total pages -- uses that same
+// effective size, and the returned PageSize echoes it.
+//
+// Search is case-insensitive over the customer PO number, the source Quotation
+// number and the customer snapshot; LIKE wildcards in the term are escaped, so
+// "50%" is a literal and not "everything". The customer filter takes one or
+// more ids, the received-date range is inclusive, and Draft/Saved is the stored
+// entry state -- never an invented fulfilment or payment status.
+//
+// SourceMissing is derived from the Quotation join, not from a column: a
+// retained PO keeps reading without its source because deletion nulls
+// quotation_id and copies the former number and revision onto the row. "only"
+// therefore answers the survivors #481 repairs, and "exclude" hides them
+// without changing the stored entry state.
+func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQuery) (PurchaseOrderListPage, error) {
+	org, err := s.RequireOrg(ctx)
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
+
+	page := query.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize, err := purchaseOrderEffectivePageSize(query.PageSize)
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
+	// PostgreSQL's OFFSET is a signed 64-bit integer and the offset is
+	// (page-1)*pageSize. Validate before multiplying: the product wraps for a
+	// page this function otherwise accepts, and the negative offset that
+	// reaches Postgres is a database error, not a malformed query (issue #469).
+	// This is the one authoritative guard: the HTTP handler maps
+	// ErrPurchaseOrderInvalid to 400, and the desktop binding sends its page
+	// through that same endpoint.
+	size := int64(pageSize)
+	if int64(page-1) > math.MaxInt64/size {
+		return PurchaseOrderListPage{}, fmt.Errorf(
+			"%w: page %d is past the largest representable offset", ErrPurchaseOrderInvalid, page)
+	}
+	offset := int64(page-1) * size
+	state := strings.TrimSpace(query.State)
+	switch state {
+	case "", PurchaseOrderStateDraft, PurchaseOrderStateSaved:
+	default:
+		return PurchaseOrderListPage{}, fmt.Errorf("%w: unknown state filter %q", ErrPurchaseOrderInvalid, query.State)
+	}
+	sourceMissing := strings.TrimSpace(query.SourceMissing)
+	if sourceMissing == "" {
+		sourceMissing = PurchaseOrderSourceMissingAny
+	}
+	switch sourceMissing {
+	case PurchaseOrderSourceMissingAny, PurchaseOrderSourceMissingOnly, PurchaseOrderSourceMissingExclude:
+	default:
+		return PurchaseOrderListPage{}, fmt.Errorf("%w: unknown source-missing filter %q",
+			ErrPurchaseOrderInvalid, query.SourceMissing)
+	}
+	from := normalizeDate(query.ReceivedFrom)
+	to := normalizeDate(query.ReceivedTo)
+	if !from.IsZero() && !to.IsZero() && from.After(to) {
+		return PurchaseOrderListPage{}, fmt.Errorf("%w: received-from must not be after received-to", ErrPurchaseOrderInvalid)
+	}
+
+	schema := s.configSchema()
+	fromClause := fmt.Sprintf(`
+		FROM %s.purchase_orders po
+		LEFT JOIN %s.quotations q ON q.id = po.quotation_id`, schema, schema)
+
+	where := " WHERE po.org_id = $1"
+	args := []any{org.ID}
+	if term := strings.TrimSpace(query.Search); term != "" {
+		pattern := "%" + escapeLike(term) + "%"
+		args = append(args, pattern)
+		placeholder := fmt.Sprintf("$%d", len(args))
+		where += fmt.Sprintf(`
+			AND (
+				COALESCE(po.po_number, '') ILIKE %s ESCAPE '\'
+				OR COALESCE(q.quote_number, po.former_quote_number, '') ILIKE %s ESCAPE '\'
+				OR po.customer_name ILIKE %s ESCAPE '\'
+			)`, placeholder, placeholder, placeholder)
+	}
+	if len(query.CustomerIDs) > 0 {
+		args = append(args, query.CustomerIDs)
+		where += fmt.Sprintf(" AND po.customer_id = ANY($%d)", len(args))
+	}
+	if state != "" {
+		args = append(args, state)
+		where += fmt.Sprintf(" AND po.state = $%d", len(args))
+	}
+	if !from.IsZero() {
+		args = append(args, from.Format("2006-01-02"))
+		where += fmt.Sprintf(" AND po.received_date >= $%d::date", len(args))
+	}
+	if !to.IsZero() {
+		args = append(args, to.Format("2006-01-02"))
+		where += fmt.Sprintf(" AND po.received_date <= $%d::date", len(args))
+	}
+	switch sourceMissing {
+	case PurchaseOrderSourceMissingOnly:
+		where += " AND q.id IS NULL"
+	case PurchaseOrderSourceMissingExclude:
+		where += " AND q.id IS NOT NULL"
+	}
+
+	var total int
+	if err := pool.QueryRow(ctx, "SELECT COUNT(*) "+fromClause+where, args...).Scan(&total); err != nil {
+		return PurchaseOrderListPage{}, fmt.Errorf("count purchase orders: %w", err)
+	}
+
+	rows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT po.id, po.uuid::text, po.state, COALESCE(po.po_number, ''),
+		       COALESCE(q.quote_number, po.former_quote_number, ''), po.source_revision,
+		       po.customer_id, po.customer_name, po.received_date, po.currency,
+		       (q.id IS NULL),
+		       CASE WHEN po.quotation_id IS NOT NULL THEN 'live'
+		            WHEN po.former_quotation_id IS NOT NULL THEN 'former'
+		            ELSE 'never' END
+		%s%s
+		ORDER BY po.received_date DESC, po.id DESC
+		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),
+		append(args, pageSize, offset)...)
+	if err != nil {
+		return PurchaseOrderListPage{}, fmt.Errorf("list purchase orders: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]PurchaseOrderListRow, 0, pageSize)
+	for rows.Next() {
+		var row PurchaseOrderListRow
+		var sourceRevision pgtype.Int2
+		var customerID pgtype.Int8
+		if err := rows.Scan(
+			&row.ID,
+			&row.UUID,
+			&row.State,
+			&row.PONumber,
+			&row.QuoteNumber,
+			&sourceRevision,
+			&customerID,
+			&row.CustomerName,
+			&row.ReceivedDate,
+			&row.Currency,
+			&row.SourceMissing,
+			&row.SourceState,
+		); err != nil {
+			return PurchaseOrderListPage{}, fmt.Errorf("scan purchase order row: %w", err)
+		}
+		if sourceRevision.Valid {
+			row.SourceRevision = sourceRevision.Int16
+		}
+		if customerID.Valid {
+			row.CustomerID = customerID.Int64
+		}
+		result = append(result, row)
+	}
+	if err := rows.Err(); err != nil {
+		return PurchaseOrderListPage{}, fmt.Errorf("iterate purchase orders: %w", err)
+	}
+
+	customers, err := listPurchaseOrderCustomers(ctx, pool, schema, org.ID)
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
+
+	// Divide before adding: `total + pageSize - 1` is the same
+	// add-before-divide class as the old offset. COUNT(*) cannot reach
+	// MaxInt-pageSize in a real table, but the safe form costs nothing and
+	// leaves no wrapping arithmetic here.
+	totalPages := total / pageSize
+	if total%pageSize != 0 {
+		totalPages++
+	}
+	if totalPages < 1 {
+		// One empty page, not "page 1 of 0": the archive still shows its
+		// empty state with working pagination controls.
+		totalPages = 1
+	}
+	return PurchaseOrderListPage{
+		Rows:       result,
+		Customers:  customers,
+		Page:       page,
+		PageSize:   pageSize,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
+}
+
+// purchaseOrderEffectivePageSize resolves a requested page size into the LIMIT
+// this query uses. Zero means the default (PurchaseOrderListPageSize); a value
+// outside 1..PurchaseOrderListMaxPageSize is invalid input, never a clamp.
+func purchaseOrderEffectivePageSize(requested int) (int, error) {
+	switch {
+	case requested == 0:
+		return PurchaseOrderListPageSize, nil
+	case requested < 0 || requested > PurchaseOrderListMaxPageSize:
+		return 0, fmt.Errorf("%w: page size %d is outside 1..%d",
+			ErrPurchaseOrderInvalid, requested, PurchaseOrderListMaxPageSize)
+	}
+	return requested, nil
+}
+
+// listPurchaseOrderCustomers returns the customers that actually own POs in
+// this organization, newest snapshot name per customer, alphabetical. It runs
+// without the page's filters on purpose: choosing customer B must stay possible
+// while the current result happens to contain only customer A.
+func listPurchaseOrderCustomers(ctx context.Context, q purchaseOrderQuerier, schema, orgID string) ([]PurchaseOrderListCustomer, error) {
+	rows, err := q.Query(ctx, fmt.Sprintf(`
+		SELECT customer_id, customer_name FROM (
+			SELECT DISTINCT ON (customer_id) customer_id, customer_name
+			FROM %s.purchase_orders
+			WHERE org_id = $1 AND customer_id IS NOT NULL
+			ORDER BY customer_id, received_date DESC, id DESC
+		) latest
+		ORDER BY customer_name, customer_id`, schema), orgID)
+	if err != nil {
+		return nil, fmt.Errorf("list purchase order customers: %w", err)
+	}
+	defer rows.Close()
+
+	customers := make([]PurchaseOrderListCustomer, 0, 8)
+	for rows.Next() {
+		var customer PurchaseOrderListCustomer
+		if err := rows.Scan(&customer.ID, &customer.Name); err != nil {
+			return nil, fmt.Errorf("scan purchase order customer: %w", err)
+		}
+		customers = append(customers, customer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate purchase order customers: %w", err)
+	}
+	return customers, nil
+}

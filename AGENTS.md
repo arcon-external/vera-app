@@ -13,8 +13,9 @@ the rest of this guide is applied.
 - **App:** Wails v2 desktop quotation generator for PT Arcon Penta Persada.
 - **Backend:** Go in `backend/` — quotation pricing, HTML templating, PDF rendering
   via `chromedp` (headless Chrome `PrintToPDF`).
-- **Persistence:** PostgreSQL via `backend/store` (pgx v5), configured entirely by
-  environment variables.
+- **Persistence:** PostgreSQL via `backend/store` (pgx v5), used by `cmd/veraserver`
+  and the CLI integration tests, configured entirely by environment variables. The
+  desktop never opens a database; it talks to the API over HTTP.
 - **Frontend:** React 19 + TypeScript + Vite in `frontend/`, styled with Tailwind CSS
   (v4).
 - **Go module:** `vera-app` (Go 1.26).
@@ -23,30 +24,30 @@ the rest of this guide is applied.
 
 ## 2. Repository Map
 
-| Path | Purpose |
-| --- | --- |
-| `main.go` | Wails startup, Postgres open, binding registration |
-| `cmd/vera/` | The `vera` CLI: every feature as a command, plus local validate/render |
-| `cmd/veraserver/` | The API server binary |
-| `docs/cli.md` | The CLI guide: every command, the input format, exit codes |
-| `backend/quotation.go` | `Prepare`/`Export` flow, input + data models |
-| `backend/builder.go` | Per-item pricing, totals, markup + per-row discount math |
-| `backend/tax.go` | Tax zone/category → basis-point rates, tax + nett |
-| `backend/preview.go` | Customer/internal preview DTOs, template HTML preview |
-| `backend/archive.go` | Archive list/detail/revision Wails methods |
-| `backend/format.go` | Rupiah + description formatting |
-| `backend/template.go` | Embedded template/asset loading |
-| `backend/theme/` | Brand theme: four bases → derived role palette for both renderers + portal |
-| `backend/store/` | Postgres config, migrations, repositories |
-| `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template |
-| `backend/template/css/template-fixed.css` | PDF/preview styles |
-| `frontend/src/App.tsx` | Application shell/state, page routing |
-| `frontend/src/components/` | UI components (shell, ledger, review, archive, detail) |
-| `frontend/src/tax.ts` | Tax options, rates, paste normalizers |
-| `frontend/src/format.ts` | IDR formatting + client-side margin and discount math |
-| `frontend/wailsjs/go/*` | Generated Wails bindings |
-| `.env.example` | Documented Postgres variable names (no secrets) |
-| `test-data/` | Local Excel fixtures (gitignored) |
+| Path                                        | Purpose                                                                    |
+| ------------------------------------------- | -------------------------------------------------------------------------- |
+| `main.go`                                   | Wails startup, API endpoint resolution, binding registration               |
+| `cmd/vera/`                                 | The `vera` CLI: every feature as a command, plus local validate/render     |
+| `cmd/veraserver/`                           | The API server binary                                                      |
+| `docs/cli.md`                               | The CLI guide: every command, the input format, exit codes                 |
+| `backend/quotation.go`                      | `Prepare`/`Export` flow, input + data models                               |
+| `backend/builder.go`                        | Per-item pricing, totals, markup + per-row discount math                   |
+| `backend/tax.go`                            | Tax zone/category → basis-point rates, tax + nett                          |
+| `backend/preview.go`                        | Customer/internal preview DTOs, template HTML preview                      |
+| `backend/archive.go`                        | Archive list/detail/revision Wails methods                                 |
+| `backend/format.go`                         | Rupiah + description formatting                                            |
+| `backend/template.go`                       | Embedded template/asset loading                                            |
+| `backend/theme/`                            | Brand theme: four bases → derived role palette for both renderers + portal |
+| `backend/store/`                            | Postgres config, migrations, repositories                                  |
+| `backend/template/html/template-fixed.html` | Customer-facing PDF/preview template                                       |
+| `backend/template/css/template-fixed.css`   | PDF/preview styles                                                         |
+| `frontend/src/App.tsx`                      | Application shell/state, page routing                                      |
+| `frontend/src/components/`                  | UI components (shell, ledger, review, archive, detail)                     |
+| `frontend/src/tax.ts`                       | Tax options, rates, paste normalizers                                      |
+| `frontend/src/format.ts`                    | IDR formatting + client-side margin and discount math                      |
+| `frontend/wailsjs/go/*`                     | Generated Wails bindings                                                   |
+| `.env.example`                              | Documented Postgres variable names (no secrets)                            |
+| `test-data/`                                | Local Excel fixtures (gitignored)                                          |
 
 ## 3. Setup Commands
 
@@ -58,7 +59,8 @@ npm --prefix frontend install
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
-Postgres must be configured for the app to start. Create a local, gitignored `.env`:
+Postgres must be configured for the API server (`cmd/veraserver`) to start; the
+desktop does not open a database. Create a local, gitignored `.env`:
 
 ```bash
 VERA_POSTGRES_DSN=postgres://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
@@ -66,13 +68,16 @@ VERA_POSTGRES_SCHEMA=vera
 ```
 
 Never commit credentials or a real DSN. `.env.example` documents the variable names.
-Startup runs versioned migrations in the configured schema.
+The server runs versioned migrations in the configured schema at startup.
 
 ## 4. Development Commands
 
 ```bash
-# Load Postgres configuration into the shell, then run the desktop loop
-set -a; source .env; set +a
+# Terminal 1: local API on 127.0.0.1:8081 (sources .env, forces the loopback bind
+# and --local-development, which refuses non-local database targets before open)
+scripts/dev-api.sh
+
+# Terminal 2: desktop dev loop (reads only VERA_API_URL from the environment or .env)
 wails dev
 
 # Frontend-only loop
@@ -212,8 +217,10 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   It needs no Wails CLI — the generated files are text and the Go side is
   reflection.
 - Keep `Startup` initialization safe for both runtime and tests.
-- `main.go` opens Postgres before `wails.Run`; startup must fail clearly when the
-  database is misconfigured.
+- `main.go` resolves the API endpoint through the build-selected `apiBaseURL`
+  before `wails.Run`: packaged builds use the production API, `wails dev` builds
+  read only a loopback `VERA_API_URL` and fail clearly when it is absent.
+  `cmd/veraserver` opens Postgres; the desktop never does.
 
 ## 10. Domain Invariants (do not break)
 
@@ -280,7 +287,7 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   `VERA_SIGNING_KEY`, never in source or the database) over a canonical field
   set pinned by `backend/signing.go`'s format test. The public portal at
   `/v/<shortId>` (and `POST /verify`) renders valid / superseded / mismatch /
-  not-found. `short_id` identifies one *revision*. Never change the canonical
+  not-found. `short_id` identifies one _revision_. Never change the canonical
   format without a migration story: existing printed codes must keep
   verifying. TLS is Google-managed — never self-signed.
 
@@ -357,8 +364,16 @@ For multiple commits per issue, each commit references the issue number.
 6. **Delete the branch** after merge (the flag above does it).
 7. Pick the next issue and repeat.
 
-> **No auto-deploy.** `vera-app` is a desktop application: merging to `main` does not
-> deploy anything. Build a release locally when needed (Section 14).
+> **Merging to `main` deploys the API, not the desktop.** `deploy.yml` builds and
+> deploys `veraserver` to Cloud Run on every push to `main`. Desktop installers and
+> the updater are built only by a release tag (`desktop.yml`); a merge is not a
+> release (Section 14).
+
+> **Sprint integration branch.** A parent issue with an approved set of child
+> tickets may use one integration branch and one PR. Every child is still planned,
+> implemented and judged on that branch; the PR body resolves the parent and every
+> child; each child's plan comment records its commit and verdict. This is the only
+> exception to the one-issue-per-branch rule.
 
 > **Cross-repo transfer is not available.** GitHub only allows issue transfer within
 > the same owner; `arcon-external/vera-app` and a personal-owner repo cannot exchange
@@ -390,15 +405,15 @@ makes the read visible afterwards, which a merge otherwise has no place for.
 > **What enforces this now.** A `pr.yml` step ("Report Dependabot alerts", in the
 > Frontend build job) queries the open-alert list on every PR and writes it to the
 > job summary, so the "before" read is visible without anyone typing anything. It
-> fails the job only when a *successful* read finds a `critical`/`high` alert:
+> fails the job only when a _successful_ read finds a `critical`/`high` alert:
 > `low`/`medium` are reported without failing, and any API failure — bad
 > permission, rate limit, network, an unexpected response — warns and passes, so a
 > blind check never blocks a PR. That fail-open is load-bearing, not decorative:
 > `GITHUB_TOKEN` has returned HTTP 403 on this endpoint even with broad grants
 > (upstream discussion `github.com/orgs/community/discussions/60612`), while the
 > docs promise `security-events` only for code-scanning alerts — so until a real
-> run shows a successful read, treat a green tick as "no blocking alerts *that this
-> check could see*" and keep doing the manual reads above. By §12.5's own standard
+> run shows a successful read, treat a green tick as "no blocking alerts _that this
+> check could see_" and keep doing the manual reads above. By §12.5's own standard
 > this step becomes a guard the day a run proves it can go red; today it is a
 > visible reminder with a tripwire attached.
 
@@ -411,7 +426,7 @@ makes the read visible afterwards, which a merge otherwise has no place for.
    one: `vitest@2` carried its own `vite@5`, `esbuild@0.21` and `tinypool@1`,
    and nothing short of a vitest major removed them.
 3. Refresh `frontend/package.json.md5` (`md5 -q frontend/package.json >
-   frontend/package.json.md5`). It is tracked and must match
+frontend/package.json.md5`). It is tracked and must match
    `frontend/package.json`, but it is a **Wails artifact rather than a CI
    fingerprint**: nothing in `.github/` or `scripts/` reads it, so a stale copy
    fails nothing and the step is hygiene, not a gate. `wails build` rewrites it,
@@ -437,19 +452,20 @@ Close the issue only after:
 
 ## 12. The Orchestrated Workflow
 
-Work on an issue is run by an **orchestrator** — the assistant — directing four
+Work on an issue is run by an **orchestrator** — the assistant — directing five
 subordinate roles. The orchestrator plans, decides and verifies; the subordinates
 do their role and stop. No issue is started without a plan and none is merged
 without validation.
 
 ### 12.1 The roles
 
-| Role | Model | Job |
-| --- | --- | --- |
-| **Worker** | `opencode-go/muse-spark-1.3-contributor#xhigh`, fallbacks `openai/gpt-6-sol` then `opencode/big-pickle` | Writes code, writes and runs tests. |
-| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates a problem into questions. It never verifies, never decides. |
-| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` | Advises on what to do next. It advises; it never decides. |
-| **Judge** | `openai/gpt-6.1-sol#high`, fallback `opencode-go/deepseek-v4.1-flash#max` | Assumes everything is wrong, verifies by running it, returns PASS or NOT PASS. |
+| Role        | Model                                                                     | Job                                                                            |
+| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **Worker**  | `opencode-go/deepseek-v4.1-flash` (default), fallbacks `opencode-go/muse-spark-1.3-contributor#xhigh` then `opencode-go/longcat-2.5-preview-free` | Writes code and tests. Loads `tdd` on every change and `diagnosing-bugs` for a bug; `prototype` only when the brief timeboxes it. |
+| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates with `grilling`; loads `research`/`domain-modeling` when facts or vocabulary are missing. Never verifies or decides. |
+| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` (the requested `#max` variant does not exist; `xhigh` is its highest) | Advises. Loads `codebase-design` for design forks and `karpathy-guideline` as the surgical lens; may evaluate a `prototype`. Never decides. |
+| **Judge**   | `opencode-go/deepseek-v4.1-flash#max`, fallback `opencode-go/longcat-2.5-preview-free` | Assumes everything is wrong; verifies by running; uses `tdd`, `diagnosing-bugs` and `code-review` as lenses. PASS/NOT PASS. |
+| **Checker** | `opencode-go/muse-spark-1.3-contributor`                                  | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
 
 Model references are exact (`provider/model#variant`) and are looked up with the
 models tool rather than guessed — a variant that does not exist fails silently at
@@ -460,18 +476,19 @@ when the model before it times out or errors at dispatch, and a dispatch that fa
 back says so in its report.
 The Judge is deliberately a **different model family** from the Advisor:
 two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family, because two reviewers from one family share one family's blind spots. That rule holds — the Advisor is Muse Spark, the Judge is GPT-6.1 Sol.
-What it costs is stated plainly: the Worker now shares a family with the Advisor
-(both Muse Spark — the executor and the advisor share blind spots, a pairing the
-rule does not bind but the one to watch), and the Judge shares one with the Worker's
-first fallback; the Judge's fallback shares one with the orchestrator. The Riddler is
-not a reviewer, so the pairing rule does not bind it. The Worker and the Judge are
-**trial models on a billed OpenAI API account** — the ChatGPT Plus subscription does
-not fund them (the first dispatch proved it: `credit_balance_exhausted`) — and their
-limits are unmeasured: a quota wall falls back per the chain, and a dispatch that
-falls back says so in its report. If a future run shows correlated
-misses between a reviewer and its family-mate, re-deal the families rather than
-defending the table.
+The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family. That rule holds under this roster — the Advisor is Muse Spark, the Judge is DeepSeek.
+
+**This is the quota-fallback roster (2026-10-21) while the OpenAI models are
+rate-limited.** It contains no OpenAI dependency. The Worker and the Judge now share
+DeepSeek: the executor/judge pairing is the one to watch. The Riddler (LongCat) and
+the Checker are not reviewers, so the pairing rule does not bind them. The requested
+Advisor `#max` variant does not exist — `#xhigh` is Muse Spark's highest available
+variant, and an exact reference is what makes dispatch reliable. A dispatch that
+falls back says so in its report. When the OpenAI limits clear, restore the primary
+roster (Worker/Advisor Muse Spark `xhigh`, Judge GPT-6.1 `high`) after looking the
+variants up with the models tool; the cross-family rule still decides the pairing.
+If a future run shows correlated misses between a reviewer and its family-mate,
+re-deal the families rather than defending the table.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
@@ -484,7 +501,19 @@ with the gap named rather than filling it in from the diff — the diff shows wh
 changed, never what was tried and abandoned, and the abandoned attempt is often the
 most useful thing in the report.
 
-**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not.
+**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not. For a design fork it starts from `codebase-design`; for a failure, `diagnosing-bugs`; for a diff, `code-review`.
+
+**The Checker watches CI after every push.** It is dispatched in the background
+against the pushed SHA and reports **every** check, not just the first red one. A
+check that is pending, skipped, cancelled or missing is **not green**, and a green
+run on an older SHA is **stale** — both are reported as failures of the read, not
+as passes. For each red check it reads the log to the decisive step or test, quotes
+the line, and classifies the cause as **code** (a test or compile failure the
+Worker must fix) or **infrastructure** (timeout, missing binary, network, runner
+capacity). It never edits, reruns or merges anything, and it never guesses: if the
+checks are still running it says so and when to look again. The agent type lives
+at `.opencode/agents/checker.md`; dispatch it every time a push changes the PR
+head, and carry its read in the orchestrator's report.
 
 **The Riddler interrogates the problem.** Fed one or more problems, it produces 10–20
 questions per problem that map the surface before anyone designs against it. Its
@@ -497,23 +526,25 @@ the output is numbered and grouped by surface, so the consumers can lift it
 wholesale. It runs once per issue after the issue is understood and before the plan
 is frozen: the plan comment answers its questions, the Advisor's brief takes the
 design-fork subset, and the Judge's brief takes the full set as its verification
-checklist. A feature earns a second pass before merge. It never verifies and never
-decides — it widens the interrogation surface; the Judge deepens it.
+checklist. It loads `grilling` for the interrogation, `research` when the answer is
+outside the repo, and `domain-modeling` when the vocabulary is unsettled. A feature
+earns a second pass before merge. It never verifies and never decides — it widens the
+interrogation surface; the Judge deepens it.
 
 ### 12.2 The loop
 
 ```
-Riddler (questions, before the plan freezes)
+Discovery: research / grilling / domain-modeling / codebase-design / prototype
       |
-Orchestrator: decide the design, freeze the interfaces, write the todolist
+Riddler (questions) + plan comment: decide design, freeze interfaces, todolist
       |
-Worker waves  -->  Advisor (if a design decision)  -->  Judge
+Worker waves (tdd / diagnosing-bugs)  -->  Advisor (design forks)  -->  Judge
    ^                               |
    +--------- NOT PASS ------------+
                                    |
                                  PASS
                                    |
-              Orchestrator's second validation -> ship
+              code-review (behaviour/large changes) -> pr -> orchestrator validation -> ship
 ```
 
 - **On PASS** the orchestrator re-validates everything personally and then decides
@@ -535,6 +566,16 @@ does.
 commit resumes the same session, hands back its own findings, and asks whether each
 is closed. Re-briefing a fresh Judge for an increment is the exception, not the
 habit — a resumed Judge knows what it found and why.
+
+**A Judge runs on a quiescent tree — no active workers.** Before dispatching a
+Judge — first pass or resume — the orchestrator confirms that **no worker subagent
+is still running**: every worker in the wave has reported and stopped, and no new
+wave has started. A Judge running beside a live worker judges a moving target: the
+diff it approves may not be the one that ships, its red proofs can collide with a
+worker's scratch edits, and its verdict goes stale the moment that worker lands
+another commit. If a worker is still running, wait for it. If the next wave is
+ready, finish and judge the current wave first — the Judge's verdict is a gate
+before the frontier moves, not a background opinion.
 
 ### 12.3 The todolist, and the tool that does not exist
 
@@ -614,7 +655,7 @@ While workers run in parallel:
 - **Nobody commits.** The orchestrator commits; concurrent `git add` on one working
   tree is a race.
 - **Nobody runs anything that writes shared output.** `npm --prefix frontend run
-  build` writes `frontend/dist`, which `backend/**` embeds.
+build` writes `frontend/dist`, which `backend/**` embeds.
 - **Nobody edits a file another worker owns.** If a task needs a change in someone
   else's file, it waits for the next wave.
 - **One tree, or a worktree per branch.** Workers share the working tree and never
@@ -654,11 +695,16 @@ While workers run in parallel:
 
 ### 12.6 How the loop scales
 
-| Change | Minimum |
-| --- | --- |
-| Behaviour, or anything staff see | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
-| Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7) |
-| Comments, docs, formatting only | One Worker, the gates (Section 13), and orchestrator validation |
+| Change                                                      | Minimum                                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Behaviour, or anything staff see                            | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
+| Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7)                             |
+| Comments, docs, formatting only                             | One Worker, the gates (Section 13), and orchestrator validation                           |
+| Bug, regression or incident                                 | `diagnosing-bugs` first: a red loop and its permanent regression test, then the normal loop |
+| New term, schema or state                                   | `domain-modeling` before the plan; the glossary/ADR is part of the plan                   |
+| A question outside the repo                                 | `research` before the plan; write the evidence down                                       |
+| A design fork or decomposition                              | `codebase-design`; a timeboxed `prototype` when a runnable answer is needed               |
+| AGENTS.md, a skill or an agent brief                        | `writing-for-agents`; one Worker, the gates, and orchestrator validation                  |
 
 The floor is never zero: **a Worker writes the change and the orchestrator validates
 it.** Skipping the Judge is a decision the orchestrator states out loud, with its
@@ -684,9 +730,47 @@ corrupt. Every exit code is read directly (Section 12.5).
    saved, and what the next run should do differently.
 5. The Dependabot read — before the PR and after the merge (Section 11). Both, not
    one.
+6. The Checker's CI read for the pushed SHA — every check, or the failure with its
+   decisive log line and whether it is code or infrastructure.
+7. Which skills were loaded, what each changed, and which were deliberately not
+   loaded.
 
 The report goes on the **issue**, because the written record is what §12.6 says does
 the enforcing; the reply to the user carries the same thing in short form.
+
+### 12.8 Skills — what to load, and who owns it
+
+Skills are loadable methods, not roles. **The orchestrator holds all of them and may
+load any directly at any point**; each subordinate loads the ones its job names. No
+skill is reserved to a subagent, and loading `code-review` does not make a session
+the Judge — it supplies the review method. Every dispatch and report names the skills
+loaded and the ones deliberately skipped, with the reason.
+
+| Phase | Skills | Who |
+| --- | --- | --- |
+| Discovery and plan | `research`, `grilling`, `domain-modeling`, `codebase-design`, `prototype` | orchestrator, Riddler, Advisor |
+| Build | `tdd`, `diagnosing-bugs`, `prototype`, `writing-for-agents` | Worker; the orchestrator may load them too |
+| Review and merge | `code-review`, `tdd`, `diagnosing-bugs`, `pr` | orchestrator, Judge, Checker for a red check |
+| Human handoff | `wizard` | orchestrator generates; the user runs it |
+
+| Skill | Load it when | It is done when |
+| --- | --- | --- |
+| `prototype` | a design fork needs a runnable answer before interfaces freeze | the question is answered and recorded; the prototype is thrown away or reduced to a test/fixture |
+| `diagnosing-bugs` | a bug, regression, incident or flaky check | a red-capable command names the symptom, the cause is verified, and a permanent regression test exists — or the missing seam is recorded |
+| `research` | the answer lives outside the repo, or a decision needs primary sources | findings are written to `docs/research/<slug>.md` or the issue with citations; no decision waits on memory |
+| `tdd` | any code or test change | the test failed first at an agreed seam; the least fix passes; the test remains |
+| `domain-modeling` | a new term, schema, state, ownership rule or money concept | `GLOSSARY.md`/ADR is updated, the plan uses the agreed words, and no schema lands before the words settle |
+| `codebase-design` | a module, seam, interface or decomposition decision | the interface is frozen in the brief; a single-worker serialization is justified |
+| `code-review` | before merging a behaviour change or after a large wave | standards and spec are reviewed; findings are fixed or recorded; the Judge still verifies |
+| `pr` | opening or updating a pull request | the title/body carry the summary, verification, `Resolves #NNN` and the Dependabot read |
+| `wizard` | a step only a human can do: credentials, dashboard, signing, cutover | a bash wizard walks the user through it and stops; the agent never fakes the step |
+| `grilling` | before freezing a high-risk plan | the plan answers the hard questions; unresolved answers block the freeze |
+| `writing-for-agents` | editing AGENTS.md, a skill, a brief or agent-facing docs | pointers are sharp, each rule has one home, the document is pruned, and its commands/links are verified |
+
+A skill's instructions do not override this guide; if they conflict, this guide wins
+and the conflict is reported. `prototype` and `research` produce evidence, not shipped
+code; `code-review` and `pr` do not replace the Judge. The `karpathy-guideline` remains
+the Advisor's default surgical lens.
 
 ---
 
@@ -715,7 +799,12 @@ If a gate fails, fix it before committing. Do not commit partially working code.
 For anything touching pricing, tax, or persistence, also run the Postgres integration
 test from Section 7.
 
-On CI, PRs whose diff is *entirely* `frontend/src/**` or `frontend/public/**` skip
+A bug fix also carries its `diagnosing-bugs` red loop and permanent regression test.
+A behaviour change gets a `code-review` before the PR, and the PR body is written with
+`pr`. Edits to this file, a skill or an agent brief use `writing-for-agents`. These
+are review gates, not substitutes for the Judge.
+
+On CI, PRs whose diff is _entirely_ `frontend/src/**` or `frontend/public/**` skip
 the Go suite's heavy steps via the scope step in `pr.yml` (the required "Go
 gates" check still reports — it just finishes fast). Every other path keeps the
 full suite, deliberately: root `*.md` feeds `TestChangelogCopyMatchesRoot`, and
@@ -757,9 +846,9 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 5. Push `main`, then create the release — **the release must exist before the
    workflow runs**, because every artifact job uploads into it: a missing
    release fails all of them (v0.10.1 lost a full cycle to `release not
-   found`). `gh release create` creates the tag as well, so there is no
+found`). `gh release create` creates the tag as well, so there is no
    separate tag step and no window in which a job can run without a release.
-   Pin `--target` explicitly: `gh release create` tags the *remote* default
+   Pin `--target` explicitly: `gh release create` tags the _remote_ default
    branch head when the tag does not exist, and if the version-bump commit is
    still local the tag lands on the commit without the bump, the desktop
    build fails its own stamp check, and the tag has to be force-moved by hand
@@ -774,13 +863,13 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 6. The tag the release created triggers `.github/workflows/desktop.yml`, which builds
    **nine** artifacts, each with a `.sha256` sidecar:
 
-   | Artifact | Job |
-   |---|---|
-   | `Vera-v<version>-windows-amd64-installer.exe` | `windows` |
-   | `Vera-v<version>-windows-arm64-installer.exe` | `windows-arm64` |
-   | `Vera-v<version>-macos-universal.dmg` | `macos` |
-   | `Vera-CLI-v<version>-{linux,darwin}-{amd64,arm64}` | `cli` |
-   | `Vera-CLI-v<version>-windows-{amd64,arm64}.exe` | `cli` |
+   | Artifact                                           | Job             |
+   | -------------------------------------------------- | --------------- |
+   | `Vera-v<version>-windows-amd64-installer.exe`      | `windows`       |
+   | `Vera-v<version>-windows-arm64-installer.exe`      | `windows-arm64` |
+   | `Vera-v<version>-macos-universal.dmg`              | `macos`         |
+   | `Vera-CLI-v<version>-{linux,darwin}-{amd64,arm64}` | `cli`           |
+   | `Vera-CLI-v<version>-windows-{amd64,arm64}.exe`    | `cli`           |
 
    All are version-stamped. The `v` appears **inside** the filename as well as
    in the tag: tag `v0.5.1` → `Vera-v0.5.1-…`. The three installer names are a
@@ -796,6 +885,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
    The `cli` job fails the release if a binary does not carry the tag, so a
    mis-stamped build cannot be published.
+
 7. **The `Announce to the updater` job does the mirroring and the updater
    variables for you.** It runs last, gated on all three installer jobs, and is
    the only thing that makes an installed desktop offer the new version. A
@@ -824,15 +914,17 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    are not pushed to every installed copy.
 
    Re-run it by hand after fixing whatever it complained about:
+
    ```bash
    gh run rerun --repo arcon-external/vera-app --failed    # or re-run the job
    ```
 
-   `gh run rerun --failed` recovers a *skipped* announce job once its `needs`
+   `gh run rerun --failed` recovers a _skipped_ announce job once its `needs`
    succeed (verified at v0.10.1), so it does not need a full re-run.
 
    To do it outside CI, the script is the whole sequence and takes `--dry-run`,
    which runs every check and changes nothing:
+
    ```bash
    scripts/announce-release.sh --version v0.4.0 --dry-run
    scripts/announce-release.sh --version v0.4.0
@@ -846,7 +938,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
    It must print the tag the release created. If it prints anything older, the
    announce job failed; read its log before doing anything else.
 9. Add a Download section to the release notes listing the installers **and the
-    six CLI binaries**, with one install line each, and these prerequisites:
+   six CLI binaries**, with one install line each, and these prerequisites:
    - Windows: SmartScreen will warn on unsigned builds — expected until signing.
      A Chrome installation is no longer required for exporting quotations; the
      native renderer replaced it in v0.4.0.
@@ -864,10 +956,10 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
   template in `backend/template/` is the source of truth for how a quotation
   looks; both engines render it.
 
-  | build | `render.Active` | chromedp dependency |
-  | --- | --- | --- |
-  | `go build` | gpdf (native, no browser) | **absent** |
-  | `go build -tags chromedp` | chromedp (headless Chrome) | present |
+  | build                     | `render.Active`            | chromedp dependency |
+  | ------------------------- | -------------------------- | ------------------- |
+  | `go build`                | gpdf (native, no browser)  | **absent**          |
+  | `go build -tags chromedp` | chromedp (headless Chrome) | present             |
 
   Reach for chromedp when the template has changed and the native layout has not
   caught up — it renders the template exactly as written, and it is the oracle
@@ -890,6 +982,7 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
   A rendering test under `-tags chromedp` skips without a browser — see
   `render.RequireUsable`. Do not add an environment variable that selects the
   engine at runtime: a compile-time choice is the point.
+
 - **Split presentation:** `GetCustomerPreview` is separated from
   `GetInternalBreakdown` (never exported). The customer view carries the
   document plus the cost side the review panel renders — but **never margin,
@@ -909,12 +1002,14 @@ Semantic versioning: `vMAJOR.MINOR.PATCH`.
 
 ## 16. Environment & Secrets
 
-| Variable | Purpose |
-| --- | --- |
-| `VERA_POSTGRES_DSN` | Primary Postgres connection string |
-| `VERA_POSTGRES_SCHEMA` | Schema name (default `vera`) |
-| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE` | Fallback |
-| `VERA_POSTGRES_TEST_DSN` | Test-only DSN for `backend/store` integration tests |
+| Variable                                                                                                                                                          | Purpose                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `VERA_API_URL`                                                                                                                                                    | Desktop `wails dev` only: loopback http(s) API URL (env or project `.env`); packaged builds ignore it. The `vera` CLI keeps its own `--api`/`VERA_API_URL`/session behavior (`docs/cli.md`) |
+| `VERA_API_ADDR`                                                                                                                                                   | API server listen address (default `:8080`; `scripts/dev-api.sh` forces `127.0.0.1:8081`) |
+| `VERA_POSTGRES_DSN`                                                                                                                                               | API server: primary Postgres connection string (never read by the desktop) |
+| `VERA_POSTGRES_SCHEMA`                                                                                                                                            | API server: schema name (default `vera`)                              |
+| `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD` / `PGSSLMODE`                                                                                        | API server fallback                                                   |
+| `VERA_POSTGRES_TEST_DSN`                                                                                                                                          | Test-only DSN for `backend/store` integration tests                   |
 | `VERA_APP_LATEST` / `VERA_APP_MIN_SUPPORTED` / `VERA_APP_NOTES_URL` / `VERA_APP_DOWNLOAD_WINDOWS` / `VERA_APP_DOWNLOAD_WINDOWS_ARM64` / `VERA_APP_DOWNLOAD_MACOS` | Desktop updater release state (empty = no update info, never prompts) |
 
 The repository is public (since 2026-10-12), which changes the threat model:

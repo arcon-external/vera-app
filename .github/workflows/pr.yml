@@ -32,9 +32,11 @@ jobs:
   go:
     name: Go gates
     # A hung job otherwise runs the 360-minute default before anyone is told.
-    # Generous against a measured ~4 minutes warm and ~6 cold, because the point
-    # is catching a wedged container or a stuck npm ci, not shaving the margin.
-    timeout-minutes: 20
+    # The Postgres-backed suites (backend/api, backend/store, plus the PO
+    # schema-per-test cases) now take ~20 minutes cold on a hosted runner, so a
+    # 20-minute cap kills a healthy run mid-suite. Keep the job cap above the
+    # `go test -timeout 30m` budget; this is a hang tripwire, not a stopwatch.
+    timeout-minutes: 45
     # Pinned, not ubuntu-latest. The runner image is part of the setup-go cache
     # key, so the migration to Ubuntu 26 (beginning 2026-10-19) would cold-start
     # every job on the day it rolls out. Here the durability fix is the speed fix.
@@ -156,6 +158,37 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go vet ./...
 
+      - name: API configuration and session build modes (#495)
+        # The development API resolver and the dev keychain identity are
+        # //go:build dev && !production variants, and the ordinary suite never
+        # compiles them: without this step a broken dev branch stays invisible
+        # until someone runs `wails dev`.
+        #
+        # `dev` and `production` select Wails' real Linux frontend, which
+        # cgo-links GTK/WebKit; only the default tags use Wails' no-cgo stub.
+        # Ubuntu 24.04 ships WebKit 4.1, so every root command adds
+        # `webkit2_41` and the packages below supply it. Without them the first
+        # command fails in pkg-config before any #495 test runs.
+        #
+        # Root package covers default, packaged, dev and debug-packaged. The
+        # Wails-free auth package covers those plus dev+production, which pins
+        # the exclusive predicate (dev && !production versus !dev || production).
+        # Wails v2.16 itself declares App twice when both tags are set, so the
+        # dev+production root package cannot link; auth is where that
+        # combination is executable.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
+          go vet -tags dev,webkit2_41 ./ ./backend/auth
+          go test -count=1 -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
+          for tags in production dev production,debug; do
+            go test -tags "$tags,webkit2_41" -count=1 \
+              -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
+          done
+          go test -tags dev,production -count=1 \
+            -run 'TestKeyring' ./backend/auth
+
       - name: Build the chromedp tag (the renderer-equivalence oracle)
         # The default suite never builds this tag, so without this step the
         # oracle's adapter could rot while everything else stays green --
@@ -186,8 +219,14 @@ jobs:
         # end-to-end export test in the Go suite -- the one that builds a
         # quotation and produces real PDF bytes, which is exactly the path a
         # broken renderer would break.
+        #
+        # The 10m timeout is go test's per-package default, and backend/api's
+        # Postgres-backed suite now passes it on a hosted runner (the PO work
+        # added several schema-per-test suites). A package timeout is reported
+        # as a deadlock dump, which reads like a hang rather than a slow suite;
+        # give the suite headroom instead of misdiagnosing it as one.
         if: steps.scope.outputs.needs_go != 'false'
-        run: go test -race ./...
+        run: go test -race -timeout 30m ./...
 
       - name: Prove the export test actually ran
         # A green tick cannot distinguish a test that ran from one that skipped,
