@@ -811,7 +811,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 			return filled
 		}
 		field.Status = apicontract.ExtractionStatusAbsent
-		field.Note = "The label was found but no value followed it."
+		field.Note = "The label was found without a usable value."
 		return field
 	}
 	chosen := selection[0]
@@ -873,6 +873,13 @@ func validFieldSelection(key string, matches []fieldMatch) []fieldMatch {
 		}
 	}
 	if len(valid) > 0 {
+		// Currency is the one field with a context fallback (the amount line).
+		// A valid fallback must not silently erase an invalid labelled
+		// currency: keep both candidates so the printed label becomes a
+		// reviewable conflict instead of disappearing.
+		if key == apicontract.ExtractionFieldCurrency && len(valid) < len(matches) {
+			return matches
+		}
 		return valid
 	}
 	return matches
@@ -906,8 +913,11 @@ func derivedDeliveryField(field apicontract.ExtractionField, derived *deliveryEv
 
 func firstDifferent(matches []fieldMatch, chosen string) string {
 	for _, match := range matches {
-		if strings.TrimSpace(match.raw) != strings.TrimSpace(chosen) {
-			return strings.TrimSpace(match.raw)
+		raw := strings.TrimSpace(match.raw)
+		// A label-only occurrence has no value and must never become the
+		// quoted "other value" in a conflict note.
+		if raw != "" && raw != strings.TrimSpace(chosen) {
+			return raw
 		}
 	}
 	return ""

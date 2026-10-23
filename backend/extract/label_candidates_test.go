@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"strings"
 	"testing"
 
 	"vera-app/backend/apicontract"
@@ -34,4 +35,32 @@ func TestProposePrefersARealFieldValueOverALabelLookalike(t *testing.T) {
 	assertField(t, result, apicontract.ExtractionFieldPONumber, "900123", apicontract.ExtractionStatusExtracted)
 	assertField(t, result, apicontract.ExtractionFieldPODate, "2026-04-07", apicontract.ExtractionStatusExtracted)
 	assertField(t, result, apicontract.ExtractionFieldIncoterms, "DDP", apicontract.ExtractionStatusExtracted)
+}
+
+// A valid amount-line currency must not hide a different invalid labelled
+// currency. The label is the document's statement; the amount is context.
+func TestProposeKeepsAnInvalidLabelledCurrencyVisible(t *testing.T) {
+	result := parseFixture(t, []testWord{
+		word("Currency:", 50, 60, 50), word("US", 104, 60, 18), word("Dollar", 124, 60, 38),
+		word("Amount:", 50, 90, 48), word("Rp", 102, 90, 14),
+		word("1,000.00", 120, 90, 45), word("IDR", 170, 90, 22),
+	})
+	field := outputFields(result)[apicontract.ExtractionFieldCurrency]
+	if field.Status != apicontract.ExtractionStatusNeedsReview {
+		t.Fatalf("currency = %+v; an invalid labelled currency must be needs_review", field)
+	}
+	if !strings.Contains(field.Value+" "+field.Raw, "US Dollar") {
+		t.Errorf("currency = %+v; the printed US Dollar disappeared", field)
+	}
+	if field.Note == "" {
+		t.Error("currency conflict has no note naming the other printed value")
+	}
+}
+
+// firstDifferent must never quote a label-only occurrence as the other value.
+func TestFirstDifferentSkipsALabelOnlyOccurrence(t *testing.T) {
+	matches := []fieldMatch{{raw: ""}, {raw: "TBD"}, {raw: "N/A"}}
+	if got := firstDifferent(matches, "TBD"); got != "N/A" {
+		t.Errorf("firstDifferent = %q; want N/A, not the empty label occurrence", got)
+	}
 }
