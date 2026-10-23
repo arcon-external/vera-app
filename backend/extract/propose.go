@@ -11,7 +11,7 @@ import (
 	"vera-app/backend/apicontract"
 )
 
-// Issue #477: propose header fields and table rows from positioned words.
+// Issue #477/#476: propose header fields and table rows from positioned words.
 //
 // The rules are deliberately conservative. A label with no value is `absent`;
 // a value that cannot be normalised, a date that could be read two ways, a
@@ -20,11 +20,13 @@ import (
 // page printed, never quantity x price) and nothing is OCRed: a page with no
 // words is `absent` for every field.
 //
-// Layout handling is a heuristic, not universal parsing. It understands a
-// label/value header and a table whose column headers appear on the page; a
-// continued table without a repeated header is left unproposed rather than
-// guessed. The benchmark ticket (#476) requires real authorised samples before
-// any accuracy claim, and none of this is that claim.
+// Layout handling is generic heuristic, not universal parsing. Header labels
+// are looked for on every page, in a left or right block, with the value on the
+// same or the next visual line; a table is found from a header row whose
+// synonyms appear in any order. None of that is a layout model: a form this
+// reader has not seen can still abstain, and abstaining is the intended answer
+// when the evidence is not there. The benchmark ticket (#476) requires real
+// authorised samples before any accuracy claim, and none of this is that claim.
 
 // Options bounds the work. MaxPages is enforced here as well as by the
 // extractor process, so a caller that parses XML directly cannot slip past it.
@@ -100,8 +102,9 @@ func Propose(pages []Page, options Options) (apicontract.ExtractionOutput, error
 	}
 
 	headerLines := headerArea(pages)
-	result.Fields = proposeFields(headerLines, minConfidence)
-	result.Rows = proposeRows(pages, minConfidence)
+	rows, derivedDelivery := proposeRows(pages, minConfidence)
+	result.Fields = proposeFields(headerLines, minConfidence, derivedDelivery)
+	result.Rows = rows
 	for _, row := range result.Rows {
 		if row.Status != apicontract.ExtractionStatusExtracted {
 			result.Abstentions.Rows++
@@ -186,27 +189,185 @@ func absFloat(value float64) float64 {
 	return value
 }
 
+// headerArea collects every line that can carry a header field, on every page.
+// A PO is not required to print its number, order date or Incoterms on page 1
+// or above the table: a right-hand block, a page 2 Incoterms block and a page 3
+// submission stamp are all ordinary. The lines belonging to a table are masked
+// out so a column header ("Need By") or a row's date is not read as a
+// label/value pair; the field/table proposers then see only prose and labels.
 func headerArea(pages []Page) []visualLine {
-	if len(pages) == 0 {
-		return nil
+	header := make([]visualLine, 0, 32)
+	var carried []tableColumn
+	tableOpen := false
+	for index := range pages {
+		page := &pages[index]
+		lines := linesOf(page)
+		headerIndex, columns, found := findTableHeader(lines)
+		if found {
+			header = append(header, lines[:headerIndex]...)
+			end := tableEnd(lines, headerIndex, columns)
+			header = append(header, lines[end:]...)
+			carried = columns
+			tableOpen = end >= len(lines)
+			continue
+		}
+		if tableOpen && len(carried) > 0 {
+			end := continuationTableEnd(lines, carried)
+			header = append(header, lines[end:]...)
+			tableOpen = end >= len(lines)
+			continue
+		}
+		header = append(header, lines...)
 	}
-	lines := linesOf(&pages[0])
+	// A second table on the same page can leave its column header in the
+	// collected prose. It is structure, never a field label line.
+	filtered := make([]visualLine, 0, len(header))
+	for _, line := range header {
+		if _, isHeader := tableColumns(line); isHeader {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
+func findTableHeader(lines []visualLine) (int, []tableColumn, bool) {
 	for index, line := range lines {
-		if _, ok := tableColumns(line); ok {
-			return lines[:index]
+		if columns, ok := tableColumns(line); ok {
+			return index, columns, true
 		}
 	}
-	// No table header on the first page: the header block is the top half.
-	// A label lower than that is more likely body text than a PO header.
-	limit := pages[0].Height * 0.55
-	header := make([]visualLine, 0, len(lines))
-	for _, line := range lines {
-		if line.Box.Y >= limit {
+	return -1, nil, false
+}
+
+// tableEnd returns the index of the first line after the table that starts at
+// headerIndex. A total, a footer or another labelled header block ends it. A
+// table with no readable terminator is treated as running to the page end:
+// guessing that prose below it is a header field would be worse than an
+// abstention.
+// lineAtTableMargin reports whether a line starts left of the description
+// column. A footer label starts at the page margin; a "Note:" line inside a
+// wrapped description starts at the description column and is data.
+func lineAtTableMargin(line visualLine, columns []tableColumn) bool {
+	descriptionX := -1.0
+	for _, column := range columns {
+		if column.Kind == columnDescription {
+			descriptionX = column.XMin
 			break
 		}
-		header = append(header, line)
 	}
-	return header
+	if descriptionX < 0 {
+		return true
+	}
+	return line.Box.X < descriptionX-20
+}
+
+// isTableEndLine reports a total, a footer label or a block heading at the
+// table's left margin. The margin test is what keeps a line item's own "Note:"
+// text from ending its table.
+func isTableEndLine(line visualLine, columns []tableColumn) bool {
+	// A total is right-aligned and a block heading is left-aligned; both are
+	// structural wherever they sit on the line.
+	if totalLinePattern.MatchString(line.Text) ||
+		tableSectionEndPattern.MatchString(strings.TrimSpace(line.Text)) {
+		return true
+	}
+	if !lineAtTableMargin(line, columns) {
+		return false
+	}
+	return footerLinePattern.MatchString(line.Text) || footerLabelPattern.MatchString(line.Text)
+}
+
+func tableEnd(lines []visualLine, headerIndex int, columns []tableColumn) int {
+	rows := 0
+	for index := headerIndex + 1; index < len(lines); index++ {
+		line := lines[index]
+		if _, isHeader := tableColumns(line); isHeader {
+			continue
+		}
+		if isTableEndLine(line, columns) {
+			if tableSectionEndPattern.MatchString(strings.TrimSpace(line.Text)) {
+				// The status/metadata block below the line items is not a
+				// header. Keep scanning only for a real field label printed
+				// after it (an "Order submitted on" stamp, for example).
+				return afterSectionHeading(lines, index)
+			}
+			return index + 1
+		}
+		if rows > 0 && matchesFieldLabelNonStatus(line.Text) {
+			return index
+		}
+		cells := assignCells(line, columns)
+		if lineAnchor, qtyAnchor, priceAnchor := cells.anchors(); lineAnchor || qtyAnchor || priceAnchor {
+			rows++
+		}
+	}
+	return len(lines)
+}
+
+// continuationTableEnd finds where a table that began on an earlier page stops
+// when this page repeats no column header. A header field label is the end, so
+// an "Order submitted on" stamp below a continued table is still read.
+func continuationTableEnd(lines []visualLine, columns []tableColumn) int {
+	for index, line := range lines {
+		if isTableEndLine(line, columns) {
+			if tableSectionEndPattern.MatchString(strings.TrimSpace(line.Text)) {
+				return afterSectionHeading(lines, index)
+			}
+			return index + 1
+		}
+		if matchesFieldLabelNonStatus(line.Text) {
+			return index
+		}
+	}
+	return len(lines)
+}
+
+// matchesFieldLabel reports whether a line carries any header label, whether or
+// not a value follows it on the same line. It is the guard that stops a
+// label-only line's "next line value" from being the next label.
+func matchesFieldLabel(text string) bool {
+	for _, pattern := range fieldPatterns {
+		if pattern.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesFieldLabelNonStatus is matchesFieldLabel without the status-note
+// forms of a delivery date ("Estimated Delivery Date"). Those belong to a
+// confirmation block, not to the document's header.
+func matchesFieldLabelNonStatus(text string) bool {
+	for key, pattern := range fieldPatterns {
+		location := pattern.FindStringSubmatchIndex(text)
+		if location == nil {
+			continue
+		}
+		// A label that starts mid-sentence ("With Delivery Date: ...") is prose
+		// from a wrapped status block, not the document's header.
+		if location[0] != 0 {
+			continue
+		}
+		if key == apicontract.ExtractionFieldRequestedDeliveryDate && statusQualified(text, location[0]) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// afterSectionHeading skips a status/confirmation/metadata block and returns
+// the first later line that carries a real field label, or the page end. It is
+// how an "Order submitted on" stamp below the metadata stays readable while the
+// metadata itself does not become a header value.
+func afterSectionHeading(lines []visualLine, index int) int {
+	for next := index + 1; next < len(lines); next++ {
+		if matchesFieldLabelNonStatus(lines[next].Text) {
+			return next
+		}
+	}
+	return len(lines)
 }
 
 // ---------------------------------------------------------------------------
@@ -252,22 +413,56 @@ type fieldMatch struct {
 
 var fieldPatterns = map[string]*regexp.Regexp{
 	apicontract.ExtractionFieldPONumber: regexp.MustCompile(
-		`(?i)\b(?:p\.?\s*o\.?\s*(?:no|number|#)|purchase\s+order\s+(?:no|number|#)|nomor\s+p\.?\s*o\.?|no\.?\s+p\.?\s*o\.?)\s*[:#-]?\s*(.*)$`),
+		`(?i)(?:` +
+			// A labelled number may print "No", "Number" or "#". A bare
+			// "Purchase Order" requires a separator, and a bare "PO:" is only
+			// a label at the start of the line: "Tanggal PO:" is a date label
+			// and "PO-2026-7781" is a value, not a second label.
+			`\bpurchase\s+order\s+(?:no|number|#)\.?\s*[:#]?\s*` +
+			`|\bpurchase\s+order\s*[:#]\s*` +
+			`|\bp\.?\s*o\.?\s+(?:no|number|#)\.?\s*[:#]?\s*` +
+			`|^\s*p\.?\s*o\.?\s*[:#]\s*` +
+			`|\bnomor\s+(?:p\.?\s*o\.?|pesanan)\s*[:#]\s*` +
+			`|\bno\.?\s+p\.?\s*o\.?\s*[:#]\s*` +
+			`)(.*)$`),
 	apicontract.ExtractionFieldPODate: regexp.MustCompile(
-		`(?i)\b(?:p\.?\s*o\.?\s+date|purchase\s+order\s+date|tanggal\s+p\.?\s*o\.?|order\s+date)\s*[:#-]?\s*(.*)$`),
+		`(?i)\b(?:` +
+			// "Order submitted on" is the order's own date, not the date a
+			// quote or the PDF was produced.
+			`order\s+submitted(?:\s+(?:on|at))?` +
+			`|purchase\s+order\s+date` +
+			`|p\.?\s*o\.?\s+date` +
+			`|order\s+date` +
+			`|date\s+of\s+(?:the\s+)?(?:purchase\s+)?order` +
+			`|tanggal\s+(?:p\.?\s*o\.?|pesanan|order)` +
+			`)\s*[:#-]\s*(.*)$`),
 	apicontract.ExtractionFieldRequestedDeliveryDate: regexp.MustCompile(
-		`(?i)\b(?:requested\s+delivery\s+date|required\s+delivery\s+date|delivery\s+date|tanggal\s+(?:kirim|pengiriman)|ship\s+date|required\s+date)\s*[:#-]?\s*(.*)$`),
+		`(?i)\b(?:requested\s+delivery\s+date|required\s+delivery\s+date|` +
+			`requested\s+date|required\s+date|need\s+by(?:\s+date)?|delivery\s+date|` +
+			`ship\s+date|tanggal\s+(?:kirim|pengiriman)` +
+			`)\s*[:#-]?\s*(.*)$`),
 	apicontract.ExtractionFieldCurrency: regexp.MustCompile(
 		`(?i)\b(?:currency|mata\s+uang)\s*[:#-]?\s*(.*)$`),
 	apicontract.ExtractionFieldPaymentTerms: regexp.MustCompile(
 		`(?i)\b(?:payment\s+terms?|terms\s+of\s+payment|syarat\s+pembayaran)\s*[:#-]?\s*(.*)$`),
 	apicontract.ExtractionFieldIncoterms: regexp.MustCompile(
-		`(?i)\b(?:incoterms?|terms\s+of\s+delivery|delivery\s+terms|syarat\s+pengiriman)\s*[:#-]?\s*(.*)$`),
+		`(?i)\b(?:incoterms?(?:\s+code)?|incoterm\s+code|terms\s+of\s+delivery|` +
+			`delivery\s+terms|syarat\s+pengiriman)\s*[:#-]\s*(.*)$`),
 }
 
-func proposeFields(lines []visualLine, minConfidence float64) []apicontract.ExtractionField {
+// deliveryEvidence is a delivery date read from one table row. It is used only
+// when no header label prints a delivery date; the derived proposal is flagged
+// needs_review because deriving a header value from a line is an inference.
+type deliveryEvidence struct {
+	Value string
+	Raw   string
+	Page  int
+	Words []Word
+}
+
+func proposeFields(lines []visualLine, minConfidence float64, derived *deliveryEvidence) []apicontract.ExtractionField {
 	matches := make(map[string][]fieldMatch, len(fieldPatterns))
-	for _, line := range lines {
+	for index, line := range lines {
 		text, spans := textWithSpans(line.Words)
 		for key, pattern := range fieldPatterns {
 			location := pattern.FindStringSubmatchIndex(text)
@@ -279,19 +474,166 @@ func proposeFields(lines []visualLine, minConfidence float64) []apicontract.Extr
 			if end > start {
 				raw = text[start:end]
 			}
+			words := wordsInRange(spans, start, end)
+			page := line.Page.Number
+			if !containsLetter(raw) && !containsDigit(raw) {
+				// A bare comma or hyphen after a label is punctuation, not a
+				// value; treat it as a label with no value and look below.
+				raw = ""
+				words = nil
+			}
+			if strings.TrimSpace(raw) == "" {
+				// A label may print its value on the next visual line. The guard
+				// rejects a next line that is itself a label or table header.
+				labelX := line.Box.X
+				if labelWords := wordsInRange(spans, location[0], location[1]); len(labelWords) > 0 {
+					labelX = labelWords[0].XMin
+				}
+				if next, ok := nextLineValue(lines, index, labelX); ok {
+					raw = next.Text
+					words = next.Words
+					page = next.Page.Number
+				}
+			}
+			if key == apicontract.ExtractionFieldPONumber && looksLikeProseValue(raw) {
+				// "Supplier to ensure correct PO number and/or Part numbers ..."
+				// is a sentence, not a PO number. A generic layout rule would
+				// otherwise report it as a second value and flag a conflict.
+				continue
+			}
+			if key == apicontract.ExtractionFieldRequestedDeliveryDate && statusQualified(text, location[0]) {
+				// "Confirmed (Estimated Delivery Date: ...)" is a status note,
+				// not the PO's requested delivery header.
+				continue
+			}
 			matches[key] = append(matches[key], fieldMatch{
-				words: wordsInRange(spans, start, end),
+				words: words,
 				raw:   raw,
-				page:  line.Page.Number,
+				page:  page,
 			})
 		}
 	}
 
 	fields := make([]apicontract.ExtractionField, 0, len(apicontract.ExtractionFieldKeys))
 	for _, key := range apicontract.ExtractionFieldKeys {
-		fields = append(fields, proposeField(key, matches[key], lines, minConfidence))
+		fields = append(fields, proposeField(key, matches[key], lines, minConfidence, derived))
 	}
 	return fields
+}
+
+// looksLikeProseValue reports a value that reads as a sentence rather than an
+// identifier. A PO number can contain spaces ("PO 123"), so only a spaced value
+// with a run of three lowercase letters is refused.
+func looksLikeProseValue(value string) bool {
+	if !strings.Contains(value, " ") {
+		return false
+	}
+	run := 0
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' {
+			run++
+			if run >= 3 {
+				return true
+			}
+			continue
+		}
+		run = 0
+	}
+	return false
+}
+
+// statusQualified reports whether the text before a label match names a status
+// statement ("Estimated Delivery Date", "Confirmed Delivery Date") rather than
+// the document's own header.
+func statusQualified(text string, start int) bool {
+	if start <= 0 {
+		return false
+	}
+	fields := strings.Fields(strings.ToLower(text[:start]))
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.Trim(fields[len(fields)-1], "(:;,[") {
+	case "estimated", "estimate", "confirmed", "confirmation", "status", "expected":
+		return true
+	}
+	return false
+}
+
+// nextLineValue returns the value printed below a label whose own line carried
+// none. It searches a few visual lines down, because a two-column page can put
+// an unrelated block between the label and its value, and it keeps only the
+// words in the label's column: "PT Contoh PO-2026-7781" contributes only the
+// value, never the neighbouring block.
+func nextLineValue(lines []visualLine, index int, labelX float64) (visualLine, bool) {
+	if index+1 >= len(lines) {
+		return visualLine{}, false
+	}
+	current := lines[index]
+	maxGap := 3.0 * (current.Box.Height + 1)
+	for offset := 1; offset <= 3 && index+offset < len(lines); offset++ {
+		next := lines[index+offset]
+		if next.Page.Number != current.Page.Number {
+			return visualLine{}, false
+		}
+		gap := next.Box.Y - current.Box.Y
+		if gap <= 0 {
+			continue
+		}
+		if gap > maxGap {
+			return visualLine{}, false
+		}
+		candidate, ok := columnBlock(next, labelX)
+		if !ok {
+			continue
+		}
+		text := strings.TrimSpace(candidate.Text)
+		if text == "" {
+			continue
+		}
+		if matchesFieldLabel(text) ||
+			totalLinePattern.MatchString(text) ||
+			footerLinePattern.MatchString(text) ||
+			footerLabelPattern.MatchString(text) {
+			continue
+		}
+		if _, isHeader := tableColumns(candidate); isHeader {
+			continue
+		}
+		return candidate, true
+	}
+	return visualLine{}, false
+}
+
+// columnBlock keeps the words of one visual line that belong to the column
+// starting at x. A gap wider than 60 points ends the block, so the next column
+// on the same line is not adopted as part of the value.
+func columnBlock(line visualLine, x float64) (visualLine, bool) {
+	words := make([]Word, 0, len(line.Words))
+	lastCenter := 0.0
+	for _, word := range line.Words {
+		center := (word.XMin + word.XMax) / 2
+		if center < x-25 {
+			continue
+		}
+		if len(words) > 0 && center-lastCenter > 60 {
+			break
+		}
+		words = append(words, word)
+		lastCenter = center
+	}
+	if len(words) == 0 {
+		return visualLine{}, false
+	}
+	xMin, yMin, xMax, yMax := unionBox(words)
+	return visualLine{
+		Page:  line.Page,
+		Words: words,
+		Text:  joinWords(words),
+		Box: apicontract.ExtractionBBox{
+			X: xMin, Y: yMin, Width: xMax - xMin, Height: yMax - yMin,
+		},
+	}, true
 }
 
 func trimRange(text string, start, end int) (int, int) {
@@ -304,7 +646,7 @@ func trimRange(text string, start, end int) (int, int) {
 	return start, end
 }
 
-func proposeField(key string, matches []fieldMatch, headerLines []visualLine, minConfidence float64) apicontract.ExtractionField {
+func proposeField(key string, matches []fieldMatch, headerLines []visualLine, minConfidence float64, derived *deliveryEvidence) apicontract.ExtractionField {
 	field := apicontract.ExtractionField{
 		Key: key,
 		ExtractionCell: apicontract.ExtractionCell{
@@ -317,6 +659,21 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 		}
 	}
 	if len(matches) == 0 {
+		return derivedDeliveryField(field, derived)
+	}
+	hasValue := false
+	for _, match := range matches {
+		if strings.TrimSpace(match.raw) != "" {
+			hasValue = true
+			break
+		}
+	}
+	if !hasValue {
+		if filled := derivedDeliveryField(field, derived); filled.Status != apicontract.ExtractionStatusAbsent || filled.Note != "" {
+			return filled
+		}
+		field.Status = apicontract.ExtractionStatusAbsent
+		field.Note = "The label was found but no value followed it."
 		return field
 	}
 	chosen := matches[0]
@@ -332,10 +689,18 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 
 	distinct := map[string]bool{}
 	for _, match := range matches {
-		if strings.TrimSpace(match.raw) == "" {
+		raw := strings.TrimSpace(match.raw)
+		if raw == "" {
 			continue
 		}
-		distinct[strings.ToUpper(strings.Join(strings.Fields(match.raw), " "))] = true
+		// Two printings of the same value in different formats are not a
+		// conflict: page 1 may print "Tuesday 7 Apr 2026" and the final page the
+		// same date with a time. Compare the normalised value when there is one.
+		distinctKey := strings.ToUpper(strings.Join(strings.Fields(raw), " "))
+		if value, status, _ := normaliseField(key, raw); status == apicontract.ExtractionStatusExtracted {
+			distinctKey = "value:" + value
+		}
+		distinct[distinctKey] = true
 	}
 	value, status, note := normaliseField(key, chosen.raw)
 	field.Value = value
@@ -353,6 +718,22 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(matches, chosen.raw))
 	}
 	applyConfidence(&field.ExtractionCell, chosen.words, minConfidence)
+	return field
+}
+
+// derivedDeliveryField fills the delivery date from the first line when the
+// header prints no value for it. The value is still an inference, so it is
+// needs_review, and its note names the row it came from.
+func derivedDeliveryField(field apicontract.ExtractionField, derived *deliveryEvidence) apicontract.ExtractionField {
+	if derived == nil || field.Key != apicontract.ExtractionFieldRequestedDeliveryDate {
+		return field
+	}
+	field.Value = derived.Value
+	field.Raw = derived.Raw
+	field.Page = pointerTo(derived.Page)
+	field.BBox = bboxOf(derived.Words)
+	field.Status = apicontract.ExtractionStatusNeedsReview
+	field.Note = "The header does not print a delivery date; this is the first line's delivery date. Confirm that it applies to the whole order."
 	return field
 }
 
@@ -495,15 +876,28 @@ var monthNames = map[string]time.Month{
 	"dec": time.December, "december": time.December, "des": time.December, "desember": time.December,
 }
 
-var dayMonthYear = regexp.MustCompile(`^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$`)
-var isoDate = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})$`)
-var dayNameMonthYear = regexp.MustCompile(`^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$`)
-var monthDayYear = regexp.MustCompile(`^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$`)
-var monthYearDay = regexp.MustCompile(`^([A-Za-z]+)\s+(\d{1,2})\s+(\d{4})$`)
+// Date patterns are unanchored on purpose: a printed value often carries a
+// weekday and a time ("Tuesday 7 Apr 2026 8:02 AM GMT+07:00"), and the date is
+// the part that matters. Two distinct dates in one value is a conflict, never a
+// preference for the first one.
+var (
+	isoDate          = regexp.MustCompile(`(\d{4})-(\d{2})-(\d{2})`)
+	dayMonthYear     = regexp.MustCompile(`(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})`)
+	dayNameMonthYear = regexp.MustCompile(`(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{4})`)
+	monthDayYear     = regexp.MustCompile(`([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})`)
+)
 
 func normaliseDate(raw string) (string, string, string) {
 	value := strings.TrimSpace(strings.Trim(raw, ".,;"))
-	if match := isoDate.FindStringSubmatch(value); match != nil {
+	value = strings.Join(strings.Fields(value), " ")
+	if value == "" {
+		return "", apicontract.ExtractionStatusAbsent, ""
+	}
+	if matches := isoDate.FindAllStringSubmatch(value, -1); len(matches) > 0 {
+		if len(matches) > 1 {
+			return raw, apicontract.ExtractionStatusNeedsReview, "More than one date is printed; confirm which one applies."
+		}
+		match := matches[0]
 		year, _ := strconv.Atoi(match[1])
 		month, _ := strconv.Atoi(match[2])
 		day, _ := strconv.Atoi(match[3])
@@ -512,7 +906,11 @@ func normaliseDate(raw string) (string, string, string) {
 		}
 		return raw, apicontract.ExtractionStatusNeedsReview, "The printed date is not a real calendar date."
 	}
-	if match := dayMonthYear.FindStringSubmatch(value); match != nil {
+	if matches := dayMonthYear.FindAllStringSubmatch(value, -1); len(matches) > 0 {
+		if len(matches) > 1 {
+			return raw, apicontract.ExtractionStatusNeedsReview, "More than one date is printed; confirm which one applies."
+		}
+		match := matches[0]
 		first, _ := strconv.Atoi(match[1])
 		second, _ := strconv.Atoi(match[2])
 		year, _ := strconv.Atoi(match[3])
@@ -534,7 +932,11 @@ func normaliseDate(raw string) (string, string, string) {
 		}
 		return raw, apicontract.ExtractionStatusNeedsReview, "The printed date is not a real calendar date."
 	}
-	if match := dayNameMonthYear.FindStringSubmatch(value); match != nil {
+	if matches := dayNameMonthYear.FindAllStringSubmatch(value, -1); len(matches) > 0 {
+		if len(matches) > 1 {
+			return raw, apicontract.ExtractionStatusNeedsReview, "More than one date is printed; confirm which one applies."
+		}
+		match := matches[0]
 		day, _ := strconv.Atoi(match[1])
 		month, ok := monthNames[strings.ToLower(match[2])]
 		year, _ := strconv.Atoi(match[3])
@@ -543,16 +945,18 @@ func normaliseDate(raw string) (string, string, string) {
 		}
 		return raw, apicontract.ExtractionStatusNeedsReview, "The printed date could not be read."
 	}
-	for _, pattern := range []*regexp.Regexp{monthDayYear, monthYearDay} {
-		if match := pattern.FindStringSubmatch(value); match != nil {
-			month, ok := monthNames[strings.ToLower(match[1])]
-			day, _ := strconv.Atoi(match[2])
-			year, _ := strconv.Atoi(match[3])
-			if ok && validDate(year, int(month), day) {
-				return formatDate(year, int(month), day), apicontract.ExtractionStatusExtracted, ""
-			}
-			return raw, apicontract.ExtractionStatusNeedsReview, "The printed date could not be read."
+	if matches := monthDayYear.FindAllStringSubmatch(value, -1); len(matches) > 0 {
+		if len(matches) > 1 {
+			return raw, apicontract.ExtractionStatusNeedsReview, "More than one date is printed; confirm which one applies."
 		}
+		match := matches[0]
+		month, ok := monthNames[strings.ToLower(match[1])]
+		day, _ := strconv.Atoi(match[2])
+		year, _ := strconv.Atoi(match[3])
+		if ok && validDate(year, int(month), day) {
+			return formatDate(year, int(month), day), apicontract.ExtractionStatusExtracted, ""
+		}
+		return raw, apicontract.ExtractionStatusNeedsReview, "The printed date could not be read."
 	}
 	return raw, apicontract.ExtractionStatusNeedsReview, "The printed value is not a recognised date format."
 }
@@ -676,6 +1080,13 @@ const (
 	columnUoM
 	columnUnitPrice
 	columnAmount
+	// columnDeliveryDate is a date column. Its values are evidence for a
+	// header delivery date, never a unit or a price.
+	columnDeliveryDate
+	// columnIgnored is a printed column this reader does not consume
+	// ("Type", "Return", "No. Schedule Lines"). Keeping its span explicit is
+	// what stops its values falling into the description or quantity cells.
+	columnIgnored
 )
 
 type tableColumn struct {
@@ -685,65 +1096,68 @@ type tableColumn struct {
 }
 
 var totalLinePattern = regexp.MustCompile(
-	`(?i)^\s*(sub\s*total|grand\s*total|total|jumlah|amount\s+due|balance\s+due|ppn|vat|tax|discount|pph)\b`)
+	`(?i)^\s*(sub[-\s]*total|grand\s*total|total|jumlah|amount\s+due|balance\s+due|ppn|vat|tax|discount|pph)\b`)
 var footerLinePattern = regexp.MustCompile(
 	`(?i)^\s*(notes?|remarks?|terms\s+and\s+conditions|signature|prepared\s+by|approved\s+by|authorized\s+by|received\s+by|page\s+\d+)\b`)
 var footerLabelPattern = regexp.MustCompile(
-	`(?i)^\s*(requester|requested\s+by|buyer|purchaser|attention|attn|to|from|ship\s+to|bill\s+to|delivery\s+address|invoice|payment|bank|account|notes?|remarks?|terms|conditions|signature|prepared\s+by|approved\s+by|authorized\s+by|received\s+by|page)\b\s*:`)
+	`(?i)^\s*(requester|requested\s+by|buyer|purchaser|attention|attn|to|from|ship\s+to|bill\s+to|delivery\s+address|invoice|payment|bank|account|notes?|remarks?|terms|conditions|signature|prepared\s+by|approved\s+by|authorized\s+by|received\s+by|page|catatan|keterangan|alamat|tanggal|req\.?\s*line\s*no|requisition|hazardous|doc(?:ument)?\s*type|product\s*/\s*service|classification|gift|hide\s+item\s+prices)\b\s*:`)
 
+// tableSectionEndPattern matches a printed block heading that follows the line
+// items ("STATUS", "Other Information"). It ends the table without guessing at
+// the rows below it: those lines are confirmation or metadata, not line items.
+var tableSectionEndPattern = regexp.MustCompile(
+	`(?i)^\s*(status|other\s+information|additional\s+information|line\s+items|item\s+details|confirmations?|comments|attachments?)\s*$`)
+
+// runningHeaderPattern matches the repeated page furniture above a continued
+// table. It is deliberately narrow: a wrapped description at the top of a
+// continuation page is data and must still be appended to its row.
+var runningHeaderPattern = regexp.MustCompile(
+	`(?i)^\s*(page\s+\d+|purchase\s+order|invoice|delivery\s+order)\b`)
+
+// tableColumns reads one printed line as a column header. It is a phrase
+// matcher, not a template: the synonyms the authorised POs print are accepted
+// in any order and at any page position, multi-word labels are consumed whole,
+// and a known non-data column keeps its own span so its values are dropped.
+// A line that does not carry a description plus at least one quantity/price
+// column is not a table header.
 func tableColumns(line visualLine) ([]tableColumn, bool) {
-	columns := make([]tableColumn, 0, 8)
-	for index := 0; index < len(line.Words); index++ {
-		first := line.Words[index]
-		token := strings.ToLower(strings.Trim(first.Text, ".:#()-/"))
-		next := ""
-		if index+1 < len(line.Words) {
-			next = strings.ToLower(strings.Trim(line.Words[index+1].Text, ".:#()-/"))
-		}
-		kind := columnUnknown
-		xMin, xMax := first.XMin, first.XMax
-		switch {
-		case token == "unit" && (next == "price" || next == "cost" || next == "rate"):
-			kind = columnUnitPrice
-			xMax = line.Words[index+1].XMax
-			index++ // the pair is one column
-		case token == "harga" && (next == "satuan" || next == "unit"):
-			kind = columnUnitPrice
-			xMax = line.Words[index+1].XMax
+	tokens := make([]string, len(line.Words))
+	for index, word := range line.Words {
+		tokens[index] = headerToken(word)
+	}
+	columns := make([]tableColumn, 0, 10)
+	for index := 0; index < len(line.Words); {
+		kind, span := classifyHeaderColumn(tokens, index)
+		if span <= 0 {
 			index++
-		case token == "line" && next == "total":
-			kind = columnAmount
-			xMax = line.Words[index+1].XMax
-			index++
-		case token == "no" || token == "nomor" || token == "line" || token == "seq" || token == "#":
-			kind = columnLineNumber
-		case token == "description" || token == "deskripsi" || token == "uraian" ||
-			token == "goods" || token == "product" || token == "particulars" || token == "item":
-			kind = columnDescription
-		case token == "qty" || token == "quantity" || token == "kuantitas" || token == "jumlah":
-			kind = columnQuantity
-		case token == "uom" || token == "satuan" || token == "unit" || token == "u/m":
-			kind = columnUoM
-		case token == "price" || token == "harga" || token == "rate" || token == "cost":
-			kind = columnUnitPrice
-		case token == "amount" || token == "total" || token == "subtotal" || token == "nilai":
-			kind = columnAmount
-		}
-		if kind == columnUnknown {
 			continue
 		}
-		columns = append(columns, tableColumn{Kind: kind, XMin: xMin, XMax: xMax})
+		last := index + span - 1
+		if last >= len(line.Words) {
+			last = len(line.Words) - 1
+		}
+		columns = append(columns, tableColumn{
+			Kind: kind,
+			XMin: line.Words[index].XMin,
+			XMax: line.Words[last].XMax,
+		})
+		index = last + 1
 	}
 	if len(columns) == 0 {
 		return nil, false
 	}
 	sort.SliceStable(columns, func(left, right int) bool { return columns[left].XMin < columns[right].XMin })
 
-	// Keep the leftmost occurrence of each kind; a second "price" column is
-	// not something this reader can disambiguate.
+	// Keep the leftmost data column of each kind; a second "price" column is
+	// not something this reader can disambiguate. Ignored columns are all
+	// kept, because each one is a boundary that keeps its values out.
 	seen := map[columnKind]bool{}
 	unique := make([]tableColumn, 0, len(columns))
 	for _, column := range columns {
+		if column.Kind == columnIgnored {
+			unique = append(unique, column)
+			continue
+		}
 		if column.Kind == columnUnknown || seen[column.Kind] {
 			continue
 		}
@@ -757,110 +1171,218 @@ func tableColumns(line visualLine) ([]tableColumn, bool) {
 	return unique, true
 }
 
-func proposeRows(pages []Page, minConfidence float64) []apicontract.ExtractionRow {
+// headerToken lowercases a header word and removes the punctuation printers put
+// around labels. "#" and "/" survive because "Part # / Description" is one
+// column, and "No. Schedule Lines" is not the line number.
+func headerToken(word Word) string {
+	value := strings.ToLower(strings.TrimSpace(word.Text))
+	return strings.Trim(value, ".:()")
+}
+
+func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
+	token := tokens[index]
+	next, third := "", ""
+	if index+1 < len(tokens) {
+		next = tokens[index+1]
+	}
+	if index+2 < len(tokens) {
+		third = tokens[index+2]
+	}
+	switch {
+	// Description phrases. The merged part/description column comes first so
+	// its placeholder or part number can be stripped from the description.
+	case token == "part":
+		if span := partDescriptionSpan(tokens, index); span > 0 {
+			return columnDescription, span
+		}
+		return columnUnknown, 0
+	case token == "item" && next == "description":
+		return columnDescription, 2
+	case token == "product" && next == "description":
+		return columnDescription, 2
+	case token == "description" && next == "of" &&
+		(third == "goods" || third == "items" || third == "services"):
+		return columnDescription, 3
+	case token == "description" || token == "deskripsi" || token == "uraian" ||
+		token == "particulars" || token == "goods" || token == "product":
+		return columnDescription, 1
+
+	// Reference columns that are not the line number. "No. Schedule Lines"
+	// is the recurring example; consuming it keeps its values out of the
+	// description and quantity cells.
+	case token == "no" && (next == "schedule" || next == "scheduled"):
+		if third == "lines" || third == "line" {
+			return columnIgnored, 3
+		}
+		return columnIgnored, 2
+	case token == "schedule" && (next == "lines" || next == "line"):
+		return columnIgnored, 2
+
+	// Money columns before the bare unit/rate and total/line words.
+	case token == "unit" && (next == "price" || next == "cost" || next == "rate"):
+		return columnUnitPrice, 2
+	case token == "harga" && (next == "satuan" || next == "unit"):
+		return columnUnitPrice, 2
+	case token == "price" || token == "harga" || token == "rate" || token == "cost":
+		return columnUnitPrice, 1
+	case token == "line" && next == "total":
+		return columnAmount, 2
+	case token == "extended" && next == "price":
+		return columnAmount, 2
+	case token == "sub" && next == "total":
+		return columnAmount, 2
+	case token == "sub-total" || token == "subtotal" || token == "amount" ||
+		token == "total" || token == "nilai":
+		return columnAmount, 1
+
+	// A delivery date has its own span, so "31 Jan 2027" never lands in the
+	// quantity or unit-of-measure cell.
+	case token == "need" && next == "by":
+		return columnDeliveryDate, 2
+	case (token == "delivery" || token == "required" || token == "requested") && next == "date":
+		return columnDeliveryDate, 2
+	case token == "eta":
+		return columnDeliveryDate, 1
+
+	// "Qty (Unit)" is one combined column whose values print "1 (PK)"; a
+	// separate "Qty" + "Unit Price" is two columns and is not combined.
+	case (token == "qty" || token == "quantity" || token == "kuantitas") && isCombinedUnitHeader(tokens, index):
+		return columnQuantity, 2
+	case token == "qty" || token == "quantity" || token == "kuantitas" || token == "jumlah":
+		return columnQuantity, 1
+
+	// Line number, after "Line Total" and after the schedule-lines phrases.
+	case token == "line" && (next == "#" || next == "no" || next == "number"):
+		return columnLineNumber, 2
+	case token == "sl" && next == "no":
+		return columnLineNumber, 2
+	case token == "line" || token == "no" || token == "nomor" || token == "#" ||
+		token == "seq" || token == "item":
+		return columnLineNumber, 1
+
+	case token == "uom" || token == "um" || token == "u/m" || token == "unit" || token == "satuan":
+		return columnUoM, 1
+
+	case token == "type" || token == "return" || token == "returnable" ||
+		token == "status" || token == "currency" || token == "discount" ||
+		token == "tax" || token == "vat":
+		return columnIgnored, 1
+	}
+	return columnUnknown, 0
+}
+
+// partDescriptionSpan returns how many header words form a merged part and
+// description column, or zero when the words are not that phrase.
+func partDescriptionSpan(tokens []string, index int) int {
+	offset := 1
+	if index+offset < len(tokens) {
+		switch tokens[index+offset] {
+		case "no", "number", "#":
+			offset++
+		}
+	}
+	if index+offset < len(tokens) && tokens[index+offset] == "/" {
+		offset++
+	}
+	if index+offset < len(tokens) &&
+		(tokens[index+offset] == "description" || tokens[index+offset] == "desc") {
+		return offset + 1
+	}
+	return 0
+}
+
+func isCombinedUnitHeader(tokens []string, index int) bool {
+	if index+1 >= len(tokens) {
+		return false
+	}
+	next := tokens[index+1]
+	if next != "unit" && next != "uom" {
+		return false
+	}
+	if index+2 < len(tokens) {
+		switch tokens[index+2] {
+		case "price", "cost", "rate", "harga", "unit", "uom":
+			return false
+		}
+	}
+	return true
+}
+
+func proposeRows(pages []Page, minConfidence float64) ([]apicontract.ExtractionRow, *deliveryEvidence) {
 	rows := make([]apicontract.ExtractionRow, 0, 16)
-	var previous *apicontract.ExtractionRow
+	previous := -1
 	var carried []tableColumn
 	carriedFrom := 0
 	tableOpen := false
+	var derived *deliveryEvidence
 	for pageIndex := range pages {
 		page := &pages[pageIndex]
 		lines := linesOf(page)
-		headerIndex := -1
+
+		// A page either continues the previous page's table or starts on its
+		// own first column header. Several headers on one page are normal: a
+		// PO can print each line item in its own "Line Items" block, with a
+		// repeated header and a STATUS block between them.
 		var columns []tableColumn
-		for index, line := range lines {
-			if found, ok := tableColumns(line); ok {
-				headerIndex = index
-				columns = found
-				break
-			}
-		}
 		continuation := false
-		switch {
-		case headerIndex >= 0:
-			carried = columns
-			carriedFrom = page.Number
-			// A fresh table header starts a new table: a wrapped description
-			// above its first row must not be appended to another page's row.
-			previous = nil
-		case tableOpen && len(carried) > 0:
-			// The previous page ended inside a table and this page repeats no
-			// column header. The columns are carried, and every row read this
-			// way is needs_review: carrying positions is an inference.
+		if tableOpen && len(carried) > 0 {
 			columns = carried
 			continuation = true
-		default:
-			tableOpen = false
-			previous = nil
-			continue
 		}
-
-		start := headerIndex + 1
-		if continuation {
-			start = 0
-		}
-		ended := false
-		started := headerIndex >= 0
-		pageRows := 0
-		for index := start; index < len(lines); index++ {
+		started := false
+		for index := 0; index < len(lines); index++ {
 			line := lines[index]
-			if _, isHeader := tableColumns(line); isHeader {
+			if header, ok := tableColumns(line); ok {
+				columns = header
+				carried = header
+				carriedFrom = page.Number
+				continuation = false
+				started = true // a header starts a fresh table
+				// A fresh header starts a new table: a wrapped description
+				// above its first row must not be appended to another row.
+				previous = -1
 				continue
 			}
-			if totalLinePattern.MatchString(line.Text) || footerLinePattern.MatchString(line.Text) {
-				if continuation && !started {
-					// A running page header ("Page 2 of 3") above a continued
-					// table is not the table's end.
-					continue
-				}
-				ended = true
-				break
+			if len(columns) == 0 {
+				continue
+			}
+			if continuation && !started && runningHeaderPattern.MatchString(line.Text) {
+				// A running page header ("PURCHASE ORDER", "Page 2 of 3") above
+				// a continued table is not the table's end and not a line item.
+				continue
+			}
+			if isTableEndLine(line, columns) {
+				columns = nil
+				continuation = false
+				started = false
+				previous = -1
+				continue
 			}
 			cells := assignCells(line, columns)
-			if cells.empty() || cells.descriptionEmpty() {
-				continue
+			lineAnchor, quantityAnchor, priceAnchor := cells.anchors()
+			rowAnchor := lineAnchor || quantityAnchor
+			if !rowAnchor && priceAnchor && previous < 0 && !cells.descriptionEmpty() {
+				// A first row may carry no line number and no quantity when the
+				// layout omits those columns. Once a row exists, a price alone
+				// is not enough to start another: a description line whose last
+				// word happens to sit in the price column must continue the row
+				// above it instead.
+				rowAnchor = true
 			}
-			if footerLabelPattern.MatchString(cells.descriptionText) ||
-				footerLabelPattern.MatchString(cells.lineNumberRaw) {
-				if continuation && !started {
-					continue
-				}
-				ended = true
-				break
-			}
-			if cells.numericEmpty() {
-				// A wrapped description continues the previous row. This is a
-				// layout fact, not a new line item. The proposal must carry the
-				// whole text and a region covering every wrapped line: a value
-				// whose raw or bbox shows only the first line is worse than an
-				// abstention.
-				if continuation && !started {
-					// Above a continued table sits a page header, not the
-					// previous line's description.
-					continue
-				}
-				if previous != nil {
-					full := strings.TrimSpace(previous.Description.Value + " " + cells.descriptionText)
-					previous.Description.Value = full
-					previous.Description.Raw = strings.TrimSpace(previous.Description.Raw + " " + cells.descriptionText)
-					previous.Description.BBox = unionExtractionBoxes(previous.Description.BBox, cells.descriptionBox)
-					previous.BBox = unionExtractionBoxes(previous.BBox, cells.descriptionBox)
-					continue
+			if !rowAnchor {
+				if previous >= 0 && !cells.empty() && strings.TrimSpace(line.Text) != "" {
+					appendDescription(&rows[previous], line.Text, line.Words, &line.Box)
 				}
 				continue
 			}
-			if continuation && !started {
-				// Before a continued table starts: skip the running page header
-				// at the top of the page, then require a numeric token. A header
-				// that happens to print a number in the amount column
-				// ("Page 2") must not become a line item.
-				if line.Box.Y < page.Height*0.10 {
-					continue
-				}
-				if !hasNumericToken(cells) {
-					continue
-				}
-				started = true
+			if !lineAnchor && previous >= 0 &&
+				descriptionIsPlaceholder(rows[previous].Description.Value) &&
+				!cells.descriptionEmpty() {
+				// The numeric row printed only "Not Available" or a part number;
+				// this line is its real description, even if a number in it lands
+				// in the quantity column.
+				appendDescription(&rows[previous], line.Text, line.Words, &line.Box)
+				continue
 			}
 			started = true
 			row := buildRow(page, line, cells, columns, minConfidence)
@@ -871,36 +1393,92 @@ func proposeRows(pages []Page, minConfidence float64) []apicontract.ExtractionRo
 					carriedFrom))
 			}
 			rows = append(rows, row)
-			previous = &rows[len(rows)-1]
-			pageRows++
-			// A table row must carry at least one readable quantity or price.
-			// If neither parses, the line is more likely prose below the table
-			// than a malformed row; stop rather than propose the rest of the
-			// page as line items. The row itself stays as a reviewable
-			// abstention.
+			previous = len(rows) - 1
+			if derived == nil {
+				if value, status, _ := normaliseDate(cells.deliveryRaw); status == apicontract.ExtractionStatusExtracted {
+					derived = &deliveryEvidence{
+						Value: value,
+						Raw:   cells.deliveryRaw,
+						Page:  page.Number,
+						Words: cells.delivery,
+					}
+				}
+			}
+			// A table row must carry at least one readable quantity, price or
+			// printed amount. If none parses, the line is more likely prose
+			// below the table than a malformed row; end the segment rather than
+			// propose the rest of the page as line items. The row itself stays
+			// as a reviewable abstention.
 			if row.Quantity.Status != apicontract.ExtractionStatusExtracted &&
-				row.UnitPrice.Status != apicontract.ExtractionStatusExtracted {
-				ended = true
-				break
+				row.UnitPrice.Status != apicontract.ExtractionStatusExtracted &&
+				row.Amount.Status != apicontract.ExtractionStatusExtracted {
+				columns = nil
+				continuation = false
+				started = false
+				previous = -1
 			}
 		}
-		tableOpen = pageRows > 0 && !ended
+		// A page that ended while a table was still open continues on the next
+		// page without a repeated header. A header printed at the bottom of a
+		// page counts as open even before its first row is read.
+		tableOpen = len(columns) > 0
 	}
 	markRowRisks(rows)
-	return rows
+	return rows, derived
 }
 
-// hasNumericToken reports whether a line's quantity, unit-price or amount
-// column carries at least one digit. It is the start test for a continued
-// table: a running page header above the table usually has text in the
-// description column and, at most, a page number in the amount column, which
-// the top-margin skip keeps out. A first row whose quantity was unreadable but
-// whose amount is printed still starts the table instead of being dropped.
-func hasNumericToken(cells rowCells) bool {
-	if containsDigit(cells.quantityRaw) || containsDigit(cells.unitPriceRaw) {
+// appendDescription extends the previous row with a wrapped description line.
+// A part number or placeholder on the numeric row is replaced by the real
+// description when one follows; otherwise the printed text is kept whole.
+func appendDescription(row *apicontract.ExtractionRow, text string, words []Word, box *apicontract.ExtractionBBox) {
+	text = strings.Join(strings.Fields(text), " ")
+	if text == "" {
+		return
+	}
+	if descriptionIsPlaceholder(row.Description.Value) {
+		row.Description.Value = text
+		row.Description.Raw = text
+		row.Description.BBox = bboxOf(words)
+		row.BBox = unionExtractionBoxes(row.BBox, box)
+		return
+	}
+	row.Description.Value = strings.TrimSpace(row.Description.Value + " " + text)
+	row.Description.Raw = strings.TrimSpace(row.Description.Raw + " " + text)
+	row.Description.BBox = unionExtractionBoxes(row.Description.BBox, bboxOf(words))
+	row.BBox = unionExtractionBoxes(row.BBox, box)
+}
+
+// descriptionIsPlaceholder reports whether a description cell is only a
+// placeholder or a part number. A single alphanumeric token is treated as a
+// part number only when it carries a separator or at least three digits, so an
+// ordinary one-word description ("BAT3") is not thrown away.
+func descriptionIsPlaceholder(value string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	switch trimmed {
+	case "", "not available", "n/a", "na", "not applicable", "none", "-", "--", "tbd", "no description":
 		return true
 	}
-	return containsDigit(cells.amountRaw) && !containsLetter(cells.amountRaw)
+	fields := strings.Fields(trimmed)
+	if len(fields) != 1 || len(fields[0]) > 32 {
+		return false
+	}
+	token := fields[0]
+	digits, letters := 0, false
+	separator := false
+	for _, character := range token {
+		switch {
+		case character >= '0' && character <= '9':
+			digits++
+		case (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z'):
+			letters = true
+		case character == '-' || character == '/':
+			separator = true
+		}
+	}
+	if digits > 0 && letters && (separator || digits >= 3) {
+		return true
+	}
+	return digits >= 4 && !letters
 }
 
 func containsLetter(value string) bool {
@@ -919,6 +1497,7 @@ type rowCells struct {
 	uom             []Word
 	unitPrice       []Word
 	amount          []Word
+	delivery        []Word
 	descriptionText string
 	descriptionBox  *apicontract.ExtractionBBox
 	lineNumberRaw   string
@@ -926,6 +1505,7 @@ type rowCells struct {
 	uomRaw          string
 	unitPriceRaw    string
 	amountRaw       string
+	deliveryRaw     string
 }
 
 func (cells rowCells) descriptionEmpty() bool { return len(cells.description) == 0 }
@@ -935,6 +1515,31 @@ func (cells rowCells) numericEmpty() bool {
 }
 func (cells rowCells) empty() bool {
 	return len(cells.lineNumber) == 0 && cells.descriptionEmpty() && cells.numericEmpty()
+}
+
+// anchors decides whether a printed line starts a new line item. A line
+// number, a readable quantity or a readable price is an anchor; a description
+// that merely contains a number is not. The quantity is split from its unit
+// first, so "1 (PK)" is a quantity anchor while "31 Jan 2027" is not.
+func (cells rowCells) anchors() (lineAnchor, quantityAnchor, priceAnchor bool) {
+	if value := trimLineNumber(cells.lineNumberRaw); value != "" && validLineNumber(value) {
+		lineAnchor = true
+	}
+	if number, _ := splitQuantity(cells.quantityRaw); strings.TrimSpace(number) != "" {
+		if _, status, _ := normaliseDecimal(number, decimalQuantity); status == apicontract.ExtractionStatusExtracted {
+			quantityAnchor = true
+		}
+	}
+	for _, raw := range []string{cells.unitPriceRaw, cells.amountRaw} {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if _, status, _ := normaliseDecimal(raw, decimalMoney); status == apicontract.ExtractionStatusExtracted {
+			priceAnchor = true
+			break
+		}
+	}
+	return lineAnchor, quantityAnchor, priceAnchor
 }
 
 func assignCells(line visualLine, columns []tableColumn) rowCells {
@@ -961,6 +1566,7 @@ func assignCells(line visualLine, columns []tableColumn) rowCells {
 		uom:         grouped[columnUoM],
 		unitPrice:   grouped[columnUnitPrice],
 		amount:      grouped[columnAmount],
+		delivery:    grouped[columnDeliveryDate],
 	}
 	cells.descriptionText = joinWords(cells.description)
 	cells.descriptionBox = bboxOf(cells.description)
@@ -969,19 +1575,25 @@ func assignCells(line visualLine, columns []tableColumn) rowCells {
 	cells.uomRaw = joinWords(cells.uom)
 	cells.unitPriceRaw = joinWords(cells.unitPrice)
 	cells.amountRaw = joinWords(cells.amount)
+	cells.deliveryRaw = joinWords(cells.delivery)
 	return cells
 }
 
 func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn, minConfidence float64) apicontract.ExtractionRow {
+	quantityRaw, combinedUoM := splitQuantity(cells.quantityRaw)
 	row := apicontract.ExtractionRow{
 		LineNumber:  cellForLineNumber(cells.lineNumberRaw, page, cells.lineNumber, minConfidence),
 		Description: textCell(cells.descriptionText, page, cells.description, minConfidence),
-		Quantity:    decimalCell(cells.quantityRaw, page, cells.quantity, decimalQuantity, minConfidence),
+		Quantity:    quantityCell(quantityRaw, page, cells.quantity, minConfidence),
 		UoM:         uomCell(cells.uomRaw, page, cells.uom, minConfidence),
 		UnitPrice:   decimalCell(cells.unitPriceRaw, page, cells.unitPrice, decimalMoney, minConfidence),
 		Amount:      decimalCell(cells.amountRaw, page, cells.amount, decimalMoney, minConfidence),
 		Page:        page.Number,
 		BBox:        &line.Box,
+	}
+	if row.UoM.Status == apicontract.ExtractionStatusAbsent && combinedUoM != "" {
+		// "Qty (Unit)" is one column: the printed "1 (PK)" carries both.
+		row.UoM = uomCell(combinedUoM, page, cells.quantity, minConfidence)
 	}
 	required := row.Description.Status == apicontract.ExtractionStatusExtracted &&
 		row.Quantity.Status == apicontract.ExtractionStatusExtracted &&
@@ -1019,9 +1631,73 @@ func buildRow(page *Page, line visualLine, cells rowCells, columns []tableColumn
 	return row
 }
 
+// quantityCell normalises the numeric part of a quantity cell. The unit has
+// already been split off by splitQuantity, so the multi-word grouping rule used
+// for prices does not apply: a quantity printed as "1 (PK)" is the number 1.
+func quantityCell(raw string, page *Page, words []Word, minConfidence float64) apicontract.ExtractionCell {
+	cell := emptyCell()
+	cell.Raw = raw
+	trimmed := strings.Join(strings.Fields(raw), " ")
+	if trimmed == "" {
+		return cell
+	}
+	cell.Page = pointerTo(page.Number)
+	cell.BBox = bboxOf(words)
+	value, status, note := normaliseDecimal(trimmed, decimalQuantity)
+	cell.Value = value
+	cell.Status = status
+	cell.Note = note
+	applyConfidence(&cell, words, minConfidence)
+	return cell
+}
+
+// splitQuantity separates a printed quantity from its unit. Both "12 PK" and
+// the combined "1 (PK)" shape are understood; a date ("31 Jan 2027") is not a
+// quantity and its month is not a unit.
+func splitQuantity(raw string) (string, string) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", ""
+	}
+	unit := ""
+	if open := strings.Index(value, "("); open >= 0 {
+		if close := strings.LastIndex(value, ")"); close > open {
+			unit = strings.TrimSpace(value[open+1 : close])
+			value = strings.TrimSpace(value[:open] + " " + value[close+1:])
+		}
+	}
+	fields := strings.Fields(value)
+	if len(fields) >= 2 && isUnitToken(fields[len(fields)-1]) {
+		unit = strings.TrimSpace(strings.Join([]string{unit, fields[len(fields)-1]}, " "))
+		fields = fields[:len(fields)-1]
+	}
+	return strings.Join(fields, " "), unit
+}
+
+// isUnitToken accepts a short alphabetic unit ("PK", "EA", "Lot") and refuses a
+// month name, so "31 Jan 2027" cannot turn its month into a UoM.
+func isUnitToken(token string) bool {
+	token = strings.Trim(token, "().,")
+	if token == "" || len(token) > 12 {
+		return false
+	}
+	for _, character := range token {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') {
+			continue
+		}
+		return false
+	}
+	_, month := monthNames[strings.ToLower(token)]
+	return !month
+}
+
+func trimLineNumber(raw string) string {
+	return strings.TrimSpace(strings.TrimRight(raw, ".)"))
+}
+
 func cellForLineNumber(raw string, page *Page, words []Word, minConfidence float64) apicontract.ExtractionCell {
 	cell := emptyCell()
-	trimmed := strings.TrimSpace(strings.TrimRight(raw, ".)"))
+	trimmed := trimLineNumber(raw)
 	cell.Raw = raw
 	if trimmed == "" {
 		return cell
@@ -1064,6 +1740,8 @@ func uomCell(raw string, page *Page, words []Word, minConfidence float64) apicon
 	cell := emptyCell()
 	cell.Raw = raw
 	trimmed := strings.Join(strings.Fields(raw), " ")
+	trimmed = strings.Trim(strings.TrimSpace(trimmed), "()")
+	trimmed = strings.TrimRight(trimmed, ".,;")
 	if trimmed == "" {
 		return cell
 	}
@@ -1131,10 +1809,12 @@ func decimalCell(raw string, page *Page, words []Word, kind decimalKind, minConf
 }
 
 // groupedNumericText joins a multi-word numeric cell only when the words form
-// a thousands-grouped number: an optional currency token, one to three leading
-// digits, then groups of exactly three digits (the last may carry a decimal
-// fraction), and an optional trailing punctuation token. "1 250.00" is
-// grouping; "1250 00" and "10" "." "5" are splits whose meaning is unknown.
+// a thousands-grouped number: optional currency tokens (a code, a symbol, or a
+// prefix/suffix attached to the number), one to three leading digits, then
+// groups of exactly three digits (the last may carry a decimal fraction), and
+// an optional trailing punctuation token. "1 250.00" and "Rp145,760,000.00 IDR"
+// are grouping; "1250" "00" and "10" "." "5" are splits whose meaning is
+// unknown and therefore abstain.
 func groupedNumericText(words []Word) (string, bool) {
 	tokens := make([]string, 0, len(words))
 	for _, word := range words {
@@ -1147,8 +1827,11 @@ func groupedNumericText(words []Word) (string, bool) {
 		return "", false
 	}
 	start, end := 0, len(tokens)
-	if isCurrencyToken(tokens[start]) {
+	for start < end && isCurrencyToken(tokens[start]) {
 		start++
+	}
+	for end > start && isCurrencyToken(tokens[end-1]) {
+		end--
 	}
 	if end > start && isPunctuationToken(tokens[end-1]) {
 		end--
@@ -1156,11 +1839,14 @@ func groupedNumericText(words []Word) (string, bool) {
 	if end-start < 1 {
 		return "", false
 	}
-	body := tokens[start:end]
+	body := make([]string, 0, end-start)
+	for _, token := range tokens[start:end] {
+		body = append(body, stripCurrencyAffixes(token))
+	}
 	if len(body) == 1 {
-		// "Rp 1.250,00": the only split is between the currency and the
-		// number, which normaliseDecimal already understands exactly.
-		return strings.Join(tokens, ""), true
+		// The only split was between a currency token and the number, or a
+		// currency affix and the number; normaliseDecimal reads the body.
+		return body[0], true
 	}
 	if !leadingGroupPattern.MatchString(body[0]) {
 		return "", false
@@ -1177,7 +1863,14 @@ func groupedNumericText(words []Word) (string, bool) {
 			return "", false
 		}
 	}
-	return strings.Join(tokens, ""), true
+	return strings.Join(body, ""), true
+}
+
+func stripCurrencyAffixes(token string) string {
+	value := strings.TrimSpace(token)
+	value = currencyPrefix.ReplaceAllString(value, "")
+	value = currencySuffix.ReplaceAllString(value, "")
+	return value
 }
 
 var (

@@ -189,6 +189,70 @@ new fields decode as empty and the panel says nothing about OCR).
   quantity is never filled, and a table without a readable header produces no
   rows.
 
+### Generic layout heuristics (#476)
+
+The heuristics are generic, not a layout model. They were written against an
+authorised SAP Ariba development set and then deliberately generalised: no
+template, column order, page position or customer label is hard-coded, and a
+form this reader has not seen can still abstain. Abstention is the fallback, not
+an error.
+
+- **Header fields are searched on every page.** A label may sit on page 1, in a
+  left or right block, or below the table on a later page. Synonyms include
+  `Purchase Order`, `Purchase Order No`, `PO No`, `PO #`, `Nomor PO`, `Order
+  submitted on`, `Order Date`, `Tanggal PO`, `Payment Terms`, `Incoterm Code`,
+  `Incoterms`, `Requested delivery date`, `Need By` and `Delivery Date`.
+- **A value may be on the next visual line.** The next line is adopted only when
+  it is not itself a label, table header, total or footer, and only the words in
+  the label's column are taken, so a neighbouring two-column block is not
+  appended to the value.
+- **The order's own date wins.** `Order submitted on` (with a weekday and time)
+  is an order date; a quote date, a PDF-generation stamp and a `Quote Ref ...
+  dated` sentence are not labels this reader treats as the PO date.
+- **A date can carry a weekday, a time and a zone.** They are stripped before
+  the date itself is normalised; two different dates in one value is
+  `needs_review`, never the first one silently.
+- **A delivery date may be derived from the first line.** When the header prints
+  no delivery date but the table has a `Need By`/`Delivery Date` column, the
+  first unambiguous row's date becomes the header proposal with
+  `needs_review` and a note naming that row. It is an inference, so it is never
+  `extracted`.
+- **A table is discovered from its header row.** The synonyms may appear in any
+  order and any position. `Line #`, `No`, `No.`, `Line`, `#`, `Item` and
+  `Sl. No` are line numbers, but `No. Schedule Lines` is a reference column and
+  is ignored. `Part # / Description`, `Part No / Description`,
+  `Item Description`, `Particulars`, `Goods` and `Product` are descriptions;
+  `Qty`, `Quantity` and `Qty (Unit)` quantities; `Unit Price`, `Rate` and
+  `Harga` prices; `Amount`, `Subtotal`, `Line Total` and `Nilai` amounts;
+  `Need By`, `Delivery Date`, `Required Date` and `ETA` delivery dates.
+- **Non-data columns keep their own region.** `Type`, `Return` and
+  `No. Schedule Lines` values are dropped instead of contaminating the
+  description, quantity or price cells.
+- **A row needs an anchor.** A line-number anchor or a readable quantity anchor
+  starts a line item; a description line that merely contains a number (even in
+  a numeric column) continues the row above it, with its whole printed text and
+  a region covering every wrapped line. A first row may start on a price anchor
+  when the layout prints no line number and no quantity.
+- **Combined quantities are split.** `1 (PK)` and `12 PK` become quantity `1` /
+  `12` and UoM `PK`; the delivery date is not a UoM.
+- **Part numbers and placeholders are not descriptions.** When the numeric row
+  prints only `Not Available` or a part number and the real description follows
+  on the next line, the placeholder is replaced; otherwise the whole printed
+  description is kept.
+- **Money cells are normalised, never recomputed.** `Rp145,760,000.00 IDR`,
+  `IDR 3,000,000.00`, `$1,250.00` and `502.00 USD` become plain decimal strings
+  with the raw and region kept as evidence. The printed amount is what is
+  reported; quantity × unit price is never substituted.
+- **Repeated headers do not create rows.** A repeated column header is skipped.
+  A continuation page without a header carries the previous column positions
+  and is `needs_review`; duplicate or missing line numbers and incomplete rows
+  stay flagged exactly as before.
+- **One page may print several line-item blocks.** Each block can repeat its own
+  header; a `STATUS`/`Other Information` block between blocks ends the table and
+  is never a row, and an `Estimated Delivery Date` inside a confirmation note is
+  not the PO's delivery header. A `Note:` printed inside the description column
+  is part of the line's description, not a document footer.
+
 ### Uncertainty policy (#478)
 
 - **Confidence floor is 70.** It is a release policy, not a measured optimum:
@@ -512,6 +576,13 @@ that a page with a usable text layer never invokes OCR and an image-only page
 does; `cmd/vextract` repeats that assertion with fake `pdftoppm`/`tesseract`
 executables while the real OCR binaries are absent.
 
+The pure proposer additionally has three structurally different synthetic
+layouts — an Ariba-like header plus table, a right-hand key/value block with no
+line-number column, and a reordered Indonesian table whose header appears on a
+later page — all generated in code. They hold the generic rules (synonyms, a
+value on the next line, row anchors, wrapped descriptions, combined quantity and
+unit, currency-wrapped prices, repeated headers) rather than one template.
+
 The opt-in Docker tests build synthetic scans from the repository's text PDFs:
 the pinned Poppler inside the image renders a page at 150 or 300 DPI, one
 variant is skewed by 3°, and the raster is wrapped back into an image-only PDF.
@@ -549,12 +620,18 @@ claim.
   a 3° synthetic skew works, but no quality claim is made.
 - No table-structure model. Rows use column positions and a readable header;
   a continued table without a repeated header is carried and flagged, not
-  repaired.
+  repaired. The column synonyms and anchors are generic heuristics, not a claim
+  to parse every layout, and a new layout can still abstain.
 - A single separator followed by three digits (`1.250`) is returned as
   `needs_review` rather than guessed as 1.25 or 1250.
 - Slash dates where both components are ≤ 12 are `needs_review`.
-- Right-aligned numeric columns and multi-column header blocks are heuristics;
-  they are not a layout model.
+- Right-aligned numeric columns, merged cells and multi-column header blocks are
+  heuristics; they are not a layout model. A label whose value is aligned in a
+  different column block, or a table whose header is split across two printed
+  lines, can still be missed rather than guessed.
+- Part-number stripping is limited to a placeholder or a single-token part
+  number on the numeric row followed by the real description. A part number
+  printed inline with a longer description is kept as printed.
 - No PO totals are proposed in this slice.
 - OCR language data is `eng` + `ind` only. A document in another language is
   outside the reviewed configuration.
