@@ -49,11 +49,58 @@ func TestProposeKeepsAnInvalidLabelledCurrencyVisible(t *testing.T) {
 	if field.Status != apicontract.ExtractionStatusNeedsReview {
 		t.Fatalf("currency = %+v; an invalid labelled currency must be needs_review", field)
 	}
-	if !strings.Contains(field.Value+" "+field.Raw, "US Dollar") {
-		t.Errorf("currency = %+v; the printed US Dollar disappeared", field)
+	if field.Value != "IDR" {
+		t.Errorf("currency value = %q; want the valid amount-line IDR", field.Value)
 	}
-	if field.Note == "" {
-		t.Error("currency conflict has no note naming the other printed value")
+	if !strings.Contains(field.Note, "US Dollar") {
+		t.Errorf("currency note = %q; the printed US Dollar disappeared", field.Note)
+	}
+}
+
+// The invalid lookalike belongs in the note, but it must never become the
+// chosen value when a valid labelled currency follows it.
+func TestProposeChoosesAValidCurrencyOverALookalikePrefix(t *testing.T) {
+	cases := []struct {
+		name  string
+		first []testWord
+		note  string
+	}{
+		{
+			name:  "section title",
+			first: []testWord{word("Currency", 50, 60, 50), word("Information", 104, 60, 50)},
+			note:  "Information",
+		},
+		{
+			name: "prose",
+			first: []testWord{
+				word("All", 50, 60, 18), word("amounts", 72, 60, 42),
+				word("are", 118, 60, 20), word("in", 142, 60, 12),
+				word("the", 158, 60, 18), word("currency", 180, 60, 46),
+				word("of", 230, 60, 14), word("the", 248, 60, 18),
+				word("country.", 270, 60, 44),
+			},
+			note: "of the country.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			words := append([]testWord{}, tc.first...)
+			words = append(words,
+				word("Currency:", 50, 90, 50), word("IDR", 104, 90, 22),
+				word("Amount:", 50, 120, 48), word("Rp", 102, 120, 14),
+				word("1,000.00", 120, 120, 45), word("IDR", 170, 120, 22),
+			)
+			field := outputFields(parseFixture(t, words))[apicontract.ExtractionFieldCurrency]
+			if field.Value != "IDR" {
+				t.Errorf("currency value = %q; want the valid labelled IDR, not the lookalike", field.Value)
+			}
+			if field.Status != apicontract.ExtractionStatusNeedsReview {
+				t.Errorf("currency status = %q; the lookalike should remain in the conflict note", field.Status)
+			}
+			if !strings.Contains(field.Note, tc.note) {
+				t.Errorf("currency note = %q; want the lookalike %q retained", field.Note, tc.note)
+			}
+		})
 	}
 }
 

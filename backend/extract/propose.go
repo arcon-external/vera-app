@@ -799,6 +799,13 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	// candidate when the document printed no valid value, so a real invalid
 	// value still arrives as needs_review rather than disappearing.
 	selection := validFieldSelection(key, matches)
+	// Currency has a context fallback. A valid fallback is the value to choose,
+	// but an invalid labelled/prose currency still belongs in the conflict note,
+	// so the printed statement is not silently erased.
+	conflictSelection := selection
+	if key == apicontract.ExtractionFieldCurrency && len(selection) < len(matches) {
+		conflictSelection = matches
+	}
 	hasValue := false
 	for _, match := range selection {
 		if strings.TrimSpace(match.raw) != "" {
@@ -826,7 +833,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	field.BBox = bboxOf(chosen.words)
 
 	distinct := map[string]bool{}
-	for _, match := range selection {
+	for _, match := range conflictSelection {
 		raw := strings.TrimSpace(match.raw)
 		if raw == "" {
 			continue
@@ -846,7 +853,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	field.Note = note
 	if len(distinct) > 1 {
 		field.Status = apicontract.ExtractionStatusNeedsReview
-		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(selection, chosen.raw))
+		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(conflictSelection, chosen.raw))
 	}
 	applyConfidence(&field.ExtractionCell, chosen.words, minConfidence)
 	return field
@@ -873,13 +880,6 @@ func validFieldSelection(key string, matches []fieldMatch) []fieldMatch {
 		}
 	}
 	if len(valid) > 0 {
-		// Currency is the one field with a context fallback (the amount line).
-		// A valid fallback must not silently erase an invalid labelled
-		// currency: keep both candidates so the printed label becomes a
-		// reviewable conflict instead of disappearing.
-		if key == apicontract.ExtractionFieldCurrency && len(valid) < len(matches) {
-			return matches
-		}
 		return valid
 	}
 	return matches
