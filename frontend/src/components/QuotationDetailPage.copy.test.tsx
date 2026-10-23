@@ -78,7 +78,8 @@ describe("QuotationDetailPage copy action", () => {
           revision={3}
           onBack={noop}
           onEdit={noop}
-          onAddPurchaseOrder={noop}
+          onCreatePurchaseOrder={async () => {}}
+          onOpenPurchaseOrder={noop}
         />
       </ToastProvider>
     );

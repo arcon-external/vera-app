@@ -44,6 +44,8 @@ export function GetDraft(arg1:number):Promise<backend.DraftDTO>;
 
 export function GetInternalBreakdown():Promise<backend.InternalBreakdown>;
 
+export function GetPOSourceOccupancy(arg1:number):Promise<backend.POSourceOccupancyDTO>;
+
 export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
 
 export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.PurchaseOrderDocumentStateDTO>;

@@ -168,6 +168,16 @@ type POSourceValidationResponse struct {
 	Valid          bool                  `json:"valid"`
 }
 
+// POSourceOccupancyResponse is the archived Quotation detail's occupancy read
+// (issue #499). It answers for one Quotation, not one revision: ActivePO is the
+// one record occupying the whole Quotation, or null when it is free for a
+// creation. The detail page uses it to choose between Create PO from this
+// Quotation, Open PO draft, and View PO.
+type POSourceOccupancyResponse struct {
+	ActivePO    *POSourceActivePORow `json:"activePO"`
+	QuotationID int64                `json:"quotationId"`
+}
+
 // PurchaseOrderItemRow is one entered PO line. QuotationItemNo and
 // QuotationSubNo are null for an extra line the source revision never carried.
 // QuantityScaled is an exact count of 1/10000 units; UnitPriceMinor is in the

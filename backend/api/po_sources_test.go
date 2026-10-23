@@ -615,3 +615,69 @@ func TestPOSourceEndpointsRequireASession(t *testing.T) {
 		}
 	}
 }
+
+// Issue #499: the archived Quotation detail no longer opens the general source
+// selector. It asks this narrow read whether the Quotation already has its one
+// PO, and offers Open PO draft / View PO instead of a second creation attempt.
+// The route is per Quotation, not per revision: the PO follows every revision,
+// so a displayed revision the PO did not start from keeps the same answer.
+func TestPOSourceOccupancyReportsTheOneActiveRecordOverHTTP(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_occupancy")
+	quotationID, number := exportForSelector(t, server, token, poSourceInput("Occupancy", "Occupancy item"))
+	exportNextRevision(t, server, token, number, 1, poSourceInput("Occupancy two", "Item two"))
+	path := "/v1/po-sources/" + strconv.FormatInt(quotationID, 10) + "/occupancy"
+
+	code, body := doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("GET %s = %d; want 200 (%v)", path, code, body)
+	}
+	var free struct {
+		ActivePO    *poSourceActivePO `json:"activePO"`
+		QuotationID int64             `json:"quotationId"`
+	}
+	encodeDecode(t, body, &free)
+	if free.QuotationID != quotationID {
+		t.Errorf("free occupancy quotation = %d; want %d", free.QuotationID, quotationID)
+	}
+	if free.ActivePO != nil {
+		t.Errorf("free quotation reports active PO %+v", free.ActivePO)
+	}
+
+	status, created := createPODraft(t, server, token, quotationID, 0, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("create draft = %d; want 201 (%v)", status, created)
+	}
+	createdID, _ := created["id"].(float64)
+	if createdID < 1 {
+		t.Fatalf("created draft id = %v", created["id"])
+	}
+
+	// The displayed revision is irrelevant to occupancy: revision 1 is on
+	// screen here and the draft started from revision 0, yet the Quotation is
+	// the same occupied one.
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("occupied GET %s = %d; want 200 (%v)", path, code, body)
+	}
+	var occupied struct {
+		ActivePO    *poSourceActivePO `json:"activePO"`
+		QuotationID int64             `json:"quotationId"`
+	}
+	encodeDecode(t, body, &occupied)
+	if occupied.ActivePO == nil {
+		t.Fatal("occupied quotation reports no active PO")
+	}
+	if occupied.ActivePO.ID != int64(createdID) || occupied.ActivePO.State != "draft" {
+		t.Errorf("active PO = %+v; want draft %d", occupied.ActivePO, int64(createdID))
+	}
+
+	// A missing Quotation is not a free one, and a malformed id is not a 404.
+	if code, _ := doJSON(t, server, http.MethodGet,
+		"/v1/po-sources/999999/occupancy", token, nil); code != http.StatusNotFound {
+		t.Errorf("unknown quotation occupancy = %d; want 404", code)
+	}
+	if code, _ := doJSON(t, server, http.MethodGet,
+		"/v1/po-sources/not-a-number/occupancy", token, nil); code != http.StatusBadRequest {
+		t.Errorf("malformed quotation id occupancy = %d; want 400", code)
+	}
+}

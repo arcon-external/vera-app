@@ -35,6 +35,17 @@ type POSourceActivePO struct {
 	State string
 }
 
+// POSourceOccupancy is the archived Quotation detail's narrow question (issue
+// #499): does this Quotation already have its one PO, and is that record a
+// draft or finalized? It is about the Quotation, never a single revision --
+// the one-PO-per-Quotation rule spans every issued revision. A nil ActivePO is
+// a free Quotation. The answer is advisory: the create transaction re-checks
+// occupancy, so a stale read can only change the label, never bypass the rule.
+type POSourceOccupancy struct {
+	ActivePO    *POSourceActivePO
+	QuotationID int64
+}
+
 // POSourceQuotation is one row of the selector's first step. It describes the
 // latest issued revision, because that is the revision a PO starts against by
 // default; the caller can still choose an older revision in the second step.
@@ -358,4 +369,58 @@ func (s *Store) ValidatePOSource(ctx context.Context, quotationID int64, revisio
 	}
 	validation.Valid = issued
 	return validation, nil
+}
+
+// GetPOSourceOccupancy answers the archived detail page's occupancy question
+// for one Quotation (issue #499). It returns the one active PO the partial
+// unique index permits, scoped to the caller's organization, or a nil ActivePO
+// when the Quotation is free. Every revision of the Quotation shares the
+// answer; the revision on screen is not an input, because a PO follows the
+// Quotation and the one-PO rule spans revisions.
+//
+// The lookup exists so the detail page can offer Open PO draft or View PO
+// instead of a second creation attempt. It is a read: CreatePurchaseOrderDraft
+// still decides occupancy inside its transaction, and its unique-index
+// conflict remains the guard when this read is stale.
+func (s *Store) GetPOSourceOccupancy(ctx context.Context, quotationID int64) (POSourceOccupancy, error) {
+	if quotationID < 1 {
+		return POSourceOccupancy{}, fmt.Errorf(
+			"%w: quotation id is required", ErrPOSourceInvalid)
+	}
+	org, err := s.RequireOrg(ctx)
+	if err != nil {
+		return POSourceOccupancy{}, err
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return POSourceOccupancy{}, err
+	}
+	schema := s.configSchema()
+
+	var occupancy POSourceOccupancy
+	var activeID pgtype.Int8
+	var activeState pgtype.Text
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT q.id, po.id, po.state
+		FROM %s.quotations q
+		LEFT JOIN %s.purchase_orders po
+		  ON po.quotation_id = q.id AND po.org_id = $2
+		WHERE q.id = $1`, schema, schema),
+		quotationID, org.ID).Scan(&occupancy.QuotationID, &activeID, &activeState)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The detail page loaded this Quotation moments ago; a missing row is
+		// a deletion, and the caller names it rather than showing "free".
+		return POSourceOccupancy{}, ErrPOSourceNotFound
+	}
+	if err != nil {
+		return POSourceOccupancy{}, fmt.Errorf(
+			"read po source occupancy for quotation %d: %w", quotationID, err)
+	}
+	if activeID.Valid {
+		occupancy.ActivePO = &POSourceActivePO{
+			ID:    activeID.Int64,
+			State: activeState.String,
+		}
+	}
+	return occupancy, nil
 }

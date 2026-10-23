@@ -2376,15 +2376,14 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The issued-Quotation detail header (#467 wave 2 + #485 copy): the title,
-    // revision picker, "Add Purchase Order from a Quotation", Copy and Edit.
-    // At 360 it is the case that says whether the three actions wrap without
-    // overflowing.
+    // Issue #499: the free Quotation. Exactly one PO action -- Create PO from
+    // this Quotation -- sits beside Copy and Edit. At 360 this case says
+    // whether the three actions wrap without overflowing.
     //
-    // What this case cannot show: the click that opens the shared selector,
-    // the focus restore on close, the real clipboard write, and the page below
-    // the header (which fetches its revision in an effect) stay hand-driven.
-    name: "QuotationDetailHeader",
+    // What this case cannot show: the click that creates the PO, the real
+    // clipboard write, and the page below the header (which fetches its
+    // revision in an effect) stay hand-driven.
+    name: "QuotationDetailHeaderFree",
     element: (
       <QuotationDetailHeader
         quotation={DETAIL_QUOTATION}
@@ -2397,9 +2396,61 @@ const CASES: SnapshotCase[] = [
         onRevisionChange={() => undefined}
         onBack={() => undefined}
         onEdit={() => undefined}
-        onAddPurchaseOrder={() => undefined}
+        purchaseOrder={null}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
         onCopy={() => undefined}
-        copyDisabled={false}
+      />
+    ),
+  },
+  {
+    // Issue #499: a draft occupies the Quotation, so the creation action is
+    // replaced by Open PO draft. The revision picker still switches the
+    // displayed revision; the occupancy answer does not change with it.
+    name: "QuotationDetailHeaderOpenDraft",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={{ id: 7, state: "draft" }}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #499: the finalized case. The same occupancy becomes View PO, so
+    // the screenshot proves the three labels are distinct and that neither
+    // occupied state offers another creation attempt.
+    name: "QuotationDetailHeaderViewPO",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={{ id: 7, state: "saved" }}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
       />
     ),
   },

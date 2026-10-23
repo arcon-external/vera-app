@@ -1,17 +1,17 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { ArchivedQuotation } from "../archive";
-import { QuotationDetailHeader } from "./QuotationDetailPage";
+import {
+  QuotationDetailHeader,
+  type QuotationDetailHeaderProps,
+} from "./QuotationDetailPage";
 
-// Issue #467 wave 2: the issued-Quotation detail surface is the second PO
-// entry path. The header is rendered without a DOM, so this suite proves the
-// action exists as a real enabled button beside Edit; the click that opens the
-// shared selector, and returning focus to this button on close, stay
-// hand-driven.
-//
-// renderToString runs no effects, which is why the header -- not the whole
-// page -- is the unit here: the page fetches its revision in an effect and
-// would only print its loading skeleton.
+// Issue #499: the issued-Quotation detail action. It is no longer a second
+// entry point into the general selector -- it acts on the revision on screen.
+// The header is rendered without a DOM (the page fetches in an effect), so
+// these pins prove the three labels exist exclusively, and that the action is
+// disabled while the occupancy answer is pending or the revision is switching.
+// The click-through lives in quotationDetailPOApp.dom.test.tsx.
 
 const QUOTATION = {
   QuoteNumber: "1502260001",
@@ -20,6 +20,8 @@ const QUOTATION = {
   CustomerName: "PT. Infineon Technologies Batam",
   Subject: "Electrical installation",
 } as ArchivedQuotation;
+
+const noop = () => {};
 
 function buttonTagFor(html: string, label: string): string {
   const button = html
@@ -32,26 +34,66 @@ function buttonTagFor(html: string, label: string): string {
   return button.slice(0, button.indexOf(">") + 1);
 }
 
-function renderHeader(): string {
+function renderHeader(
+  overrides: Partial<QuotationDetailHeaderProps> = {}
+): string {
   return renderToString(
     <QuotationDetailHeader
       quotation={QUOTATION}
       activeRevision={1}
       revisionOptions={[{ value: 1, label: "Revision 01 — latest" }]}
-      onRevisionChange={() => {}}
-      onBack={() => {}}
-      onEdit={() => {}}
-      onAddPurchaseOrder={() => {}}
+      onRevisionChange={noop}
+      onBack={noop}
+      onEdit={noop}
+      purchaseOrder={null}
+      purchaseOrderPending={false}
+      onCreatePurchaseOrder={noop}
+      onOpenPurchaseOrder={noop}
+      {...overrides}
     />
   ).replace(/<!-- -->/g, "");
 }
 
-describe("QuotationDetailHeader PO entry path (issue #467)", () => {
-  it("offers Add Purchase Order from a Quotation as an enabled action", () => {
+describe("QuotationDetailHeader from-this-Quotation action (issue #499)", () => {
+  it("offers exactly Create PO from this Quotation when the Quotation is free", () => {
     const html = renderHeader();
-    const action = buttonTagFor(html, "Add Purchase Order from a Quotation");
+    const action = buttonTagFor(html, "Create PO from this Quotation");
     expect(action).not.toContain(" disabled=");
-    expect(html).toContain("Add Purchase Order from a Quotation");
+    expect(html).toContain("Create PO from this Quotation");
+    expect(html).not.toContain("Open PO draft");
+    expect(html).not.toContain("View PO");
+  });
+
+  it("offers Open PO draft, and no creation attempt, when a draft occupies it", () => {
+    const html = renderHeader({
+      purchaseOrder: { id: 41, state: "draft" },
+    });
+    expect(buttonTagFor(html, "Open PO draft")).not.toContain(" disabled=");
+    expect(html).not.toContain("Create PO from this Quotation");
+    expect(html).not.toContain("View PO");
+  });
+
+  it("offers View PO when the occupying record is finalized", () => {
+    const html = renderHeader({
+      purchaseOrder: { id: 41, state: "saved" },
+    });
+    expect(buttonTagFor(html, "View PO")).not.toContain(" disabled=");
+    expect(html).not.toContain("Create PO from this Quotation");
+    expect(html).not.toContain("Open PO draft");
+  });
+
+  it("disables creation until the occupancy answer arrives", () => {
+    const html = renderHeader({ purchaseOrderPending: true });
+    expect(buttonTagFor(html, "Create PO from this Quotation")).toContain(
+      " disabled="
+    );
+  });
+
+  it("disables creation while the displayed revision is being replaced", () => {
+    const html = renderHeader({ revisionSwitching: true });
+    expect(buttonTagFor(html, "Create PO from this Quotation")).toContain(
+      " disabled="
+    );
   });
 
   it("keeps the existing Edit action and quotation identity", () => {

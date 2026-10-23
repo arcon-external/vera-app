@@ -82,6 +82,10 @@ export function GetInternalBreakdown() {
   return window['go']['backend']['Quotation']['GetInternalBreakdown']();
 }
 
+export function GetPOSourceOccupancy(arg1) {
+  return window['go']['backend']['Quotation']['GetPOSourceOccupancy'](arg1);
+}
+
 export function GetPurchaseOrder(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrder'](arg1);
 }

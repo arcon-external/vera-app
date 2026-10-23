@@ -76,6 +76,16 @@ type POSourceSelection struct {
 	RevisionNumber int16
 }
 
+// POSourceOccupancyDTO is the archived Quotation detail's occupancy answer
+// (issue #499). ActivePO is the one record occupying the Quotation -- a draft
+// or a finalized record -- or nil when the Quotation is free. Occupancy
+// belongs to the Quotation, so the displayed revision is deliberately not an
+// input.
+type POSourceOccupancyDTO struct {
+	ActivePO    *POSourceActivePODTO
+	QuotationID int64
+}
+
 // POSourceValidationDTO answers the confirm-time revalidation. A false Valid
 // carries a stable Reason ("quotation_not_found" or "revision_not_found").
 type POSourceValidationDTO struct {
@@ -195,4 +205,32 @@ func (q *Quotation) ValidatePOSource(selection POSourceSelection) (POSourceValid
 		QuotationID:    response.QuotationID,
 		RevisionNumber: response.RevisionNumber,
 	}, nil
+}
+
+// GetPOSourceOccupancy asks whether a Quotation already has its one PO, and
+// whether that record is a draft or finalized (issue #499). The archived detail
+// page uses it to offer Open PO draft / View PO instead of a second creation
+// attempt; the create path re-checks occupancy inside the server transaction,
+// so this read may be stale without ever becoming a bypass.
+func (q *Quotation) GetPOSourceOccupancy(quotationID int64) (POSourceOccupancyDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return POSourceOccupancyDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return POSourceOccupancyDTO{}, err
+	}
+	var response apicontract.POSourceOccupancyResponse
+	path := "/v1/po-sources/" + strconv.FormatInt(quotationID, 10) + "/occupancy"
+	if err := client.Get(path, &response); err != nil {
+		return POSourceOccupancyDTO{}, err
+	}
+	dto := POSourceOccupancyDTO{QuotationID: response.QuotationID}
+	if response.ActivePO != nil {
+		dto.ActivePO = &POSourceActivePODTO{
+			ID:    response.ActivePO.ID,
+			State: response.ActivePO.State,
+		}
+	}
+	return dto, nil
 }

@@ -776,6 +776,61 @@ function App() {
   }, [settingsUserId]);
 
   const [checkingSession, setCheckingSession] = useState(true);
+
+  // #499: the archived Quotation's action creates the one PO from the revision
+  // on screen. App owns the workspace transition and the shared source-bound
+  // create path; the detail page only supplies the exact displayed pair. A
+  // refusal is rethrown to the page, which re-reads occupancy so a concurrent
+  // create lands on Open PO draft / View PO instead of a duplicate.
+  //
+  // The detail page is a read surface: no Quotation, PO or Company edit can be
+  // live while it is mounted (leaving any of those pages already passed the
+  // guard), so this transition has nothing to discard today. It still moves
+  // through the guard below rather than assuming that, and clears the stale
+  // dirty flag the same way the selector's create path clears it.
+  const adoptCreatedPurchaseOrder = useCallback(
+    (draft: backend.PurchaseOrderDTO) => {
+      poLeave.setDirty(false);
+      // Payment terms and Incoterms come from the revision; the saved defaults
+      // only fill a field it left empty, and the received date is applied when
+      // the server stored none.
+      poWorkspace.open(
+        applyPurchaseOrderDefaults(draft, workspaceSettings.purchaseOrder)
+      );
+      setPage("po");
+      pushToast(
+        "success",
+        `Purchase order draft created from quotation ${draft.QuoteNumber}, revision ${draft.SourceRevision}.`
+      );
+    },
+    [
+      poLeave.setDirty,
+      poWorkspace.open,
+      pushToast,
+      workspaceSettings.purchaseOrder,
+    ]
+  );
+
+  const createPurchaseOrderFromQuotation = useCallback(
+    async (quotationID: number, revision: number) => {
+      const draft = await CreatePurchaseOrderDraft({
+        QuotationID: quotationID,
+        RevisionNumber: revision,
+        // Issue #492: the received date is a PO fact the source revision never
+        // supplies. Blank means the server stores today in WIB.
+        ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+      });
+      // The cross-workspace move still asks the leave guard. The detail page
+      // holds no editable state, so it answers at once today; routing through
+      // it means a future editable surface cannot be discarded silently.
+      poLeave.request("po", () => adoptCreatedPurchaseOrder(draft));
+    },
+    [
+      adoptCreatedPurchaseOrder,
+      poLeave.request,
+      workspaceSettings.purchaseOrder.receivedDate,
+    ]
+  );
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   // The live company currency: the denomination fresh input is written in,
   // and what a stored draft or revision is compared against before it may be
@@ -2140,19 +2195,8 @@ function App() {
             // never supplies. Blank means the server stores today in WIB.
             ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
           });
-          poLeave.setDirty(false);
-          // Payment terms and Incoterms come from the revision; the saved
-          // defaults only fill a field it left empty, and the received date is
-          // applied when the server stored none.
-          poWorkspace.open(
-            applyPurchaseOrderDefaults(draft, workspaceSettings.purchaseOrder)
-          );
+          adoptCreatedPurchaseOrder(draft);
           closePOSourceSelector();
-          setPage("po");
-          pushToast(
-            "success",
-            `Purchase order draft created from quotation ${draft.QuoteNumber}, revision ${draft.SourceRevision}.`
-          );
         }}
         onOpenDraft={async (activePO) => {
           try {
@@ -2567,7 +2611,8 @@ function App() {
             revision={selectedQuotation.revision}
             onBack={() => setPage("archive")}
             onEdit={handleEditQuotation}
-            onAddPurchaseOrder={() => setPOSelectorOpen(true)}
+            onCreatePurchaseOrder={createPurchaseOrderFromQuotation}
+            onOpenPurchaseOrder={(id) => void openPurchaseOrder(id)}
           />
         )
       ) : null}

@@ -132,4 +132,46 @@ func TestPOSourceBindingsRequireSignIn(t *testing.T) {
 	if _, err := q.ValidatePOSource(POSourceSelection{QuotationID: 1}); err == nil {
 		t.Error("ValidatePOSource without a session succeeded")
 	}
+	if _, err := q.GetPOSourceOccupancy(1); err == nil {
+		t.Error("GetPOSourceOccupancy without a session succeeded")
+	}
+}
+
+// Issue #499: the archived detail page's occupancy read. The binding sends no
+// revision -- occupancy belongs to the Quotation -- and maps both the one
+// active record (draft or saved) and the free answer without inventing one.
+func TestGetPOSourceOccupancyMapsTheActiveRecordAndFreeAnswer(t *testing.T) {
+	answers := []apicontract.POSourceOccupancyResponse{
+		{QuotationID: 12, ActivePO: &apicontract.POSourceActivePORow{ID: 7, State: "saved"}},
+		{QuotationID: 12},
+	}
+	calls := 0
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/po-sources/12/occupancy" {
+			t.Errorf("%s %s; want GET /v1/po-sources/12/occupancy",
+				request.Method, request.URL.Path)
+		}
+		if request.URL.Query().Encode() != "" {
+			t.Errorf("query = %q; occupancy takes no revision", request.URL.RawQuery)
+		}
+		_ = json.NewEncoder(writer).Encode(answers[calls])
+		calls++
+	})
+
+	q := newTestQuotation()
+	occupied, err := q.GetPOSourceOccupancy(12)
+	if err != nil {
+		t.Fatalf("GetPOSourceOccupancy failed: %v", err)
+	}
+	if occupied.QuotationID != 12 || occupied.ActivePO == nil ||
+		occupied.ActivePO.ID != 7 || occupied.ActivePO.State != "saved" {
+		t.Errorf("occupied answer = %+v; want quotation 12 saved PO 7", occupied)
+	}
+	free, err := q.GetPOSourceOccupancy(12)
+	if err != nil {
+		t.Fatalf("second GetPOSourceOccupancy failed: %v", err)
+	}
+	if free.QuotationID != 12 || free.ActivePO != nil {
+		t.Errorf("free answer = %+v; want quotation 12 with no active PO", free)
+	}
 }

@@ -146,6 +146,43 @@ func (s *Server) listPOSourceRevisions(context echo.Context) error {
 	})
 }
 
+// getPOSourceOccupancy is the archived Quotation detail's occupancy read
+// (issue #499). It answers for one Quotation, not one revision: the one record
+// occupying the whole Quotation, or a null activePO when it is free. The
+// detail page uses the answer to choose Create PO from this Quotation, Open PO
+// draft, or View PO; creation itself still re-checks occupancy in its
+// transaction, so this read is never the guard.
+func (s *Server) getPOSourceOccupancy(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	occupancy, err := s.database.GetPOSourceOccupancy(requestContext, id)
+	if errors.Is(err, store.ErrPOSourceNotFound) {
+		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation not found"})
+	}
+	if errors.Is(err, store.ErrPOSourceInvalid) {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
+	}
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "read purchase order occupancy"})
+	}
+	response := apicontract.POSourceOccupancyResponse{
+		QuotationID: occupancy.QuotationID,
+	}
+	if occupancy.ActivePO != nil {
+		response.ActivePO = &apicontract.POSourceActivePORow{
+			ID:    occupancy.ActivePO.ID,
+			State: occupancy.ActivePO.State,
+		}
+	}
+	return context.JSON(http.StatusOK, response)
+}
+
 // validatePOSource is the selector's confirm gate. The exact pair must still
 // exist and be issued, checked after the user has spent time choosing. A
 // well-formed request always answers 200 with the outcome in the body, so the

@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { GetQuotationRevision } from "@backend/backend/Quotation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  GetPOSourceOccupancy,
+  GetQuotationRevision,
+} from "@backend/backend/Quotation";
 import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotation } from "../archive";
 import { resolveCurrencyEntry } from "../archive";
@@ -70,13 +73,44 @@ export function QuotationCopyButton({
   );
 }
 
+/**
+ * The one Purchase Order occupying the displayed Quotation (#499). A draft
+ * opens its editor; a finalized record opens the saved view. It carries no
+ * revision: the one-PO rule spans every revision of the Quotation.
+ */
+export interface QuotationDetailPurchaseOrder {
+  id: number;
+  state: "draft" | "saved";
+}
+
+// A refused create hands the server's message through (the bindings marshal a
+// typed error as {message}); this reads it without letting an object render as
+// "[object Object]". Same shape as App's local helper, kept here because that
+// one is not exported and a component does not import the app shell.
+function purchaseOrderErrorMessage(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error.trim()) return error;
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return fallback;
+}
+
 interface QuotationDetailPageProps {
   quotationID: number;
   revision: number;
   onBack: () => void;
   onEdit: (quotation: ArchivedQuotation) => void;
-  /** Second PO entry path (#467): opens the shared source selector. */
-  onAddPurchaseOrder: () => void;
+  /**
+   * Free Quotation: create its one PO from the displayed revision, through the
+   * same source-bound create path the selector uses. It resolves once the PO
+   * workspace has adopted the record, and rejects when the server refuses --
+   * a concurrent occupation included.
+   */
+  onCreatePurchaseOrder: (quotationID: number, revision: number) => Promise<void>;
+  /** Occupied Quotation: open the existing record (draft editor or saved view). */
+  onOpenPurchaseOrder: (purchaseOrderID: number) => void;
   /** The live profile entry: the initial render's currency only. Once the
    * revision loads, every figure renders in its REVISION currency
    * (quotation.Currency) resolved below; the live entry is then just the
@@ -91,10 +125,22 @@ export interface QuotationDetailHeaderProps {
   onRevisionChange: (revision: number) => void;
   onBack: () => void;
   onEdit: () => void;
-  onAddPurchaseOrder: () => void;
+  /** The one PO occupying this Quotation, or null when it is free (#499). */
+  purchaseOrder: QuotationDetailPurchaseOrder | null;
+  /** True until the occupancy read answers; creation waits for it. */
+  purchaseOrderPending: boolean;
+  /** Free: create from the revision on screen. */
+  onCreatePurchaseOrder: () => void;
+  /** Occupied: open the existing record by id. */
+  onOpenPurchaseOrder: (purchaseOrderID: number) => void;
+  /**
+   * True while the displayed revision is being replaced. Both the copy and the
+   * create action are disabled: each must act on the revision on screen, and
+   * the previous revision's figures are still mounted during the fetch.
+   */
+  revisionSwitching?: boolean;
   /** Copy is optional so the header's PO-only pins keep rendering without it. */
   onCopy?: (quotation: ArchivedQuotation) => void;
-  copyDisabled?: boolean;
 }
 
 // The issued-Quotation header, exported so its two entry actions can be
@@ -107,9 +153,12 @@ export function QuotationDetailHeader({
   onRevisionChange,
   onBack,
   onEdit,
-  onAddPurchaseOrder,
+  purchaseOrder,
+  purchaseOrderPending,
+  onCreatePurchaseOrder,
+  onOpenPurchaseOrder,
+  revisionSwitching = false,
   onCopy,
-  copyDisabled = false,
 }: QuotationDetailHeaderProps) {
   return (
     <header>
@@ -149,17 +198,31 @@ export function QuotationDetailHeader({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            aria-label="Add Purchase Order from a Quotation"
-            onClick={onAddPurchaseOrder}
-          >
-            Add Purchase Order from a Quotation
-          </Button>
+          {/* #499: exactly one action. A free Quotation creates from the
+              displayed revision; an occupied one opens its existing record and
+              never offers a second creation attempt. */}
+          {purchaseOrder === null ? (
+            <Button
+              variant="secondary"
+              aria-label="Create PO from this Quotation"
+              disabled={purchaseOrderPending || revisionSwitching}
+              onClick={onCreatePurchaseOrder}
+            >
+              Create PO from this Quotation
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              aria-label={purchaseOrder.state === "saved" ? "View PO" : "Open PO draft"}
+              onClick={() => onOpenPurchaseOrder(purchaseOrder.id)}
+            >
+              {purchaseOrder.state === "saved" ? "View PO" : "Open PO draft"}
+            </Button>
+          )}
           {onCopy ? (
             <QuotationCopyButton
               quotation={quotation}
-              disabled={copyDisabled}
+              disabled={revisionSwitching}
               onCopy={onCopy}
             />
           ) : null}
@@ -180,13 +243,21 @@ export function QuotationDetailPage({
   revision,
   onBack,
   onEdit,
-  onAddPurchaseOrder,
+  onCreatePurchaseOrder,
+  onOpenPurchaseOrder,
   currency = IDR_ENTRY,
 }: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState(false);
   const [activeRevision, setActiveRevision] = useState(revision);
+  // #499: the occupancy answer and the create attempt. The answer chooses the
+  // label; the attempt is in flight only long enough to hand the record to the
+  // PO workspace.
+  const [purchaseOrder, setPurchaseOrder] =
+    useState<QuotationDetailPurchaseOrder | null>(null);
+  const [purchaseOrderPending, setPurchaseOrderPending] = useState(true);
+  const [creatingPurchaseOrder, setCreatingPurchaseOrder] = useState(false);
   const { pushToast } = useToast();
   // The catalogue, fetched like App.tsx fetches it: the revision code
   // resolves to its entry once loaded. Null until then -- figures fall back
@@ -206,6 +277,46 @@ export function QuotationDetailPage({
       active = false;
     };
   }, []);
+
+  // The narrow occupancy read (#499). Keyed to the Quotation, not the
+  // displayed revision: the PO follows every revision, so switching the
+  // selector must not make an occupied Quotation look free.
+  const readPurchaseOrder = useCallback(
+    async (id: number): Promise<QuotationDetailPurchaseOrder | null> => {
+      const occupancy = await GetPOSourceOccupancy(id);
+      const active = occupancy.ActivePO;
+      if (!active) return null;
+      return {
+        id: active.ID,
+        // Only "saved" is finalized; anything else is the editable draft the
+        // server labels. The state is read, never assumed.
+        state: active.State === "saved" ? "saved" : "draft",
+      };
+    },
+    []
+  );
+
+  useEffect(() => {
+    let active = true;
+    setPurchaseOrder(null);
+    setPurchaseOrderPending(true);
+    void readPurchaseOrder(quotationID)
+      .then((found) => {
+        if (active) setPurchaseOrder(found);
+      })
+      .catch(() => {
+        // A failed read cannot decide the action. Creation stays offered
+        // because the server's create transaction is the real occupancy guard;
+        // a concurrent occupation answers 409 and is handled below.
+        if (active) setPurchaseOrder(null);
+      })
+      .finally(() => {
+        if (active) setPurchaseOrderPending(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [quotationID, readPurchaseOrder]);
 
   // Reset to the revision requested by the archive when the target changes.
   // Clearing the loaded record makes a different quotation show the skeleton
@@ -261,6 +372,52 @@ export function QuotationDetailPage({
   // any code the catalogue cannot resolve.
   const entry = resolveCurrencyEntry(catalogue, quotation?.Currency, currency);
 
+  // #499: create from the revision on screen. App owns the source-bound create
+  // call and the PO workspace; this page only supplies the exact displayed
+  // pair (the header is disabled while a switch is in flight, so the pair it
+  // reads is the revision the user sees). A refusal is resolved by re-reading
+  // occupancy: a concurrent create answers 409, and that must switch the action
+  // to Open PO draft / View PO rather than retry.
+  const handleCreatePurchaseOrder = useCallback(async () => {
+    if (quotation === null || creatingPurchaseOrder) return;
+    setCreatingPurchaseOrder(true);
+    try {
+      await onCreatePurchaseOrder(quotation.ID, quotation.RevisionNumber);
+    } catch (error) {
+      let found: QuotationDetailPurchaseOrder | null = null;
+      try {
+        found = await readPurchaseOrder(quotation.ID);
+      } catch {
+        found = null;
+      }
+      if (found !== null) {
+        setPurchaseOrder(found);
+        pushToast(
+          "error",
+          found.state === "saved"
+            ? "This quotation already has a finalized purchase order. Use View PO to open it."
+            : "This quotation already has a purchase order draft. Use Open PO draft to continue it."
+        );
+      } else {
+        pushToast(
+          "error",
+          purchaseOrderErrorMessage(
+            error,
+            "The purchase order could not be created."
+          )
+        );
+      }
+    } finally {
+      setCreatingPurchaseOrder(false);
+    }
+  }, [
+    quotation,
+    creatingPurchaseOrder,
+    onCreatePurchaseOrder,
+    readPurchaseOrder,
+    pushToast,
+  ]);
+
   if (loading) {
     return (
       <div className="space-y-4" aria-label="Loading quotation">
@@ -294,8 +451,11 @@ export function QuotationDetailPage({
         onRevisionChange={(next) => setActiveRevision(Number(next))}
         onBack={onBack}
         onEdit={() => onEdit(quotation)}
-        onAddPurchaseOrder={onAddPurchaseOrder}
-        copyDisabled={switching}
+        purchaseOrder={purchaseOrder}
+        purchaseOrderPending={purchaseOrderPending}
+        revisionSwitching={switching || creatingPurchaseOrder}
+        onCreatePurchaseOrder={() => void handleCreatePurchaseOrder()}
+        onOpenPurchaseOrder={onOpenPurchaseOrder}
         onCopy={(current) =>
           void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
         }
