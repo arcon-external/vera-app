@@ -119,11 +119,10 @@ func Propose(pages []Page, options Options) (apicontract.ExtractionOutput, error
 }
 
 type visualLine struct {
-	Page   *Page
-	Words  []Word
-	Text   string
-	Center float64
-	Box    apicontract.ExtractionBBox
+	Page  *Page
+	Words []Word
+	Text  string
+	Box   apicontract.ExtractionBBox
 }
 
 func linesOf(page *Page) []visualLine {
@@ -149,10 +148,9 @@ func linesOf(page *Page) []visualLine {
 		})
 		xMin, yMin, xMax, yMax := unionBox(current)
 		lines = append(lines, visualLine{
-			Page:   page,
-			Words:  current,
-			Text:   joinWords(current),
-			Center: center,
+			Page:  page,
+			Words: current,
+			Text:  joinWords(current),
 			Box: apicontract.ExtractionBBox{
 				X: xMin, Y: yMin, Width: xMax - xMin, Height: yMax - yMin,
 			},
@@ -415,15 +413,19 @@ var fieldPatterns = map[string]*regexp.Regexp{
 	apicontract.ExtractionFieldPONumber: regexp.MustCompile(
 		`(?i)(?:` +
 			// A labelled number may print "No", "Number" or "#". A bare
-			// "Purchase Order" requires a separator, and a bare "PO:" is only
-			// a label at the start of the line: "Tanggal PO:" is a date label
-			// and "PO-2026-7781" is a value, not a second label.
+			// "Purchase Order" may omit the separator; a value that reads as a
+			// label fragment is discarded before it can be mistaken for a
+			// number. A bare "PO" needs either a separator or whitespace, so
+			// "PO-2026-7781" is a value, not a second label.
 			`\bpurchase\s+order\s+(?:no|number|#)\.?\s*[:#]?\s*` +
-			`|\bpurchase\s+order\s*[:#]\s*` +
+			`|\bpurchase\s+order\s*[:#]?\s*` +
 			`|\bp\.?\s*o\.?\s+(?:no|number|#)\.?\s*[:#]?\s*` +
 			`|^\s*p\.?\s*o\.?\s*[:#]\s*` +
-			`|\bnomor\s+(?:p\.?\s*o\.?|pesanan)\s*[:#]\s*` +
-			`|\bno\.?\s+p\.?\s*o\.?\s*[:#]\s*` +
+			`|^\s*p\.?\s*o\.?\s+` +
+			`|\bnomor\s+(?:p\.?\s*o\.?|pesanan)\s*[:#]?\s*` +
+			`|\bno\.?\s+p\.?\s*o\.?\s*[:#]?\s*` +
+			`|\bdocument\s+(?:no|number)\.?\s*[:#]?\s*` +
+			`|\bdoc\s+no\.?\s*[:#]?\s*` +
 			`)(.*)$`),
 	apicontract.ExtractionFieldPODate: regexp.MustCompile(
 		`(?i)\b(?:` +
@@ -433,9 +435,12 @@ var fieldPatterns = map[string]*regexp.Regexp{
 			`|purchase\s+order\s+date` +
 			`|p\.?\s*o\.?\s+date` +
 			`|order\s+date` +
+			`|issued(?:\s+(?:on|at))?` +
+			`|issue\s+date` +
+			`|document\s+date` +
 			`|date\s+of\s+(?:the\s+)?(?:purchase\s+)?order` +
 			`|tanggal\s+(?:p\.?\s*o\.?|pesanan|order)` +
-			`)\s*[:#-]\s*(.*)$`),
+			`)\s*[:#-]?\s*(.*)$`),
 	apicontract.ExtractionFieldRequestedDeliveryDate: regexp.MustCompile(
 		`(?i)\b(?:requested\s+delivery\s+date|required\s+delivery\s+date|` +
 			`requested\s+date|required\s+date|need\s+by(?:\s+date)?|delivery\s+date|` +
@@ -447,17 +452,20 @@ var fieldPatterns = map[string]*regexp.Regexp{
 		`(?i)\b(?:payment\s+terms?|terms\s+of\s+payment|syarat\s+pembayaran)\s*[:#-]?\s*(.*)$`),
 	apicontract.ExtractionFieldIncoterms: regexp.MustCompile(
 		`(?i)\b(?:incoterms?(?:\s+code)?|incoterm\s+code|terms\s+of\s+delivery|` +
-			`delivery\s+terms|syarat\s+pengiriman)\s*[:#-]\s*(.*)$`),
+			`delivery\s+terms|syarat\s+pengiriman)\s*[:#-]?\s*(.*)$`),
 }
 
 // deliveryEvidence is a delivery date read from one table row. It is used only
 // when no header label prints a delivery date; the derived proposal is flagged
 // needs_review because deriving a header value from a line is an inference.
+// LineNumber names the row that actually carried the date, which is not
+// necessarily line 1: line 1's delivery cell may be unparseable.
 type deliveryEvidence struct {
-	Value string
-	Raw   string
-	Page  int
-	Words []Word
+	Value      string
+	Raw        string
+	LineNumber string
+	Page       int
+	Words      []Word
 }
 
 func proposeFields(lines []visualLine, minConfidence float64, derived *deliveryEvidence) []apicontract.ExtractionField {
@@ -476,20 +484,17 @@ func proposeFields(lines []visualLine, minConfidence float64, derived *deliveryE
 			}
 			words := wordsInRange(spans, start, end)
 			page := line.Page.Number
-			if !containsLetter(raw) && !containsDigit(raw) {
-				// A bare comma or hyphen after a label is punctuation, not a
-				// value; treat it as a label with no value and look below.
-				raw = ""
-				words = nil
-			}
+			raw = sanitiseFieldRaw(key, raw)
 			if strings.TrimSpace(raw) == "" {
+				words = nil
 				// A label may print its value on the next visual line. The guard
-				// rejects a next line that is itself a label or table header.
+				// rejects a next line that is itself a label or table header, and
+				// only a plausible value for this field is adopted.
 				labelX := line.Box.X
 				if labelWords := wordsInRange(spans, location[0], location[1]); len(labelWords) > 0 {
 					labelX = labelWords[0].XMin
 				}
-				if next, ok := nextLineValue(lines, index, labelX); ok {
+				if next, ok := nextLineValue(lines, index, labelX, key); ok {
 					raw = next.Text
 					words = next.Words
 					page = next.Page.Number
@@ -561,11 +566,12 @@ func statusQualified(text string, start int) bool {
 }
 
 // nextLineValue returns the value printed below a label whose own line carried
-// none. It searches a few visual lines down, because a two-column page can put
-// an unrelated block between the label and its value, and it keeps only the
-// words in the label's column: "PT Contoh PO-2026-7781" contributes only the
-// value, never the neighbouring block.
-func nextLineValue(lines []visualLine, index int, labelX float64) (visualLine, bool) {
+// none. It searches up to three visual lines down (a two-column page can put an
+// unrelated block between the label and its value), keeps only the words in the
+// label's column, and adopts the line only when it is a plausible value for
+// this specific field: a supplier or address line below "Payment Terms:" is
+// not payment terms.
+func nextLineValue(lines []visualLine, index int, labelX float64, key string) (visualLine, bool) {
 	if index+1 >= len(lines) {
 		return visualLine{}, false
 	}
@@ -594,10 +600,14 @@ func nextLineValue(lines []visualLine, index int, labelX float64) (visualLine, b
 		if matchesFieldLabel(text) ||
 			totalLinePattern.MatchString(text) ||
 			footerLinePattern.MatchString(text) ||
-			footerLabelPattern.MatchString(text) {
+			footerLabelPattern.MatchString(text) ||
+			looksLikePartyOrAddress(text) {
 			continue
 		}
 		if _, isHeader := tableColumns(candidate); isHeader {
+			continue
+		}
+		if !plausibleNextLineValue(key, text) {
 			continue
 		}
 		return candidate, true
@@ -605,9 +615,131 @@ func nextLineValue(lines []visualLine, index int, labelX float64) (visualLine, b
 	return visualLine{}, false
 }
 
+// sanitiseFieldRaw drops a value that is only punctuation or a label fragment.
+// A bare "Purchase Order Date" line must become a label with no value, not a
+// PO number "Date ..."; "Incoterms Information" is a section title, not DDP.
+func sanitiseFieldRaw(key, raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if !containsLetter(trimmed) && !containsDigit(trimmed) {
+		return ""
+	}
+	switch key {
+	case apicontract.ExtractionFieldPONumber:
+		if looksLikePOValueFragment(trimmed) || looksLikeProseValue(trimmed) {
+			return ""
+		}
+	case apicontract.ExtractionFieldIncoterms:
+		switch strings.ToLower(strings.Trim(trimmed, ".:;")) {
+		case "information", "details", "data", "location", "code", "terms":
+			return ""
+		}
+	}
+	return trimmed
+}
+
+// looksLikePOValueFragment reports a captured value that is really the start of
+// another label on the same line ("Purchase Order Date: ...").
+func looksLikePOValueFragment(value string) bool {
+	fields := strings.Fields(strings.ToLower(value))
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.Trim(fields[0], ".:;()") {
+	case "date", "no", "number", "currency", "terms", "incoterm", "incoterms", "submitted", "confirmed":
+		return true
+	}
+	return false
+}
+
+// plausibleNextLineValue is the field-specific guard for a label-only line.
+// A value is adopted only when the field's own normaliser would accept it (or,
+// for a date, when it visibly reads as a date but is merely ambiguous).
+func plausibleNextLineValue(key, text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || looksLikePartyOrAddress(text) {
+		return false
+	}
+	switch key {
+	case apicontract.ExtractionFieldPONumber:
+		return validPONumber(text) && !looksLikeProseValue(text)
+	case apicontract.ExtractionFieldPODate, apicontract.ExtractionFieldRequestedDeliveryDate:
+		if _, status, _ := normaliseDate(text); status == apicontract.ExtractionStatusExtracted {
+			return true
+		}
+		return looksLikeDateValue(text) && !looksLikeProseValue(text)
+	case apicontract.ExtractionFieldCurrency:
+		_, status, _ := normaliseCurrency(text)
+		return status == apicontract.ExtractionStatusExtracted
+	case apicontract.ExtractionFieldPaymentTerms:
+		return plausiblePaymentTerms(text)
+	case apicontract.ExtractionFieldIncoterms:
+		_, status, _ := normaliseIncoterms(text)
+		return status == apicontract.ExtractionStatusExtracted
+	}
+	return true
+}
+
+// looksLikeDateValue is the permissive test for an ambiguous date: it must
+// contain a digit and a month name or a date separator. It is only used when
+// normaliseDate has already returned needs_review.
+func looksLikeDateValue(text string) bool {
+	if !containsDigit(text) {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for month := range monthNames {
+		if strings.Contains(lower, month) {
+			return true
+		}
+	}
+	return dayMonthYear.MatchString(text) || isoDate.MatchString(text)
+}
+
+// plausiblePaymentTerms accepts a term line with a payment marker or a number.
+// A bare company/address line has neither and is rejected before this point.
+func plausiblePaymentTerms(text string) bool {
+	lower := strings.ToLower(text)
+	for _, marker := range []string{
+		"net", "day", "month", "week", "advance", "cash", "cod", "credit",
+		"invoice", "receipt", "due", "dp", "tt", "t/t", "lc", "l/c",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return containsDigit(text)
+}
+
+var (
+	partyWordsPattern = regexp.MustCompile(
+		`(?i)\b(supplier|vendor|customer|buyer|purchaser|bill\s+to|ship\s+to|sold\s+to|deliver\s+to|address|contact|attention|attn|tel|telephone|phone|fax|email)\b`)
+	companySuffixPattern = regexp.MustCompile(
+		`(?i)\b(pty|ltd|limited|inc|llc|gmbh|corp|corporation|company|co|sdn|bhd|pt|pte)\b`)
+	addressWordsPattern = regexp.MustCompile(
+		`(?i)\b(street|st|road|rd|avenue|ave|lane|blvd|boulevard|jalan|jl|blok|block|lot|kecamatan|kelurahan|kota|island|park|industrial|zip|postal)\b`)
+)
+
+// looksLikePartyOrAddress rejects a party or address line as a next-line
+// value. A company name, a street address, an email or a phone number is never
+// payment terms, an Incoterm, a currency or a PO number.
+func looksLikePartyOrAddress(text string) bool {
+	if partyWordsPattern.MatchString(text) ||
+		companySuffixPattern.MatchString(text) ||
+		addressWordsPattern.MatchString(text) {
+		return true
+	}
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "@") || strings.Contains(lower, "www.") ||
+		longDigitsPattern.MatchString(text)
+}
+
 // columnBlock keeps the words of one visual line that belong to the column
-// starting at x. A gap wider than 60 points ends the block, so the next column
-// on the same line is not adopted as part of the value.
+// starting at x. The 25-point left tolerance absorbs a label and a value that
+// are not perfectly left-aligned; a gap wider than 60 points ends the block, so
+// the next column on the same line is not adopted as part of the value.
 func columnBlock(line visualLine, x float64) (visualLine, bool) {
 	words := make([]Word, 0, len(line.Words))
 	lastCenter := 0.0
@@ -653,13 +785,13 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 			Status: apicontract.ExtractionStatusAbsent,
 		},
 	}
-	if key == apicontract.ExtractionFieldCurrency && len(matches) == 0 {
-		if match, ok := fallbackCurrency(headerLines); ok {
-			matches = []fieldMatch{match}
-		}
+	if key == apicontract.ExtractionFieldCurrency {
+		// A direct "Currency:" label is one answer; an amount line that prints
+		// a code is another. Both are kept so a disagreement stays visible.
+		matches = append(matches, fallbackCurrency(headerLines)...)
 	}
 	if len(matches) == 0 {
-		return derivedDeliveryField(field, derived)
+		return derivedDeliveryField(field, derived, minConfidence)
 	}
 	hasValue := false
 	for _, match := range matches {
@@ -669,7 +801,7 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 		}
 	}
 	if !hasValue {
-		if filled := derivedDeliveryField(field, derived); filled.Status != apicontract.ExtractionStatusAbsent || filled.Note != "" {
+		if filled := derivedDeliveryField(field, derived, minConfidence); filled.Status != apicontract.ExtractionStatusAbsent || filled.Note != "" {
 			return filled
 		}
 		field.Status = apicontract.ExtractionStatusAbsent
@@ -706,13 +838,6 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	field.Value = value
 	field.Status = status
 	field.Note = note
-	if strings.TrimSpace(chosen.raw) == "" {
-		field.Status = apicontract.ExtractionStatusAbsent
-		field.Page = nil
-		field.BBox = nil
-		field.Note = "The label was found but no value followed it."
-		return field
-	}
 	if len(distinct) > 1 {
 		field.Status = apicontract.ExtractionStatusNeedsReview
 		field.Note = fmt.Sprintf("Another value was printed for this field (%q); confirm which one applies.", firstDifferent(matches, chosen.raw))
@@ -721,10 +846,11 @@ func proposeField(key string, matches []fieldMatch, headerLines []visualLine, mi
 	return field
 }
 
-// derivedDeliveryField fills the delivery date from the first line when the
-// header prints no value for it. The value is still an inference, so it is
-// needs_review, and its note names the row it came from.
-func derivedDeliveryField(field apicontract.ExtractionField, derived *deliveryEvidence) apicontract.ExtractionField {
+// derivedDeliveryField fills the delivery date from the row that actually
+// carried a readable date. The value is still an inference, so it is
+// needs_review, its note names that row, and a measured OCR confidence is
+// applied exactly as it would be for a printed header value.
+func derivedDeliveryField(field apicontract.ExtractionField, derived *deliveryEvidence, minConfidence float64) apicontract.ExtractionField {
 	if derived == nil || field.Key != apicontract.ExtractionFieldRequestedDeliveryDate {
 		return field
 	}
@@ -733,7 +859,16 @@ func derivedDeliveryField(field apicontract.ExtractionField, derived *deliveryEv
 	field.Page = pointerTo(derived.Page)
 	field.BBox = bboxOf(derived.Words)
 	field.Status = apicontract.ExtractionStatusNeedsReview
-	field.Note = "The header does not print a delivery date; this is the first line's delivery date. Confirm that it applies to the whole order."
+	if derived.LineNumber != "" {
+		field.Note = fmt.Sprintf(
+			"The header does not print a delivery date; this is line %s's delivery date on page %d. Confirm that it applies to the whole order.",
+			derived.LineNumber, derived.Page)
+	} else {
+		field.Note = fmt.Sprintf(
+			"The header does not print a delivery date; this is the first line with a readable delivery date on page %d. Confirm that it applies to the whole order.",
+			derived.Page)
+	}
+	applyConfidence(&field.ExtractionCell, derived.Words, minConfidence)
 	return field
 }
 
@@ -803,28 +938,47 @@ var currencyCandidates = map[string]bool{
 	"INR": true, "PHP": true, "VND": true, "SAR": true, "AED": true,
 }
 
-func fallbackCurrency(lines []visualLine) (fieldMatch, bool) {
-	seen := map[string]bool{}
-	values := make([]string, 0, 2)
-	words := make([]Word, 0, 4)
-	page := 0
+var (
+	currencyContextPattern = regexp.MustCompile(
+		`(?i)\b(amounts?|totals?|sub[-\s]*totals?|nilai|currency|mata\s+uang)\b`)
+	amountShapePattern = regexp.MustCompile(`\d[\d.,]*\d`)
+	longDigitsPattern  = regexp.MustCompile(`\d{5,}`)
+)
+
+// fallbackCurrency reads a currency code only from a line that prints it in an
+// amount context: an amount/total/currency label, or a printed amount. A prose
+// sentence ("Deposit payable in USD") is not a currency field. Each match keeps
+// only its own line's words, so a bbox never spans pages.
+func fallbackCurrency(lines []visualLine) []fieldMatch {
+	matches := make([]fieldMatch, 0, 2)
 	for _, line := range lines {
+		if !currencyContextPattern.MatchString(line.Text) && !amountShapePattern.MatchString(line.Text) {
+			continue
+		}
+		words := make([]Word, 0, 2)
+		codes := make([]string, 0, 2)
+		seen := map[string]bool{}
 		for _, word := range line.Words {
 			token := strings.ToUpper(strings.Trim(word.Text, ".,:;()"))
-			if currencyCandidates[token] && !seen[token] {
+			if !currencyCandidates[token] {
+				continue
+			}
+			words = append(words, word)
+			if !seen[token] {
 				seen[token] = true
-				values = append(values, token)
-				words = append(words, word)
-				if page == 0 {
-					page = line.Page.Number
-				}
+				codes = append(codes, token)
 			}
 		}
+		if len(codes) == 0 {
+			continue
+		}
+		matches = append(matches, fieldMatch{
+			words: words,
+			raw:   strings.Join(codes, " / "),
+			page:  line.Page.Number,
+		})
 	}
-	if len(values) == 0 {
-		return fieldMatch{}, false
-	}
-	return fieldMatch{words: words, raw: strings.Join(values, " / "), page: page}, true
+	return matches
 }
 
 func normaliseField(key, raw string) (string, string, string) {
@@ -857,8 +1011,21 @@ func normaliseField(key, raw string) (string, string, string) {
 
 var poNumberPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._/#-]{0,63}$`)
 
+var poNumberPlaceholders = map[string]bool{
+	"tbd": true, "tba": true, "n/a": true, "na": true, "n.a.": true,
+	"xxx": true, "xx": true, "xxxx": true, "none": true, "pending": true,
+	"not available": true, "to be advised": true, "to be determined": true,
+}
+
 func validPONumber(value string) bool {
-	return poNumberPattern.MatchString(value)
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || strings.Trim(trimmed, "-–—_. ") == "" {
+		return false
+	}
+	if poNumberPlaceholders[strings.ToLower(strings.Join(strings.Fields(trimmed), " "))] {
+		return false
+	}
+	return poNumberPattern.MatchString(trimmed)
 }
 
 var monthNames = map[string]time.Month{
@@ -983,10 +1150,8 @@ func normaliseCurrency(raw string) (string, string, string) {
 	if len(codes) == 1 {
 		return codes[0], apicontract.ExtractionStatusExtracted, ""
 	}
-	if len(trimmed) == 3 && isLetters(strings.ToUpper(trimmed)) {
-		return strings.ToUpper(trimmed), apicontract.ExtractionStatusExtracted, ""
-	}
-	return raw, apicontract.ExtractionStatusNeedsReview, "The printed currency is not a three-letter code; confirm the currency."
+	return raw, apicontract.ExtractionStatusNeedsReview,
+		"The printed currency is not one of the supported three-letter codes; confirm the currency."
 }
 
 // currencyCodes returns the distinct supported codes printed in the value, in
@@ -1005,15 +1170,6 @@ func currencyCodes(upper string) []string {
 		codes = append(codes, token)
 	}
 	return codes
-}
-
-func isLetters(value string) bool {
-	for _, character := range value {
-		if character < 'A' || character > 'Z' {
-			return false
-		}
-	}
-	return value != ""
 }
 
 // validThousandsGrouping reports whether value is digits in groups of three,
@@ -1204,7 +1360,8 @@ func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
 		(third == "goods" || third == "items" || third == "services"):
 		return columnDescription, 3
 	case token == "description" || token == "deskripsi" || token == "uraian" ||
-		token == "particulars" || token == "goods" || token == "product":
+		token == "particulars" || token == "goods" || token == "product" ||
+		token == "article":
 		return columnDescription, 1
 
 	// Reference columns that are not the line number. "No. Schedule Lines"
@@ -1223,7 +1380,8 @@ func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
 		return columnUnitPrice, 2
 	case token == "harga" && (next == "satuan" || next == "unit"):
 		return columnUnitPrice, 2
-	case token == "price" || token == "harga" || token == "rate" || token == "cost":
+	case token == "price" || token == "harga" || token == "rate" || token == "cost" ||
+		token == "tariff":
 		return columnUnitPrice, 1
 	case token == "line" && next == "total":
 		return columnAmount, 2
@@ -1232,7 +1390,7 @@ func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
 	case token == "sub" && next == "total":
 		return columnAmount, 2
 	case token == "sub-total" || token == "subtotal" || token == "amount" ||
-		token == "total" || token == "nilai":
+		token == "total" || token == "nilai" || token == "sum":
 		return columnAmount, 1
 
 	// A delivery date has its own span, so "31 Jan 2027" never lands in the
@@ -1248,7 +1406,8 @@ func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
 	// separate "Qty" + "Unit Price" is two columns and is not combined.
 	case (token == "qty" || token == "quantity" || token == "kuantitas") && isCombinedUnitHeader(tokens, index):
 		return columnQuantity, 2
-	case token == "qty" || token == "quantity" || token == "kuantitas" || token == "jumlah":
+	case token == "qty" || token == "quantity" || token == "kuantitas" ||
+		token == "jumlah" || token == "count":
 		return columnQuantity, 1
 
 	// Line number, after "Line Total" and after the schedule-lines phrases.
@@ -1260,7 +1419,8 @@ func classifyHeaderColumn(tokens []string, index int) (columnKind, int) {
 		token == "seq" || token == "item":
 		return columnLineNumber, 1
 
-	case token == "uom" || token == "um" || token == "u/m" || token == "unit" || token == "satuan":
+	case token == "uom" || token == "um" || token == "u/m" || token == "unit" ||
+		token == "satuan" || token == "measure":
 		return columnUoM, 1
 
 	case token == "type" || token == "return" || token == "returnable" ||
@@ -1397,10 +1557,11 @@ func proposeRows(pages []Page, minConfidence float64) ([]apicontract.ExtractionR
 			if derived == nil {
 				if value, status, _ := normaliseDate(cells.deliveryRaw); status == apicontract.ExtractionStatusExtracted {
 					derived = &deliveryEvidence{
-						Value: value,
-						Raw:   cells.deliveryRaw,
-						Page:  page.Number,
-						Words: cells.delivery,
+						Value:      value,
+						Raw:        cells.deliveryRaw,
+						LineNumber: row.LineNumber.Value,
+						Page:       page.Number,
+						Words:      cells.delivery,
 					}
 				}
 			}
@@ -1451,7 +1612,8 @@ func appendDescription(row *apicontract.ExtractionRow, text string, words []Word
 // descriptionIsPlaceholder reports whether a description cell is only a
 // placeholder or a part number. A single alphanumeric token is treated as a
 // part number only when it carries a separator or at least three digits, so an
-// ordinary one-word description ("BAT3") is not thrown away.
+// ordinary one-word description ("BAT3") is not thrown away. The 32-character
+// cap keeps a short sentence from being mistaken for a part number.
 func descriptionIsPlaceholder(value string) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(value))
 	switch trimmed {
@@ -1499,7 +1661,6 @@ type rowCells struct {
 	amount          []Word
 	delivery        []Word
 	descriptionText string
-	descriptionBox  *apicontract.ExtractionBBox
 	lineNumberRaw   string
 	quantityRaw     string
 	uomRaw          string
@@ -1569,7 +1730,6 @@ func assignCells(line visualLine, columns []tableColumn) rowCells {
 		delivery:    grouped[columnDeliveryDate],
 	}
 	cells.descriptionText = joinWords(cells.description)
-	cells.descriptionBox = bboxOf(cells.description)
 	cells.lineNumberRaw = joinWords(cells.lineNumber)
 	cells.quantityRaw = joinWords(cells.quantity)
 	cells.uomRaw = joinWords(cells.uom)

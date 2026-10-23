@@ -274,24 +274,28 @@ func indonesianTableHeader(y float64) []testWord {
 	}
 }
 
+// indonesianRow lays out one row of the reordered table. The 26-point
+// description stride keeps every description word left of the Rate column.
+func indonesianRow(description []string, rate, qty, uom, amount string, y float64) []testWord {
+	words := make([]testWord, 0, len(description)+5)
+	for index, part := range description {
+		words = append(words, word(part, 50+float64(index)*26, y, 24))
+	}
+	return append(words,
+		word(rate, 300, y, 50), word(qty, 360, y, 8),
+		word(uom, 400, y, 16), word(amount, 480, y, 50), word("IDR", 540, y, 20))
+}
+
 func TestProposeReadsAReorderedTableWithIndonesianLabels(t *testing.T) {
 	pageOne := indonesianPageOne()
 	pageTwo := indonesianTableHeader(100)
-	pageTwo = append(pageTwo,
-		word("Jasa", 50, 125, 22), word("instalasi", 76, 125, 40),
-		word("250,000.00", 300, 125, 50), word("3", 360, 125, 8),
-		word("OH", 400, 125, 16), word("750,000.00", 480, 125, 50), word("IDR", 540, 125, 20),
-		word("listrik", 50, 143, 30),
-		word("Material", 50, 161, 42), word("kabel", 96, 161, 30),
-		word("1.250,00", 300, 161, 45), word("10", 360, 161, 12),
-		word("M", 400, 161, 8), word("12.500,00", 480, 161, 45), word("IDR", 540, 161, 20),
-	)
+	pageTwo = append(pageTwo, indonesianRow([]string{"Jasa", "instalasi"}, "250,000.00", "3", "OH", "750,000.00", 125)...)
+	pageTwo = append(pageTwo, word("listrik", 50, 143, 30))
+	pageTwo = append(pageTwo, indonesianRow([]string{"Material", "kabel"}, "1.250,00", "10", "M", "12.500,00", 161)...)
 	pageThree := []testWord{
 		word("Halaman", 500, 40, 48), word("3", 552, 40, 8),
-		word("Transport", 50, 100, 50),
-		word("500,000.00", 300, 100, 50), word("1", 360, 100, 6),
-		word("Lot", 400, 100, 20), word("500,000.00", 480, 100, 50), word("IDR", 540, 100, 20),
 	}
+	pageThree = append(pageThree, indonesianRow([]string{"Transport"}, "500,000.00", "1", "Lot", "500,000.00", 100)...)
 	result := parseFixture(t, pageOne, pageTwo, pageThree)
 
 	assertField(t, result, apicontract.ExtractionFieldPONumber, "15020843", apicontract.ExtractionStatusExtracted)
@@ -405,8 +409,8 @@ func TestProposeReadsSeveralLineItemBlocksOnOnePage(t *testing.T) {
 	assertField(t, result, apicontract.ExtractionFieldIncoterms, "DAP", apicontract.ExtractionStatusExtracted)
 
 	delivery := assertField(t, result, apicontract.ExtractionFieldRequestedDeliveryDate, "2026-06-10", apicontract.ExtractionStatusNeedsReview)
-	if !strings.Contains(delivery.Note, "first line") {
-		t.Errorf("delivery note = %q; want the first line named", delivery.Note)
+	if !strings.Contains(delivery.Note, "line 1") {
+		t.Errorf("delivery note = %q; want the actual first line named", delivery.Note)
 	}
 	if strings.Contains(delivery.Value, "2026-06-20") {
 		t.Errorf("delivery = %q; the STATUS note's estimated date must not become the header", delivery.Value)

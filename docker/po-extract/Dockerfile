@@ -12,12 +12,14 @@
 # parent's /proc/<pid>/environ and recover its credentials.
 #
 # Both base images are pinned by digest and every engine package is pinned to an
-# exact Debian package version. The installed Poppler and Tesseract versions are
+# exact Debian package version. The builder pin is the multi-arch index digest
+# (amd64 and arm64 resolve their own manifest); the runtime pin is a manifest
+# digest. The installed Poppler and Tesseract versions are
 # recorded at build time in /etc/vextract-engine-version and
 # /etc/vextract-ocr-version, and every extraction result carries them, so a
 # repeat run is comparable and a regression is attributable to a version. The
 # license review basis and source-offer notes live in the RUN comment below.
-FROM golang:1.26.10-bookworm@sha256:88750ccdd0f2a77fcc00a14b1a48d6409bd8ddb5d7c2dd6ec0b4a2e916daf9d9 AS build
+FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS build
 
 WORKDIR /src
 COPY go.mod go.sum ./

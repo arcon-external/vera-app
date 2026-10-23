@@ -1,14 +1,16 @@
 # PO PDF extraction — decision and benchmark protocol (#476)
 
-Status: **proposed, not yet validated on real POs.** No authorized customer
-PDFs exist in this environment, so no accuracy, latency, or memory number in
-this document is a measurement. Every threshold in §2 is a proposal awaiting
-pilot signoff. #477 and #478 implement text extraction and selective OCR
-plumbing respectively; neither claims reliability, and the §2.5 scan/mixed
-bars remain **unmeasured**. The release position for scans is the explicit
-limitations list in [`po-extraction.md`](po-extraction.md), not an acceptance
-result. The protocol below still has to run on authorized samples before any
-reliability claim is made.
+Status: **proposed, not validated on a fresh holdout.** The 47-PO authorised
+SAP Ariba set has since been measured; that set is a **seen development set**
+(its first frozen measurement failed the §2.5 bars — the record lives on the PO
+sprint branch, not on this branch). It is no longer a holdout and may not be
+used for an accuracy claim. No accuracy, latency, or memory number in this
+document is a measurement. Every threshold in §2 is a proposal awaiting pilot
+signoff. #477 and #478 implement text extraction and selective OCR plumbing
+respectively; neither claims reliability, and the §2.5 scan/mixed bars remain
+**unmeasured**. A new authorised, frozen holdout is required before any
+reliability claim. The release position for scans is the explicit limitations
+list in [`po-extraction.md`](po-extraction.md), not an acceptance result.
 
 ## 1. Decision: proposed pipeline and candidates
 
@@ -45,7 +47,9 @@ explicit abstentions", not "reliable fully-automatic extraction".
 - Decided: the text-first/selective-OCR shape, the candidate list, the metric
   set, the restricted-worker shape, the provenance contract.
 - Blocked: every empirical claim — accuracy, latency, RAM, cost, engine
-  choice, and all numeric limits. Blocked on authorized sample PDFs (see §6).
+  choice, and all numeric limits. Blocked on a **new authorised frozen
+  holdout**: the 47-PO SAP Ariba set has been seen and measured, and is a
+  development set, not a holdout (see §6).
 
 ## 2. Benchmark protocol
 
@@ -212,7 +216,9 @@ Extraction results are evidence, never facts. Later tickets consume:
 ## 6. Blocker: what is required from the user
 
 #477 (text-PDF extraction) and #478 (scanned/mixed) cannot claim accuracy
-until the user provides **authorized sample customer PDFs** meeting §2.1
-(stratified text/scan/mixed, ground-truth correctable, holdout-capable), plus
-**signoff on the §2.5 thresholds**. Until then the honest status of this
-ticket is: decision proposed, protocol ready, validation blocked.
+until a **new authorised frozen holdout** meeting §2.1 (stratified
+text/scan/mixed, ground-truth correctable, holdout-capable) exists, plus
+**signoff on the §2.5 thresholds**. The 47-PO SAP Ariba set already measured is
+a seen development set and may not be reused as the holdout. Until then the
+honest status of this ticket is: decision proposed, protocol ready, validation
+blocked.

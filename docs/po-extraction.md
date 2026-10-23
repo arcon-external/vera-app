@@ -3,12 +3,13 @@
 Status: **shipped as assistance, not validated accuracy.** This document covers
 both halves of the pipeline proposed in
 [`po-extraction-benchmark.md`](po-extraction-benchmark.md): the text layer
-(#477) and scanned/mixed pages (#478). The accuracy thresholds in that
-document (§2.5) have **not been measured** — no authorised customer PDFs, no
-human-corrected ground truth and no frozen holdout were available — so nothing
-here claims that extraction is reliable. It claims that the plumbing, the
-evidence contract, the per-page decision, the uncertainty policy, the
-stale-source rule and the explicit-apply rule are in place.
+(#477) and scanned/mixed pages (#478). An authorised 47-PO SAP Ariba set has
+been measured once, and its first frozen run failed the §2.5 bars; that set is
+now a **seen development set**, not a holdout. No fresh authorised frozen
+holdout is available on this branch, so nothing here claims that extraction is
+reliable. It claims that the plumbing, the evidence contract, the per-page
+decision, the uncertainty policy, the stale-source rule and the explicit-apply
+rule are in place.
 
 **The scan/mixed position for this release is therefore the stated limitations
 below, not a measured acceptance result.** #476 §2.5 remains unvalidated.
@@ -191,40 +192,58 @@ new fields decode as empty and the panel says nothing about OCR).
 
 ### Generic layout heuristics (#476)
 
-The heuristics are generic, not a layout model. They were written against an
-authorised SAP Ariba development set and then deliberately generalised: no
-template, column order, page position or customer label is hard-coded, and a
-form this reader has not seen can still abstain. Abstention is the fallback, not
-an error.
+The heuristics are generic, not a layout model. They combine a broad synonym
+and evidence vocabulary with positional rules; the vocabulary includes common
+SAP Ariba labels (`Purchase Order`, `Line #`, `Part # / Description`, `Need By`)
+because those are ordinary procurement synonyms, not because a customer
+template is hard-coded. Geometry is not template-specific either. There is **no
+universal-layout guarantee**: an unknown label set, an unrecognised column
+order, or geometry this reader cannot align abstains rather than being guessed.
+Abstention is the fallback, not an error.
 
 - **Header fields are searched on every page.** A label may sit on page 1, in a
   left or right block, or below the table on a later page. Synonyms include
-  `Purchase Order`, `Purchase Order No`, `PO No`, `PO #`, `Nomor PO`, `Order
-  submitted on`, `Order Date`, `Tanggal PO`, `Payment Terms`, `Incoterm Code`,
-  `Incoterms`, `Requested delivery date`, `Need By` and `Delivery Date`.
-- **A value may be on the next visual line.** The next line is adopted only when
-  it is not itself a label, table header, total or footer, and only the words in
+  `Purchase Order`, `Purchase Order No`, `PO No`, `PO #`, `Nomor PO`,
+  `Document No`, `Order submitted on`, `Order Date`, `Issued`, `Tanggal PO`,
+  `Payment Terms`, `Incoterm Code`, `Incoterms`, `Requested delivery date`,
+  `Need By` and `Delivery Date`. A separator (`:`, `#`, `-`) is optional:
+  `Order Date 15 March 2026` and `Incoterms DDP` are read.
+- **A value may be on the next visual line, but only a plausible one is
+  adopted.** The next line is rejected when it is itself a label, table header,
+  total or footer, and also when it is a party or address line. A label-only
+  `Payment Terms:` followed by `Supplier PT Contoh` stays `absent`; the same
+  holds for a date, currency, Incoterms or PO-number label. Only the words in
   the label's column are taken, so a neighbouring two-column block is not
   appended to the value.
+- **An unsupported identifier or currency is not asserted.** A PO number that
+  is a placeholder (`TBD`, `N/A`, `NA`, `XXX`, `-`) is `needs_review` or
+  `absent`; a three-letter token that is not in the supported currency list is
+  `needs_review`, never an invented currency. A currency fallback needs an
+  amount/currency context on the same line, so prose such as `Deposit payable
+  in USD` is not treated as the PO's currency; its evidence stays on one page.
 - **The order's own date wins.** `Order submitted on` (with a weekday and time)
   is an order date; a quote date, a PDF-generation stamp and a `Quote Ref ...
   dated` sentence are not labels this reader treats as the PO date.
 - **A date can carry a weekday, a time and a zone.** They are stripped before
   the date itself is normalised; two different dates in one value is
   `needs_review`, never the first one silently.
-- **A delivery date may be derived from the first line.** When the header prints
-  no delivery date but the table has a `Need By`/`Delivery Date` column, the
-  first unambiguous row's date becomes the header proposal with
-  `needs_review` and a note naming that row. It is an inference, so it is never
-  `extracted`.
+- **A delivery date may be derived from the first row that carries one.** When
+  the header prints no delivery date but the table has a `Need By`/`Delivery
+  Date` column, the first row with a readable date becomes the header proposal
+  with `needs_review`; the note names that actual row (which may be line 2 when
+  line 1's cell is unreadable), and a measured OCR confidence is applied. It is
+  an inference, so it is never `extracted`.
 - **A table is discovered from its header row.** The synonyms may appear in any
   order and any position. `Line #`, `No`, `No.`, `Line`, `#`, `Item` and
   `Sl. No` are line numbers, but `No. Schedule Lines` is a reference column and
   is ignored. `Part # / Description`, `Part No / Description`,
-  `Item Description`, `Particulars`, `Goods` and `Product` are descriptions;
-  `Qty`, `Quantity` and `Qty (Unit)` quantities; `Unit Price`, `Rate` and
-  `Harga` prices; `Amount`, `Subtotal`, `Line Total` and `Nilai` amounts;
-  `Need By`, `Delivery Date`, `Required Date` and `ETA` delivery dates.
+  `Item Description`, `Particulars`, `Goods`, `Product` and `Article` are
+  descriptions; `Qty`, `Quantity`, `Count` and `Qty (Unit)` quantities; `UoM`,
+  `Measure` and `Unit` units; `Unit Price`, `Rate`, `Tariff` and `Harga`
+  prices; `Amount`, `Subtotal`, `Line Total`, `Sum` and `Nilai` amounts;
+  `Need By`, `Delivery Date`, `Required Date` and `ETA` delivery dates. An
+  unrecognised header (`Commodity Wording`, `Bundle Size`, `Pricing Basis`,
+  `Aggregate`) produces no table rather than a guessed one.
 - **Non-data columns keep their own region.** `Type`, `Return` and
   `No. Schedule Lines` values are dropped instead of contaminating the
   description, quantity or price cells.
@@ -419,7 +438,8 @@ Over a bound is a **failed run** with a typed reason, never a partial result.
 `docker/po-extract/Dockerfile` is the **reviewed configuration**. It pins both
 bases by digest and every engine package by exact version:
 
-- builder `golang:1.26-bookworm@sha256:d9c68c2c…` (matches the Go toolchain);
+- builder `golang:1.26.10-bookworm@sha256:632dff73…` (multi-arch index
+  digest, so arm64/Mac builds resolve their own manifest);
 - runtime `debian:trixie-slim@sha256:62bd423a…`;
 - `poppler-utils=25.03.0-5+deb13u4` (Poppler reports `pdftotext version 25.03.0`);
 - `tesseract-ocr=5.5.0-1+b1` (Tesseract reports `tesseract 5.5.0`);
@@ -609,10 +629,12 @@ claim.
 
 ## Known limitations (stated, not hidden)
 
-- **Accuracy is unmeasured.** The synthetic tests prove plumbing and contract
-  shape only; #476 §6 still blocks any real-PO accuracy claim. #476 §2.5
-  scan/mixed thresholds are **not validated** — there is no ground truth and no
-  holdout. The release position is this limitations list.
+- **Accuracy is unmeasured on a holdout.** The synthetic tests prove plumbing
+  and contract shape only. The 47-PO authorised set is a **seen development
+  set**; its first frozen measurement failed §2.5, and a new authorised frozen
+  holdout is required before any accuracy claim. #476 §2.5 scan/mixed
+  thresholds are **not validated**. The release position is this limitations
+  list.
 - The per-page decision is not a region model: an image table inside an
   otherwise text-rich page is not detected, so that page is read from its text
   layer only.

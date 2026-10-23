@@ -259,10 +259,19 @@ deployment action outside this verification's authority.
 
 ## 5. Extraction holdout gate — BLOCKED
 
+> **Update (2026-10-23):** a 47-PO authorised SAP Ariba development set has
+> since been measured. Its first frozen run failed the #476 §2.5 bars, and the
+> set is now a **seen development set**, not a holdout. This section's
+> "BLOCKED" status therefore means "no fresh authorised holdout", not "no
+> authorised PDFs". A new frozen holdout is still required before any accuracy
+> claim.
+
 `docs/po-extraction.md` and `docs/po-extraction-benchmark.md` state it
-explicitly: the accuracy thresholds in #476 §2.5 have **not been measured**.
-The sprint handoff records only three authorised samples, with no ground truth;
-#476 records that no authorised holdout or threshold signoff exists. Reporting
+explicitly: the accuracy thresholds in #476 §2.5 have **not been measured on a
+holdout**.
+The sprint handoff predates the 47-PO development-set measurement; that set
+has ground truth but is seen, not a holdout, and it failed the first frozen
+run. No fresh authorised holdout or threshold signoff exists. Reporting
 extraction as validated would be inventing a number. The licence review for
 Poppler/Tesseract as separate server-side subprocesses is approved
 (2026-10-21); the *measurement* gate is not.
