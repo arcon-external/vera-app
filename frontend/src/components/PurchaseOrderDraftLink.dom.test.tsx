@@ -30,6 +30,7 @@ const {
   linkMock,
   documentStateMock,
   extractionMock,
+  attachMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   updateMock: vi.fn(),
@@ -37,10 +38,11 @@ const {
   linkMock: vi.fn(),
   documentStateMock: vi.fn(),
   extractionMock: vi.fn(),
+  attachMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
-  AttachPurchaseOrderDocument: vi.fn(),
+  AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   CorrectPurchaseOrder: vi.fn(),
   CreatePurchaseOrderBlankDraft: (...args: unknown[]) => createMock(...args),
   FinalizePurchaseOrder: vi.fn(),
@@ -252,6 +254,7 @@ beforeEach(() => {
   linkMock.mockReset();
   documentStateMock.mockReset();
   extractionMock.mockReset();
+  attachMock.mockReset();
 
   latestOrder = createdRow();
   createMock.mockImplementation(async () => {
@@ -351,6 +354,21 @@ function type(label: string, value: string): void {
   act(() => {
     setter?.call(field, value);
     field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function chooseFile(name = "Customer PO.pdf"): void {
+  const fileInput = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Customer PO PDF file"]'
+  );
+  if (fileInput === null) throw new Error("file input not found");
+  const file = new File(["%PDF-1.7\n"], name, { type: "application/pdf" });
+  Object.defineProperty(fileInput, "files", {
+    configurable: true,
+    value: [file],
+  });
+  act(() => {
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
 
@@ -465,6 +483,39 @@ describe("draft source link (issue #497)", () => {
     ).toBeNull();
   });
 
+  it("links after an upload at the version the upload saved", async () => {
+    reviewForTest = review();
+    attachMock.mockResolvedValue({
+      ID: 4,
+      UUID: "doc-493",
+      PurchaseOrderID: 41,
+      Version: 1,
+      Active: true,
+    });
+    await render();
+    type("Customer PO number", "UPLOAD-THEN-LINK");
+    await flush();
+    chooseFile();
+    await flush();
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const uploadSave = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(uploadSave.ExpectedVersion).toBe(1);
+    expect(uploadSave.PONumber).toBe("UPLOAD-THEN-LINK");
+    expect(attachMock).toHaveBeenCalledTimes(1);
+
+    // The link preview persists the working copy against the version the upload
+    // advanced to, not the transient version.
+    await openReview();
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    const linkSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(linkSave.ID).toBe(41);
+    expect(linkSave.ExpectedVersion).toBe(2);
+    expect(linkSave.PONumber).toBe("UPLOAD-THEN-LINK");
+    expect(previewMock).toHaveBeenCalledWith(41, 12, 0);
+  });
+
   it("blocks a currency mismatch without conversion and explains the remedy", async () => {
     reviewForTest = review({ Source: source({ Currency: "USD" }) });
     await render();
@@ -577,6 +628,64 @@ describe("draft source link (issue #497)", () => {
       "1502260001:0"
     );
     expect(document.body.textContent).toContain("Linked source");
+  });
+
+  it("edits a former draft's currency and basis before relinking", async () => {
+    reviewForTest = review({ Source: source({ Currency: "USD" }) });
+    await render(
+      blank({
+        ID: 7,
+        UUID: "former-493",
+        Version: 2,
+        SourceState: "former",
+        SourceMissing: true,
+        PrintedTotalsKnown: true,
+        QuotationID: 0,
+        QuoteNumber: "1502260099",
+        SourceRevision: 1,
+        CustomerID: 2,
+        CustomerName: "PT. Former",
+        Currency: "IDR",
+        TaxZone: "FTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+      })
+    );
+
+    // A formerly-linked draft is before a new link, so the basis card is
+    // editable and says the former source is only a reference.
+    const editorText = document.body.textContent ?? "";
+    expect(editorText).toContain("Source basis");
+    expect(editorText).toContain("former quotation remains the reference");
+
+    await openReview();
+    expect(button("Link source").disabled).toBe(true);
+    // The remedy is editing this draft, not choosing another revision.
+    expect(document.body.textContent).toContain("change the draft currency");
+    act(() => button("Back without linking").click());
+    await flush();
+
+    chooseSelect("Currency", "USD");
+    await flush();
+    act(() => button("Link a Quotation").click());
+    await flush();
+    await flush();
+
+    act(() => input("Acknowledge omission of quotation line 1").click());
+    await flush();
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    expect(linkMock).toHaveBeenCalledTimes(1);
+    const preSave = updateMock.mock.calls[
+      updateMock.mock.calls.length - 1
+    ][0] as PurchaseOrderUpdateInput;
+    expect(preSave.Currency).toBe("USD");
+    expect(preSave.TaxZone).toBe("FTZ");
+    expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
+      "1502260001:0"
+    );
   });
 
   it("validates the working copy before creating a stored draft", async () => {

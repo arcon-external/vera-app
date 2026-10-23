@@ -226,9 +226,9 @@ func TestStaffLinksANeverLinkedDraftAndSourceOwnsIdentity(t *testing.T) {
 			[]int64{linked.PrintedSubtotalMinor, linked.PrintedDiscountMinor, linked.PrintedPpnMinor, linked.PrintedGrandTotalMinor},
 			[]int64{source.PrintedSubtotalMinor, source.PrintedDiscountMinor, source.PrintedPpnMinor, source.PrintedGrandTotalMinor})
 	}
-	if linked.BillingAddress != source.BillingAddress {
-		t.Errorf("billing address = %q; a new customer's address comes from the source %q",
-			linked.BillingAddress, source.BillingAddress)
+	if linked.BillingAddress != "Jl. Billing entered before linking" {
+		t.Errorf("billing address = %q; a PO-owned typed address survives the first link",
+			linked.BillingAddress)
 	}
 
 	// PO-owned values survive untouched.
@@ -267,6 +267,131 @@ func TestStaffLinksANeverLinkedDraftAndSourceOwnsIdentity(t *testing.T) {
 	}
 	if n := countRows(t, database, "purchase_order_source_repairs", "correction_id IN (SELECT id FROM "+database.configSchema()+".purchase_order_corrections WHERE purchase_order_id = $1)", draft.ID); n != 0 {
 		t.Errorf("link wrote %d source-repair satellites; want none", n)
+	}
+}
+
+// #493 review: the billing address is PO-owned. A never-linked draft always has
+// no customer, so the source customer always differs on the first link; the
+// typed address is still the staff-entered value and must survive it.
+func TestDraftLinkKeepsATypedBillingAddressOnAFirstLink(t *testing.T) {
+	database := openTestSchema(t, "vera_po_493_billing")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	quotation := seedLinkQuotation(t, database, repairQuotationOptions{
+		CustomerCode: 2, CustomerName: "PT. Billing Source", Subject: "Billing source",
+		Address: "Jl. Source Billing 77", Currency: "IDR", TaxZone: "FTZ", TaxType: "Goods",
+		UnitPrice: 200, PaymentTermDays: 45,
+	})
+	draft := seedNeverLinkableDraft(t, database, user, ctx, false)
+	update := blankDraftUpdate(draft, draft.Version, user)
+	update.BillingAddress = "Jl. Typed Before The Link"
+	saved, err := database.UpdatePurchaseOrderDraft(ctx, update)
+	if err != nil {
+		t.Fatalf("save the typed billing address: %v", err)
+	}
+	if saved.CustomerID != 0 {
+		t.Fatalf("never-linked customer id = %d; want none before the link", saved.CustomerID)
+	}
+
+	decisions := []PurchaseOrderDecision{
+		{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
+		{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
+	}
+	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
+		saved, quotation, user, decisions, []string{"1", "3"}, []int{1}, ""))
+	if err != nil {
+		t.Fatalf("link the never-linked draft: %v", err)
+	}
+	source := linkReviewSource(t, database, quotation)
+	if linked.CustomerID != source.CustomerID || source.CustomerID == 0 {
+		t.Fatalf("customer id = %d; want the source's %d", linked.CustomerID, source.CustomerID)
+	}
+	if linked.BillingAddress != "Jl. Typed Before The Link" {
+		t.Errorf("billing address = %q; the typed PO-owned address must survive a changed customer",
+			linked.BillingAddress)
+	}
+	if linked.BillingAddress == source.BillingAddress {
+		t.Error("the billing address was replaced by the source's address")
+	}
+}
+
+// #493 review: a formerly-linked draft is still before a new link, so its
+// currency and tax basis stay editable. Once edited, a link to a revision in
+// the new currency is allowed -- with no conversion anywhere.
+func TestFormerlyLinkedDraftEditsItsBasisAndLinksToAMatchingRevision(t *testing.T) {
+	database := openTestSchema(t, "vera_po_493_former_basis")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	quotation := seedRepairQuotationWith(t, database, repairQuotationOptions{
+		CustomerCode: 2, CustomerName: "PT. Former Basis", Subject: "Former basis",
+		Address: "Jl. Old Billing", Currency: "IDR", TaxZone: "FTZ", TaxType: "Goods",
+		UnitPrice: 100, PaymentTermDays: 45,
+	})
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	admin := deletionUser(t, database, "admin")
+	preview := previewFor(t, database, admin, DeletionTargetQuotation, quotation.ID)
+	if _, err := database.ConfirmDeletion(ctx, DeletionConfirmInput{
+		TargetType: DeletionTargetQuotation, TargetID: quotation.ID,
+		Scope: DeletionScopeRecord, Reason: "source gone before relinking",
+		TypedNumber: quotation.QuoteNumber, ExpectedFingerprint: preview.Fingerprint,
+		ActorID: admin.ID,
+	}); err != nil {
+		t.Fatalf("delete the source quotation: %v", err)
+	}
+	former, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("read the former draft: %v", err)
+	}
+	if former.SourceState != PurchaseOrderSourceStateFormer {
+		t.Fatalf("source state = %q; want former", former.SourceState)
+	}
+
+	// The basis is editable until a new link exists: move it to USD/Non-FTZ.
+	update := PurchaseOrderUpdate{
+		ID:              former.ID,
+		Currency:        "USD",
+		TaxZone:         "NonFTZ",
+		TaxType:         "Goods",
+		ServiceCategory: "",
+		BillingAddress:  former.BillingAddress,
+		DeliveryAddress: former.DeliveryAddress,
+		ReceivedDate:    datePointer(former.ReceivedDate),
+		PaymentTerms:    former.PaymentTerms,
+		Incoterms:       former.Incoterms,
+		UpdatedBy:       user.ID,
+		ExpectedVersion: former.Version,
+		Items:           former.Items,
+	}
+	edited, err := database.UpdatePurchaseOrderDraft(ctx, update)
+	if err != nil {
+		t.Fatalf("edit a former draft's currency and basis = %v; want the edit accepted", err)
+	}
+	if edited.Currency != "USD" || edited.TaxZone != "NonFTZ" ||
+		edited.TaxType != "Goods" || edited.PpnBps != 1100 {
+		t.Errorf("edited basis = %s/%s/%s %d bps; want USD/NonFTZ/Goods 1100",
+			edited.Currency, edited.TaxZone, edited.TaxType, edited.PpnBps)
+	}
+	if edited.SourceState != PurchaseOrderSourceStateFormer {
+		t.Errorf("source state after the basis edit = %q; want former", edited.SourceState)
+	}
+
+	// A replacement revision in the new currency can now be linked. Its basis
+	// differs, so the link still needs the explicit choice.
+	replacement := seedRepairQuotationWith(t, database, repairQuotationOptions{
+		CustomerCode: 2, CustomerName: "PT. Former Basis", Subject: "Replacement in USD",
+		Address: "Jl. New Billing", Currency: "USD", TaxZone: "FTZ", TaxType: "Goods",
+		UnitPrice: 100, PaymentTermDays: 45,
+	})
+	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
+		edited, replacement, user, nil, nil, nil, PurchaseOrderDraftLinkTaxKeep))
+	if err != nil {
+		t.Fatalf("link a former draft after editing its currency = %v; want the link accepted", err)
+	}
+	if linked.SourceState != PurchaseOrderSourceStateLive ||
+		linked.QuotationID != replacement.ID ||
+		linked.Currency != "USD" || linked.TaxZone != "NonFTZ" {
+		t.Errorf("linked = %q quotation %d %s/%s; want live replacement in USD keeping NonFTZ",
+			linked.SourceState, linked.QuotationID, linked.Currency, linked.TaxZone)
 	}
 }
 

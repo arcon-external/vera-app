@@ -403,6 +403,46 @@ describe("PO draft update payload (issue #468)", () => {
     expect(input.Items[1].QuotationSubNo).toBe(1);
   });
 
+  it("sends the source basis for a never- or formerly-linked draft only", () => {
+    const former = buildPurchaseOrderUpdate(
+      initial({
+        SourceState: "former",
+        SourceMissing: true,
+        QuotationID: 0,
+        QuoteNumber: "1502260099",
+        TaxZone: "NonFTZ",
+        TaxType: "Services",
+        ServiceCategory: "Construction",
+      }),
+      USD
+    );
+    expect(former.error).toBeNull();
+    expect(former.input?.Currency).toBe("USD");
+    expect(former.input?.TaxZone).toBe("NonFTZ");
+    expect(former.input?.TaxType).toBe("Services");
+    expect(former.input?.ServiceCategory).toBe("Construction");
+
+    const never = buildPurchaseOrderUpdate(
+      initial({
+        SourceState: "never",
+        QuotationID: 0,
+        QuoteNumber: "",
+        CustomerID: 0,
+        SourceMissing: true,
+      }),
+      USD
+    );
+    expect(never.input?.Currency).toBe("USD");
+    expect(never.input?.TaxZone).toBe("NonFTZ");
+
+    // A live row's basis stays server-frozen: empty means "keep".
+    const live = buildPurchaseOrderUpdate(initial(), USD);
+    expect(live.input?.Currency).toBe("");
+    expect(live.input?.TaxZone).toBe("");
+    expect(live.input?.TaxType).toBe("");
+    expect(live.input?.ServiceCategory).toBe("");
+  });
+
   it("names the failing line instead of storing an unparseable value", () => {
     const badQuantity = purchaseOrderEditorReducer(initial(), {
       type: "lineChanged",

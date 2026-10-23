@@ -693,11 +693,17 @@ export function PurchaseOrderEditorView({
         </Card>
       ) : null}
 
-      {state.sourceState === "never" && !correcting ? (
+      {/* A never- or formerly-linked draft is still before a link, so the
+          source basis stays editable until one commits. */}
+      {sourceLess && !correcting ? (
         <Card className="p-4">
           <SectionHeading
             title="Source basis"
-            hint="Editable until a quotation is linked; the server computes PPN"
+            hint={
+              state.sourceState === "former"
+                ? "Editable until a new quotation is linked; the former source remains the reference and the server computes PPN"
+                : "Editable until a quotation is linked; the server computes PPN"
+            }
           />
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">
@@ -889,7 +895,9 @@ export function PurchaseOrderEditorView({
         <p className="mt-4 text-caption text-ink-500">
           {state.sourceState === "never"
             ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis above are editable until then."
-            : "Customer, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
+            : state.sourceState === "former"
+              ? "The former quotation remains the reference for the printed totals and lines. Currency and tax basis above are editable until a new link."
+              : "Customer, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
         </p>
       </Card>
 
@@ -1718,50 +1726,85 @@ export function PurchaseOrderEditorPage({
   };
 
   /**
-   * #497: persists the working copy before the link review. The review and the
-   * link compare the stored values, so an unsaved edit must be saved first or
-   * the review would describe values the link does not keep. Nothing is
-   * overwritten: this is the same draft save, through the same builder.
+   * #493/#498: one persistence of the working copy, shared by Save, the
+   * upload's id resolver and the link review. It creates the row once and then
+   * writes the entered values with a single Update, so a concurrent Save and
+   * upload produce one create and one successful update -- never a second row
+   * or a version conflict. The retained version advances after the update, so a
+   * failed attach retries at the latest version. The notification is delivered
+   * once even when two callers await the same save: the upload must not double
+   * notify a Save that already did.
    */
-  const persistWorkingCopy = async (): Promise<PurchaseOrderDTO> => {
+  type WorkingCopyOutcome =
+    | { kind: "saved"; order: PurchaseOrderDTO }
+    | { kind: "conflict"; conflict: PurchaseOrderConflictDTO }
+    | { kind: "savedRecord" }
+    | { kind: "error"; message: string };
+  const workingCopyPersisting = useRef<{
+    promise: Promise<WorkingCopyOutcome>;
+    notified: boolean;
+  } | null>(null);
+
+  const persistWorkingCopy = async (notifySaved: boolean): Promise<WorkingCopyOutcome> => {
     // Validate the working copy before creating anything. An incomplete
-    // transient draft must not leave a blank stored row behind just because
-    // Link was clicked; the same rule Save follows.
+    // transient draft must not leave a blank stored row behind just because an
+    // upload or Link was clicked; the same rule Save follows.
     const preflight = buildPurchaseOrderUpdate(editorStateRef.current, activeCurrency);
     if (preflight.input === null) {
-      throw new Error(preflight.error ?? "The draft is incomplete.");
+      return { kind: "error", message: preflight.error ?? "The draft is incomplete." };
     }
-    const persisted = await ensurePersisted();
-    const working = {
-      ...editorStateRef.current,
-      orderId: persisted.id,
-      version: persisted.version,
-    };
-    const result = buildPurchaseOrderUpdate(working, activeCurrency);
-    if (result.input === null) {
-      throw new Error(result.error ?? "The draft is incomplete.");
+    let shared = workingCopyPersisting.current;
+    if (shared === null) {
+      const promise = (async (): Promise<WorkingCopyOutcome> => {
+        const persisted = await ensurePersisted();
+        const working = {
+          ...editorStateRef.current,
+          orderId: persisted.id,
+          version: persisted.version,
+        };
+        const result = buildPurchaseOrderUpdate(working, activeCurrency);
+        if (result.input === null) {
+          return { kind: "error", message: result.error ?? "The draft is incomplete." };
+        }
+        const answer = await UpdatePurchaseOrderDraft(
+          new backend.PurchaseOrderUpdateInput({
+            ...result.input,
+            ID: persisted.id,
+            ExpectedVersion: persisted.version,
+            Overwrite: false,
+            Items: result.input.Items.map((item) => new backend.PurchaseOrderItemInput(item)),
+          })
+        );
+        const outcome = writeOutcome(answer);
+        if (outcome.kind === "saved") {
+          // Advance the retained version: an attach retry after a failed
+          // upload must write against the row as it now stands.
+          persistedRef.current = { id: outcome.order.ID, version: outcome.order.Version };
+          dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+          return { kind: "saved", order: outcome.order };
+        }
+        if (outcome.kind === "conflict") {
+          return { kind: "conflict", conflict: outcome.conflict };
+        }
+        if (outcome.kind === "savedRecord") {
+          return { kind: "savedRecord" };
+        }
+        return { kind: "error", message: "The server answered without a saved record. Try again." };
+      })();
+      const record = { promise, notified: false };
+      workingCopyPersisting.current = record;
+      const clear = () => {
+        if (workingCopyPersisting.current === record) workingCopyPersisting.current = null;
+      };
+      void promise.then(clear, clear);
+      shared = record;
     }
-    const answer = await UpdatePurchaseOrderDraft(
-      new backend.PurchaseOrderUpdateInput({
-        ...result.input,
-        ID: persisted.id,
-        ExpectedVersion: persisted.version,
-        Overwrite: false,
-        Items: result.input.Items.map((item) => new backend.PurchaseOrderItemInput(item)),
-      })
-    );
-    const outcome = writeOutcome(answer);
-    if (outcome.kind === "conflict") {
-      throw new Error(draftLinkConflictWarning(outcome.conflict));
+    const outcome = await shared.promise;
+    if (outcome.kind === "saved" && notifySaved && !shared.notified) {
+      shared.notified = true;
+      onSaved(outcome.order, correcting);
     }
-    if (outcome.kind === "savedRecord") {
-      throw new Error("This purchase order was saved by someone else; reopen it before linking.");
-    }
-    if (outcome.kind !== "saved") {
-      throw new Error("The draft could not be saved before the review.");
-    }
-    dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
-    return outcome.order;
+    return outcome;
   };
 
   /** Loads the link review for the selector's confirmed exact pair. */
@@ -1772,9 +1815,21 @@ export function PurchaseOrderEditorPage({
     setLinkLoading(true);
     setLinkError(null);
     try {
-      const persisted = await persistWorkingCopy();
+      // The review and the link compare the stored values, so an unsaved edit
+      // must be saved first or the review would describe values the link does
+      // not keep. This path does not add a second "draft saved" toast.
+      const persistence = await persistWorkingCopy(false);
+      if (persistence.kind === "conflict") {
+        throw new Error(draftLinkConflictWarning(persistence.conflict));
+      }
+      if (persistence.kind === "savedRecord") {
+        throw new Error("This purchase order was saved by someone else; reopen it before linking.");
+      }
+      if (persistence.kind === "error") {
+        throw new Error(persistence.message);
+      }
       const loaded = await PreviewPurchaseOrderDraftLink(
-        persisted.ID,
+        persistence.order.ID,
         target.quotationId,
         target.revisionNumber
       );
@@ -1906,6 +1961,35 @@ export function PurchaseOrderEditorPage({
       return;
     }
     dispatch({ type: "saveStarted" });
+    // The first Save of a transient draft goes through the same shared
+    // persistence an upload uses. A concurrent Save + upload therefore makes
+    // one create and one successful update, rather than two writes racing on
+    // the same version or a second row.
+    if (!correcting && !overwrite && expectedVersion < 1) {
+      try {
+        const outcome = await persistWorkingCopy(true);
+        if (outcome.kind === "saved") {
+          setConflict(null);
+          return;
+        }
+        if (outcome.kind === "conflict") {
+          dispatch({ type: "saveConflict" });
+          setPendingWrite("save");
+          setConflict(outcome.conflict);
+          return;
+        }
+        if (outcome.kind === "savedRecord") {
+          dispatch({ type: "saveConflict" });
+          setPendingWrite("save");
+          setConflict(savedRecordAnswer(expectedVersion));
+          return;
+        }
+        dispatch({ type: "saveFailed", error: outcome.message });
+      } catch (error) {
+        dispatch({ type: "saveFailed", error: errorText(error) });
+      }
+      return;
+    }
     try {
       // Save, upload and extraction share one in-flight create. A Save whose
       // create is still running and a file choice made at the same time must
@@ -2281,7 +2365,22 @@ export function PurchaseOrderEditorPage({
       ) : null}
       <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
-        resolvePurchaseOrderId={async () => (await ensurePersisted()).id}
+        // #493/#498: an upload must persist the working copy before attaching,
+        // so a reload cannot lose the values staff saw when they chose the file.
+        // The panel's interface is unchanged: it still only asks for an id.
+        resolvePurchaseOrderId={async () => {
+          const outcome = await persistWorkingCopy(true);
+          if (outcome.kind === "saved") return outcome.order.ID;
+          if (outcome.kind === "conflict") {
+            throw new Error(draftLinkConflictWarning(outcome.conflict));
+          }
+          if (outcome.kind === "savedRecord") {
+            throw new Error(
+              "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
+            );
+          }
+          throw new Error(outcome.message);
+        }}
         onExtract={startExtraction}
         extractionStatus={
           extractionRun?.Status === "queued" || extractionRun?.Status === "running"

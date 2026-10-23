@@ -21,14 +21,16 @@ import (
 // line references and printed totals. Every PO-owned value -- number, dates,
 // addresses, ship-to, customer contact, payment terms, Incoterm, lines,
 // quantities, prices, discounts and the adjustment -- stays exactly as staff
-// entered it. The one deliberate exception is the billing address, which follows
-// a changed customer exactly as the saved-record repair already does; it is
-// never replaced for a same-customer link.
+// entered it. The billing address is PO-owned too: the link never replaces it,
+// even when the link moves the record to a different customer, because #497
+// requires a PO-owned value to survive untouched until staff review it. The
+// admin-only finalized repair is the one operation that follows a changed
+// customer's source address.
 //
 // Currency is structural, not convertible: the draft and the revision must be
-// in one currency or the link is refused. The remedy is editing a never-linked
-// draft's currency (or choosing another revision) before retrying -- never a
-// conversion by the store.
+// in one currency or the link is refused. The remedy is editing a never- or
+// formerly-linked draft's currency (or choosing another revision) before
+// retrying -- never a conversion by the store.
 //
 // Tax is the one basis the link may move, and only by explicit choice: when the
 // draft and source bases differ, staff must choose "keep" or "source". The
@@ -310,14 +312,11 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 
 	// The customer name is source-owned unconditionally: the revision's customer
 	// is the authority even when the customer did not change but was renamed in
-	// the directory. The billing address is the one conditional: a changed
-	// customer brings the revision's address, while a same-customer link keeps
-	// the PO-owned address (the saved-record repair's rule).
+	// the directory. The billing address is PO-owned unconditionally, even when
+	// the link moves the record to a different customer: a Staff draft link never
+	// replaces a value staff entered.
 	customerName := source.CustomerName
 	billingAddress := stored.BillingAddress
-	if source.CustomerID != stored.CustomerID {
-		billingAddress = source.BillingAddress
-	}
 
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET

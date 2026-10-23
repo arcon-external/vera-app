@@ -156,8 +156,10 @@ func TestStaffLinksANeverLinkedDraftOverHTTP(t *testing.T) {
 		linked.ContactEmail != "sentinel@example.com" || linked.DiscountPercent != 10 {
 		t.Errorf("PO-owned values moved: %+v", linked)
 	}
-	if linked.BillingAddress == "" || linked.BillingAddress == "Jl. Entered before the link" {
-		t.Errorf("billing address = %q; a new customer's address comes from the revision",
+	// The billing address is PO-owned: the typed value survives the first link
+	// even though the source customer differs (a never-linked draft has none).
+	if linked.BillingAddress != "Jl. Entered before the link" {
+		t.Errorf("billing address = %q; the typed PO-owned address must survive the link",
 			linked.BillingAddress)
 	}
 	if !linked.PrintedTotalsKnown {

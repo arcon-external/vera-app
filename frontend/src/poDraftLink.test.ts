@@ -172,14 +172,23 @@ describe("draft link tax vocabulary", () => {
     ).toContain("Choose");
   });
 
-  it("words the currency remedy differently for an editable and a frozen draft", () => {
+  it("words the currency remedy for every draft that can still edit its basis", () => {
     const never = draftLinkCurrencyRemedy("never", "IDR", "USD");
     expect(never).toContain("Back without linking");
     expect(never).toContain("Source basis");
     expect(never).toContain("never converted");
+    // A formerly-linked draft is still before a new link: same remedy, no
+    // conversion.
     const former = draftLinkCurrencyRemedy("former", "IDR", "USD");
-    expect(former).toContain("Choose a quotation in IDR");
+    expect(former).toContain("Back without linking");
+    expect(former).toContain("Source basis");
+    expect(former).toContain("then link again");
     expect(former).toContain("never converted");
+    // A live draft is frozen: the remedy is another revision.
+    const live = draftLinkCurrencyRemedy("live", "IDR", "USD");
+    expect(live).toContain("Choose a quotation in IDR");
+    expect(live).not.toContain("Source basis");
+    expect(live).toContain("never converted");
   });
 });
 

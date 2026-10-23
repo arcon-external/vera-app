@@ -474,71 +474,66 @@ type PurchaseOrderProtectedFieldsRequest struct {
 	PONumberKey        *string `json:"poNumberKey,omitempty"`
 }
 
+// purchaseOrderProtectedFields is the one ordered source of protected field
+// names. Both accessors read it, so a new protected column is added in exactly
+// one visible place and cannot be silently writable through the draft variant.
+var purchaseOrderProtectedFields = []struct {
+	name    string
+	present func(PurchaseOrderProtectedFieldsRequest) bool
+}{
+	{"confirmationNumber", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.ConfirmationNumber != nil }},
+	{"confirmationWarn", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.ConfirmationWarn != nil }},
+	{"uuid", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.UUID != nil }},
+	{"customerId", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.CustomerID != nil }},
+	{"quotationId", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.QuotationID != nil }},
+	{"sourceRevision", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.SourceRevision != nil }},
+	{"currency", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.Currency != nil }},
+	{"taxZone", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.TaxZone != nil }},
+	{"taxType", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.TaxType != nil }},
+	{"serviceCategory", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.ServiceCategory != nil }},
+	{"taxCategory", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.TaxCategory != nil }},
+	{"orgId", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.OrgID != nil }},
+	{"state", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.State != nil }},
+	{"savedAt", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.SavedAt != nil }},
+	{"savedBy", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.SavedBy != nil }},
+	{"pdfAbsentConfirmed", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.PdfAbsentConfirmed != nil }},
+	{"version", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.Version != nil }},
+	{"id", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.ID != nil }},
+	{"poNumberKey", func(r PurchaseOrderProtectedFieldsRequest) bool { return r.PONumberKey != nil }},
+}
+
+// purchaseOrderSourceBasisFields is the exact set a draft save may carry:
+// currency and the tax triple are editable before a source is linked (#496).
+// Every other protected value is still refused, and the store freezes the
+// basis on a row that already has a live source.
+var purchaseOrderSourceBasisFields = map[string]struct{}{
+	"currency":        {},
+	"taxZone":         {},
+	"taxType":         {},
+	"serviceCategory": {},
+	"taxCategory":     {},
+}
+
 // Named returns the first protected value the request carried, or "". The
 // caller refuses it by name; the list is deliberately read in a fixed order so
 // the answer is deterministic.
 func (request PurchaseOrderProtectedFieldsRequest) Named() string {
-	// Field order follows the struct, but this reads as one explicit list so a
-	// new protected column is added in exactly one visible place.
-	checks := []struct {
-		name   string
-		absent bool
-	}{
-		{"confirmationNumber", request.ConfirmationNumber == nil},
-		{"confirmationWarn", request.ConfirmationWarn == nil},
-		{"uuid", request.UUID == nil},
-		{"customerId", request.CustomerID == nil},
-		{"quotationId", request.QuotationID == nil},
-		{"sourceRevision", request.SourceRevision == nil},
-		{"currency", request.Currency == nil},
-		{"taxZone", request.TaxZone == nil},
-		{"taxType", request.TaxType == nil},
-		{"serviceCategory", request.ServiceCategory == nil},
-		{"taxCategory", request.TaxCategory == nil},
-		{"orgId", request.OrgID == nil},
-		{"state", request.State == nil},
-		{"savedAt", request.SavedAt == nil},
-		{"savedBy", request.SavedBy == nil},
-		{"pdfAbsentConfirmed", request.PdfAbsentConfirmed == nil},
-		{"version", request.Version == nil},
-		{"id", request.ID == nil},
-		{"poNumberKey", request.PONumberKey == nil},
-	}
-	for _, check := range checks {
-		if !check.absent {
-			return check.name
-		}
-	}
-	return ""
+	return request.firstProtected(nil)
 }
 
-// NamedExceptSourceBasis is the draft-update variant: currency and the tax
-// triple are editable before a source is linked (#496), so a draft save may
-// carry them. Every other protected value is still refused, and the store
-// freezes the basis on a row that already has a live or former source.
+// NamedExceptSourceBasis is the draft-update variant: the source-basis names
+// are removed from the one ordered list rather than repeated as a second list.
 func (request PurchaseOrderProtectedFieldsRequest) NamedExceptSourceBasis() string {
-	checks := []struct {
-		name   string
-		absent bool
-	}{
-		{"confirmationNumber", request.ConfirmationNumber == nil},
-		{"confirmationWarn", request.ConfirmationWarn == nil},
-		{"uuid", request.UUID == nil},
-		{"customerId", request.CustomerID == nil},
-		{"quotationId", request.QuotationID == nil},
-		{"sourceRevision", request.SourceRevision == nil},
-		{"orgId", request.OrgID == nil},
-		{"state", request.State == nil},
-		{"savedAt", request.SavedAt == nil},
-		{"savedBy", request.SavedBy == nil},
-		{"pdfAbsentConfirmed", request.PdfAbsentConfirmed == nil},
-		{"version", request.Version == nil},
-		{"id", request.ID == nil},
-		{"poNumberKey", request.PONumberKey == nil},
-	}
-	for _, check := range checks {
-		if !check.absent {
-			return check.name
+	return request.firstProtected(purchaseOrderSourceBasisFields)
+}
+
+func (request PurchaseOrderProtectedFieldsRequest) firstProtected(excluded map[string]struct{}) string {
+	for _, field := range purchaseOrderProtectedFields {
+		if _, skip := excluded[field.name]; skip {
+			continue
+		}
+		if field.present(request) {
+			return field.name
 		}
 	}
 	return ""

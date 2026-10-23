@@ -1118,13 +1118,14 @@ export function buildPurchaseOrderUpdate(
       Items: items,
       DiscountPercent: discountPercent,
       AdjustmentMinor: adjustment,
-      // Only a never-linked draft may move currency/basis. A linked or former
-      // row's stored basis is frozen; empty means "keep" and prevents the
-      // editor's legacy display derivation from being submitted as a change.
-      Currency: state.sourceState === "never" ? state.currency : "",
-      TaxZone: state.sourceState === "never" ? state.taxZone : "",
-      TaxType: state.sourceState === "never" ? state.taxType : "",
-      ServiceCategory: state.sourceState === "never" ? state.serviceCategory : "",
+      // A never- or formerly-linked draft may move currency/basis before a
+      // link exists. A live row's stored basis is frozen; empty means "keep"
+      // and prevents the editor's legacy display derivation from being
+      // submitted as a change.
+      Currency: state.sourceState !== "live" ? state.currency : "",
+      TaxZone: state.sourceState !== "live" ? state.taxZone : "",
+      TaxType: state.sourceState !== "live" ? state.taxType : "",
+      ServiceCategory: state.sourceState !== "live" ? state.serviceCategory : "",
       ExpectedVersion: state.version,
       Overwrite: false,
     },

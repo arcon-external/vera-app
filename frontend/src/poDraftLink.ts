@@ -95,9 +95,9 @@ export function draftLinkTaxChoiceError(
 }
 
 /**
- * What staff do about a currency mismatch. A never-linked draft can be edited;
- * a formerly-linked draft's basis is frozen (#496), so the remedy is choosing a
- * revision in its own currency. Neither path converts an amount.
+ * What staff do about a currency mismatch. A never- or formerly-linked draft is
+ * still before a link and can be edited; a live draft is frozen, so its remedy
+ * is choosing a revision in its own currency. Neither path converts an amount.
  */
 export function draftLinkCurrencyRemedy(
   sourceState: PurchaseOrderSourceState,
@@ -105,7 +105,7 @@ export function draftLinkCurrencyRemedy(
   sourceCurrency: string
 ): string {
   if (draftCurrency === sourceCurrency) return "";
-  if (sourceState === "never") {
+  if (sourceState !== "live") {
     return `This draft is in ${draftCurrency}; the quotation is in ${sourceCurrency}. Choose Back without linking, change the draft currency to ${sourceCurrency} in the editor's Source basis card, then link again. Amounts are never converted.`;
   }
   return `This draft is fixed in ${draftCurrency}; the quotation is in ${sourceCurrency}. Choose a quotation in ${draftCurrency}. Amounts are never converted.`;

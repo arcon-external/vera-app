@@ -556,16 +556,49 @@ func resolveBlankPurchaseOrderBasis(companyCurrency string, input PurchaseOrderB
 	}, nil
 }
 
-// resolvePurchaseOrderUpdateBasis keeps a linked row's currency and tax basis
-// frozen and lets only a never-linked draft move them. Empty submitted values
-// mean "keep the stored value"; a never-linked draft is allowed to clear its
-// service category when it switches to Goods.
+// keepsFormerLegacyPopulation reports whether a formerly-linked legacy row
+// should keep the one-time legacy population instead of taking the editable
+// path. It is true only when the stored tax type is empty (a pre-007 row) and
+// the submission names no tax type, currency or zone change: the editor's
+// display-derived basis is not an edit. A submission that names a type, or that
+// moves the commercial basis, is an ordinary editable former-draft save.
+func keepsFormerLegacyPopulation(lock purchaseOrderWriteLock, input PurchaseOrderUpdate) bool {
+	if lock.SourceState != PurchaseOrderSourceStateFormer || strings.TrimSpace(lock.TaxType) != "" {
+		return false
+	}
+	if strings.TrimSpace(input.TaxType) != "" {
+		return false
+	}
+	if input.Currency != "" && !strings.EqualFold(strings.TrimSpace(input.Currency), lock.Currency) {
+		return false
+	}
+	if input.TaxZone != "" && strings.TrimSpace(input.TaxZone) != lock.TaxZone {
+		return false
+	}
+	if legacyCategory := strings.TrimSpace(input.TaxCategory); legacyCategory != "" &&
+		legacyCategory != lock.TaxCategory {
+		return false
+	}
+	return true
+}
+
+// resolvePurchaseOrderUpdateBasis keeps only a LIVE row's currency and tax
+// basis frozen. A never- or formerly-linked draft is still before a link, so
+// its basis is editable within the supported options (#493 review); a link
+// still needs an exact currency match and an explicit tax choice, so nothing is
+// converted silently.
+//
+// Empty submitted values mean "keep the stored value"; a never-linked draft is
+// allowed to clear its service category when it switches to Goods.
 //
 // A pre-007 source revision stored an empty tax_type/service_category and only
 // the legacy tax_category. Such a row may be populated once from the matching
-// legacy basis; a stored non-empty basis remains frozen.
+// legacy basis, and that population is also preserved for a formerly-linked
+// row that submits no tax type: a stored non-empty basis remains frozen on a
+// live row, and a legacy partial submission (the display-derived basis) still
+// cannot drift the effective basis.
 func resolvePurchaseOrderUpdateBasis(lock purchaseOrderWriteLock, input PurchaseOrderUpdate) (purchaseOrderBasis, error) {
-	if lock.SourceState != PurchaseOrderSourceStateNever {
+	if lock.SourceState == PurchaseOrderSourceStateLive || keepsFormerLegacyPopulation(lock, input) {
 		if input.Currency != "" && !strings.EqualFold(strings.TrimSpace(input.Currency), lock.Currency) {
 			return purchaseOrderBasis{}, fmt.Errorf(
 				"%w: the currency is fixed while a source is linked", ErrPurchaseOrderInvalid)

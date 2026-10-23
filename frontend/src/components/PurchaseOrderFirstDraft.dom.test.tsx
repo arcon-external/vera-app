@@ -577,7 +577,7 @@ describe("PO-first draft (issue #496)", () => {
     expect(payload.ServiceCategory).toBe("");
   });
 
-  it("shares one in-flight create between Save and an upload", async () => {
+  it("shares one persistence between a concurrent Save and an upload", async () => {
     const gate = deferred<PurchaseOrderDTO>();
     createMock.mockReset();
     createMock.mockReturnValue(gate.promise);
@@ -606,11 +606,22 @@ describe("PO-first draft (issue #496)", () => {
     await flush();
     await flush();
     expect(createMock).toHaveBeenCalledTimes(1);
+    // One update carries the typed values; the upload does not write again on
+    // the same version, so there is no conflict and no second row.
     expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(payload.ID).toBe(41);
+    expect(payload.ExpectedVersion).toBe(1);
+    expect(payload.PONumber).toBe("RACE-496");
     expect(attachMock).toHaveBeenCalledTimes(1);
+    expect(updateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      attachMock.mock.invocationCallOrder[0]
+    );
     expect(
       (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
     ).toBe(41);
+    // Save and upload notify the page once between them.
+    expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("41");
   });
 
   it("retries a failed update on the created row without creating again", async () => {
@@ -644,18 +655,31 @@ describe("PO-first draft (issue #496)", () => {
     expect(payload.ServiceCategory).toBe("");
   });
 
-  it("does not submit a derived basis for a legacy former draft", async () => {
+  it("submits the derived basis for a legacy former draft but not for a live one", async () => {
+    // A formerly-linked draft may still edit its basis before a new link, so
+    // the editor's display-derived legacy basis is submitted. A live row's
+    // basis stays server-frozen and must never be submitted as a change.
     await render(legacyDraft("former"));
     act(() => button("Save draft").click());
     await flush();
     expect(updateMock).toHaveBeenCalledTimes(1);
-    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
-    expect(payload.TaxType).toBe("");
-    expect(payload.ServiceCategory).toBe("");
+    const formerPayload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(formerPayload.TaxType).toBe("Services");
+    expect(formerPayload.ServiceCategory).toBe("NonConstruction");
+    expect(formerPayload.Currency).toBe("IDR");
+
+    await reopen(legacyDraft("live"));
+    act(() => button("Save draft").click());
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    const livePayload = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(livePayload.TaxType).toBe("");
+    expect(livePayload.ServiceCategory).toBe("");
+    expect(livePayload.Currency).toBe("");
   });
 
   it("shows the typed unavailable banner and disables Extract", async () => {
-    availabilityMock.mockResolvedValueOnce({ Available: false });
+    availabilityMock.mockResolvedValue({ Available: false });
     const attachment = {
       UUID: "doc-498",
       SHA256: "doc-sha-498",
@@ -688,7 +712,7 @@ describe("PO-first draft (issue #496)", () => {
     expect(startExtractionMock).not.toHaveBeenCalled();
   });
 
-  it("keeps typed values across a transient upload that creates the row", async () => {
+  it("persists the typed values before a transient upload attaches", async () => {
     documentStateMock.mockResolvedValue({
       Document: EXTRACTION_DOCUMENT,
       Versions: [EXTRACTION_DOCUMENT],
@@ -700,18 +724,78 @@ describe("PO-first draft (issue #496)", () => {
     await flush();
     chooseFile();
     await flush();
-    expect(createMock).toHaveBeenCalledTimes(1);
-    expect(input("Customer PO number").value).toBe("TYPED-BEFORE-UPLOAD");
 
-    // The upload only created the owner and attached the file. The ordinary
-    // Save writes the entered value to that same row; no second create.
-    act(() => button("Save draft").click());
-    await flush();
+    // One create, then one update carrying what staff typed, and only then the
+    // attach: a reload cannot lose the values the user saw when attaching.
     expect(createMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledTimes(1);
     const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
-    expect(payload.PONumber).toBe("TYPED-BEFORE-UPLOAD");
     expect(payload.ID).toBe(41);
+    expect(payload.ExpectedVersion).toBe(1);
+    expect(payload.PONumber).toBe("TYPED-BEFORE-UPLOAD");
+    expect(attachMock).toHaveBeenCalledTimes(1);
+    expect(updateMock.mock.invocationCallOrder[0]).toBeLessThan(
+      attachMock.mock.invocationCallOrder[0]
+    );
+    expect(
+      (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
+    ).toBe(41);
+    expect(input("Customer PO number").value).toBe("TYPED-BEFORE-UPLOAD");
+    // The save notified the page once, exactly as a Save does.
+    expect(document.querySelector('[data-testid="saved-id"]')?.textContent).toBe("41");
+  });
+
+  it("attaches nothing when the transient working copy is invalid", async () => {
+    await render();
+    type("Received date", "");
+    await flush();
+
+    chooseFile();
+    await flush();
+
+    // Validation runs before the create, so an incomplete working copy leaves
+    // no blank row and no attachment behind.
+    expect(createMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(attachMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Received date must be YYYY-MM-DD.");
+  });
+
+  it("retries a failed attach on the saved row without writing again", async () => {
+    attachMock
+      .mockRejectedValueOnce(new Error("the upload was interrupted"))
+      .mockResolvedValueOnce({
+        ID: 1,
+        UUID: "doc-latest",
+        PurchaseOrderID: 41,
+        Version: 1,
+        Active: true,
+      });
+    await render();
+    type("Customer PO number", "RETRY-LATEST");
+    await flush();
+
+    chooseFile();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(attachMock).toHaveBeenCalledTimes(1);
+    const first = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(first.ExpectedVersion).toBe(1);
+    expect(first.PONumber).toBe("RETRY-LATEST");
+
+    // The failed attach left the row saved at the version the update wrote. The
+    // retry attaches to that row; it must not create a second one or rewrite
+    // the same values against a stale version.
+    expect(document.body.textContent).toContain("Loaded at version 2.");
+    chooseFile("Customer PO retry.pdf");
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(attachMock).toHaveBeenCalledTimes(2);
+    expect(
+      (attachMock.mock.calls[1][0] as { PurchaseOrderID: number }).PurchaseOrderID
+    ).toBe(41);
   });
 
   it("shows extraction for a source-less draft created by upload", async () => {
