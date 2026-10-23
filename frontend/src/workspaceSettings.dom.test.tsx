@@ -138,6 +138,7 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
       mocks.getPurchaseOrder(...args),
     GetPurchaseOrderExtraction: (...args: unknown[]) =>
       mocks.getPurchaseOrderExtraction(...args),
+    GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
     GetPurchaseOrderDocumentState: (...args: unknown[]) =>
       mocks.getPurchaseOrderDocumentState(...args),
     ListPurchaseOrders: (...args: unknown[]) =>

@@ -52,6 +52,8 @@ export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):
 
 export function GetPurchaseOrderExtraction(arg1:number):Promise<backend.PurchaseOrderExtractionStateDTO>;
 
+export function GetPurchaseOrderExtractionAvailability():Promise<backend.PurchaseOrderExtractionAvailabilityDTO>;
+
 export function GetPurchaseOrderHistory(arg1:number):Promise<Array<backend.PurchaseOrderCorrectionDTO>>;
 
 export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrderReviewDTO>;

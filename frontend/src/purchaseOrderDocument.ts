@@ -207,8 +207,16 @@ export interface ExtractAvailability {
  */
 export function extractAndCompareAvailability(
   documentState: PurchaseOrderDocumentState,
-  hasApplyTarget = true
+  hasApplyTarget = true,
+  extractorAvailable: boolean | null = null
 ): ExtractAvailability {
+  if (extractorAvailable === false) {
+    return {
+      enabled: false,
+      reason: "Automatic extraction is not available on this server.",
+      hint: "Enter the values manually.",
+    };
+  }
   if (documentState === "none") {
     return {
       enabled: false,

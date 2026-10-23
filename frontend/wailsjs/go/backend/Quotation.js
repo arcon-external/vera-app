@@ -98,6 +98,10 @@ export function GetPurchaseOrderExtraction(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderExtraction'](arg1);
 }
 
+export function GetPurchaseOrderExtractionAvailability() {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderExtractionAvailability']();
+}
+
 export function GetPurchaseOrderHistory(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
 }

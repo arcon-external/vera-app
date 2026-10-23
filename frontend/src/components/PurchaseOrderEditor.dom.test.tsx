@@ -44,6 +44,7 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
   GetPurchaseOrderExtraction: (...args: unknown[]) => extractionMock(...args),
+  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
   StartPurchaseOrderExtraction: (...args: unknown[]) => startExtractionMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
 }));
@@ -564,6 +565,7 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
     expect(useExtracted?.checked).toBe(false);
     act(() => useExtracted?.click());
     act(() => applySelectedButton().click());
+    await flush();
 
     expect(inputValue("Customer PO number")).toBe("4500123456");
     expect(inputValue("Payment terms")).toBe("45 days");
@@ -583,6 +585,7 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
     expect(row.checked).toBe(false);
     act(() => row.click());
     act(() => applySelectedButton().click());
+    await flush();
 
     expect(inputValue("Line 1 description")).toBe("Extracted line");
     expect(inputValue("Line 1 quantity")).toBe("2");
@@ -638,6 +641,37 @@ describe("PO extraction applies only chosen proposals (issue #477)", () => {
     expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
     expect(document.body.textContent).toContain("The PDF changed after this extraction");
     expect(inputValue("Customer PO number")).toBe("PO-1");
+  });
+
+  it("re-reads the latest generation before Apply and writes nothing when it is stale", async () => {
+    extractionMock.mockResolvedValue(extractionState());
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    // The untouched empty PO date is the one preselected proposal.
+    expect(inputValue("PO date")).toBe("");
+
+    // The PDF was replaced outside this editor after the panel read. Apply must
+    // re-read the run, not trust the earlier panel state.
+    const replaced = extractionState();
+    replaced.Run.Status = "stale";
+    replaced.Run.Result = null as unknown as typeof replaced.Run.Result;
+    replaced.Document = { ID: 5, Version: 2, SHA256: "replacement-sha" };
+    extractionMock.mockReset();
+    extractionMock.mockResolvedValue(replaced);
+
+    act(() => applySelectedButton().click());
+
+    await flush();
+    await flush();
+
+    expect(inputValue("PO date")).toBe("");
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+    expect(document.body.textContent).toContain("The PDF changed after this extraction");
+    expect(document.body.textContent).toContain("Run Extract again");
+    expect(document.body.textContent).not.toContain("Applied 1 field");
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
   });
 });
 
@@ -852,6 +886,7 @@ describe("PO extraction reconciles manual edits (issue #479)", () => {
     await flush();
     expect(startExtractionMock).toHaveBeenCalledTimes(1);
 
+    extractionMock.mockResolvedValue(extractionState());
     await act(async () => {
       delayedStart.resolve(extractionState());
       await Promise.resolve();
@@ -877,6 +912,7 @@ describe("PO extraction reconciles manual edits (issue #479)", () => {
     // Keep the edited PO number, use the extracted payment terms.
     act(() => radio("Use extracted Payment terms").click());
     act(() => applySelectedButton().click());
+    await flush();
 
     expect(inputValue("Customer PO number")).toBe("MANUAL-1");
     expect(inputValue("Payment terms")).toBe("30 days after delivery");
@@ -913,6 +949,7 @@ describe("PO extraction reconciles manual edits (issue #479)", () => {
     expect(inputValue("Customer PO number")).toBe("MANUAL-1");
     expect(radio("Use extracted Payment terms").checked).toBe(true);
     act(() => applySelectedButton().click());
+    await flush();
     expect(inputValue("Payment terms")).toBe("30 days after delivery");
     expect(inputValue("Customer PO number")).toBe("MANUAL-1");
   });
@@ -930,6 +967,7 @@ describe("PO extraction reconciles manual edits (issue #479)", () => {
     typeInto("Line 1 description", "Typed by hand");
     act(() => button("Extract and compare").click());
     await flush();
+    extractionMock.mockResolvedValue(extractionState());
     await act(async () => {
       delayedStart.resolve(extractionState());
       await Promise.resolve();
@@ -941,6 +979,7 @@ describe("PO extraction reconciles manual edits (issue #479)", () => {
 
     // Applying the untouched empty PO date must consume only that proposal.
     act(() => applySelectedButton().click());
+    await flush();
     expect(inputValue("PO date")).toBe("2026-10-12");
     expect(inputValue("Payment terms")).toBe("");
     expect(inputValue("Line 1 description")).toBe("Typed by hand");

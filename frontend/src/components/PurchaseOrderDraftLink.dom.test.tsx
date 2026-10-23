@@ -53,6 +53,7 @@ vi.mock("@backend/backend/Quotation", () => ({
   LinkPurchaseOrderDraftSource: (...args: unknown[]) => linkMock(...args),
   PreviewPurchaseOrderDraftLink: (...args: unknown[]) => previewMock(...args),
   RemovePurchaseOrderDocument: vi.fn(),
+  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
   StartPurchaseOrderExtraction: vi.fn(),
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
 }));

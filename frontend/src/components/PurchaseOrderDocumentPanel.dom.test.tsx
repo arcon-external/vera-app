@@ -19,6 +19,7 @@ const { stateMock, attachMock, contentMock, removeMock } = vi.hoisted(() => ({
 
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentState: (...args: unknown[]) => stateMock(...args),
+  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
   AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   GetActivePurchaseOrderDocumentContent: (...args: unknown[]) => contentMock(...args),
   RemovePurchaseOrderDocument: (...args: unknown[]) => removeMock(...args),

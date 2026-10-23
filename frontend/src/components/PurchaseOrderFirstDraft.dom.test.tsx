@@ -22,6 +22,7 @@ const {
   documentStateMock,
   extractionMock,
   startExtractionMock,
+  availabilityMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
   updateMock: vi.fn(),
@@ -29,6 +30,7 @@ const {
   documentStateMock: vi.fn(),
   extractionMock: vi.fn(),
   startExtractionMock: vi.fn(),
+  availabilityMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
@@ -42,6 +44,7 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderReview: vi.fn(),
   AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   RemovePurchaseOrderDocument: vi.fn(),
+  GetPurchaseOrderExtractionAvailability: (...args: unknown[]) => availabilityMock(...args),
   StartPurchaseOrderExtraction: (...args: unknown[]) => startExtractionMock(...args),
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
 }));
@@ -110,12 +113,31 @@ function createdRow(): PurchaseOrderDTO {
   };
 }
 
+function manualLine(index: number): PurchaseOrderDTO["Items"][number] {
+  return {
+    QuotationItemNo: index,
+    QuotationSubNo: null,
+    LineNumber: index,
+    Description: `Manual line ${index}`,
+    QuantityScaled: 10000,
+    UoM: "Pc",
+    UnitPriceMinor: 125000,
+    DiscountEnabled: false,
+    DiscountPercent: 0,
+    GrossMinor: 125000,
+    DiscountMinor: 0,
+    NetMinor: 125000,
+  };
+}
+
 function savedFrom(input: PurchaseOrderUpdateInput, version: number): PurchaseOrderDTO {
   return {
     ...createdRow(),
     ID: input.ID,
     Version: version,
     PONumber: input.PONumber,
+    PODate: input.PODate || null,
+    RequestedDeliveryDate: input.RequestedDeliveryDate || null,
     BillingAddress: input.BillingAddress,
     DeliveryAddress: input.DeliveryAddress,
     ReceivedDate: input.ReceivedDate,
@@ -153,12 +175,14 @@ beforeEach(() => {
   documentStateMock.mockReset();
   extractionMock.mockReset();
   startExtractionMock.mockReset();
+  availabilityMock.mockReset();
   createMock.mockResolvedValue(createdRow());
   updateMock.mockImplementation(async (input: PurchaseOrderUpdateInput) => ({
     Order: savedFrom(input, input.ExpectedVersion + 1),
   }));
   documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
   extractionMock.mockResolvedValue({ Run: null, Document: null });
+  availabilityMock.mockResolvedValue({ Available: true });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -231,6 +255,136 @@ function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
   });
 }
 
+const EXTRACTION_DOCUMENT = {
+  UUID: "doc-498",
+  SHA256: "doc-sha-498",
+  ContentType: "application/pdf",
+  OriginalFilename: "Customer PO.pdf",
+  UploadedAt: "2026-10-23T10:00:00Z",
+  ID: 4,
+  PurchaseOrderID: 41,
+  Version: 1,
+  SizeBytes: 1536,
+  UploadedBy: 4,
+  Active: true,
+};
+
+function extractionCell(value: string, status: string) {
+  return {
+    Value: value,
+    Raw: value,
+    Status: status,
+    Page: status === "absent" ? null : 1,
+    BBox: status === "absent" ? null : { X: 86, Y: 82, Width: 56, Height: 9 },
+    Confidence: null,
+    Note: "",
+  };
+}
+
+/** A successful extraction run whose line price is printed in `unitPrice`. */
+function extractionRun(
+  unitPrice: string,
+  id: number,
+  options: { paymentTerms?: string; rowCount?: number; descriptionPrefix?: string } = {}
+) {
+  const paymentTerms = options.paymentTerms ?? "";
+  const rowCount = options.rowCount ?? 1;
+  const descriptionPrefix = options.descriptionPrefix ?? "Extracted line";
+  return {
+    Run: {
+      UUID: `run-${id}`,
+      Status: "succeeded",
+      Engine: "poppler",
+      EngineVersion: "25.03.0",
+      DocumentSHA256: EXTRACTION_DOCUMENT.SHA256,
+      ErrorCode: null,
+      ErrorMessage: null,
+      Result: {
+        Engine: "poppler",
+        EngineVersion: "25.03.0",
+        PageCount: 1,
+        PagesWithText: 1,
+        PagesWithoutText: 0,
+        DurationMs: 20,
+        SchemaVersion: 1,
+        Pages: [{ Number: 1, Width: 595, Height: 842 }],
+        Fields: [
+          { Key: "poNumber", Cell: extractionCell("4500456", "extracted") },
+          { Key: "poDate", Cell: extractionCell("2026-10-12", "extracted") },
+          { Key: "requestedDeliveryDate", Cell: extractionCell("", "absent") },
+          { Key: "currency", Cell: extractionCell("", "absent") },
+          { Key: "paymentTerms", Cell: extractionCell(paymentTerms, paymentTerms === "" ? "absent" : "extracted") },
+          { Key: "incoterms", Cell: extractionCell("EXW", "extracted") },
+        ],
+        Rows: Array.from({ length: rowCount }, (_, index) => ({
+          LineNumber: extractionCell(String(index + 1), "extracted"),
+          Description: extractionCell(`${descriptionPrefix} ${index + 1}`, "extracted"),
+          Quantity: extractionCell("2", "extracted"),
+          UoM: extractionCell("Pc", "extracted"),
+          UnitPrice: extractionCell(unitPrice, "extracted"),
+          Amount: extractionCell("", "absent"),
+          Status: "extracted",
+          Page: 1,
+          BBox: { X: 50, Y: 225, Width: 490, Height: 10 },
+          Note: "",
+        })),
+        Abstentions: { Fields: 3, Rows: 0 },
+      },
+      ID: id,
+      PurchaseOrderID: 41,
+      DocumentID: EXTRACTION_DOCUMENT.ID,
+      DocumentVersion: EXTRACTION_DOCUMENT.Version,
+      PageCount: 1,
+      RequestedBy: 4,
+      CreatedAt: "2026-10-21T10:00:00Z",
+      StartedAt: "2026-10-21T10:00:01Z",
+      FinishedAt: "2026-10-21T10:00:02Z",
+      DurationMS: 20,
+    },
+    Document: {
+      ID: EXTRACTION_DOCUMENT.ID,
+      Version: EXTRACTION_DOCUMENT.Version,
+      SHA256: EXTRACTION_DOCUMENT.SHA256,
+    },
+  };
+}
+
+function extractionRowCheckbox(): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Apply extracted line 1"]'
+  );
+  if (found === null) throw new Error("extracted row checkbox not found");
+  return found;
+}
+
+function applySelected(): HTMLButtonElement {
+  const found = Array.from(
+    document.querySelectorAll<HTMLButtonElement>("button")
+  ).find((candidate) => candidate.textContent?.startsWith("Apply selected"));
+  if (found === undefined) throw new Error("Apply selected button not found");
+  return found;
+}
+
+function extractionRadio(label: string): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(
+    `input[type="radio"][aria-label="${label}"]`
+  );
+  if (found === null) throw new Error(`radio ${label} not found`);
+  return found;
+}
+
+function extractionConflict(key: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(
+    `[data-testid="po-extraction-conflict-${key}"]`
+  );
+}
+
+function lineDescriptions(): string[] {
+  return Array.from(document.querySelectorAll<HTMLInputElement>('input[aria-label^="Line "][aria-label$=" description"]')).map(
+    (field) => field.value
+  );
+}
+
 function Harness({
   onLink,
   draft,
@@ -266,6 +420,18 @@ function Harness({
 }
 
 async function render(draft?: PurchaseOrderDTO): Promise<void> {
+  await act(async () => {
+    root.render(<Harness draft={draft} />);
+  });
+  await flush();
+}
+
+async function reopen(draft: PurchaseOrderDTO): Promise<void> {
+  act(() => root.unmount());
+  container.remove();
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
   await act(async () => {
     root.render(<Harness draft={draft} />);
   });
@@ -486,5 +652,240 @@ describe("PO-first draft (issue #496)", () => {
     const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
     expect(payload.TaxType).toBe("");
     expect(payload.ServiceCategory).toBe("");
+  });
+
+  it("shows the typed unavailable banner and disables Extract", async () => {
+    availabilityMock.mockResolvedValueOnce({ Available: false });
+    const attachment = {
+      UUID: "doc-498",
+      SHA256: "doc-sha-498",
+      ContentType: "application/pdf",
+      OriginalFilename: "Customer PO.pdf",
+      UploadedAt: "2026-10-23T10:00:00Z",
+      ID: 4,
+      PurchaseOrderID: 41,
+      Version: 1,
+      SizeBytes: 1536,
+      UploadedBy: 4,
+      Active: true,
+    };
+    documentStateMock.mockResolvedValue({ Document: attachment, Versions: [attachment] });
+    attachMock.mockResolvedValue(attachment);
+    await render();
+
+    // A PDF is attached, so absence of a document is not the reason. Only the
+    // typed deployment answer disables the action.
+    chooseFile();
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-unavailable"]')).not.toBeNull();
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Automatic extraction is not available on this server");
+    expect(text).toContain("enter the values manually");
+    expect(button("Extract and compare").disabled).toBe(true);
+
+    act(() => button("Extract and compare").click());
+    await flush();
+    expect(startExtractionMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps typed values across a transient upload that creates the row", async () => {
+    documentStateMock.mockResolvedValue({
+      Document: EXTRACTION_DOCUMENT,
+      Versions: [EXTRACTION_DOCUMENT],
+    });
+    attachMock.mockResolvedValue(EXTRACTION_DOCUMENT);
+    await render();
+
+    type("Customer PO number", "TYPED-BEFORE-UPLOAD");
+    await flush();
+    chooseFile();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(input("Customer PO number").value).toBe("TYPED-BEFORE-UPLOAD");
+
+    // The upload only created the owner and attached the file. The ordinary
+    // Save writes the entered value to that same row; no second create.
+    act(() => button("Save draft").click());
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(payload.PONumber).toBe("TYPED-BEFORE-UPLOAD");
+    expect(payload.ID).toBe(41);
+  });
+
+  it("shows extraction for a source-less draft created by upload", async () => {
+    documentStateMock.mockResolvedValue({
+      Document: EXTRACTION_DOCUMENT,
+      Versions: [EXTRACTION_DOCUMENT],
+    });
+    attachMock.mockResolvedValue(EXTRACTION_DOCUMENT);
+    extractionMock.mockResolvedValue(extractionRun("1250.00", 14));
+    await render();
+    expect(createMock).not.toHaveBeenCalled();
+
+    chooseFile();
+    await flush();
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(attachMock).toHaveBeenCalledTimes(1);
+    expect(
+      (attachMock.mock.calls[0][0] as { PurchaseOrderID: number }).PurchaseOrderID
+    ).toBe(41);
+    // The upload created the one row; the panel reads the stored draft and its
+    // extraction result without a second create. The source-link review stays
+    // separate and available.
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("Link a Quotation");
+    expect(button("Final Save").disabled).toBe(true);
+  });
+
+  it("invalidates an actionable result on a currency change and re-extracts in the new currency", async () => {
+    documentStateMock.mockResolvedValue({
+      Document: EXTRACTION_DOCUMENT,
+      Versions: [EXTRACTION_DOCUMENT],
+    });
+    extractionMock.mockResolvedValue(extractionRun("1250", 9));
+    await render(createdRow());
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("4500456");
+
+    // IDR has no minor unit; the same printed "1250.00" would mean something
+    // else under USD. Changing the draft currency ends this result.
+    chooseSelect("Currency", "USD");
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    const notice = document.body.textContent ?? "";
+    expect(notice).toContain("currency changed to USD");
+    expect(notice).toContain("Run Extract again");
+
+    // A refresh that still returns the old run must not make it actionable
+    // again under the new currency.
+    extractionMock.mockResolvedValue(extractionRun("1250", 9));
+    await flush();
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+
+    // Extract again parses the stored decimals with the currency now in effect.
+    const usdRun = extractionRun("1250.00", 10);
+    startExtractionMock.mockResolvedValue(usdRun);
+    extractionMock.mockResolvedValue(usdRun);
+    act(() => button("Extract and compare").click());
+    await flush();
+    expect(startExtractionMock).toHaveBeenCalledTimes(1);
+
+    act(() => extractionRowCheckbox().click());
+    act(() => applySelected().click());
+    await flush();
+    expect(input("Line 1 unit price").value).toBe("$1,250.00");
+  });
+
+  it("keeps a deliberately cleared field empty through Apply, save and reopen", async () => {
+    documentStateMock.mockResolvedValue({
+      Document: EXTRACTION_DOCUMENT,
+      Versions: [EXTRACTION_DOCUMENT],
+    });
+    const stored = { ...createdRow(), PaymentTerms: "45 days" };
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayed = deferred<ReturnType<typeof extractionRun>>();
+    startExtractionMock.mockReturnValueOnce(delayed.promise);
+    await render(stored);
+
+    act(() => button("Extract and compare").click());
+    await flush();
+    // Clear the field while extraction is running. This is a deliberate clear,
+    // not an empty field extraction may fill on its own.
+    type("Payment terms", "");
+
+    const run = extractionRun("1250.00", 12, { paymentTerms: "30 days after delivery" });
+    extractionMock.mockResolvedValue(run);
+    await act(async () => {
+      delayed.resolve(run);
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(extractionConflict("paymentTerms")).not.toBeNull();
+    expect(extractionRadio("Keep draft Payment terms").checked).toBe(true);
+
+    // Apply the untouched PO date; the cleared field is not written.
+    act(() => applySelected().click());
+    await flush();
+    expect(input("Payment terms").value).toBe("");
+    expect(input("PO date").value).toBe("2026-10-12");
+
+    act(() => button("Save draft").click());
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(payload.PaymentTerms).toBe("");
+    expect(payload.PODate).toBe("2026-10-12");
+    expect(button("Final Save").disabled).toBe(true);
+
+    await reopen(savedFrom(payload, 2));
+    expect(input("Payment terms").value).toBe("");
+    expect(input("PO date").value).toBe("2026-10-12");
+    expect(button("Final Save").disabled).toBe(true);
+  });
+
+  it("keeps the surviving manual lines when a five-line draft removes one line during extraction", async () => {
+    documentStateMock.mockResolvedValue({
+      Document: EXTRACTION_DOCUMENT,
+      Versions: [EXTRACTION_DOCUMENT],
+    });
+    const stored = {
+      ...createdRow(),
+      Items: [1, 2, 3, 4, 5].map(manualLine),
+    };
+    extractionMock.mockResolvedValue({ Run: null, Document: null });
+    const delayed = deferred<ReturnType<typeof extractionRun>>();
+    startExtractionMock.mockReturnValueOnce(delayed.promise);
+    await render(stored);
+    expect(lineDescriptions()).toEqual([
+      "Manual line 1",
+      "Manual line 2",
+      "Manual line 3",
+      "Manual line 4",
+      "Manual line 5",
+    ]);
+
+    act(() => button("Extract and compare").click());
+    await flush();
+    act(() => button("Remove line 2").click());
+
+    const run = extractionRun("1250.00", 13, { rowCount: 5 });
+    extractionMock.mockResolvedValue(run);
+    await act(async () => {
+      delayed.resolve(run);
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(
+      document.querySelector('[data-testid="po-extraction-line-conflict"]')
+    ).not.toBeNull();
+    expect(extractionRadio("Keep my lines").checked).toBe(true);
+
+    act(() => applySelected().click());
+    await flush();
+    expect(lineDescriptions()).toEqual([
+      "Manual line 1",
+      "Manual line 3",
+      "Manual line 4",
+      "Manual line 5",
+    ]);
+    expect(input("Line 2 unit price").value).toBe("Rp125.000");
+
+    act(() => button("Save draft").click());
+    await flush();
+    const payload = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(payload.Items.map((item) => item.Description)).toEqual([
+      "Manual line 1",
+      "Manual line 3",
+      "Manual line 4",
+      "Manual line 5",
+    ]);
+    // The surviving manual lines keep their quotation references; no extracted
+    // row was silently substituted.
+    expect(payload.Items.map((item) => item.QuotationItemNo)).toEqual([1, 3, 4, 5]);
   });
 });

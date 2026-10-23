@@ -376,6 +376,34 @@ describe("applying chosen proposals", () => {
     expect(applied.lines).toBeUndefined();
     expect(applied.appliedRows).toBe(0);
   });
+
+  it("applied rows carry no quotation references, even when manual lines did", () => {
+    const selection = { [proposalCellKey("row", "0")]: true };
+    const applied = applyExtractionSelection(result(), selection, emptyHeader(), lines(), 10, USD);
+    expect(applied.lines).toHaveLength(1);
+    for (const line of applied.lines ?? []) {
+      expect(line.quotationItemNo).toBeNull();
+      expect(line.quotationSubNo).toBeNull();
+    }
+  });
+
+  it("parses the same printed decimal with the currency in effect", () => {
+    const extraction = result();
+    extraction.Rows[0] = {
+      ...extraction.Rows[0],
+      UnitPrice: cell("1250"),
+      Amount: cell("2500"),
+    };
+    const selection = { [proposalCellKey("row", "0")]: true };
+    const idr = applyExtractionSelection(extraction, selection, emptyHeader(), lines(), 10, IDR);
+    const usd = applyExtractionSelection(extraction, selection, emptyHeader(), lines(), 10, USD);
+    expect(idr.lines?.[0]?.unitPrice).toBe("Rp 1.250");
+    expect(usd.lines?.[0]?.unitPrice).toBe("$1,250.00");
+    // IDR has no minor unit, so a printed fraction is not representable there.
+    const fractional = { ...extraction.Rows[0], UnitPrice: cell("1250.5") };
+    expect(rowProposalApplicable(fractional, IDR)).toBe(false);
+    expect(rowProposalApplicable(fractional, USD)).toBe(true);
+  });
 });
 
 describe("evidence and abstention wording", () => {

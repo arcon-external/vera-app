@@ -463,7 +463,7 @@ _Avoid_: Skip upload, PDF waiver
 ### Extraction and review
 
 **Extraction**:
-Reading a customer PO PDF into a purchase-order draft; it may use text extraction or OCR.
+Reading a customer PO PDF into evidence inside a stored purchase-order draft, before or after a source is linked; it may use text extraction or OCR. It never supplies the Customer or the source.
 _Avoid_: Import, parsing
 
 **OCR**:

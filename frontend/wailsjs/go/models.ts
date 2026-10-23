@@ -2222,6 +2222,18 @@ export namespace backend {
 	        this.Rows = source["Rows"];
 	    }
 	}
+	export class PurchaseOrderExtractionAvailabilityDTO {
+	    Available: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderExtractionAvailabilityDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Available = source["Available"];
+	    }
+	}
 	export class PurchaseOrderExtractionBBoxDTO {
 	    X: number;
 	    Y: number;

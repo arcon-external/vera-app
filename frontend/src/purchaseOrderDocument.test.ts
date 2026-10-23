@@ -116,6 +116,18 @@ describe("Extract and compare availability", () => {
     expect(availability.enabled).toBe(false);
     expect(availability.reason).toContain("Correct this record");
   });
+
+  it("disables extraction when the typed deployment probe says it is unavailable", () => {
+    const availability = extractAndCompareAvailability("attached", true, false);
+    expect(availability.enabled).toBe(false);
+    expect(availability.reason).toContain("not available on this server");
+    expect(availability.hint).toContain("manually");
+  });
+
+  it("keeps extraction enabled when the probe is unknown or confirmed available", () => {
+    expect(extractAndCompareAvailability("attached", true, null).enabled).toBe(true);
+    expect(extractAndCompareAvailability("attached", true, true).enabled).toBe(true);
+  });
 });
 
 describe("document validation messages", () => {

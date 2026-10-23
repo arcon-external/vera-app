@@ -171,6 +171,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// #477: text-PDF extraction. Start is a write of intent (202); the latest
 	// read returns the run and the active document generation so a replaced
 	// PDF is visibly stale rather than silently applied.
+	// #498: the availability probe is a typed preflight for the desktop. It
+	// is registered before the :id routes because it shares their prefix.
+	server.echo.GET("/v1/purchase-orders/extraction/availability", server.getPurchaseOrderExtractionAvailability, server.requireSession)
 	server.echo.POST("/v1/purchase-orders/:id/extractions", server.startPurchaseOrderExtraction, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id/extractions/latest", server.getPurchaseOrderExtraction, server.requireSession)
 	// #480: permanent deletion. Preview and challenge describe the exact chain;

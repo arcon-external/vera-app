@@ -2157,6 +2157,25 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // Issue #498: the typed deployment probe says extraction is unavailable.
+    // The banner is explicit and Extract is disabled; the manual entry path
+    // remains visible. At 360 the banner and the button row must wrap rather
+    // than overflow.
+    name: "PurchaseOrderExtractionUnavailable496",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_ATTACHED}
+        extractorAvailable={false}
+        onExtract={() => undefined}
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
     // The extraction review (#477): every header field with its status and
     // page region, two line proposals, one absent cell and one needs-review
     // row, and the one explicit Apply action. This is where the 360 layout

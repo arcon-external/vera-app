@@ -107,6 +107,8 @@ export interface PurchaseOrderEditorViewProps {
   incotermOptions: { value: string; label: string }[];
   /** Safe deferred linking for #497; it never replaces or creates a record. */
   onLinkQuotation?: () => void;
+  /** #498: a currency change invalidates an actionable extraction result. */
+  onCurrencyChange?: (next: CurrencyInfo) => void;
   onSave: () => void;
   onCancel: () => void;
   /** Opens the final-save difference review (#471). */
@@ -561,6 +563,7 @@ export function PurchaseOrderEditorView({
   uomOptions,
   incotermOptions,
   onLinkQuotation,
+  onCurrencyChange,
   onSave,
   onCancel,
   onFinalSave,
@@ -711,6 +714,10 @@ export function PurchaseOrderEditorView({
                     (option) => option.code === value
                   );
                   if (next === undefined || next.code === state.currency) return;
+                  if (onCurrencyChange !== undefined) {
+                    onCurrencyChange(next);
+                    return;
+                  }
                   dispatch({
                     type: "currencyChanged",
                     code: next.code,
@@ -1142,6 +1149,7 @@ export function PurchaseOrderEditorPage({
     Record<string, ExtractionChoice>
   >({});
   const [extractionStarting, setExtractionStarting] = useState(false);
+  const [extractionApplying, setExtractionApplying] = useState(false);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [extractionApplied, setExtractionApplied] = useState<{
     fields: number;
@@ -1164,6 +1172,14 @@ export function PurchaseOrderEditorPage({
   const extractionGeneration = useRef(0);
   const extractionPoll = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extractionInitialized = useRef<number | null>(null);
+  // #498: a run whose result must not become actionable again without a new
+  // Extract. A currency change and a stale Apply both add to this set; a new
+  // run has a new id, so it is unaffected.
+  const extractionRejectedRuns = useRef<Set<number>>(new Set());
+  // The draft currency in effect when the result was adopted. Amounts are
+  // parsed from the stored result through this currency; changing the draft
+  // currency invalidates the result rather than reinterpreting it.
+  const extractionCurrencyRef = useRef<string | null>(null);
   // Async poll callbacks must see the editor as it is now, not as it was when
   // the first response was scheduled.
   const editorStateRef = useRef(state);
@@ -1229,6 +1245,28 @@ export function PurchaseOrderEditorPage({
     // longer active. They end with the generation, before any refresh returns.
     setExtractionChoices({});
     rebaseExtractionTracker();
+    extractionCurrencyRef.current = null;
+  };
+
+  /**
+   * #498: ends one result without declaring the active PDF unusable. A
+   * currency change (or a stale Apply) discards the run, its selection and its
+   * tracker, but the document generation stays known so Extract can start
+   * again immediately. The run id stays rejected, so a later refresh cannot
+   * quietly restore it.
+   */
+  const rejectExtraction = (runId: number, message: string) => {
+    extractionRejectedRuns.current.add(runId);
+    extractionGeneration.current += 1;
+    extractionInitialized.current = null;
+    clearExtractionPoll();
+    setExtractionState(null);
+    setExtractionSelection({});
+    setExtractionChoices({});
+    setExtractionApplied(null);
+    setExtractionError(message);
+    extractionCurrencyRef.current = null;
+    rebaseExtractionTracker();
   };
 
   // Declared as a function so adoptExtraction and the poll can call each other
@@ -1282,7 +1320,9 @@ export function PurchaseOrderEditorPage({
       return;
     }
     setExtractionState(next);
-    if (run != null && run.Status === "succeeded" && run.Result != null) {
+    if (run != null && run.Status === "succeeded" && run.Result != null &&
+      !extractionRejectedRuns.current.has(run.ID)) {
+      extractionCurrencyRef.current = editorStateRef.current.currency;
       if (extractionInitialized.current !== run.ID) {
         extractionInitialized.current = run.ID;
         const editor = editorStateRef.current;
@@ -1418,76 +1458,165 @@ export function PurchaseOrderEditorPage({
     setExtractionChoices((current) => ({ ...current, [key]: choice }));
   };
 
-  const applyExtraction = () => {
+  const currencyFor = (code: string): CurrencyInfo =>
+    currencyOptions.find((option) => option.code === code) ?? currency;
+
+  /**
+   * #498: Apply re-reads the latest run and active document before writing.
+   * The panel's earlier read can be seconds old, and a PDF replaced in another
+   * session is invisible to a tab that never refreshed. A stale, replaced or
+   * superseded result discards the selection and writes nothing; the staff
+   * member runs Extract again. A currency change invalidates the amounts the
+   * same way: the stored decimals are parsed with the draft currency.
+   */
+  const applyExtraction = async () => {
+    if (extractionApplying || extractionStarting) return;
     const run = extractionState?.Run;
+    if (run == null || run.Result == null) return;
+    const orderId = editorStateRef.current.orderId;
+    if (orderId < 1) return;
+    // The read belongs to the generation that was active when Apply started.
+    const generation = extractionGeneration.current;
+    setExtractionApplying(true);
+    setExtractionError(null);
+    try {
+      const latest = await GetPurchaseOrderExtraction(orderId);
+      if (generation !== extractionGeneration.current) return;
+      const latestRun = latest.Run ?? null;
+      const latestDocument = latest.Document ?? null;
+      if (
+        latestRun == null ||
+        latestRun.ID !== run.ID ||
+        latestRun.Status !== "succeeded" ||
+        latestRun.Result == null ||
+        extractionIsStale(latestRun, latestDocument)
+      ) {
+        if (!sameExtractionDocument(activeDocumentRef.current ?? null, latestDocument)) {
+          activeDocumentRef.current = latestDocument;
+          setActiveDocument(latestDocument);
+        }
+        rejectExtraction(
+          latestRun?.ID ?? run.ID,
+          "The PDF changed after this extraction, so its proposals were discarded. Your entries were not changed. Run Extract again."
+        );
+        return;
+      }
+      if (!sameExtractionDocument(activeDocumentRef.current ?? null, latestDocument)) {
+        activeDocumentRef.current = latestDocument;
+        setActiveDocument(latestDocument);
+      }
+      const current = editorStateRef.current;
+      if (extractionCurrencyRef.current !== null &&
+        extractionCurrencyRef.current !== current.currency) {
+        rejectExtraction(
+          latestRun.ID,
+          `The draft currency changed after this extraction, so its proposals were discarded. Run Extract again to read the amounts in ${current.currency}.`
+        );
+        return;
+      }
+      const currentCurrency = currencyFor(current.currency);
+      const plan = resolveExtractionConflicts(
+        latestRun.Result,
+        current.header,
+        current.lines,
+        ensureExtractionTracker(),
+        currentCurrency
+      );
+      const selection = resolvedExtractionSelection(
+        plan,
+        extractionChoices,
+        extractionSelection
+      );
+      const applied = applyExtractionSelection(
+        latestRun.Result,
+        selection,
+        current.header,
+        current.lines,
+        current.nextKey,
+        currentCurrency
+      );
+      if (applied.appliedFields === 0 && applied.appliedRows === 0) {
+        setExtractionError(
+          "No selected proposal could be applied. Choose a value to use, or enter it manually."
+        );
+        return;
+      }
+      dispatch({
+        type: "extractionApplied",
+        header: applied.headerPatch,
+        lines: applied.lines,
+        nextKey: current.nextKey + applied.appliedRows,
+      });
+      // The applied proposals are consumed; the rest of the result is not. Only
+      // the baseline of what Apply actually wrote moves, so an unresolved
+      // cleared field or line conflict stays a conflict until it is decided or
+      // the result is discarded.
+      const previous = extractionTrackerRef.current;
+      const baselineHeader = { ...previous.baseline.header };
+      const appliedHeaderKeys = [
+        "poNumber",
+        "poDate",
+        "requestedDeliveryDate",
+        "paymentTerms",
+        "incoterms",
+      ] as const;
+      for (const key of appliedHeaderKeys) {
+        if (Object.prototype.hasOwnProperty.call(applied.headerPatch, key)) {
+          baselineHeader[key] = String(applied.headerPatch[key] ?? "");
+        }
+      }
+      const baselineLines =
+        applied.lines !== undefined
+          ? applied.lines.map((line) => ({
+              key: line.key,
+              description: line.description,
+              quantity: line.quantity,
+              uom: line.uom,
+              unitPrice: line.unitPrice,
+            }))
+          : previous.baseline.lines;
+      const nextTracker: ExtractionEditTracker = {
+        generation: previous.generation,
+        baseline: { header: baselineHeader, lines: baselineLines },
+      };
+      extractionTrackerRef.current = nextTracker;
+      setExtractionTracker(nextTracker);
+      setExtractionChoices({});
+      setExtractionApplied({ fields: applied.appliedFields, rows: applied.appliedRows });
+    } catch (error) {
+      if (generation !== extractionGeneration.current) return;
+      setExtractionError(errorText(error));
+    } finally {
+      setExtractionApplying(false);
+    }
+  };
+
+  /**
+   * #498: a currency change while a result is actionable invalidates it. The
+   * stored result has no currency of its own; its printed decimals were parsed
+   * with the draft currency in effect, so reinterpreting them under another
+   * currency would apply a different amount. The run is rejected so a later
+   * refresh cannot quietly restore it.
+   */
+  const changeCurrency = (next: CurrencyInfo) => {
+    if (next.code === state.currency) return;
+    const run = extractionState?.Run ?? null;
     const active =
       activeDocumentRef.current !== undefined
         ? activeDocumentRef.current
         : extractionState?.Document ?? null;
-    if (run == null || run.Result == null || extractionIsStale(run, active)) return;
-    const plan = resolveExtractionConflicts(
-      run.Result,
-      state.header,
-      state.lines,
-      ensureExtractionTracker(),
-      activeCurrency
-    );
-    const selection = resolvedExtractionSelection(
-      plan,
-      extractionChoices,
-      extractionSelection
-    );
-    const applied = applyExtractionSelection(
-      run.Result,
-      selection,
-      state.header,
-      state.lines,
-      state.nextKey,
-      activeCurrency
-    );
-    if (applied.appliedFields === 0 && applied.appliedRows === 0) return;
-    dispatch({
-      type: "extractionApplied",
-      header: applied.headerPatch,
-      lines: applied.lines,
-      nextKey: state.nextKey + applied.appliedRows,
-    });
-    // The applied proposals are consumed; the rest of the result is not. Only
-    // the baseline of what Apply actually wrote moves, so an unresolved
-    // cleared field or line conflict stays a conflict until it is decided or
-    // the result is discarded.
-    const previous = extractionTrackerRef.current;
-    const baselineHeader = { ...previous.baseline.header };
-    const appliedHeaderKeys = [
-      "poNumber",
-      "poDate",
-      "requestedDeliveryDate",
-      "paymentTerms",
-      "incoterms",
-    ] as const;
-    for (const key of appliedHeaderKeys) {
-      if (Object.prototype.hasOwnProperty.call(applied.headerPatch, key)) {
-        baselineHeader[key] = String(applied.headerPatch[key] ?? "");
-      }
+    if (extractionResultActionable(run, active) && run != null) {
+      rejectExtraction(
+        run.ID,
+        `The draft currency changed to ${next.code} after this extraction, so its proposals were discarded. Run Extract again to read the amounts in ${next.code}.`
+      );
     }
-    const baselineLines =
-      applied.lines !== undefined
-        ? applied.lines.map((line) => ({
-            key: line.key,
-            description: line.description,
-            quantity: line.quantity,
-            uom: line.uom,
-            unitPrice: line.unitPrice,
-          }))
-        : previous.baseline.lines;
-    const nextTracker: ExtractionEditTracker = {
-      generation: previous.generation,
-      baseline: { header: baselineHeader, lines: baselineLines },
-    };
-    extractionTrackerRef.current = nextTracker;
-    setExtractionTracker(nextTracker);
-    setExtractionChoices({});
-    setExtractionApplied({ fields: applied.appliedFields, rows: applied.appliedRows });
+    dispatch({
+      type: "currencyChanged",
+      code: next.code,
+      from: activeCurrency,
+      to: next,
+    });
   };
 
   /**
@@ -2116,7 +2245,8 @@ export function PurchaseOrderEditorPage({
     extractionRun != null && !isTerminalExtractionStatus(extractionRun.Status);
   const showExtractionPanel =
     extractionResultActionable(extractionRun, activeExtractionDocument) &&
-    dismissedExtractionId !== extractionRun?.ID;
+    dismissedExtractionId !== extractionRun?.ID &&
+    !extractionRejectedRuns.current.has(extractionRun?.ID ?? -1);
   // #479: the comparison is recomputed from the editor as staff type, not
   // frozen when the result arrived, and every choice is folded into the one
   // selection Apply consumes.
@@ -2195,7 +2325,8 @@ export function PurchaseOrderEditorPage({
           currency={activeCurrency}
           selection={extractionResolvedSelection}
           onToggle={toggleExtraction}
-          onApply={applyExtraction}
+          onApply={() => void applyExtraction()}
+          applying={extractionApplying}
           onDiscard={() => {
             setDismissedExtractionId(extractionRun.ID);
             setExtractionChoices({});
@@ -2215,6 +2346,7 @@ export function PurchaseOrderEditorPage({
         uomOptions={uomOptions}
         incotermOptions={incotermOptions}
         onLinkQuotation={onLinkQuotation}
+        onCurrencyChange={changeCurrency}
         onSave={() => void save(state.version, false)}
         onCancel={onCancel}
         onFinalSave={() => void startReview()}

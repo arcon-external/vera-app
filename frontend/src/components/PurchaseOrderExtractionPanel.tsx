@@ -52,6 +52,8 @@ export interface PurchaseOrderExtractionPanelViewProps {
   selection: Record<string, boolean>;
   onToggle: (key: string, selected: boolean) => void;
   onApply: () => void;
+  /** #498: true while Apply re-reads the latest generation. */
+  applying?: boolean;
   onDiscard: () => void;
   applied?: { fields: number; rows: number } | null;
   /**
@@ -363,6 +365,7 @@ export function PurchaseOrderExtractionPanelView({
   selection,
   onToggle,
   onApply,
+  applying = false,
   onDiscard,
   applied = null,
   plan = null,
@@ -530,7 +533,7 @@ export function PurchaseOrderExtractionPanelView({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <Button variant="primary" onClick={onApply} disabled={!canApply}>
+        <Button variant="primary" onClick={onApply} disabled={!canApply || applying}>
           {selectedFields + selectedRows === 0
             ? "Apply selected"
             : `Apply selected (${selectedFields} ${selectedFields === 1 ? "field" : "fields"}${

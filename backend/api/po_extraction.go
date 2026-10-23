@@ -43,6 +43,17 @@ func (s *Server) startPurchaseOrderExtraction(context echo.Context) error {
 	return context.JSON(http.StatusAccepted, mapPurchaseOrderExtractionState(state))
 }
 
+// getPurchaseOrderExtractionAvailability answers whether this deployment can
+// extract at all. It is authenticated but organization-independent: the
+// preflight describes the server, not a tenant. It writes nothing and is the
+// typed signal behind the desktop's disabled Extract and banner.
+func (s *Server) getPurchaseOrderExtractionAvailability(context echo.Context) error {
+	available := s.extractions != nil && s.extractions.Available(context.Request().Context())
+	return context.JSON(http.StatusOK, apicontract.PurchaseOrderExtractionAvailabilityRow{
+		Available: available,
+	})
+}
+
 func (s *Server) getPurchaseOrderExtraction(context echo.Context) error {
 	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
 	if err != nil || id < 1 {

@@ -3,6 +3,7 @@ import {
   AttachPurchaseOrderDocument,
   GetActivePurchaseOrderDocumentContent,
   GetPurchaseOrderDocumentState,
+  GetPurchaseOrderExtractionAvailability,
   RemovePurchaseOrderDocument,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
@@ -54,6 +55,8 @@ export interface PurchaseOrderDocumentPanelViewProps {
   extractionStatus?: "queued" | "running" | null;
   /** True while the start request itself is in flight. */
   extractionStarting?: boolean;
+  /** The typed deployment probe: false disables Extract and shows a banner. */
+  extractorAvailable?: boolean | null;
   onChooseFile: () => void;
   onView: () => void;
   onRemove: () => void;
@@ -73,6 +76,7 @@ export function PurchaseOrderDocumentPanelView({
   onExtract,
   extractionStatus = null,
   extractionStarting = false,
+  extractorAvailable = null,
   onChooseFile,
   onView,
   onRemove,
@@ -82,7 +86,7 @@ export function PurchaseOrderDocumentPanelView({
 }: PurchaseOrderDocumentPanelViewProps) {
   const active: PurchaseOrderDocumentDTO | null = state.Document ?? null;
   const documentState = documentStateOf(state);
-  const extract = extractAndCompareAvailability(documentState, onExtract != null);
+  const extract = extractAndCompareAvailability(documentState, onExtract != null, extractorAvailable);
   const extractInFlight = extractionStatus === "queued" || extractionStatus === "running";
   const extractBusy = extractionStarting || extractInFlight;
   const disabled = busy !== "idle" || loading;
@@ -144,6 +148,15 @@ export function PurchaseOrderDocumentPanelView({
         <p className="mt-1 text-caption text-ink-500">
           The final save recorded this omission deliberately.
         </p>
+      ) : null}
+
+      {extractorAvailable === false ? (
+        <div className="mt-3" data-testid="po-extraction-unavailable">
+          <StatusBanner tone="info">
+            Automatic extraction is not available on this server. Attach the PDF and
+            enter the values manually; nothing is read automatically.
+          </StatusBanner>
+        </div>
       ) : null}
 
       {pendingRemoval && active !== null ? (
@@ -298,6 +311,10 @@ export function PurchaseOrderDocumentPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState(false);
   const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
+  // #498: the typed deployment probe. `null` means "not answered/unreachable";
+  // that is not an unavailable extractor, so the manual path stays reachable
+  // and Start still returns its typed 503 if the deployment cannot extract.
+  const [extractorAvailable, setExtractorAvailable] = useState<boolean | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const previewUrl = useRef<string | null>(null);
   // Every state read carries the generation it was requested for. A read that
@@ -356,6 +373,23 @@ export function PurchaseOrderDocumentPanel({
       cancelled = true;
     };
   }, [purchaseOrderId, initialState]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const answer = await GetPurchaseOrderExtractionAvailability();
+        if (!cancelled) setExtractorAvailable(answer.Available);
+      } catch {
+        // A probe failure is not evidence of an unavailable extractor. Keep
+        // Extract enabled so Start's typed refusal remains the visible answer.
+        if (!cancelled) setExtractorAvailable(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const current = previewUrl.current;
@@ -490,6 +524,7 @@ export function PurchaseOrderDocumentPanel({
         onExtract={onExtract}
         extractionStatus={extractionStatus}
         extractionStarting={extractionStarting}
+        extractorAvailable={extractorAvailable}
         onChooseFile={chooseFile}
         onView={() => void view()}
         onRemove={() => setPendingRemoval(true)}

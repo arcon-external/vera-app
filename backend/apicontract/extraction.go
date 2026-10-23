@@ -150,6 +150,13 @@ type ExtractionAbstentions struct {
 	Rows   int `json:"rows"`
 }
 
+// PurchaseOrderExtractionAvailabilityRow is the typed deployment answer the
+// desktop uses to disable Extract before a run is requested. It carries no
+// reason text: wording belongs to the client, and the code is the contract.
+type PurchaseOrderExtractionAvailabilityRow struct {
+	Available bool `json:"available"`
+}
+
 // ExtractionOutput is the complete extractor answer. Engine and EngineVersion
 // identify the text engine; OCREngine and OCREngineVersion identify the OCR
 // engine when one ran. Every version is part of the stored result so repeat

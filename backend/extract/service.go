@@ -43,6 +43,21 @@ func NewService(database *store.Store, engine Engine) *Service {
 	}
 }
 
+// Available reports whether this deployment can extract at all, using the
+// same Prober preflight Start runs. It is a typed deployment answer for the
+// desktop's banner: not an error string, and never a simulated success.
+// An engine without the optional Prober is assumed available, exactly as
+// Start assumes it.
+func (s *Service) Available(ctx context.Context) bool {
+	if s == nil || s.Store == nil || s.Engine == nil {
+		return false
+	}
+	if prober, ok := s.Engine.(Prober); ok {
+		return prober.Available(ctx) == nil
+	}
+	return true
+}
+
 // Start queues an extraction and returns the run that is active for the
 // document. Starting again while that run is still queued/running returns the
 // same run; the extra worker loses the queued -> running claim and exits.

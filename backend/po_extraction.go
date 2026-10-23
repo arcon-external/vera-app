@@ -143,6 +143,30 @@ type PurchaseOrderExtractionStateDTO struct {
 	Document *PurchaseOrderExtractionDocumentDTO
 }
 
+// PurchaseOrderExtractionAvailabilityDTO is the typed deployment answer behind
+// the desktop's disabled Extract and its unavailable banner. It is the same
+// preflight Start runs, so a banner and a 503 cannot disagree.
+type PurchaseOrderExtractionAvailabilityDTO struct {
+	Available bool
+}
+
+// GetPurchaseOrderExtractionAvailability asks whether this deployment can
+// extract at all. It writes nothing and creates no run.
+func (q *Quotation) GetPurchaseOrderExtractionAvailability() (PurchaseOrderExtractionAvailabilityDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return PurchaseOrderExtractionAvailabilityDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return PurchaseOrderExtractionAvailabilityDTO{}, err
+	}
+	var response apicontract.PurchaseOrderExtractionAvailabilityRow
+	if err := client.Get("/v1/purchase-orders/extraction/availability", &response); err != nil {
+		return PurchaseOrderExtractionAvailabilityDTO{}, err
+	}
+	return PurchaseOrderExtractionAvailabilityDTO{Available: response.Available}, nil
+}
+
 // StartPurchaseOrderExtraction asks the server to queue a text extraction for
 // the current PDF. It is idempotent while a run is active: the server returns
 // the run already in flight.

@@ -77,6 +77,64 @@ func finishExtractionSuccess(t *testing.T, database *Store, ctx context.Context,
 	return finished
 }
 
+func TestSourceLessDraftExtractsBeforeLinkingWithoutACustomer(t *testing.T) {
+	database := openTestSchema(t, "vera_po_extract_source_less")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+	draft := createBlankDraft(t, database, ctx, user)
+	document := attachTestDocument(t, database, ctx, draft.ID, user, minimalPDF(nil, ""))
+
+	before, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("list clients before: %v", err)
+	}
+
+	run := createExtractionRun(t, database, ctx, draft.ID, user.ID)
+	finished := finishExtractionSuccess(t, database, ctx, run)
+	if finished.Status != PurchaseOrderExtractionStatusSucceeded ||
+		finished.DocumentID != document.ID || finished.DocumentVersion != document.Version ||
+		finished.DocumentSHA256 != document.SHA256 {
+		t.Fatalf("finished run = %+v; want the source-less document generation", finished)
+	}
+
+	state, err := database.LatestPurchaseOrderExtraction(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("read latest extraction: %v", err)
+	}
+	if state.Run == nil || state.Run.Status != PurchaseOrderExtractionStatusSucceeded {
+		t.Fatalf("latest run = %+v; want the stored success", state.Run)
+	}
+	if len(state.Run.Result) == 0 {
+		t.Error("the extraction result was not persisted")
+	}
+	if state.Document == nil || state.Document.ID != document.ID {
+		t.Errorf("active document = %+v; want %d", state.Document, document.ID)
+	}
+
+	reread, err := database.GetPurchaseOrder(ctx, draft.ID)
+	if err != nil {
+		t.Fatalf("read draft after extraction: %v", err)
+	}
+	if reread.SourceState != "never" || reread.CustomerID != 0 || reread.CustomerName != "" ||
+		reread.QuotationID != 0 {
+		t.Errorf("extraction changed source identity: %+v", reread)
+	}
+	after, err := database.ListClients(ctx)
+	if err != nil {
+		t.Fatalf("list clients after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("client records = %d after extraction; want %d (extraction cannot create a Customer)",
+			len(after), len(before))
+	}
+
+	// Extraction is evidence, not a source. The source-less draft still cannot
+	// enter its finalize review even though a succeeded result exists.
+	if _, err := database.GetPurchaseOrderReview(ctx, draft.ID); !errors.Is(err, ErrPurchaseOrderSourceMissing) {
+		t.Errorf("review after extraction = %v; want source missing", err)
+	}
+}
+
 func TestCreateExtractionRequiresAnAttachedDocument(t *testing.T) {
 	database := openTestSchema(t, "vera_po_extract_no_document")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "No document")
