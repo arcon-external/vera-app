@@ -1,16 +1,19 @@
 # Quotation → PO sprint verification (#482)
 
-Status: **partially verified — one required gate is BLOCKED; D1 is RESOLVED.
-The Judge passed the record on evidence accuracy subject to two corrections
-(applied below), and returned **NOT PASS / BLOCKED** for sprint completion.**
-No release or merge was made; the branch and draft PR are pushed.
+Status: **the sprint's verification record; the one BLOCKED gate was the
+extraction holdout, superseded by #503, which deleted the feature.** Criteria 1–4
+and the repository gates passed as recorded below. The Judge passed the record on
+evidence accuracy subject to two corrections (applied below), and returned
+**NOT PASS / BLOCKED** for sprint completion on that gate; §5 records why the
+blocker is void. No release or merge was made; the branch and draft PR are
+pushed.
 
 - Branch: `feat/464-po-sprint`
-- Behaviour verified at `8809adb` (`merge: resolve manual extraction conflicts and
-  retry safely (#479)`), clean tree before the verification.
+- Behaviour verified at `8809adb` (the #479 merge), clean tree before the
+  verification.
 - Final code at `5098a55` (D1 fix `22879b4`, record update `5098a55`); the Judge
   corrections are a docs-only commit after it.
-- D1 fix: `22879b4` (`fix: correct the extraction OCR hint copy`, `Refs #482`).
+- D1 copy fix: `22879b4` (`Refs #482`); the code it touched was deleted (§5).
 - Database: disposable local `vera-pg-test` (PostgreSQL 18.6),
   `postgres://vera:vera@127.0.0.1:55432/veratest?sslmode=disable`, and the
   rehearsal schema `vera_sprint_upgrade`. Production was never contacted.
@@ -20,17 +23,17 @@ No release or merge was made; the branch and draft PR are pushed.
 
 | # | Acceptance criterion | Status |
 | --- | --- | --- |
-| 1 | Manual and PDF workflows, both entry paths, selector steps, lists/filters, drafts, finalization, correction | **PASS** (behaviour); D1 **RESOLVED** in `22879b4` |
+| 1 | Manual entry and PDF workflows, selector steps, lists/filters, drafts, finalization, correction | **PASS** (behaviour); D1 **RESOLVED** in `22879b4` |
 | 2 | Optional numbering, race/overwrite paths, deletion challenges, source survival/repair, permissions end to end | **PASS** |
 | 3 | Production-shaped upgrade/rollback rehearsal; old signature still verifies | **PASS** (local binary + schema rehearsal, not a production deploy) |
 | 4 | Real assembled pages, modal keyboard/focus, errors, progress, evidence at narrow/wide | **PASS** for jsdom + SSR snapshots; real Wails interactions **HAND-DRIVEN** |
-| 5 | Extraction holdout results against the agreed quality/resource/security/license gates | **BLOCKED — user input required** |
+| 5 | Extraction holdout results against the agreed quality/resource/security/license gates | **SUPERSEDED** — the feature was deleted by #503 and no accuracy claim was ever made (§5) |
 | 6 | Full repository gates on a quiescent tree; Judge before merge; orchestrator revalidation | Gates **PASS**; Judge and orchestrator revalidation **HAND-DRIVEN / pending** |
-| 7 | No release while sprint issues/PRs are unresolved; an unresolved quality gate blocks completion | **BLOCKED** by criterion 5 (and PR #484 is still a draft) |
+| 7 | No release while sprint issues/PRs are unresolved; an unresolved quality gate blocks completion | Criterion 5's blocker is **VOID**; no release was made and PR #484 is still a draft |
 
-**#482 cannot be closed and #464 cannot be declared fully verified** until the
-extraction holdout inputs below are supplied, or the user explicitly accepts
-assisted extraction without accuracy claims. The rest of the sprint is verified.
+**The extraction holdout no longer blocks anything:** #503 deleted the feature, so
+#482 and #464 are not waiting on holdout inputs or an accuracy signoff. The rest
+of the sprint record below stands as verified.
 
 ## 1. Manual and PDF workflows
 
@@ -115,7 +118,7 @@ and discard tests (`PurchaseOrderEditor.test.tsx`, `.dom.test.tsx`). Snapshots
   `PurchaseOrderCorrectionEditor-1280.png`,
   `PurchaseOrderVersionConflict-360.png`.
 
-### PDF attach, replace, remove and extraction
+### PDF attach, replace and remove
 
 - Attach/replace/history: store `TestAttachPurchaseOrderDocumentStoresExactBytesAndMetadata`,
   `TestReplacingAPurchaseOrderDocumentRetainsThePriorVersion`,
@@ -123,18 +126,7 @@ and discard tests (`PurchaseOrderEditor.test.tsx`, `.dom.test.tsx`). Snapshots
   `TestAttachPurchaseOrderDocumentRefusesInvalidEncryptedAndOversized`; API
   `TestPurchaseOrderDocumentUploadReadReplaceAndHistory` and the removal /
   no-PDF-finalize tests; frontend `PurchaseOrderDocumentPanel.test.tsx` / `.dom.test.tsx`.
-- Extraction: `go test ./backend/extract ./cmd/vextract` and
-  `backend/api -run Extraction` (pipeline, per-page text/OCR decision, typed
-  failures, stale-after-replacement, idempotent start, OCR provenance), plus
-  frontend `poExtraction*.test.ts`, `PurchaseOrderExtractionPanel.dom.test.tsx`
-  and `PurchaseOrderEditor.dom.test.tsx` conflict/apply tests.
-- Real engines, opt-in: `VERA_EXTRACTOR_DOCKER=1 go test ./backend/extract -run Docker -v`
-  → 4 PASS (text, mixed header + scanned table, 150 DPI + 3° skew, fully
-  scanned). Full server + store + container: API `TestDockerExtractionEndToEnd`
-  → PASS. These use **synthetic** PDFs and prove plumbing only.
-- Snapshots read: `PurchaseOrderDocumentAttached-360.png`,
-  `PurchaseOrderExtractionReview-360.png`,
-  `PurchaseOrderExtractionConflicts-{360,1280}.png`.
+- Snapshots read: `PurchaseOrderDocumentAttached-360.png`.
 
 ## 2. Numbering, races, deletion, source survival, permissions
 
@@ -160,8 +152,7 @@ package exits are recorded in §6.
   `TestAttachPurchaseOrderDocumentKeepsOneActiveUnderARealRace`,
   `TestRepairPurchaseOrderSourceLosesTheRaceForAnOccupiedTarget`,
   `TestChainDeletionRaceWithACorrectionNeverCascadesUnconfirmed`,
-  `TestConcurrentChainDeletionsRunOnce`,
-  `TestConcurrentExtractionStartsShareOneActiveRun`; API
+  `TestConcurrentChainDeletionsRunOnce`; API
   `TestPurchaseOrderDraftOverwriteOverTheAPIKeepsTheReplacedDraftAndAttachment`,
   `TestPurchaseOrderStaleSaveReturnsTheNamedConflict` — all PASS.
 - **Deletion challenges:** `TestDeleteQuotationChainNeedsTheChallengeAndRemovesEverything`,
@@ -193,8 +184,7 @@ package exits are recorded in §6.
   `TestDeletionEndpointsRefuseStaff`,
   `TestPurchaseOrderSourceRepairIsAdminOnlyOverTheAPI`,
   `TestPurchaseOrderEndpointsRequireASession`,
-  `TestPOSourceEndpointsRequireASession`,
-  `TestExtractionRequiresASessionAndAKnownRecord`; frontend
+  `TestPOSourceEndpointsRequireASession`; frontend
   `PurchaseOrderWorkspace.dom.test.tsx` admin/staff action visibility and
   `DeletionDialog.dom.test.tsx` 403 handling — all PASS.
 
@@ -239,12 +229,11 @@ deployment action outside this verification's authority.
 - `scripts/ui-snapshot.sh` exit 0; 48 cases rendered to 96 PNGs in
   `/tmp/opencode/ui-snap-sprint/` (local evidence, not committed).
 - Read at both widths: DocumentHome, POSelector Step 1/3, PurchaseOrderEditor,
-  PurchaseOrderDifferenceReview, PurchaseOrderExtractionConflicts,
-  PurchaseOrderRepairReview, PurchaseOrderArchive.
+  PurchaseOrderDifferenceReview, PurchaseOrderRepairReview,
+  PurchaseOrderArchive.
 - Read at 360 only: PurchaseOrderSavedSourceMissing,
   PurchaseOrderFinalConfirmation, PurchaseOrderVersionConflict,
-  PurchaseOrderExtractionReview, PurchaseOrderDocumentAttached,
-  DeletionDialogChallengePanel.
+  PurchaseOrderDocumentAttached, DeletionDialogChallengePanel.
 - Read at 1280 only: DeletionDialogChain, PurchaseOrderCorrectionEditor.
 - No clipped controls, horizontal overflow, or missing status/evidence labels
   were seen; the archive table and the selector list scroll as designed.
@@ -257,46 +246,29 @@ deployment action outside this verification's authority.
   file pickers, PDF preview and a real Wails webview were not exercised. Those
   stay hand-driven.
 
-## 5. Extraction holdout gate — BLOCKED
+## 5. Extraction holdout gate — SUPERSEDED
 
-> **Update (2026-10-23):** a 47-PO authorised SAP Ariba development set has
-> since been measured. Its first frozen run failed the #476 §2.5 bars, and the
-> set is now a **seen development set**, not a holdout. This section's
-> "BLOCKED" status therefore means "no fresh authorised holdout", not "no
-> authorised PDFs". A new frozen holdout is still required before any accuracy
-> claim.
+> **Superseded by #503 (2026-10-26).** The PO extraction feature was deleted:
+> engine, extractor CLI, Docker image, API routes, Wails bindings, store
+> repository, database table and editor panel are all gone. The gate was never
+> measured against an approved holdout and no accuracy claim was ever made, so
+> nothing is left to validate and it no longer applies to #482, #464 or PR #484.
+>
+> Extraction-specific items elsewhere in this record are superseded with it: the
+> `backend/extract` / `cmd/vextract` and `backend/api -run Extraction` commands,
+> the opt-in `VERA_EXTRACTOR_DOCKER` Docker runs and their §6 gate-table rows,
+> the `poExtraction*` and `PurchaseOrderExtractionPanel` tests, the
+> `TestConcurrentExtractionStartsShareOneActiveRun` and
+> `TestExtractionRequiresASessionAndAKnownRecord` tests, the extraction
+> snapshots (§4 — the 48 cases / 96 PNGs there included two extraction cases),
+> and the extraction-accuracy residual (§8). They describe a feature that no
+> longer exists and prove nothing about the product as shipped.
 
-`docs/po-extraction.md` and `docs/po-extraction-benchmark.md` state it
-explicitly: the accuracy thresholds in #476 §2.5 have **not been measured on a
-holdout**.
-The sprint handoff predates the 47-PO development-set measurement; that set
-has ground truth but is seen, not a holdout, and it failed the first frozen
-run. No fresh authorised holdout or threshold signoff exists. Reporting
-extraction as validated would be inventing a number. The licence review for
-Poppler/Tesseract as separate server-side subprocesses is approved
-(2026-10-21); the *measurement* gate is not.
-
-**Exact inputs required from the user (or an explicit written acceptance of
-assisted extraction without accuracy claims):**
-
-1. Authorised customer PDFs, stratified per #476 §2.1: at least 3 customer
-   layouts, 30 POs, 5 scanned/mixed documents — or a written statement of what
-   was actually obtained with thresholds re-scoped accordingly.
-2. Human-corrected ground truth per PO, recorded independently of any engine
-   output: header fields, every line (description, quantity to 4 decimals, UoM,
-   unit price), printed totals, and source page/region.
-3. A tuning / frozen-holdout split by layout, with the holdout unseen until the
-   acceptance run.
-4. Signoff on the §2.5 bars before measuring: critical-field accuracy ≥ 95 %,
-   complete-row accuracy ≥ 90 %, zero silent monetary/quantity errors, zero
-   silent missing/duplicate rows, correction time below the manual baseline,
-   p95 latency inside the async UX budget, and zero crashes/hangs on hostile,
-   oversized, encrypted or invalid input.
-5. The §2.4 measurements themselves (accuracy, abstentions, latency p50/p95,
-   peak RAM, failures, cost) on that holdout.
-
-Until then: #476 stays open, #482 stays open, #464 is not fully verified, and
-PR #484 stays a draft. This is a documented blocker, not an assumption.
+The history, for the record: the #476 §2.5 thresholds were never measured on an
+approved holdout. The 47-PO authorised SAP Ariba set was measured once on
+2026-10-23, failed the first frozen run, and is a **seen development set**, not a
+holdout. That is why no accuracy claim was made, and deleting the feature makes
+no claim either way.
 
 ## 6. Repository gates on the quiescent tree
 
@@ -313,10 +285,8 @@ are below (the 830 total includes the two D1 guards).
 | `npm --prefix frontend test` | 0 | 62 files passed, 1 skipped; 830 tests passed, 48 skipped (the 48 are the opt-in UI snapshot harness) |
 | `go test ./cmd/vera -run '^TestEndToEndThroughTheCLI$'` (DSN) | 0 | PASS |
 | Targeted store PO suite (`-race`, DSN) | 0 | 132 PASS |
-| Targeted API PO suite (`-race`, DSN) | 0 | 74 PASS, 1 Docker test skipped (run separately) |
+| Targeted API PO suite (`-race`, DSN) | 0 | 74 PASS, 1 Docker test skipped (that test was deleted with extraction, §5) |
 | Targeted frontend PO suite (30 files) | 0 | 390 passed |
-| `VERA_EXTRACTOR_DOCKER=1 go test ./backend/extract -run Docker` | 0 | 4 PASS |
-| `VERA_EXTRACTOR_DOCKER=1 … go test ./backend/api -run '^TestDockerExtractionEndToEnd$'` | 0 | PASS |
 | `scripts/ui-snapshot.sh` | 0 | 48 cases, 96 PNGs |
 | Upgrade/rollback rehearsal | 0 | `REHEARSAL OK` |
 
@@ -333,74 +303,36 @@ corrections — the gate table's SHA is now the final code SHA, and §8 no longe
 sweeps #476 into “open until the PR merges”. **PR #484: NOT PASS as written** —
 it resolved #476 while #476's measurement/signoff criteria are unmet; the body
 now uses `Refs #476` and the PR stays draft. **Sprint completion: NOT PASS /
-BLOCKED** on criterion 5. Orchestrator revalidation re-ran the final-SHA gates;
-no merge or release was performed.
+BLOCKED** on criterion 5 — that blocker is void since #503 deleted the feature
+(§5). Orchestrator revalidation re-ran the final-SHA gates; no merge or release
+was performed.
 
 ## 7. Defects found
 
-### D1 — stale extraction copy says scanned pages are not read — **RESOLVED**
+### D1 — stale copy says scanned pages are not read — **RESOLVED, then superseded (#503)**
 
-`frontend/src/purchaseOrderDocument.ts:229` (and the empty-state hint at
-`:216`) still says:
+> Superseded: the panel and the availability copy this defect lived in are
+> deleted with the extraction feature (#503), so there is no guard left to run.
 
-> Reads the selectable text layer only; scanned pages are not read.
+At the time, the document panel's hint said it read "the selectable text layer
+only; scanned pages are not read", while the review panel on the same screen
+reported pages read with OCR — the two contradicted each other on one screen.
+The pure test asserted only that the hint contained "text layer", which the
+stale sentence satisfied, so it could not fail.
 
-That is #477 wording. #478 shipped per-page OCR, and the review panel on the
-same screen reports "1 of 2 pages had no usable text layer and were read with
-OCR (tesseract 5.5.0)". The stale hint is visible in the freshly rendered
-`PurchaseOrderDocumentAttached-360.png`; the pure test
-(`purchaseOrderDocument.test.ts:100`) only asserts the hint contains
-`"text layer"`, so nothing catches the contradiction. The component's header
-comment at `frontend/src/components/PurchaseOrderExtractionPanel.tsx:44`
-carries the same stale claim ("A scanned page is reported as an abstention,
-never OCRed here").
+The `tdd` lens found the weak guard; `diagnosing-bugs` confirmed the boundary was
+an assembled-panel repro, not a pure-function one. The fix in `22879b4` was copy
+only, with two replacement guards proven red on the old copy before they passed.
 
-The `tdd` lens found the reason the existing test missed it:
-`purchaseOrderDocument.test.ts:100` asserted only that the hint contains
-`"text layer"`, which the stale sentence still satisfied. The correct
-regression seam is the pure `extractAndCompareAvailability` function, with the
-panel SSR pass as the assembled check. The `diagnosing-bugs` lens confirmed the
-boundary: the minimised repro is the rendered `DocumentAttached` panel, where
-the hint and the OCR evidence line contradicted each other on one screen.
+Both the copy and the guards go with the feature. The lesson stands and is why
+§9 records it: a substring assertion that the wrong sentence also satisfies is
+not a guard.
 
-**Resolution — `22879b4`** (`fix: correct the extraction OCR hint copy`,
-`Refs #482`). Copy changes only:
-
-- `purchaseOrderDocument.ts:216` — `"Reads the selectable text layer only."` →
-  `"Reads selectable text and OCRs scanned pages."`
-- `purchaseOrderDocument.ts:229` — `"Reads the selectable text layer only;
-  scanned pages are not read."` → `"Reads selectable text and OCRs scanned
-  pages; low-confidence OCR values need review against the page image."`
-- `PurchaseOrderExtractionPanel.tsx:44` — `"A scanned page is reported as an
-  abstention, never OCRed here."` → `"The engine OCRs only pages without a
-  usable text layer, and its low-confidence evidence arrives marked
-  `needs_review` rather than as fact."`
-
-Red/green evidence (md5-restore scratch):
-
-- New guards: `purchaseOrderDocument.test.ts` — "says scanned pages are OCRed
-  and that low-confidence OCR needs review";
-  `PurchaseOrderDocumentPanel.test.tsx` — "says scanned pages are OCRed, with a
-  low-confidence review instruction".
-- Against the old copy (scratch restored, green md5 `7aefe453…` saved first):
-  `npx vitest run src/purchaseOrderDocument.test.ts
-  src/components/PurchaseOrderDocumentPanel.test.tsx` → **exit 1**, exactly
-  those 2 tests failed (`expected 'Reads the selectable text layer only;…' to
-  contain 'OCRs scanned pages'`).
-- Restored from the saved copy (`md5sum -c` → `OK`) and re-ran → **exit 0**,
-  29 passed in 2 files.
-- Full gates after the fix: `npm --prefix frontend test` exit 0 (830 passed, 48
-  opt-in snapshot tests skipped), `npm --prefix frontend run build` exit 0,
-  `gofmt -l .` exit 0 (no output), `go vet ./...` exit 0.
-
-No functional failure was found: every gate above passed, and the OCR pipeline
-behaves as documented in the Docker and API tests.
+No functional failure was found: every gate passed, and the OCR pipeline behaved
+as its Docker and API tests documented at the time.
 
 ## 8. Remaining unverified / hand-driven
 
-- **Extraction accuracy, latency, memory, cost and hostile-PDF behaviour on real
-  documents** — blocked, see §5. Stock hostile-input handling is covered by
-  synthetic tests only.
 - **Real desktop Wails interactions** — clicking either entry path, typing,
   native focus/keyboard in the webview, file picker, PDF preview, window
   resize. jsdom substitutes for focus/keyboard logic; it is not a browser.
@@ -418,13 +350,14 @@ behaves as documented in the Docker and API tests.
   The rehearsal itself was run and reported, not contradicted.
 - **Judge verdict and orchestrator revalidation** — the Judge passed the record
   on evidence accuracy subject to the two corrections now applied; it returned
-  **NOT PASS / BLOCKED** for sprint completion. PR #484 stays draft; the
-  `Resolves #476` overreach is corrected to `Refs #476`.
+  **NOT PASS / BLOCKED** for sprint completion on criterion 5, which #503 has
+  since superseded (§5). PR #484 stays draft; the `Resolves #476` overreach is
+  corrected to `Refs #476`.
 - Administrative state: all child tickets are open until the integration PR
-  merges, except **#476**, which stays open until its measurement/signoff
-  criteria are met; **#482** and **#464** stay open until the extraction gate
-  resolves. #483's fix is present, its regression tests pass, and the PR
-  resolves it.
+  merges, except **#476**, **#477**, **#478**, **#479**, **#482** and **#498**,
+  which #503 supersedes and closes as deleted; **#464** no longer waits on the
+  extraction gate (§5). #483's fix is present, its regression tests pass, and the
+  PR resolves it.
 
 ## 9. Process record
 
@@ -435,13 +368,12 @@ behaves as documented in the Docker and API tests.
     to this verification worker, so both axes were run directly rather than
     delegated.
   - `tdd` — used to check whether each claimed guard can actually fail. It
-    found D1's guard was too weak (the test asserted a substring the stale copy
-    still contained); the fix in `22879b4` replaces it with the two guards
-    proven red on the old copy above.
-  - `diagnosing-bugs` — used for D1: the repro is the assembled panel where
-    the stale hint and the OCR evidence line disagree; the correct regression
-    seam is the pure `extractAndCompareAvailability` function. The fix was
-    applied in `22879b4` after the defect was recorded.
+    found D1's guard was too weak: the test asserted a substring the stale copy
+    still contained. The replacement guards were proven red on the old copy
+    before they passed (`22879b4`).
+  - `diagnosing-bugs` — used for D1: the repro was the assembled panel where the
+    stale hint and the OCR evidence line disagreed. The fix was applied in
+    `22879b4` after the defect was recorded.
   - Deliberately not loaded: `research` (the primary documents are in-repo),
     `prototype` (no design fork), and the design/copy skills (no product
     change).
