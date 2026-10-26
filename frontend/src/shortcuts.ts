@@ -11,10 +11,12 @@ export type ActionId =
   | "exportPdf"
   | "prepare"
   | "newQuotation"
+  | "gotoHome"
   | "gotoEditor"
+  | "gotoDrafts"
   | "gotoArchive"
-  | "gotoClients"
-  | "gotoTeam"
+  | "gotoPurchaseOrder"
+  | "gotoAdmin"
   | "gotoSettings"
   | "toggleHelp"
   | "gridUp"
@@ -48,11 +50,13 @@ export const SHORTCUT_ACTIONS: ActionDef[] = [
   { id: "exportPdf", label: "Export PDF", hint: "From the editor, when ready", default: { mod: true, ctrl: false, shift: false, alt: false, key: "s" } },
   { id: "prepare", label: "Prepare quotation", hint: "From the editor", default: { mod: true, ctrl: false, shift: false, alt: false, key: "Enter" } },
   { id: "newQuotation", label: "New quotation", hint: "Discard-confirm flow still applies", default: { mod: true, ctrl: false, shift: false, alt: false, key: "n" } },
-  { id: "gotoEditor", label: "Go to Editor", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "1" } },
-  { id: "gotoArchive", label: "Go to Archive", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "2" } },
-  { id: "gotoClients", label: "Go to Clients", hint: "Admins only", default: { mod: false, ctrl: false, shift: false, alt: true, key: "3" } },
-  { id: "gotoTeam", label: "Go to Team", hint: "Admins only", default: { mod: false, ctrl: false, shift: false, alt: true, key: "4" } },
-  { id: "gotoSettings", label: "Go to Settings", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "5" } },
+  { id: "gotoHome", label: "Go to Home", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "0" } },
+  { id: "gotoEditor", label: "Go to Quotation Editor", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "1" } },
+  { id: "gotoDrafts", label: "Go to Quotation Drafts", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "2" } },
+  { id: "gotoArchive", label: "Go to Quotation Archive", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "3" } },
+  { id: "gotoPurchaseOrder", label: "Go to Purchase Orders", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "4" } },
+  { id: "gotoAdmin", label: "Go to Admin Dashboard", hint: "Admins only", default: { mod: false, ctrl: false, shift: false, alt: true, key: "5" } },
+  { id: "gotoSettings", label: "Go to Account settings", hint: "", default: { mod: false, ctrl: false, shift: false, alt: true, key: "6" } },
   { id: "toggleHelp", label: "Shortcuts overlay", hint: "Also closes it", default: { mod: false, ctrl: false, shift: false, alt: false, key: "?" } },
   { id: "gridUp", label: "Grid: move up", hint: "Editor cells", default: { mod: false, ctrl: false, shift: false, alt: false, key: "ArrowUp" } },
   { id: "gridDown", label: "Grid: move down", hint: "Editor cells", default: { mod: false, ctrl: false, shift: false, alt: false, key: "ArrowDown" } },

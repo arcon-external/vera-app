@@ -215,3 +215,82 @@ func TestPostFormReadsTheNotFoundPage(t *testing.T) {
 		t.Errorf("body = %q; want the not-found page", body)
 	}
 }
+
+// TestConflictOfReadsTheStaleSaveBody is the desktop half of #473's conflict
+// contract: the 409 body's current version and last writer must survive as
+// typed data, not be flattened into an English sentence the UI would have to
+// parse. A non-conflict refusal must leave Conflict nil.
+func TestConflictOfReadsTheStaleSaveBody(t *testing.T) {
+	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{
+			"error": "purchase order was saved since it was loaded: Budi Santoso saved version 4",
+			"code": "po_version_conflict",
+			"currentVersion": 4,
+			"currentState": "draft",
+			"updatedBy": 9,
+			"updatedByName": "Budi Santoso",
+			"updatedAt": "2026-10-21T08:30:00+07:00"
+		}`))
+	})
+	err := client.Put("/v1/purchase-orders/7", map[string]any{"expectedVersion": 3}, nil)
+	if StatusOf(err) != http.StatusConflict {
+		t.Fatalf("StatusOf = %d; want 409", StatusOf(err))
+	}
+	conflict := ConflictOf(err)
+	if conflict == nil {
+		t.Fatal("ConflictOf = nil; want the conflict details")
+	}
+	if conflict.CurrentVersion != 4 || conflict.CurrentState != "draft" ||
+		conflict.UpdatedBy != 9 || conflict.UpdatedByName != "Budi Santoso" ||
+		conflict.UpdatedAt != "2026-10-21T08:30:00+07:00" {
+		t.Errorf("conflict = %+v; want version 4 by Budi Santoso", conflict)
+	}
+	if err.Error() == "" || !strings.Contains(err.Error(), "version 4") {
+		t.Errorf("message = %q; want the server's sentence", err.Error())
+	}
+}
+
+func TestConflictOfIgnoresOtherRefusals(t *testing.T) {
+	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = writer.Write([]byte(`{"error":"a correction needs a reason","code":"po_correction_reason_required"}`))
+	})
+	err := client.Post("/v1/purchase-orders/7/correction", map[string]any{}, nil)
+	if StatusOf(err) != http.StatusUnprocessableEntity {
+		t.Fatalf("StatusOf = %d; want 422", StatusOf(err))
+	}
+	if conflict := ConflictOf(err); conflict != nil {
+		t.Errorf("ConflictOf = %+v; want nil for a non-conflict refusal", conflict)
+	}
+}
+
+// TestCodeOfReadsTheRefusalCode is wave 2 of #473: the desktop must react to a
+// saved-record refusal (po_not_draft) as a named answer, not by matching the
+// English sentence. Every refusal's stable code survives on the error.
+func TestCodeOfReadsTheRefusalCode(t *testing.T) {
+	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{"error":"only a draft can be edited","code":"po_not_draft"}`))
+	})
+	err := client.Put("/v1/purchase-orders/7", map[string]any{"expectedVersion": 5}, nil)
+	if StatusOf(err) != http.StatusConflict {
+		t.Fatalf("StatusOf = %d; want 409", StatusOf(err))
+	}
+	if code := CodeOf(err); code != "po_not_draft" {
+		t.Errorf("CodeOf = %q; want po_not_draft", code)
+	}
+	if conflict := ConflictOf(err); conflict != nil {
+		t.Errorf("ConflictOf = %+v; want nil: this is a state refusal, not a version conflict", conflict)
+	}
+	if code := CodeOf(fmt.Errorf("wrapped: %w", err)); code != "po_not_draft" {
+		t.Errorf("CodeOf on a wrapped error = %q; want po_not_draft", code)
+	}
+}
+
+func TestCodeOfIsEmptyWithoutARefusalCode(t *testing.T) {
+	if code := CodeOf(fmt.Errorf("network unreachable")); code != "" {
+		t.Errorf("CodeOf = %q; want empty for a non-response error", code)
+	}
+}

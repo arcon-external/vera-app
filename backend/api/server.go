@@ -112,7 +112,58 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/quotations/next-sequence", server.nextSequence, server.requireSession)
 	server.echo.GET("/v1/quotations/:id", server.detailEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
-	server.echo.DELETE("/v1/quotations/:id", server.deleteEndpoint, server.requireSession, server.requireAdmin)
+	// PO source selector (issue #467): issued Quotations, their issued
+	// revisions, and the confirm-time revalidation both PO entry paths share.
+	server.echo.GET("/v1/po-sources", server.listPOSources, server.requireSession)
+	server.echo.GET("/v1/po-sources/:id/revisions", server.listPOSourceRevisions, server.requireSession)
+	server.echo.GET("/v1/po-sources/:id/occupancy", server.getPOSourceOccupancy, server.requireSession)
+	server.echo.POST("/v1/po-sources/validate", server.validatePOSource, server.requireSession)
+	// Manual Purchase Order drafts (issue #468). Creating is the server-side
+	// revalidation of the selector's exact pair; reading reopens a draft;
+	// updating replaces the editable draft header and lines.
+	// The archive (issue #469) is the one GET collection route: 15 rows per
+	// page, org-scoped, with search and filters.
+	server.echo.GET("/v1/purchase-orders", server.listPurchaseOrders, server.requireSession)
+	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
+	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)
+	// Finalization (issue #471): the review reads the exact source revision,
+	// and the final save is the one-way draft -> saved transition.
+	server.echo.GET("/v1/purchase-orders/:id/review", server.getPurchaseOrderReview, server.requireSession)
+	server.echo.POST("/v1/purchase-orders/:id/finalize", server.finalizePurchaseOrder, server.requireSession)
+	// Corrections (#473): replacing a saved record requires a reason and the
+	// version it was loaded at; the history returns the immutable snapshots.
+	server.echo.POST("/v1/purchase-orders/:id/correction", server.correctPurchaseOrder, server.requireSession)
+	// #475: repairing the saved source link is admin-only. The review reads the
+	// candidate revision without writing; the repair repeats the #471 difference
+	// rules and records the old/new link and the choices.
+	// #481: the refusal a non-admin receives is the same typed code the store
+	// would return, so the link-repair contract has one answer at every layer.
+	server.echo.POST("/v1/purchase-orders/:id/source-repair/review", server.reviewPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
+	server.echo.POST("/v1/purchase-orders/:id/source-repair", server.repairPurchaseOrderSource, server.requireSession, server.requireAdminWithCode("po_repair_forbidden"))
+	// #497: Staff link a never/formerly-linked draft to an issued revision.
+	// These routes have no admin gate; the store refuses a saved record by name
+	// and a live draft as not eligible.
+	server.echo.POST("/v1/purchase-orders/:id/source-link/review", server.previewPurchaseOrderDraftLink, server.requireSession)
+	server.echo.POST("/v1/purchase-orders/:id/source-link", server.linkPurchaseOrderDraftSource, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
+	// #474: the optional customer-system confirmation number. POST with no body:
+	// the client asks for assignment and never supplies the identifier.
+	server.echo.POST("/v1/purchase-orders/:id/confirmation-number", server.assignPurchaseOrderConfirmation, server.requireSession)
+	// The one optional customer PO PDF (issue #472): upload/replace, the
+	// active document's metadata and retained versions, byte content for the
+	// active document or one version, and deliberate removal.
+	server.echo.POST("/v1/purchase-orders/:id/document", server.uploadPurchaseOrderDocument, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/document", server.getPurchaseOrderDocument, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/document/content", server.getPurchaseOrderDocumentContent, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/documents/:version/content", server.getPurchaseOrderDocumentVersionContent, server.requireSession)
+	server.echo.DELETE("/v1/purchase-orders/:id/document", server.removePurchaseOrderDocument, server.requireSession)
+	// #480: permanent deletion. Preview and challenge describe the exact chain;
+	// confirm is the irreversible write. All three are admin-only, and the store
+	// re-reads the actor's stored role inside the write.
+	server.echo.POST("/v1/deletions/preview", server.previewDeletion, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/deletions/challenge", server.createDeletionChallenge, server.requireSession, server.requireAdmin)
+	server.echo.POST("/v1/deletions", server.confirmDeletion, server.requireSession, server.requireAdmin)
 	server.echo.PUT("/v1/quotations/:id/revisions/:rev/document", server.attachDocumentEndpoint, server.requireSession)
 	server.echo.GET("/v1/admin/users", server.listUsers, server.requireSession, server.requireAdmin)
 	server.echo.POST("/v1/admin/users", server.createUser, server.requireSession, server.requireAdmin)
@@ -301,12 +352,26 @@ func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 
 // requireAdmin denies non-admin callers. It must run after requireSession.
 func (s *Server) requireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(context echo.Context) error {
-		user, _ := context.Get("user").(store.AuthUser)
-		if err := auth.RequireRole(user, "admin"); err != nil {
-			return context.JSON(http.StatusForbidden, map[string]string{"error": err.Error()})
+	return s.requireAdminWithCode("")(next)
+}
+
+// requireAdminWithCode is requireAdmin with a stable machine-readable refusal
+// code. The store repeats every admin rule inside its transaction, and its
+// errors already carry a code; the route gate should not answer a different
+// shape just because it ran first. An empty code keeps the historical body.
+func (s *Server) requireAdminWithCode(code string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(context echo.Context) error {
+			user, _ := context.Get("user").(store.AuthUser)
+			if err := auth.RequireRole(user, "admin"); err != nil {
+				body := map[string]string{"error": err.Error()}
+				if code != "" {
+					body["code"] = code
+				}
+				return context.JSON(http.StatusForbidden, body)
+			}
+			return next(context)
 		}
-		return next(context)
 	}
 }
 

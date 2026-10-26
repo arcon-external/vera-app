@@ -31,7 +31,75 @@ import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
+import { DocumentHomePage } from "./components/DocumentHomePage";
+import { AppShell } from "./components/AppShell";
+import { AdminDashboard } from "./components/AdminDashboard";
+import { ToastProvider } from "./toast";
+import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
+import {
+  DeletionChallengePanel,
+  DeletionDialogView,
+} from "./components/DeletionDialog";
+import { PurchaseOrderDocumentPanelView } from "./components/PurchaseOrderDocumentPanel";
+import { PurchaseOrderConflictPrompt } from "./components/PurchaseOrderConflictPrompt";
+import { PurchaseOrderHistoryPanel } from "./components/PurchaseOrderHistoryPanel";
+import { POQuotationSelectorView } from "./components/POQuotationSelector";
+import {
+  PurchaseOrderDiscardPrompt,
+  PurchaseOrderEditorView,
+  PurchaseOrderLineRow,
+} from "./components/PurchaseOrderEditor";
+import {
+  PurchaseOrderDifferenceReviewView,
+  PurchaseOrderFinalConfirmationView,
+  PurchaseOrderSavedView,
+} from "./components/PurchaseOrderFinalize";
+import {
+  evaluateReview,
+  type PurchaseOrderReviewDTO,
+  type PurchaseOrderSourceDTO,
+} from "./poFinalize";
+import type { PurchaseOrderDraftLinkReviewDTO } from "./poDraftLink";
+import { PurchaseOrderTotals } from "./components/PurchaseOrderTotals";
+import {
+  PurchaseOrderRepairConfirmationView,
+  PurchaseOrderSourceChange,
+} from "./components/PurchaseOrderRepair";
+import { PurchaseOrderDraftLinkReviewPanel } from "./components/PurchaseOrderSourceLinkPanel";
+import { QuotationDetailHeader } from "./components/QuotationDetailPage";
+import {
+  deletionReducer,
+  initialDeletionState,
+  type DeletionPreviewDTO,
+} from "./deletion";
+import type { ArchivedQuotation } from "./archive";
+import type { CurrencyInfo } from "./format";
+import {
+  initialPOSourceSelectorState,
+  poSourceSelectorReducer,
+} from "./poSelector";
+import type { POSourceQuotation } from "./poSelector";
+import {
+  initialPOListFilters,
+  initialPOListStateFor,
+} from "./poList";
+import type { POListRowDTO, POListState } from "./poList";
+import {
+  blankPurchaseOrderDraft,
+  buildPurchaseOrderUpdate,
+  calculatePurchaseOrder,
+  initialPurchaseOrderEditorState,
+} from "./purchaseOrder";
+import type { PurchaseOrderHistoryEntry } from "./poCorrection";
+import type { PurchaseOrderDTO } from "./purchaseOrder";
+import type { PurchaseOrderDocumentStateDTO } from "./purchaseOrderDocument";
 import { PortalPreviewPanel } from "./components/PortalPreviewPanel";
+import { QuotationSettingsPage } from "./components/QuotationSettingsPage";
+import { PurchaseOrderSettingsPage } from "./components/PurchaseOrderSettingsPage";
+import {
+  DEFAULT_PURCHASE_ORDER_SETTINGS,
+  DEFAULT_QUOTATION_SETTINGS,
+} from "./workspaceSettings";
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
@@ -78,6 +146,769 @@ interface SnapshotCase {
   name: string;
   element: ReactElement;
 }
+
+// The PO source selector fixture (issue #467): two available Quotations and
+// one already used, so the screenshot proves the used row is greyed and marked
+// without needing an interaction. The three states are the reducer's real
+// output, not hand-written markup.
+const PO_SELECTOR_ROWS: POSourceQuotation[] = [
+  {
+    id: 12,
+    quoteNumber: "1502260012",
+    subject: "Supply and installation of electrical systems",
+    customerName: "PT. Infineon Technologies Batam",
+    latestRevision: 2,
+    issuedRevisionCount: 3,
+    activePO: null,
+  },
+  {
+    id: 11,
+    quoteNumber: "1502260011",
+    subject: "Mechanical works and pump replacement",
+    customerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    latestRevision: 0,
+    issuedRevisionCount: 1,
+    activePO: { id: 20, state: "draft" },
+  },
+  {
+    id: 10,
+    quoteNumber: "1502260010",
+    subject: "Cooling package",
+    customerName: "PT. Datalec Global Solution",
+    latestRevision: 1,
+    issuedRevisionCount: 2,
+    activePO: { id: 21, state: "saved" },
+  },
+];
+const PO_SELECTOR_STEP_ONE = {
+  ...initialPOSourceSelectorState,
+  rows: PO_SELECTOR_ROWS,
+  page: 1,
+  pageSize: 15,
+  total: 17,
+  totalPages: 2,
+};
+const PO_SELECTOR_STEP_TWO = poSourceSelectorReducer(
+  poSourceSelectorReducer(PO_SELECTOR_STEP_ONE, {
+    type: "quotationSelected",
+    quotation: PO_SELECTOR_ROWS[0],
+  }),
+  {
+    type: "revisionsLoaded",
+    quotationId: 12,
+    revisions: [
+      { revision: 2, issuedAt: "2026-10-20T10:00:00+07:00" },
+      { revision: 1, issuedAt: "2026-10-18T10:00:00+07:00" },
+      { revision: 0, issuedAt: "2026-10-15T10:00:00+07:00" },
+    ],
+  }
+);
+const PO_SELECTOR_STEP_THREE = poSourceSelectorReducer(
+  poSourceSelectorReducer(PO_SELECTOR_STEP_TWO, {
+    type: "revisionSelected",
+    revision: 2,
+  }),
+  { type: "continue" }
+);
+
+// The manual PO draft editor (issue #468): the copied quotation lines, the
+// editable header fields and the dirty-cancel state. Currency is the PO's own
+// snapshot (USD here) rather than the live profile, so the money fields prove
+// denomination follows the document.
+const PO_EDITOR_USD: CurrencyInfo = {
+  code: "USD",
+  exponent: 2,
+  symbol: "$",
+  position: "before",
+  groupSep: ",",
+  decimalSep: ".",
+  symbolSpaced: false,
+};
+// Issue #496: a source-less draft starts in the live company currency.
+const PO_EDITOR_IDR: CurrencyInfo = {
+  code: "IDR",
+  exponent: 0,
+  symbol: "Rp",
+  position: "before",
+  groupSep: ".",
+  decimalSep: ",",
+  symbolSpaced: false,
+};
+const PO_EDITOR_ORDER: PurchaseOrderDTO = {
+  PODate: "2026-10-01",
+  RequestedDeliveryDate: "2026-11-20",
+  UUID: "uuid-po-7",
+  State: "draft",
+  QuoteNumber: "1502260012",
+  CustomerName: "PT. Infineon Technologies Batam",
+  BillingAddress:
+    "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+  DeliveryAddress:
+    "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+  ShipToCode: "SHIP-317",
+  ContactEmail: "buyer@infineon.example",
+  ContactPhone: "+62 778 123 456",
+  PONumber: "PO-INF-2026-091",
+  ReceivedDate: "2026-10-02",
+  Version: 1,
+  Incoterms: "CIF",
+  Currency: "USD",
+  TaxZone: "NonFTZ",
+  TaxCategory: "SupplyOnly",
+  AdjustmentReason: "Round to the printed total",
+  CreatedAt: "2026-10-02T10:00:00Z",
+  UpdatedAt: "2026-10-02T10:00:00Z",
+  Items: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Supply and installation of electrical panels",
+      QuantityScaled: 25000,
+      UoM: "Lot",
+      UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+      GrossMinor: 312625,
+      DiscountMinor: 31262,
+      NetMinor: 281363,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineNumber: 2,
+      Description: "Mounting and cable termination",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
+    },
+  ],
+  ID: 7,
+  QuotationID: 12,
+  SourceRevision: 2,
+  CustomerID: 2,
+  PaymentTerms: "45 days",
+  DiscountPercent: 5,
+  PpnBps: 1100,
+  SubtotalMinor: 323363,
+  DiscountMinor: 16168,
+  PpnMinor: 33791,
+  AdjustmentMinor: -250,
+  GrandTotalMinor: 340736,
+  PrintedSubtotalMinor: 325000,
+  PrintedDiscountMinor: 0,
+  PrintedPpnMinor: 35750,
+  PrintedGrandTotalMinor: 360750,
+};
+const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
+  PO_EDITOR_ORDER,
+  PO_EDITOR_USD
+);
+const PO_EDITOR_CALCULATION = calculatePurchaseOrder(
+  PO_EDITOR_INITIAL,
+  PO_EDITOR_USD
+);
+// The correction editor and its history (issue #473). The saved record is at
+// version 4; the reason is required, the confirmation number is text rather
+// than a control, and the two retained snapshots show a correction with its
+// attachment reference and a recovered draft without one.
+const PO_CORRECTING_STATE = initialPurchaseOrderEditorState(
+  { ...PO_EDITOR_ORDER, State: "saved", Version: 4, ConfirmationNumber: "2302260001" },
+  PO_EDITOR_USD
+);
+const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
+  {
+    UUID: "corr-2",
+    Kind: "correction",
+    State: "saved",
+    Reason: "The customer moved to a new warehouse",
+    ActorName: "Budi Santoso",
+    CreatedAt: "2026-10-21T10:15:00+07:00",
+    QuoteNumber: "1502260044",
+    CustomerName: "PT. Batam Electrical Works",
+    SourceRevision: 1,
+    Currency: "USD",
+    TaxZone: "FTZ",
+    TaxCategory: "Goods",
+    BillingAddress: "Jl. Billing 12, Batam Center, Kota Batam",
+    DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    ShipToCode: "SHIP-INF-3",
+    ContactEmail: "procurement@buyer.example",
+    ContactPhone: "+62 778 555 0101",
+    PONumber: "PO-INF-2026-091",
+    PODate: "2026-10-02",
+    ReceivedDate: "2026-10-03",
+    RequestedDeliveryDate: "2026-11-20",
+    PaymentTerms: "45 days",
+    Incoterms: "CIF",
+    AdjustmentReason: "Round to the printed total",
+    PreviousVersion: 4,
+    ResultingVersion: 5,
+    DiscountPercent: 5,
+    SubtotalMinor: 323363,
+    DiscountMinor: 16168,
+    PpnBps: 1100,
+    PpnMinor: 33791,
+    AdjustmentMinor: -250,
+    GrandTotalMinor: 340736,
+    Attachment: {
+      Version: 2,
+      SHA256: "d2f4a6c8e0b1".padEnd(64, "0"),
+      Filename: "Customer PO 4500098123.pdf",
+    },
+    Items: [
+      {
+        LineNumber: 1,
+        Description: "Supply and installation of electrical panels",
+        QuantityScaled: 25000,
+        UoM: "Lot",
+        UnitPriceMinor: 125050,
+        DiscountMinor: 31262,
+        NetMinor: 281363,
+      },
+      {
+        LineNumber: 2,
+        Description: "Mounting and cable termination",
+        QuantityScaled: 10000,
+        UoM: "Unit",
+        UnitPriceMinor: 42000,
+        DiscountMinor: 0,
+        NetMinor: 42000,
+      },
+    ],
+  },
+  {
+    UUID: "corr-1",
+    Kind: "draft_overwrite",
+    State: "draft",
+    Reason: "Draft overwritten after a concurrent save",
+    ActorName: "Sari",
+    CreatedAt: "2026-10-21T09:00:00+07:00",
+    QuoteNumber: "1502260044",
+    CustomerName: "PT. Batam Electrical Works",
+    SourceRevision: 1,
+    Currency: "USD",
+    TaxZone: "FTZ",
+    TaxCategory: "Goods",
+    BillingAddress: "Jl. Billing 12, Batam Center, Kota Batam",
+    DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+    ShipToCode: "SHIP-INF-3",
+    ContactEmail: "procurement@buyer.example",
+    ContactPhone: "+62 778 555 0101",
+    PONumber: "PO-INF-2026-090",
+    PODate: "",
+    ReceivedDate: "2026-10-03",
+    RequestedDeliveryDate: "",
+    PaymentTerms: "30 days",
+    Incoterms: "EXW",
+    AdjustmentReason: "",
+    PreviousVersion: 3,
+    ResultingVersion: 4,
+    DiscountPercent: 0,
+    SubtotalMinor: 300000,
+    DiscountMinor: 0,
+    PpnBps: 0,
+    PpnMinor: 0,
+    AdjustmentMinor: 0,
+    GrandTotalMinor: 300000,
+    Attachment: null,
+    Items: [
+      {
+        LineNumber: 1,
+        Description: "Cooling package",
+        QuantityScaled: 10000,
+        UoM: "Lot",
+        UnitPriceMinor: 300000,
+        DiscountMinor: 0,
+        NetMinor: 300000,
+      },
+    ],
+  },
+];
+
+const PO_EDITOR_UOM_OPTIONS = [
+  { value: "Lot", label: "Lot" },
+  { value: "Unit", label: "Unit" },
+  { value: "Pc", label: "Pc" },
+];
+
+// The single optional customer PO PDF (issue #472), shown in both branches:
+// empty, attached with one retained prior version, and the inline removal
+// confirmation. The bytes are irrelevant to the panel; only the metadata is
+// rendered.
+const PO_DOCUMENT_NONE: PurchaseOrderDocumentStateDTO = {
+  Document: null,
+  Versions: [],
+};
+const PO_DOCUMENT_ATTACHED: PurchaseOrderDocumentStateDTO = {
+  Document: {
+    UUID: "doc-2",
+    SHA256: "d2f4a6c8e0b1",
+    ContentType: "application/pdf",
+    OriginalFilename: "Customer PO 4500098123.pdf",
+    UploadedAt: "2026-10-20T09:15:00Z",
+    ID: 2,
+    PurchaseOrderID: 7,
+    Version: 2,
+    SizeBytes: 1_536_000,
+    UploadedBy: 4,
+    Active: true,
+  },
+  Versions: [
+    {
+      UUID: "doc-2",
+      SHA256: "d2f4a6c8e0b1",
+      ContentType: "application/pdf",
+      OriginalFilename: "Customer PO 4500098123.pdf",
+      UploadedAt: "2026-10-20T09:15:00Z",
+      ID: 2,
+      PurchaseOrderID: 7,
+      Version: 2,
+      SizeBytes: 1_536_000,
+      UploadedBy: 4,
+      Active: true,
+    },
+    {
+      UUID: "doc-1",
+      SHA256: "a1b2c3d4e5f6",
+      ContentType: "application/pdf",
+      OriginalFilename: "Customer PO scanned.pdf",
+      UploadedAt: "2026-10-18T14:40:00Z",
+      ID: 1,
+      PurchaseOrderID: 7,
+      Version: 1,
+      SizeBytes: 2_048_000,
+      UploadedBy: 4,
+      Active: false,
+      ReplacedAt: "2026-10-20T09:15:00Z",
+    },
+  ],
+};
+
+// The final-save review (issue #471): the exact source revision beside the
+// entered PO. Two differing values (payment terms and the first line's price),
+// one source line the PO omits, and one extra PO line, so the screenshot shows
+// both choices unpressed, the missing/extra review, and the printed-total
+// check with its unexplained remainder.
+const PO_REVIEW_SOURCE: PurchaseOrderSourceDTO = {
+  QuotationID: 12,
+  RevisionNumber: 2,
+  QuoteNumber: "1502260012",
+  CustomerID: 2,
+  CustomerName: "PT. Infineon Technologies Batam",
+  Currency: "USD",
+  PaymentTerms: "60 days from delivery",
+  Incoterms: "FOB",
+  DiscountPercent: 5,
+  Lines: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineLabel: "1",
+      Description: "Supply and installation of electrical panels",
+      UoM: "Lot",
+      QuantityScaled: 25000,
+      UnitPriceMinor: 118000,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineLabel: "2.1",
+      Description: "Mounting and cable termination",
+      UoM: "Unit",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+    },
+    {
+      QuotationItemNo: 3,
+      QuotationSubNo: null,
+      LineLabel: "3",
+      Description: "Electrical commissioning report",
+      UoM: "Lot",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 0,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+    },
+  ],
+  PrintedSubtotalMinor: 339690,
+  PrintedDiscountMinor: 16984,
+  PrintedPpnMinor: 35500,
+  PrintedGrandTotalMinor: 358205,
+};
+const PO_REVIEW_ORDER: PurchaseOrderDTO = {
+  ...PO_EDITOR_ORDER,
+  PaymentTerms: "45 days",
+  Items: [
+    PO_EDITOR_ORDER.Items[0],
+    PO_EDITOR_ORDER.Items[1],
+    {
+      QuotationItemNo: null,
+      QuotationSubNo: null,
+      LineNumber: 3,
+      Description: "Freight and insurance",
+      QuantityScaled: 10000,
+      UoM: "Lot",
+      UnitPriceMinor: 12500,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 12500,
+      DiscountMinor: 0,
+      NetMinor: 12500,
+    },
+  ],
+};
+const PO_REVIEW_STATE = initialPurchaseOrderEditorState(
+  PO_REVIEW_ORDER,
+  PO_EDITOR_USD
+);
+const PO_REVIEW_DTO: PurchaseOrderReviewDTO = {
+  Order: PO_REVIEW_ORDER,
+  Source: PO_REVIEW_SOURCE,
+  DocumentState: "none",
+};
+const PO_REVIEW_EVALUATION = evaluateReview(
+  PO_REVIEW_STATE,
+  PO_REVIEW_SOURCE,
+  PO_EDITOR_USD,
+  {},
+  [],
+  []
+);
+
+// Issue #497: the Staff draft-link review. A never-linked USD draft whose three
+// manual lines already matched the source, with a differing tax basis: the tax
+// choice is required and unpressed, so the screenshot shows the choice cards and
+// the blocked Link source action beside the same difference review the final
+// save uses.
+const PO_LINK_ORDER: PurchaseOrderDTO = {
+  ...blankPurchaseOrderDraft({
+    currency: "USD",
+    taxZone: "FTZ",
+    taxType: "Goods",
+    serviceCategory: "",
+    receivedDate: "2026-10-02",
+    paymentTerms: "45 days",
+    incoterms: "CIF",
+  }),
+  ID: 7,
+  UUID: "uuid-po-link",
+  Version: 3,
+  PONumber: "PO-INF-2026-091",
+  BillingAddress: "Jl. Billing entered before linking",
+  DeliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam",
+  Items: [
+    {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Supply and installation of electrical panels",
+      QuantityScaled: 25000,
+      UoM: "Lot",
+      UnitPriceMinor: 125050,
+      DiscountEnabled: true,
+      DiscountPercent: 10,
+      GrossMinor: 312625,
+      DiscountMinor: 31262,
+      NetMinor: 281363,
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineNumber: 2,
+      Description: "Mounting and cable termination",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
+    },
+    {
+      QuotationItemNo: 3,
+      QuotationSubNo: null,
+      LineNumber: 3,
+      Description: "Electrical commissioning report",
+      QuantityScaled: 10000,
+      UoM: "Lot",
+      UnitPriceMinor: 0,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 0,
+      DiscountMinor: 0,
+      NetMinor: 0,
+    },
+  ],
+};
+const PO_LINK_STATE = initialPurchaseOrderEditorState(PO_LINK_ORDER, PO_EDITOR_USD);
+const PO_LINK_REVIEW: PurchaseOrderDraftLinkReviewDTO = {
+  Order: PO_LINK_ORDER,
+  Source: {
+    ...PO_REVIEW_SOURCE,
+    Currency: "USD",
+    PaymentTerms: "45 days",
+    Incoterms: "CIF",
+    DiscountPercent: 0,
+    Lines: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        LineLabel: "1",
+        Description: "Supply and installation of electrical panels",
+        UoM: "Lot",
+        QuantityScaled: 25000,
+        UnitPriceMinor: 125050,
+        DiscountEnabled: true,
+        DiscountPercent: 10,
+      },
+      {
+        QuotationItemNo: 2,
+        QuotationSubNo: 1,
+        LineLabel: "2.1",
+        Description: "Mounting and cable termination",
+        UoM: "Unit",
+        QuantityScaled: 10000,
+        UnitPriceMinor: 42000,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+      {
+        QuotationItemNo: 3,
+        QuotationSubNo: null,
+        LineLabel: "3",
+        Description: "Electrical commissioning report",
+        UoM: "Lot",
+        QuantityScaled: 10000,
+        UnitPriceMinor: 0,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+    ],
+  },
+  DocumentState: "none",
+  DraftTax: {
+    TaxZone: "FTZ",
+    TaxType: "Goods",
+    ServiceCategory: "",
+    TaxCategory: "",
+    PpnBps: 0,
+  },
+  SourceTax: {
+    TaxZone: "NonFTZ",
+    TaxType: "Goods",
+    ServiceCategory: "",
+    TaxCategory: "",
+    PpnBps: 1100,
+  },
+  TaxChoiceRequired: true,
+};
+
+// The source repair (issue #475) compares the same record against a genuinely
+// different link, so the old → new pair in the evidence is not two identical
+// quotations: revision 2 becomes revision 0 of another issued quotation.
+const PO_REPAIR_SOURCE: PurchaseOrderSourceDTO = {
+  ...PO_REVIEW_SOURCE,
+  QuotationID: 19,
+  QuoteNumber: "1502260051",
+  RevisionNumber: 0,
+};
+const PO_REPAIR_REVIEW_DTO: PurchaseOrderReviewDTO = {
+  Order: {
+    ...PO_REVIEW_ORDER,
+    State: "saved",
+    PdfAbsentConfirmed: true,
+    ConfirmationNumber: "2302260001",
+  },
+  Source: PO_REPAIR_SOURCE,
+  DocumentState: "none",
+};
+const PO_REPAIR_EVALUATION = evaluateReview(
+  PO_REVIEW_STATE,
+  PO_REPAIR_SOURCE,
+  PO_EDITOR_USD,
+  {},
+  [],
+  []
+);
+
+// The PO archive (issue #469, #481): a mixed page of drafts and saved records,
+// one row without a customer PO number, one source-missing row whose former
+// quotation is named beside its own readable values, the independent Source
+// filter, the customer multi-select and the 31-row pagination.
+const PO_LIST_ROWS: POListRowDTO[] = [
+  {
+    UUID: "uuid-po-9",
+    State: "draft",
+    PONumber: "PO-INF-2026-091",
+    QuoteNumber: "1502260012",
+    CustomerName: "PT. Infineon Technologies Batam",
+    ReceivedDate: "2026-10-02",
+    Currency: "USD",
+    ID: 9,
+    CustomerID: 2,
+    SourceRevision: 2,
+    SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-8",
+    State: "saved",
+    PONumber: "",
+    QuoteNumber: "1503260004",
+    CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    ReceivedDate: "2026-09-30",
+    Currency: "IDR",
+    ID: 8,
+    CustomerID: 3,
+    SourceRevision: 0,
+    SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-7",
+    State: "draft",
+    PONumber: "PO-DAT-2026-14",
+    QuoteNumber: "1504260007",
+    CustomerName: "PT. Datalec Global Solution",
+    ReceivedDate: "2026-09-24",
+    Currency: "IDR",
+    ID: 7,
+    CustomerID: 4,
+    SourceRevision: 1,
+    SourceMissing: false,
+  },
+  {
+    UUID: "uuid-po-6",
+    State: "saved",
+    PONumber: "PO-HTE-2026-08",
+    QuoteNumber: "1505260011",
+    CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
+    ReceivedDate: "2026-09-18",
+    Currency: "IDR",
+    ID: 6,
+    CustomerID: 3,
+    SourceRevision: 2,
+    SourceMissing: true,
+  },
+];
+const PO_LIST_CUSTOMERS = [
+  { ID: 2, Name: "PT. Infineon Technologies Batam" },
+  { ID: 3, Name: "PT. H-Tech Oilfield Equipment, NOV XL Systems" },
+  { ID: 4, Name: "PT. Datalec Global Solution" },
+];
+const PO_DRAFT_ROWS = PO_LIST_ROWS.filter((row) => row.State === "draft");
+const PO_SAVED_ROWS = PO_LIST_ROWS.filter((row) => row.State === "saved");
+const PO_LIST_DRAFTS: POListState = {
+  ...initialPOListStateFor("drafts"),
+  rows: PO_DRAFT_ROWS,
+  customers: PO_LIST_CUSTOMERS,
+  page: 1,
+  pageSize: 15,
+  total: 8,
+  totalPages: 1,
+};
+const PO_LIST_ARCHIVE: POListState = {
+  ...initialPOListStateFor("archive"),
+  rows: PO_SAVED_ROWS,
+  customers: PO_LIST_CUSTOMERS,
+  page: 1,
+  pageSize: 15,
+  total: 23,
+  totalPages: 2,
+};
+// Issue #496: the three source states the archive copy must keep distinct. A
+// never-linked draft has no quotation or Customer; a former row keeps its
+// former source; a live revision 00 is a real link. The case exists so the
+// copy is read at both widths, not only asserted in SSR.
+const PO_LIST_SOURCE_MISSING_496: POListState = {
+  ...initialPOListStateFor("drafts"),
+  rows: [
+    {
+      UUID: "uuid-po-never",
+      State: "draft",
+      PONumber: "",
+      QuoteNumber: "",
+      CustomerName: "",
+      ReceivedDate: "2026-10-22",
+      Currency: "IDR",
+      ID: 41,
+      CustomerID: 0,
+      SourceRevision: 0,
+      SourceMissing: true,
+      SourceState: "never",
+    },
+    {
+      UUID: "uuid-po-former",
+      State: "draft",
+      PONumber: "PO-FORMER-496",
+      QuoteNumber: "1502250007",
+      CustomerName: "PT. Former Source",
+      ReceivedDate: "2026-10-21",
+      Currency: "IDR",
+      ID: 40,
+      CustomerID: 3,
+      SourceRevision: 1,
+      SourceMissing: true,
+      SourceState: "former",
+    },
+    {
+      UUID: "uuid-po-live0",
+      State: "draft",
+      PONumber: "PO-LIVE-REV00",
+      QuoteNumber: "1502260008",
+      CustomerName: "PT. Live Source",
+      ReceivedDate: "2026-10-20",
+      Currency: "IDR",
+      ID: 39,
+      CustomerID: 2,
+      SourceRevision: 0,
+      SourceMissing: false,
+      SourceState: "live",
+    },
+  ],
+  customers: [
+    { ID: 2, Name: "PT. Live Source" },
+    { ID: 3, Name: "PT. Former Source" },
+  ],
+  page: 1,
+  pageSize: 15,
+  total: 3,
+  totalPages: 1,
+};
+const PO_LIST_NO_MATCH: POListState = {  ...initialPOListStateFor("archive"),
+  filters: {
+    ...initialPOListFilters,
+    search: "datalec",
+    customerIds: [2],
+    receivedFrom: "2026-10-01",
+    state: "saved",
+  },
+  customers: PO_LIST_CUSTOMERS,
+  total: 0,
+  totalPages: 1,
+};
+
+
+// The issued-Quotation detail header (#467 wave 2): the second PO entry path
+// beside Edit, with the revision picker present because this quotation has
+// three issued revisions. Only the header is rendered; the page fetches its
+// revision in an effect, which this harness never runs.
+const DETAIL_QUOTATION = {
+  QuoteNumber: "1502260012",
+  RevisionNumber: 2,
+  AvailableRevisions: [2, 1, 0],
+  CustomerName: "PT. Infineon Technologies Batam",
+  Subject: "Supply and installation of electrical systems",
+} as ArchivedQuotation;
 
 // The line-item editor fixture (issue #430): the proof surface for the UoM
 // select's background chevron. One plain line (its own UoM select) plus one
@@ -176,6 +1007,141 @@ const TEMPLATE_LABELS: CompanyLabelEntry[] = [
   label("termsLeadTime", "3. Lead time is {leadtime}.", 300, true),
   label("termsIncoterm", "4. Incoterms: {incoterm}", 300, true),
 ];
+
+
+// #480: the permanent-deletion dialog. Three states are evidence: a single
+// record with the surviving document listed, a whole chain with the issued
+// ten-letter challenge, and a chain that moved between the challenge and the
+// confirmation. The dialog is an overlay in the app; here it is rendered inline
+// because the harness screenshots a page, not a modal interaction.
+const DELETION_PREVIEW: DeletionPreviewDTO = {
+  TargetType: "quotation",
+  TargetID: 12,
+  TargetUUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+  DocumentNumber: "1502260012",
+  DocumentNumberLabel: "Quotation number",
+  QuoteNumber: "1502260012",
+  PONumber: "",
+  CustomerName: "PT. Infineon Technologies Batam",
+  State: "issued",
+  SourceMissing: false,
+  Version: 0,
+  Fingerprint: "v1;target=quotation;quotation_id=12;revisions=0,1",
+  Scopes: [
+    {
+      Scope: "record",
+      Available: true,
+      UnavailableReason: "",
+      RequiresChallenge: false,
+      Removes: [
+        {
+          Type: "quotation",
+          ID: 12,
+          UUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+          DocumentNumber: "1502260012",
+          SourceReference: "",
+          Label: "Quotation 1502260012",
+          State: "issued",
+          Version: 0,
+          Revisions: [0, 1],
+          DocumentVersions: 2,
+          HistoryEntries: 0,
+        },
+      ],
+      Preserves: [
+        {
+          Type: "purchase_order",
+          ID: 34,
+          UUID: "9a6f7e2c-51c8-4f18-9a3a-1d0f2b6c4e77",
+          DocumentNumber: "PO-INF-2026-091",
+          SourceReference: "1502260012",
+          Label: "Purchase order PO-INF-2026-091",
+          State: "saved",
+          Version: 7,
+          Revisions: [],
+          DocumentVersions: 1,
+          HistoryEntries: 3,
+        },
+      ],
+    },
+    {
+      Scope: "chain",
+      Available: true,
+      UnavailableReason: "",
+      RequiresChallenge: true,
+      Removes: [
+        {
+          Type: "quotation",
+          ID: 12,
+          UUID: "4d0f8f0e-1d43-4e3c-9f9a-5c0e0b7a1f12",
+          DocumentNumber: "1502260012",
+          SourceReference: "",
+          Label: "Quotation 1502260012",
+          State: "issued",
+          Version: 0,
+          Revisions: [0, 1],
+          DocumentVersions: 2,
+          HistoryEntries: 0,
+        },
+        {
+          Type: "purchase_order",
+          ID: 34,
+          UUID: "9a6f7e2c-51c8-4f18-9a3a-1d0f2b6c4e77",
+          DocumentNumber: "PO-INF-2026-091",
+          SourceReference: "1502260012",
+          Label: "Purchase order PO-INF-2026-091",
+          State: "saved",
+          Version: 7,
+          Revisions: [],
+          DocumentVersions: 1,
+          HistoryEntries: 3,
+        },
+      ],
+      Preserves: [],
+    },
+  ],
+};
+
+function deletionState(scope: "record" | "chain") {
+  return deletionReducer(
+    deletionReducer(initialDeletionState, {
+      type: "previewLoaded",
+      preview: DELETION_PREVIEW,
+    }),
+    { type: "scopeChanged", scope }
+  );
+}
+
+const DELETION_CHAIN_READY = deletionReducer(deletionState("chain"), {
+  type: "challengeLoaded",
+  challenge: {
+    ChallengeID: "challenge-480",
+    Letters: "ABCDEFGHJK",
+    ExpiresAt: "2026-10-21T10:15:00Z",
+    Fingerprint: DELETION_PREVIEW.Fingerprint,
+  },
+});
+
+const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
+  type: "chainChanged",
+  changed: {
+    Preview: { ...DELETION_PREVIEW, Fingerprint: "v1;target=quotation;quotation_id=12;revisions=0,1,2" },
+    Changes: [
+      {
+        Field: "purchase_order_34_version",
+        Label: "Purchase order 34 version",
+        Before: "7",
+        After: "8",
+      },
+      {
+        Field: "revisions",
+        Label: "Quotation revisions",
+        Before: "0,1",
+        After: "0,1,2",
+      },
+    ],
+  },
+});
 
 const CASES: SnapshotCase[] = [
   {
@@ -396,6 +1362,897 @@ const CASES: SnapshotCase[] = [
     element: <LoginPage onSignedIn={() => undefined} />,
   },
   {
+    // The document home (issue #466, now the global workspace dashboard in
+    // #491): five destinations for an admin. Quotation, Purchase Order and
+    // Admin are enabled; Delivery Order and Invoice render disabled with their
+    // Coming later badges.
+    //
+    // What this case cannot show, stated so it is not assumed: the clicks
+    // behind the enabled buttons, keyboard order, and focus visibility
+    // stay hand-driven.
+    name: "DocumentHome",
+    element: (
+      <DocumentHomePage
+        isAdmin
+        onOpenQuotation={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onOpenAdmin={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #491: Home for a staff member. The Admin card is absent, so the
+    // screenshot proves the gate is visual as well as logical.
+    name: "DocumentHomeStaff",
+    element: (
+      <DocumentHomePage
+        onOpenQuotation={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #491: the shell on Home — Vera + Business Suite, no workspace tabs,
+    // no back arrow.
+    name: "AppShellHome",
+    element: (
+      <AppShell page="home" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Workspace cards sit here.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the Quotation workspace's three tabs beside the back arrow.
+    name: "AppShellQuotation",
+    element: (
+      <AppShell page="create" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Quotation editor body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the PO workspace's tabs with Drafts active.
+    name: "AppShellPurchaseOrder",
+    element: (
+      <AppShell page="po-drafts" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Draft purchase orders body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #491: the Admin workspace's four tabs with Company active.
+    name: "AppShellAdmin",
+    element: (
+      <AppShell page="admin-company" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Company settings body.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #494: the assembled Admin Company page, not the shell alone. The
+    // primary bar is the only Clients/Team/Company/Backups navigation, and the
+    // Company profile's own General/Units/Quotation/Portal bar sits in the body
+    // where the duplicate main tablist used to be. The card's effects do not
+    // run under renderToString, so the panel below the bar is its loading
+    // state; that is enough for the placement question, because the bar renders
+    // before the fetch resolves.
+    //
+    // What this case cannot show: the Company panels' loaded content, tab
+    // switching, keyboard order and focus stay hand-driven.
+    name: "AppShellAdminCompany",
+    element: (
+      <ToastProvider>
+        <AppShell
+          page="admin-company"
+          settingsOrigin="admin"
+          onNavigate={() => undefined}
+        >
+          <AdminDashboard tab="company" />
+        </AppShell>
+      </ToastProvider>
+    ),
+  },
+  {
+    // Issue #491: the Drafts tab (issue #469's list with the state pinned to
+    // draft). Search, the customer multi-select, the received range and the
+    // Source filter remain; the State control does not, because the tab owns
+    // it. At 360 the table scrolls inside its card; the filter grid stacks.
+    //
+    // What this case cannot show: typing, opening a row, the fetch effect,
+    // focus order and the real scrollbar stay hand-driven.
+    name: "PurchaseOrderDrafts",
+    element: (
+      <PurchaseOrderListView
+        mode="drafts"
+        state={PO_LIST_DRAFTS}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #491: the Archive tab. The state is pinned to saved records, so the
+    // State control is gone while search, dates, customers and source remain.
+    name: "PurchaseOrderArchive",
+    element: (
+      <PurchaseOrderListView
+        mode="archive"
+        state={PO_LIST_ARCHIVE}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // The filtered empty state (issue #469): four active filter dimensions,
+    // no match, and the enabled Reset filters action. It is the case that
+    // proves an empty page is not the unfiltered "No purchase orders yet"
+    // message.
+    name: "PurchaseOrderArchiveNoMatch",
+    element: (
+      <PurchaseOrderListView
+        mode="archive"
+        state={PO_LIST_NO_MATCH}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #496: never-linked, formerly-linked and a real revision 00 in one
+    // list. The first row must read "No quotation linked" with no fabricated
+    // Customer, the second keeps its former source, and the third keeps
+    // "Revision 0". The Source missing badge is shared, because the filter and
+    // the user-facing state are shared.
+    name: "PurchaseOrderSourceMissing496",
+    element: (
+      <PurchaseOrderListView
+        mode="drafts"
+        state={PO_LIST_SOURCE_MISSING_496}
+        dispatch={() => undefined}
+        onOpen={() => undefined}
+        onAdd={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // The PO source selector, step 1 (issue #467): search, the checked
+    // filter, pagination, and a used Quotation greyed with its reason. The
+    // list scrolls inside the dialog rather than growing the page.
+    //
+    // What this case cannot show: typing, paging, selection, focus order and
+    // the browser's real scrollbar stay hand-driven.
+    name: "POSelectorStepOne",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_ONE}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
+      />
+    ),
+  },
+  {
+    // Step 2 (issue #467): three issued revisions, newest first, with the
+    // Continue action disabled until one is chosen.
+    name: "POSelectorStepTwo",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_TWO}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
+      />
+    ),
+  },
+  {
+    // Step 3 (issue #467): the exact pair, with Confirm enabled because the
+    // reducer produced a complete selection.
+    name: "POSelectorStepThree",
+    element: (
+      <POQuotationSelectorView
+        state={PO_SELECTOR_STEP_THREE}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+        onOpenDraft={() => undefined}
+      />
+    ),
+  },
+  {
+    // The selector in repair mode (issue #475): the same three steps with the
+    // repair wording. The server has already exempted the repaired record's
+    // own Quotation, so the remaining occupied rows are still disabled and no
+    // "Open draft" shortcut is offered.
+    name: "POSelectorRepairMode",
+    element: (
+      <POQuotationSelectorView
+        state={{
+          ...PO_SELECTOR_STEP_ONE,
+          rows: [
+            { ...PO_SELECTOR_ROWS[0], activePO: null },
+            PO_SELECTOR_ROWS[1],
+            PO_SELECTOR_ROWS[2],
+          ],
+        }}
+        dispatch={() => undefined}
+        mode="repair"
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // The manual PO draft editor (issue #468/#470): header snapshot, copied
+    // lines in the PO's own USD currency, each line's own discount controls,
+    // and the calculation inputs. At 360 this is the case that says whether
+    // the five-field line grid reflows instead of overflowing.
+    //
+    // The totals panel sits below the 900px viewport, so it has its own case
+    // (PurchaseOrderTotals) rather than being cropped out of this one.
+    //
+    // What this case cannot show: typing, Select behaviour, saving, and the
+    // click that opens the discard confirmation stay hand-driven.
+    name: "PurchaseOrderEditor",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_EDITOR_INITIAL}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // Issue #496: the PO-first blank editor. It has no source, Customer,
+    // quote number, revision or printed totals, but it is the full manual-entry
+    // form: Link a Quotation at the top, the editable source basis (currency
+    // and tax triple) and the PO-owned header/lines. At 360 the link card,
+    // basis grid and header wrap instead of overflowing, and the header must
+    // never read "Draft 0" or "revision 0".
+    name: "PurchaseOrderFirstDraft496",
+    element: (
+      <PurchaseOrderEditorView
+        state={initialPurchaseOrderEditorState(
+          blankPurchaseOrderDraft({
+            currency: "IDR",
+            taxZone: "NonFTZ",
+            taxType: "Goods",
+            serviceCategory: "",
+            receivedDate: "2026-10-22",
+            paymentTerms: "50% advance",
+            incoterms: "EXW",
+          }),
+          PO_EDITOR_IDR
+        )}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_IDR}
+        currencyOptions={[PO_EDITOR_IDR, PO_EDITOR_USD]}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onLinkQuotation={() => undefined}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // Issue #497: the Staff draft-link review with a required tax choice. The
+    // tax cards, the reused difference review and the blocked Link source action
+    // are the whole slice's user-visible surface. At 360 the two basis cards
+    // stack and the line-match grid reflows; at 1280 they sit side by side.
+    //
+    // What this case cannot show: choosing a basis, matching a line, the link
+    // request, and the post-link "Linked source" state stay hand-driven (the DOM
+    // suite covers them).
+    name: "PurchaseOrderDraftLink497",
+    element: (
+      <PurchaseOrderDraftLinkReviewPanel
+        state={PO_LINK_STATE}
+        review={PO_LINK_REVIEW}
+        currency={PO_EDITOR_USD}
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        taxChoice=""
+        linking={false}
+        error={null}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onTaxChoice={() => undefined}
+        onBack={() => undefined}
+        onLink={() => undefined}
+      />
+    ),
+  },
+  {
+    // The correction editor (issue #473): the required reason, the saved
+    // record's version, and the protected confirmation number shown as text.
+    // At 360 this says whether the reason card and the protected note wrap.
+    name: "PurchaseOrderCorrectionEditor",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_CORRECTING_STATE}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+        mode="correction"
+        correctionReason="The customer moved to a new warehouse"
+        onCorrectionReasonChange={() => undefined}
+        confirmationNumber="2302260001"
+      />
+    ),
+  },
+  {
+    // The version warning (issue #473): the two choices when a draft really is
+    // still a draft -- the current version, the writer's name and time, and
+    // Overwrite as the primary action.
+    name: "PurchaseOrderVersionConflict",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The correction editor sits behind the warning.
+        </p>
+        <PurchaseOrderConflictPrompt
+          conflict={{
+            CurrentState: "draft",
+            CurrentVersion: 5,
+            UpdatedBy: 9,
+            UpdatedByName: "Budi Santoso",
+            UpdatedAt: "2026-10-21T10:15:00+07:00",
+          }}
+          overwriting={false}
+          onCancel={() => undefined}
+          onCorrectSaved={() => undefined}
+          onOverwrite={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The saved-record transition (issue #473 wave 2): a draft write met a
+    // record that is already saved, so the dialog offers no Overwrite. The
+    // correction form, with its required reason, is the one safe way forward.
+    name: "PurchaseOrderSavedRecordTransition",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The draft editor keeps its working copy behind the warning.
+        </p>
+        <PurchaseOrderConflictPrompt
+          conflict={{
+            CurrentState: "saved",
+            CurrentVersion: 5,
+            UpdatedBy: 9,
+            UpdatedByName: "Budi Santoso",
+            UpdatedAt: "2026-10-21T10:15:00+07:00",
+          }}
+          overwriting={false}
+          savedTransition
+          onCancel={() => undefined}
+          onCorrectSaved={() => undefined}
+          onOverwrite={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The correction history (issue #473): a saved correction with its
+    // attachment reference and a recovered draft, each with reason, actor,
+    // time, versions, replaced lines and totals.
+    name: "PurchaseOrderHistory",
+    element: (
+      <PurchaseOrderHistoryPanel
+        entries={PO_HISTORY}
+        currency={PO_EDITOR_USD}
+        expandPreviousValues
+      />
+    ),
+  },
+  {
+    // The final-save difference review (issue #471): every differing value
+    // with both choices unpressed, the fixed currency statement, one omitted
+    // source line, two extra PO lines (one with a suggestion), the corrected
+    // match picker and the recalculated totals. At 360 this is the case that
+    // says whether the two-choice row stacks instead of overflowing.
+    name: "PurchaseOrderDifferenceReview",
+    element: (
+      <PurchaseOrderDifferenceReviewView
+        state={PO_REVIEW_STATE}
+        source={PO_REVIEW_SOURCE}
+        currency={PO_EDITOR_USD}
+        quoteNumber="1502260012"
+        documentState="none"
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    ),
+  },
+  {
+    // The repair difference review (issue #475): the same #471 choices against
+    // the candidate revision, no choice preselected, and the repair wording
+    // instead of the final-save one.
+    name: "PurchaseOrderRepairReview",
+    element: (
+      <PurchaseOrderDifferenceReviewView
+        state={PO_REVIEW_STATE}
+        source={PO_REPAIR_SOURCE}
+        currency={PO_EDITOR_USD}
+        quoteNumber={PO_REPAIR_SOURCE.QuoteNumber}
+        mode="repair"
+        documentState="none"
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    ),
+  },
+  {
+    // The repair confirmation (issue #475): old link → new link, the kept
+    // confirmation number, the choices this repair stores and the required
+    // reason. At 360 this says whether the link pair and the reason field
+    // stack instead of overflowing.
+    name: "PurchaseOrderRepairConfirmation",
+    element: (
+      <PurchaseOrderRepairConfirmationView
+        review={PO_REPAIR_REVIEW_DTO}
+        evaluation={PO_REPAIR_EVALUATION}
+        currency={PO_EDITOR_USD}
+        reason="The order followed the wrong quotation revision"
+        onReasonChange={() => undefined}
+        onBack={() => undefined}
+        onSave={() => undefined}
+        saving={false}
+        error={null}
+      />
+    ),
+  },
+  {
+    // The required final confirmation when no customer PDF exists (#471).
+    // The checkbox is unchecked and Final save is disabled: the deliberate
+    // acknowledgement must be given, not assumed.
+    name: "PurchaseOrderFinalConfirmation",
+    element: (
+      <PurchaseOrderFinalConfirmationView
+        review={PO_REVIEW_DTO}
+        evaluation={PO_REVIEW_EVALUATION}
+        payload={buildPurchaseOrderUpdate(PO_REVIEW_EVALUATION.applied, PO_EDITOR_USD).input!}
+        currency={PO_EDITOR_USD}
+        documentConfirmed={false}
+        onToggleDocumentConfirmed={() => undefined}
+        assignConfirmation={false}
+        onToggleAssignConfirmation={() => undefined}
+        onBack={() => undefined}
+        onFinalSave={() => undefined}
+        saving={false}
+        error={null}
+      />
+    ),
+  },
+  {
+    // A saved record (issue #471/#472): read-only PO fields and totals, the
+    // printed source figures beside them, the recorded no-PDF confirmation and
+    // the attachment panel's empty state. The document metadata is supplied so
+    // the SSR snapshot shows the settled state rather than a loading line.
+    //
+    // #474: this record has no confirmation number, so the panel shows "Not
+    // assigned" and the later Assign action.
+    name: "PurchaseOrderSaved",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // The saved record with the admin source-repair action (issue #475), beside
+    // Correct. The action is absent from the staff case above.
+    name: "PurchaseOrderSavedRepairAction",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // A saved record whose source Quotation was deleted (issue #481): the
+    // independent Source missing badge and banner, the former quotation named
+    // beside the record's own readable values, the no-new-downstream rule, and
+    // the admin-only Link Quotation action. Correct is absent because the
+    // server refuses a correction while the source is missing.
+    name: "PurchaseOrderSavedSourceMissing",
+    element: (
+      <PurchaseOrderSavedView
+        order={{
+          ...PO_EDITOR_ORDER,
+          State: "saved",
+          PdfAbsentConfirmed: true,
+          SourceMissing: true,
+          ConfirmationNumber: "2302268001",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+        }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        canRepairSource
+        onRepairSource={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // A saved record whose confirmation number is issued (#474): the number is
+    // read-only beside Copy, with the manual-submission explanation and no
+    // Submitted claim. The warning banner is shown because the stored sequence
+    // crossed 8000.
+    name: "PurchaseOrderSavedConfirmationAssigned",
+    element: (
+      <PurchaseOrderSavedView
+        order={{
+          ...PO_EDITOR_ORDER,
+          State: "saved",
+          PdfAbsentConfirmed: true,
+          ConfirmationNumber: "2302268000",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+          ConfirmationWarn: true,
+        }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // The attachment panel with no PDF (#472): the exact empty-state sentence
+    // and Attach. At 360 this says whether the action row wraps instead of
+    // overflowing.
+    name: "PurchaseOrderDocumentNone",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_NONE}
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // The attachment panel with version 2 active and version 1 retained
+    // (#472): filename, size, "Version 2 of 2", View, Replace and Remove.
+    name: "PurchaseOrderDocumentAttached",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_ATTACHED}
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // Removal's own confirmation (#472): no second dialog exists elsewhere,
+    // and the copy says the prior versions remain in correction history.
+    name: "PurchaseOrderDocumentRemovalConfirmation",
+    element: (
+      <PurchaseOrderDocumentPanelView
+        state={PO_DOCUMENT_ATTACHED}
+        pendingRemoval
+        onChooseFile={() => undefined}
+        onView={() => undefined}
+        onRemove={() => undefined}
+        onConfirmRemove={() => undefined}
+        onCancelRemove={() => undefined}
+      />
+    ),
+  },
+  {
+    // One PO line with its row discount (issue #470). The editor page pushes
+    // the lines below the fold at 360, so this is the case that shows whether
+    // the discount controls and the line total reflow at the narrow width.
+    name: "PurchaseOrderLineDiscount",
+    element: (
+      <div className="grid gap-3">
+        <PurchaseOrderLineRow
+          line={PO_EDITOR_INITIAL.lines[0]}
+          index={0}
+          currency={PO_EDITOR_USD}
+          uomOptions={PO_EDITOR_UOM_OPTIONS}
+          calculation={PO_EDITOR_CALCULATION.lines[0] ?? null}
+          dispatch={() => undefined}
+        />
+        <PurchaseOrderLineRow
+          line={PO_EDITOR_INITIAL.lines[1]}
+          index={1}
+          currency={PO_EDITOR_USD}
+          uomOptions={PO_EDITOR_UOM_OPTIONS}
+          calculation={PO_EDITOR_CALCULATION.lines[1] ?? null}
+          dispatch={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // The explained calculation (issue #470): every stage from line totals to
+    // the grand total, the PPN printed separately, the signed adjustment with
+    // its reason, and the source document's printed figures in their own
+    // group. Rendered alone because the editor page pushes it below the fold.
+    name: "PurchaseOrderTotals",
+    element: (
+      <PurchaseOrderTotals
+        totals={PO_EDITOR_CALCULATION.totals}
+        currency={PO_EDITOR_USD}
+        discountPercent={5}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
+      />
+    ),
+  },
+  {
+    // The same panel when the display-only aggregate gross cannot be named
+    // exactly (issue #470 wave 3). Each line and the stored subtotal/grand are
+    // exact; only the sum of line grosses is above 2^53-1. This case proves the
+    // long status text fits at 360 without clipping the money column.
+    name: "PurchaseOrderTotalsExactRange",
+    element: (
+      <PurchaseOrderTotals
+        totals={{
+          ...PO_EDITOR_CALCULATION.totals!,
+          grossMinor: null,
+          rowDiscountMinor: null,
+        }}
+        currency={PO_EDITOR_USD}
+        discountPercent={5}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
+      />
+    ),
+  },
+  {
+    // The same panel while an input cannot be parsed (issue #470 wave 2): an
+    // explicit pending state, never a column of fabricated zeros. The printed
+    // group stays visible because it is source evidence, not our arithmetic.
+    name: "PurchaseOrderTotalsPending",
+    element: (
+      <PurchaseOrderTotals
+        totals={null}
+        currency={PO_EDITOR_USD}
+        discountPercent={null}
+        ppnBps={PO_EDITOR_INITIAL.ppnBps}
+        adjustmentReason=""
+        printedTotals={PO_EDITOR_INITIAL.printedTotals}
+        sourceRevision={2}
+      />
+    ),
+  },
+  {
+    // The one discard dialog (issue #468, wave 3): Cancel and a guarded tab
+    // click open this same modal, so both widths must keep both choices
+    // readable and the scrim must cover the page behind it.
+    name: "PurchaseOrderTabDiscard",
+    element: (
+      <div className="min-h-[420px] bg-paper p-4">
+        <p className="text-small text-ink-500">
+          The purchase order editor sits behind the prompt.
+        </p>
+        <PurchaseOrderDiscardPrompt
+          onKeepEditing={() => undefined}
+          onDiscard={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // Issue #499: the free Quotation. Exactly one PO action -- Create PO from
+    // this Quotation -- sits beside Copy and Edit. At 360 this case says
+    // whether the three actions wrap without overflowing.
+    //
+    // What this case cannot show: the click that creates the PO, the real
+    // clipboard write, and the page below the header (which fetches its
+    // revision in an effect) stay hand-driven.
+    name: "QuotationDetailHeaderFree",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={null}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #499: a draft occupies the Quotation, so the creation action is
+    // replaced by Open PO draft. The revision picker still switches the
+    // displayed revision; the occupancy answer does not change with it.
+    name: "QuotationDetailHeaderOpenDraft",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={{ id: 7, state: "draft" }}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #499: the finalized case. The same occupancy becomes View PO, so
+    // the screenshot proves the three labels are distinct and that neither
+    // occupied state offers another creation attempt.
+    name: "QuotationDetailHeaderViewPO",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 — latest" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={{ id: 7, state: "saved" }}
+        purchaseOrderPending={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: single-record scope. The connected purchase order is listed as
+    // surviving, because deleting the quotation releases its link rather than
+    // deleting it.
+    name: "DeletionDialogRecord",
+    element: (
+      <DeletionDialogView
+        state={deletionState("record")}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: whole-chain scope with the issued challenge. The ten letters are
+    // the second confirmation; this is the state where the delete button is
+    // still disabled until the admin types them.
+    name: "DeletionDialogChain",
+    element: (
+      <DeletionDialogView
+        state={DELETION_CHAIN_READY}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: the challenge card on its own. In the 900px dialog screenshot the
+    // card sits below the fold of the dialog's own scroll container, so this
+    // case is the evidence that the issued letters, the expiry and the input
+    // render legibly at both widths.
+    name: "DeletionDialogChallengePanel",
+    element: (
+      <DeletionChallengePanel
+        state={DELETION_CHAIN_READY}
+        challengeError="Those letters do not match the challenge."
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+      />
+    ),
+  },
+  {
+    // #480: the changed-chain stop. Nothing was deleted; the modal names what
+    // moved and asks for the confirmation to be renewed.
+    name: "DeletionDialogChanged",
+    element: (
+      <DeletionDialogView
+        state={DELETION_CHANGED}
+        targetLabel="quotation 1502260012"
+        onClose={() => undefined}
+        onScope={() => undefined}
+        onReason={() => undefined}
+        onTypedNumber={() => undefined}
+        onChallengeInput={() => undefined}
+        onRequestChallenge={() => undefined}
+        onChangeReviewed={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
     // The line-item editor (issue #430): the proof surface for the UoM
     // select's background chevron. The fixture above renders one plain line
     // and one line with an open sub-item panel, so both UoMSelect call sites
@@ -434,6 +2291,47 @@ const CASES: SnapshotCase[] = [
         onRemoveSubBullet={() => undefined}
         onSubBulletChange={() => undefined}
         onPasteItems={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #492: the Quotation defaults surface, at both widths. A
+    // representative saved set (Services with a category, a default subject)
+    // shows every control the page can render, including the conditional
+    // service-category field.
+    name: "QuotationSettings",
+    element: (
+      <QuotationSettingsPage
+        settings={{
+          ...DEFAULT_QUOTATION_SETTINGS,
+          validityDays: 45,
+          paymentTermDays: 30,
+          taxZone: "NonFTZ",
+          taxType: "Services",
+          serviceCategory: "Construction",
+          subject: "Supply and installation of electrical and mechanical systems",
+        }}
+        onChange={() => undefined}
+        onClear={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #492: the Purchase Order defaults surface. The received date is
+    // filled, so the date control reads as an entered value rather than an
+    // empty box.
+    name: "PurchaseOrderSettings",
+    element: (
+      <PurchaseOrderSettingsPage
+        settings={{
+          ...DEFAULT_PURCHASE_ORDER_SETTINGS,
+          paymentTerms: "50% advance, balance 30 days after delivery",
+          incoterms: "FOB",
+          receivedDate: "2026-10-01",
+          listPageSize: 25,
+        }}
+        onChange={() => undefined}
+        onClear={() => undefined}
       />
     ),
   },

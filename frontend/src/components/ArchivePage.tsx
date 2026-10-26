@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DeleteQuotation, ListQuotations } from "@backend/backend/Quotation";
+import { ListQuotations } from "@backend/backend/Quotation";
 import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotationSummary } from "../archive";
 import { resolveCurrencyEntry } from "../archive";
@@ -8,6 +8,7 @@ import { decorateMoney } from "../format";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { useToast } from "../toast";
 import { Badge, Button, Card } from "./ui";
+import { DeletionDialog } from "./DeletionDialog";
 
 // The IDR entry, transcribed field-for-field from
 // backend/currency/currency.go. This is the prop default only -- the live
@@ -29,14 +30,24 @@ interface ArchivePageProps {
    * rows whose code it cannot resolve. Each row renders in its own
    * REVISION currency (row.Currency), never this one, once resolved. */
   currency?: CurrencyInfo;
+  /** Whether the signed-in user may permanently delete a quotation. */
+  isAdmin?: boolean;
 }
 
-export function ArchivePage({ onNewQuotation, onOpenQuotation, currency = IDR_ENTRY }: ArchivePageProps) {
+export function ArchivePage({
+  onNewQuotation,
+  onOpenQuotation,
+  currency = IDR_ENTRY,
+  isAdmin = false,
+}: ArchivePageProps) {
   const [rows, setRows] = useState<ArchivedQuotationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [confirmingId, setConfirmingId] = useState<number | null>(null);
-  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #480: the delete action opens the shared permanent-deletion dialog, which
+  // asks for the scope, the typed number and (for a chain) the ten-letter
+  // challenge. The old two-click inline delete is gone: it could remove a
+  // quotation without a reason, a typed confirmation or a surviving-PO plan.
+  const [deletionTarget, setDeletionTarget] = useState<{ id: number; label: string } | null>(null);
   // The catalogue, fetched like App.tsx fetches it: row codes resolve to
   // entries here, so each row renders in its revision currency. Null until
   // loaded (or when the binding fails) -- rows then fall back to the live
@@ -111,31 +122,6 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation, currency = IDR_EN
     if (action === "archiveOpen" && !inControl && activeIndex >= 0 && activeIndex < rows.length) {
       const row = rows[activeIndex];
       onOpenQuotation(row.ID, row.RevisionNumber);
-    }
-  };
-
-  useEffect(
-    () => () => {
-      if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    },
-    []
-  );
-
-  const requestDelete = (id: number) => {
-    setConfirmingId(id);
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    confirmTimer.current = setTimeout(() => setConfirmingId(null), 6000);
-  };
-
-  const handleDelete = async (id: number) => {
-    if (confirmTimer.current) clearTimeout(confirmTimer.current);
-    try {
-      await DeleteQuotation(id);
-      setRows((current) => current.filter((row) => row.ID !== id));
-      setConfirmingId(null);
-      pushToast("success", "Quotation deleted.");
-    } catch {
-      pushToast("error", "We couldn't delete this quotation. Try again.");
     }
   };
 
@@ -258,43 +244,23 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation, currency = IDR_EN
                       {decorateMoney(resolveCurrencyEntry(catalogue, row.Currency, currency), row.DisplayGrand)}
                     </td>
                     <td className="px-5 py-3 text-right align-middle">
-                      {confirmingId === row.ID ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDelete(row.ID);
-                            }}
-                          >
-                            Confirm
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setConfirmingId(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </span>
-                      ) : (
+                      {isAdmin ? (
                         <Button
                           variant="ghost"
                           size="sm"
                           aria-label={`Delete quotation ${row.QuoteNumber}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            requestDelete(row.ID);
+                            setDeletionTarget({
+                              id: row.ID,
+                              label: `quotation ${row.QuoteNumber}`,
+                            });
                           }}
                           className="hover:!bg-danger-50 hover:!text-danger-600"
                         >
                           Delete
                         </Button>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -306,9 +272,26 @@ export function ArchivePage({ onNewQuotation, onOpenQuotation, currency = IDR_EN
 
       {rows.length > 0 ? (
         <p className="text-caption text-ink-500">
-          Deleting a quotation also removes every revision it contains. This
-          cannot be undone.
+          Deleting a record is permanent. A single quotation deletion removes
+          every revision it contains and leaves a connected purchase order as
+          Source missing; whole-chain deletion removes both.
         </p>
+      ) : null}
+
+      {deletionTarget !== null ? (
+        <DeletionDialog
+          targetType="quotation"
+          targetId={deletionTarget.id}
+          targetLabel={deletionTarget.label}
+          onClose={() => setDeletionTarget(null)}
+          onDeleted={() => {
+            setRows((current) =>
+              current.filter((row) => row.ID !== deletionTarget.id)
+            );
+            setDeletionTarget(null);
+            pushToast("success", "Quotation deleted.");
+          }}
+        />
       ) : null}
     </section>
   );

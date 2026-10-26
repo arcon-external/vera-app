@@ -370,18 +370,25 @@ func TestDeleteRequiresAdmin(t *testing.T) {
 		t.Fatalf("export = %d; want 201", code)
 	}
 	id, _ := exported["id"].(float64)
+	quoteNumber, _ := exported["quoteNumber"].(string)
 	quotePath := "/v1/quotations/" + strconv.Itoa(int(id))
 
 	staffToken := staffLogin(t, server, "vera_api_quote_delete")
-
-	code, _ = doJSON(t, server, http.MethodDelete, quotePath, staffToken, nil)
+	code, _ = doJSON(t, server, http.MethodPost, "/v1/deletions/preview", staffToken, map[string]any{
+		"targetType": "quotation", "targetId": int64(id),
+	})
 	if code != http.StatusForbidden {
-		t.Fatalf("staff delete = %d; want 403", code)
+		t.Fatalf("staff deletion preview = %d; want 403", code)
 	}
 
-	code, _ = doJSON(t, server, http.MethodDelete, quotePath, token, nil)
-	if code != http.StatusNoContent {
-		t.Fatalf("admin delete = %d; want 204", code)
+	preview := previewDeletionOverAPI(t, server, token, "quotation", int64(id))
+	code, body := doJSON(t, server, http.MethodPost, "/v1/deletions", token, map[string]any{
+		"targetType": "quotation", "targetId": int64(id), "scope": "record",
+		"reason": "archive cleanup", "typedNumber": quoteNumber,
+		"expectedFingerprint": preview.Fingerprint,
+	})
+	if code != http.StatusOK {
+		t.Fatalf("admin deletion = %d (%v); want 200", code, body)
 	}
 	code, _ = doJSON(t, server, http.MethodGet, quotePath, token, nil)
 	if code != http.StatusNotFound {

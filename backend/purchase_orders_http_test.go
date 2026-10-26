@@ -1,0 +1,609 @@
+package backend
+
+import (
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"vera-app/backend/apicontract"
+	"vera-app/backend/store"
+)
+
+// Issue #468: the desktop reaches PO drafts through these bindings. The API
+// integration suite proves server behaviour; these prove the wrappers send the
+// promised payload and map every field the editor renders.
+
+func TestCreatePurchaseOrderDraftPostsTheExactPairAndMapsTheDraft(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != "/v1/purchase-orders" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["quotationId"] != float64(12) || body["revisionNumber"] != float64(0) {
+			t.Errorf("source payload = %v; want quotation 12 revision 0", body)
+		}
+		writer.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, UUID: "uuid-7", State: "draft", QuotationID: 12, SourceRevision: 0,
+			QuoteNumber: "1502260012", CustomerID: 2, CustomerName: "PT. Buyer",
+			BillingAddress: "Jl. Billing", DeliveryAddress: "Jl. Delivery",
+			ShipToCode: "SHIP", ContactEmail: "buyer@example.com", ContactPhone: "+62",
+			PONumber: "PO-1", ReceivedDate: "2026-10-20", Incoterms: "CIF",
+			Currency: "USD", TaxZone: "NonFTZ", TaxCategory: "SupplyInstall",
+			PaymentTerms: "45 days", CreatedAt: "2026-10-20T10:00:00Z",
+			UpdatedAt: "2026-10-20T10:00:00Z",
+			Items: []apicontract.PurchaseOrderItemRow{{
+				LineNumber: 1, Description: "Widget", QuantityScaled: 25000,
+				UoM: "Pc", UnitPriceMinor: 1250,
+			}},
+		})
+	})
+
+	q := newTestQuotation()
+	draft, err := q.CreatePurchaseOrderDraft(PurchaseOrderCreateInput{
+		QuotationID: 12, RevisionNumber: 0,
+	})
+	if err != nil {
+		t.Fatalf("CreatePurchaseOrderDraft failed: %v", err)
+	}
+	if draft.ID != 7 || draft.State != "draft" || draft.SourceRevision != 0 ||
+		draft.Currency != "USD" || draft.PaymentTerms != "45 days" ||
+		draft.CustomerName != "PT. Buyer" {
+		t.Errorf("draft = %+v; want the full mapped header", draft)
+	}
+	if len(draft.Items) != 1 || draft.Items[0].QuantityScaled != 25000 ||
+		draft.Items[0].UnitPriceMinor != 1250 {
+		t.Errorf("items = %+v; want the exact scaled line", draft.Items)
+	}
+}
+
+func TestGetPurchaseOrderReadsOneDraftByID(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/purchase-orders/7" {
+			t.Errorf("request = %s %s; want GET /v1/purchase-orders/7", request.Method, request.URL.Path)
+		}
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "draft", ReceivedDate: "2026-10-20",
+			Items: []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	draft, err := q.GetPurchaseOrder(7)
+	if err != nil {
+		t.Fatalf("GetPurchaseOrder failed: %v", err)
+	}
+	if draft.ID != 7 || draft.ReceivedDate != "2026-10-20" || draft.Items == nil {
+		t.Errorf("draft = %+v; want id 7 with an empty line list", draft)
+	}
+}
+
+func TestUpdatePurchaseOrderDraftPutsTheEditableFields(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut || request.URL.Path != "/v1/purchase-orders/7" {
+			t.Errorf("request = %s %s; want PUT /v1/purchase-orders/7", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["expectedVersion"] != float64(3) || body["overwrite"] != true {
+			t.Errorf("version intent = %v/%v; want 3/true",
+				body["expectedVersion"], body["overwrite"])
+		}
+		if body["billingAddress"] != "Jl. Edited" || body["poNumber"] != "PO-9" ||
+			body["receivedDate"] != "2026-10-02" || body["poDate"] != "2026-10-01" ||
+			body["paymentTerms"] != "50% advance" {
+			t.Errorf("header payload = %v", body)
+		}
+		if body["discountPercent"] != float64(5) ||
+			body["adjustmentMinor"] != float64(-250) ||
+			body["adjustmentReason"] != "Printed total rounding" {
+			t.Errorf("calculation payload = %v", body)
+		}
+		items, _ := body["items"].([]any)
+		if len(items) != 1 {
+			t.Fatalf("items payload = %v; want 1", body["items"])
+		}
+		item, _ := items[0].(map[string]any)
+		if item["quantityScaled"] != float64(25000) || item["unitPriceMinor"] != float64(1250) ||
+			item["quotationItemNo"] != float64(1) || item["discountEnabled"] != true ||
+			item["discountPercent"] != float64(10) {
+			t.Errorf("item payload = %v", item)
+		}
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "draft", ReceivedDate: "2026-10-02",
+			DiscountPercent: 5, SubtotalMinor: 23750, DiscountMinor: 1187,
+			PpnBps: 1100, PpnMinor: 2482, AdjustmentMinor: -250,
+			AdjustmentReason: "Printed total rounding", GrandTotalMinor: 24795,
+			PrintedSubtotalMinor: 25000, PrintedDiscountMinor: 0,
+			PrintedPpnMinor: 2750, PrintedGrandTotalMinor: 27750,
+			Items: []apicontract.PurchaseOrderItemRow{{
+				LineNumber: 1, Description: "Widget", QuantityScaled: 25000,
+				UoM: "Pc", UnitPriceMinor: 1250, DiscountEnabled: true,
+				DiscountPercent: 10, GrossMinor: 31250, DiscountMinor: 3125,
+				NetMinor: 28125,
+			}},
+		})
+	})
+
+	itemNo := 1
+	q := newTestQuotation()
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID:               7,
+		BillingAddress:   "Jl. Edited",
+		PONumber:         "PO-9",
+		PODate:           "2026-10-01",
+		ReceivedDate:     "2026-10-02",
+		PaymentTerms:     "50% advance",
+		DiscountPercent:  5,
+		AdjustmentMinor:  -250,
+		AdjustmentReason: "Printed total rounding",
+		ExpectedVersion:  3,
+		Overwrite:        true,
+		Items: []PurchaseOrderItemInput{{
+			QuotationItemNo: &itemNo,
+			Description:     "Widget",
+			QuantityScaled:  25000,
+			UoM:             "Pc",
+			UnitPriceMinor:  1250,
+			DiscountEnabled: true,
+			DiscountPercent: 10,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft failed: %v", err)
+	}
+	if result.Conflict != nil || result.Order == nil {
+		t.Fatalf("result = %+v; want a saved order, not a conflict", result)
+	}
+	draft := *result.Order
+	if draft.ID != 7 || draft.ReceivedDate != "2026-10-02" {
+		t.Errorf("draft = %+v; want the updated record", draft)
+	}
+	if draft.DiscountPercent != 5 || draft.SubtotalMinor != 23750 ||
+		draft.DiscountMinor != 1187 || draft.PpnBps != 1100 || draft.PpnMinor != 2482 ||
+		draft.AdjustmentMinor != -250 || draft.AdjustmentReason != "Printed total rounding" ||
+		draft.GrandTotalMinor != 24795 || draft.PrintedSubtotalMinor != 25000 ||
+		draft.PrintedDiscountMinor != 0 || draft.PrintedPpnMinor != 2750 ||
+		draft.PrintedGrandTotalMinor != 27750 {
+		t.Errorf("mapped calculation = %+v; want every stored and printed figure", draft)
+	}
+	if len(draft.Items) != 1 || !draft.Items[0].DiscountEnabled ||
+		draft.Items[0].DiscountPercent != 10 || draft.Items[0].GrossMinor != 31250 ||
+		draft.Items[0].DiscountMinor != 3125 || draft.Items[0].NetMinor != 28125 {
+		t.Errorf("mapped line calculation = %+v", draft.Items)
+	}
+}
+
+func TestPurchaseOrderBindingsRequireSignIn(t *testing.T) {
+	q := newTestQuotation()
+	if _, err := q.CreatePurchaseOrderDraft(PurchaseOrderCreateInput{QuotationID: 1}); err == nil {
+		t.Error("CreatePurchaseOrderDraft without a session succeeded; want refusal")
+	}
+	if _, err := q.GetPurchaseOrder(1); err == nil {
+		t.Error("GetPurchaseOrder without a session succeeded; want refusal")
+	}
+	if _, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{ID: 1}); err == nil {
+		t.Error("UpdatePurchaseOrderDraft without a session succeeded; want refusal")
+	}
+	if _, err := q.AssignPurchaseOrderConfirmationNumber(1); err == nil {
+		t.Error("AssignPurchaseOrderConfirmationNumber without a session succeeded; want refusal")
+	}
+}
+
+// TestAssignPurchaseOrderConfirmationNumberPostsAndMapsTheNumber covers the
+// desktop side of #474: the request is a bodiless POST that asks the server to
+// assign, and every value the saved view renders survives the mapping.
+func TestAssignPurchaseOrderConfirmationNumberPostsAndMapsTheNumber(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/confirmation-number" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/confirmation-number",
+				request.Method, request.URL.Path)
+		}
+		number := "2302260001"
+		assignedAt := "2026-10-21T09:00:00Z"
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "saved", ReceivedDate: "2026-10-20",
+			ConfirmationNumber:     &number,
+			ConfirmationAssignedAt: &assignedAt,
+			ConfirmationWarn:       true,
+			Items:                  []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	order, err := q.AssignPurchaseOrderConfirmationNumber(7)
+	if err != nil {
+		t.Fatalf("AssignPurchaseOrderConfirmationNumber failed: %v", err)
+	}
+	if order.ConfirmationNumber == nil || *order.ConfirmationNumber != "2302260001" {
+		t.Errorf("number = %v; want 2302260001", order.ConfirmationNumber)
+	}
+	if order.ConfirmationAssignedAt == nil || *order.ConfirmationAssignedAt != "2026-10-21T09:00:00Z" {
+		t.Errorf("assigned at = %v; want the server time", order.ConfirmationAssignedAt)
+	}
+	if !order.ConfirmationWarn {
+		t.Error("confirmation warning was not mapped")
+	}
+}
+
+// TestFinalizePurchaseOrderSendsTheAssignmentRequest proves the checkbox
+// travels as a request field and that the returned identifier is mapped. The
+// desktop never sends the number itself.
+func TestFinalizePurchaseOrderSendsTheAssignmentRequest(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/finalize" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/finalize",
+				request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["assignConfirmationNumber"] != true {
+			t.Errorf("assignConfirmationNumber = %v; want true", body["assignConfirmationNumber"])
+		}
+		if _, sent := body["confirmationNumber"]; sent {
+			t.Error("the client sent a confirmation number; only the server may allocate one")
+		}
+		number := "2302260003"
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "saved", PONumber: "PO-7", ReceivedDate: "2026-10-20",
+			ConfirmationNumber: &number,
+			Items:              []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	result, err := q.FinalizePurchaseOrder(PurchaseOrderFinalizeInput{
+		ID:                       7,
+		PONumber:                 "PO-7",
+		ReceivedDate:             "2026-10-20",
+		ExpectedVersion:          4,
+		DocumentConfirmed:        true,
+		AssignConfirmationNumber: true,
+	})
+	if err != nil {
+		t.Fatalf("FinalizePurchaseOrder failed: %v", err)
+	}
+	if result.Order == nil {
+		t.Fatalf("result = %+v; want the saved order", result)
+	}
+	saved := *result.Order
+	if saved.ConfirmationNumber == nil || *saved.ConfirmationNumber != "2302260003" {
+		t.Errorf("number = %v; want 2302260003", saved.ConfirmationNumber)
+	}
+}
+
+// TestPurchaseOrderPPNRateMatchesQuotationTaxResolution pins the PO calculator
+// against the quotation's own tax model. The two live in different packages --
+// `store` cannot import `backend` without a cycle -- so the resolver is written
+// twice and this test is what keeps the pair from drifting: a change to
+// resolveTax's customer-facing PPN must break here.
+//
+// Both tax models are covered: the legacy category-only revision and the
+// current tax_type/service_category one whose legacy category is empty.
+func TestPurchaseOrderPPNRateMatchesQuotationTaxResolution(t *testing.T) {
+	cases := []struct {
+		name            string
+		zone            string
+		taxType         string
+		serviceCategory string
+		legacyCategory  string
+	}{
+		{"legacy FTZ", "FTZ", "", "", ""},
+		{"legacy goods", "NonFTZ", "", "", "SupplyOnly"},
+		{"legacy service", "NonFTZ", "", "", "SupplyInstall"},
+		{"legacy construction service", "NonFTZ", "", "", "SupplyInstallConstruction"},
+		{"current non-FTZ goods", "NonFTZ", TaxTypeGoods, "", ""},
+		{"current FTZ goods", "FTZ", TaxTypeGoods, "", ""},
+		{"current FTZ service", "FTZ", TaxTypeServices, ServiceCategoryNonConstruction, ""},
+		{"current service", "NonFTZ", TaxTypeServices, ServiceCategoryNonConstruction, ""},
+		{"current construction service", "NonFTZ", TaxTypeServices, ServiceCategoryConstruction, ""},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			quotationType := testCase.taxType
+			quotationCategory := testCase.serviceCategory
+			if quotationType == "" {
+				if testCase.zone == TaxZoneFTZ {
+					quotationType = TaxTypeGoods
+				} else {
+					quotationType, quotationCategory, _ = legacyTaxCategoryToNew(testCase.legacyCategory)
+				}
+			}
+			ppnBps, _, _, err := resolveTax(testCase.zone, quotationType, quotationCategory)
+			if err != nil {
+				t.Fatalf("resolveTax: %v", err)
+			}
+			poBps, err := store.PurchaseOrderPPNBps(
+				testCase.zone, testCase.taxType, testCase.serviceCategory, testCase.legacyCategory)
+			if err != nil {
+				t.Fatalf("PurchaseOrderPPNBps: %v", err)
+			}
+			if poBps != int16(ppnBps) {
+				t.Errorf("PO PPN = %d bps, quotation PPN = %d bps", poBps, ppnBps)
+			}
+		})
+	}
+}
+
+// TestPurchaseOrderBindingsModelCarriesEveryField guards the generated Wails
+// model shape for this slice. The repository's bindings test covers method
+// names; a field the generator dropped would still compile on both sides and
+// silently disappear from the update payload (the generated constructor copies
+// only the fields its class declares). The class list here is exactly the PO
+// types #470 changed.
+func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "frontend", "wailsjs", "go", "models.ts"))
+	if err != nil {
+		t.Fatalf("read generated models: %v", err)
+	}
+	source := string(raw)
+	targets := []struct {
+		name  string
+		value any
+	}{
+		{"PurchaseOrderDTO", PurchaseOrderDTO{}},
+		{"PurchaseOrderItemDTO", PurchaseOrderItemDTO{}},
+		{"PurchaseOrderCreateInput", PurchaseOrderCreateInput{}},
+		{"PurchaseOrderItemInput", PurchaseOrderItemInput{}},
+		{"PurchaseOrderUpdateInput", PurchaseOrderUpdateInput{}},
+		{"PurchaseOrderFinalizeInput", PurchaseOrderFinalizeInput{}},
+		{"PurchaseOrderWriteResult", PurchaseOrderWriteResult{}},
+		{"PurchaseOrderConflictDTO", PurchaseOrderConflictDTO{}},
+		{"PurchaseOrderCorrectionInput", PurchaseOrderCorrectionInput{}},
+		{"PurchaseOrderCorrectionDTO", PurchaseOrderCorrectionDTO{}},
+		{"PurchaseOrderCorrectionItemDTO", PurchaseOrderCorrectionItemDTO{}},
+		{"PurchaseOrderCorrectionAttachmentDTO", PurchaseOrderCorrectionAttachmentDTO{}},
+	}
+	for _, target := range targets {
+		start := strings.Index(source, "export class "+target.name+" {")
+		if start < 0 {
+			t.Errorf("models.ts has no class %s", target.name)
+			continue
+		}
+		block := source[start:]
+		if end := strings.Index(block, "\n\texport class "); end >= 0 {
+			block = block[:end]
+		}
+		structType := reflect.TypeOf(target.value)
+		for index := 0; index < structType.NumField(); index++ {
+			structField := structType.Field(index)
+			field := structField.Name
+			// Nested classes are rebuilt through convertValues; the generator
+			// does not copy them as plain values, so accept that form too.
+			want := `this.` + field + ` = source["` + field + `"];`
+			nested := structField.Type.Kind() == reflect.Struct ||
+				(structField.Type.Kind() == reflect.Ptr &&
+					structField.Type.Elem().Kind() == reflect.Struct) ||
+				(structField.Type.Kind() == reflect.Slice &&
+					structField.Type.Elem().Kind() == reflect.Struct)
+			if nested && strings.Contains(block, `this.`+field+` = this.convertValues(source["`+field+`"]`) {
+				continue
+			}
+			if !strings.Contains(block, want) {
+				t.Errorf("models.ts %s is missing %s", target.name, want)
+			}
+		}
+	}
+}
+
+// TestPurchaseOrderSurfacesCarryNoInternalEconomics mirrors
+// TestCustomerPreviewCarriesNoInternalEconomics for the PO: supplier cost,
+// margin, PPH22 and profit must never appear on any PO surface a customer
+// comparison could read. A field added with one of those names fails here.
+func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
+	forbidden := []string{"cost", "margin", "pph22", "profit", "nett"}
+	surfaces := []reflect.Type{
+		reflect.TypeOf(store.PurchaseOrder{}),
+		reflect.TypeOf(store.PurchaseOrderItem{}),
+		reflect.TypeOf(store.PurchaseOrderCalcInput{}),
+		reflect.TypeOf(store.PurchaseOrderCalc{}),
+		reflect.TypeOf(apicontract.PurchaseOrderRow{}),
+		reflect.TypeOf(apicontract.PurchaseOrderItemRow{}),
+		reflect.TypeOf(PurchaseOrderDTO{}),
+		reflect.TypeOf(PurchaseOrderItemDTO{}),
+		reflect.TypeOf(PurchaseOrderCorrectionDTO{}),
+		reflect.TypeOf(PurchaseOrderCorrectionItemDTO{}),
+		reflect.TypeOf(PurchaseOrderConflictDTO{}),
+	}
+	for _, surface := range surfaces {
+		for index := 0; index < surface.NumField(); index++ {
+			field := surface.Field(index)
+			lower := strings.ToLower(field.Name)
+			for _, word := range forbidden {
+				if strings.Contains(lower, word) {
+					t.Errorf("%s.%s carries internal economics (%q)",
+						surface.Name(), field.Name, word)
+				}
+			}
+		}
+	}
+}
+
+// TestUpdatePurchaseOrderDraftReturnsATypedConflict is the desktop half of the
+// warning contract (#473): the 409's actor, time and version arrive as a
+// result, not as an error string, so the editor can offer Cancel/Overwrite with
+// real values.
+func TestUpdatePurchaseOrderDraftReturnsATypedConflict(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut || request.URL.Path != "/v1/purchase-orders/7" {
+			t.Errorf("request = %s %s; want PUT /v1/purchase-orders/7", request.Method, request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{
+			"error": "purchase order was saved since it was loaded: Sari saved version 5",
+			"code": "po_version_conflict",
+			"currentVersion": 5,
+			"currentState": "draft",
+			"updatedBy": 11,
+			"updatedByName": "Sari",
+			"updatedAt": "2026-10-21T10:15:00+07:00"
+		}`))
+	})
+
+	q := newTestQuotation()
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 4, Overwrite: false,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft returned an error for a conflict: %v", err)
+	}
+	if result.Order != nil {
+		t.Errorf("Order = %+v; want nil on a conflict", result.Order)
+	}
+	if result.Conflict == nil {
+		t.Fatal("Conflict = nil; want the current version and writer")
+	}
+	if result.Conflict.CurrentVersion != 5 || result.Conflict.CurrentState != "draft" ||
+		result.Conflict.UpdatedBy != 11 || result.Conflict.UpdatedByName != "Sari" ||
+		result.Conflict.UpdatedAt != "2026-10-21T10:15:00+07:00" {
+		t.Errorf("Conflict = %+v; want version 5 saved by Sari", result.Conflict)
+	}
+}
+
+// TestUpdatePurchaseOrderDraftReturnsASavedRecordAnswer is wave 2 of #473: a
+// po_not_draft refusal is a typed answer, not an error string. The editor keeps
+// the working copy and offers the correction flow instead of dead-ending on
+// "only a draft can be edited" after a staff member chose Overwrite.
+func TestUpdatePurchaseOrderDraftReturnsASavedRecordAnswer(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusConflict)
+		_, _ = writer.Write([]byte(`{
+			"error": "only a draft can be edited",
+			"code": "po_not_draft"
+		}`))
+	})
+
+	q := newTestQuotation()
+	result, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 5, Overwrite: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft returned an error for a saved record: %v", err)
+	}
+	if !result.SavedRecord {
+		t.Error("SavedRecord = false; want the correction-flow answer")
+	}
+	if result.Order != nil || result.Conflict != nil {
+		t.Errorf("result = %+v; want neither an order nor a version conflict", result)
+	}
+}
+
+// TestCorrectPurchaseOrderPostsTheReasonAndVersion proves the saved record's
+// one write path: a reason travels with the editable values, the version is
+// stated, and no protected identity field is sent.
+func TestCorrectPurchaseOrderPostsTheReasonAndVersion(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost ||
+			request.URL.Path != "/v1/purchase-orders/7/correction" {
+			t.Errorf("request = %s %s; want POST /v1/purchase-orders/7/correction",
+				request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body["reason"] != "Customer moved warehouse" {
+			t.Errorf("reason = %v; want the staff reason", body["reason"])
+		}
+		if body["expectedVersion"] != float64(6) || body["overwrite"] != true {
+			t.Errorf("version intent = %v/%v; want 6/true",
+				body["expectedVersion"], body["overwrite"])
+		}
+		if body["deliveryAddress"] != "Jl. New" {
+			t.Errorf("deliveryAddress = %v; want the corrected value", body["deliveryAddress"])
+		}
+		for _, protected := range []string{"confirmationNumber", "quotationId", "sourceRevision",
+			"customerId", "currency", "uuid", "state", "version"} {
+			if _, sent := body[protected]; sent {
+				t.Errorf("the client sent protected field %q", protected)
+			}
+		}
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, Version: 7, State: "saved", ReceivedDate: "2026-10-20",
+			DeliveryAddress: "Jl. New", Items: []apicontract.PurchaseOrderItemRow{},
+		})
+	})
+
+	q := newTestQuotation()
+	result, err := q.CorrectPurchaseOrder(PurchaseOrderCorrectionInput{
+		ID:              7,
+		DeliveryAddress: "Jl. New",
+		Reason:          "Customer moved warehouse",
+		ExpectedVersion: 6,
+		Overwrite:       true,
+	})
+	if err != nil {
+		t.Fatalf("CorrectPurchaseOrder failed: %v", err)
+	}
+	if result.Conflict != nil || result.Order == nil {
+		t.Fatalf("result = %+v; want the corrected record", result)
+	}
+	if result.Order.Version != 7 || result.Order.DeliveryAddress != "Jl. New" {
+		t.Errorf("corrected = %+v; want version 7 with the new address", result.Order)
+	}
+}
+
+// TestGetPurchaseOrderHistoryMapsTheSnapshot covers every value the history
+// panel renders, including the attachment reference.
+func TestGetPurchaseOrderHistoryMapsTheSnapshot(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet || request.URL.Path != "/v1/purchase-orders/7/history" {
+			t.Errorf("request = %s %s; want GET /v1/purchase-orders/7/history",
+				request.Method, request.URL.Path)
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"history": []apicontract.PurchaseOrderCorrectionRow{{
+				ID: 3, UUID: "corr-3", Kind: "correction", State: "saved",
+				Reason: "Customer moved warehouse", ActorID: 9, ActorName: "Budi",
+				CreatedAt: "2026-10-21T08:00:00Z", PreviousVersion: 4, ResultingVersion: 5,
+				QuotationID: 12, SourceRevision: 1, QuoteNumber: "1502260012",
+				CustomerID: 2, CustomerName: "PT. Buyer", Currency: "USD",
+				DeliveryAddress: "Jl. Old", PONumber: "PO-7", PaymentTerms: "30 days",
+				ReceivedDate: "2026-10-02", SubtotalMinor: 200, GrandTotalMinor: 200,
+				Attachment: &apicontract.PurchaseOrderCorrectionAttachmentRow{
+					Version: 2, SHA256: strings.Repeat("a", 64), Filename: "customer-po.pdf",
+				},
+				Items: []apicontract.PurchaseOrderCorrectionItemRow{{
+					LineNumber: 1, Description: "Widget", QuantityScaled: 20000,
+					UoM: "Pc", UnitPriceMinor: 100, GrossMinor: 200, NetMinor: 200,
+				}},
+			}},
+		})
+	})
+
+	q := newTestQuotation()
+	history, err := q.GetPurchaseOrderHistory(7)
+	if err != nil {
+		t.Fatalf("GetPurchaseOrderHistory failed: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history = %d; want 1", len(history))
+	}
+	entry := history[0]
+	if entry.Kind != "correction" || entry.Reason != "Customer moved warehouse" ||
+		entry.ActorName != "Budi" || entry.PreviousVersion != 4 || entry.ResultingVersion != 5 {
+		t.Errorf("entry = %+v; want the correction's reason and versions", entry)
+	}
+	if entry.Attachment == nil || entry.Attachment.Version != 2 ||
+		entry.Attachment.Filename != "customer-po.pdf" {
+		t.Errorf("attachment = %+v; want version 2 of customer-po.pdf", entry.Attachment)
+	}
+	if len(entry.Items) != 1 || entry.Items[0].LineNumber != 1 || entry.Items[0].NetMinor != 200 {
+		t.Errorf("items = %+v; want the retained line", entry.Items)
+	}
+}

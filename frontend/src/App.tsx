@@ -13,9 +13,19 @@ import {
   ClearDraftContext,
   SetRevisionContext,
   ClearRevisionContext,
+  ListPOSourceQuotations,
+  ListPOSourceRevisions,
+  ValidatePOSource,
+  CreatePurchaseOrderDraft,
+  GetPurchaseOrder,
+  ReviewPurchaseOrderSource,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
-import { AppShell } from "./components/AppShell";
+import {
+  AppShell,
+  profileMenuContext,
+  type SettingsOrigin,
+} from "./components/AppShell";
 import { ArchivePage } from "./components/ArchivePage";
 import { DraftsPage } from "./components/DraftsPage";
 import {
@@ -61,10 +71,39 @@ import {
 } from "./tax";
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
+import { DocumentHomePage } from "./components/DocumentHomePage";
+import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
+import { POQuotationSelector } from "./components/POQuotationSelector";
+import type {
+  POSourcePage,
+  POSourceQuery,
+  POSourceRevision,
+  POSourceSelection,
+  POSourceValidation,
+} from "./poSelector";
+import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
+import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace";
+import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
+import { usePurchaseOrderWorkspace } from "./poWorkspace";
+import { blankPurchaseOrderDraft } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
-import { UsersPage } from "./components/UsersPage";
-import { ClientsPage } from "./components/ClientsPage";
 import { EXPORT_DIR_KEY, SettingsPage } from "./components/SettingsPage";
+import { QuotationSettingsPage } from "./components/QuotationSettingsPage";
+import { PurchaseOrderSettingsPage } from "./components/PurchaseOrderSettingsPage";
+import {
+  DEFAULT_WORKSPACE_SETTINGS,
+  applyPurchaseOrderDefaults,
+  clearPurchaseOrderSettings,
+  clearQuotationSettings,
+  quotationDefaultsFromSettings,
+  readWorkspaceSettings,
+  todayWIB,
+  writePurchaseOrderSettings,
+  writeQuotationSettings,
+  type QuotationSettings,
+  type PurchaseOrderSettings,
+  type WorkspaceSettings,
+} from "./workspaceSettings";
 import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
@@ -78,6 +117,19 @@ interface StatusState {
 }
 
 const DEFAULT_COMPANY_NAME = "PT Arcon Penta Persada";
+
+/**
+ * The device store for per-user settings. Access itself can throw under a
+ * locked-down browser profile, so a missing store is `null` -- the settings
+ * module then answers the built-in defaults instead of breaking the page.
+ */
+function localSettingsStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function pickCustomerId(options: { value: number }[], current: number): number {
   if (options.some((option) => option.value === current)) return current;
@@ -436,14 +488,84 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Issue #491: the three PO tabs share one workspace. */
+export function isPurchaseOrderPage(page: AppPage): boolean {
+  return page === "po" || page === "po-drafts" || page === "po-archive";
+}
+
+export function purchaseOrderTab(page: AppPage): "editor" | "drafts" | "archive" {
+  if (page === "po-drafts") return "drafts";
+  if (page === "po-archive") return "archive";
+  return "editor";
+}
+
+export function isAdminPage(page: AppPage): boolean {
+  return page.startsWith("admin-");
+}
+
 function App() {
-  const [page, setPage] = useState<
-    "create" | "drafts" | "archive" | "detail" | "users" | "clients" | "settings"
-  >("create");
+  // Issue #491: the workspace page model. "home" is the global dashboard; the
+  // Quotation pages keep their meanings; "po"/"po-drafts"/"po-archive" are the
+  // three Purchase Order tabs; "admin-*" are the Admin Dashboard tabs; and
+  // "settings" is the signed-in person's account settings. There is no router:
+  // one page state still drives the whole app.
+  const [page, setPage] = useState<AppPage>("home");
+  // Issue #494: the profile menu offers a workspace's settings only while that
+  // workspace is the context. A settings page is a profile surface with no
+  // tabs, so this is the one thing a settings page must remember about where
+  // it was opened from; it widens the menu and changes nothing else. It is
+  // recorded only when the leave guard actually allows the navigation, and
+  // cleared on Home and on sign-out.
+  const [settingsOrigin, setSettingsOrigin] = useState<SettingsOrigin>(null);
+  // #468 wave 2: the PO editor owns its reducer state, so a tab that unmounts
+  // it loses unsaved work. The editor lifts only its dirty flag; this gate
+  // asks through the same discard panel before any navigation leaves it.
   const [selectedQuotation, setSelectedQuotation] = useState<{
     id: number;
     revision: number;
   } | null>(null);
+  // The PO source selector (#467) is shared by both PO entry paths and, in
+  // repair mode (#475), by the admin source-link repair.
+  const [poSelectorOpen, setPOSelectorOpen] = useState(false);
+  const [poSelectorMode, setPOSelectorMode] = useState<"entry" | "repair" | "link">("entry");
+  const [poSelectorRepairID, setPOSelectorRepairID] = useState<number | null>(null);
+  // #497: the exact pair the selector confirmed for the open source-less draft.
+  // The editor owns persistence and the review, so App only carries the choice
+  // until the editor consumes it.
+  const [pendingLinkTarget, setPendingLinkTarget] = useState<{
+    quotationId: number;
+    revisionNumber: number;
+  } | null>(null);
+  // The PO workspace (#468/#473) owns the open record and its phase in one
+  // controller, so Cancel from a correction can re-read the saved record
+  // instead of leaving a stale editor behind. The page renders the archive when
+  // no record is open.
+  const { pushToast } = useToast();
+  const poWorkspace = usePurchaseOrderWorkspace({
+    onRefreshError: (error) =>
+      pushToast(
+        "error",
+        getErrorMessage(
+          error,
+          "The saved purchase order could not be reloaded, so the archive is shown."
+        )
+      ),
+  });
+  const closePurchaseOrder = poWorkspace.close;
+  // Leaving the PO page clears the edited draft, so returning to the PO surface
+  // shows the archive rather than a stale editor. The leave guard owns the
+  // dirty-check before this runs.
+  const navigatePage = useCallback(
+    (next: AppPage) => {
+      if (next !== "po") closePurchaseOrder();
+      // Issue #494: a successful return to Home ends the remembered workspace
+      // context. Only the allowed navigation reaches here; a refused one has
+      // no way to clear it.
+      if (next === "home") setSettingsOrigin(null);
+      setPage(next);
+    },
+    [closePurchaseOrder]
+  );
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
     revision: number;
@@ -455,6 +577,82 @@ function App() {
   // canonical unit on this first line once GetCompanyUnits() answers.
   const [items, setItems] = useState<EditorItem[]>([newItem(0, "")]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
+  // The subject a fresh draft was initialized with -- the saved default, or "".
+  // Applying a default subject is not an edit, so the editor must not read as
+  // dirty until the subject differs from this. Null means "no pristine
+  // subject": a loaded draft, revision or pasted copy, whose own header counts
+  // as work exactly as it did before (issue #492).
+  const [pristineSubject, setPristineSubject] = useState<string | null>("");
+
+  // Whether the editor holds anything worth confirming before it is replaced:
+  // a revision/draft context, a header field, or any line content. Issue #491
+  // also uses this as the Quotation tab's unsaved-work flag, so leaving the
+  // editor through the shell asks before the page (and its draft context) goes.
+  // Declared up here because the leave guard is built around it and because the
+  // paste capture below reads it in its dependency array.
+  const subject = details.subject.trim();
+  const dirty =
+    editingQuote !== null ||
+    (subject !== "" && subject !== (pristineSubject ?? "")) ||
+    details.recipientName.trim() !== "" ||
+    items.some(
+      (item) =>
+        item.description.trim() !== "" ||
+        item.unitPrice.trim() !== "" ||
+        item.bullets.some((line) => line.trim() !== "") ||
+        item.subItems.some((sub) => sub.description.trim() !== "")
+    );
+
+  // The Company tab reports its own unsaved-work flag; the leave guard asks
+  // before another workspace or Admin tab unmounts it.
+  const [companyDirty, setCompanyDirty] = useState(false);
+  const poLeave = usePurchaseOrderLeaveGuard(page, navigatePage, {
+    dirtyPages: { create: dirty, "admin-company": companyDirty },
+    onDiscard: (source) => {
+      if (source === "create") resetForm();
+      if (source === "admin-company") setCompanyDirty(false);
+    },
+  });
+
+  // Issue #494: every settings entry goes through the guard, and the origin is
+  // recorded in the allowed-navigation callback — the same place `after`
+  // already runs for mod+N. Keep editing never invokes it, so a refused visit
+  // leaves the previous context untouched.
+  const openAccountSettings = useCallback(() => {
+    poLeave.request("settings", () => {
+      setSettingsOrigin(profileMenuContext(page, settingsOrigin));
+      setPage("settings");
+    });
+  }, [poLeave.request, page, settingsOrigin]);
+
+  const openQuotationSettings = useCallback(() => {
+    poLeave.request("quotation-settings", () => {
+      setSettingsOrigin("quotation");
+      setPage("quotation-settings");
+    });
+  }, [poLeave.request]);
+
+  const openPurchaseOrderSettings = useCallback(() => {
+    poLeave.request("po-settings", () => {
+      setSettingsOrigin("purchase-order");
+      setPage("po-settings");
+    });
+  }, [poLeave.request]);
+
+  // The shell's own navigation (workspace tabs, the back arrow, Account
+  // settings) still runs through the guard; only Account settings needs the
+  // origin captured on the way.
+  const navigateFromShell = useCallback(
+    (next: AppPage) => {
+      if (next === "settings") {
+        openAccountSettings();
+        return;
+      }
+      poLeave.request(next);
+    },
+    [openAccountSettings, poLeave.request]
+  );
+
   const [customerId, setCustomerId] = useState(2);
   const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
   const [status, setStatus] = useState<StatusState>({ type: "idle", message: "" });
@@ -474,9 +672,165 @@ function App() {
   const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftCount, setDraftCount] = useState(0);
-  const { pushToast } = useToast();
+  // #469: a row opens the exact stored draft by id through the #468 route.
+  // The list already knows the id; the server is the authority on the record,
+  // so it is fetched rather than passed in from the row.
+  // #475: the saved view's admin action opens the same selector with the
+  // record's own quotation exempt. The candidate review is read before the
+  // repair panel opens, so an ineligible target fails in the modal with the
+  // server's reason instead of leaving an unexplained empty panel.
+  const openSourceRepair = useCallback(() => {
+    const record = poWorkspace.draft;
+    if (record === null || record.State !== "saved") return;
+    setPendingLinkTarget(null);
+    setPOSelectorMode("repair");
+    setPOSelectorRepairID(record.ID);
+    setPOSelectorOpen(true);
+  }, [poWorkspace.draft]);
+  const closePOSourceSelector = useCallback(() => {
+    setPOSelectorOpen(false);
+    setPOSelectorMode("entry");
+    setPOSelectorRepairID(null);
+  }, []);
+  const openPurchaseOrder = useCallback(
+    async (id: number) => {
+      try {
+        setPendingLinkTarget(null);
+        const draft = await GetPurchaseOrder(id);
+        poLeave.setDirty(false);
+        poWorkspace.open(draft);
+        setPage("po");
+      } catch (error) {
+        pushToast(
+          "error",
+          getErrorMessage(error, "The purchase order could not be opened.")
+        );
+      }
+    },
+    [poLeave, poWorkspace.open, pushToast]
+  );
   const [user, setUser] = useState<SignedInUser | null>(null);
+  // Issue #492: the account's device-local Quotation and PO defaults. They are
+  // read when the signed-in account changes and written by the settings pages;
+  // signing out resets this copy but never removes the saved records.
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>(
+    DEFAULT_WORKSPACE_SETTINGS
+  );
+  const settingsUserId = user?.ID ?? null;
+  // Which account's defaults have already been applied to the mounted blank
+  // editor. The form exists before sign-in resolves, so this is what stops a
+  // later render (or a settings save) from overwriting work the user has
+  // started.
+  const defaultsAppliedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (settingsUserId === null) {
+      setWorkspaceSettings(DEFAULT_WORKSPACE_SETTINGS);
+      defaultsAppliedFor.current = null;
+      return;
+    }
+    const next = readWorkspaceSettings(localSettingsStorage(), settingsUserId);
+    setWorkspaceSettings(next);
+    if (defaultsAppliedFor.current === settingsUserId) return;
+    defaultsAppliedFor.current = settingsUserId;
+    // The first blank editor of a signed-in session is a new draft too. Apply
+    // the account's defaults only while nothing else has claimed the editor: a
+    // reset, a draft, a revision or a paste writes details afterwards (and the
+    // reset path applies the defaults itself).
+    if (dirty || activeDraftId !== 0 || editingQuote !== null) return;
+    setDetails({
+      ...DEFAULT_DETAILS,
+      ...quotationDefaultsFromSettings(next.quotation),
+    });
+    // The applied subject is the baseline, not an edit.
+    setPristineSubject(next.quotation.subject.trim());
+    // Keyed to the account on purpose: the values are read at the moment the
+    // account changes, and a later settings save reaches the next draft through
+    // resetForm rather than by rewriting an editor already in use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsUserId]);
+  const saveQuotationSettings = useCallback(
+    (next: QuotationSettings) => {
+      const storage = localSettingsStorage();
+      writeQuotationSettings(storage, settingsUserId, next);
+      setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+    },
+    [settingsUserId]
+  );
+  const clearSavedQuotationSettings = useCallback(() => {
+    const storage = localSettingsStorage();
+    clearQuotationSettings(storage, settingsUserId);
+    setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+  }, [settingsUserId]);
+  const savePurchaseOrderSettings = useCallback(
+    (next: PurchaseOrderSettings) => {
+      const storage = localSettingsStorage();
+      writePurchaseOrderSettings(storage, settingsUserId, next);
+      setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+    },
+    [settingsUserId]
+  );
+  const clearSavedPurchaseOrderSettings = useCallback(() => {
+    const storage = localSettingsStorage();
+    clearPurchaseOrderSettings(storage, settingsUserId);
+    setWorkspaceSettings(readWorkspaceSettings(storage, settingsUserId));
+  }, [settingsUserId]);
+
   const [checkingSession, setCheckingSession] = useState(true);
+
+  // #499: the archived Quotation's action creates the one PO from the revision
+  // on screen. App owns the workspace transition and the shared source-bound
+  // create path; the detail page only supplies the exact displayed pair. A
+  // refusal is rethrown to the page, which re-reads occupancy so a concurrent
+  // create lands on Open PO draft / View PO instead of a duplicate.
+  //
+  // The detail page is a read surface: no Quotation, PO or Company edit can be
+  // live while it is mounted (leaving any of those pages already passed the
+  // guard), so this transition has nothing to discard today. It still moves
+  // through the guard below rather than assuming that, and clears the stale
+  // dirty flag the same way the selector's create path clears it.
+  const adoptCreatedPurchaseOrder = useCallback(
+    (draft: backend.PurchaseOrderDTO) => {
+      poLeave.setDirty(false);
+      // Payment terms and Incoterms come from the revision; the saved defaults
+      // only fill a field it left empty, and the received date is applied when
+      // the server stored none.
+      poWorkspace.open(
+        applyPurchaseOrderDefaults(draft, workspaceSettings.purchaseOrder)
+      );
+      setPage("po");
+      pushToast(
+        "success",
+        `Purchase order draft created from quotation ${draft.QuoteNumber}, revision ${draft.SourceRevision}.`
+      );
+    },
+    [
+      poLeave.setDirty,
+      poWorkspace.open,
+      pushToast,
+      workspaceSettings.purchaseOrder,
+    ]
+  );
+
+  const createPurchaseOrderFromQuotation = useCallback(
+    async (quotationID: number, revision: number) => {
+      const draft = await CreatePurchaseOrderDraft({
+        QuotationID: quotationID,
+        RevisionNumber: revision,
+        // Issue #492: the received date is a PO fact the source revision never
+        // supplies. Blank means the server stores today in WIB.
+        ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+      });
+      // The cross-workspace move still asks the leave guard. The detail page
+      // holds no editable state, so it answers at once today; routing through
+      // it means a future editable surface cannot be discarded silently.
+      poLeave.request("po", () => adoptCreatedPurchaseOrder(draft));
+    },
+    [
+      adoptCreatedPurchaseOrder,
+      poLeave.request,
+      workspaceSettings.purchaseOrder.receivedDate,
+    ]
+  );
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   // The live company currency: the denomination fresh input is written in,
   // and what a stored draft or revision is compared against before it may be
@@ -604,6 +958,47 @@ function App() {
     [currencyCatalogue, companyCurrency]
   );
 
+  // #496: the transient Editor draft. It is built from the company currency
+  // and the user's Quotation tax defaults; no row exists until Save draft or an
+  // upload asks for one. It is deliberately a DTO, so the existing editor and
+  // reducer are reused rather than a second blank-form implementation.
+  const blankPODraft = useMemo(
+    () =>
+      blankPurchaseOrderDraft({
+        currency: liveEntry?.code ?? companyCurrency,
+        taxZone: workspaceSettings.quotation.taxZone,
+        taxType: workspaceSettings.quotation.taxType,
+        serviceCategory:
+          workspaceSettings.quotation.taxType === "Services"
+            ? workspaceSettings.quotation.serviceCategory
+            : "",
+        receivedDate:
+          workspaceSettings.purchaseOrder.receivedDate !== ""
+            ? workspaceSettings.purchaseOrder.receivedDate
+            : todayWIB(),
+        paymentTerms: workspaceSettings.purchaseOrder.paymentTerms,
+        incoterms: workspaceSettings.purchaseOrder.incoterms,
+      }),
+    [liveEntry?.code, companyCurrency, workspaceSettings]
+  );
+  const poDraft = poWorkspace.draft ?? blankPODraft;
+
+  // The PO's own currency, resolved from its snapshot rather than the live
+  // profile (#390's rule applied to the new surface): an IDR default over a
+  // USD PO would be wrong by a factor of 100. Null gates the editor's money
+  // fields until the catalogue can name the denomination.
+  const poEntry = useMemo(
+    () =>
+      poDraft === null
+        ? null
+        : resolveLiveEntry(
+            currencyCatalogue,
+            poDraft.Currency,
+            IDR_FALLBACK_ENTRY
+          ),
+    [currencyCatalogue, poDraft]
+  );
+
   // The resolved canonical unit every default falls back to: the profile's
   // canonical when it is on the served list, otherwise the first served unit —
   // never a value off the list, and never a hardcoded default (#337). Empty
@@ -666,7 +1061,15 @@ function App() {
     nextKey.current = 1;
     nextSubId.current = 1;
     setItems([newItem(0, canonicalUnit)]);
-    setDetails(DEFAULT_DETAILS);
+    // Issue #492: a brand-new quotation starts from this account's saved
+    // defaults. A pasted copy or a reopened draft writes its own details
+    // afterwards, so those values always win.
+    setDetails({
+      ...DEFAULT_DETAILS,
+      ...quotationDefaultsFromSettings(workspaceSettings.quotation),
+    });
+    // A fresh draft's default subject is the baseline, not an edit.
+    setPristineSubject(workspaceSettings.quotation.subject.trim());
     setCustomerId((current) => pickCustomerId(customerOptions, current));
     setEditingQuote(null);
     // The editor is no longer a resumed draft, so the next export must not try
@@ -676,7 +1079,7 @@ function App() {
     void ClearDraftContext().catch(() => undefined);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview, customerOptions, canonicalUnit]);
+  }, [clearPreview, customerOptions, canonicalUnit, workspaceSettings.quotation]);
 
   // Server-owned client directory: the editor dropdown reads here, and new
   // clients appear without a rebuild. Prepare validates server-side.
@@ -704,7 +1107,11 @@ function App() {
     } finally {
       setUser(null);
       resetForm();
-      setPage("create");
+      setCompanyDirty(false);
+      // Issue #494: the remembered workspace context belongs to the session
+      // that opened it; the next sign-in starts from Home with none.
+      setSettingsOrigin(null);
+      setPage("home");
     }
   }, [resetForm]);
 
@@ -722,7 +1129,9 @@ function App() {
           if (message.startsWith("reach the quotation server")) return;
           setUser(null);
           resetForm();
-          setPage("create");
+          setCompanyDirty(false);
+          setSettingsOrigin(null);
+          setPage("home");
           pushToast(
             "error",
             "You've been signed out. Contact your administrator if this was unexpected."
@@ -843,6 +1252,9 @@ function App() {
           ) + 1;
         setItems(restored.items);
         setDetails(restored.details);
+        // A loaded draft keeps its own semantics: its header is work, not a
+        // freshly applied default.
+        setPristineSubject(null);
         setCustomerId(
           restored.customerId ||
             draft.CustomerID ||
@@ -875,22 +1287,6 @@ function App() {
     []
   );
 
-  // Whether the editor holds anything worth confirming before it is
-  // replaced: a revision/draft context, a header field, or any line content.
-  // Declared up here (rather than with ready/loading below) because the paste
-  // capture below reads it in its dependency array.
-  const dirty =
-    editingQuote !== null ||
-    details.subject.trim() !== "" ||
-    details.recipientName.trim() !== "" ||
-    items.some(
-      (item) =>
-        item.description.trim() !== "" ||
-        item.unitPrice.trim() !== "" ||
-        item.bullets.some((line) => line.trim() !== "") ||
-        item.subItems.some((sub) => sub.description.trim() !== "")
-    );
-
   // A pasted copy always starts a new, unsaved quotation: no archived
   // number, revision, draft or preview travels with it, and the recalculation
   // and dirty tracking pick it up like typed input.
@@ -907,6 +1303,8 @@ function App() {
       nextSubId.current = applied.nextSubId;
       setItems(applied.items);
       setDetails(applied.details);
+      // A pasted copy is entered work, never a pristine default.
+      setPristineSubject(null);
       setCustomerId(applied.customerCode);
       setEditingQuote(null);
       setActiveDraftId(0);
@@ -997,6 +1395,8 @@ function App() {
           }))
         );
         setDetails(draft.details);
+        // A revision being edited is work regardless of its subject.
+        setPristineSubject(null);
         setCustomerId(draft.customerCode);
         setEditingQuote({
           number: quotation.QuoteNumber,
@@ -1486,6 +1886,8 @@ function App() {
       const pastedType = (cols[9] || "").trim();
       const pastedServiceCategory = (cols[10] || "").trim();
 
+      // A pasted row is an edit, even when a cell happens to equal a default.
+      setPristineSubject(null);
       setDetails((current) => {
         const next: DetailsState = {
           ...current,
@@ -1586,6 +1988,16 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // The PO source selector owns the keyboard while it is open: its dialog
+      // handles Escape and contains Tab, and no global shortcut may act on
+      // the page behind the modal.
+      if (poSelectorOpen) return;
+      // The tab-navigation discard prompt is modal too: Escape is Keep
+      // editing, and no shortcut may navigate behind it.
+      if (poLeave.pendingPage !== null) {
+        if (event.key === "Escape") poLeave.keepEditing();
+        return;
+      }
       if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const inGrid = (event.target as HTMLElement).closest?.("[data-grid-cell]");
         if (inGrid) return;
@@ -1627,22 +2039,39 @@ function App() {
           return;
         case "newQuotation":
           event.preventDefault();
-          requestNewQuotation();
+          // Already in the Quotation editor: the editor's own confirm owns the
+          // discard. Anywhere else, the leave guard runs first; once allowed,
+          // the Editor page is shown before the existing confirmation can
+          // render in its action bar.
+          if (page === "create") {
+            requestNewQuotation();
+            return;
+          }
+          poLeave.request("create", () => {
+            setPage("create");
+            requestNewQuotation();
+          });
+          return;
+        case "gotoHome":
+          poLeave.request("home");
           return;
         case "gotoEditor":
-          setPage("create");
+          poLeave.request("create");
+          return;
+        case "gotoDrafts":
+          poLeave.request("drafts");
           return;
         case "gotoArchive":
-          setPage("archive");
+          poLeave.request("archive");
           return;
-        case "gotoClients":
-          if (user?.Role === "admin") setPage("clients");
+        case "gotoPurchaseOrder":
+          poLeave.request("po");
           return;
-        case "gotoTeam":
-          if (user?.Role === "admin") setPage("users");
+        case "gotoAdmin":
+          if (user?.Role === "admin") poLeave.request("admin-clients");
           return;
         case "gotoSettings":
-          setPage("settings");
+          openAccountSettings();
           return;
         case "toggleHelp":
           setShowHelp((visible) => !visible);
@@ -1653,7 +2082,71 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, user, showHelp, confirmingNew, pendingPaste, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew]);
+  }, [page, user, showHelp, confirmingNew, pendingPaste, handleExport, handlePrepare, requestNewQuotation, whatsNew, dismissWhatsNew, poSelectorOpen, poLeave.request, poLeave.pendingPage, poLeave.keepEditing, openAccountSettings]);
+
+  // PO source selector loaders (#467). The modal owns the three steps; these
+  // callbacks are its only transport, so the component stays free of hidden
+  // API assumptions and both entry paths reuse the same server data.
+  const loadPOSourcePage = useCallback(
+    async (query: POSourceQuery): Promise<POSourcePage> => {
+      const page = await ListPOSourceQuotations({
+        Search: query.search,
+        Page: query.page,
+        HideUsed: query.hideUsed,
+        ExcludePOID: query.excludePOID ?? 0,
+      });
+      return {
+        quotations: page.Quotations.map((row) => ({
+          id: row.ID,
+          quoteNumber: row.QuoteNumber,
+          subject: row.Subject,
+          customerName: row.CustomerName,
+          latestRevision: row.LatestRevision,
+          issuedRevisionCount: row.IssuedRevisionCount,
+          activePO:
+            row.ActivePO === null || row.ActivePO === undefined
+              ? null
+              : {
+                  id: row.ActivePO.ID,
+                  state: row.ActivePO.State === "saved" ? "saved" : "draft",
+                },
+        })),
+        page: page.Page,
+        pageSize: page.PageSize,
+        total: page.Total,
+        totalPages: page.TotalPages,
+      };
+    },
+    []
+  );
+
+  const loadPOSourceRevisions = useCallback(
+    async (quotationId: number): Promise<POSourceRevision[]> => {
+      const response = await ListPOSourceRevisions(quotationId);
+      return response.Revisions.map((revision) => ({
+        revision: revision.Revision,
+        issuedAt: revision.IssuedAt,
+      }));
+    },
+    []
+  );
+
+  const validatePOSourceSelection = useCallback(
+    async (selection: POSourceSelection): Promise<POSourceValidation> => {
+      const result = await ValidatePOSource({
+        QuotationID: selection.quotationId,
+        RevisionNumber: selection.revisionNumber,
+      });
+      return { valid: result.Valid, reason: result.Reason };
+    },
+    []
+  );
+
+  // Issue #491: admin pages are never shown to staff, even if a stale page
+  // state or a shortcut somehow names one. The shell and the render below both
+  // use this resolved page, so the Admin workspace cannot leak.
+  const isAdmin = user?.Role === "admin";
+  const visiblePage: AppPage = isAdminPage(page) && !isAdmin ? "home" : page;
 
   return (
     <>
@@ -1663,6 +2156,66 @@ function App() {
       {user !== null ? (
         <WhatsNewModal notes={whatsNew} onDismiss={dismissWhatsNew} />
       ) : null}
+      <POQuotationSelector
+        open={poSelectorOpen}
+        mode={poSelectorMode === "repair" ? "repair" : "entry"}
+        excludePOID={poSelectorRepairID ?? undefined}
+        onClose={closePOSourceSelector}
+        onConfirm={async (selection) => {
+          if (poSelectorMode === "repair") {
+            if (poSelectorRepairID === null) {
+              throw new Error("The saved purchase order is no longer open.");
+            }
+            const review = await ReviewPurchaseOrderSource({
+              ID: poSelectorRepairID,
+              QuotationID: selection.quotationId,
+              RevisionNumber: selection.revisionNumber,
+            });
+            poLeave.setDirty(false);
+            poWorkspace.repair(review);
+            closePOSourceSelector();
+            setPage("po");
+            return;
+          }
+          if (poSelectorMode === "link") {
+            // #497: the shared entry selector's exact pair. The editor saves
+            // the working copy and loads the difference review itself.
+            setPendingLinkTarget({
+              quotationId: selection.quotationId,
+              revisionNumber: selection.revisionNumber,
+            });
+            closePOSourceSelector();
+            setPage("po");
+            return;
+          }
+          const draft = await CreatePurchaseOrderDraft({
+            QuotationID: selection.quotationId,
+            RevisionNumber: selection.revisionNumber,
+            // Issue #492: the received date is a PO fact the source revision
+            // never supplies. Blank means the server stores today in WIB.
+            ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+          });
+          adoptCreatedPurchaseOrder(draft);
+          closePOSourceSelector();
+        }}
+        onOpenDraft={async (activePO) => {
+          try {
+            const draft = await GetPurchaseOrder(activePO.id);
+            poLeave.setDirty(false);
+            poWorkspace.open(draft);
+            closePOSourceSelector();
+            setPage("po");
+          } catch (error) {
+            pushToast(
+              "error",
+              getErrorMessage(error, "The purchase order draft could not be opened.")
+            );
+          }
+        }}
+        loadPage={loadPOSourcePage}
+        loadRevisions={loadPOSourceRevisions}
+        validate={validatePOSourceSelection}
+      />
       {checkingSession ? (
         <div className="flex min-h-full items-center justify-center px-5">
           <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />
@@ -1675,21 +2228,20 @@ function App() {
         <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
       ) : null}
       <AppShell
-      page={page}
-      onOpenEditor={() => setPage("create")}
-      onOpenDrafts={() => setPage("drafts")}
-      onOpenArchive={() => setPage("archive")}
+      page={visiblePage}
+      settingsOrigin={settingsOrigin}
+      inert={poLeave.pendingPage !== null}
+      onNavigate={navigateFromShell}
       draftCount={draftCount}
-      onOpenUsers={() => setPage("users")}
-      onOpenClients={() => setPage("clients")}
-      onOpenSettings={() => setPage("settings")}
-      showUsersTab={user?.Role === "admin"}
-      showClientsTab={user?.Role === "admin"}
       companyName={companyName}
       user={user}
-      onSignOut={() => void handleSignOut()}
+      onSignOut={() =>
+        poLeave.request(visiblePage, () => void handleSignOut())
+      }
+      onOpenQuotationSettings={openQuotationSettings}
+      onOpenPurchaseOrderSettings={openPurchaseOrderSettings}
       actionBar={
-        page === "create" ? (
+        visiblePage === "create" ? (
           <>
             <div className="flex min-w-0 items-center gap-2">
               {pendingPaste ? (
@@ -1810,7 +2362,77 @@ function App() {
         ) : null
       }
     >
-      {page === "create" ? (
+      {visiblePage === "home" ? (
+        <DocumentHomePage
+          isAdmin={isAdmin}
+          onOpenQuotation={() => poLeave.request("create")}
+          onOpenPurchaseOrder={() => poLeave.request("po")}
+          onOpenAdmin={() => poLeave.request("admin-clients")}
+        />
+      ) : null}
+
+      {isPurchaseOrderPage(visiblePage) ? (
+        <PurchaseOrderWorkspacePage
+          workspace={poWorkspace}
+          currency={poEntry}
+          uomOptions={storedUoMs ?? []}
+          incotermOptions={INCOTERM_OPTIONS}
+          tab={purchaseOrderTab(visiblePage)}
+          pageSize={workspaceSettings.purchaseOrder.listPageSize}
+          blankDraft={blankPODraft}
+          currencyOptions={currencyCatalogue ?? []}
+          onLinkQuotation={() => {
+            setPOSelectorMode("link");
+            setPOSelectorRepairID(null);
+            setPOSelectorOpen(true);
+          }}
+          pendingLinkTarget={pendingLinkTarget}
+          onLinkTargetHandled={() => setPendingLinkTarget(null)}
+          onLinked={(updated) => {
+            // The workspace adopts the server's linked record so the editor
+            // remounts on its stored source instead of the transient draft.
+            poWorkspace.saved(updated);
+            pushToast(
+              "success",
+              `Linked to quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}. Your entered values were kept.`
+            );
+          }}
+          onAdd={() => {
+            setPOSelectorMode("entry");
+            setPOSelectorRepairID(null);
+            setPendingLinkTarget(null);
+            setPOSelectorOpen(true);
+          }}
+          isAdmin={isAdmin}
+          onRepairSource={openSourceRepair}
+          onOpen={(id) => void openPurchaseOrder(id)}
+          onSaved={(updated, corrected) => {
+            pushToast(
+              "success",
+              corrected
+                ? "Purchase order corrected. The previous values are in the history."
+                : updated.State === "saved"
+                  ? "Purchase order saved and finalized."
+                  : "Purchase order draft saved."
+            );
+          }}
+          onRepaired={(updated) => {
+            pushToast(
+              "success",
+              `Source link repaired. The purchase order now follows quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}.`
+            );
+          }}
+          onBack={() => {
+            poLeave.setDirty(false);
+            poWorkspace.close();
+            setPage("po-archive");
+          }}
+          onCancel={() => poWorkspace.cancel(poLeave.request, poLeave.setDirty)}
+          onDirtyChange={poLeave.setDirty}
+        />
+      ) : null}
+
+      {visiblePage === "create" ? (
         <div className="flex flex-col gap-6" onPasteCapture={handleCopyPasteCapture}>
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
@@ -1940,14 +2562,14 @@ function App() {
         </div>
       ) : null}
 
-      {page === "drafts" ? (
+      {visiblePage === "drafts" ? (
         <DraftsPage
           onOpenDraft={handleOpenDraft}
           onNewQuotation={handleNewQuotation}
         />
       ) : null}
 
-      {page === "archive" ? (
+      {visiblePage === "archive" ? (
         // #390: every row's grand total is live-currency chrome until the
         // catalogue loads, so nothing renders while the entry is unknown.
         liveEntry === null ? (
@@ -1963,13 +2585,14 @@ function App() {
           // catalogue loads, never a row's steady state.
           <ArchivePage
             currency={liveEntry}
+            isAdmin={user?.Role === "admin"}
             onNewQuotation={handleNewQuotation}
             onOpenQuotation={handleOpenQuotation}
           />
         )
       ) : null}
 
-      {page === "detail" && selectedQuotation !== null ? (
+      {visiblePage === "detail" && selectedQuotation !== null ? (
         // #390: the detail page shows margin, tax and nett in the live
         // currency until the revision's own is resolved.
         liveEntry === null ? (
@@ -1988,19 +2611,16 @@ function App() {
             revision={selectedQuotation.revision}
             onBack={() => setPage("archive")}
             onEdit={handleEditQuotation}
+            onCreatePurchaseOrder={createPurchaseOrderFromQuotation}
+            onOpenPurchaseOrder={(id) => void openPurchaseOrder(id)}
           />
         )
       ) : null}
 
-      {page === "users" && user?.Role === "admin" ? <UsersPage /> : null}
-
-      {page === "clients" && user?.Role === "admin" ? <ClientsPage /> : null}
-
-      {page === "settings" && user !== null ? (
-        <SettingsPage
-          isAdmin={user.Role === "admin"}
-          user={user}
-          onProfileChanged={setUser}
+      {isAdminPage(visiblePage) && isAdmin ? (
+        <AdminDashboard
+          tab={adminTabForPage(visiblePage)}
+          onCompanyDirtyChange={setCompanyDirty}
           onCompanyChanged={() => {
             // A company save (name, currency, canonical unit, or the unit list
             // itself) reaches the editor through here: re-read the profile and
@@ -2011,7 +2631,39 @@ function App() {
           }}
         />
       ) : null}
+
+      {visiblePage === "settings" && user !== null ? (
+        <SettingsPage
+          isAdmin={isAdmin}
+          user={user}
+          onProfileChanged={setUser}
+        />
+      ) : null}
+
+      {visiblePage === "quotation-settings" && user !== null ? (
+        <QuotationSettingsPage
+          settings={workspaceSettings.quotation}
+          onChange={saveQuotationSettings}
+          onClear={clearSavedQuotationSettings}
+        />
+      ) : null}
+
+      {visiblePage === "po-settings" && user !== null ? (
+        <PurchaseOrderSettingsPage
+          settings={workspaceSettings.purchaseOrder}
+          onChange={savePurchaseOrderSettings}
+          onClear={clearSavedPurchaseOrderSettings}
+        />
+      ) : null}
     </AppShell>
+    {poLeave.pendingPage !== null ? (
+      <PurchaseOrderDiscardPrompt
+        onKeepEditing={poLeave.keepEditing}
+        onDiscard={poLeave.discard}
+        returnFocus={poLeave.pendingReturnFocus}
+        description={poLeave.pendingDescription}
+      />
+    ) : null}
     </>
       )}
     </>

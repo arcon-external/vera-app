@@ -24,14 +24,52 @@ type Client struct {
 	baseURL        string
 }
 
+// ConflictInfo is the current state a stale PO save was refused against
+// (#473). It is read from the 409 body, never parsed from the message.
+type ConflictInfo struct {
+	Code           string `json:"code"`
+	CurrentState   string `json:"currentState"`
+	UpdatedByName  string `json:"updatedByName"`
+	UpdatedAt      string `json:"updatedAt"`
+	CurrentVersion int64  `json:"currentVersion"`
+	UpdatedBy      int64  `json:"updatedBy"`
+}
+
+// DeletionChangeInfo is one named difference between a confirmed deletion
+// chain and the chain as it stands (#480). The desktop binding turns these into
+// typed modal rows, so the wording lives server-side.
+type DeletionChangeInfo struct {
+	Field  string `json:"field"`
+	Label  string `json:"label"`
+	Before string `json:"before"`
+	After  string `json:"after"`
+}
+
+// DeletionConflictInfo is the 409 body a stale deletion confirmation carries.
+// Preview stays raw so this package does not depend on the API contract; the
+// binding decodes it into the generated shape.
+type DeletionConflictInfo struct {
+	Changes []DeletionChangeInfo `json:"changes"`
+	Preview json.RawMessage      `json:"preview"`
+}
+
 // StatusError is a response the server refused: anything outside 2xx, and the
 // 401 that ends a session.
 //
 // It carries the status code because callers want different things from it. The
 // desktop shows Message and nothing else. The CLI maps the code to an exit
 // status, so a script can branch on "not found" without matching English.
+//
+// Conflict is set only for a named optimistic-concurrency refusal (#473). The
+// desktop binding turns it into a typed result so the warning can name the
+// writer and version without asking Go callers to parse prose. Code is the
+// server's stable refusal code for every named refusal, so a binding can react
+// to a particular one (po_not_draft) the same way.
 type StatusError struct {
+	Conflict   *ConflictInfo
+	Deletion   *DeletionConflictInfo
 	StatusCode int
+	Code       string
 	Message    string
 }
 
@@ -54,6 +92,37 @@ func StatusOf(err error) int {
 		return status.StatusCode
 	}
 	return 0
+}
+
+// ConflictOf reports the stale-version details behind an error, or nil when the
+// refusal was something else.
+func ConflictOf(err error) *ConflictInfo {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Conflict
+	}
+	return nil
+}
+
+// CodeOf reports the server's stable refusal code behind an error (for example
+// "po_not_draft"), or "" when the error carried none. It is how a binding
+// reacts to a named refusal without reading English prose.
+func CodeOf(err error) string {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code
+	}
+	return ""
+}
+
+// DeletionOf reports the changed-chain details behind a refused deletion, or nil
+// when the refusal was something else (#480).
+func DeletionOf(err error) *DeletionConflictInfo {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Deletion
+	}
+	return nil
 }
 
 // BaseURL reports the API address this client talks to. The verification
@@ -139,7 +208,7 @@ func (c *Client) do(method, path string, body any, out any) error {
 		return nil
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
+		return decodeStatusError(response, "server request failed")
 	}
 	if out == nil {
 		return nil
@@ -156,6 +225,50 @@ func apiError(response *http.Response, fallback string) string {
 		return fallback
 	}
 	return apiErrorBody(body, fallback)
+}
+
+// decodeStatusError reads a refused response once and returns both the message
+// the desktop shows and, for a named stale-version refusal, the conflict
+// details a binding turns into a typed result.
+func decodeStatusError(response *http.Response, fallback string) error {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+	if err != nil {
+		return &StatusError{StatusCode: response.StatusCode, Message: fallback}
+	}
+	failure := &StatusError{
+		StatusCode: response.StatusCode,
+		Message:    apiErrorBody(body, fallback),
+	}
+	var envelope struct {
+		Code           string               `json:"code"`
+		CurrentState   string               `json:"currentState"`
+		UpdatedByName  string               `json:"updatedByName"`
+		UpdatedAt      string               `json:"updatedAt"`
+		CurrentVersion int64                `json:"currentVersion"`
+		UpdatedBy      int64                `json:"updatedBy"`
+		Changes        []DeletionChangeInfo `json:"changes"`
+		Preview        json.RawMessage      `json:"preview"`
+	}
+	if json.Unmarshal(body, &envelope) == nil {
+		failure.Code = envelope.Code
+		if envelope.Code == "po_version_conflict" {
+			failure.Conflict = &ConflictInfo{
+				Code:           envelope.Code,
+				CurrentState:   envelope.CurrentState,
+				CurrentVersion: envelope.CurrentVersion,
+				UpdatedBy:      envelope.UpdatedBy,
+				UpdatedByName:  envelope.UpdatedByName,
+				UpdatedAt:      envelope.UpdatedAt,
+			}
+		}
+		if envelope.Code == "deletion_chain_changed" {
+			failure.Deletion = &DeletionConflictInfo{
+				Changes: envelope.Changes,
+				Preview: envelope.Preview,
+			}
+		}
+	}
+	return failure
 }
 
 // PostForm sends an application/x-www-form-urlencoded body and returns the raw
@@ -280,6 +393,12 @@ func (c *Client) Delete(path string, out any) error {
 	return c.do(http.MethodDelete, path, nil, out)
 }
 
+// DeleteWithBody performs an authenticated DELETE carrying a JSON body, for a
+// destructive action whose confirmation must travel with the request.
+func (c *Client) DeleteWithBody(path string, body, out any) error {
+	return c.do(http.MethodDelete, path, body, out)
+}
+
 // Upload posts a multipart file field and decodes the JSON response into
 // out (may be nil). It is used for admin backup restores.
 func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) error {
@@ -326,36 +445,47 @@ func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) 
 	return nil
 }
 
-// Download performs an authenticated GET returning raw bytes and the
-// filename from Content-Disposition (falling back to defaultName).
-func (c *Client) Download(path, defaultName string) (filename string, data []byte, err error) {
+// GetBytes performs an authenticated GET and returns the raw response body
+// plus its headers. It exists for document content, where the caller needs the
+// version/SHA headers as well as the bytes.
+func (c *Client) GetBytes(path string) (data []byte, header http.Header, err error) {
 	request, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("build API request: %w", err)
+		return nil, nil, fmt.Errorf("build API request: %w", err)
 	}
 	if token := c.token(); token != "" {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return "", nil, fmt.Errorf("reach the quotation server: %w", err)
+		return nil, nil, fmt.Errorf("reach the quotation server: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
 		if c.OnUnauthorized != nil {
 			c.OnUnauthorized()
 		}
-		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
+		return nil, nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode != http.StatusOK {
-		return "", nil, &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
+		return nil, nil, &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "server request failed")}
 	}
 	data, err = io.ReadAll(io.LimitReader(response.Body, 512<<20))
 	if err != nil {
-		return "", nil, fmt.Errorf("read download: %w", err)
+		return nil, nil, fmt.Errorf("read download: %w", err)
+	}
+	return data, response.Header.Clone(), nil
+}
+
+// Download performs an authenticated GET returning raw bytes and the
+// filename from Content-Disposition (falling back to defaultName).
+func (c *Client) Download(path, defaultName string) (filename string, data []byte, err error) {
+	data, header, err := c.GetBytes(path)
+	if err != nil {
+		return "", nil, err
 	}
 	filename = defaultName
-	if _, params, err := mime.ParseMediaType(response.Header.Get("Content-Disposition")); err == nil {
+	if _, params, err := mime.ParseMediaType(header.Get("Content-Disposition")); err == nil {
 		if name := params["filename"]; name != "" {
 			filename = filepath.Base(name)
 		}

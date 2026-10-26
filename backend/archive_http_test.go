@@ -210,19 +210,6 @@ func TestGetQuotationWithoutCurrencyReadsDefault(t *testing.T) {
 	}
 }
 
-func TestDeleteSurfacesServerDenial(t *testing.T) {
-	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(http.StatusForbidden)
-		_ = json.NewEncoder(writer).Encode(map[string]string{"error": "admin access required"})
-	})
-
-	q := newTestQuotation()
-	err := q.DeleteQuotation(9)
-	if err == nil || !strings.Contains(err.Error(), "admin access required") {
-		t.Fatalf("delete error = %v; want server 403 text", err)
-	}
-}
-
 func TestExportPersistsUploadsAndWritesPDF(t *testing.T) {
 	if os.Getenv("VERA_RUN_CHROME_TESTS") == "" {
 		t.Skip("set VERA_RUN_CHROME_TESTS=1 to exercise the chromedp PDF build")

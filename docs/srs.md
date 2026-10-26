@@ -48,8 +48,9 @@ activated via single-use expiring invite codes.
 | Backups | Neon PITR + nightly `pg_dump` to free object storage | Neon PITR + nightly dumps on API host disk |
 
 Design rules that must survive any move: the database publishes **no host
-port** (reachable only from the API host/network); the desktop talks to **one
-HTTPS base URL** (override via `VERA_API_URL`); secrets live in **environment
+port** (reachable only from the API host/network); a packaged desktop talks to
+**one HTTPS base URL** (development builds may read a loopback `VERA_API_URL`
+from the environment or the project `.env`); secrets live in **environment
 only**, never in images, repos, or logs.
 
 ## 3. Infrastructure requirements (API host)
@@ -136,18 +137,22 @@ only**, never in images, repos, or logs.
   Unsigned: macOS needs right-click → Open on first launch; Windows needs
   *More info → Run anyway*; WebView2 `download` strategy assumed (staff are
   online by definition).
-- **Config:** exactly one variable, `VERA_API_URL` (compiled default = public
-  staff URL; env overrides for dev/personal; plain HTTP is loopback-only).
-  No secrets, no DB access. An update check falls back to the public static
-  `latest.json` manifest in `vera-downloads-508411` if the API is unreachable.
+- **Config:** packaged and debug-packaged builds compile in the public staff
+  URL and ignore `VERA_API_URL` and any `.env`. `wails dev` builds read only
+  `VERA_API_URL` from the exported environment or the gitignored project
+  `.env`, in that order; it must be a loopback http(s) URL with no userinfo,
+  and a missing value fails startup instead of falling back to production. The
+  desktop reads no database, bootstrap or signing configuration. An update
+  check falls back to the public static `latest.json` manifest in
+  `vera-downloads-508411` if the API is unreachable.
 - **Distribution:** portable binaries, no installer needed.
 
 ## 6. Configuration reference (all environment variables)
 
 | Variable | Where | Required | Default / notes |
 |---|---|---|---|
-| `VERA_API_URL` | desktop | no | Public staff URL; localhost fallback is dev-only |
-| `VERA_API_ADDR` | API | no | `:8080` |
+| `VERA_API_URL` | desktop dev builds | no | Loopback http(s) only, from env or project `.env`; packaged builds ignore it. The `vera` CLI retains its own `--api`/`VERA_API_URL`/session resolution |
+| `VERA_API_ADDR` | API | no | `:8080`; `scripts/dev-api.sh` forces `127.0.0.1:8081` locally |
 | `VERA_POSTGRES_DSN` | API | **yes** | Full DSN, `sslmode=require` for cloud; **never log, never commit** |
 | `VERA_POSTGRES_SCHEMA` | API | no | `vera` |
 | `VERA_BOOTSTRAP_ADMIN_EMAIL` / `_NAME` / `_PASSWORD` | API | no | One-time first-admin creation; leave empty afterwards |
@@ -158,6 +163,15 @@ only**, never in images, repos, or logs.
 Secrets handling (non-negotiable): mode-`600` files, env only, redacted in
 logs (`RedactedDSN`), never pasted into issues/chat. Rotating the DB password
 = set it at the provider, update the API env, recreate, verify login shape.
+
+Local API development runs `scripts/dev-api.sh`, which passes
+`--local-development`; the server then refuses a remote, multi-host, or
+unparseable Postgres target before opening the store. The policy validates the
+resolved configuration (including the PG* fallback) and accepts exactly one
+`localhost` name, loopback address, or local Unix socket. Production's bare
+entrypoint is unchanged. This is a transport-locality guard, deliberately
+weaker than #500's seed allowlist: #500 must still refuse a *local* database
+that is not the recognised development one before writing fixtures.
 
 ## 7. Deployment procedures
 

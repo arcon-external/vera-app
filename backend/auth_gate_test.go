@@ -40,23 +40,3 @@ func TestPrepareRequiresSignIn(t *testing.T) {
 		t.Fatal("Prepare without a session succeeded; want denial")
 	}
 }
-
-func TestStaffCanPrepareButCannotDelete(t *testing.T) {
-	q := newTestQuotation()
-	q.SetAuthService(auth.StaffTestService())
-	if err := q.Prepare(gatedPrepareInput()); err != nil {
-		t.Fatalf("staff Prepare failed: %v", err)
-	}
-	if err := q.DeleteQuotation(1); err == nil {
-		t.Fatal("staff DeleteQuotation succeeded; want admin-only denial")
-	}
-}
-
-func TestAdminCanDelete(t *testing.T) {
-	q := &Quotation{}
-	q.SetAuthService(auth.AdminTestService())
-	// No store attached, so it must fail on the store check, not the gate.
-	if err := q.DeleteQuotation(1); err == nil || err.Error() == "admin access required" {
-		t.Fatalf("admin DeleteQuotation error = %v; want store error, not denial", err)
-	}
-}
