@@ -354,10 +354,11 @@ as its Docker and API tests documented at the time.
   since superseded (§5). PR #484 stays draft; the `Resolves #476` overreach is
   corrected to `Refs #476`.
 - Administrative state: all child tickets are open until the integration PR
-  merges, except **#476**, **#477**, **#478**, **#479**, **#482** and **#498**,
-  which #503 supersedes and closes as deleted; **#464** no longer waits on the
-  extraction gate (§5). #483's fix is present, its regression tests pass, and the
-  PR resolves it.
+  merges, except **#476**, **#477**, **#478**, **#479** and **#498**, which #503
+  supersedes and closes as deleted. **#482** stays open as the sprint
+  verification record, with its extraction gate superseded (§5); **#464** no
+  longer waits on that gate. #483's fix is present, its regression tests pass,
+  and the PR resolves it.
 
 ## 9. Process record
 
