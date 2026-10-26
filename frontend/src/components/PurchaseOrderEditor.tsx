@@ -1197,7 +1197,7 @@ export function PurchaseOrderEditorPage({
   };
 
   /**
-   * #493/#498: one persistence of the working copy, shared by Save, the
+   * #493: one persistence of the working copy, shared by Save, the
    * upload's id resolver and the link review. It creates the row once and then
    * writes the entered values with a single Update, so a concurrent Save and
    * upload produce one create and one successful update -- never a second row
@@ -1805,7 +1805,7 @@ export function PurchaseOrderEditorPage({
         // document controls while it is in flight keeps an attach from starting
         // against a panel that is about to disappear (and losing its error).
         disabled={state.saving}
-        // #493/#498: an upload must persist the working copy before attaching,
+        // #493: an upload must persist the working copy before attaching,
         // so a reload cannot lose the values staff saw when they chose the file.
         // It notifies no one: onSaved would remount this editor mid-attach and a
         // failed upload's error would be set on the unmounted panel. The shared

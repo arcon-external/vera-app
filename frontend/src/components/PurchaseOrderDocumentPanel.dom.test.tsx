@@ -178,7 +178,7 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
     expect(container.textContent).toContain("Version 2 of 2");
   });
 
-  it("ignores an initial state read that lands after a replacement was read (#477)", async () => {
+  it("ignores an initial state read that lands after a replacement was read", async () => {
     const delayedInitialRead = deferred<PurchaseOrderDocumentStateDTO>();
     stateMock.mockReturnValueOnce(delayedInitialRead.promise);
     attachMock.mockResolvedValueOnce(stateWith(2).Document);

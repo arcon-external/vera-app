@@ -9,9 +9,11 @@ import (
 // that shared the schema is untouched.
 //
 // The test drives a real disposable schema through every migration, so 038
-// creates the table and 040 drops it in the same run — the state a fresh
-// deployment reaches, and the state an existing deployment reaches when it
-// applies the new migration on top of an already-applied 038.
+// creates the table and 040 drops it in the same run — the fresh-deployment
+// path. The existing-deployment path (038 already applied, then 040) was
+// verified separately during the #503 review; 040 is a plain DROP TABLE IF
+// EXISTS and is safe on both. This test does not re-apply the earlier
+// migrations, so it does not by itself detect a rewritten 038.
 func TestMigration040DropsExtractionTableAndKeepsThePODocumentPath(t *testing.T) {
 	database := openTestSchema(t, "vera_po_migration_040")
 	ctx := context.Background()
