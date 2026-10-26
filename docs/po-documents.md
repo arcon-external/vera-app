@@ -216,6 +216,5 @@ does not rewrite the saved PO or its recorded absence fields.
 
 ## Out of scope
 
-Extraction (#477) is not part of this slice. The editor shows **Extract and
-compare** visibly disabled with a stated reason, rather than pretending the
-action is available.
+The customer PO PDF is evidence, never a source of values. Nothing reads its
+text or fills a purchase-order field from it; staff enter every value by hand.

@@ -299,7 +299,7 @@ The number printed on the customer's purchase order; it is not the confirmation 
 _Avoid_: PO number (for Vera's record), order number
 
 **Confirmation number**:
-The optional reference a customer's system returns to confirm the order; once assigned it does not change.
+The optional reference Vera issues to confirm the order, which the customer's system receives; once assigned it does not change.
 _Avoid_: PO number, confirmation code
 
 **Number warning**:
@@ -379,7 +379,7 @@ A quotation revision already linked to a purchase order; the source selector sho
 _Avoid_: Taken quotation
 
 **Manual entry**:
-Typing purchase-order values, with or without a linked source, as opposed to accepting values extracted from a customer PO PDF.
+Typing purchase-order values, with or without a linked source; it is the only way to enter a purchase order.
 _Avoid_: Manual PO, standalone PO
 
 **Source missing**:
@@ -460,32 +460,6 @@ _Avoid_: Source totals, original totals
 The deliberate acknowledgement, on a first final save with no customer PO PDF, that the order has no document.
 _Avoid_: Skip upload, PDF waiver
 
-### Extraction and review
-
-**Extraction**:
-Reading a customer PO PDF into evidence inside a stored purchase-order draft, before or after a source is linked; it may use text extraction or OCR. It never supplies the Customer or the source.
-_Avoid_: Import, parsing
-
-**OCR**:
-The text recognition used for scanned customer PO pages.
-_Avoid_: Scanning, auto-OCR
-
-**Extracted value**:
-A value read from the customer PO that must be reviewed before it becomes part of the purchase order.
-_Avoid_: Imported value, parsed value
-
-**Extraction confidence**:
-How reliably a value was read from the PDF; low-confidence values always need review.
-_Avoid_: Score, certainty
-
-**Extraction conflict**:
-A value the extractor cannot resolve safely, so staff must choose or correct it.
-_Avoid_: Parse error, mismatch
-
-**Extraction review**:
-The mandatory check of every extracted value; there is no auto-accept mode.
-_Avoid_: Auto-OCR, auto-accept
-
 ### Verification and retention
 
 **Verification**:
@@ -529,7 +503,7 @@ A request to permanently delete a quotation, purchase order or document chain; a
 _Avoid_: Delete, purge
 
 **Mock fixture**:
-A clearly labelled fictional record created only in an explicitly confirmed local database for manual testing; it is not an issued document, carries synthetic PDFs, and makes no extraction-accuracy claim.
+A clearly labelled fictional record created only in an explicitly confirmed local database for manual testing; it is not an issued document and carries synthetic PDFs.
 _Avoid_: Test data, demo data, sample data
 
 ### Workspaces and settings

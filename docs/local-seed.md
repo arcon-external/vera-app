@@ -121,14 +121,14 @@ finalize, correction, and the admin deletion flow. No impossible stored state is
 fabricated. Quotation revisions are unsigned by design — they are fixtures, not
 issued documents, and the public verification portal is not part of this set.
 
-## Synthetic documents and extraction limits
+## Synthetic documents
 
 Quotation documents and customer PO documents are synthetic PDFs from
-`backend/extract/pdfgen`. They contain known text and no customer content. The
+`backend/localseed/pdfgen`. They contain known text and no customer content. The
 mixed fixture has a text header page and an image-only "scanned" page with no
-text layer. This exercises document handling and evidence display only: **no
-extraction-accuracy claim** is made, and no extraction result is accepted for
-the user. Authorized holdout measurement remains a separate quality gate.
+text layer, so document handling and evidence display meet both shapes. The
+generator only produces fixtures: it reads no document, fills no field and makes
+no accuracy claim.
 
 ## Re-running, edits and cleanup
 
