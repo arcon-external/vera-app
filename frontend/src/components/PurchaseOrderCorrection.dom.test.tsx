@@ -33,9 +33,6 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   GetPurchaseOrderDocumentVersionContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
-  GetPurchaseOrderExtraction: vi.fn(async () => ({ Run: null, Document: null })),
-  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
-  StartPurchaseOrderExtraction: vi.fn(),
 }));
 
 vi.mock("@backend/models", () => ({

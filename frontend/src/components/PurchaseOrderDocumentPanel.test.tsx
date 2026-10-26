@@ -7,8 +7,7 @@ import {
 import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 
 // Issue #472: the attachment panel's assembled markup. The SSR pass holds the
-// exact empty-state sentence, the version/history label, the disabled
-// Extract and compare action with its stated reason, and the inline removal
+// exact empty-state sentence, the version/history label, and the inline removal
 // confirmation. Interactions (picker, view, remove) live in the DOM suite.
 
 function stateWith(version: number | null): PurchaseOrderDocumentStateDTO {
@@ -78,46 +77,6 @@ describe("customer PO PDF panel", () => {
     expect(html).toContain("Replace");
     expect(html).toContain("Remove</button>");
     expect(html).not.toContain("No customer PO PDF attached");
-  });
-
-  it("keeps Extract and compare disabled without a PDF and says why", () => {
-    const empty = render();
-    expect(empty).toContain("Extract and compare");
-    expect(empty).toContain("disabled");
-    expect(empty).toContain("Attach a customer PO PDF before extracting its data.");
-  });
-
-  it("says scanned pages are OCRed, with a low-confidence review instruction", () => {
-    // Issue #478 shipped OCR; the panel must not keep the #477 claim that
-    // scanned pages are skipped. The attached branch carries the full hint.
-    const empty = render();
-    expect(empty).not.toContain("scanned pages are not read");
-    expect(empty).not.toContain("text layer only");
-
-    const attached = render({ state: stateWith(1), onExtract: () => undefined });
-    expect(attached).toContain("OCRs scanned pages");
-    expect(attached).toContain("low-confidence OCR values need review");
-    expect(attached).not.toContain("scanned pages are not read");
-    expect(attached).not.toContain("text layer only");
-  });
-
-  it("enables Extract and compare only where a proposal can be applied", () => {
-    const attached = render({ state: stateWith(1), onExtract: () => undefined });
-    expect(attached).toContain('aria-label="Extract and compare"');
-    expect(attached).not.toContain('aria-label="Extract and compare" disabled');
-
-    const savedView = render({ state: stateWith(1) });
-    expect(savedView).toContain("Correct this record to apply extracted proposals.");
-  });
-
-  it("shows honest progress while an extraction runs", () => {
-    const running = render({
-      state: stateWith(1),
-      onExtract: () => undefined,
-      extractionStatus: "running",
-    });
-    expect(running).toContain("Reading the PDF text…");
-    expect(running).toContain("Extracting…");
   });
 
   it("asks its own confirmation before removing the current PDF", () => {

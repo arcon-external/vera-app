@@ -206,12 +206,6 @@ export type PurchaseOrderEditorAction =
   | { type: "saveConflict" }
   | { type: "versionAdopted"; version: number }
   | { type: "valuesReplaced"; header: PurchaseOrderHeader; lines: PurchaseOrderLine[] }
-  | {
-      type: "extractionApplied";
-      header: Partial<PurchaseOrderHeader>;
-      lines?: PurchaseOrderLine[];
-      nextKey: number;
-    }
   | { type: "saveFailed"; error: string }
   | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
 
@@ -431,10 +425,9 @@ export interface BlankPurchaseOrderOptions {
 
 /**
  * Builds the transient editor DTO for a source-less draft. It is never stored
- * until Save draft, a PDF upload or an extraction asks for a row; opening the
- * editor creates nothing. Every identity field is empty, and SourceState
- * "never" tells the UI not to show a Customer, a quotation revision or printed
- * totals.
+ * until Save draft or a PDF upload asks for a row; opening the editor creates
+ * nothing. Every identity field is empty, and SourceState "never" tells the UI
+ * not to show a Customer, a quotation revision or printed totals.
  */
 export function blankPurchaseOrderDraft(
   options: BlankPurchaseOrderOptions
@@ -1236,17 +1229,6 @@ export function purchaseOrderEditorReducer(
       // exist only as decisions. Applying them to the working copy before the
       // correction transition keeps the values the reviewer confirmed.
       return { ...state, header: action.header, lines: action.lines, error: null };
-    case "extractionApplied":
-      // #477: only the chosen proposals. Lines are replaced only when the
-      // staff member ticked at least one extracted row; otherwise the current
-      // entries stay exactly as they were.
-      return {
-        ...state,
-        header: { ...state.header, ...action.header },
-        lines: action.lines ?? state.lines,
-        nextKey: Math.max(state.nextKey, action.nextKey),
-        error: null,
-      };
     case "saveFailed":
       return { ...state, saving: false, error: action.error };
     case "saveSucceeded": {
