@@ -7,15 +7,14 @@ import (
 	"strconv"
 	"strings"
 
-	"vera-app/backend/extract/pdfgen"
+	"vera-app/backend/localseed/pdfgen"
 	"vera-app/backend/store"
 )
 
 // Synthetic documents only. Every page says what it is, so a screenshot of a
 // seeded document cannot be mistaken for a customer's paperwork. The generator
-// is backend/extract/pdfgen, the same text-support package the extraction tests
-// use; nothing here is a production renderer and nothing claims extraction
-// accuracy.
+// lives in backend/localseed/pdfgen and is local-seed support only; nothing
+// here is a production renderer.
 
 func quotationPDF(
 	quoteNumber string,
@@ -57,7 +56,7 @@ func quotationPDF(
 		pdfgen.Line{Text: "Discount        " + rupiah(totals.MarginalizedDiscount), Y: y + 16, Size: 9},
 		pdfgen.Line{Text: "PPN             " + rupiah(totals.PpnAmount), Y: y + 32, Size: 9},
 		pdfgen.Line{Text: "Grand total     " + rupiah(totals.CustomerGrandTotal), Y: y + 48, Size: 10},
-		pdfgen.Line{Text: "SYNTHETIC PDF - no extraction accuracy is claimed.", Y: y + 74, Size: 8},
+		pdfgen.Line{Text: "SYNTHETIC PDF - fictional local-seed fixture.", Y: y + 74, Size: 8},
 	)
 	return pdfgen.Build([][]pdfgen.Line{lines})
 }
@@ -96,7 +95,7 @@ func purchaseOrderTextPDF(poNumber, sourceQuote, customer string, items []store.
 	}
 	lines = append(lines,
 		pdfgen.Line{Text: "Grand total     " + rupiah(grandTotal), Y: y + 16, Size: 10},
-		pdfgen.Line{Text: "SYNTHETIC PDF - no extraction accuracy is claimed.", Y: y + 42, Size: 8},
+		pdfgen.Line{Text: "SYNTHETIC PDF - fictional local-seed fixture.", Y: y + 42, Size: 8},
 	)
 	return pdfgen.Build([][]pdfgen.Line{lines})
 }

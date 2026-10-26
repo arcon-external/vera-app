@@ -544,7 +544,7 @@ func (q *Quotation) CreatePurchaseOrderDraft(input PurchaseOrderCreateInput) (Pu
 // CreatePurchaseOrderBlankDraft starts a draft with no source and no Customer
 // (#496). The server supplies the company currency, validates the user's tax
 // defaults, and returns the stored draft. Opening the editor does not call
-// this; the first Save draft, PDF upload or extraction does.
+// this; the first Save draft or PDF upload does.
 func (q *Quotation) CreatePurchaseOrderBlankDraft(input PurchaseOrderBlankCreateInput) (PurchaseOrderDTO, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return PurchaseOrderDTO{}, err

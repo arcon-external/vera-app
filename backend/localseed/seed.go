@@ -336,7 +336,7 @@ func inspect(
 		Notes: []string{
 			"Every fixture is fictional and marked [MOCK]; customer names, subjects, PO numbers and PDFs say so.",
 			"Seeded quotation revisions are intentionally unsigned. They are manual-testing fixtures, not issued documents, and the public verification portal is not part of this set.",
-			"Customer PO documents and quotation PDFs are synthetic text/scanned PDFs; no extraction accuracy is claimed.",
+			"Customer PO documents and quotation PDFs are synthetic text/scanned PDFs.",
 			"Re-running preserves existing fixtures, never overwrites them and never deletes records.",
 		},
 	}

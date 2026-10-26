@@ -1,11 +1,11 @@
-// Package pdfgen builds small synthetic PDFs for tests and manual verification.
+// Package pdfgen builds small synthetic PDFs for the local seed.
 //
-// It exists so the extraction tests can use a real PDF with known words and
+// It exists so seeded fixtures can use a real PDF with known words and
 // positions without committing a customer document. The generator writes a
-// classic-xref, single-font document; Poppler reads it as ordinary text. This
-// is test support, not a production renderer: it supports the Helvetica
-// base-14 face, ASCII text, multi-page tables and full-page image pages (for
-// synthetic scans), which is all the fixtures need.
+// classic-xref, single-font document; a PDF reader sees ordinary text. This is
+// test support, not a production renderer: it supports the Helvetica base-14
+// face, ASCII text, multi-page tables and full-page image pages (for synthetic
+// scans), which is all the fixtures need.
 package pdfgen
 
 import (

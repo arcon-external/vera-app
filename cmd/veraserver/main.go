@@ -94,10 +94,6 @@ func runWith(args []string, getenv func(string) string,
 	// Cleanup is best-effort: an outage must not prevent the API from starting.
 	cleanStaleSessions(ctx, database)
 	go cleanupSessionsDaily(ctx, database)
-	// #477: no extraction worker survives a restart. Fail those runs cleanly
-	// rather than leaving them "running" forever. Best-effort: a failure here
-	// is logged, and the run stays visible rather than blocking startup.
-	recoverInterruptedExtractions(ctx, database)
 
 	bootstrapName := getenv("VERA_BOOTSTRAP_ADMIN_NAME")
 	bootstrapEmail := getenv("VERA_BOOTSTRAP_ADMIN_EMAIL")
@@ -153,22 +149,6 @@ func cleanStaleSessions(ctx context.Context, database *store.Store) {
 	defer cancel()
 	if _, err := database.DeleteStaleSessions(cleanupCtx, time.Now().Add(-30*24*time.Hour)); err != nil {
 		fmt.Fprintf(os.Stderr, "veraserver: session cleanup failed: %v\n", err)
-	}
-}
-
-// recoverInterruptedExtractions fails extraction runs a previous process left
-// queued or running. There is no worker to resume them, so the honest state is
-// failed with an "interrupted" reason the review panel can show.
-func recoverInterruptedExtractions(ctx context.Context, database *store.Store) {
-	cleanupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	count, err := database.RecoverInterruptedPurchaseOrderExtractions(cleanupCtx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "veraserver: extraction recovery failed: %v\n", err)
-		return
-	}
-	if count > 0 {
-		fmt.Printf("veraserver: marked %d interrupted extraction run(s) failed\n", count)
 	}
 }
 
