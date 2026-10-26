@@ -29,7 +29,6 @@ const mocks = vi.hoisted(() => ({
   previewLink: vi.fn(),
   linkSource: vi.fn(),
   documentState: vi.fn(),
-  extraction: vi.fn(),
   getUnits: vi.fn(),
   getCatalogue: vi.fn(),
   getProfile: vi.fn(),
@@ -93,12 +92,9 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     PreviewPurchaseOrderDraftLink: (...args: unknown[]) => mocks.previewLink(...args),
     LinkPurchaseOrderDraftSource: (...args: unknown[]) => mocks.linkSource(...args),
     GetPurchaseOrderDocumentState: (...args: unknown[]) => mocks.documentState(...args),
-    GetPurchaseOrderExtraction: (...args: unknown[]) => mocks.extraction(...args),
     GetPurchaseOrderHistory: vi.fn(async () => []),
     AttachPurchaseOrderDocument: vi.fn(),
     RemovePurchaseOrderDocument: vi.fn(),
-    GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
-    StartPurchaseOrderExtraction: vi.fn(),
     FinalizePurchaseOrder: vi.fn(),
     CorrectPurchaseOrder: vi.fn(),
     GetPurchaseOrderReview: vi.fn(),
@@ -362,7 +358,6 @@ beforeEach(() => {
     return { Order: latestOrder };
   });
   mocks.documentState.mockResolvedValue({ Document: null, Versions: [] });
-  mocks.extraction.mockResolvedValue({ Run: null, Document: null });
 
   container = document.createElement("div");
   document.body.appendChild(container);

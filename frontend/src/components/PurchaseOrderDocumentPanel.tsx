@@ -3,7 +3,6 @@ import {
   AttachPurchaseOrderDocument,
   GetActivePurchaseOrderDocumentContent,
   GetPurchaseOrderDocumentState,
-  GetPurchaseOrderExtractionAvailability,
   RemovePurchaseOrderDocument,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
@@ -11,9 +10,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   documentErrorMessage,
-  documentStateOf,
   documentVersionLabel,
-  extractAndCompareAvailability,
   formatDocumentSize,
   MAX_PURCHASE_ORDER_DOCUMENT_BYTES,
   NO_DOCUMENT_TEXT,
@@ -29,10 +26,6 @@ import { Button, Card, SectionHeading, StatusBanner } from "./ui";
 // current document, its version against the retained correction history, and
 // the four operations staff need. Attaching or replacing a PDF never saves the
 // purchase order, so a checked draft stays exactly as entered.
-//
-// "Extract and compare" is visible but disabled until #477 ships, with the
-// reason stated beside it. A dead control with no explanation would imply the
-// feature exists and is broken.
 
 export type DocumentPanelBusy = "idle" | "uploading" | "removing";
 
@@ -46,17 +39,6 @@ export interface PurchaseOrderDocumentPanelViewProps {
   /** True when the saved record recorded a deliberate no-PDF final save. */
   absenceConfirmed?: boolean;
   preview?: { url: string; filename: string } | null;
-  /**
-   * Starts a text extraction. Omitted by a read-only saved view, whose panel
-   * explains the correction path instead of starting an unappliable job.
-   */
-  onExtract?: () => void;
-  /** The run's queued/running status, for honest progress on the button. */
-  extractionStatus?: "queued" | "running" | null;
-  /** True while the start request itself is in flight. */
-  extractionStarting?: boolean;
-  /** The typed deployment probe: false disables Extract and shows a banner. */
-  extractorAvailable?: boolean | null;
   /**
    * Blocks every document control, including the hidden file input. The editor
    * sets it while a draft Save is in flight, so an upload cannot attach to a row
@@ -79,10 +61,6 @@ export function PurchaseOrderDocumentPanelView({
   pendingRemoval = false,
   absenceConfirmed = false,
   preview = null,
-  onExtract,
-  extractionStatus = null,
-  extractionStarting = false,
-  extractorAvailable = null,
   disabled: disabledProp = false,
   onChooseFile,
   onView,
@@ -92,23 +70,9 @@ export function PurchaseOrderDocumentPanelView({
   onClosePreview,
 }: PurchaseOrderDocumentPanelViewProps) {
   const active: PurchaseOrderDocumentDTO | null = state.Document ?? null;
-  const documentState = documentStateOf(state);
-  const extract = extractAndCompareAvailability(documentState, onExtract != null, extractorAvailable);
-  const extractInFlight = extractionStatus === "queued" || extractionStatus === "running";
-  const extractBusy = extractionStarting || extractInFlight;
   const disabled = busy !== "idle" || loading || disabledProp;
   const versionLabel = documentVersionLabel(state);
   const uploadedDate = active?.UploadedAt ? active.UploadedAt.slice(0, 10) : "";
-  const extractHint =
-    extractionStarting
-      ? "Starting extraction…"
-      : extractionStatus === "queued"
-        ? "Queued for extraction…"
-        : extractionStatus === "running"
-          ? "Reading the PDF text…"
-          : extract.enabled
-            ? extract.hint
-            : extract.reason;
 
   return (
     <Card className="p-4">
@@ -155,15 +119,6 @@ export function PurchaseOrderDocumentPanelView({
         <p className="mt-1 text-caption text-ink-500">
           The final save recorded this omission deliberately.
         </p>
-      ) : null}
-
-      {extractorAvailable === false ? (
-        <div className="mt-3" data-testid="po-extraction-unavailable">
-          <StatusBanner tone="info">
-            Automatic extraction is not available on this server. Attach the PDF and
-            enter the values manually; nothing is read automatically.
-          </StatusBanner>
-        </div>
       ) : null}
 
       {pendingRemoval && active !== null ? (
@@ -228,19 +183,6 @@ export function PurchaseOrderDocumentPanelView({
               </Button>
             </>
           ) : null}
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <Button
-              aria-label="Extract and compare"
-              onClick={onExtract}
-              disabled={disabled || extractBusy || !extract.enabled}
-              title={extract.enabled ? undefined : extract.reason}
-            >
-              {extractBusy ? "Extracting…" : "Extract and compare"}
-            </Button>
-            <span className="max-w-[18rem] text-caption text-ink-500">
-              {extractHint}
-            </span>
-          </div>
         </div>
       )}
 
@@ -281,17 +223,6 @@ export interface PurchaseOrderDocumentPanelProps {
   absenceConfirmed?: boolean;
   onStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
   /**
-   * Called synchronously when a successful attach/replace/remove has changed
-   * the active document, before the state refresh returns. The editor clears
-   * any extraction result and selection here, so a refresh that is still in
-   * flight cannot leave proposals for the old PDF actionable.
-   */
-  onDocumentChanged?: () => void;
-  /** Omitted by a saved view: its document panel explains the correction path. */
-  onExtract?: () => void;
-  extractionStatus?: "queued" | "running" | null;
-  extractionStarting?: boolean;
-  /**
    * Blocks every document control, including the hidden file input, and makes
    * `attach` refuse a synthetic or stale file event. The editor sets it while a
    * draft Save is in flight.
@@ -311,10 +242,6 @@ export function PurchaseOrderDocumentPanel({
   initialState = null,
   absenceConfirmed = false,
   onStateChange,
-  onDocumentChanged,
-  onExtract,
-  extractionStatus = null,
-  extractionStarting = false,
   disabled = false,
 }: PurchaseOrderDocumentPanelProps) {
   const [state, setState] = useState<PurchaseOrderDocumentStateDTO>(
@@ -325,10 +252,6 @@ export function PurchaseOrderDocumentPanel({
   const [error, setError] = useState<string | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState(false);
   const [preview, setPreview] = useState<{ url: string; filename: string } | null>(null);
-  // #498: the typed deployment probe. `null` means "not answered/unreachable";
-  // that is not an unavailable extractor, so the manual path stays reachable
-  // and Start still returns its typed 503 if the deployment cannot extract.
-  const [extractorAvailable, setExtractorAvailable] = useState<boolean | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const previewUrl = useRef<string | null>(null);
   // Every state read carries the generation it was requested for. A read that
@@ -389,23 +312,6 @@ export function PurchaseOrderDocumentPanel({
   }, [purchaseOrderId, initialState]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const answer = await GetPurchaseOrderExtractionAvailability();
-        if (!cancelled) setExtractorAvailable(answer.Available);
-      } catch {
-        // A probe failure is not evidence of an unavailable extractor. Keep
-        // Extract enabled so Start's typed refusal remains the visible answer.
-        if (!cancelled) setExtractorAvailable(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     const current = previewUrl.current;
     return () => {
       if (current !== null && typeof URL.revokeObjectURL === "function") {
@@ -454,9 +360,6 @@ export function PurchaseOrderDocumentPanel({
           Filename: file.name,
         })
       );
-      // Notify before refreshing: the editor must not keep showing proposals
-      // for the previous PDF while the new state is still being read.
-      onDocumentChanged?.();
       await refresh(id);
       setPendingRemoval(false);
     } catch (uploadError) {
@@ -508,7 +411,6 @@ export function PurchaseOrderDocumentPanel({
     setError(null);
     try {
       await RemovePurchaseOrderDocument(purchaseOrderId, true);
-      onDocumentChanged?.();
       await refresh();
       setPendingRemoval(false);
     } catch (removeError) {
@@ -542,10 +444,6 @@ export function PurchaseOrderDocumentPanel({
         absenceConfirmed={absenceConfirmed}
         preview={preview}
         disabled={disabled}
-        onExtract={onExtract}
-        extractionStatus={extractionStatus}
-        extractionStarting={extractionStarting}
-        extractorAvailable={extractorAvailable}
         onChooseFile={chooseFile}
         onView={() => void view()}
         onRemove={() => setPendingRemoval(true)}

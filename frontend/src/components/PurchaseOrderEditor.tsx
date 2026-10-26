@@ -3,11 +3,9 @@ import {
   CorrectPurchaseOrder,
   CreatePurchaseOrderBlankDraft,
   FinalizePurchaseOrder,
-  GetPurchaseOrderExtraction,
   GetPurchaseOrderReview,
   LinkPurchaseOrderDraftSource,
   PreviewPurchaseOrderDraftLink,
-  StartPurchaseOrderExtraction,
   UpdatePurchaseOrderDraft,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
@@ -39,27 +37,9 @@ import {
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
-  type PurchaseOrderHeader,
-  type PurchaseOrderLine,
   type PurchaseOrderLineCalculation,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
-import {
-  applyExtractionSelection,
-  createExtractionEditTracker,
-  extractionErrorMessage,
-  extractionIsStale,
-  extractionProgressText,
-  extractionResultActionable,
-  isTerminalExtractionStatus,
-  resolveExtractionConflicts,
-  resolvedExtractionSelection,
-  type ExtractionChoice,
-  type ExtractionEditTracker,
-  type PurchaseOrderExtractionDocumentDTO,
-  type PurchaseOrderExtractionStateDTO,
-} from "../poExtraction";
-import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 import {
   draftLinkConflictWarning,
   planDraftLink,
@@ -67,7 +47,6 @@ import {
   type PurchaseOrderDraftTaxChoice,
 } from "../poDraftLink";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
-import { PurchaseOrderExtractionPanelView } from "./PurchaseOrderExtractionPanel";
 import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
 import {
   PurchaseOrderDifferenceReviewView,
@@ -107,8 +86,6 @@ export interface PurchaseOrderEditorViewProps {
   incotermOptions: { value: string; label: string }[];
   /** Safe deferred linking for #497; it never replaces or creates a record. */
   onLinkQuotation?: () => void;
-  /** #498: a currency change invalidates an actionable extraction result. */
-  onCurrencyChange?: (next: CurrencyInfo) => void;
   onSave: () => void;
   onCancel: () => void;
   /** Opens the final-save difference review (#471). */
@@ -307,18 +284,6 @@ export function PurchaseOrderDiscardPrompt({
         </Card>
       </div>
     </div>
-  );
-}
-
-function sameExtractionDocument(
-  left: PurchaseOrderExtractionDocumentDTO | null,
-  right: PurchaseOrderExtractionDocumentDTO | null
-): boolean {
-  if (left === null || right === null) return left === right;
-  return (
-    left.ID === right.ID &&
-    left.Version === right.Version &&
-    left.SHA256 === right.SHA256
   );
 }
 
@@ -563,7 +528,6 @@ export function PurchaseOrderEditorView({
   uomOptions,
   incotermOptions,
   onLinkQuotation,
-  onCurrencyChange,
   onSave,
   onCancel,
   onFinalSave,
@@ -720,10 +684,6 @@ export function PurchaseOrderEditorView({
                     (option) => option.code === value
                   );
                   if (next === undefined || next.code === state.currency) return;
-                  if (onCurrencyChange !== undefined) {
-                    onCurrencyChange(next);
-                    return;
-                  }
                   dispatch({
                     type: "currencyChanged",
                     code: next.code,
@@ -1133,499 +1093,10 @@ export function PurchaseOrderEditorPage({
   const [linkTaxChoice, setLinkTaxChoice] = useState<PurchaseOrderDraftTaxChoice>("");
   const [linking, setLinking] = useState(false);
 
-  // #477: the extraction review. The run is the server's, the selection is
-  // local, and applying is the one action that moves a proposal into the
-  // working copy. A run is never applied automatically and a late response
-  // cannot overwrite a value staff has since edited: the selection starts from
-  // what the editor held when the result arrived, and Apply re-checks each
-  // ticked value against the current header.
-  const [extractionState, setExtractionState] =
-    useState<PurchaseOrderExtractionStateDTO | null>(null);
-  const [extractionSelection, setExtractionSelection] = useState<Record<string, boolean>>({});
-  /**
-   * #479: the editor as it stood when tracking began, plus the choices staff
-   * made for conflicting values. The tracker distinguishes "still empty" from
-   * "cleared deliberately"; the choices are kept across a retry and discarded
-   * with the document generation.
-   */
-  const [extractionTracker, setExtractionTracker] = useState<ExtractionEditTracker>(() =>
-    createExtractionEditTracker(0, state.header, state.lines)
-  );
-  const extractionTrackerRef = useRef(extractionTracker);
-  extractionTrackerRef.current = extractionTracker;
-  const [extractionChoices, setExtractionChoices] = useState<
-    Record<string, ExtractionChoice>
-  >({});
-  const [extractionStarting, setExtractionStarting] = useState(false);
-  const [extractionApplying, setExtractionApplying] = useState(false);
-  const [extractionError, setExtractionError] = useState<string | null>(null);
-  const [extractionApplied, setExtractionApplied] = useState<{
-    fields: number;
-    rows: number;
-  } | null>(null);
-  const [dismissedExtractionId, setDismissedExtractionId] = useState<number | null>(null);
-  // The active PDF generation as the document panel has reported it. Undefined
-  // means "not loaded yet"; null means "no actionable document" -- either the
-  // record deliberately has no PDF, or a replacement's state read has not
-  // returned yet. The review panel and Apply compare the run against this, not
-  // against whatever document the last extraction response happened to mention.
-  const [activeDocument, setActiveDocument] = useState<
-    PurchaseOrderExtractionDocumentDTO | null | undefined
-  >(undefined);
-  const activeDocumentRef = useRef<PurchaseOrderExtractionDocumentDTO | null | undefined>(
-    undefined
-  );
-  // Bumped whenever the active document changes. A response that was requested
-  // for the previous generation is discarded instead of adopted.
-  const extractionGeneration = useRef(0);
-  const extractionPoll = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const extractionInitialized = useRef<number | null>(null);
-  // #498: a run whose result must not become actionable again without a new
-  // Extract. A currency change and a stale Apply both add to this set; a new
-  // run has a new id, so it is unaffected.
-  const extractionRejectedRuns = useRef<Set<number>>(new Set());
-  // The draft currency in effect when the result was adopted. Amounts are
-  // parsed from the stored result through this currency; changing the draft
-  // currency invalidates the result rather than reinterpreting it.
-  const extractionCurrencyRef = useRef<string | null>(null);
-  // Async poll callbacks must see the editor as it is now, not as it was when
-  // the first response was scheduled.
+  // The async save and upload paths must see the editor as it is now, not as
+  // it was when the request was scheduled.
   const editorStateRef = useRef(state);
   editorStateRef.current = state;
-
-  /**
-   * Re-bases the tracker on the values now in the editor. It is called when a
-   * document generation ends or a result is consumed: from that point the new
-   * values are the baseline a later edit is measured against.
-   */
-  function rebaseExtractionTracker(
-    header: PurchaseOrderHeader = editorStateRef.current.header,
-    lines: PurchaseOrderLine[] = editorStateRef.current.lines
-  ): ExtractionEditTracker {
-    const next = createExtractionEditTracker(
-      extractionGeneration.current,
-      header,
-      lines
-    );
-    extractionTrackerRef.current = next;
-    setExtractionTracker(next);
-    return next;
-  }
-
-  /** The tracker for the active document generation, created on first need. */
-  function ensureExtractionTracker(): ExtractionEditTracker {
-    const current = extractionTrackerRef.current;
-    if (current.generation === extractionGeneration.current) return current;
-    return rebaseExtractionTracker();
-  }
-
-  function clearExtractionPoll() {
-    if (extractionPoll.current !== null) {
-      clearTimeout(extractionPoll.current);
-      extractionPoll.current = null;
-    }
-  }
-
-  /**
-   * Clears the result and the apply selection now. Called on a document change
-   * (and on a successful attach/replace/remove before its refresh returns), so
-   * old proposals stop being actionable at the moment the PDF changes rather
-   * than one round trip later.
-   *
-   * The generation bump is what discards responses that were requested for the
-   * document this call ends. The retained reference is cleared as well, so a
-   * pre-change response cannot compare equal to an old document if a call site
-   * ever skips its generation check: until the document panel reports the
-   * replacement, no document is actionable.
-   */
-  const invalidateExtraction = () => {
-    extractionGeneration.current += 1;
-    extractionInitialized.current = null;
-    clearExtractionPoll();
-    activeDocumentRef.current = null;
-    setActiveDocument(null);
-    setExtractionState(null);
-    setExtractionSelection({});
-    setExtractionApplied(null);
-    setDismissedExtractionId(null);
-    setExtractionError(null);
-    // #479: the old run's baseline and choices describe a PDF that is no
-    // longer active. They end with the generation, before any refresh returns.
-    setExtractionChoices({});
-    rebaseExtractionTracker();
-    extractionCurrencyRef.current = null;
-  };
-
-  /**
-   * #498: ends one result without declaring the active PDF unusable. A
-   * currency change (or a stale Apply) discards the run, its selection and its
-   * tracker, but the document generation stays known so Extract can start
-   * again immediately. The run id stays rejected, so a later refresh cannot
-   * quietly restore it.
-   */
-  const rejectExtraction = (runId: number, message: string) => {
-    extractionRejectedRuns.current.add(runId);
-    extractionGeneration.current += 1;
-    extractionInitialized.current = null;
-    clearExtractionPoll();
-    setExtractionState(null);
-    setExtractionSelection({});
-    setExtractionChoices({});
-    setExtractionApplied(null);
-    setExtractionError(message);
-    extractionCurrencyRef.current = null;
-    rebaseExtractionTracker();
-  };
-
-  // Declared as a function so adoptExtraction and the poll can call each other
-  // without a render-time ordering problem; no timer fires during render.
-  function scheduleExtractionPoll(runId: number, attempt = 0) {
-    if (attempt >= 120) {
-      setExtractionError(
-        "Extraction has not reported a result after two minutes. Run Extract again, or enter the values manually."
-      );
-      clearExtractionPoll();
-      return;
-    }
-    clearExtractionPoll();
-    extractionPoll.current = setTimeout(() => {
-      void (async () => {
-        // The generation is captured when this read starts, not when the poll
-        // was scheduled: a replacement between the timer firing and the answer
-        // arriving must discard the answer.
-        const generation = extractionGeneration.current;
-        try {
-          const next = await GetPurchaseOrderExtraction(editorStateRef.current.orderId);
-          if (generation !== extractionGeneration.current) return;
-          const run = next.Run;
-          if (run !== null && run !== undefined && run.ID === runId && !isTerminalExtractionStatus(run.Status)) {
-            setExtractionState(next);
-            scheduleExtractionPoll(runId, attempt + 1);
-            return;
-          }
-          adoptExtraction(next);
-        } catch (pollError) {
-          if (generation !== extractionGeneration.current) return;
-          setExtractionError(errorText(pollError));
-          clearExtractionPoll();
-        }
-      })();
-    }, 1000);
-  }
-
-  const adoptExtraction = (next: PurchaseOrderExtractionStateDTO) => {
-    const run = next.Run ?? null;
-    const active = activeDocumentRef.current;
-    // A response for a different PDF generation is never made actionable: it
-    // may be the answer to a request that was already in flight when the
-    // document changed.
-    if (run != null && active !== undefined && extractionIsStale(run, active)) {
-      setExtractionState({ Run: run, Document: active });
-      extractionInitialized.current = null;
-      setExtractionSelection({});
-      setExtractionChoices({});
-      rebaseExtractionTracker();
-      return;
-    }
-    setExtractionState(next);
-    if (run != null && run.Status === "succeeded" && run.Result != null &&
-      !extractionRejectedRuns.current.has(run.ID)) {
-      extractionCurrencyRef.current = editorStateRef.current.currency;
-      if (extractionInitialized.current !== run.ID) {
-        extractionInitialized.current = run.ID;
-        const editor = editorStateRef.current;
-        // #479: the default selection is the resolved matrix, not a blanket
-        // "empty means preselect". A field staff cleared while the run was
-        // processing starts unchosen and waits for a decision.
-        const plan = resolveExtractionConflicts(
-          run.Result,
-          editor.header,
-          editor.lines,
-          ensureExtractionTracker(),
-          activeCurrency
-        );
-        setExtractionSelection(plan.selection);
-      }
-    } else {
-      extractionInitialized.current = null;
-      setExtractionSelection({});
-      // A queued/running run still needs a baseline: staff can keep typing,
-      // and an edit made from here on is protected when the result arrives.
-      if (run != null) ensureExtractionTracker();
-    }
-    if (run != null && !isTerminalExtractionStatus(run.Status)) {
-      scheduleExtractionPoll(run.ID);
-    }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    // A transient editor has no row to read; the first upload/save adopts one
-    // and the explicit refresh paths use that id.
-    if (order.ID < 1) return;
-    // The initial read belongs to the document generation that was active when
-    // it started. A replacement while it is in flight ends that generation.
-    const generation = extractionGeneration.current;
-    void (async () => {
-      try {
-        const next = await GetPurchaseOrderExtraction(order.ID);
-        if (cancelled || generation !== extractionGeneration.current) return;
-        adoptExtraction(next);
-      } catch (loadError) {
-        if (cancelled || generation !== extractionGeneration.current) return;
-        setExtractionError(errorText(loadError));
-      }
-    })();
-    return () => {
-      cancelled = true;
-      clearExtractionPoll();
-    };
-    // Re-reading is keyed to the record; the callbacks above are intentionally
-    // stable for its lifetime and read current values through refs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.ID]);
-
-  const refreshExtraction = () => {
-    const generation = extractionGeneration.current;
-    clearExtractionPoll();
-    setDismissedExtractionId(null);
-    setExtractionApplied(null);
-    void (async () => {
-      try {
-        const next = await GetPurchaseOrderExtraction(editorStateRef.current.orderId);
-        if (generation !== extractionGeneration.current) return;
-        adoptExtraction(next);
-      } catch (refreshError) {
-        if (generation !== extractionGeneration.current) return;
-        setExtractionError(errorText(refreshError));
-      }
-    })();
-  };
-
-  const handleDocumentStateChange = (next: PurchaseOrderDocumentStateDTO) => {
-    const document: PurchaseOrderExtractionDocumentDTO | null = next.Document
-      ? {
-          ID: next.Document.ID,
-          Version: next.Document.Version,
-          SHA256: next.Document.SHA256,
-        }
-      : null;
-    const previous = activeDocumentRef.current;
-    const run = extractionState?.Run ?? null;
-    const changed =
-      previous !== undefined
-        ? !sameExtractionDocument(previous, document)
-        : run != null && extractionIsStale(run, document);
-    // Invalidate before reporting the new document: the clear inside ends the
-    // old generation, and the value assigned next is the one every response
-    // from here on is compared against.
-    if (changed) invalidateExtraction();
-    activeDocumentRef.current = document;
-    setActiveDocument(document);
-    refreshExtraction();
-  };
-
-  const startExtraction = () => {
-    if (extractionStarting) return;
-    // The start belongs to the document generation that is active when it is
-    // requested. A replacement while it is in flight ends that generation, and
-    // its run is never made actionable here.
-    const generation = extractionGeneration.current;
-    clearExtractionPoll();
-    // #479: a retry is a request, never a reset. The working copy and the
-    // reviewed choices stay; only the old row ticks are dropped because they
-    // name rows of a result that is about to be replaced. The tracker keeps
-    // its original baseline, so edits made before and between retries remain
-    // protected.
-    ensureExtractionTracker();
-    setExtractionSelection({});
-    setExtractionStarting(true);
-    setExtractionError(null);
-    setExtractionApplied(null);
-    setDismissedExtractionId(null);
-    void (async () => {
-      try {
-        const persisted = await ensurePersisted();
-        const next = await StartPurchaseOrderExtraction(persisted.id);
-        if (generation !== extractionGeneration.current) return;
-        adoptExtraction(next);
-      } catch (startError) {
-        if (generation !== extractionGeneration.current) return;
-        setExtractionError(errorText(startError));
-      } finally {
-        setExtractionStarting(false);
-      }
-    })();
-  };
-
-  const toggleExtraction = (key: string, selected: boolean) => {
-    setExtractionSelection((current) => ({ ...current, [key]: selected }));
-  };
-
-  const chooseExtraction = (key: string, choice: ExtractionChoice) => {
-    setExtractionChoices((current) => ({ ...current, [key]: choice }));
-  };
-
-  const currencyFor = (code: string): CurrencyInfo =>
-    currencyOptions.find((option) => option.code === code) ?? currency;
-
-  /**
-   * #498: Apply re-reads the latest run and active document before writing.
-   * The panel's earlier read can be seconds old, and a PDF replaced in another
-   * session is invisible to a tab that never refreshed. A stale, replaced or
-   * superseded result discards the selection and writes nothing; the staff
-   * member runs Extract again. A currency change invalidates the amounts the
-   * same way: the stored decimals are parsed with the draft currency.
-   */
-  const applyExtraction = async () => {
-    if (extractionApplying || extractionStarting) return;
-    const run = extractionState?.Run;
-    if (run == null || run.Result == null) return;
-    const orderId = editorStateRef.current.orderId;
-    if (orderId < 1) return;
-    // The read belongs to the generation that was active when Apply started.
-    const generation = extractionGeneration.current;
-    setExtractionApplying(true);
-    setExtractionError(null);
-    try {
-      const latest = await GetPurchaseOrderExtraction(orderId);
-      if (generation !== extractionGeneration.current) return;
-      const latestRun = latest.Run ?? null;
-      const latestDocument = latest.Document ?? null;
-      if (
-        latestRun == null ||
-        latestRun.ID !== run.ID ||
-        latestRun.Status !== "succeeded" ||
-        latestRun.Result == null ||
-        extractionIsStale(latestRun, latestDocument)
-      ) {
-        if (!sameExtractionDocument(activeDocumentRef.current ?? null, latestDocument)) {
-          activeDocumentRef.current = latestDocument;
-          setActiveDocument(latestDocument);
-        }
-        rejectExtraction(
-          latestRun?.ID ?? run.ID,
-          "The PDF changed after this extraction, so its proposals were discarded. Your entries were not changed. Run Extract again."
-        );
-        return;
-      }
-      if (!sameExtractionDocument(activeDocumentRef.current ?? null, latestDocument)) {
-        activeDocumentRef.current = latestDocument;
-        setActiveDocument(latestDocument);
-      }
-      const current = editorStateRef.current;
-      if (extractionCurrencyRef.current !== null &&
-        extractionCurrencyRef.current !== current.currency) {
-        rejectExtraction(
-          latestRun.ID,
-          `The draft currency changed after this extraction, so its proposals were discarded. Run Extract again to read the amounts in ${current.currency}.`
-        );
-        return;
-      }
-      const currentCurrency = currencyFor(current.currency);
-      const plan = resolveExtractionConflicts(
-        latestRun.Result,
-        current.header,
-        current.lines,
-        ensureExtractionTracker(),
-        currentCurrency
-      );
-      const selection = resolvedExtractionSelection(
-        plan,
-        extractionChoices,
-        extractionSelection
-      );
-      const applied = applyExtractionSelection(
-        latestRun.Result,
-        selection,
-        current.header,
-        current.lines,
-        current.nextKey,
-        currentCurrency
-      );
-      if (applied.appliedFields === 0 && applied.appliedRows === 0) {
-        setExtractionError(
-          "No selected proposal could be applied. Choose a value to use, or enter it manually."
-        );
-        return;
-      }
-      dispatch({
-        type: "extractionApplied",
-        header: applied.headerPatch,
-        lines: applied.lines,
-        nextKey: current.nextKey + applied.appliedRows,
-      });
-      // The applied proposals are consumed; the rest of the result is not. Only
-      // the baseline of what Apply actually wrote moves, so an unresolved
-      // cleared field or line conflict stays a conflict until it is decided or
-      // the result is discarded.
-      const previous = extractionTrackerRef.current;
-      const baselineHeader = { ...previous.baseline.header };
-      const appliedHeaderKeys = [
-        "poNumber",
-        "poDate",
-        "requestedDeliveryDate",
-        "paymentTerms",
-        "incoterms",
-      ] as const;
-      for (const key of appliedHeaderKeys) {
-        if (Object.prototype.hasOwnProperty.call(applied.headerPatch, key)) {
-          baselineHeader[key] = String(applied.headerPatch[key] ?? "");
-        }
-      }
-      const baselineLines =
-        applied.lines !== undefined
-          ? applied.lines.map((line) => ({
-              key: line.key,
-              description: line.description,
-              quantity: line.quantity,
-              uom: line.uom,
-              unitPrice: line.unitPrice,
-            }))
-          : previous.baseline.lines;
-      const nextTracker: ExtractionEditTracker = {
-        generation: previous.generation,
-        baseline: { header: baselineHeader, lines: baselineLines },
-      };
-      extractionTrackerRef.current = nextTracker;
-      setExtractionTracker(nextTracker);
-      setExtractionChoices({});
-      setExtractionApplied({ fields: applied.appliedFields, rows: applied.appliedRows });
-    } catch (error) {
-      if (generation !== extractionGeneration.current) return;
-      setExtractionError(errorText(error));
-    } finally {
-      setExtractionApplying(false);
-    }
-  };
-
-  /**
-   * #498: a currency change while a result is actionable invalidates it. The
-   * stored result has no currency of its own; its printed decimals were parsed
-   * with the draft currency in effect, so reinterpreting them under another
-   * currency would apply a different amount. The run is rejected so a later
-   * refresh cannot quietly restore it.
-   */
-  const changeCurrency = (next: CurrencyInfo) => {
-    if (next.code === state.currency) return;
-    const run = extractionState?.Run ?? null;
-    const active =
-      activeDocumentRef.current !== undefined
-        ? activeDocumentRef.current
-        : extractionState?.Document ?? null;
-    if (extractionResultActionable(run, active) && run != null) {
-      rejectExtraction(
-        run.ID,
-        `The draft currency changed to ${next.code} after this extraction, so its proposals were discarded. Run Extract again to read the amounts in ${next.code}.`
-      );
-    }
-    dispatch({
-      type: "currencyChanged",
-      code: next.code,
-      from: activeCurrency,
-      to: next,
-    });
-  };
 
   /**
    * Wave 2 of #473: carry the working copy into the correction flow at the
@@ -1684,7 +1155,7 @@ export function PurchaseOrderEditorPage({
 
   /**
    * Persists the transient row the first time an action needs an id (Save
-   * draft, PDF upload or extraction). The created id is adopted immediately, so
+   * draft or PDF upload). The created id is adopted immediately, so
    * a failed attach or update retries against the same row instead of creating
    * a second one.
    */
@@ -1992,7 +1463,7 @@ export function PurchaseOrderEditorPage({
       return;
     }
     try {
-      // Save, upload and extraction share one in-flight create. A Save whose
+      // Save and upload share one in-flight create. A Save whose
       // create is still running and a file choice made at the same time must
       // await the same row, never create a second one.
       let working = editorStateRef.current;
@@ -2318,42 +1789,6 @@ export function PurchaseOrderEditorPage({
     );
   }
 
-  const extractionRun = extractionState?.Run ?? null;
-  const activeExtractionDocument =
-    activeDocument !== undefined
-      ? activeDocument
-      : extractionState?.Document ?? null;
-  const extractionStale =
-    extractionRun != null &&
-    extractionIsStale(extractionRun, activeExtractionDocument);
-  const extractionInFlight =
-    extractionRun != null && !isTerminalExtractionStatus(extractionRun.Status);
-  const showExtractionPanel =
-    extractionResultActionable(extractionRun, activeExtractionDocument) &&
-    dismissedExtractionId !== extractionRun?.ID &&
-    !extractionRejectedRuns.current.has(extractionRun?.ID ?? -1);
-  // #479: the comparison is recomputed from the editor as staff type, not
-  // frozen when the result arrived, and every choice is folded into the one
-  // selection Apply consumes.
-  const extractionPlan =
-    showExtractionPanel && extractionRun?.Result != null
-      ? resolveExtractionConflicts(
-          extractionRun.Result,
-          state.header,
-          state.lines,
-          extractionTracker,
-          activeCurrency
-        )
-      : null;
-  const extractionResolvedSelection =
-    extractionPlan !== null
-      ? resolvedExtractionSelection(
-          extractionPlan,
-          extractionChoices,
-          extractionSelection
-        )
-      : extractionSelection;
-
   return (
     <div className="flex flex-col gap-6">
       {linkLoading ? (
@@ -2390,62 +1825,7 @@ export function PurchaseOrderEditorPage({
           }
           throw new Error(outcome.message);
         }}
-        onExtract={startExtraction}
-        extractionStatus={
-          extractionRun?.Status === "queued" || extractionRun?.Status === "running"
-            ? extractionRun.Status
-            : null
-        }
-        extractionStarting={extractionStarting}
-        onStateChange={handleDocumentStateChange}
-        onDocumentChanged={invalidateExtraction}
       />
-      {extractionError !== null ? (
-        <StatusBanner tone="danger">
-          {extractionError} You can still enter the values manually; the PDF stays
-          attached.
-        </StatusBanner>
-      ) : null}
-      {extractionInFlight ? (
-        <StatusBanner tone="info">
-          <span role="status">
-            {extractionProgressText(extractionRun?.Status ?? "queued")} You can keep
-            entering values while it runs.
-          </span>
-        </StatusBanner>
-      ) : null}
-      {extractionStale && !extractionInFlight ? (
-        <StatusBanner tone="info">
-          {extractionErrorMessage(extractionRun ?? { Status: "stale" })}
-        </StatusBanner>
-      ) : null}
-      {!extractionStale && extractionRun?.Status === "failed" ? (
-        <StatusBanner tone="danger">
-          {extractionErrorMessage(extractionRun)} The PDF stays attached and the manual
-          entry path is unchanged.
-        </StatusBanner>
-      ) : null}
-      {showExtractionPanel && extractionRun?.Result != null ? (
-        <PurchaseOrderExtractionPanelView
-          result={extractionRun.Result}
-          header={state.header}
-          lines={state.lines}
-          currency={activeCurrency}
-          selection={extractionResolvedSelection}
-          onToggle={toggleExtraction}
-          onApply={() => void applyExtraction()}
-          applying={extractionApplying}
-          onDiscard={() => {
-            setDismissedExtractionId(extractionRun.ID);
-            setExtractionChoices({});
-            rebaseExtractionTracker();
-          }}
-          applied={extractionApplied}
-          plan={extractionPlan}
-          choices={extractionChoices}
-          onChoose={chooseExtraction}
-        />
-      ) : null}
       <PurchaseOrderEditorView
         state={state}
         dispatch={dispatch}
@@ -2454,7 +1834,6 @@ export function PurchaseOrderEditorPage({
         uomOptions={uomOptions}
         incotermOptions={incotermOptions}
         onLinkQuotation={onLinkQuotation}
-        onCurrencyChange={changeCurrency}
         onSave={() => void save(state.version, false)}
         onCancel={onCancel}
         onFinalSave={() => void startReview()}

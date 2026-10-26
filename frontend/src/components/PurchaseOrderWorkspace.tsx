@@ -149,8 +149,8 @@ export function PurchaseOrderWorkspacePage({
         );
       }
       // #496: the editor opens on the full blank manual-entry form. It is
-      // transient until Save draft, an upload or an extraction asks for a row;
-      // merely opening it creates nothing.
+      // transient until Save draft or an upload asks for a row; merely opening
+      // it creates nothing.
       return (
         <PurchaseOrderEditorPage
           key={0}

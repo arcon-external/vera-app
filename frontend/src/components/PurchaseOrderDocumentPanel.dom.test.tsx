@@ -19,7 +19,6 @@ const { stateMock, attachMock, contentMock, removeMock } = vi.hoisted(() => ({
 
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentState: (...args: unknown[]) => stateMock(...args),
-  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
   AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   GetActivePurchaseOrderDocumentContent: (...args: unknown[]) => contentMock(...args),
   RemovePurchaseOrderDocument: (...args: unknown[]) => removeMock(...args),
@@ -324,16 +323,5 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
       container.querySelector('iframe[title="Customer PO PDF preview"]')
     ).toBeNull();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:po-pdf");
-  });
-
-  it("keeps Extract and compare disabled and explains why", async () => {
-    stateMock.mockResolvedValueOnce(stateWith(null));
-    act(() => root.render(<PurchaseOrderDocumentPanel purchaseOrderId={7} />));
-    await flush();
-    const extract = button("Extract and compare");
-    expect(extract.disabled).toBe(true);
-    expect(container.textContent).toContain(
-      "Attach a customer PO PDF before extracting its data."
-    );
   });
 });

@@ -26,26 +26,19 @@ import {
 // and the shared discard prompt. App supplies only the one-line wiring this
 // harness copies.
 
-const { extractionMock, startExtractionMock, documentStateMock, attachMock } = vi.hoisted(() => ({
-  extractionMock: vi.fn(),
-  startExtractionMock: vi.fn(),
+const { documentStateMock, attachMock } = vi.hoisted(() => ({
   documentStateMock: vi.fn(),
   attachMock: vi.fn(),
 }));
 
-// The editor page now mounts the document panel, which reads the one optional
-// customer PO PDF through the desktop binding (#472), and the extraction
-// review, which reads the latest run (#477). This suite is about tab
-// navigation, so both reads default to their empty state; individual tests
-// override the extraction answer where they exercise it.
+// The editor page mounts the document panel, which reads the one optional
+// customer PO PDF through the desktop binding (#472). This suite is about tab
+// navigation and manual entry, so the read defaults to an attached document.
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
   AttachPurchaseOrderDocument: (...args: unknown[]) => attachMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
-  GetPurchaseOrderExtraction: (...args: unknown[]) => extractionMock(...args),
-  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
-  StartPurchaseOrderExtraction: (...args: unknown[]) => startExtractionMock(...args),
   UpdatePurchaseOrderDraft: vi.fn(),
 }));
 
@@ -163,12 +156,9 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
-  extractionMock.mockReset();
-  extractionMock.mockResolvedValue({ Run: null, Document: null });
-  startExtractionMock.mockReset();
   attachMock.mockReset();
   documentStateMock.mockReset();
-  documentStateMock.mockResolvedValue(extractionDocumentState());
+  documentStateMock.mockResolvedValue(attachedDocumentState());
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -222,138 +212,21 @@ async function flush(): Promise<void> {
   });
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
-    resolve = res;
-  });
-  return { promise, resolve };
-}
-
-function extractionCell(value: string, status: string, page: number | null = 1) {
-  return {
-    Value: value,
-    Raw: value,
-    Status: status,
-    Page: page,
-    BBox: page === null ? null : { X: 86, Y: 82, Width: 56, Height: 9 },
-    Confidence: null,
-    Note: "",
-  };
-}
-
-function extractionState() {
-  return {
-    Run: {
-      UUID: "run-1",
-      Status: "succeeded",
-      Engine: "poppler",
-      EngineVersion: "25.03.0",
-      DocumentSHA256: "doc-sha",
-      ErrorCode: null,
-      ErrorMessage: null,
-      Result: {
-        Engine: "poppler",
-        EngineVersion: "25.03.0",
-        PageCount: 1,
-        PagesWithText: 1,
-        PagesWithoutText: 0,
-        DurationMs: 20,
-        SchemaVersion: 1,
-        Pages: [{ Number: 1, Width: 595, Height: 842 }],
-        Fields: [
-          { Key: "poNumber", Cell: extractionCell("4500123456", "extracted") },
-          { Key: "poDate", Cell: extractionCell("2026-10-12", "extracted") },
-          { Key: "requestedDeliveryDate", Cell: extractionCell("", "absent", null) },
-          { Key: "currency", Cell: extractionCell("USD", "extracted") },
-          { Key: "paymentTerms", Cell: extractionCell("30 days after delivery", "needs_review") },
-          { Key: "incoterms", Cell: extractionCell("CIF", "extracted") },
-        ],
-        Rows: [
-          {
-            LineNumber: extractionCell("1", "extracted"),
-            Description: extractionCell("Extracted line", "extracted"),
-            Quantity: extractionCell("2", "extracted"),
-            UoM: extractionCell("Pc", "extracted"),
-            UnitPrice: extractionCell("1250.00", "extracted"),
-            Amount: extractionCell("2500.00", "extracted"),
-            Status: "extracted",
-            Page: 1,
-            BBox: { X: 50, Y: 225, Width: 490, Height: 10 },
-            Note: "",
-          },
-        ],
-        Abstentions: { Fields: 2, Rows: 0 },
-      },
-      ID: 9,
-      PurchaseOrderID: 7,
-      DocumentID: 4,
-      DocumentVersion: 1,
-      PageCount: 1,
-      RequestedBy: 3,
-      CreatedAt: "2026-10-21T10:00:00Z",
-      StartedAt: "2026-10-21T10:00:01Z",
-      FinishedAt: "2026-10-21T10:00:02Z",
-      DurationMS: 20,
-    },
-    Document: { ID: 4, Version: 1, SHA256: "doc-sha" },
-  };
-}
-
-function extractionDocumentState(
-  id = 4,
-  version = 1,
-  sha256 = "doc-sha"
-): PurchaseOrderDocumentStateDTO {
+function attachedDocumentState(): PurchaseOrderDocumentStateDTO {
   const document = {
-    UUID: `doc-${id}-${version}`,
-    SHA256: sha256,
+    UUID: "doc-4-1",
+    SHA256: "doc-sha",
     ContentType: "application/pdf",
     OriginalFilename: "Customer PO.pdf",
     UploadedAt: "2026-10-21T10:00:00Z",
-    ID: id,
+    ID: 4,
     PurchaseOrderID: 7,
-    Version: version,
+    Version: 1,
     SizeBytes: 1536,
     UploadedBy: 4,
     Active: true,
   };
   return { Document: document, Versions: [document] };
-}
-
-function extractionCheckbox(label: string): HTMLInputElement {
-  const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
-  if (!found) throw new Error(`checkbox ${label} not found`);
-  return found;
-}
-
-function applySelectedButtonOrNull(): HTMLButtonElement | null {
-  return (
-    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
-      candidate.textContent?.startsWith("Apply selected")
-    ) ?? null
-  );
-}
-
-function applySelectedButton(): HTMLButtonElement {
-  const found = applySelectedButtonOrNull();
-  if (!found) throw new Error("Apply selected button not found");
-  return found;
-}
-
-function chooseDocumentFile(name = "Replacement.pdf", content = "%PDF-1.7\n"): void {
-  const input = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Customer PO PDF file"]'
-  );
-  if (!input) throw new Error("file input not found");
-  const file = new File([content], name, { type: "application/pdf" });
-  Object.defineProperty(input, "files", {
-    configurable: true,
-    value: [file],
-  });
-  act(() => {
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  });
 }
 
 function inputValue(label: string): string | undefined {
@@ -540,490 +413,25 @@ describe("PO discard is one modal decision (issue #468, wave 3)", () => {
   });
 });
 
-describe("PO extraction applies only chosen proposals (issue #477)", () => {
-  it("shows the evidence and leaves every value unchanged until Apply", async () => {
-    extractionMock.mockResolvedValue(extractionState());
+describe("PO editor opens on manual entry (issue #505)", () => {
+  it("renders the manual fields and offers no Extract and compare path", async () => {
     act(() => root.render(<Workspace />));
     await flush();
 
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
-    expect(document.body.textContent).toContain("Page 1 · 86–142 × 82–91 pt");
+    // Manual entry is the only way in: the header and first line are editable.
     expect(inputValue("Customer PO number")).toBe("PO-1");
     expect(inputValue("Payment terms")).toBe("45 days");
-  });
-
-  it("applies a ticked header field and leaves an unticked one alone", async () => {
-    extractionMock.mockResolvedValue(extractionState());
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    // #479: the draft already held a different PO number, so it is a conflict
-    // with an explicit choice rather than a checkbox that would overwrite it.
-    const useExtracted = document.querySelector<HTMLInputElement>(
-      'input[type="radio"][aria-label="Use extracted Customer PO number"]'
-    );
-    expect(useExtracted?.checked).toBe(false);
-    act(() => useExtracted?.click());
-    act(() => applySelectedButton().click());
-    await flush();
-
-    expect(inputValue("Customer PO number")).toBe("4500123456");
-    expect(inputValue("Payment terms")).toBe("45 days");
-    // The empty PO date was preselected by the conservative default; the
-    // nonempty payment terms and quoted Incoterms were not.
-    expect(inputValue("PO date")).toBe("2026-10-12");
-    expect(document.body.textContent).toContain("Applied 2 fields");
-  });
-
-  it("replaces the line set only when a row is ticked", async () => {
-    extractionMock.mockResolvedValue(extractionState());
-    act(() => root.render(<Workspace />));
-    await flush();
-
+    expect(inputValue("Ship-to code")).toBe("SHIP-1");
     expect(inputValue("Line 1 description")).toBe("Widget");
-    const row = extractionCheckbox("Apply extracted line 1");
-    expect(row.checked).toBe(false);
-    act(() => row.click());
-    act(() => applySelectedButton().click());
-    await flush();
 
-    expect(inputValue("Line 1 description")).toBe("Extracted line");
-    expect(inputValue("Line 1 quantity")).toBe("2");
-    expect(inputValue("Line 1 unit price")).toBe("$1,250.00");
-  });
-
-  it("removes Apply as soon as the PDF is replaced, even while the document refresh is pending", async () => {
-    extractionMock.mockResolvedValue(extractionState());
-    let resolveDocumentRefresh!: (state: PurchaseOrderDocumentStateDTO) => void;
-    const pendingDocumentRefresh = new Promise<PurchaseOrderDocumentStateDTO>((resolve) => {
-      resolveDocumentRefresh = resolve;
-    });
-    documentStateMock.mockReturnValueOnce(Promise.resolve(extractionDocumentState()));
-    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh);
-    attachMock.mockResolvedValue(undefined);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
-    const row = extractionCheckbox("Apply extracted line 1");
-    act(() => row.click());
-    expect(applySelectedButtonOrNull()).not.toBeNull();
-
-    // Replacing the PDF succeeds, but the refreshed document state is still in
-    // flight: this is exactly the window where old proposals used to stay live.
-    chooseDocumentFile();
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-
-    // When the refresh finally resolves to a new generation, the old result is
-    // still not actionable even though the extraction read returns it again.
-    await act(async () => {
-      resolveDocumentRefresh(extractionDocumentState(5, 2, "replacement-sha"));
-      await Promise.resolve();
-    });
-    await flush();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-  });
-
-  it("discards a stale result visibly and offers no Apply", async () => {
-    const stale = extractionState();
-    stale.Run.Status = "stale";
-    stale.Run.Result = null as unknown as typeof stale.Run.Result;
-    stale.Document.SHA256 = "different-document";
-    extractionMock.mockResolvedValue(stale);
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(document.body.textContent).toContain("The PDF changed after this extraction");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-  });
-
-  it("re-reads the latest generation before Apply and writes nothing when it is stale", async () => {
-    extractionMock.mockResolvedValue(extractionState());
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
-    // The untouched empty PO date is the one preselected proposal.
-    expect(inputValue("PO date")).toBe("");
-
-    // The PDF was replaced outside this editor after the panel read. Apply must
-    // re-read the run, not trust the earlier panel state.
-    const replaced = extractionState();
-    replaced.Run.Status = "stale";
-    replaced.Run.Result = null as unknown as typeof replaced.Run.Result;
-    replaced.Document = { ID: 5, Version: 2, SHA256: "replacement-sha" };
-    extractionMock.mockReset();
-    extractionMock.mockResolvedValue(replaced);
-
-    act(() => applySelectedButton().click());
-
-    await flush();
-    await flush();
-
-    expect(inputValue("PO date")).toBe("");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-    expect(document.body.textContent).toContain("The PDF changed after this extraction");
-    expect(document.body.textContent).toContain("Run Extract again");
-    expect(document.body.textContent).not.toContain("Applied 1 field");
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-  });
-});
-
-// Issue #477, wave 3. The Judge replaced the PDF while a read that started
-// against the previous document was still in flight, then released that read:
-// the old proposals (and its PO date) came back. Every asynchronous acquisition
-// path captures the active-document generation when its request starts, and a
-// response from a generation that has ended is discarded instead of adopted.
-describe("PO extraction late responses cannot resurrect a replaced document (#477)", () => {
-  it("discards a delayed initial read after the PDF is replaced", async () => {
-    const delayedInitialRead = deferred<ReturnType<typeof extractionState>>();
-    extractionMock.mockReturnValueOnce(delayedInitialRead.promise);
-    // Every read after the initial one returns the old result, as a server that
-    // has not observed the replacement yet would.
-    extractionMock.mockResolvedValue(extractionState());
-    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
-    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
-    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
-    attachMock.mockResolvedValue(undefined);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    // The refresh the document panel triggered has already made the old result
-    // actionable, so this is the state the delayed response could restore.
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).not.toBeNull();
-    expect(inputValue("PO date")).toBe("");
-
-    chooseDocumentFile();
-    await flush();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-
-    await act(async () => {
-      delayedInitialRead.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-    // The late response is discarded, not adopted as inert stale evidence: an
-    // adopted response would render its empty stale banner here.
-    expect(document.querySelector('[role="status"]')).toBeNull();
-    expect(inputValue("PO date")).toBe("");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-  });
-
-  it("discards a delayed start response after the PDF is replaced", async () => {
-    extractionMock.mockResolvedValue({ Run: null, Document: null });
-    const delayedStart = deferred<ReturnType<typeof extractionState>>();
-    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
-    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
-    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
-    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
-    attachMock.mockResolvedValue(undefined);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-
-    act(() => button("Extract and compare").click());
-    await flush();
-    expect(startExtractionMock).toHaveBeenCalledTimes(1);
-
-    chooseDocumentFile();
-    await flush();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-
-    await act(async () => {
-      delayedStart.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-    // Discarded, not adopted as inert stale evidence (an adopted response would
-    // render its empty stale banner here).
-    expect(document.querySelector('[role="status"]')).toBeNull();
-    expect(inputValue("PO date")).toBe("");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-  });
-
-  it("discards a delayed poll response after the PDF is replaced", async () => {
-    const running: any = extractionState();
-    running.Run.Status = "running";
-    running.Run.Result = null;
-    extractionMock.mockResolvedValueOnce(running);
-    extractionMock.mockResolvedValueOnce(running);
-    const delayedPoll = deferred<ReturnType<typeof extractionState>>();
-    extractionMock.mockReturnValueOnce(delayedPoll.promise);
-    const pendingDocumentRefresh = deferred<PurchaseOrderDocumentStateDTO>();
-    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
-    documentStateMock.mockReturnValueOnce(pendingDocumentRefresh.promise);
-    attachMock.mockResolvedValue(undefined);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-    expect(document.body.textContent).toContain("Reading the PDF text");
-
-    // Let the one-second poll fire; its response stays in flight.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-    });
-    expect(extractionMock.mock.calls.length).toBeGreaterThanOrEqual(3);
-
-    chooseDocumentFile();
-    await flush();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-
-    await act(async () => {
-      delayedPoll.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-    // Discarded, not adopted as inert stale evidence (an adopted response would
-    // render its empty stale banner here).
-    expect(document.querySelector('[role="status"]')).toBeNull();
-    expect(inputValue("PO date")).toBe("");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-  });
-
-  it("ignores a document panel read that lands after the replacement was read", async () => {
-    const delayedDocumentRead = deferred<PurchaseOrderDocumentStateDTO>();
-    documentStateMock.mockReturnValueOnce(delayedDocumentRead.promise);
-    documentStateMock.mockResolvedValueOnce(extractionDocumentState(5, 2, "replacement-sha"));
-    attachMock.mockResolvedValue(undefined);
-    extractionMock.mockResolvedValue(extractionState());
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    // The replacement has been read as version 2; its old extraction result is
-    // already discarded as stale.
-    chooseDocumentFile();
-    await flush();
-    expect(document.body.textContent).toContain("Version 2 of 1");
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-
-    // The panel's first read now lands with the replaced version 1 state. It
-    // must not restore the old document generation, its result, or Apply.
-    await act(async () => {
-      delayedDocumentRead.resolve(extractionDocumentState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(document.body.textContent).toContain("Version 2 of 1");
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(applySelectedButtonOrNull()).toBeNull();
-    expect(inputValue("PO date")).toBe("");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-  });
-});
-
-describe("PO extraction failure keeps the manual path (issue #477)", () => {
-  it("shows the typed reason and changes no field", async () => {
-    const failed: any = extractionState();
-    failed.Run.Status = "failed";
-    failed.Run.ErrorCode = "page_limit";
-    failed.Run.Result = null as unknown as typeof failed.Run.Result;
-    extractionMock.mockResolvedValue(failed);
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    expect(document.body.textContent).toContain("more pages");
-    expect(document.body.textContent).toContain("manual");
-    expect(inputValue("Customer PO number")).toBe("PO-1");
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-  });
-});
-
-// Issue #479: staff keep entering values while extraction runs. A late result
-// is reconciled field by field: untouched empty fields fill in, a field the
-// draft already held (or that staff cleared) waits for an explicit choice, and
-// nothing reaches the editor until Apply. Retry keeps the working copy; a
-// replaced PDF discards the run and its tracked edits.
-describe("PO extraction reconciles manual edits (issue #479)", () => {
-  function radio(label: string): HTMLInputElement {
-    const found = document.querySelector<HTMLInputElement>(
-      `input[type="radio"][aria-label="${label}"]`
-    );
-    if (!found) throw new Error(`radio ${label} not found`);
-    return found;
-  }
-
-  function conflict(key: string): HTMLElement | null {
-    return document.querySelector<HTMLElement>(
-      `[data-testid="po-extraction-conflict-${key}"]`
-    );
-  }
-
-  it("asks only about values changed while extraction ran, and applies the chosen sides", async () => {
-    extractionMock.mockResolvedValue({ Run: null, Document: null });
-    const delayedStart = deferred<ReturnType<typeof extractionState>>();
-    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    // Staff edit one field and deliberately clear another while the run is
-    // still in flight.
-    typeInto("Customer PO number", "MANUAL-1");
-    typeInto("Payment terms", "");
-    act(() => button("Extract and compare").click());
-    await flush();
-    expect(startExtractionMock).toHaveBeenCalledTimes(1);
-
-    extractionMock.mockResolvedValue(extractionState());
-    await act(async () => {
-      delayedStart.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    // Only the two differing values get a choice. The untouched empty PO date
-    // is preselected without a prompt; an equal Incoterms value and an absent
-    // requested date are not conflicts.
-    expect(conflict("poNumber")).not.toBeNull();
-    expect(conflict("paymentTerms")).not.toBeNull();
-    expect(conflict("poDate")).toBeNull();
-    expect(conflict("incoterms")).toBeNull();
-    expect(conflict("requestedDeliveryDate")).toBeNull();
-    expect(extractionCheckbox("Apply extracted Customer PO date").checked).toBe(true);
-    expect(radio("Keep draft Customer PO number").checked).toBe(true);
-    expect(radio("Use extracted Payment terms").checked).toBe(false);
-
-    // Nothing has moved yet: the choices are a decision, not an edit.
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
-    expect(inputValue("Payment terms")).toBe("");
-
-    // Keep the edited PO number, use the extracted payment terms.
-    act(() => radio("Use extracted Payment terms").click());
-    act(() => applySelectedButton().click());
-    await flush();
-
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
-    expect(inputValue("Payment terms")).toBe("30 days after delivery");
-    expect(inputValue("PO date")).toBe("2026-10-12");
-    expect(document.body.textContent).toContain("Applied 2 fields");
-  });
-
-  it("keeps manual edits and the reviewed choice through Extract again", async () => {
-    extractionMock.mockResolvedValue(extractionState());
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    expect(conflict("paymentTerms")).not.toBeNull();
-    act(() => radio("Use extracted Payment terms").click());
-    typeInto("Customer PO number", "MANUAL-1");
-
-    const delayedRetry = deferred<ReturnType<typeof extractionState>>();
-    startExtractionMock.mockReturnValueOnce(delayedRetry.promise);
-    act(() => button("Extract and compare").click());
-    await flush();
-
-    // The retry is only a request: the editor keeps both values and the
-    // reviewed choice while the new run is pending.
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
-    expect(inputValue("Payment terms")).toBe("45 days");
-    expect(radio("Use extracted Payment terms").checked).toBe(true);
-
-    await act(async () => {
-      delayedRetry.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
-    expect(radio("Use extracted Payment terms").checked).toBe(true);
-    act(() => applySelectedButton().click());
-    await flush();
-    expect(inputValue("Payment terms")).toBe("30 days after delivery");
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
-  });
-
-  it("keeps unresolved conflicts when only an auto field is applied", async () => {
-    extractionMock.mockResolvedValue({ Run: null, Document: null });
-    const delayedStart = deferred<ReturnType<typeof extractionState>>();
-    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    // One cleared header and one edited line while the run is in flight.
-    typeInto("Payment terms", "");
-    typeInto("Line 1 description", "Typed by hand");
-    act(() => button("Extract and compare").click());
-    await flush();
-    extractionMock.mockResolvedValue(extractionState());
-    await act(async () => {
-      delayedStart.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    expect(conflict("paymentTerms")).not.toBeNull();
-    expect(document.querySelector('[data-testid="po-extraction-line-conflict"]')).not.toBeNull();
-
-    // Applying the untouched empty PO date must consume only that proposal.
-    act(() => applySelectedButton().click());
-    await flush();
-    expect(inputValue("PO date")).toBe("2026-10-12");
-    expect(inputValue("Payment terms")).toBe("");
-    expect(inputValue("Line 1 description")).toBe("Typed by hand");
-
-    expect(conflict("paymentTerms")).not.toBeNull();
-    expect(document.querySelector('[data-testid="po-extraction-line-conflict"]')).not.toBeNull();
-    expect(extractionCheckbox("Apply extracted line 1").disabled).toBe(true);
-  });
-
-  it("discards a late result, its conflicts and its choices after the PDF is replaced", async () => {
-    extractionMock.mockResolvedValue({ Run: null, Document: null });
-    const delayedStart = deferred<ReturnType<typeof extractionState>>();
-    startExtractionMock.mockReturnValueOnce(delayedStart.promise);
-    documentStateMock.mockResolvedValueOnce(extractionDocumentState());
-    documentStateMock.mockResolvedValue(
-      extractionDocumentState(5, 2, "replacement-sha")
-    );
-    attachMock.mockResolvedValue(undefined);
-
-    act(() => root.render(<Workspace />));
-    await flush();
-
-    typeInto("Customer PO number", "MANUAL-1");
-    act(() => button("Extract and compare").click());
-    await flush();
-    chooseDocumentFile();
-    await flush();
-
-    expect(conflict("poNumber")).toBeNull();
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-
-    await act(async () => {
-      delayedStart.resolve(extractionState());
-      await Promise.resolve();
-    });
-    await flush();
-
-    // The result belonged to the replaced generation: it cannot bring back a
-    // conflict, a choice, or a proposal for the new document.
-    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
-    expect(conflict("poNumber")).toBeNull();
+    // The customer PO PDF panel is still there, without an extraction action.
+    expect(document.body.textContent).toContain("Customer PO.pdf");
     expect(
-      document.querySelector('input[type="radio"][aria-label="Use extracted Customer PO number"]')
+      document.querySelector('button[aria-label="Extract and compare"]')
     ).toBeNull();
-    expect(inputValue("Customer PO number")).toBe("MANUAL-1");
+    expect(document.querySelector('[data-testid="po-extraction-panel"]')).toBeNull();
+    expect(
+      document.querySelector('[data-testid="po-extraction-unavailable"]')
+    ).toBeNull();
   });
 });

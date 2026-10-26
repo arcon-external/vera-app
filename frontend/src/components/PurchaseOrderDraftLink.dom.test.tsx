@@ -29,7 +29,6 @@ const {
   previewMock,
   linkMock,
   documentStateMock,
-  extractionMock,
   attachMock,
 } = vi.hoisted(() => ({
   createMock: vi.fn(),
@@ -37,7 +36,6 @@ const {
   previewMock: vi.fn(),
   linkMock: vi.fn(),
   documentStateMock: vi.fn(),
-  extractionMock: vi.fn(),
   attachMock: vi.fn(),
 }));
 
@@ -49,14 +47,11 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   GetPurchaseOrder: vi.fn(),
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
-  GetPurchaseOrderExtraction: (...args: unknown[]) => extractionMock(...args),
   GetPurchaseOrderHistory: vi.fn(async () => []),
   GetPurchaseOrderReview: vi.fn(),
   LinkPurchaseOrderDraftSource: (...args: unknown[]) => linkMock(...args),
   PreviewPurchaseOrderDraftLink: (...args: unknown[]) => previewMock(...args),
   RemovePurchaseOrderDocument: vi.fn(),
-  GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
-  StartPurchaseOrderExtraction: vi.fn(),
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
 }));
 
@@ -253,7 +248,6 @@ beforeEach(() => {
   previewMock.mockReset();
   linkMock.mockReset();
   documentStateMock.mockReset();
-  extractionMock.mockReset();
   attachMock.mockReset();
 
   latestOrder = createdRow();
@@ -300,7 +294,6 @@ beforeEach(() => {
     return { Order: linked };
   });
   documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
-  extractionMock.mockResolvedValue({ Run: null, Document: null });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);

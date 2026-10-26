@@ -189,55 +189,6 @@ export function finalSaveSendsAbsenceConfirmation(
   return documentState === "none" && confirmed;
 }
 
-export interface ExtractAvailability {
-  enabled: boolean;
-  reason: string;
-  /** The short line under the button, shown whether or not it is enabled. */
-  hint: string;
-}
-
-/**
- * "Extract and compare" is available whenever a PDF is attached and the caller
- * has somewhere to apply proposals (the draft/correction editor). A saved
- * record is read-only, so its panel explains the correction path instead of
- * starting a job whose result could not be used.
- *
- * The empty branch keeps the action visible but disabled with the exact
- * remedy, rather than hiding a control staff will look for.
- */
-export function extractAndCompareAvailability(
-  documentState: PurchaseOrderDocumentState,
-  hasApplyTarget = true,
-  extractorAvailable: boolean | null = null
-): ExtractAvailability {
-  if (extractorAvailable === false) {
-    return {
-      enabled: false,
-      reason: "Automatic extraction is not available on this server.",
-      hint: "Enter the values manually.",
-    };
-  }
-  if (documentState === "none") {
-    return {
-      enabled: false,
-      reason: "Attach a customer PO PDF before extracting its data.",
-      hint: "Reads selectable text and OCRs scanned pages.",
-    };
-  }
-  if (!hasApplyTarget) {
-    return {
-      enabled: false,
-      reason: "Correct this record to apply extracted proposals.",
-      hint: "Saved values are protected until a correction is started.",
-    };
-  }
-  return {
-    enabled: true,
-    reason: "",
-    hint: "Reads selectable text and OCRs scanned pages; low-confidence OCR values need review against the page image.",
-  };
-}
-
 function messageOf(error: unknown): string {
   if (typeof error === "string") return error.trim();
   if (error instanceof Error) return error.message.trim();

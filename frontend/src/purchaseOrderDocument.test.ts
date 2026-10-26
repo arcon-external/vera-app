@@ -9,7 +9,6 @@ import {
   documentErrorMessage,
   documentStateOf,
   documentVersionLabel,
-  extractAndCompareAvailability,
   finalSaveNeedsConfirmation,
   finalSaveSendsAbsenceConfirmation,
   formatDocumentSize,
@@ -84,49 +83,6 @@ describe("customer PO document state", () => {
     expect(finalSaveSendsAbsenceConfirmation("none", false)).toBe(false);
     expect(finalSaveSendsAbsenceConfirmation("attached", true)).toBe(false);
     expect(finalSaveSendsAbsenceConfirmation("attached", false)).toBe(false);
-  });
-});
-
-describe("Extract and compare availability", () => {
-  it("is honestly disabled without a PDF", () => {
-    const availability = extractAndCompareAvailability("none");
-    expect(availability.enabled).toBe(false);
-    expect(availability.reason).toContain("Attach a customer PO PDF");
-  });
-
-  it("offers extraction with a PDF when the editor can apply proposals", () => {
-    const availability = extractAndCompareAvailability("attached");
-    expect(availability.enabled).toBe(true);
-    expect(availability.hint).toContain("selectable text");
-  });
-
-  it("says scanned pages are OCRed and that low-confidence OCR needs review", () => {
-    // #478 shipped per-page OCR. This guard fails on the stale #477 copy
-    // ("scanned pages are not read") and on any hint that drops the
-    // uncertainty instruction staff need before applying OCR evidence.
-    const availability = extractAndCompareAvailability("attached");
-    expect(availability.hint).toContain("OCRs scanned pages");
-    expect(availability.hint).toMatch(/low-confidence OCR values need review/i);
-    expect(availability.hint).not.toContain("scanned pages are not read");
-    expect(availability.hint).not.toContain("text layer only");
-  });
-
-  it("explains the correction path on a read-only saved view", () => {
-    const availability = extractAndCompareAvailability("attached", false);
-    expect(availability.enabled).toBe(false);
-    expect(availability.reason).toContain("Correct this record");
-  });
-
-  it("disables extraction when the typed deployment probe says it is unavailable", () => {
-    const availability = extractAndCompareAvailability("attached", true, false);
-    expect(availability.enabled).toBe(false);
-    expect(availability.reason).toContain("not available on this server");
-    expect(availability.hint).toContain("manually");
-  });
-
-  it("keeps extraction enabled when the probe is unknown or confirmed available", () => {
-    expect(extractAndCompareAvailability("attached", true, null).enabled).toBe(true);
-    expect(extractAndCompareAvailability("attached", true, true).enabled).toBe(true);
   });
 });
 

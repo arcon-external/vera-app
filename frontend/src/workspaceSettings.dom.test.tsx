@@ -75,10 +75,6 @@ const mocks = vi.hoisted(() => ({
     Total: 0,
     TotalPages: 1,
   })),
-  getPurchaseOrderExtraction: vi.fn(async (..._args: unknown[]) => ({
-    Run: null,
-    Document: null,
-  })),
   getPurchaseOrderDocumentState: vi.fn(async (..._args: unknown[]) => ({
     Document: null,
     Versions: [],
@@ -136,9 +132,6 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
       mocks.updatePurchaseOrderDraft(...args),
     GetPurchaseOrder: (...args: unknown[]) =>
       mocks.getPurchaseOrder(...args),
-    GetPurchaseOrderExtraction: (...args: unknown[]) =>
-      mocks.getPurchaseOrderExtraction(...args),
-    GetPurchaseOrderExtractionAvailability: vi.fn(async () => ({ Available: true })),
     GetPurchaseOrderDocumentState: (...args: unknown[]) =>
       mocks.getPurchaseOrderDocumentState(...args),
     ListPurchaseOrders: (...args: unknown[]) =>
