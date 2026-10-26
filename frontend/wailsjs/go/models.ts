@@ -1,22 +1,22 @@
 export namespace auth {
-	
+
 	export class Service {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new Service(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 
 }
 
 export namespace backend {
-	
+
 	export class ArchivedQuotationSubItem {
 	    DisplayMarginAmount: string;
 	    Description: string;
@@ -39,11 +39,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    MarginEnabled: boolean;
 	    DiscountEnabled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationSubItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
@@ -92,11 +92,11 @@ export namespace backend {
 	    MarginEnabled: boolean;
 	    DiscountEnabled: boolean;
 	    ShowSubPrices: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayMarginAmount = source["DisplayMarginAmount"];
@@ -122,7 +122,7 @@ export namespace backend {
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -195,11 +195,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    ValidityDays: number;
 	    TaxRateBps: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotation(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayPpn = source["DisplayPpn"];
@@ -256,7 +256,7 @@ export namespace backend {
 	        this.ValidityDays = source["ValidityDays"];
 	        this.TaxRateBps = source["TaxRateBps"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -275,8 +275,8 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class ArchivedQuotationSummary {
 	    QuoteNumber: string;
 	    CustomerName: string;
@@ -287,11 +287,11 @@ export namespace backend {
 	    ID: number;
 	    GrandTotal: number;
 	    RevisionNumber: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationSummary(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuoteNumber = source["QuoteNumber"];
@@ -314,11 +314,11 @@ export namespace backend {
 	    ID: number;
 	    IsActive: boolean;
 	    MustChangePassword: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new AuthUserDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Email = source["Email"];
@@ -337,11 +337,11 @@ export namespace backend {
 	    Default: string;
 	    MaxLength: number;
 	    Terms: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CompanyLabelEntry(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Key = source["Key"];
@@ -355,11 +355,11 @@ export namespace backend {
 	    LogoBase64: string;
 	    LogoMime: string;
 	    BuiltIn: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CompanyLogo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.LogoBase64 = source["LogoBase64"];
@@ -384,11 +384,11 @@ export namespace backend {
 	    Currency: string;
 	    CanonicalUoM: string;
 	    HasLogo: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CompanyProfile(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ThemeQDeep = source["ThemeQDeep"];
@@ -412,11 +412,11 @@ export namespace backend {
 	export class CompanyUnit {
 	    Value: string;
 	    Label: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CompanyUnit(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Value = source["Value"];
@@ -440,11 +440,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    No: number;
 	    Qty: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CustomerPreviewItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -464,7 +464,7 @@ export namespace backend {
 	        this.No = source["No"];
 	        this.Qty = source["Qty"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -513,11 +513,11 @@ export namespace backend {
 	    LeadTimeDays: number;
 	    Validity: number;
 	    PaymentTerm: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CustomerPreview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Incoterm = source["Incoterm"];
@@ -550,7 +550,7 @@ export namespace backend {
 	        this.Validity = source["Validity"];
 	        this.PaymentTerm = source["PaymentTerm"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -569,17 +569,17 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
+
 	export class DeletionChallengeDTO {
 	    ChallengeID: string;
 	    Letters: string;
 	    ExpiresAt: string;
 	    Fingerprint: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionChallengeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ChallengeID = source["ChallengeID"];
@@ -593,11 +593,11 @@ export namespace backend {
 	    TargetID: number;
 	    Scope: string;
 	    ExpectedFingerprint: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionChallengeInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TargetType = source["TargetType"];
@@ -611,11 +611,11 @@ export namespace backend {
 	    Label: string;
 	    Before: string;
 	    After: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionChangeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Field = source["Field"];
@@ -636,11 +636,11 @@ export namespace backend {
 	    Version: number;
 	    DocumentVersions: number;
 	    HistoryEntries: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionRecordDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Type = source["Type"];
@@ -663,11 +663,11 @@ export namespace backend {
 	    Preserves: DeletionRecordDTO[];
 	    Available: boolean;
 	    RequiresChallenge: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionScopeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Scope = source["Scope"];
@@ -677,7 +677,7 @@ export namespace backend {
 	        this.Available = source["Available"];
 	        this.RequiresChallenge = source["RequiresChallenge"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -710,11 +710,11 @@ export namespace backend {
 	    TargetID: number;
 	    Version: number;
 	    SourceMissing: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionPreviewDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TargetType = source["TargetType"];
@@ -731,7 +731,7 @@ export namespace backend {
 	        this.Version = source["Version"];
 	        this.SourceMissing = source["SourceMissing"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -753,17 +753,17 @@ export namespace backend {
 	export class DeletionChangedDTO {
 	    Preview?: DeletionPreviewDTO;
 	    Changes: DeletionChangeDTO[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionChangedDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Preview = this.convertValues(source["Preview"], DeletionPreviewDTO);
 	        this.Changes = this.convertValues(source["Changes"], DeletionChangeDTO);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -785,17 +785,17 @@ export namespace backend {
 	export class DeletionChallengeResult {
 	    Challenge?: DeletionChallengeDTO;
 	    Changed?: DeletionChangedDTO;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionChallengeResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Challenge = this.convertValues(source["Challenge"], DeletionChallengeDTO);
 	        this.Changed = this.convertValues(source["Changed"], DeletionChangedDTO);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -814,8 +814,8 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class DeletionConfirmInput {
 	    TargetType: string;
 	    TargetID: number;
@@ -825,11 +825,11 @@ export namespace backend {
 	    ExpectedFingerprint: string;
 	    ChallengeID: string;
 	    ChallengeLetters: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionConfirmInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TargetType = source["TargetType"];
@@ -845,17 +845,17 @@ export namespace backend {
 	export class DeletionOutcomeDTO {
 	    Removed: DeletionRecordDTO[];
 	    AuditIDs: number[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionOutcomeDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Removed = this.convertValues(source["Removed"], DeletionRecordDTO);
 	        this.AuditIDs = source["AuditIDs"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -878,18 +878,18 @@ export namespace backend {
 	    Outcome?: DeletionOutcomeDTO;
 	    Changed?: DeletionChangedDTO;
 	    ChallengeProblem: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionConfirmResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Outcome = this.convertValues(source["Outcome"], DeletionOutcomeDTO);
 	        this.Changed = this.convertValues(source["Changed"], DeletionChangedDTO);
 	        this.ChallengeProblem = source["ChallengeProblem"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -908,23 +908,23 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class DeletionPreviewInput {
 	    TargetType: string;
 	    TargetID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionPreviewInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TargetType = source["TargetType"];
 	        this.TargetID = source["TargetID"];
 	    }
 	}
-	
+
 	export class DeletionRequest {
 	    Email: string;
 	    DisplayName: string;
@@ -932,11 +932,11 @@ export namespace backend {
 	    RequestedAt: string;
 	    ID: number;
 	    UserID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DeletionRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Email = source["Email"];
@@ -947,7 +947,7 @@ export namespace backend {
 	        this.UserID = source["UserID"];
 	    }
 	}
-	
+
 	export class DraftDTO {
 	    Payload: string;
 	    Subject: string;
@@ -958,11 +958,11 @@ export namespace backend {
 	    ID: number;
 	    ItemCount: number;
 	    CustomerID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DraftDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Payload = source["Payload"];
@@ -984,11 +984,11 @@ export namespace backend {
 	    UpdatedAt: string;
 	    ID: number;
 	    ItemCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DraftSummaryDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayName = source["DisplayName"];
@@ -1005,11 +1005,11 @@ export namespace backend {
 	    Status: string;
 	    RequestedAt: string;
 	    ID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EmailChangeRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ProposedEmail = source["ProposedEmail"];
@@ -1021,11 +1021,11 @@ export namespace backend {
 	export class EmailChangeResult {
 	    Email: string;
 	    PreviousEmail: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EmailChangeResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Email = source["Email"];
@@ -1040,11 +1040,11 @@ export namespace backend {
 	    RequestedAt: string;
 	    ID: number;
 	    UserID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new EmailChangeRow(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Email = source["Email"];
@@ -1078,11 +1078,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    MarginEnabled: boolean;
 	    DiscountEnabled: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InternalPreviewSubItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -1135,11 +1135,11 @@ export namespace backend {
 	    DiscountEnabled: boolean;
 	    MarginBlendedApprox: boolean;
 	    ListUnitPrice: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InternalPreviewItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayOriginalUnitPrice = source["DisplayOriginalUnitPrice"];
@@ -1169,7 +1169,7 @@ export namespace backend {
 	        this.MarginBlendedApprox = source["MarginBlendedApprox"];
 	        this.ListUnitPrice = source["ListUnitPrice"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1231,11 +1231,11 @@ export namespace backend {
 	    RowDiscountTotal: number;
 	    TaxRateBps: number;
 	    DiscountPercent: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InternalBreakdown(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DisplayMarginalizedGrand = source["DisplayMarginalizedGrand"];
@@ -1281,7 +1281,7 @@ export namespace backend {
 	        this.TaxRateBps = source["TaxRateBps"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1300,19 +1300,19 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class ManagedClient {
 	    Name: string;
 	    PrimaryAddress: string;
 	    ID: number;
 	    QuotationCount: number;
 	    Code: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ManagedClient(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -1330,11 +1330,11 @@ export namespace backend {
 	    ID: number;
 	    IsActive: boolean;
 	    MustChangePassword: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ManagedUser(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Email = source["Email"];
@@ -1349,11 +1349,11 @@ export namespace backend {
 	export class OwnDeletionRequest {
 	    Status: string;
 	    ID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new OwnDeletionRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Status = source["Status"];
@@ -1363,11 +1363,11 @@ export namespace backend {
 	export class POSourceActivePODTO {
 	    ID: number;
 	    State: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceActivePODTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1377,17 +1377,17 @@ export namespace backend {
 	export class POSourceOccupancyDTO {
 	    ActivePO?: POSourceActivePODTO;
 	    QuotationID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceOccupancyDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ActivePO = this.convertValues(source["ActivePO"], POSourceActivePODTO);
 	        this.QuotationID = source["QuotationID"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1414,11 +1414,11 @@ export namespace backend {
 	    ID: number;
 	    LatestRevision: number;
 	    IssuedRevisionCount: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceQuotationDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ActivePO = this.convertValues(source["ActivePO"], POSourceActivePODTO);
@@ -1429,7 +1429,7 @@ export namespace backend {
 	        this.LatestRevision = source["LatestRevision"];
 	        this.IssuedRevisionCount = source["IssuedRevisionCount"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1454,11 +1454,11 @@ export namespace backend {
 	    PageSize: number;
 	    Total: number;
 	    TotalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourcePageDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Quotations = this.convertValues(source["Quotations"], POSourceQuotationDTO);
@@ -1467,7 +1467,7 @@ export namespace backend {
 	        this.Total = source["Total"];
 	        this.TotalPages = source["TotalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1491,11 +1491,11 @@ export namespace backend {
 	    Page: number;
 	    HideUsed: boolean;
 	    ExcludePOID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Search = source["Search"];
@@ -1504,15 +1504,15 @@ export namespace backend {
 	        this.ExcludePOID = source["ExcludePOID"];
 	    }
 	}
-	
+
 	export class POSourceRevisionDTO {
 	    IssuedAt: string;
 	    Revision: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceRevisionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.IssuedAt = source["IssuedAt"];
@@ -1525,11 +1525,11 @@ export namespace backend {
 	    CustomerName: string;
 	    Revisions: POSourceRevisionDTO[];
 	    QuotationID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceRevisionsDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuoteNumber = source["QuoteNumber"];
@@ -1538,7 +1538,7 @@ export namespace backend {
 	        this.Revisions = this.convertValues(source["Revisions"], POSourceRevisionDTO);
 	        this.QuotationID = source["QuotationID"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1560,11 +1560,11 @@ export namespace backend {
 	export class POSourceSelection {
 	    QuotationID: number;
 	    RevisionNumber: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceSelection(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationID = source["QuotationID"];
@@ -1576,11 +1576,11 @@ export namespace backend {
 	    QuotationID: number;
 	    RevisionNumber: number;
 	    Valid: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new POSourceValidationDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Reason = source["Reason"];
@@ -1594,11 +1594,11 @@ export namespace backend {
 	    TaxZone: string;
 	    TaxType: string;
 	    ServiceCategory: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderBlankCreateInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ReceivedDate = source["ReceivedDate"];
@@ -1613,11 +1613,11 @@ export namespace backend {
 	    UpdatedAt: string;
 	    CurrentVersion: number;
 	    UpdatedBy: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderConflictDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.CurrentState = source["CurrentState"];
@@ -1631,11 +1631,11 @@ export namespace backend {
 	    SHA256: string;
 	    Filename: string;
 	    Version: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionAttachmentDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SHA256 = source["SHA256"];
@@ -1656,11 +1656,11 @@ export namespace backend {
 	    GrossMinor: number;
 	    DiscountMinor: number;
 	    NetMinor: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionItemDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
@@ -1680,11 +1680,11 @@ export namespace backend {
 	export class PurchaseOrderSourceRepairDecisionDTO {
 	    Key: string;
 	    Choice: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceRepairDecisionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Key = source["Key"];
@@ -1703,11 +1703,11 @@ export namespace backend {
 	    NewQuotationID: number;
 	    NewSourceRevision: number;
 	    NewCustomerID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceRepairDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.PreviousQuoteNumber = source["PreviousQuoteNumber"];
@@ -1722,7 +1722,7 @@ export namespace backend {
 	        this.NewSourceRevision = source["NewSourceRevision"];
 	        this.NewCustomerID = source["NewCustomerID"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1783,11 +1783,11 @@ export namespace backend {
 	    PpnMinor: number;
 	    AdjustmentMinor: number;
 	    GrandTotalMinor: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Attachment = this.convertValues(source["Attachment"], PurchaseOrderCorrectionAttachmentDTO);
@@ -1832,7 +1832,7 @@ export namespace backend {
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.GrandTotalMinor = source["GrandTotalMinor"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1860,11 +1860,11 @@ export namespace backend {
 	    UnitPriceMinor: number;
 	    DiscountEnabled: boolean;
 	    DiscountPercent: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
@@ -1897,11 +1897,11 @@ export namespace backend {
 	    AdjustmentMinor: number;
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -1924,7 +1924,7 @@ export namespace backend {
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1943,16 +1943,16 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
+
 	export class PurchaseOrderCreateInput {
 	    ReceivedDate: string;
 	    QuotationID: number;
 	    RevisionNumber: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCreateInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ReceivedDate = source["ReceivedDate"];
@@ -1973,11 +1973,11 @@ export namespace backend {
 	    GrossMinor: number;
 	    DiscountMinor: number;
 	    NetMinor: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
@@ -2044,11 +2044,11 @@ export namespace backend {
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
 	    Version: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.PODate = source["PODate"];
@@ -2101,7 +2101,7 @@ export namespace backend {
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
 	        this.Version = source["Version"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2123,11 +2123,11 @@ export namespace backend {
 	export class PurchaseOrderDecisionInput {
 	    Key: string;
 	    Choice: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDecisionInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Key = source["Key"];
@@ -2140,11 +2140,11 @@ export namespace backend {
 	    Filename: string;
 	    SHA256: string;
 	    Version: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDocumentContentDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.DataBase64 = source["DataBase64"];
@@ -2169,11 +2169,11 @@ export namespace backend {
 	    SizeBytes: number;
 	    UploadedBy: number;
 	    Active: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDocumentDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.UUID = source["UUID"];
@@ -2195,17 +2195,17 @@ export namespace backend {
 	export class PurchaseOrderDocumentStateDTO {
 	    Document?: PurchaseOrderDocumentDTO;
 	    Versions: PurchaseOrderDocumentDTO[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDocumentStateDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Document = this.convertValues(source["Document"], PurchaseOrderDocumentDTO);
 	        this.Versions = this.convertValues(source["Versions"], PurchaseOrderDocumentDTO);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2228,11 +2228,11 @@ export namespace backend {
 	    PurchaseOrderID: number;
 	    DataBase64: string;
 	    Filename: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDocumentUploadInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.PurchaseOrderID = source["PurchaseOrderID"];
@@ -2249,11 +2249,11 @@ export namespace backend {
 	    AcknowledgedMissing: string[];
 	    AcknowledgedExtra: number[];
 	    TaxChoice: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDraftLinkInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2265,7 +2265,7 @@ export namespace backend {
 	        this.AcknowledgedExtra = source["AcknowledgedExtra"];
 	        this.TaxChoice = source["TaxChoice"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2290,11 +2290,11 @@ export namespace backend {
 	    ServiceCategory: string;
 	    TaxCategory: string;
 	    PpnBps: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDraftTaxBasisDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TaxZone = source["TaxZone"];
@@ -2314,11 +2314,11 @@ export namespace backend {
 	    UnitPriceMinor: number;
 	    DiscountEnabled: boolean;
 	    DiscountPercent: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceLineDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
@@ -2347,11 +2347,11 @@ export namespace backend {
 	    PrintedDiscountMinor: number;
 	    PrintedPpnMinor: number;
 	    PrintedGrandTotalMinor: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationID = source["QuotationID"];
@@ -2369,7 +2369,7 @@ export namespace backend {
 	        this.PrintedPpnMinor = source["PrintedPpnMinor"];
 	        this.PrintedGrandTotalMinor = source["PrintedGrandTotalMinor"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2395,11 +2395,11 @@ export namespace backend {
 	    DraftTax: PurchaseOrderDraftTaxBasisDTO;
 	    SourceTax: PurchaseOrderDraftTaxBasisDTO;
 	    TaxChoiceRequired: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDraftLinkReviewDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Order = this.convertValues(source["Order"], PurchaseOrderDTO);
@@ -2409,7 +2409,7 @@ export namespace backend {
 	        this.SourceTax = this.convertValues(source["SourceTax"], PurchaseOrderDraftTaxBasisDTO);
 	        this.TaxChoiceRequired = source["TaxChoiceRequired"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2428,7 +2428,7 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
+
 	export class PurchaseOrderFinalizeInput {
 	    ID: number;
 	    BillingAddress: string;
@@ -2453,11 +2453,11 @@ export namespace backend {
 	    Overwrite: boolean;
 	    DocumentConfirmed: boolean;
 	    AssignConfirmationNumber: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderFinalizeInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2484,7 +2484,7 @@ export namespace backend {
 	        this.DocumentConfirmed = source["DocumentConfirmed"];
 	        this.AssignConfirmationNumber = source["AssignConfirmationNumber"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2503,16 +2503,16 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
+
+
 	export class PurchaseOrderListCustomerDTO {
 	    Name: string;
 	    ID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListCustomerDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Name = source["Name"];
@@ -2532,11 +2532,11 @@ export namespace backend {
 	    SourceRevision: number;
 	    SourceMissing: boolean;
 	    SourceState: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListRowDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.UUID = source["UUID"];
@@ -2560,11 +2560,11 @@ export namespace backend {
 	    PageSize: number;
 	    Total: number;
 	    TotalPages: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListPageDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.PurchaseOrders = this.convertValues(source["PurchaseOrders"], PurchaseOrderListRowDTO);
@@ -2574,7 +2574,7 @@ export namespace backend {
 	        this.Total = source["Total"];
 	        this.TotalPages = source["TotalPages"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2602,11 +2602,11 @@ export namespace backend {
 	    SourceMissing: string;
 	    Page: number;
 	    PageSize: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListQuery(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Search = source["Search"];
@@ -2619,23 +2619,23 @@ export namespace backend {
 	        this.PageSize = source["PageSize"];
 	    }
 	}
-	
+
 	export class PurchaseOrderReviewDTO {
 	    Order: PurchaseOrderDTO;
 	    Source: PurchaseOrderSourceDTO;
 	    DocumentState: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderReviewDTO(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Order = this.convertValues(source["Order"], PurchaseOrderDTO);
 	        this.Source = this.convertValues(source["Source"], PurchaseOrderSourceDTO);
 	        this.DocumentState = source["DocumentState"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2654,10 +2654,10 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
-	
-	
+
+
+
+
 	export class PurchaseOrderSourceRepairInput {
 	    ID: number;
 	    TargetQuotationID: number;
@@ -2682,11 +2682,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
 	    ExpectedVersion: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceRepairInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2713,7 +2713,7 @@ export namespace backend {
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2736,11 +2736,11 @@ export namespace backend {
 	    ID: number;
 	    QuotationID: number;
 	    RevisionNumber: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceReviewInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2771,11 +2771,11 @@ export namespace backend {
 	    ServiceCategory: string;
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderUpdateInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -2801,7 +2801,7 @@ export namespace backend {
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2824,18 +2824,18 @@ export namespace backend {
 	    Order?: PurchaseOrderDTO;
 	    Conflict?: PurchaseOrderConflictDTO;
 	    SavedRecord: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderWriteResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Order = this.convertValues(source["Order"], PurchaseOrderDTO);
 	        this.Conflict = this.convertValues(source["Conflict"], PurchaseOrderConflictDTO);
 	        this.SavedRecord = source["SavedRecord"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2856,11 +2856,11 @@ export namespace backend {
 	}
 	export class QuotationSubSubItemInput {
 	    Description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QuotationSubSubItemInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -2876,11 +2876,11 @@ export namespace backend {
 	    DiscountEnabled: boolean;
 	    MarginEnabled: boolean;
 	    SubSubItems: QuotationSubSubItemInput[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QuotationSubItemInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -2893,7 +2893,7 @@ export namespace backend {
 	        this.MarginEnabled = source["MarginEnabled"];
 	        this.SubSubItems = this.convertValues(source["SubSubItems"], QuotationSubSubItemInput);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2923,11 +2923,11 @@ export namespace backend {
 	    DiscountEnabled: boolean;
 	    MarginEnabled: boolean;
 	    ShowSubPrices: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QuotationItemInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -2941,7 +2941,7 @@ export namespace backend {
 	        this.MarginEnabled = source["MarginEnabled"];
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -2977,11 +2977,11 @@ export namespace backend {
 	    LeadTimeDays: number;
 	    CustomerID: number;
 	    Validity: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new QuotationInput(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Incoterm = source["Incoterm"];
@@ -3001,7 +3001,7 @@ export namespace backend {
 	        this.CustomerID = source["CustomerID"];
 	        this.Validity = source["Validity"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -3020,18 +3020,18 @@ export namespace backend {
 		    return a;
 		}
 	}
-	
-	
-	
+
+
+
 	export class RestoreResult {
 	    SafetySnapshot: string;
 	    Quotations: number;
 	    Revisions: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RestoreResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SafetySnapshot = source["SafetySnapshot"];
@@ -3047,11 +3047,11 @@ export namespace backend {
 	    ID: number;
 	    ItemCount: number;
 	    CustomerID: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new SavedDraft(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Payload = source["Payload"];
@@ -3070,11 +3070,11 @@ export namespace backend {
 	    DownloadURL: string;
 	    UpdateAvailable: boolean;
 	    Required: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new UpdateInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Current = source["Current"];
@@ -3089,7 +3089,7 @@ export namespace backend {
 }
 
 export namespace currency {
-	
+
 	export class CurrencyInfo {
 	    code: string;
 	    exponent: number;
@@ -3098,11 +3098,11 @@ export namespace currency {
 	    groupSep: string;
 	    decimalSep: string;
 	    symbolSpaced: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new CurrencyInfo(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -3118,15 +3118,15 @@ export namespace currency {
 }
 
 export namespace quotation {
-	
+
 	export class DescriptionLine {
 	    No: string;
 	    Text: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new DescriptionLine(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.No = source["No"];
@@ -3137,7 +3137,7 @@ export namespace quotation {
 }
 
 export namespace store {
-	
+
 	export class RevisionTotals {
 	    OriginalSubtotal: number;
 	    OriginalDiscount: number;
@@ -3151,11 +3151,11 @@ export namespace store {
 	    NettProfit: number;
 	    PpnAmount: number;
 	    CustomerGrandTotal: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RevisionTotals(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.OriginalSubtotal = source["OriginalSubtotal"];
@@ -3175,11 +3175,11 @@ export namespace store {
 	export class RevisionSubSubItem {
 	    SubSubNo: number;
 	    Description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RevisionSubSubItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SubSubNo = source["SubSubNo"];
@@ -3202,11 +3202,11 @@ export namespace store {
 	    MarginEnabled: boolean;
 	    DiscountEnabled: boolean;
 	    SubSubItems: RevisionSubSubItem[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RevisionSubItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.SubNo = source["SubNo"];
@@ -3225,7 +3225,7 @@ export namespace store {
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.SubSubItems = this.convertValues(source["SubSubItems"], RevisionSubSubItem);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -3262,11 +3262,11 @@ export namespace store {
 	    DiscountEnabled: boolean;
 	    ShowSubPrices: boolean;
 	    SubItems: RevisionSubItem[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RevisionItem(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Description = source["Description"];
@@ -3287,7 +3287,7 @@ export namespace store {
 	        this.ShowSubPrices = source["ShowSubPrices"];
 	        this.SubItems = this.convertValues(source["SubItems"], RevisionSubItem);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -3340,11 +3340,11 @@ export namespace store {
 	    PaymentTermDays: number;
 	    ValidityDays: number;
 	    RevisionNumber: number;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new RevisionDraft(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.TaxCategory = source["TaxCategory"];
@@ -3381,7 +3381,7 @@ export namespace store {
 	        this.ValidityDays = source["ValidityDays"];
 	        this.RevisionNumber = source["RevisionNumber"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -3400,20 +3400,20 @@ export namespace store {
 		    return a;
 		}
 	}
-	
-	
-	
-	
+
+
+
+
 	export class Store {
-	
-	
+
+
 	    static createFrom(source: any = {}) {
 	        return new Store(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	
+
 	    }
 	}
 
