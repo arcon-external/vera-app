@@ -11,7 +11,6 @@ import (
 
 	"vera-app/backend"
 	"vera-app/backend/auth"
-	"vera-app/backend/extract"
 	"vera-app/backend/store"
 )
 
@@ -26,7 +25,6 @@ type Server struct {
 	service       *auth.Service
 	templates     *backend.Quotation
 	signer        *backend.Signer
-	extractions   *extract.Service
 	verifyLimiter *ipRateLimiter
 	// previewLimiter bounds the admin portal preview separately from
 	// verifyLimiter. The preview is authenticated and admin-only, but it is
@@ -51,14 +49,6 @@ type Server struct {
 // wires it from VERA_SIGNING_KEY at boot.
 func (s *Server) SetSigner(signer *backend.Signer) {
 	s.signer = signer
-}
-
-// SetExtractor replaces the restricted extraction engine. Production leaves it
-// nil unless VERA_EXTRACTOR_CMD names the dedicated isolated command, in which
-// case extraction is disabled and the start endpoint answers 503. Tests use a
-// stub so the default suite needs no Poppler and no Docker.
-func (s *Server) SetExtractor(engine extract.Engine) {
-	s.extractions.Engine = engine
 }
 
 // SetBackupDir overrides the backup directory (tests and operators).
@@ -95,7 +85,6 @@ func (s *Server) backupDirOrDefault() string {
 // tests that never touch snapshot rendering.
 func NewServer(database *store.Store, service *auth.Service, templates *backend.Quotation) *Server {
 	server := &Server{echo: echo.New(), database: database, service: service, templates: templates,
-		extractions:    extract.NewService(database, extract.NewCommandEngineFromEnvironment()),
 		verifyLimiter:  newIPRateLimiter(30, time.Minute),
 		previewLimiter: newIPRateLimiter(previewsPerMinute, time.Minute),
 		loginLimiter:   newIPRateLimiter(loginAttemptsPerMinute, time.Minute),
@@ -169,14 +158,6 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/purchase-orders/:id/document/content", server.getPurchaseOrderDocumentContent, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id/documents/:version/content", server.getPurchaseOrderDocumentVersionContent, server.requireSession)
 	server.echo.DELETE("/v1/purchase-orders/:id/document", server.removePurchaseOrderDocument, server.requireSession)
-	// #477: text-PDF extraction. Start is a write of intent (202); the latest
-	// read returns the run and the active document generation so a replaced
-	// PDF is visibly stale rather than silently applied.
-	// #498: the availability probe is a typed preflight for the desktop. It
-	// is registered before the :id routes because it shares their prefix.
-	server.echo.GET("/v1/purchase-orders/extraction/availability", server.getPurchaseOrderExtractionAvailability, server.requireSession)
-	server.echo.POST("/v1/purchase-orders/:id/extractions", server.startPurchaseOrderExtraction, server.requireSession)
-	server.echo.GET("/v1/purchase-orders/:id/extractions/latest", server.getPurchaseOrderExtraction, server.requireSession)
 	// #480: permanent deletion. Preview and challenge describe the exact chain;
 	// confirm is the irreversible write. All three are admin-only, and the store
 	// re-reads the actor's stored role inside the write.

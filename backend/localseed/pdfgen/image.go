@@ -1,9 +1,8 @@
-// Issue #478: synthetic scanned PDFs for tests.
+// Synthetic scanned PDFs for the local seed.
 //
-// The scan tests start from the repository's own text PDFs, rasterise them with
-// the pinned Poppler in the extractor image, and wrap the result back into a
-// PDF whose page content is only an image. That gives a real "scanned" fixture
-// with known text, without committing a customer document or a binary fixture.
+// The seed wraps a full-page image into a PDF whose page content is only an
+// image, so a fixture can represent a scanned document without committing a
+// customer document or a binary fixture.
 //
 // This file is test support: one full-page image per page, an optional
 // rotation (to make a skewed scan), the default A4 page size, and Flate for the

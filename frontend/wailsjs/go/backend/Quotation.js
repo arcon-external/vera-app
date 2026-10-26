@@ -98,14 +98,6 @@ export function GetPurchaseOrderDocumentVersionContent(arg1, arg2) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderDocumentVersionContent'](arg1, arg2);
 }
 
-export function GetPurchaseOrderExtraction(arg1) {
-  return window['go']['backend']['Quotation']['GetPurchaseOrderExtraction'](arg1);
-}
-
-export function GetPurchaseOrderExtractionAvailability() {
-  return window['go']['backend']['Quotation']['GetPurchaseOrderExtractionAvailability']();
-}
-
 export function GetPurchaseOrderHistory(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
 }
@@ -224,10 +216,6 @@ export function SetStore(arg1) {
 
 export function SetVerifyURL(arg1) {
   return window['go']['backend']['Quotation']['SetVerifyURL'](arg1);
-}
-
-export function StartPurchaseOrderExtraction(arg1) {
-  return window['go']['backend']['Quotation']['StartPurchaseOrderExtraction'](arg1);
 }
 
 export function UpdatePurchaseOrderDraft(arg1) {
