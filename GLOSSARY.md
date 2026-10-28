@@ -428,6 +428,18 @@ _Avoid_: Preferences, presets
 
 ### PO review and evidence
 
+**Reconciliation session**:
+The retained difference review for one purchase order and its exact source revision, including the values checked and the staff decisions.
+_Avoid_: Review run, reconciliation log
+
+**Review notice**:
+Temporary feedback that a checked purchase-order field is empty or matches the source; it is not a retained decision.
+_Avoid_: Toast, review item
+
+**Review item**:
+A retained purchase-order difference or line-match issue, with its values and unresolved or resolved decision history.
+_Avoid_: Notice, toast
+
 **Difference review**:
 The mandatory comparison of the source revision and the customer PO, where every differing value is chosen or adjusted before finalize.
 _Avoid_: Reconciliation, comparison

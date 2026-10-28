@@ -1,0 +1,2016 @@
+{
+  "Version": 1,
+  "Shapes": {
+    "Session": [
+      "ID",
+      "PurchaseOrderID",
+      "SourceQuotationID",
+      "SourceRevision",
+      "POVersion",
+      "Active",
+      "ReadOnly",
+      "CreatedBy",
+      "CreatedAt",
+      "UpdatedAt",
+      "LineIdentities",
+      "Items"
+    ],
+    "Item": [
+      "Key",
+      "Field",
+      "Kind",
+      "LineKey",
+      "SourceLineRef",
+      "Label",
+      "POValue",
+      "SourceValue",
+      "Status",
+      "Resolution",
+      "ActorID",
+      "UpdatedAt",
+      "History"
+    ],
+    "HistoryEvent": [
+      "Kind",
+      "SourceLineRef",
+      "POValue",
+      "SourceValue",
+      "Status",
+      "Resolution",
+      "ActorID",
+      "At"
+    ],
+    "LineIdentity": [
+      "Key",
+      "ID",
+      "Removed"
+    ],
+    "Discount": [
+      "Enabled",
+      "Percent"
+    ],
+    "TaxBasis": [
+      "TaxZone",
+      "TaxType",
+      "ServiceCategory"
+    ],
+    "Feedback": [
+      "Notice",
+      "Status",
+      "Resolution"
+    ],
+    "Transition": [
+      "Name",
+      "Field",
+      "Event",
+      "Before",
+      "After",
+      "CreatesItem",
+      "WritesPO",
+      "BlocksFinalSave"
+    ]
+  },
+  "Fields": [
+    {
+      "ID": "header:paymentTerms",
+      "KeyPattern": "header:paymentTerms",
+      "Label": "Payment terms",
+      "Mode": "commit"
+    },
+    {
+      "ID": "header:incoterms",
+      "KeyPattern": "header:incoterms",
+      "Label": "Incoterms",
+      "Mode": "commit"
+    },
+    {
+      "ID": "header:discountPercent",
+      "KeyPattern": "header:discountPercent",
+      "Label": "Whole-PO discount",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:description",
+      "KeyPattern": "line:{lineKey}:description",
+      "Label": "Line {lineNumber} description",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:uom",
+      "KeyPattern": "line:{lineKey}:uom",
+      "Label": "Line {lineNumber} unit of measure",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:quantity",
+      "KeyPattern": "line:{lineKey}:quantity",
+      "Label": "Line {lineNumber} quantity",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:unitPrice",
+      "KeyPattern": "line:{lineKey}:unitPrice",
+      "Label": "Line {lineNumber} unit price",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:discount",
+      "KeyPattern": "line:{lineKey}:discount",
+      "Label": "Line {lineNumber} discount",
+      "Mode": "commit"
+    },
+    {
+      "ID": "line:match",
+      "KeyPattern": "line:{lineKey}:match",
+      "Label": "Line {lineNumber} match",
+      "Mode": "line-set"
+    },
+    {
+      "ID": "source:match",
+      "KeyPattern": "source:{sourceLineRef}:match",
+      "Label": "Quotation line {sourceLineRef} missing",
+      "Mode": "line-set"
+    },
+    {
+      "ID": "link:taxBasis",
+      "KeyPattern": "link:taxBasis",
+      "Label": "Tax basis",
+      "Mode": "link"
+    },
+    {
+      "ID": "derived:totals",
+      "KeyPattern": "derived:totals",
+      "Label": "Totals",
+      "Mode": "derived"
+    }
+  ],
+  "Session": {
+    "ID": 71,
+    "PurchaseOrderID": 7,
+    "SourceQuotationID": 12,
+    "SourceRevision": 0,
+    "POVersion": 3,
+    "Active": true,
+    "ReadOnly": false,
+    "CreatedBy": 9,
+    "CreatedAt": "2026-10-28T10:30:00Z",
+    "UpdatedAt": "2026-10-28T10:30:00Z",
+    "LineIdentities": [
+      {
+        "Key": "client:8d15a161-b8ea-43e8-bae0-020dd45d4385",
+        "ID": 501,
+        "Removed": false
+      },
+      {
+        "Key": "client:e53e9cb9-9a1e-4802-ac88-7ea0dd89147b",
+        "ID": null,
+        "Removed": false
+      }
+    ],
+    "Items": [
+      {
+        "Key": "line:client:8d15a161-b8ea-43e8-bae0-020dd45d4385:quantity",
+        "Field": "line:quantity",
+        "Kind": "difference",
+        "LineKey": "client:8d15a161-b8ea-43e8-bae0-020dd45d4385",
+        "SourceLineRef": "1",
+        "Label": "Line 1 quantity",
+        "POValue": 120000,
+        "SourceValue": 100000,
+        "Status": "resolved",
+        "Resolution": "kept_po",
+        "ActorID": 9,
+        "UpdatedAt": "2026-10-28T10:30:00Z",
+        "History": [
+          {
+            "POValue": 120000,
+            "SourceValue": 100000,
+            "Status": "resolved",
+            "Resolution": "kept_po",
+            "ActorID": 9,
+            "At": "2026-10-28T10:30:00Z",
+            "SourceLineRef": "1",
+            "Kind": "difference"
+          }
+        ]
+      },
+      {
+        "Key": "header:paymentTerms",
+        "Field": "header:paymentTerms",
+        "Kind": "difference",
+        "LineKey": null,
+        "SourceLineRef": null,
+        "Label": "Payment terms",
+        "POValue": "30 days",
+        "SourceValue": "45 days",
+        "Status": "unresolved",
+        "Resolution": null,
+        "ActorID": 9,
+        "UpdatedAt": "2026-10-28T10:30:00Z",
+        "History": [
+          {
+            "SourceLineRef": null,
+            "POValue": "30 days",
+            "SourceValue": "45 days",
+            "Status": "unresolved",
+            "Resolution": null,
+            "ActorID": 9,
+            "At": "2026-10-28T10:30:00Z",
+            "Kind": "difference"
+          }
+        ]
+      },
+      {
+        "Key": "line:client:8d15a161-b8ea-43e8-bae0-020dd45d4385:discount",
+        "Field": "line:discount",
+        "Kind": "difference",
+        "LineKey": "client:8d15a161-b8ea-43e8-bae0-020dd45d4385",
+        "SourceLineRef": "1",
+        "Label": "Line 1 discount",
+        "POValue": {
+          "Enabled": true,
+          "Percent": 5
+        },
+        "SourceValue": {
+          "Enabled": false,
+          "Percent": 0
+        },
+        "Status": "resolved",
+        "Resolution": "kept_po",
+        "ActorID": 9,
+        "UpdatedAt": "2026-10-28T10:30:00Z",
+        "History": [
+          {
+            "SourceLineRef": "1",
+            "POValue": {
+              "Enabled": true,
+              "Percent": 5
+            },
+            "SourceValue": {
+              "Enabled": false,
+              "Percent": 0
+            },
+            "Status": "resolved",
+            "Resolution": "kept_po",
+            "ActorID": 9,
+            "At": "2026-10-28T10:30:00Z",
+            "Kind": "difference"
+          }
+        ]
+      },
+      {
+        "Key": "link:taxBasis",
+        "Field": "link:taxBasis",
+        "Kind": "tax_basis",
+        "LineKey": null,
+        "SourceLineRef": null,
+        "Label": "Tax basis",
+        "POValue": {
+          "TaxZone": "FTZ",
+          "TaxType": "Goods",
+          "ServiceCategory": ""
+        },
+        "SourceValue": {
+          "TaxZone": "FTZ",
+          "TaxType": "Goods",
+          "ServiceCategory": ""
+        },
+        "Status": "resolved",
+        "Resolution": "used_quotation",
+        "ActorID": 9,
+        "UpdatedAt": "2026-10-28T10:30:00Z",
+        "History": [
+          {
+            "SourceLineRef": null,
+            "POValue": {
+              "TaxZone": "FTZ",
+              "TaxType": "Goods",
+              "ServiceCategory": ""
+            },
+            "SourceValue": {
+              "TaxZone": "FTZ",
+              "TaxType": "Goods",
+              "ServiceCategory": ""
+            },
+            "Status": "resolved",
+            "Resolution": "used_quotation",
+            "ActorID": 9,
+            "At": "2026-10-28T10:30:00Z",
+            "Kind": "tax_basis"
+          }
+        ]
+      },
+      {
+        "Key": "source:2.1:match",
+        "Field": "source:match",
+        "Kind": "missing_line",
+        "LineKey": null,
+        "SourceLineRef": "2.1",
+        "Label": "Quotation line 2.1 missing",
+        "POValue": null,
+        "SourceValue": "2.1",
+        "Status": "resolved",
+        "Resolution": "acknowledged_missing",
+        "ActorID": 9,
+        "UpdatedAt": "2026-10-28T10:30:00Z",
+        "History": [
+          {
+            "Kind": "missing_line",
+            "SourceLineRef": "2.1",
+            "POValue": null,
+            "SourceValue": "2.1",
+            "Status": "resolved",
+            "Resolution": "acknowledged_missing",
+            "ActorID": 9,
+            "At": "2026-10-28T10:30:00Z"
+          }
+        ]
+      }
+    ]
+  },
+  "Values": {
+    "Discount": {
+      "Enabled": true,
+      "Percent": 5
+    },
+    "TaxBasis": {
+      "TaxZone": "FTZ",
+      "TaxType": "Goods",
+      "ServiceCategory": ""
+    }
+  },
+  "Transitions": [
+    {
+      "Name": "empty-required-commit",
+      "Field": "line:quantity",
+      "Event": "commit_empty_required",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": "empty",
+        "Status": null,
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "matching-first-commit",
+      "Field": "line:quantity",
+      "Event": "commit_match",
+      "Before": {
+        "Notice": "empty",
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": "matched",
+        "Status": null,
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "difference-first-commit",
+      "Field": "line:quantity",
+      "Event": "commit_difference",
+      "Before": {
+        "Notice": "matched",
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": true,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "typing-does-not-review",
+      "Field": "line:quantity",
+      "Event": "type",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "idempotent-differing-commit",
+      "Field": "line:quantity",
+      "Event": "commit_same_difference",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "keep-asks-for-confirmation",
+      "Field": "line:quantity",
+      "Event": "request_keep",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "cancel-keep-remains-unresolved",
+      "Field": "line:quantity",
+      "Event": "cancel_keep",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "confirm-keep",
+      "Field": "line:quantity",
+      "Event": "confirm_keep",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "use-quotation-writes-field",
+      "Field": "line:quantity",
+      "Event": "use_quotation",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "used_quotation"
+      },
+      "CreatesItem": false,
+      "WritesPO": true,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "resolved-edited-back-to-source",
+      "Field": "line:quantity",
+      "Event": "commit_match",
+      "Before": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "values_now_match"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "unresolved-edited-back-to-source",
+      "Field": "line:quantity",
+      "Event": "commit_match",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "values_now_match"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "resolved-new-difference-needs-choice",
+      "Field": "line:quantity",
+      "Event": "commit_new_difference",
+      "Before": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "same-kept-value-stays-resolved",
+      "Field": "line:quantity",
+      "Event": "commit_same_value",
+      "Before": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "cleared-required-value-keeps-history",
+      "Field": "line:quantity",
+      "Event": "commit_empty_required",
+      "Before": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "After": {
+        "Notice": "empty",
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "missing-line-found",
+      "Field": "source:match",
+      "Event": "line_set_changed",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": true,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "acknowledge-missing",
+      "Field": "source:match",
+      "Event": "acknowledge_missing",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "acknowledged_missing"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "extra-line-found",
+      "Field": "line:match",
+      "Event": "line_set_changed",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": true,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "acknowledge-extra",
+      "Field": "line:match",
+      "Event": "acknowledge_extra",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "acknowledged_extra"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "duplicate-cannot-be-acknowledged",
+      "Field": "line:match",
+      "Event": "acknowledge_duplicate",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "correct-line-match",
+      "Field": "line:match",
+      "Event": "correct_match",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "match_corrected"
+      },
+      "CreatesItem": false,
+      "WritesPO": true,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "correct-missing-line-match",
+      "Field": "source:match",
+      "Event": "correct_match",
+      "Before": {
+        "Notice": null,
+        "Status": "unresolved",
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "match_corrected"
+      },
+      "CreatesItem": false,
+      "WritesPO": true,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "line-removal-retains-item",
+      "Field": "line:quantity",
+      "Event": "remove_line",
+      "Before": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "line_removed"
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "tax-kept-at-link",
+      "Field": "link:taxBasis",
+      "Event": "link_keep_basis",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "kept_po"
+      },
+      "CreatesItem": true,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "tax-adopted-at-link",
+      "Field": "link:taxBasis",
+      "Event": "link_use_basis",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": "resolved",
+        "Resolution": "used_quotation"
+      },
+      "CreatesItem": true,
+      "WritesPO": true,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "matching-header-on-commit",
+      "Field": "header:paymentTerms",
+      "Event": "commit_match",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": "matched",
+        "Status": null,
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    },
+    {
+      "Name": "empty-required-header-on-commit",
+      "Field": "header:paymentTerms",
+      "Event": "commit_empty_required",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": "empty",
+        "Status": null,
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": true
+    },
+    {
+      "Name": "derived-totals-never-create-item",
+      "Field": "derived:totals",
+      "Event": "derive_totals",
+      "Before": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "After": {
+        "Notice": null,
+        "Status": null,
+        "Resolution": null
+      },
+      "CreatesItem": false,
+      "WritesPO": false,
+      "BlocksFinalSave": false
+    }
+  ],
+  "IdentityCases": [
+    {
+      "Name": "edit-and-reorder-persisted-line",
+      "BeforeKey": "line:id:501:quantity",
+      "AfterKey": "line:id:501:quantity",
+      "BeforeID": 501,
+      "AfterID": 501,
+      "Removed": false
+    },
+    {
+      "Name": "first-save-binds-client-key-without-rekeying",
+      "BeforeKey": "line:client:8d15a161-b8ea-43e8-bae0-020dd45d4385:quantity",
+      "AfterKey": "line:client:8d15a161-b8ea-43e8-bae0-020dd45d4385:quantity",
+      "BeforeID": null,
+      "AfterID": 501,
+      "Removed": false
+    },
+    {
+      "Name": "line-removal-retains-key-and-id",
+      "BeforeKey": "line:id:501:quantity",
+      "AfterKey": "line:id:501:quantity",
+      "BeforeID": 501,
+      "AfterID": 501,
+      "Removed": true
+    }
+  ],
+  "GateCases": [
+    {
+      "Name": "ready-even-when-derived-totals-differ",
+      "Blockers": [],
+      "CanSave": true
+    },
+    {
+      "Name": "required-value-empty",
+      "Blockers": [
+        "required_value_empty"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "unresolved-input",
+      "Blockers": [
+        "unresolved_item"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "unacknowledged-missing",
+      "Blockers": [
+        "missing_line"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "unacknowledged-extra",
+      "Blockers": [
+        "extra_line"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "duplicate-even-if-item-resolved",
+      "Blockers": [
+        "duplicate_match"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "never-linked-draft",
+      "Blockers": [
+        "source_missing"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "former-source-draft",
+      "Blockers": [
+        "source_missing"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "stale-session-write",
+      "Blockers": [
+        "version_conflict"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "no-pdf-unconfirmed",
+      "Blockers": [
+        "document_confirmation_required"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "invalid-input-or-negative-total",
+      "Blockers": [
+        "invalid_calculation"
+      ],
+      "CanSave": false
+    },
+    {
+      "Name": "unknown-or-stale-choice",
+      "Blockers": [
+        "invalid_decision"
+      ],
+      "CanSave": false
+    }
+  ],
+  "ComparisonCases": [
+    {
+      "Name": "all-values-match",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "surrounding-whitespace-is-ignored",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": " \t45 days\n",
+        "Incoterms": " CIF ",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": " Widget ",
+            "UoM": " Pc\t",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "internal-whitespace-and-case-are-content",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45  days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [
+          {
+            "Key": "header:paymentTerms",
+            "Label": "Payment terms",
+            "POValue": "45  days",
+            "SourceValue": "45 days"
+          },
+          {
+            "Key": "line:1:description",
+            "Label": "Line 1 description",
+            "POValue": "widget",
+            "SourceValue": "Widget"
+          }
+        ],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "every-current-comparable-field-differs",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "30 days",
+        "Incoterms": "FOB",
+        "DiscountPercent": 10,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget revised",
+            "UoM": "Box",
+            "QuantityScaled": 25000,
+            "UnitPriceMinor": 700,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [
+          {
+            "Key": "header:paymentTerms",
+            "Label": "Payment terms",
+            "POValue": "30 days",
+            "SourceValue": "45 days"
+          },
+          {
+            "Key": "header:incoterms",
+            "Label": "Incoterms",
+            "POValue": "FOB",
+            "SourceValue": "CIF"
+          },
+          {
+            "Key": "header:discountPercent",
+            "Label": "Whole-PO discount",
+            "POValue": "10%",
+            "SourceValue": "5%"
+          },
+          {
+            "Key": "line:1:description",
+            "Label": "Line 1 description",
+            "POValue": "Widget revised",
+            "SourceValue": "Widget"
+          },
+          {
+            "Key": "line:1:uom",
+            "Label": "Line 1 unit of measure",
+            "POValue": "Box",
+            "SourceValue": "Pc"
+          },
+          {
+            "Key": "line:1:quantity",
+            "Label": "Line 1 quantity",
+            "POValue": "2.5",
+            "SourceValue": "3"
+          },
+          {
+            "Key": "line:1:unitPrice",
+            "Label": "Line 1 unit price",
+            "POValue": "700",
+            "SourceValue": "650"
+          },
+          {
+            "Key": "line:1:discount",
+            "Label": "Line 1 discount",
+            "POValue": "None",
+            "SourceValue": "5%"
+          }
+        ],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {
+        "line:1:unitPrice": [
+          "$7.00",
+          "$6.50"
+        ]
+      }
+    },
+    {
+      "Name": "quantity-compares-exactly-at-four-decimals",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 10000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 10001,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [
+          {
+            "Key": "line:1:quantity",
+            "Label": "Line 1 quantity",
+            "POValue": "1.0001",
+            "SourceValue": "1"
+          }
+        ],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "missing-extra-unknown-and-duplicate-references",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          },
+          {
+            "QuotationItemNo": 2,
+            "QuotationSubNo": 1,
+            "Description": "Mounting",
+            "UoM": "Unit",
+            "QuantityScaled": 20000,
+            "UnitPriceMinor": 420,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          },
+          {
+            "LineNumber": 2,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          },
+          {
+            "LineNumber": 3,
+            "QuotationItemNo": null,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          },
+          {
+            "LineNumber": 4,
+            "QuotationItemNo": 99,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [
+          "2.1"
+        ],
+        "ExtraLineNumbers": [
+          3,
+          4
+        ],
+        "DuplicateLineNumbers": [
+          2
+        ]
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "reordered-priced-sub-item-matches-by-reference",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          },
+          {
+            "QuotationItemNo": 2,
+            "QuotationSubNo": 1,
+            "Description": "Mounting",
+            "UoM": "Unit",
+            "QuantityScaled": 20000,
+            "UnitPriceMinor": 420,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 2,
+            "QuotationSubNo": 1,
+            "Description": "Mounting",
+            "UoM": "Unit",
+            "QuantityScaled": 20000,
+            "UnitPriceMinor": 420,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          },
+          {
+            "LineNumber": 2,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount",
+          "line:2:description",
+          "line:2:uom",
+          "line:2:quantity",
+          "line:2:unitPrice",
+          "line:2:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "disabled-discount-percent-is-dormant",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": false,
+            "DiscountPercent": 85
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "enabled-zero-is-distinct-from-disabled-zero",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 0
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [
+          {
+            "Key": "line:1:discount",
+            "Label": "Line 1 discount",
+            "POValue": "0%",
+            "SourceValue": "None"
+          }
+        ],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "one-minor-unit-price-difference",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 0,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 1,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [
+          {
+            "Key": "line:1:unitPrice",
+            "Label": "Line 1 unit price",
+            "POValue": "1",
+            "SourceValue": "0"
+          }
+        ],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {
+        "line:1:unitPrice": [
+          "$0.01",
+          "$0.00"
+        ]
+      }
+    },
+    {
+      "Name": "zero-price-is-valid",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 0,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "45 days",
+        "Incoterms": "CIF",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 0,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    },
+    {
+      "Name": "optional-text-both-empty-matches",
+      "Source": {
+        "QuotationID": 12,
+        "RevisionNumber": 0,
+        "QuoteNumber": "1502260042",
+        "CustomerID": 2,
+        "CustomerName": "PT. Buyer",
+        "Currency": "USD",
+        "PaymentTerms": "",
+        "Incoterms": "",
+        "DiscountPercent": 5,
+        "PrintedSubtotalMinor": 1853,
+        "PrintedDiscountMinor": 92,
+        "PrintedPpnMinor": 0,
+        "PrintedGrandTotalMinor": 1761,
+        "Lines": [
+          {
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Entered": {
+        "PaymentTerms": "",
+        "Incoterms": "",
+        "DiscountPercent": 5,
+        "Lines": [
+          {
+            "LineNumber": 1,
+            "QuotationItemNo": 1,
+            "QuotationSubNo": null,
+            "Description": "Widget",
+            "UoM": "Pc",
+            "QuantityScaled": 30000,
+            "UnitPriceMinor": 650,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ]
+      },
+      "Want": {
+        "Differences": [],
+        "ComparableKeys": [
+          "header:paymentTerms",
+          "header:incoterms",
+          "header:discountPercent",
+          "line:1:description",
+          "line:1:uom",
+          "line:1:quantity",
+          "line:1:unitPrice",
+          "line:1:discount"
+        ],
+        "Missing": [],
+        "ExtraLineNumbers": [],
+        "DuplicateLineNumbers": []
+      },
+      "FrontendPriceValues": {}
+    }
+  ],
+  "TotalsCases": [
+    {
+      "Name": "matching-total",
+      "Input": {
+        "Lines": [
+          {
+            "QuantityScaled": 10000,
+            "UnitPriceMinor": 1000,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ],
+        "DiscountPercent": 0,
+        "PpnBps": 1100,
+        "AdjustmentMinor": 0,
+        "AdjustmentReason": ""
+      },
+      "PrintedGrandTotalMinor": 1110,
+      "ReasonFields": [],
+      "Want": {
+        "grossMinor": 1000,
+        "rowDiscountMinor": 0,
+        "subtotalMinor": 1000,
+        "discountMinor": 0,
+        "afterDiscountMinor": 1000,
+        "ppnMinor": 110,
+        "adjustmentMinor": 0,
+        "grandTotalMinor": 1110,
+        "printedDifferenceMinor": 0
+      }
+    },
+    {
+      "Name": "accepted-quantity-difference-does-not-force-equality",
+      "Input": {
+        "Lines": [
+          {
+            "QuantityScaled": 20000,
+            "UnitPriceMinor": 1000,
+            "DiscountEnabled": false,
+            "DiscountPercent": 0
+          }
+        ],
+        "DiscountPercent": 0,
+        "PpnBps": 1100,
+        "AdjustmentMinor": 0,
+        "AdjustmentReason": ""
+      },
+      "PrintedGrandTotalMinor": 1110,
+      "ReasonFields": [
+        "line:quantity"
+      ],
+      "Want": {
+        "grossMinor": 2000,
+        "rowDiscountMinor": 0,
+        "subtotalMinor": 2000,
+        "discountMinor": 0,
+        "afterDiscountMinor": 2000,
+        "ppnMinor": 220,
+        "adjustmentMinor": 0,
+        "grandTotalMinor": 2220,
+        "printedDifferenceMinor": -1110
+      }
+    },
+    {
+      "Name": "same-rounding-discount-ppn-and-signed-adjustment-pipeline",
+      "Input": {
+        "Lines": [
+          {
+            "QuantityScaled": 15000,
+            "UnitPriceMinor": 101,
+            "DiscountEnabled": true,
+            "DiscountPercent": 5
+          }
+        ],
+        "DiscountPercent": 10,
+        "PpnBps": 1100,
+        "AdjustmentMinor": -5,
+        "AdjustmentReason": "Customer PO rounding"
+      },
+      "PrintedGrandTotalMinor": 155,
+      "ReasonFields": [
+        "line:quantity",
+        "line:discount",
+        "header:discountPercent",
+        "po:adjustment"
+      ],
+      "Want": {
+        "grossMinor": 152,
+        "rowDiscountMinor": 7,
+        "subtotalMinor": 145,
+        "discountMinor": 14,
+        "afterDiscountMinor": 131,
+        "ppnMinor": 14,
+        "adjustmentMinor": -5,
+        "grandTotalMinor": 140,
+        "printedDifferenceMinor": 15
+      }
+    }
+  ],
+  "Enums": {
+    "ItemKind": [
+      "difference",
+      "missing_line",
+      "extra_line",
+      "duplicate_match",
+      "tax_basis"
+    ],
+    "ItemStatus": [
+      "unresolved",
+      "resolved"
+    ],
+    "Resolution": [
+      "kept_po",
+      "used_quotation",
+      "values_now_match",
+      "acknowledged_missing",
+      "acknowledged_extra",
+      "match_corrected",
+      "line_removed"
+    ],
+    "Notice": [
+      "empty",
+      "matched"
+    ]
+  }
+}
