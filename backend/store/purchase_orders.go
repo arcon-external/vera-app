@@ -884,6 +884,12 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// R-04: an ordinary draft save advances the PO version, so the live
+	// session's recorded version must follow it or the next Load hands back a
+	// token that can never save.
+	if err := syncReconciliationVersionTx(ctx, tx, schema, org.ID, input.ID); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	updated, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {

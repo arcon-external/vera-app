@@ -368,8 +368,15 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
 
+	generation, err := nextReconciliationGeneration(ctx, tx, schema, org.ID, stored.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := deactivateReconciliationSessionsTx(ctx, tx, schema, org.ID, stored.ID); err != nil {
+		return PurchaseOrder{}, err
+	}
 	if err := createReconciliationSessionTx(ctx, tx, schema, org.ID, stored.ID,
-		source.QuotationID, source.RevisionNumber, source.RevisionID, 1,
+		source.QuotationID, source.RevisionNumber, source.RevisionID, generation,
 		input.UpdatedBy, lock.Version+1); err != nil {
 		return PurchaseOrder{}, err
 	}

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -241,27 +243,29 @@ func validateReconciliationHeaderValue(item POReconciliationItem) error {
 			if len(raw) == 0 || string(raw) == "null" {
 				continue
 			}
-			var number int16
+			var number json.Number
 			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.UseNumber()
-			var generic any
-			if err := decoder.Decode(&generic); err != nil {
+			if err := decoder.Decode(&number); err != nil {
 				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
 			}
-			_ = number
-			switch value := generic.(type) {
-			case json.Number:
-				if strings.Contains(value.String(), ".") {
-					return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
-				}
-			case float64:
+			text := number.String()
+			if strings.ContainsAny(text, ".eE") {
 				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
+			}
+			percent, err := strconv.ParseInt(text, 10, 16)
+			if err != nil || percent < 0 || percent > 100 {
+				return fmt.Errorf("%w: item %q must carry a percent between 0 and 100",
+					ErrPurchaseOrderInvalid, item.Key)
 			}
 		}
 	}
 	return nil
 }
 
+// createReconciliationSessionTx installs the active session for one exact
+// source revision. The link-time tax item (contract section 6) is seeded by
+// #517; this slice records the session shell only.
 func createReconciliationSessionTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID, quotationID int64, revision int16, revisionID int64, generation int, createdBy, poVersion int64) error {
 	lineIdentities, err := json.Marshal([]POReconciliationLineIdentity{})
 	if err != nil {
@@ -276,13 +280,55 @@ func createReconciliationSessionTx(ctx context.Context, q purchaseOrderQuerier, 
 			org_id, purchase_order_id, source_quotation_id, source_revision,
 			source_revision_id, generation, active, readonly, po_version,
 			line_identities, created_by
-		) VALUES ($1,$2,$3,$4,$5,$6,TRUE,FALSE,$7,$8,$9)
-		ON CONFLICT DO NOTHING`, schema),
+		) VALUES ($1,$2,$3,$4,$5,$6,TRUE,FALSE,$7,$8,$9)`, schema),
 		orgID, poID, quotationID, revision, revisionIDParam, generation,
 		poVersion, lineIdentities, createdBy,
 	)
 	if err != nil {
 		return fmt.Errorf("create reconciliation session for purchase order %d: %w", poID, err)
+	}
+	return nil
+}
+
+// deactivateReconciliationSessionsTx retires the active session before a new
+// generation is installed (a relink or, later, a source repair).
+func deactivateReconciliationSessionsTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64) error {
+	if _, err := q.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_order_reconciliation_sessions
+		SET active = FALSE, updated_at = NOW()
+		WHERE purchase_order_id = $1 AND org_id = $2 AND active`, schema),
+		poID, orgID); err != nil {
+		return fmt.Errorf("deactivate reconciliation session for purchase order %d: %w", poID, err)
+	}
+	return nil
+}
+
+// nextReconciliationGeneration keeps a return to a previously used source
+// revision legal under the historical uniqueness rule (R-06).
+func nextReconciliationGeneration(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64) (int, error) {
+	var generation int
+	if err := q.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(MAX(generation), 0) + 1
+		FROM %s.purchase_order_reconciliation_sessions
+		WHERE purchase_order_id = $1 AND org_id = $2`, schema),
+		poID, orgID).Scan(&generation); err != nil {
+		return 0, fmt.Errorf("read next reconciliation generation for purchase order %d: %w", poID, err)
+	}
+	return generation, nil
+}
+
+// syncReconciliationVersionTx keeps the session's recorded PO version current
+// after an ordinary draft save, so the next Load returns a usable token (R-04).
+func syncReconciliationVersionTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64) error {
+	if _, err := q.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_order_reconciliation_sessions s
+		SET po_version = p.version, updated_at = NOW()
+		FROM %s.purchase_orders p
+		WHERE s.purchase_order_id = $1 AND s.org_id = $2
+		  AND s.active AND NOT s.readonly
+		  AND p.id = s.purchase_order_id AND p.org_id = s.org_id`, schema, schema),
+		poID, orgID); err != nil {
+		return fmt.Errorf("sync reconciliation version for purchase order %d: %w", poID, err)
 	}
 	return nil
 }
@@ -293,11 +339,13 @@ func loadReconciliationSession(ctx context.Context, q purchaseOrderQuerier, sche
 	var lineIdentitiesRaw []byte
 	var sourceRevision int16
 	err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT id, purchase_order_id, source_quotation_id, source_revision,
-		       po_version, active, readonly, created_by, created_at, updated_at,
-		       line_identities
-		FROM %s.purchase_order_reconciliation_sessions
-		WHERE purchase_order_id = $1 AND org_id = $2 AND active`, schema),
+		SELECT s.id, s.purchase_order_id, s.source_quotation_id, s.source_revision,
+		       p.version, s.active, s.readonly, s.created_by, s.created_at, s.updated_at,
+		       s.line_identities
+		FROM %s.purchase_order_reconciliation_sessions s
+		JOIN %s.purchase_orders p
+		  ON p.id = s.purchase_order_id AND p.org_id = s.org_id
+		WHERE s.purchase_order_id = $1 AND s.org_id = $2 AND s.active`, schema, schema),
 		poID, orgID).Scan(
 		&session.ID, &session.PurchaseOrderID,
 		&session.SourceQuotationID, &sourceRevision,
@@ -444,6 +492,11 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 	if stored.ReadOnly {
 		return POReconciliationSession{}, ErrPOReconciliationReadOnly
 	}
+	if session.ID != stored.ID {
+		return POReconciliationSession{}, fmt.Errorf(
+			"%w: reconciliation session %d is not the active session %d for this purchase order",
+			ErrPurchaseOrderInvalid, session.ID, stored.ID)
+	}
 	if stored.SourceQuotationID != session.SourceQuotationID || stored.SourceRevision != session.SourceRevision {
 		return POReconciliationSession{}, fmt.Errorf("%w: the reconciliation source is fixed for this session",
 			ErrPurchaseOrderInvalid)
@@ -472,9 +525,7 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 	for _, item := range existing {
 		byKey[item.Key] = item
 	}
-	submitted := map[string]bool{}
 	for _, item := range session.Items {
-		submitted[item.Key] = true
 		previous, ok := byKey[item.Key]
 		poValue, err := normalizeReconciliationJSON(item.POValue)
 		if err != nil {
@@ -483,6 +534,11 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 		sourceValue, err := normalizeReconciliationJSON(item.SourceValue)
 		if err != nil {
 			return POReconciliationSession{}, fmt.Errorf("%w: item %q has an invalid value", ErrPurchaseOrderInvalid, item.Key)
+		}
+		// Repeated identical saves are idempotent: no new event, no new
+		// attribution, no history growth (contract section 4).
+		if ok && reconciliationItemUnchanged(previous, item, poValue, sourceValue) {
+			continue
 		}
 		event := POReconciliationHistoryEvent{
 			Kind:          item.Kind,
@@ -526,16 +582,9 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 			return POReconciliationSession{}, fmt.Errorf("save reconciliation item %q: %w", item.Key, err)
 		}
 	}
-	for _, item := range existing {
-		if !submitted[item.Key] {
-			if _, err := tx.Exec(ctx, fmt.Sprintf(`
-				DELETE FROM %s.purchase_order_reconciliation_items
-				WHERE session_id = $1 AND org_id = $2 AND key = $3`, schema),
-				sessionRowID, org.ID, item.Key); err != nil {
-				return POReconciliationSession{}, fmt.Errorf("remove reconciliation item %q: %w", item.Key, err)
-			}
-		}
-	}
+	// Items absent from the submitted array are retained. The client cannot
+	// erase a resolved decision or its history by omission; a removed line is
+	// resolved explicitly as line_removed (contract sections 4-6).
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET updated_by = $3, updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
@@ -550,6 +599,94 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 		return POReconciliationSession{}, err
 	}
 	return updated, nil
+}
+
+// enforceReconciliationFinalGate is the server-side half of the Final Save
+// gate. It refuses while any persisted item is unresolved, and it refuses a
+// resolved choice that disagrees with the decision recomputed from the
+// submitted values. A pre-041 record has no session and is unaffected (R-07).
+func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64, comparison PurchaseOrderComparison, decisions []PurchaseOrderDecision) error {
+	session, _, err := loadReconciliationSession(ctx, q, schema, orgID, poID)
+	if errors.Is(err, ErrPOReconciliationNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	unresolved := 0
+	for _, item := range session.Items {
+		if item.Status == POReconciliationStatusUnresolved {
+			unresolved++
+		}
+	}
+	if unresolved > 0 {
+		return fmt.Errorf("%w: %d reconciliation item(s) are unresolved",
+			ErrPurchaseOrderUnresolvedDifference, unresolved)
+	}
+	chosen := make(map[string]string, len(decisions))
+	for _, decision := range decisions {
+		chosen[decision.Key] = decision.Choice
+	}
+	differing := make(map[string]bool, len(comparison.Differences))
+	for _, difference := range comparison.Differences {
+		differing[difference.Key] = true
+	}
+	for _, item := range session.Items {
+		if item.Resolution == nil || !differing[item.Field] {
+			continue
+		}
+		switch *item.Resolution {
+		case POReconciliationResolutionKeptPO:
+			if chosen[item.Field] != PurchaseOrderChoicePO {
+				return fmt.Errorf("%w: %q was kept from the purchase order but the final save chose otherwise",
+					ErrPurchaseOrderUnresolvedDifference, item.Field)
+			}
+		case POReconciliationResolutionUsedQuote:
+			if chosen[item.Field] != PurchaseOrderChoiceQuotation {
+				return fmt.Errorf("%w: %q was taken from the quotation but the final save chose otherwise",
+					ErrPurchaseOrderUnresolvedDifference, item.Field)
+			}
+		}
+	}
+	return nil
+}
+
+// maxSafeJSONInteger is the largest integer a JavaScript number represents
+// exactly. Values crossing to the desktop are bounded by it (AGENTS.md §10).
+const maxSafeJSONInteger = int64(1<<53 - 1)
+
+func reconciliationItemUnchanged(previous, next POReconciliationItem, poValue, sourceValue json.RawMessage) bool {
+	if previous.Kind != next.Kind || previous.Field != next.Field || previous.Label != next.Label {
+		return false
+	}
+	if !sameOptionalString(previous.LineKey, next.LineKey) ||
+		!sameOptionalString(previous.SourceLineRef, next.SourceLineRef) ||
+		!sameOptionalString(previous.Resolution, next.Resolution) {
+		return false
+	}
+	if previous.Status != next.Status {
+		return false
+	}
+	return reconciliationJSONEqual(previous.POValue, poValue) &&
+		reconciliationJSONEqual(previous.SourceValue, sourceValue)
+}
+
+func sameOptionalString(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func reconciliationJSONEqual(a, b json.RawMessage) bool {
+	var left, right any
+	if err := json.Unmarshal(a, &left); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(b, &right); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 func normalizeReconciliationJSON(raw json.RawMessage) (json.RawMessage, error) {
@@ -568,17 +705,20 @@ func normalizeReconciliationJSON(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	switch value := generic.(type) {
 	case json.Number:
-		if _, err := value.Int64(); err != nil {
-			number, parseErr := value.Float64()
-			if parseErr != nil {
-				return nil, parseErr
+		if integer, err := value.Int64(); err == nil {
+			if integer > maxSafeJSONInteger || integer < -maxSafeJSONInteger {
+				return nil, fmt.Errorf("reconciliation integers must stay within 2^53-1")
 			}
-			if number != float64(int64(number)) {
-				return nil, fmt.Errorf("reconciliation numbers must be integers")
-			}
-			return json.Marshal(int64(number))
+			return json.Marshal(integer)
 		}
-		return json.Marshal(generic)
+		number, parseErr := value.Float64()
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if number != float64(int64(number)) {
+			return nil, fmt.Errorf("reconciliation numbers must be integers")
+		}
+		return json.Marshal(int64(number))
 	default:
 		return json.RawMessage(append([]byte(nil), trimmed...)), nil
 	}

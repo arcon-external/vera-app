@@ -378,7 +378,11 @@ func TestPOReconciliationImmutability(t *testing.T) {
 		Key: "header:paymentTerms", Field: "header:paymentTerms",
 		Kind: POReconciliationKindDifference, Label: "Payment terms",
 		POValue: mustMarshalValue(t, "45 days"), SourceValue: mustMarshalValue(t, "45 days"),
-		Status: POReconciliationStatusUnresolved,
+		// Final Save refuses an unresolved item (P1-1), so the immutability
+		// case starts from a resolved decision. TestPOReconciliationFinalSaveRefusesUnresolved
+		// owns the refusal proof.
+		Status:     POReconciliationStatusResolved,
+		Resolution: strPointer(POReconciliationResolutionKeptPO),
 	}}
 	if _, err := database.SavePOReconciliation(ctx, loaded, user.ID); err != nil {
 		t.Fatalf("save before finalize: %v", err)

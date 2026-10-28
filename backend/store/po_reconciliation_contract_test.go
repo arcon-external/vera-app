@@ -14,6 +14,11 @@ import (
 // item, history, line-identity, discount and tax-basis checks below run
 // against the real store types; only the transient feedback/transition
 // examples stay test-only, because notices are never persisted.
+//
+// P2-12: the generated desktop declarations in frontend/wailsjs/go/models.ts
+// describe nullable fields as optional non-null values. That generator output
+// is not hand-edited; the frontend adapter normalizes null/undefined at the
+// transport seam before the pane sees a session.
 type reconciliationSessionContract = POReconciliationSession
 
 type reconciliationLineIdentityContract = POReconciliationLineIdentity
