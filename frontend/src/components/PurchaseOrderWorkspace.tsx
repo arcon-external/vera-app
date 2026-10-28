@@ -13,6 +13,7 @@ import type { PurchaseOrderDTO } from "../purchaseOrder";
 import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
+import type { ReconciliationTransport } from "../poReconciliationAdapter";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
 import { PurchaseOrderRepairPage } from "./PurchaseOrderRepair";
@@ -76,6 +77,13 @@ export interface PurchaseOrderWorkspacePageProps {
    */
   actionsInShell?: boolean;
   onShellActions?: (actions: POEditorShellActions | null) => void;
+  /**
+   * Ticket 04: the reconciliation backend (defaults to the Wails bindings)
+   * and the attribution for local keep/use decisions.
+   */
+  reconciliationTransport?: ReconciliationTransport;
+  actorId?: number;
+  actorName?: string;
 }
 
 /**
@@ -141,6 +149,9 @@ export function PurchaseOrderWorkspacePage({
   onDirtyChange,
   actionsInShell = false,
   onShellActions,
+  reconciliationTransport,
+  actorId,
+  actorName,
 }: PurchaseOrderWorkspacePageProps) {
   const { draft, phase } = workspace;
 
@@ -180,6 +191,9 @@ export function PurchaseOrderWorkspacePage({
           onCancel={onCancel}
           actionsInShell={actionsInShell}
           onShellActions={onShellActions}
+          reconciliationTransport={reconciliationTransport}
+          actorId={actorId}
+          actorName={actorName}
         />
       );
     }
@@ -288,6 +302,9 @@ export function PurchaseOrderWorkspacePage({
       onCancel={onCancel}
       actionsInShell={actionsInShell}
       onShellActions={onShellActions}
+      reconciliationTransport={reconciliationTransport}
+      actorId={actorId}
+      actorName={actorName}
     />
   );
 }

@@ -10,55 +10,15 @@ import {
   initialPurchaseOrderEditorState,
 } from "./purchaseOrder";
 
-// Test-only wire declarations until ticket 04 exposes production DTOs. These
-// checks pin shape and fixtures, not an as-yet unimplemented commit handler.
-interface Session {
-  ID: number;
-  PurchaseOrderID: number;
-  SourceQuotationID: number;
-  SourceRevision: number;
-  POVersion: number;
-  Active: boolean;
-  ReadOnly: boolean;
-  CreatedBy: number;
-  CreatedAt: string;
-  UpdatedAt: string;
-  LineIdentities: LineIdentity[];
-  Items: Item[];
-}
-
-interface LineIdentity {
-  Key: string;
-  ID: number | null;
-  Removed: boolean;
-}
-
-interface Item {
-  Key: string;
-  Field: string;
-  Kind: string;
-  LineKey: string | null;
-  SourceLineRef: string | null;
-  Label: string;
-  POValue: unknown;
-  SourceValue: unknown;
-  Status: string;
-  Resolution: string | null;
-  ActorID: number;
-  UpdatedAt: string;
-  History: HistoryEvent[];
-}
-
-interface HistoryEvent {
-  Kind: string;
-  SourceLineRef: string | null;
-  POValue: unknown;
-  SourceValue: unknown;
-  Status: string;
-  Resolution: string | null;
-  ActorID: number;
-  At: string;
-}
+// Ticket 04 binds the former test-only wire declarations to the production
+// DTOs in ./poReconciliation: these checks pin shape and fixtures, not an
+// as-yet unimplemented commit handler.
+import type {
+  ReconciliationHistoryEvent as HistoryEvent,
+  ReconciliationItem as Item,
+  ReconciliationLineIdentity as LineIdentity,
+  ReconciliationSession as Session,
+} from "./poReconciliation";
 
 interface Discount { Enabled: boolean; Percent: number }
 interface TaxBasis { TaxZone: string; TaxType: string; ServiceCategory: string }

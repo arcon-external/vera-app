@@ -36,6 +36,7 @@ import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
+import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
 import {
   DeletionChallengePanel,
   DeletionDialogView,
@@ -898,6 +899,69 @@ const PO_LIST_NO_MATCH: POListState = {  ...initialPOListStateFor("archive"),
 };
 
 
+// Ticket 04: one unresolved header difference, one kept resolution and the
+// link-time tax basis, as the pane shows them mid-reconciliation.
+const PO_RECONCILIATION_SESSION = {
+  ID: 3,
+  PurchaseOrderID: 7,
+  SourceQuotationID: 12,
+  SourceRevision: 2,
+  POVersion: 4,
+  Active: true,
+  ReadOnly: false,
+  CreatedBy: 7,
+  CreatedAt: "2026-10-26T10:00:00Z",
+  UpdatedAt: "2026-10-28T00:00:05Z",
+  LineIdentities: [],
+  Items: [
+    {
+      Key: "header:paymentTerms",
+      Field: "header:paymentTerms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Payment terms",
+      POValue: "50% advance, balance 30 days",
+      SourceValue: "30 days from invoice",
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "header:incoterms",
+      Field: "header:incoterms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Incoterms",
+      POValue: "CIF",
+      SourceValue: "CIF",
+      Status: "resolved",
+      Resolution: "kept_po",
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:01Z",
+      History: [],
+    },
+    {
+      Key: "link:taxBasis",
+      Field: "link:taxBasis",
+      Kind: "tax_basis",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Tax basis",
+      POValue: "FTZ · Goods",
+      SourceValue: "FTZ · Goods",
+      Status: "resolved",
+      Resolution: "kept_po",
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:00Z",
+      History: [],
+    },
+  ],
+};
+
 // The issued-Quotation detail header (#467 wave 2): the second PO entry path
 // beside Edit, with the revision picker present because this quotation has
 // three issued revisions. Only the header is rendered; the page fetches its
@@ -1519,6 +1583,91 @@ const CASES: SnapshotCase[] = [
         onOpen={() => undefined}
         onAdd={() => undefined}
         onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // Ticket 04: the two-pane editor composition: form column plus the
+    // sticky rail at 1024 and above, the sheet trigger below. The pane
+    // content is the same component in both places; only the layout wrapper
+    // changes with the breakpoint.
+    name: "PurchaseOrderEditorTwoPane",
+    element: (
+      <>
+        <ReconciliationSheetTrigger
+          unresolvedCount={1}
+          sourceLabel="QT-2026-018 · revision 02"
+          expanded={false}
+          onOpen={() => undefined}
+        />
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="flex min-w-0 flex-col gap-6">
+            <div className="rounded-xl border border-rule bg-white p-5">
+              <p className="text-small font-medium text-ink-900">Order details</p>
+              <div className="mt-3 h-10 animate-pulse rounded-md bg-paper-muted" />
+              <div className="mt-3 h-10 animate-pulse rounded-md bg-paper-muted" />
+            </div>
+          </div>
+          <aside
+            aria-label="Reconciliation"
+            className="hidden min-h-0 lg:sticky lg:top-[88px] lg:block lg:max-h-[calc(100dvh-176px)] lg:flex-col"
+          >
+            <ReconciliationPaneContent
+              idPrefix="harness-twopane"
+              session={PO_RECONCILIATION_SESSION}
+              status="ready"
+              error={null}
+              sourceLabel="QT-2026-018 · revision 02"
+              sourceRevision={2}
+              noSource={false}
+              formerSource={false}
+              readOnly={false}
+              filter="all"
+              onFilterChange={() => undefined}
+              onShowAll={() => undefined}
+              latestNotice={null}
+              keepConfirmKey={null}
+              onRequestKeep={() => undefined}
+              onCancelKeep={() => undefined}
+              onConfirmKeep={() => undefined}
+              onUse={() => undefined}
+              onRetry={() => undefined}
+              actorNameFor={() => null}
+            />
+          </aside>
+        </div>
+      </>
+    ),
+  },
+  {
+    // Ticket 04: the live reconciliation pane with an unresolved difference,
+    // a kept resolution and the link-time tax basis. Unresolved first, then
+    // resolved; the count reads 1 to resolve. What this case cannot show is
+    // committing, keep/use and the Final Save gate: those are interaction and
+    // stay in the DOM suite and hand-driven review.
+    name: "PurchaseOrderReconciliationPane",
+    element: (
+      <ReconciliationPaneContent
+        idPrefix="harness"
+        session={PO_RECONCILIATION_SESSION}
+        status="ready"
+        error={null}
+        sourceLabel="QT-2026-018 · revision 02"
+        sourceRevision={2}
+        noSource={false}
+        formerSource={false}
+        readOnly={false}
+        filter="all"
+        onFilterChange={() => undefined}
+        onShowAll={() => undefined}
+        latestNotice={null}
+        keepConfirmKey={null}
+        onRequestKeep={() => undefined}
+        onCancelKeep={() => undefined}
+        onConfirmKeep={() => undefined}
+        onUse={() => undefined}
+        onRetry={() => undefined}
+        actorNameFor={() => null}
       />
     ),
   },

@@ -2479,10 +2479,14 @@ function App() {
           <>
             <div className="flex min-w-0 items-center gap-2">
               <span className="text-caption text-ink-500">
-                {poShellActions.dirty ? "Unsaved changes" : "All changes saved"}
-                {poShellActions.sourceLess
-                  ? " · Link a Quotation before Final Save."
-                  : ""}
+                {poShellActions.blockedMessage ?? (
+                  <>
+                    {poShellActions.dirty ? "Unsaved changes" : "All changes saved"}
+                    {poShellActions.sourceLess
+                      ? " · Link a Quotation before Final Save."
+                      : ""}
+                  </>
+                )}
               </span>
             </div>
             <div className="ml-auto flex items-center gap-2.5">
@@ -2506,17 +2510,29 @@ function App() {
                 <Button
                   variant="primary"
                   aria-label="Final Save"
+                  aria-disabled={
+                    poShellActions.unresolvedCount > 0 ? true : undefined
+                  }
                   disabled={
-                    poShellActions.saving ||
-                    poShellActions.reviewLoading ||
-                    poShellActions.sourceLess
+                    poShellActions.unresolvedCount === 0 &&
+                    (poShellActions.saving ||
+                      poShellActions.reviewLoading ||
+                      poShellActions.sourceLess)
                   }
                   title={
-                    poShellActions.sourceLess
-                      ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
-                      : undefined
+                    poShellActions.unresolvedCount > 0
+                      ? poShellActions.blockedMessage ?? undefined
+                      : poShellActions.sourceLess
+                        ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
+                        : undefined
                   }
-                  onClick={() => poShellActions?.onFinalSave()}
+                  onClick={() => {
+                    if (poShellActions.unresolvedCount > 0) {
+                      poShellActions.onBlockedActivate();
+                    } else {
+                      poShellActions?.onFinalSave();
+                    }
+                  }}
                 >
                   {poShellActions.reviewLoading ? "Loading review…" : "Final Save"}
                 </Button>
@@ -2600,6 +2616,8 @@ function App() {
           onDirtyChange={poLeave.setDirty}
           actionsInShell
           onShellActions={setPoShellActions}
+          actorId={user?.ID ?? 0}
+          actorName={user?.DisplayName ?? "You"}
         />
         </div>
       ) : null}
