@@ -60,12 +60,17 @@ export interface PurchaseOrderListPageProps {
 export interface PurchaseOrderListViewProps {
   state: POListState;
   dispatch: (action: POListAction) => void;
-  onOpen: (id: number) => void;
+  /**
+   * Opens one row by id. May return a promise the row awaits: while it is
+   * pending the row's Open button reads "Opening…" and is disabled; a
+   * rejection re-enables it and the caller shows the failure.
+   */
+  onOpen: (id: number) => void | Promise<unknown>;
   onAdd: () => void;
   onRetry: () => void;
   /** Pins the stored state to one tab; absent keeps the State control. */
   mode?: POListMode;
-  /** Present only for an admin; absent renders no delete control at all. */
+  /** Present only for an admin; absent renders no ⋯ menu column at all. */
   onDelete?: (row: POListRowDTO) => void;
 }
 
@@ -102,6 +107,118 @@ function SourceMissingBadge() {
   );
 }
 
+const RECEIVED_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * Ticket 03: the docket's received date. A real YYYY-MM-DD calendar date
+ * reads `2 Oct 2026`; anything else (blank, unparsable) renders as-is so a
+ * missing date is never invented. Exported for the list suite.
+ */
+export function formatReceivedDate(raw: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (match === null) return raw;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return raw;
+  }
+  return `${day} ${RECEIVED_MONTHS[month - 1]} ${year}`;
+}
+
+/**
+ * Ticket 03: one row's admin menu. The destructive action lives here, never
+ * beside Open: one "⋯" trigger, one danger menu item, Escape and outside
+ * pointer close it and return focus. Non-admins never render this component
+ * (or its table column), not a disabled copy of it.
+ */
+function RowMenu({ label, onDelete }: { label: string; onDelete: () => void }) {
+  const [open, setOpen] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (groupRef.current?.contains(event.target as Node) !== true) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open ]);
+
+  const close = () => {
+    setOpen(false);
+    groupRef.current?.querySelector("button")?.focus();
+  };
+
+  return (
+    <div
+      ref={groupRef}
+      className="relative inline-flex"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.preventDefault();
+          close();
+        }
+      }}
+    >
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-11 w-11 px-0 lg:h-auto lg:w-8"
+        aria-label={`More actions for purchase order ${label}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span aria-hidden="true" className="text-lead leading-none">
+          ⋯
+        </span>
+      </Button>
+      {open ? (
+        <div
+          role="menu"
+          aria-label={`More actions for purchase order ${label}`}
+          className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-lg border border-rule bg-white py-1 shadow-pop"
+        >
+          <button
+            type="button"
+            role="menuitem"
+            aria-label={`Delete purchase order ${label}`}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-small text-danger-600 transition-colors hover:bg-danger-50 focus-visible:outline-hidden focus-visible:bg-danger-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger-500/40"
+          >
+            Delete purchase order…
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function PurchaseOrderListView({
   state,
   dispatch,
@@ -116,6 +233,33 @@ export function PurchaseOrderListView({
     activeFilterCount(state.filters) -
     (pinnedState !== null && state.filters.state !== "" ? 1 : 0);
   const filtered = filterCount > 0;
+  // Ticket 03: the filter panel collapses below 1024. Its open state is local
+  // UI state, so the keep-alive from ticket 02 restores it (with the chips)
+  // exactly after a settings round-trip.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // One row opening at a time. Set on activation, cleared when the open
+  // settles; a rejection re-enables the button and the caller toasts.
+  const [openingId, setOpeningId] = useState<number | null>(null);
+  const showAdmin = onDelete !== undefined;
+
+  const openRow = (id: number) => {
+    if (openingId !== null) return;
+    setOpeningId(id);
+    const done = () => setOpeningId(null);
+    try {
+      const result = onOpen(id);
+      if (
+        result !== null &&
+        typeof (result as Promise<unknown>).then === "function"
+      ) {
+        void (result as Promise<unknown>).then(done, done);
+      } else {
+        done();
+      }
+    } catch {
+      done();
+    }
+  };
   const heading =
     mode === "drafts"
       ? "Draft purchase orders"
@@ -142,6 +286,67 @@ export function PurchaseOrderListView({
       : mode === "archive"
         ? "Saved records appear here after a draft is finalized."
         : "Start one from an issued quotation revision.";
+
+  // Ticket 03: removable chips under search below 1024. The pinned tab state
+  // is the tab, never a chip.
+  const chips: { key: string; label: string; clear: () => void }[] = [];
+  const searchText = state.filters.search.trim();
+  if (searchText !== "") {
+    chips.push({
+      key: "search",
+      label: searchText,
+      clear: () => dispatch({ type: "filtersChanged", patch: { search: "" } }),
+    });
+  }
+  const receivedFrom = state.filters.receivedFrom.trim();
+  const receivedTo = state.filters.receivedTo.trim();
+  if (receivedFrom !== "" || receivedTo !== "") {
+    chips.push({
+      key: "received",
+      label:
+        receivedFrom !== "" && receivedTo !== ""
+          ? `Received ${formatReceivedDate(receivedFrom)}–${formatReceivedDate(receivedTo)}`
+          : receivedFrom !== ""
+            ? `Received from ${formatReceivedDate(receivedFrom)}`
+            : `Received to ${formatReceivedDate(receivedTo)}`,
+      clear: () =>
+        dispatch({
+          type: "filtersChanged",
+          patch: { receivedFrom: "", receivedTo: "" },
+        }),
+    });
+  }
+  if (state.filters.sourceMissing !== "any") {
+    chips.push({
+      key: "source",
+      label:
+        state.filters.sourceMissing === "only"
+          ? "Source missing only"
+          : "Source present only",
+      clear: () =>
+        dispatch({
+          type: "filtersChanged",
+          patch: { sourceMissing: "any" },
+        }),
+    });
+  }
+  for (const customerId of state.filters.customerIds) {
+    const customer = state.customers.find((entry) => entry.ID === customerId);
+    chips.push({
+      key: `customer-${customerId}`,
+      label: `Customer: ${customer?.Name ?? `#${customerId}`}`,
+      clear: () =>
+        dispatch({
+          type: "filtersChanged",
+          patch: {
+            customerIds: state.filters.customerIds.filter(
+              (id) => id !== customerId
+            ),
+          },
+        }),
+    });
+  }
+
   return (
     <section aria-labelledby="po-list-heading" className="flex flex-col gap-5">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -164,12 +369,8 @@ export function PurchaseOrderListView({
       </header>
 
       <Card className="p-4">
-        <div
-          className={`grid gap-4 sm:grid-cols-2 ${
-            pinnedState === null ? "xl:grid-cols-5" : "xl:grid-cols-4"
-          }`}
-        >
-          <label className="grid gap-1.5 sm:col-span-2">
+        <div className="flex items-end gap-3">
+          <label className="grid min-w-0 flex-1 gap-1.5">
             <span className="text-small font-medium text-ink-700">
               Search purchase orders
             </span>
@@ -187,6 +388,56 @@ export function PurchaseOrderListView({
               }
             />
           </label>
+          <Button
+            aria-label={filtersOpen ? "Hide filters" : "Show filters"}
+            aria-expanded={filtersOpen}
+            aria-controls="po-list-filters"
+            onClick={() => setFiltersOpen((current) => !current)}
+            className="shrink-0 lg:hidden"
+          >
+            Filters
+            {filterCount > 0 ? (
+              <span
+                className="tnum flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent-100 px-1 text-[11px] font-semibold leading-none text-accent-800"
+                aria-label={`${filterCount} active`}
+              >
+                {filterCount > 99 ? "99+" : filterCount}
+              </span>
+            ) : null}
+          </Button>
+        </div>
+        {chips.length > 0 ? (
+          <ul
+            aria-label="Active filters"
+            className="mt-3 flex flex-wrap gap-2 lg:hidden"
+          >
+            {chips.map((chip) => (
+              <li key={chip.key}>
+                <button
+                  type="button"
+                  aria-label={`Remove ${chip.label} filter`}
+                  onClick={chip.clear}
+                  className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-rule bg-white px-3 text-small text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+                >
+                  <span className="max-w-44 truncate">{chip.label}</span>
+                  <span aria-hidden="true" className="text-ink-400">
+                    ×
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div
+          id="po-list-filters"
+          className={filtersOpen ? "lg:block" : "hidden lg:block"}
+        >
+          <div
+            className={`mt-4 grid gap-4 sm:grid-cols-2 ${
+              pinnedState === null ? "xl:grid-cols-5" : "xl:grid-cols-4"
+            }`}
+          >
           {pinnedState === null ? (
             <div className="grid gap-1.5">
               <span className="text-small font-medium text-ink-700">State</span>
@@ -316,18 +567,35 @@ export function PurchaseOrderListView({
             </Button>
           </div>
         </div>
+        </div>
       </Card>
 
       <Card className="overflow-hidden">
         {state.loading && state.rows.length === 0 ? (
-          <div className="space-y-3 p-6" aria-label="Loading purchase orders">
-            {[0, 1, 2, 3].map((item) => (
-              <div
-                key={item}
-                className="h-12 animate-pulse rounded-lg bg-paper-muted"
-              />
-            ))}
-          </div>
+          <>
+            <div
+              className="hidden space-y-3 p-6 lg:block"
+              aria-label="Loading purchase orders"
+            >
+              {[0, 1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="h-12 animate-pulse rounded-lg bg-paper-muted"
+                />
+              ))}
+            </div>
+            <div
+              className="flex flex-col gap-3 p-4 lg:hidden"
+              aria-label="Loading purchase orders"
+            >
+              {[0, 1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="h-12 animate-pulse rounded-lg bg-paper-muted"
+                />
+              ))}
+            </div>
+          </>
         ) : state.error !== null ? (
           <div className="flex flex-col items-center gap-3 px-6 py-14 text-center">
             <p role="alert" className="max-w-md text-body text-danger-700">
@@ -362,95 +630,194 @@ export function PurchaseOrderListView({
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto scroll-thin">
-            <table className="w-full min-w-[900px] text-left text-body">
-              <caption className="sr-only">Purchase orders</caption>
-              <thead>
-                <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
-                  <th className="px-5 py-3 font-medium">Customer PO</th>
-                  <th className="px-4 py-3 font-medium">Quotation</th>
-                  <th className="px-4 py-3 font-medium">Customer</th>
-                  <th className="px-4 py-3 font-medium">Received</th>
-                  <th className="px-4 py-3 font-medium">State</th>
-                  <th className="px-5 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-rule">
-                {state.rows.map((row) => {
-                  const openable = canOpenRow(row);
-                  return (
-                    <tr
-                      key={row.ID}
-                      className="transition-colors duration-150 hover:bg-paper-subtle/60"
-                    >
-                      <td className="px-5 py-3 align-middle">
-                        <span
-                          className={`tnum text-body font-medium ${
-                            row.PONumber.trim() === ""
-                              ? "text-ink-400"
-                              : "text-ink-900"
-                          }`}
-                        >
-                          {poNumberLabel(row)}
-                        </span>
-                        <p className="mt-0.5 text-caption uppercase text-ink-400">
-                          {row.Currency}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 align-middle">
-                        <span className="tnum text-body text-ink-700">
-                          {quotationCellLabel(row)}
-                        </span>
-                        <p className="text-caption text-ink-400">
-                          {sourceRevisionLabel(row)}
-                        </p>
-                        {row.SourceMissing ? <SourceMissingBadge /> : null}
-                      </td>
-                      <td className="px-4 py-3 align-middle text-body text-ink-700">
-                        {customerCellLabel(row)}
-                      </td>
-                      <td className="tnum whitespace-nowrap px-4 py-3 align-middle text-body text-ink-700">
-                        {row.ReceivedDate}
-                      </td>
-                      <td className="px-4 py-3 align-middle">
-                        <Badge tone={row.State === "draft" ? "accent" : "success"}>
-                          {row.State === "draft" ? "Draft" : "Saved"}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3 text-right align-middle">
-                        <span className="inline-flex items-center gap-1.5">
+          <>
+            <div
+              className={`hidden lg:block ${state.loading ? "opacity-60" : ""}`}
+              aria-busy={state.loading || undefined}
+            >
+              <table className="w-full table-fixed text-left text-body">
+                <caption className="sr-only">Purchase orders</caption>
+                <thead>
+                  <tr className="h-10 border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
+                    <th className="w-[24%] px-5 py-3 font-medium">
+                      Customer PO
+                    </th>
+                    <th className="w-[26%] px-4 py-3 font-medium">
+                      Quotation
+                    </th>
+                    <th className="w-[22%] px-4 py-3 font-medium">Customer</th>
+                    <th className="w-[14%] px-4 py-3 font-medium">Received</th>
+                    <th className="w-[9%] px-4 py-3 font-medium">State</th>
+                    <th className="w-20 px-4 py-3">
+                      <span className="sr-only">Open</span>
+                    </th>
+                    {showAdmin ? (
+                      <th className="w-12 py-3 pl-0 pr-4">
+                        <span className="sr-only">More actions</span>
+                      </th>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rule">
+                  {state.rows.map((row) => {
+                    const openable = canOpenRow(row);
+                    const opening = openingId === row.ID;
+                    return (
+                      <tr
+                        key={row.ID}
+                        className="h-14 transition-colors duration-150 hover:bg-paper-subtle/60"
+                      >
+                        <td className="px-5 py-3 align-middle">
+                          <span
+                            className={`tnum text-body font-medium ${
+                              row.PONumber.trim() === ""
+                                ? "text-ink-400"
+                                : "text-ink-900"
+                            }`}
+                          >
+                            {poNumberLabel(row)}
+                          </span>
+                          <p className="mt-0.5 text-micro uppercase text-ink-400">
+                            {row.Currency}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <span className="tnum block truncate text-body text-ink-700">
+                            {quotationCellLabel(row)}
+                          </span>
+                          <p className="text-caption text-ink-400">
+                            {sourceRevisionLabel(row)}
+                          </p>
+                          {row.SourceMissing ? <SourceMissingBadge /> : null}
+                        </td>
+                        <td className="px-4 py-3 align-middle text-body text-ink-700">
+                          <span className="block max-w-full truncate">
+                            {customerCellLabel(row)}
+                          </span>
+                        </td>
+                        <td className="tnum whitespace-nowrap px-4 py-3 align-middle text-body text-ink-700">
+                          {formatReceivedDate(row.ReceivedDate)}
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <Badge
+                            tone={row.State === "draft" ? "accent" : "success"}
+                          >
+                            {row.State === "draft" ? "Draft" : "Saved"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 align-middle">
                           <Button
-                            size="sm"
+                            size="xs"
+                            className="h-8 w-16 px-0"
                             aria-label={`Open purchase order ${poNumberLabel(row)}`}
-                            disabled={!openable}
+                            disabled={!openable || opening}
                             title={
                               row.State === "draft"
                                 ? "Open this draft"
                                 : "Open this saved purchase order (read-only)"
                             }
-                            onClick={() => onOpen(row.ID)}
+                            onClick={() => openRow(row.ID)}
                           >
-                            Open
+                            {opening ? "Opening…" : "Open"}
                           </Button>
-                          {onDelete !== undefined ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`Delete purchase order ${poNumberLabel(row)}`}
-                              className="hover:!bg-danger-50 hover:!text-danger-600"
-                              onClick={() => onDelete(row)}
-                            >
-                              Delete
-                            </Button>
-                          ) : null}
+                        </td>
+                        {showAdmin ? (
+                          <td className="py-3 pl-0 pr-4 align-middle">
+                            <div className="border-l border-rule pl-4">
+                              <RowMenu
+                                label={poNumberLabel(row)}
+                                onDelete={() => onDelete?.(row)}
+                              />
+                            </div>
+                          </td>
+                        ) : null}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <ul
+              className={`flex flex-col gap-3 p-4 lg:hidden ${state.loading ? "opacity-60" : ""}`}
+              aria-busy={state.loading || undefined}
+              aria-label="Purchase orders"
+            >
+              {state.rows.map((row) => {
+                const openable = canOpenRow(row);
+                const opening = openingId === row.ID;
+                return (
+                  <li key={row.ID}>
+                    <article
+                      aria-label={`Purchase order ${poNumberLabel(row)}`}
+                      className="rounded-lg border border-rule bg-white p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <span
+                            className={`tnum text-body font-medium ${
+                              row.PONumber.trim() === ""
+                                ? "text-ink-400"
+                                : "text-ink-900"
+                            }`}
+                          >
+                            {poNumberLabel(row)}
+                          </span>
+                          <span className="text-micro uppercase text-ink-400">
+                            {row.Currency}
+                          </span>
+                          <Badge
+                            tone={row.State === "draft" ? "accent" : "success"}
+                          >
+                            {row.State === "draft" ? "Draft" : "Saved"}
+                          </Badge>
+                        </div>
+                        {showAdmin ? (
+                          <span className="shrink-0">
+                            <RowMenu
+                              label={poNumberLabel(row)}
+                              onDelete={() => onDelete?.(row)}
+                            />
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-1.5 text-body text-ink-700">
+                        {customerCellLabel(row)}
+                      </p>
+                      <p className="mt-0.5 text-small text-ink-700">
+                        <span className="tnum">{quotationCellLabel(row)}</span>
+                        <span className="text-ink-400">
+                          {" "}
+                          · {sourceRevisionLabel(row)}
                         </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </p>
+                      {row.SourceMissing ? (
+                        <p className="mt-1">
+                          <SourceMissingBadge />
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-caption text-ink-500">
+                        Received {formatReceivedDate(row.ReceivedDate)}
+                      </p>
+                      <Button
+                        variant="secondary"
+                        aria-label={`Open purchase order ${poNumberLabel(row)}`}
+                        disabled={!openable || opening}
+                        title={
+                          row.State === "draft"
+                            ? "Open this draft"
+                            : "Open this saved purchase order (read-only)"
+                        }
+                        onClick={() => openRow(row.ID)}
+                        className="mt-3 min-h-11 w-full"
+                      >
+                        {opening ? "Opening…" : "Open"}
+                      </Button>
+                    </article>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </Card>
 
@@ -461,7 +828,7 @@ export function PurchaseOrderListView({
             {state.total === 1 ? "order" : "orders"} · page {state.page} of{" "}
             {state.totalPages}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 [&_button]:max-lg:min-h-11">
             <Button
               aria-label="Previous page"
               disabled={state.loading || state.page <= 1}

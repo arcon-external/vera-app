@@ -13,6 +13,7 @@ import {
 } from "../poList";
 import {
   PurchaseOrderListView,
+  formatReceivedDate,
   type PurchaseOrderListViewProps,
 } from "./PurchaseOrderListPage";
 
@@ -161,7 +162,10 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     expect(html).toContain("1502260012");
     expect(html).toContain("1503260004");
     expect(html).toContain("PT. H-Tech Oilfield Equipment, NOV XL Systems");
-    expect(html).toContain("2026-10-02");
+    // Ticket 03: the docket reads a formatted calendar date, not the raw
+    // YYYY-MM-DD the server sends.
+    expect(html).toContain("2 Oct 2026");
+    expect(html).not.toContain("2026-10-02");
     expect(html).toContain(">Draft<");
     expect(html).toContain(">Saved<");
     expect(html).toContain("2 purchase orders");
@@ -321,7 +325,7 @@ describe("PurchaseOrderListView states (issue #469)", () => {
     expect(html).not.toContain("Delete purchase order");
   });
 
-  it("offers the admin delete entry point without changing the row's Open control", () => {
+  it("offers the admin delete entry point in its own menu, never beside Open", () => {
     const html = render({
       state: state({
         rows: [row()],
@@ -330,8 +334,24 @@ describe("PurchaseOrderListView states (issue #469)", () => {
       }),
       onDelete: () => undefined,
     });
-    expect(html).toContain('aria-label="Delete purchase order PO-INF-2026-091"');
+    // Ticket 03: one Open action per row; Delete lives in the separate ⋯
+    // menu, which is closed in the initial markup.
     expect(html).toContain('aria-label="Open purchase order PO-INF-2026-091"');
+    expect(html).toContain(
+      'aria-label="More actions for purchase order PO-INF-2026-091"'
+    );
+    expect(html).not.toContain('aria-label="Delete purchase order ');
+    expect(html).not.toContain(">Delete</button>");
+
+    const plain = render({
+      state: state({
+        rows: [row()],
+        total: 1,
+        totalPages: 1,
+      }),
+    });
+    expect(plain).not.toContain("More actions for purchase order");
+    expect(plain).toContain('aria-label="Open purchase order PO-INF-2026-091"');
   });
 
   it("lists the customer facet and marks the selected customers", () => {
@@ -462,5 +482,62 @@ describe("PurchaseOrderListView fixture sanity (issue #469)", () => {
       TotalPages: 1,
     };
     expect(page.PurchaseOrders[0].SourceMissing).toBe(false);
+  });
+});
+
+describe("PurchaseOrderListView dockets (ticket 03)", () => {
+  it("renders one table without a min-width scroller and no amount anywhere", () => {
+    const html = render({
+      state: state({ rows: [row()], total: 1, totalPages: 1 }),
+    });
+    expect(html).toContain("<table");
+    // No horizontal-scroll escape hatch at 1024: the table wraps instead.
+    expect(html).not.toContain("min-w-[900px]");
+    expect(html).not.toContain("overflow-x-auto");
+    // No amount, margin or totals column: money stays out of the list.
+    expect(html).not.toContain("GrandTotal");
+    expect(html).not.toContain("Subtotal");
+    expect(html).not.toContain("Rp");
+  });
+
+  it("renders one card per row below 1024 with the same actions", () => {
+    const html = render({
+      state: state({ rows: [row()], total: 1, totalPages: 1 }),
+    });
+    expect(html).toContain('aria-label="Purchase order PO-INF-2026-091"');
+    expect(html).toContain("Received 2 Oct 2026");
+    expect(html).toContain("PT. Infineon Technologies Batam");
+    // The card's Open is full width; the table's Open is a fixed small button.
+    expect(html).toContain("min-h-11 w-full");
+  });
+
+  it("collapses the filters behind a toggle with removable chips", () => {
+    const html = render({
+      mode: "drafts",
+      state: state({
+        filters: {
+          ...initialPOListFilters,
+          search: "ACME",
+          receivedFrom: "2026-10-01",
+          receivedTo: "2026-10-31",
+          customerIds: [2],
+        },
+        customers: [{ ID: 2, Name: "PT. Infineon Technologies Batam" }],
+      }),
+    });
+    expect(html).toContain('aria-label="Show filters"');
+    expect(html).toContain('id="po-list-filters"');
+    expect(html).toContain(">ACME<");
+    expect(html).toContain("Received 1 Oct 2026–31 Oct 2026");
+    expect(html).toContain("Customer: PT. Infineon Technologies Batam");
+    expect(html).toContain("Remove ACME filter");
+  });
+
+  it("formats the received date and never invents one", () => {
+    expect(formatReceivedDate("2026-10-02")).toBe("2 Oct 2026");
+    expect(formatReceivedDate("2026-01-31")).toBe("31 Jan 2026");
+    expect(formatReceivedDate("")).toBe("");
+    expect(formatReceivedDate("not a date")).toBe("not a date");
+    expect(formatReceivedDate("2026-02-30")).toBe("2026-02-30");
   });
 });
