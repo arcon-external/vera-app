@@ -187,18 +187,20 @@ type POSourceOccupancyResponse struct {
 // own calculation. They are returned, not recomputed, so a reopened order shows
 // the arithmetic it was saved with.
 type PurchaseOrderItemRow struct {
-	QuotationItemNo *int   `json:"quotationItemNo"`
-	QuotationSubNo  *int   `json:"quotationSubNo"`
-	LineNumber      int    `json:"lineNumber"`
-	Description     string `json:"description"`
-	QuantityScaled  int64  `json:"quantityScaled"`
-	UoM             string `json:"uom"`
-	UnitPriceMinor  int64  `json:"unitPriceMinor"`
-	DiscountEnabled bool   `json:"discountEnabled"`
-	DiscountPercent int16  `json:"discountPercent"`
-	GrossMinor      int64  `json:"grossMinor"`
-	DiscountMinor   int64  `json:"discountMinor"`
-	NetMinor        int64  `json:"netMinor"`
+	QuotationItemNo *int    `json:"quotationItemNo"`
+	QuotationSubNo  *int    `json:"quotationSubNo"`
+	ID              int64   `json:"id"`
+	ClientKey       *string `json:"clientKey"`
+	LineNumber      int     `json:"lineNumber"`
+	Description     string  `json:"description"`
+	QuantityScaled  int64   `json:"quantityScaled"`
+	UoM             string  `json:"uom"`
+	UnitPriceMinor  int64   `json:"unitPriceMinor"`
+	DiscountEnabled bool    `json:"discountEnabled"`
+	DiscountPercent int16   `json:"discountPercent"`
+	GrossMinor      int64   `json:"grossMinor"`
+	DiscountMinor   int64   `json:"discountMinor"`
+	NetMinor        int64   `json:"netMinor"`
 }
 
 // PurchaseOrderRow is one PO draft or saved record. Dates are plain
@@ -407,14 +409,16 @@ type PurchaseOrderCreateRequest struct {
 // the server from array order, so drafts always carry 1..n without gaps. A row
 // discount mirrors the quotation's: a flag plus a 0-100 percentage.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo *int   `json:"quotationItemNo"`
-	QuotationSubNo  *int   `json:"quotationSubNo"`
-	Description     string `json:"description"`
-	QuantityScaled  int64  `json:"quantityScaled"`
-	UoM             string `json:"uom"`
-	UnitPriceMinor  int64  `json:"unitPriceMinor"`
-	DiscountEnabled bool   `json:"discountEnabled"`
-	DiscountPercent int16  `json:"discountPercent"`
+	QuotationItemNo *int    `json:"quotationItemNo"`
+	QuotationSubNo  *int    `json:"quotationSubNo"`
+	ID              *int64  `json:"id"`
+	ClientKey       *string `json:"clientKey"`
+	Description     string  `json:"description"`
+	QuantityScaled  int64   `json:"quantityScaled"`
+	UoM             string  `json:"uom"`
+	UnitPriceMinor  int64   `json:"unitPriceMinor"`
+	DiscountEnabled bool    `json:"discountEnabled"`
+	DiscountPercent int16   `json:"discountPercent"`
 }
 
 // PurchaseOrderUpdateRequest replaces the editable draft fields. Source,

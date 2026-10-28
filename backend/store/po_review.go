@@ -553,17 +553,18 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		return PurchaseOrder{}, err
 	}
 
-	comparison := ComparePurchaseOrder(source, PurchaseOrderReviewState{
+	entered := PurchaseOrderReviewState{
 		PaymentTerms:    input.PaymentTerms,
 		Incoterms:       input.Incoterms,
 		DiscountPercent: input.DiscountPercent,
 		Lines:           lines,
-	})
+	}
+	comparison := ComparePurchaseOrder(source, entered)
 	if err := ValidatePurchaseOrderDecisions(
 		comparison, input.Decisions, input.AcknowledgedMissing, input.AcknowledgedExtra); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := enforceReconciliationFinalGate(ctx, tx, schema, org.ID, input.ID, comparison, input.Decisions); err != nil {
+	if err := enforceReconciliationFinalGate(ctx, tx, schema, org.ID, input.ID, comparison, input.Decisions, entered, source); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -659,7 +660,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if tag.RowsAffected() != 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
-	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 

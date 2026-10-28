@@ -221,6 +221,13 @@ func validateReconciliationSessionInput(session POReconciliationSession) error {
 		if err := validateReconciliationHeaderValue(item); err != nil {
 			return err
 		}
+		// Totals stay derived: the store records no derived:totals item, and
+		// the mismatch reason belongs to the frontend check strip, which
+		// names the first differing input in document order (R-09). The
+		// refusal above is the whole of the store-side boundary.
+		if err := validateReconciliationLineItemShape(item); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -269,30 +276,33 @@ func validateReconciliationHeaderValue(item POReconciliationItem) error {
 }
 
 // createReconciliationSessionTx installs the active session for one exact
-// source revision. The link-time tax item (contract section 6) is seeded by
-// #517; this slice records the session shell only.
-func createReconciliationSessionTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID, quotationID int64, revision int16, revisionID int64, generation int, createdBy, poVersion int64) error {
+// source revision and returns its id. Line identities and the link-time tax
+// item are seeded by the caller (#517): creation seeds from the inserted
+// rows, linking seeds from the linked draft's rows.
+func createReconciliationSessionTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID, quotationID int64, revision int16, revisionID int64, generation int, createdBy, poVersion int64) (int64, error) {
 	lineIdentities, err := json.Marshal([]POReconciliationLineIdentity{})
 	if err != nil {
-		return fmt.Errorf("encode reconciliation line identities: %w", err)
+		return 0, fmt.Errorf("encode reconciliation line identities: %w", err)
 	}
 	var revisionIDParam any
 	if revisionID > 0 {
 		revisionIDParam = revisionID
 	}
-	_, err = q.Exec(ctx, fmt.Sprintf(`
+	var sessionID int64
+	err = q.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO %s.purchase_order_reconciliation_sessions (
 			org_id, purchase_order_id, source_quotation_id, source_revision,
 			source_revision_id, generation, active, readonly, po_version,
 			line_identities, created_by
-		) VALUES ($1,$2,$3,$4,$5,$6,TRUE,FALSE,$7,$8,$9)`, schema),
+		) VALUES ($1,$2,$3,$4,$5,$6,TRUE,FALSE,$7,$8,$9)
+		RETURNING id`, schema),
 		orgID, poID, quotationID, revision, revisionIDParam, generation,
 		poVersion, lineIdentities, createdBy,
-	)
+	).Scan(&sessionID)
 	if err != nil {
-		return fmt.Errorf("create reconciliation session for purchase order %d: %w", poID, err)
+		return 0, fmt.Errorf("create reconciliation session for purchase order %d: %w", poID, err)
 	}
-	return nil
+	return sessionID, nil
 }
 
 // deactivateReconciliationSessionsTx retires the active session before a new
@@ -506,8 +516,27 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 		return POReconciliationSession{}, fmt.Errorf("%w: the reconciliation source is fixed for this session",
 			ErrPurchaseOrderInvalid)
 	}
+	// The link-time tax basis is read-only context after linking: the
+	// generic writer refuses any mutation and never mints a tax item.
+	if err := checkReconciliationTaxItemsUnchanged(stored.Items, session.Items); err != nil {
+		return POReconciliationSession{}, err
+	}
+	liveRows, err := loadPurchaseOrderLineAliases(ctx, tx, schema, session.PurchaseOrderID)
+	if err != nil {
+		return POReconciliationSession{}, err
+	}
+	// The server owns the line mapping: submitted LineIdentities are
+	// informational only. References resolve against the stored identities
+	// plus the live rows, binding rows the stored set never recorded.
+	identities, err := resolveReconciliationIdentities(stored.LineIdentities, liveRows, session.Items)
+	if err != nil {
+		return POReconciliationSession{}, err
+	}
+	if err := checkReconciliationRemovedItems(identities, session.Items); err != nil {
+		return POReconciliationSession{}, err
+	}
 	now := time.Now().UTC()
-	lineIdentities, err := json.Marshal(session.LineIdentities)
+	lineIdentities, err := json.Marshal(identities)
 	if err != nil {
 		return POReconciliationSession{}, fmt.Errorf("encode reconciliation line identities: %w", err)
 	}
@@ -607,10 +636,15 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 }
 
 // enforceReconciliationFinalGate is the server-side half of the Final Save
-// gate. It refuses while any persisted item is unresolved, and it refuses a
-// resolved choice that disagrees with the decision recomputed from the
-// submitted values. A pre-041 record has no session and is unaffected (R-07).
-func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64, comparison PurchaseOrderComparison, decisions []PurchaseOrderDecision) error {
+// gate (#502, tickets 04-05). It refuses while any persisted item is
+// unresolved, binds every persisted difference decision to the value actually
+// submitted (a previously kept value is not authority for a newly edited
+// one), and checks every line-set outcome against the recomputed comparison:
+// missing and extra lines need a current acknowledgement or correction,
+// duplicates block, and an unknown non-null source reference must be
+// corrected (R-02) — acknowledgement alone never clears it. A pre-041 record
+// has no session and is unaffected (R-07).
+func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64, comparison PurchaseOrderComparison, decisions []PurchaseOrderDecision, entered PurchaseOrderReviewState, source PurchaseOrderSource) error {
 	session, _, err := loadReconciliationSession(ctx, q, schema, orgID, poID)
 	if errors.Is(err, ErrPOReconciliationNotFound) {
 		return nil
@@ -618,15 +652,57 @@ func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier,
 	if err != nil {
 		return err
 	}
-	unresolved := 0
 	for _, item := range session.Items {
 		if item.Status == POReconciliationStatusUnresolved {
-			unresolved++
+			return fmt.Errorf("%w: reconciliation item %q is unresolved",
+				ErrPurchaseOrderUnresolvedDifference, item.Key)
 		}
 	}
-	if unresolved > 0 {
-		return fmt.Errorf("%w: %d reconciliation item(s) are unresolved",
-			ErrPurchaseOrderUnresolvedDifference, unresolved)
+	identities := make(map[string]*int64, len(session.LineIdentities))
+	removed := make(map[string]bool, len(session.LineIdentities))
+	for index := range session.LineIdentities {
+		identity := &session.LineIdentities[index]
+		identities[identity.Key] = identity.ID
+		if identity.Removed {
+			removed[identity.Key] = true
+		}
+	}
+	linesByID := make(map[int64]PurchaseOrderItem, len(entered.Lines))
+	linesByNumber := make(map[int]PurchaseOrderItem, len(entered.Lines))
+	for _, line := range entered.Lines {
+		linesByID[line.ID] = line
+		linesByNumber[line.LineNumber] = line
+	}
+	rowOf := func(lineKey string) (PurchaseOrderItem, bool) {
+		id, ok := identities[lineKey]
+		if !ok || id == nil {
+			return PurchaseOrderItem{}, false
+		}
+		line, ok := linesByID[*id]
+		return line, ok
+	}
+	numberOf := func(lineKey string) (int, bool) {
+		line, ok := rowOf(lineKey)
+		if !ok {
+			return 0, false
+		}
+		return line.LineNumber, true
+	}
+	missingLabels := make(map[string]bool, len(comparison.Missing))
+	for _, line := range comparison.Missing {
+		missingLabels[line.Label()] = true
+	}
+	extraNumbers := make(map[int]bool, len(comparison.ExtraLineNumbers))
+	for _, number := range comparison.ExtraLineNumbers {
+		extraNumbers[number] = true
+	}
+	duplicateNumbers := make(map[int]bool, len(comparison.DuplicateLineNumbers))
+	for _, number := range comparison.DuplicateLineNumbers {
+		duplicateNumbers[number] = true
+	}
+	sourceLabels := make(map[string]bool, len(source.Lines))
+	for _, line := range source.Lines {
+		sourceLabels[line.Label()] = true
 	}
 	chosen := make(map[string]string, len(decisions))
 	for _, decision := range decisions {
@@ -636,57 +712,243 @@ func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier,
 	for _, difference := range comparison.Differences {
 		differing[difference.Key] = difference
 	}
+	var poTriple, sourceTriple POReconciliationTaxBasis
+	var triples bool
+	tripleOf := func() (POReconciliationTaxBasis, POReconciliationTaxBasis) {
+		if triples {
+			return poTriple, sourceTriple
+		}
+		triples = true
+		var zone, taxType, service, legacy string
+		if err := q.QueryRow(ctx, fmt.Sprintf(`
+			SELECT tax_zone, tax_type, service_category, tax_category
+			FROM %s.purchase_orders WHERE id = $1`, schema),
+			poID).Scan(&zone, &taxType, &service, &legacy); err == nil {
+			poTriple = reconciliationTaxTriple(zone, taxType, service, legacy)
+		}
+		sourceTriple = reconciliationTaxTriple(source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
+		return poTriple, sourceTriple
+	}
 	for _, item := range session.Items {
 		if item.Resolution == nil {
 			continue
 		}
-		difference, differs := differing[item.Field]
-		switch *item.Resolution {
-		case POReconciliationResolutionKeptPO:
-			if !differs {
+		resolution := *item.Resolution
+		switch item.Kind {
+		case POReconciliationKindDifference:
+			if resolution == POReconciliationResolutionRemoved {
+				if item.LineKey == nil || !removed[*item.LineKey] {
+					return fmt.Errorf("%w: reconciliation item %q is resolved as removed without a removed line",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
 				continue
 			}
-			if chosen[item.Field] != PurchaseOrderChoicePO {
-				return fmt.Errorf("%w: %q was kept from the purchase order but the final save chose otherwise",
-					ErrPurchaseOrderUnresolvedDifference, item.Field)
+			submitted, ok := reconciliationSubmittedValue(item, entered, rowOf, tripleOf)
+			if !ok {
+				return fmt.Errorf("%w: the recorded decision for %q no longer matches a submitted line",
+					ErrPurchaseOrderUnresolvedDifference, item.Key)
 			}
-			// The frozen receipt must describe the value actually saved. A
-			// recorded decision for an older value is stale, even when the
-			// final choice is the same.
-			if !reconciliationItemValueMatches(item, difference.POValue) {
-				return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
-					ErrPurchaseOrderUnresolvedDifference, item.Field)
+			positional := reconciliationPositionalKey(item, numberOf)
+			_, differs := differing[positional]
+			switch resolution {
+			case POReconciliationResolutionKeptPO:
+				if !differs {
+					continue
+				}
+				if chosen[positional] != PurchaseOrderChoicePO {
+					return fmt.Errorf("%w: %q was kept from the purchase order but the final save chose otherwise",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+				if !reconciliationJSONEqual(canonicalStoredValue(item), submitted) {
+					return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			case POReconciliationResolutionUsedQuote:
+				if !differs {
+					continue
+				}
+				if chosen[positional] != PurchaseOrderChoiceQuotation {
+					return fmt.Errorf("%w: %q was taken from the quotation but the final save chose otherwise",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+				if !reconciliationJSONEqual(canonicalStoredValue(item), submitted) {
+					return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			case POReconciliationResolutionMatched:
+				if differs {
+					return fmt.Errorf("%w: reconciliation item %q claims the values match, but %q still differs",
+						ErrPurchaseOrderUnresolvedDifference, item.Key, positional)
+				}
 			}
-		case POReconciliationResolutionUsedQuote:
-			if differs && chosen[item.Field] != PurchaseOrderChoiceQuotation {
-				return fmt.Errorf("%w: %q was taken from the quotation but the final save chose otherwise",
-					ErrPurchaseOrderUnresolvedDifference, item.Field)
+		case POReconciliationKindMissingLine:
+			reference := valueOrEmpty(item.SourceLineRef)
+			switch resolution {
+			case POReconciliationResolutionAckMiss:
+				if !missingLabels[reference] {
+					return fmt.Errorf("%w: reconciliation item %q acknowledges a line that is no longer missing",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			case POReconciliationResolutionCorrected:
+				if missingLabels[reference] {
+					return fmt.Errorf("%w: reconciliation item %q claims a corrected match, but quotation line %s is still missing",
+						ErrPurchaseOrderUnresolvedDifference, item.Key, reference)
+				}
 			}
+		case POReconciliationKindExtraLine:
+			if item.LineKey == nil {
+				return fmt.Errorf("%w: reconciliation item %q names no line", ErrPurchaseOrderUnresolvedDifference, item.Key)
+			}
+			number, ok := numberOf(*item.LineKey)
+			switch resolution {
+			case POReconciliationResolutionAckExtra:
+				if !ok || !extraNumbers[number] {
+					return fmt.Errorf("%w: reconciliation item %q acknowledges a line that is no longer extra",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+				if reference := extraLineReference(item); reference != "" && !sourceLabels[reference] {
+					return fmt.Errorf("%w: line %d references an unknown quotation line %q; correct the reference instead of acknowledging it",
+						ErrPurchaseOrderUnresolvedDifference, number, reference)
+				}
+			case POReconciliationResolutionCorrected:
+				if ok && extraNumbers[number] {
+					return fmt.Errorf("%w: reconciliation item %q claims a corrected match, but line %d is still extra",
+						ErrPurchaseOrderUnresolvedDifference, item.Key, number)
+				}
+			case POReconciliationResolutionRemoved:
+				if !removed[*item.LineKey] {
+					return fmt.Errorf("%w: reconciliation item %q is resolved as removed without a removed line",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			}
+		case POReconciliationKindDuplicateMatch:
+			if item.LineKey == nil {
+				return fmt.Errorf("%w: reconciliation item %q names no line", ErrPurchaseOrderUnresolvedDifference, item.Key)
+			}
+			switch resolution {
+			case POReconciliationResolutionCorrected:
+				if number, ok := numberOf(*item.LineKey); ok && duplicateNumbers[number] {
+					return fmt.Errorf("%w: reconciliation item %q claims a corrected match, but line %d still duplicates another",
+						ErrPurchaseOrderUnresolvedDifference, item.Key, number)
+				}
+			case POReconciliationResolutionRemoved:
+				if !removed[*item.LineKey] {
+					return fmt.Errorf("%w: reconciliation item %q is resolved as removed without a removed line",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			}
+		case POReconciliationKindTaxBasis:
+			po, src := tripleOf()
+			poRaw, _ := json.Marshal(po)
+			srcRaw, _ := json.Marshal(src)
+			switch resolution {
+			case POReconciliationResolutionKeptPO:
+				if !reconciliationJSONEqual(poRaw, item.POValue) {
+					return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			case POReconciliationResolutionUsedQuote:
+				if !reconciliationJSONEqual(srcRaw, item.SourceValue) || !reconciliationJSONEqual(poRaw, srcRaw) {
+					return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
+						ErrPurchaseOrderUnresolvedDifference, item.Key)
+				}
+			}
+		}
+	}
+	// An unknown non-null source reference must be corrected (R-02), even
+	// when an acknowledgement decision names the line: acknowledgement alone
+	// never clears it. The reference validator normally refuses these first;
+	// this names the blocker in reconciliation terms.
+	for _, number := range comparison.ExtraLineNumbers {
+		line, ok := linesByNumber[number]
+		if !ok {
+			continue
+		}
+		if reference := purchaseOrderLineReference(line); reference != nil && !sourceLabels[*reference] {
+			return fmt.Errorf("%w: line %d references an unknown quotation line %q; correct the reference instead of acknowledging it",
+				ErrPurchaseOrderUnresolvedDifference, number, *reference)
 		}
 	}
 	return nil
 }
 
-// reconciliationItemValueMatches binds a persisted header decision to the
-// value the final save submits. Only the header slice is frozen here; the
-// line and tax decisions arrive with #517.
-func reconciliationItemValueMatches(item POReconciliationItem, submitted string) bool {
-	switch item.Field {
-	case "header:paymentTerms", "header:incoterms":
-		var text string
-		if err := json.Unmarshal(item.POValue, &text); err != nil {
-			return false
-		}
-		return strings.TrimSpace(text) == submitted
-	case "header:discountPercent":
-		var percent int
-		if err := json.Unmarshal(item.POValue, &percent); err != nil {
-			return false
-		}
-		return fmt.Sprintf("%d%%", percent) == submitted
-	default:
-		return true
+// reconciliationPositionalKey renders the comparison key for an item: header
+// and tax keys travel as-is, line items resolve through the submitted order.
+func reconciliationPositionalKey(item POReconciliationItem, numberOf func(string) (int, bool)) string {
+	suffix, ok := lineItemKeySuffix(item.Field)
+	if !ok || item.LineKey == nil {
+		return item.Key
 	}
+	number, ok := numberOf(*item.LineKey)
+	if !ok {
+		return item.Key
+	}
+	return "line:" + strconv.Itoa(number) + ":" + suffix
+}
+
+// reconciliationSubmittedValue renders the submitted value for a difference
+// item in canonical stored form. The second result is false when the item's
+// line is absent from the submission.
+func reconciliationSubmittedValue(item POReconciliationItem, entered PurchaseOrderReviewState, rowOf func(string) (PurchaseOrderItem, bool), tripleOf func() (POReconciliationTaxBasis, POReconciliationTaxBasis)) (json.RawMessage, bool) {
+	switch item.Field {
+	case "header:paymentTerms":
+		raw, err := json.Marshal(strings.TrimSpace(entered.PaymentTerms))
+		if err != nil {
+			return nil, false
+		}
+		return raw, true
+	case "header:incoterms":
+		raw, err := json.Marshal(strings.TrimSpace(entered.Incoterms))
+		if err != nil {
+			return nil, false
+		}
+		return raw, true
+	case "header:discountPercent":
+		raw, err := json.Marshal(entered.DiscountPercent)
+		if err != nil {
+			return nil, false
+		}
+		return raw, true
+	case "link:taxBasis":
+		po, _ := tripleOf()
+		raw, err := json.Marshal(po)
+		if err != nil {
+			return nil, false
+		}
+		return raw, true
+	}
+	if item.LineKey == nil {
+		return nil, false
+	}
+	line, ok := rowOf(*item.LineKey)
+	if !ok {
+		return nil, false
+	}
+	raw, err := canonicalReconciliationLineValue(item.Field, line)
+	if err != nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+// canonicalStoredValue canonicalizes a persisted item value the same way the
+// submitted side is canonicalized, so dormant editor state (a disabled
+// discount's percentage) never reads as a new difference.
+func canonicalStoredValue(item POReconciliationItem) json.RawMessage {
+	if item.Field == "line:discount" {
+		return canonicalReconciliationStoredDiscount(item.POValue)
+	}
+	return item.POValue
+}
+
+// extraLineReference reads the claimed reference off an extra-line item: a
+// null purchase-order value is a line with no reference at all.
+func extraLineReference(item POReconciliationItem) string {
+	var reference string
+	if err := json.Unmarshal(item.POValue, &reference); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(reference)
 }
 
 // maxSafeJSONInteger is the largest integer a JavaScript number represents
