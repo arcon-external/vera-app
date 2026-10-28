@@ -144,6 +144,32 @@ AS $reconciliation_guard$
 DECLARE
     po_state TEXT;
 BEGIN
+    IF TG_OP = 'INSERT' THEN
+        -- The source pair must name a real revision, even when the revision
+        -- pointer is NULL (a nullable composite FK skips validation).
+        IF NOT EXISTS (
+            SELECT 1 FROM {{schema}}.quotation_revisions
+            WHERE quotation_id = NEW.source_quotation_id
+              AND revision_number = NEW.source_revision
+        ) THEN
+            RAISE EXCEPTION
+                'source revision %/% does not exist', NEW.source_quotation_id, NEW.source_revision
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'UPDATE'
+       AND (NEW.source_quotation_id IS DISTINCT FROM OLD.source_quotation_id
+            OR NEW.source_revision IS DISTINCT FROM OLD.source_revision)
+       AND NOT EXISTS (
+            SELECT 1 FROM {{schema}}.quotation_revisions
+            WHERE quotation_id = NEW.source_quotation_id
+              AND revision_number = NEW.source_revision
+       ) THEN
+        RAISE EXCEPTION
+            'source revision %/% does not exist', NEW.source_quotation_id, NEW.source_revision
+            USING ERRCODE = '23514';
+    END IF;
     IF TG_OP = 'DELETE' THEN
         -- Whole-chain PO deletion cascades here after the parent row is
         -- gone; that is the only delete path that may remove a session.
@@ -246,7 +272,7 @@ $reconciliation_guard$;
 DROP TRIGGER IF EXISTS purchase_order_reconciliation_sessions_guard_trigger
     ON {{schema}}.purchase_order_reconciliation_sessions;
 CREATE TRIGGER purchase_order_reconciliation_sessions_guard_trigger
-    BEFORE UPDATE OR DELETE ON {{schema}}.purchase_order_reconciliation_sessions
+    BEFORE INSERT OR UPDATE OR DELETE ON {{schema}}.purchase_order_reconciliation_sessions
     FOR EACH ROW
     EXECUTE FUNCTION {{schema}}.purchase_order_reconciliation_session_guard();
 
@@ -302,6 +328,23 @@ BEGIN
                 USING ERRCODE = '23514';
         END IF;
         RETURN OLD;
+    END IF;
+    -- An UPDATE can retarget the row at another session/PO. The destination
+    -- must be mutable even when the old parent was.
+    SELECT s.readonly INTO session_readonly
+    FROM {{schema}}.purchase_order_reconciliation_sessions s WHERE s.id = NEW.session_id;
+    IF FOUND AND session_readonly THEN
+        RAISE EXCEPTION
+            'purchase order reconciliation session % is read-only; it cannot gain items',
+            NEW.session_id
+            USING ERRCODE = '23514';
+    END IF;
+    SELECT state INTO po_state FROM {{schema}}.purchase_orders WHERE id = NEW.purchase_order_id;
+    IF FOUND AND po_state = 'saved' THEN
+        RAISE EXCEPTION
+            'purchase order % is saved; its reconciliation session cannot gain items',
+            NEW.purchase_order_id
+            USING ERRCODE = '23514';
     END IF;
     SELECT s.readonly INTO session_readonly
     FROM {{schema}}.purchase_order_reconciliation_sessions s WHERE s.id = OLD.session_id;

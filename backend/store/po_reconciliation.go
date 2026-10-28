@@ -243,10 +243,15 @@ func validateReconciliationHeaderValue(item POReconciliationItem) error {
 			if len(raw) == 0 || string(raw) == "null" {
 				continue
 			}
-			var number json.Number
+			var generic any
 			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.UseNumber()
-			if err := decoder.Decode(&number); err != nil {
+			if err := decoder.Decode(&generic); err != nil {
+				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
+			}
+			number, ok := generic.(json.Number)
+			if !ok {
+				// A quoted number ("10") or a bool/object is not a percent.
 				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
 			}
 			text := number.String()
@@ -627,28 +632,61 @@ func enforceReconciliationFinalGate(ctx context.Context, q purchaseOrderQuerier,
 	for _, decision := range decisions {
 		chosen[decision.Key] = decision.Choice
 	}
-	differing := make(map[string]bool, len(comparison.Differences))
+	differing := make(map[string]PurchaseOrderDifference, len(comparison.Differences))
 	for _, difference := range comparison.Differences {
-		differing[difference.Key] = true
+		differing[difference.Key] = difference
 	}
 	for _, item := range session.Items {
-		if item.Resolution == nil || !differing[item.Field] {
+		if item.Resolution == nil {
 			continue
 		}
+		difference, differs := differing[item.Field]
 		switch *item.Resolution {
 		case POReconciliationResolutionKeptPO:
+			if !differs {
+				continue
+			}
 			if chosen[item.Field] != PurchaseOrderChoicePO {
 				return fmt.Errorf("%w: %q was kept from the purchase order but the final save chose otherwise",
 					ErrPurchaseOrderUnresolvedDifference, item.Field)
 			}
+			// The frozen receipt must describe the value actually saved. A
+			// recorded decision for an older value is stale, even when the
+			// final choice is the same.
+			if !reconciliationItemValueMatches(item, difference.POValue) {
+				return fmt.Errorf("%w: the recorded decision for %q no longer matches the value submitted for final save",
+					ErrPurchaseOrderUnresolvedDifference, item.Field)
+			}
 		case POReconciliationResolutionUsedQuote:
-			if chosen[item.Field] != PurchaseOrderChoiceQuotation {
+			if differs && chosen[item.Field] != PurchaseOrderChoiceQuotation {
 				return fmt.Errorf("%w: %q was taken from the quotation but the final save chose otherwise",
 					ErrPurchaseOrderUnresolvedDifference, item.Field)
 			}
 		}
 	}
 	return nil
+}
+
+// reconciliationItemValueMatches binds a persisted header decision to the
+// value the final save submits. Only the header slice is frozen here; the
+// line and tax decisions arrive with #517.
+func reconciliationItemValueMatches(item POReconciliationItem, submitted string) bool {
+	switch item.Field {
+	case "header:paymentTerms", "header:incoterms":
+		var text string
+		if err := json.Unmarshal(item.POValue, &text); err != nil {
+			return false
+		}
+		return strings.TrimSpace(text) == submitted
+	case "header:discountPercent":
+		var percent int
+		if err := json.Unmarshal(item.POValue, &percent); err != nil {
+			return false
+		}
+		return fmt.Sprintf("%d%%", percent) == submitted
+	default:
+		return true
+	}
 }
 
 // maxSafeJSONInteger is the largest integer a JavaScript number represents
@@ -705,20 +743,20 @@ func normalizeReconciliationJSON(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	switch value := generic.(type) {
 	case json.Number:
-		if integer, err := value.Int64(); err == nil {
-			if integer > maxSafeJSONInteger || integer < -maxSafeJSONInteger {
-				return nil, fmt.Errorf("reconciliation integers must stay within 2^53-1")
-			}
-			return json.Marshal(integer)
-		}
-		number, parseErr := value.Float64()
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		if number != float64(int64(number)) {
+		text := value.String()
+		// Only a plain integer is a valid stored number. A decimal or an
+		// exponent can hide a value outside JavaScript's exact range.
+		if strings.ContainsAny(text, ".eE") {
 			return nil, fmt.Errorf("reconciliation numbers must be integers")
 		}
-		return json.Marshal(int64(number))
+		integer, err := value.Int64()
+		if err != nil {
+			return nil, err
+		}
+		if integer > maxSafeJSONInteger || integer < -maxSafeJSONInteger {
+			return nil, fmt.Errorf("reconciliation integers must stay within 2^53-1")
+		}
+		return json.Marshal(integer)
 	default:
 		return json.RawMessage(append([]byte(nil), trimmed...)), nil
 	}
