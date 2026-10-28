@@ -250,11 +250,40 @@ describe("purchase order matching", () => {
     expect(comparison.duplicateLineNumbers).toEqual([2]);
   });
 
+  it("names an unknown non-null reference even when acknowledged (R-02)", () => {
+    const base = order();
+    const state = stateFrom(
+      order({
+        Items: [
+          { ...base.Items[0], QuotationItemNo: 99, QuotationSubNo: null },
+          base.Items[1],
+        ],
+      })
+    );
+    const comparison = comparePurchaseOrder(state, SOURCE, USD);
+    expect(comparison.extraLineNumbers).toEqual([1]);
+
+    const unacknowledged = evaluateReview(state, SOURCE, USD, {}, [], []);
+    expect(unacknowledged.canContinue).toBe(false);
+    expect(unacknowledged.blockers.join("\n")).toContain(
+      "Line 1 names quotation line 99, which does not exist"
+    );
+
+    // An acknowledgement records the decision but never clears the unknown
+    // reference: Final Save stays blocked until the match is corrected.
+    const acknowledged = evaluateReview(state, SOURCE, USD, {}, [], [1]);
+    expect(acknowledged.canContinue).toBe(false);
+    expect(acknowledged.blockers.join("\n")).toContain(
+      "Line 1 names quotation line 99, which does not exist"
+    );
+  });
+
   it("suggests an exact description or the same price, unit and quantity only", () => {
     const candidate = SOURCE.Lines[0];
     const exact = suggestSourceLine(
       {
         key: 1,
+        clientKey: "client:test-1",
         description: "  widget ",
         quantity: "9",
         uom: "Box",
@@ -272,6 +301,7 @@ describe("purchase order matching", () => {
     const sameMoney = suggestSourceLine(
       {
         key: 1,
+        clientKey: "client:test-1",
         description: "Unrelated wording",
         quantity: "2",
         uom: "pc",
@@ -289,6 +319,7 @@ describe("purchase order matching", () => {
     const unrelated = suggestSourceLine(
       {
         key: 1,
+        clientKey: "client:test-1",
         description: "Freight",
         quantity: "1",
         uom: "Lot",

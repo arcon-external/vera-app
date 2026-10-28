@@ -57,6 +57,7 @@ import {
   PurchaseOrderSourceLinkPanel,
 } from "./PurchaseOrderSourceLinkPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
+import { ReconciliationTotalsStrip } from "./ReconciliationTotalsStrip";
 import { Select } from "./Select";
 import {
   SERVICE_CATEGORY_OPTIONS,
@@ -72,6 +73,13 @@ import {
   type ReconciliationItem,
   type ReconciliationSourceValues,
 } from "../poReconciliation";
+import {
+  explainTotalsDifference,
+  headerDiscountDifference,
+  lineMoneyDifferences,
+  sourceLineRef,
+  type LineField,
+} from "../poReconciliation.lines";
 import {
   wailsReconciliationTransport,
   type ReconciliationTransport,
@@ -134,6 +142,17 @@ export interface PurchaseOrderEditorViewProps {
   onCommitField?: (field: HeaderFieldKey) => void;
   onFocusField?: (field: HeaderFieldKey) => void;
   onShowItem?: (key: string) => void;
+  /**
+   * Ticket 05: line reconciliation wiring. Match choices come from the
+   * linked source; blur commits each line field; feedback keys are
+   * `clientKey:field`. Absent in harnesses without a source.
+   */
+  matchOptions?: { value: string; label: string }[];
+  onMatchChange?: (lineKey: string, quotationItemNo: number | null, quotationSubNo: number | null) => void;
+  onCommitLine?: (lineKey: string, field: LineField) => void;
+  lineNotices?: Record<string, CommitNotice | null>;
+  lineErrors?: Record<string, string | null>;
+  unresolvedByLineField?: Record<string, ReconciliationItem | null>;
   /**
    * Ticket 04: the Final Save gate also applies to the standalone footer.
    * When unresolved items block, the button stays focusable with
@@ -473,6 +492,13 @@ export function PurchaseOrderLineRow({
   uomOptions,
   calculation,
   dispatch,
+  matchOptions,
+  onMatchChange,
+  onCommitLine,
+  lineNotices,
+  lineErrors,
+  unresolvedByLineField,
+  onShowItem,
 }: {
   line: PurchaseOrderEditorState["lines"][number];
   index: number;
@@ -480,7 +506,28 @@ export function PurchaseOrderLineRow({
   uomOptions: CompanyUnitOption[];
   calculation: PurchaseOrderLineCalculation | null;
   dispatch: (action: PurchaseOrderEditorAction) => void;
+  /** Quotation match choices; absent when no source is linked. */
+  matchOptions?: { value: string; label: string }[];
+  onMatchChange?: (quotationItemNo: number | null, quotationSubNo: number | null) => void;
+  /** Blur-commit of one line field; absent when reconciliation is off. */
+  onCommitLine?: (field: LineField) => void;
+  lineNotices?: Record<string, CommitNotice | null>;
+  lineErrors?: Record<string, string | null>;
+  unresolvedByLineField?: Record<string, ReconciliationItem | null>;
+  onShowItem?: (key: string) => void;
 }) {
+  const feedbackKey = (field: LineField) => `${line.clientKey}:${field}`;
+  const feedback = (field: LineField, label: string) => (
+    <HeaderFieldFeedback
+      fieldKey={feedbackKey(field)}
+      label={label}
+      notice={lineNotices?.[feedbackKey(field)] ?? null}
+      validationError={lineErrors?.[feedbackKey(field)] ?? null}
+      unresolvedItem={unresolvedByLineField?.[feedbackKey(field)] ?? null}
+      onShowItem={onShowItem}
+    />
+  );
+  const commit = (field: LineField) => () => onCommitLine?.(field);
   return (
     <div
       className="grid gap-3 rounded-lg border border-rule bg-white p-3 sm:grid-cols-[minmax(0,1fr)_120px_140px_170px_auto] sm:items-end"
@@ -501,10 +548,37 @@ export function PurchaseOrderLineRow({
               patch: { description: event.target.value },
             })
           }
+          onBlur={commit("description")}
         />
-        <span className="text-caption text-ink-400">
-          {matchLabel(line.quotationItemNo, line.quotationSubNo)}
-        </span>
+        {matchOptions !== undefined && onMatchChange !== undefined ? (
+          <Select
+            ariaLabel={`Line ${index + 1} quotation match`}
+            value={
+              line.quotationItemNo === null
+                ? ""
+                : line.quotationSubNo === null
+                  ? String(line.quotationItemNo)
+                  : `${line.quotationItemNo}.${line.quotationSubNo}`
+            }
+            options={matchOptions}
+            onChange={(value) => {
+              const text = String(value);
+              if (text === "") {
+                onMatchChange(null, null);
+                return;
+              }
+              const [head, tail] = text.split(".");
+              const itemNo = Number(head);
+              if (!Number.isInteger(itemNo) || itemNo < 1) return;
+              onMatchChange(itemNo, tail === undefined ? null : Number(tail));
+            }}
+          />
+        ) : (
+          <span className="text-caption text-ink-400">
+            {matchLabel(line.quotationItemNo, line.quotationSubNo)}
+          </span>
+        )}
+        {feedback("description", `Line ${index + 1} description`)}
       </label>
       <label className="grid gap-1.5">
         <span className="text-small font-medium text-ink-700">Quantity</span>
@@ -520,7 +594,9 @@ export function PurchaseOrderLineRow({
               patch: { quantity: event.target.value },
             })
           }
+          onBlur={commit("quantity")}
         />
+        {feedback("quantity", `Line ${index + 1} quantity`)}
       </label>
       <div className="grid gap-1.5">
         <span className="text-small font-medium text-ink-700">UoM</span>
@@ -528,14 +604,16 @@ export function PurchaseOrderLineRow({
           ariaLabel={`Line ${index + 1} unit of measure`}
           value={line.uom}
           options={uomOptions.length > 0 ? uomOptions : [{ value: line.uom, label: line.uom || "—" }]}
-          onChange={(value) =>
+          onChange={(value) => {
             dispatch({
               type: "lineChanged",
               key: line.key,
               patch: { uom: String(value) },
-            })
-          }
+            });
+            onCommitLine?.("uom");
+          }}
         />
+        {feedback("uom", `Line ${index + 1} unit of measure`)}
       </div>
       <label className="grid gap-1.5">
         <span className="text-small font-medium text-ink-700">
@@ -553,7 +631,9 @@ export function PurchaseOrderLineRow({
               patch: { unitPrice: event.target.value },
             })
           }
+          onBlur={commit("unitPrice")}
         />
+        {feedback("unitPrice", `Line ${index + 1} unit price`)}
       </label>
       <Button
         size="sm"
@@ -568,13 +648,14 @@ export function PurchaseOrderLineRow({
             type="checkbox"
             aria-label={`Line ${index + 1} discount enabled`}
             checked={line.discountEnabled}
-            onChange={(event) =>
+            onChange={(event) => {
               dispatch({
                 type: "lineChanged",
                 key: line.key,
                 patch: { discountEnabled: event.target.checked },
-              })
-            }
+              });
+              onCommitLine?.("discount");
+            }}
           />
           Row discount
         </label>
@@ -592,9 +673,11 @@ export function PurchaseOrderLineRow({
                 patch: { discountPercent: event.target.value },
               })
             }
+            onBlur={commit("discount")}
           />
           <span className="text-small text-ink-500">%</span>
         </div>
+        {feedback("discount", `Line ${index + 1} discount`)}
         <span className="ml-auto tnum whitespace-nowrap text-small text-ink-700">
           {calculation === null
             ? "Line total —"
@@ -623,7 +706,7 @@ function HeaderFieldFeedback({
   unresolvedItem,
   onShowItem,
 }: {
-  fieldKey: HeaderFieldKey;
+  fieldKey: string;
   label: string;
   notice: CommitNotice | undefined;
   validationError: string | null | undefined;
@@ -694,6 +777,12 @@ export function PurchaseOrderEditorView({
   onCommitField,
   onFocusField,
   onShowItem,
+  matchOptions,
+  onMatchChange,
+  onCommitLine,
+  lineNotices,
+  lineErrors,
+  unresolvedByLineField,
   gateUnresolvedCount = 0,
   gateBlockedMessage = null,
   onBlockedActivate,
@@ -1072,6 +1161,22 @@ export function PurchaseOrderEditorView({
                 uomOptions={uomOptions}
                 calculation={calculation.lines[index] ?? null}
                 dispatch={dispatch}
+                matchOptions={matchOptions}
+                onMatchChange={
+                  onMatchChange === undefined
+                    ? undefined
+                    : (quotationItemNo, quotationSubNo) =>
+                        onMatchChange(line.clientKey, quotationItemNo, quotationSubNo)
+                }
+                onCommitLine={
+                  onCommitLine === undefined
+                    ? undefined
+                    : (field) => onCommitLine(line.clientKey, field)
+                }
+                lineNotices={lineNotices}
+                lineErrors={lineErrors}
+                unresolvedByLineField={unresolvedByLineField}
+                onShowItem={onShowItem}
               />
             ))
           )}
@@ -1311,6 +1416,8 @@ export function PurchaseOrderEditorPage({
   // keep step and announcements. The editor owns the form values; the hook
   // only reads them at commit time and writes them back on Use Quotation.
   const [compareSource, setCompareSource] = useState<ReconciliationSourceValues | null>(null);
+  // Ticket 05: source lines for line matching; loaded with the scalars.
+  const [compareLines, setCompareLines] = useState<PurchaseOrderSourceLineDTO[] | null>(null);
   const [sessionBannerError, setSessionBannerError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const sheetTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -1331,6 +1438,24 @@ export function PurchaseOrderEditorPage({
     poVersion: state.version,
     readOnly: correcting,
     source: compareSource,
+    sourceLines: compareLines,
+    lines: state.lines.map((line, index) => ({
+      clientKey: line.clientKey,
+      persistedId: line.persistedId,
+      dtoAlias: line.persistedClientKey,
+      displayNumber: index + 1,
+      quotationItemNo: line.quotationItemNo,
+      quotationSubNo: line.quotationSubNo,
+      values: {
+        description: line.description,
+        uom: line.uom,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        discountEnabled: line.discountEnabled,
+        discountPercent: line.discountPercent,
+      },
+    })),
+    currency: activeCurrency,
     actor: { id: actorId, name: actorName },
     getFieldValue: (field) =>
       field === "header:paymentTerms"
@@ -1345,6 +1470,24 @@ export function PurchaseOrderEditorPage({
         dispatch({ type: "headerChanged", patch: { incoterms: String(value) } });
       } else {
         dispatch({ type: "headerChanged", patch: { discountPercent: String(value) } });
+      }
+    },
+    applyLineFieldValue: (lineKey, field, value) => {
+      const target = editorStateRef.current.lines.find((line) => line.clientKey === lineKey);
+      if (target === undefined) return;
+      if (field === "discount" && typeof value === "object") {
+        dispatch({
+          type: "lineChanged",
+          key: target.key,
+          patch: { discountEnabled: value.enabled, discountPercent: value.percent },
+        });
+        return;
+      }
+      if (typeof value === "string") {
+        if (field === "description") dispatch({ type: "lineChanged", key: target.key, patch: { description: value } });
+        else if (field === "uom") dispatch({ type: "lineChanged", key: target.key, patch: { uom: value } });
+        else if (field === "quantity") dispatch({ type: "lineChanged", key: target.key, patch: { quantity: value } });
+        else if (field === "unitPrice") dispatch({ type: "lineChanged", key: target.key, patch: { unitPrice: value } });
       }
     },
   });
@@ -1372,9 +1515,11 @@ export function PurchaseOrderEditorPage({
           incoterms: loaded.Source.Incoterms,
           discountPercent: loaded.Source.DiscountPercent,
         });
+        setCompareLines(loaded.Source.Lines);
       } catch {
         if (cancelled) return;
         setCompareSource(null);
+        setCompareLines(null);
       }
     })();
     return () => {
@@ -1472,9 +1617,10 @@ export function PurchaseOrderEditorPage({
   // assertively and focuses the first unresolved item: in the rail at 1024
   // and above, in the sheet below (opened first if closed).
   const blockedActivate = useCallback(() => {
-    const count = reconciliation.unresolvedCount;
+    const count = reconciliation.blockingCount;
+    const named = reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ");
     reconciliation.setBlockedAnnouncement(
-      `Final Save is blocked. Resolve ${count} ${count === 1 ? "item" : "items"} first.`
+      `Final Save is blocked. Resolve ${count} ${count === 1 ? "item" : "items"} first${named !== "" ? `: ${named}` : "."}`
     );
     const smallViewport =
       typeof window !== "undefined" &&
@@ -1486,7 +1632,7 @@ export function PurchaseOrderEditorPage({
       return;
     }
     paneRailRef.current?.focusFirstUnresolved();
-  }, [reconciliation.unresolvedCount, reconciliation.setBlockedAnnouncement, sheetOpen]);
+  }, [reconciliation.blockingCount, reconciliation.blockers, reconciliation.setBlockedAnnouncement, sheetOpen]);
 
   // Ticket 04: focuses a pane item from the inline anchor under a field.
   const showPaneItem = useCallback(
@@ -1538,7 +1684,8 @@ export function PurchaseOrderEditorPage({
     const callbacks = shellActionsRef.current;
     if (callbacks === null) return;
     const version = state.version;
-    const unresolved = reconciliation.unresolvedCount;
+    const unresolved = reconciliation.blockingCount;
+    const namedBlockers = reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ");
     onShellActions?.({
       mode: correcting ? "correction" : "draft",
       dirty: shellDirty,
@@ -1548,7 +1695,7 @@ export function PurchaseOrderEditorPage({
       unresolvedCount: unresolved,
       blockedMessage:
         unresolved > 0
-          ? `Resolve ${unresolved} ${unresolved === 1 ? "item" : "items"} to enable Final Save`
+          ? `Resolve ${unresolved} ${unresolved === 1 ? "item" : "items"} to enable Final Save${namedBlockers !== "" ? `: ${namedBlockers}` : ""}`
           : null,
       onSave: () => void callbacks.save(version, false),
       onFinalSave: () => void callbacks.startReview(),
@@ -1564,7 +1711,8 @@ export function PurchaseOrderEditorPage({
     state.version,
     reviewLoading,
     shellSourceLess,
-    reconciliation.unresolvedCount,
+    reconciliation.blockingCount,
+    reconciliation.blockers,
     blockedActivate,
     onShellActions,
   ]);
@@ -1967,6 +2115,7 @@ export function PurchaseOrderEditorPage({
         incoterms: loaded.Source.Incoterms,
         discountPercent: loaded.Source.DiscountPercent,
       });
+      setCompareLines(loaded.Source.Lines);
       const initial = initialFinalizeReviewState();
       setReview(loaded);
       // Brief section 5.5: the finalize review reads the session, it does not
@@ -1985,7 +2134,7 @@ export function PurchaseOrderEditorPage({
           DiscountPercent: loaded.Source.DiscountPercent,
         }
       );
-      setDecisions({ ...initial.decisions, ...prefilled });
+      setDecisions({ ...initial.decisions, ...prefilled, ...reconciliation.prefillLines() });
       setAcknowledgedMissing(initial.acknowledgedMissing);
       setAcknowledgedExtra(initial.acknowledgedExtra);
       setDocumentConfirmed(initial.documentConfirmed);
@@ -2258,6 +2407,108 @@ export function PurchaseOrderEditorPage({
       unresolvedHeaderItems[item.Field as HeaderFieldKey] = item;
     }
   }
+  // Ticket 05: line feedback keys are `clientKey:field`, from the stable
+  // identity — never the displayed line number.
+  const unresolvedByLineField: Record<string, ReconciliationItem | null> = {};
+  for (const item of reconciliation.items) {
+    if (item.Status !== "unresolved" || typeof item.LineKey !== "string") continue;
+    if (
+      item.Field === "line:description" ||
+      item.Field === "line:uom" ||
+      item.Field === "line:quantity" ||
+      item.Field === "line:unitPrice" ||
+      item.Field === "line:discount"
+    ) {
+      const suffix = item.Field.slice("line:".length);
+      unresolvedByLineField[`${item.LineKey}:${suffix}`] = item;
+    }
+  }
+  // #517: focusing a line's match select from a pane card. The pane hands
+  // the stable session key; the editor works in aliases.
+  const focusLineMatch = (sessionKey: string) => {
+    const clientKey = reconciliation.clientKeyForSessionKey(sessionKey);
+    if (clientKey === null) return;
+    const at = state.lines.findIndex((line) => line.clientKey === clientKey);
+    if (at === -1) return;
+    document
+      .querySelector(`[aria-label="Line ${at + 1} quotation match"]`)
+      ?.scrollIntoView({ block: "nearest" });
+    (document.querySelector(`[aria-label="Line ${at + 1} quotation match"]`) as HTMLElement | null)?.focus();
+  };
+  const addLineFromSource = (reference: string) => {
+    const [head, tail] = reference.split(".");
+    const itemNo = Number(head);
+    if (!Number.isInteger(itemNo) || itemNo < 1) return;
+    dispatch({
+      type: "lineAddedFromSource",
+      uom: uomOptions[0]?.value ?? "",
+      quotationItemNo: itemNo,
+      quotationSubNo: tail === undefined ? null : Number(tail),
+    });
+  };
+  // Ticket 05: derived totals strip inputs, in document order. Null while the
+  // source is still loading; the strip reads pending then.
+  const totalsStripReason: string | null =
+    compareSource === null || compareLines === null
+      ? null
+      : explainTotalsDifference([
+          headerDiscountDifference(state.header.discountPercent, compareSource.discountPercent),
+          ...lineMoneyDifferences(
+            state.lines.map((line, index) => ({
+              displayNumber: index + 1,
+              values: {
+                description: line.description,
+                uom: line.uom,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                discountEnabled: line.discountEnabled,
+                discountPercent: line.discountPercent,
+              },
+              source:
+                compareLines.find(
+                  (entry) =>
+                    sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo) ===
+                    (line.quotationItemNo === null
+                      ? ""
+                      : sourceLineRef(line.quotationItemNo, line.quotationSubNo))
+                ) ?? null,
+            })),
+            activeCurrency
+          ),
+        ]);
+  const totalsStrip =
+    state.sourceState !== "live" || !state.printedTotalsKnown ? null : (
+      <ReconciliationTotalsStrip
+        calculatedMinor={calculatePurchaseOrder(state, activeCurrency).totals?.grandTotalMinor ?? null}
+        printedMinor={state.printedTotals.grandTotalMinor}
+        reason={totalsStripReason}
+        currency={activeCurrency}
+      />
+    );
+  const matchOptions: { value: string; label: string }[] | undefined =
+    compareLines === null
+      ? undefined
+      : [
+          { value: "", label: "Extra line (no quotation match)" },
+          ...compareLines.map((entry) => ({
+            value: sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo),
+            label: `Quotation item ${sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo)} · ${entry.Description}`,
+          })),
+          ...state.lines
+            .filter(
+              (line) =>
+                line.quotationItemNo !== null &&
+                !compareLines.some(
+                  (entry) =>
+                    sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo) ===
+                    sourceLineRef(line.quotationItemNo ?? 0, line.quotationSubNo)
+                )
+            )
+            .map((line) => ({
+              value: sourceLineRef(line.quotationItemNo ?? 0, line.quotationSubNo),
+              label: `Quotation item ${sourceLineRef(line.quotationItemNo ?? 0, line.quotationSubNo)} (not in source)`,
+            })),
+        ];
   const paneStatus =
     state.sourceState === "live"
       ? reconciliation.status === "idle"
@@ -2368,10 +2619,24 @@ export function PurchaseOrderEditorPage({
           focusedFieldRef.current = field;
         }}
         onShowItem={(key) => showPaneItem(key)}
-        gateUnresolvedCount={reconciliation.unresolvedCount}
+        matchOptions={matchOptions}
+        onMatchChange={(lineKey, quotationItemNo, quotationSubNo) => {
+          const target = state.lines.find((line) => line.clientKey === lineKey);
+          if (target === undefined) return;
+          dispatch({
+            type: "lineChanged",
+            key: target.key,
+            patch: { quotationItemNo, quotationSubNo },
+          });
+        }}
+        onCommitLine={(lineKey, field) => reconciliation.commitLine(lineKey, field)}
+        lineNotices={reconciliation.lineNotices}
+        lineErrors={reconciliation.lineValidationErrors}
+        unresolvedByLineField={unresolvedByLineField}
+        gateUnresolvedCount={reconciliation.blockingCount}
         gateBlockedMessage={
-          reconciliation.unresolvedCount > 0
-            ? `Resolve ${reconciliation.unresolvedCount} ${reconciliation.unresolvedCount === 1 ? "item" : "items"} to enable Final Save`
+          reconciliation.blockingCount > 0
+            ? `Resolve ${reconciliation.blockingCount} ${reconciliation.blockingCount === 1 ? "item" : "items"} to enable Final Save: ${reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ")}`
             : null
         }
         onBlockedActivate={blockedActivate}
@@ -2413,7 +2678,13 @@ export function PurchaseOrderEditorPage({
             onUse={reconciliation.useQuotation}
             onLinkQuotation={onLinkQuotation}
             onRetry={reconciliation.reload}
+            onAddLineFromSource={addLineFromSource}
+            onAcknowledgeMissing={reconciliation.acknowledgeMissing}
+            onAcknowledgeExtra={reconciliation.acknowledgeExtra}
+            onFixMatch={focusLineMatch}
+            currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
+            totalsStrip={totalsStrip}
           />
         </aside>
       </div>
@@ -2459,7 +2730,13 @@ export function PurchaseOrderEditorPage({
             onUse={reconciliation.useQuotation}
             onLinkQuotation={onLinkQuotation}
             onRetry={reconciliation.reload}
+            onAddLineFromSource={addLineFromSource}
+            onAcknowledgeMissing={reconciliation.acknowledgeMissing}
+            onAcknowledgeExtra={reconciliation.acknowledgeExtra}
+            onFixMatch={focusLineMatch}
+            currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
+            totalsStrip={totalsStrip}
             headerActions={
               <button
                 type="button"

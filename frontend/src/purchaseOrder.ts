@@ -18,6 +18,16 @@ export const QUANTITY_SCALE = 10000;
 
 /** One line as the desktop binding returns it (PascalCase = Wails models). */
 export interface PurchaseOrderDTOItem {
+  /**
+   * The persisted row id (#517). Required on rows the server returns;
+   * optional here so payloads built against older bindings still decode.
+   */
+  ID?: number;
+  /**
+   * The row-carried editor alias (#517, migration 042). Null on pre-042 rows
+   * and on payloads built against older bindings.
+   */
+  ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
   LineNumber: number;
@@ -128,6 +138,25 @@ export interface PurchaseOrderDTO {
 /** One editable line. Quantity and money stay strings until they are parsed. */
 export interface PurchaseOrderLine {
   key: number;
+  /**
+   * #517: the editor alias (`client:<UUID>`), generated per line and always
+   * submitted. It is the line's session key while the session first sees it;
+   * a session's first-seen key never re-keys afterwards, so this alias is
+   * carried across saves, reorder and reopen verbatim.
+   */
+  clientKey: string;
+  /**
+   * #517: the persisted row id from the DTO, once loaded. Never edited
+   * locally; submitted back so the server matches the row by id first.
+   */
+  persistedId?: number;
+  /**
+   * #517: the row-carried alias from the DTO (migration 042). A loaded line
+   * reuses it as its editor alias so reopen keeps the same session key; a
+   * pre-042 row has none and keeps a fresh local alias while its session
+   * key stays `id:<row>`.
+   */
+  persistedClientKey?: string | null;
   description: string;
   quantity: string;
   uom: string;
@@ -186,10 +215,27 @@ export interface PurchaseOrderEditorState {
   error: string | null;
 }
 
+/**
+ * Ticket 05: one collision-resistant client key per editor line. Stored on
+ * the line so edits, reorder and validation all keep the same identity the
+ * reconciliation items key off.
+ */
+export function newPurchaseOrderLineKey(): string {
+  try {
+    // Called as a method: a detached randomUUID loses its receiver.
+    const id: unknown = globalThis.crypto?.randomUUID?.();
+    if (typeof id === "string" && id.length > 0) return `client:${id}`;
+  } catch {
+    // A missing or unbound implementation falls through to the counter.
+  }
+  return `client:local-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`;
+}
+
 export type PurchaseOrderEditorAction =
   | { type: "headerChanged"; patch: Partial<PurchaseOrderHeader> }
   | { type: "lineChanged"; key: number; patch: Partial<PurchaseOrderLine> }
   | { type: "lineAdded"; uom: string }
+  | { type: "lineAddedFromSource"; uom: string; quotationItemNo: number; quotationSubNo: number | null }
   | { type: "lineRemoved"; key: number }
   | {
       type: "sourceBasisChanged";
@@ -211,6 +257,18 @@ export type PurchaseOrderEditorAction =
 
 /** One replace-lines payload entry (PascalCase = Wails binding). */
 export interface PurchaseOrderItemInput {
+  /**
+   * The persisted row id when the line was loaded from the server (#517).
+   * Null for editor-entered lines; the server matches ID, then alias, then
+   * exact values, and refuses unknown ids and duplicate claims.
+   */
+  ID?: number | null;
+  /**
+   * The editor alias, always submitted (#517). The server adopts it onto the
+   * matched row, binds it in the session identities and refuses an alias
+   * owned by another line; an unbound alias is refused with save guidance.
+   */
+  ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
   Description: string;
@@ -895,6 +953,15 @@ export function initialPurchaseOrderEditorState(
 ): PurchaseOrderEditorState {
   const lines = order.Items.map((item, index) => ({
     key: index,
+    // #517: a row-carried alias is reused verbatim so reopen keeps the same
+    // session key; otherwise the session key is derived at commit time and a
+    // fresh local alias is submitted for the server to adopt.
+    clientKey:
+      typeof item.ClientKey === "string" && item.ClientKey !== ""
+        ? item.ClientKey
+        : newPurchaseOrderLineKey(),
+    persistedId: item.ID,
+    persistedClientKey: item.ClientKey ?? null,
     description: item.Description,
     quantity: formatQuantityScaled(item.QuantityScaled),
     uom: item.UoM,
@@ -1058,6 +1125,8 @@ export function buildPurchaseOrderUpdate(
       };
     }
     items.push({
+      ID: line.persistedId ?? null,
+      ClientKey: line.clientKey,
       QuotationItemNo: line.quotationItemNo,
       QuotationSubNo: line.quotationSubNo,
       Description: line.description,
@@ -1151,6 +1220,9 @@ export function purchaseOrderEditorReducer(
           ...state.lines,
           {
             key: state.nextKey,
+            clientKey: newPurchaseOrderLineKey(),
+            persistedId: undefined,
+            persistedClientKey: null,
             description: "",
             quantity: "1",
             uom: action.uom,
@@ -1159,6 +1231,28 @@ export function purchaseOrderEditorReducer(
             discountPercent: "0",
             quotationItemNo: null,
             quotationSubNo: null,
+          },
+        ],
+        nextKey: state.nextKey + 1,
+      };
+    case "lineAddedFromSource":
+      return {
+        ...state,
+        lines: [
+          ...state.lines,
+          {
+            key: state.nextKey,
+            clientKey: newPurchaseOrderLineKey(),
+            persistedId: undefined,
+            persistedClientKey: null,
+            description: "",
+            quantity: "1",
+            uom: action.uom,
+            unitPrice: "0",
+            discountEnabled: false,
+            discountPercent: "0",
+            quotationItemNo: action.quotationItemNo,
+            quotationSubNo: action.quotationSubNo,
           },
         ],
         nextKey: state.nextKey + 1,
@@ -1233,7 +1327,31 @@ export function purchaseOrderEditorReducer(
       return { ...state, saving: false, error: action.error };
     case "saveSucceeded": {
       const saved = initialPurchaseOrderEditorState(action.order, action.currency);
-      return { ...saved, nextKey: Math.max(saved.nextKey, state.nextKey) };
+      // #517: the save round-trip rebuilds lines from the returned DTO, which
+      // now carries IDs and row aliases. The editor alias is the session key
+      // while the session first sees the line, so it is carried over by
+      // alias first (reused verbatim on reopen) and by persisted id second.
+      // Position is never consulted: a reorder swap must not re-key a line.
+      const byAlias = new Map(
+        state.lines.map((line) => [line.clientKey, line] as const)
+      );
+      const byID = new Map(
+        state.lines
+          .filter((line) => line.persistedId !== undefined)
+          .map((line) => [line.persistedId as number, line] as const)
+      );
+      const lines = saved.lines.map((line) => {
+        const previous =
+          byAlias.get(line.clientKey) ??
+          (line.persistedId !== undefined ? byID.get(line.persistedId) : undefined);
+        if (previous === undefined) return line;
+        return {
+          ...line,
+          clientKey: previous.clientKey,
+          persistedClientKey: line.persistedClientKey,
+        };
+      });
+      return { ...saved, lines, nextKey: Math.max(saved.nextKey, state.nextKey) };
     }
     default:
       return state;

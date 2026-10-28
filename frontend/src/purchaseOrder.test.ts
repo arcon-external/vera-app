@@ -390,7 +390,8 @@ describe("PO draft update payload (issue #468)", () => {
     expect(input.ReceivedDate).toBe("2026-10-20");
     expect(input.PaymentTerms).toBe("45 days");
     expect(input.Items).toHaveLength(2);
-    expect(input.Items[0]).toEqual({
+    expect(input.Items[0]).toMatchObject({
+      ID: null,
       QuotationItemNo: 1,
       QuotationSubNo: null,
       Description: "Widget",
@@ -400,6 +401,7 @@ describe("PO draft update payload (issue #468)", () => {
       DiscountEnabled: true,
       DiscountPercent: 10,
     });
+    expect(typeof input.Items[0]?.ClientKey).toBe("string");
     expect(input.Items[1].QuotationSubNo).toBe(1);
   });
 
@@ -618,6 +620,7 @@ describe("PO explained calculation (issue #470)", () => {
       },
       lines: lines.map((line, index) => ({
         key: index,
+        clientKey: `client:test-${index}`,
         description: `Line ${index + 1}`,
         quantity: line.quantity,
         uom: "Pc",
@@ -1324,5 +1327,96 @@ describe("PO-first draft states (issue #496)", () => {
         })
       )
     ).toBe(true);
+  });
+});
+
+describe("#517 stable line identity across load, payload and save", () => {
+  const rowA = {
+    ID: 101,
+    ClientKey: "client:aaa",
+    QuotationItemNo: 1,
+    QuotationSubNo: null,
+    LineNumber: 1,
+    Description: "Widget",
+    QuantityScaled: 20000,
+    UoM: "Pc",
+    UnitPriceMinor: 10000,
+    DiscountEnabled: false,
+    DiscountPercent: 0,
+    GrossMinor: 20000,
+    DiscountMinor: 0,
+    NetMinor: 20000,
+  };
+  // Identical values to row A on purpose: only the id/alias may distinguish
+  // the two lines. A value-based match would confuse them.
+  const rowB = {
+    ...rowA,
+    ID: 102,
+    ClientKey: "client:bbb",
+    LineNumber: 2,
+    Description: "Widget",
+  };
+
+  it("reuses the row-carried alias on load so reopen keeps the session key", () => {
+    const state = initial(order({ Items: [rowA, rowB] }));
+    expect(state.lines.map((line) => line.clientKey)).toEqual(["client:aaa", "client:bbb"]);
+    expect(state.lines.map((line) => line.persistedId)).toEqual([101, 102]);
+    expect(state.lines.map((line) => line.persistedClientKey)).toEqual([
+      "client:aaa",
+      "client:bbb",
+    ]);
+  });
+
+  it("gives a pre-042 row a fresh alias while keeping its id", () => {
+    const { ID: _droppedId, ClientKey: _droppedAlias, ...legacy } = rowA;
+    void _droppedId;
+    void _droppedAlias;
+    const state = initial(order({ Items: [{ ...legacy }] }));
+    expect(state.lines[0]?.persistedId).toBeUndefined();
+    expect(state.lines[0]?.persistedClientKey).toBeNull();
+    expect(state.lines[0]?.clientKey.startsWith("client:")).toBe(true);
+  });
+
+  it("submits the persisted id and the editor alias per line", () => {
+    const state = initial(order({ Items: [rowA, { ...rowB, ID: undefined, ClientKey: undefined }] }));
+    const result = buildPurchaseOrderUpdate(state, USD);
+    expect(result.error).toBeNull();
+    expect(result.input?.Items.map((item) => [item.ID, item.ClientKey])).toEqual([
+      [101, "client:aaa"],
+      [null, expect.stringMatching(/^client:/)],
+    ]);
+  });
+
+  it("carries aliases by id across a save that reorders the lines", () => {
+    const before = initial(order({ Items: [rowA, rowB] }));
+    // The server returns the same rows swapped: ids and aliases travel with
+    // their rows, never with the display position.
+    const after = purchaseOrderEditorReducer(before, {
+      type: "saveSucceeded",
+      order: order({ Items: [{ ...rowB, LineNumber: 1 }, { ...rowA, LineNumber: 2 }] }),
+      currency: USD,
+    });
+    expect(after.lines.map((line) => [line.persistedId, line.clientKey])).toEqual([
+      [102, "client:bbb"],
+      [101, "client:aaa"],
+    ]);
+  });
+
+  it("keeps a new line's alias when the save assigns its id", () => {
+    const before = initial(order({ Items: [rowA] }));
+    const added = purchaseOrderEditorReducer(before, { type: "lineAdded", uom: "Pc" });
+    const fresh = added.lines[added.lines.length - 1];
+    if (fresh === undefined) throw new Error("expected an added line");
+    expect(fresh.persistedId).toBeUndefined();
+
+    const after = purchaseOrderEditorReducer(added, {
+      type: "saveSucceeded",
+      order: order({
+        Items: [rowA, { ...rowA, ID: 109, ClientKey: fresh.clientKey, LineNumber: 2 }],
+      }),
+      currency: USD,
+    });
+    const carried = after.lines.find((line) => line.persistedId === 109);
+    expect(carried?.clientKey).toBe(fresh.clientKey);
   });
 });

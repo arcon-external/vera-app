@@ -33,6 +33,7 @@ import {
   parseQuantityScaled,
   parseUnitPriceMinor,
 } from "./purchaseOrder";
+import { sourceLineRef } from "./poReconciliation.lines";
 
 /** One customer-facing line of the frozen source revision. */
 export interface PurchaseOrderSourceLineDTO {
@@ -436,7 +437,23 @@ export function evaluateReview(
       blockers.push(`Quotation line ${sourceLabel(line)} is not on this purchase order. Acknowledge the omission.`);
     }
   }
+  const sourceRefs = new Set(source.Lines.map((line) => sourceLabel(line)));
   for (const lineNumber of comparison.extraLineNumbers) {
+    const line = state.lines[lineNumber - 1];
+    const reference =
+      line === undefined
+        ? null
+        : line.quotationItemNo === null
+          ? null
+          : sourceLineRef(line.quotationItemNo, line.quotationSubNo);
+    if (reference !== null && !sourceRefs.has(reference)) {
+      // R-02: an unknown reference must be corrected; acknowledgement alone
+      // cannot clear it, so the acknowledgement list is never consulted here.
+      blockers.push(
+        `Line ${lineNumber} names quotation line ${reference}, which does not exist. Correct the match to finalize.`
+      );
+      continue;
+    }
     if (!acknowledgedExtra.includes(lineNumber)) {
       blockers.push(`Line ${lineNumber} has no quotation match. Acknowledge it as an extra line.`);
     }

@@ -1,5 +1,12 @@
 import type { backend } from "@backend/models";
-import type { POReviewDecisions } from "./poFinalize";
+import type { CurrencyInfo } from "./format";
+import type { POReviewDecisions, PurchaseOrderSourceLineDTO } from "./poFinalize";
+import {
+  formatQuantityScaled,
+  parseDiscountPercent,
+  parseQuantityScaled,
+  parseUnitPriceMinor,
+} from "./purchaseOrder";
 
 // Ticket 04: the live header reconciliation domain for the PO workbench.
 //
@@ -393,7 +400,8 @@ export type PaneFilter = "all" | "unresolved" | "resolved";
 
 /** The latest commit event echoed under the pane filters. */
 export interface LatestNotice {
-  field: HeaderFieldKey;
+  /** Header key or `line:{clientKey}:{field}` for line commits. */
+  field: string;
   label: string;
   kind: "empty" | "matched";
 }

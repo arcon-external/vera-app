@@ -405,7 +405,7 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
 
     if (shellActions === null) throw new Error("no shell actions reported");
     expect(shellActions.unresolvedCount).toBe(1);
-    expect(shellActions.blockedMessage).toBe("Resolve 1 item to enable Final Save");
+    expect(shellActions.blockedMessage).toContain("Resolve 1 item to enable Final Save");
 
     // The review must not open: activating the blocked save focuses the
     // first unresolved item and announces the blocker assertively.
@@ -415,7 +415,7 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
     expect(document.querySelector('[role="alert"]')?.textContent).toBe(
-      "Final Save is blocked. Resolve 1 item first."
+      "Final Save is blocked. Resolve 1 item first: Payment terms"
     );
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
       "Keep PO entry for Payment terms"

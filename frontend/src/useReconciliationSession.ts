@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   HEADER_FIELDS,
   applyKeepResolution,
   applyUseResolution,
   commitHeaderField,
-  countUnresolvedHeaderItems,
   emptyLocalSession,
   orderPaneItems,
   paneFilterCounts,
@@ -18,6 +17,25 @@ import {
   type ReconciliationSourceValues,
 } from "./poReconciliation";
 import {
+  acknowledgeLineMatch,
+  commitLineField,
+  deriveLineSet,
+  lineFieldLabel,
+  reconcileLineSession,
+  sessionBlockers,
+  LINE_FIELD_SUFFIX,
+  sourceLineRef,
+  prefillLineDecisions,
+  type LineField,
+  type LineValuesInput,
+  sessionLineKey,
+  type SessionBlocker,
+} from "./poReconciliation.lines";
+import { formatQuantityScaled, formatUnitPriceMinor } from "./purchaseOrder";
+import { formatMoney } from "./format";
+import type { CurrencyInfo } from "./format";
+import type { PurchaseOrderSourceLineDTO } from "./poFinalize";
+import {
   loadSession,
   saveSession,
   type ReconciliationTransport,
@@ -27,6 +45,16 @@ import type { PurchaseOrderSourceState } from "./purchaseOrder";
 export interface ReconciliationActor {
   id: number;
   name: string;
+}
+
+export interface ReconciliationEditorLine {
+  clientKey: string;
+  persistedId?: number | null;
+  dtoAlias?: string | null;
+  displayNumber: number;
+  quotationItemNo: number | null;
+  quotationSubNo: number | null | undefined;
+  values: LineValuesInput;
 }
 
 export interface UseReconciliationSessionOptions {
@@ -41,9 +69,19 @@ export interface UseReconciliationSessionOptions {
   readOnly: boolean;
   /** Source scalars for live comparison; null until the review source loads. */
   source: ReconciliationSourceValues | null;
+  /** Source lines for line matching; null until the review source loads. */
+  sourceLines: PurchaseOrderSourceLineDTO[] | null;
+  /** Editor lines with raw values, in display order. */
+  lines: ReconciliationEditorLine[];
+  currency: CurrencyInfo;
   actor: ReconciliationActor;
   getFieldValue: (field: HeaderFieldKey) => string;
   applyFieldValue: (field: HeaderFieldKey, value: string) => void;
+  applyLineFieldValue: (
+    lineKey: string,
+    field: LineField,
+    value: string | { enabled: boolean; percent: string }
+  ) => void;
 }
 
 /**
@@ -63,14 +101,27 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     poVersion,
     readOnly,
     source,
+    sourceLines,
+    lines,
+    currency,
     actor,
   } = options;
   const getFieldValueRef = useRef(options.getFieldValue);
   getFieldValueRef.current = options.getFieldValue;
   const applyFieldValueRef = useRef(options.applyFieldValue);
   applyFieldValueRef.current = options.applyFieldValue;
+  const applyLineFieldValueRef = useRef(options.applyLineFieldValue);
+  applyLineFieldValueRef.current = options.applyLineFieldValue;
   const sourceRef = useRef(source);
   sourceRef.current = source;
+  const sourceLinesRef = useRef(sourceLines);
+  sourceLinesRef.current = sourceLines;
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
+  const currencyRef = useRef(currency);
+  currencyRef.current = currency;
+  const actorRef = useRef(actor);
+  actorRef.current = actor;
 
   const [session, setSession] = useState<ReconciliationSession | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
@@ -87,6 +138,11 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     "header:incoterms": null,
     "header:discountPercent": null,
   });
+  // Ticket 05: line commit feedback, keyed `clientKey:field`.
+  const [lineNotices, setLineNotices] = useState<Record<string, CommitNotice>>({});
+  const [lineValidationErrors, setLineValidationErrors] = useState<
+    Record<string, string | null>
+  >({});
   const [latestNotice, setLatestNotice] = useState<LatestNotice | null>(null);
   const [filter, setFilter] = useState<PaneFilter>("all");
   const [keepConfirmKey, setKeepConfirmKey] = useState<string | null>(null);
@@ -150,6 +206,79 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
   }, [transport, orderId, sourceState, loadToken]);
 
   const reload = useCallback(() => setLoadToken((token) => token + 1), []);
+
+  // Ticket 05: declarative line-set sync. Rematches and removals flow through
+  // this effect, never through imperative calls: the editor edits its lines,
+  // and the session's identities plus missing/extra/unknown/duplicate items
+  // follow. Idempotent: reconcile returns the same reference when nothing
+  // changed, so depending on the session cannot loop.
+  const lineSignature = JSON.stringify(
+    lines.map((line) => [
+      line.clientKey,
+      line.persistedId ?? null,
+      line.dtoAlias ?? null,
+      line.displayNumber,
+      line.quotationItemNo,
+      line.quotationSubNo ?? null,
+    ])
+  );
+  const sourcesSignature = JSON.stringify(
+    sourceLines === null
+      ? null
+      : sourceLines.map((entry) => sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo))
+  );
+  useEffect(() => {
+    if (readOnlyRef.current || !liveRef.current) return;
+    if (sourcesSignature === "null") return;
+    setSession((current) => {
+      const base =
+        current ??
+        emptyLocalSession({
+          purchaseOrderId: orderId,
+          sourceQuotationId,
+          sourceRevision,
+          poVersion,
+        });
+      const identities = base.LineIdentities;
+      const { session: next, changed } = reconcileLineSession({
+        session: base,
+        lines: linesRef.current.map((entry) => ({
+          sessionKey: sessionLineKey(identities, entry),
+          persistedId: entry.persistedId,
+          displayNumber: entry.displayNumber,
+          quotationItemNo: entry.quotationItemNo,
+          quotationSubNo: entry.quotationSubNo,
+        })),
+        sources: sourceLinesRef.current ?? [],
+        actorId: actorRef.current.id,
+        now: new Date().toISOString(),
+      });
+      return changed ? next : current;
+    });
+    // Signatures pin the inputs; the session dep re-syncs after a commit or
+    // save rebuilds it without touching the line set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineSignature, sourcesSignature, orderId, sourceQuotationId, sourceRevision, poVersion, session]);
+
+  const sessionKeyFor = useCallback(
+    (clientKey: string): string => {
+      const line = linesRef.current.find((entry) => entry.clientKey === clientKey);
+      if (line === undefined) return clientKey;
+      return sessionLineKey(session?.LineIdentities ?? [], line);
+    },
+    [session]
+  );
+
+  const clientKeyForSessionKey = useCallback(
+    (sessionKey: string): string | null => {
+      const identities = session?.LineIdentities ?? [];
+      const line = linesRef.current.find(
+        (entry) => sessionLineKey(identities, entry) === sessionKey
+      );
+      return line?.clientKey ?? null;
+    },
+    [session]
+  );
 
   const fieldDef = (field: HeaderFieldKey): HeaderFieldDef => HEADER_FIELDS[field];
 
@@ -222,10 +351,10 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       if (result.item !== null) {
         upsertItem(result.item, result.itemChanged);
         if (result.itemChanged && result.item.Status === "unresolved") {
-          const count = countUnresolvedHeaderItems([
+          const count = [
             ...(session?.Items.filter((entry) => entry.Key !== result.item?.Key) ?? []),
             result.item,
-          ]);
+          ].filter((entry) => entry.Status === "unresolved").length;
           setAnnouncement(
             `${def.label}: differs from the Quotation. ${count} ${count === 1 ? "item" : "items"} to resolve.`
           );
@@ -235,6 +364,118 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     // session read for the count only; the transition itself is pure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [actor.id, findItem, upsertItem, session]
+  );
+
+  /**
+   * Ticket 05: one blur-commit of one line field. Same notice/review
+   * behaviour as commitField, keyed by the stable line identity. Unmatched
+   * lines never compare; invalid numbers are validation errors, never items.
+   */
+  const commitLine = useCallback(
+    (lineKey: string, field: LineField) => {
+      if (readOnlyRef.current || !liveRef.current) return;
+      const currentSources = sourceLinesRef.current;
+      if (currentSources === null) return;
+      const line = linesRef.current.find((entry) => entry.clientKey === lineKey);
+      if (line === undefined) return;
+      const identities = session?.LineIdentities ?? [];
+      const sessionKey = sessionLineKey(identities, line);
+      const set = deriveLineSet(
+        linesRef.current.map((entry) => ({
+          sessionKey: sessionLineKey(identities, entry),
+          lineNumber: entry.displayNumber,
+          quotationItemNo: entry.quotationItemNo,
+          quotationSubNo: entry.quotationSubNo,
+        })),
+        currentSources
+      );
+      const pair = set.matched.find((entry) => entry.line.sessionKey === sessionKey);
+      const feedbackKey = `${lineKey}:${field}`;
+      const raw =
+        field === "discount"
+          ? { enabled: line.values.discountEnabled, percent: line.values.discountPercent }
+          : line.values[field];
+      const result = commitLineField({
+        lineKey: sessionKey,
+        displayNumber: line.displayNumber,
+        field,
+        poValue: raw,
+        source: pair?.source ?? null,
+        existingItem: findItem(`line:${lineKey}:${LINE_FIELD_SUFFIX[field]}`),
+        actorId: actorRef.current.id,
+        now: new Date().toISOString(),
+        currency: currencyRef.current,
+      });
+      setLineNotices((current) => ({ ...current, [feedbackKey]: result.notice }));
+      setLineValidationErrors((current) => ({
+        ...current,
+        [feedbackKey]: result.validationError,
+      }));
+      if (result.notice !== null) {
+        const label = lineFieldLabel(line.displayNumber, field);
+        setLatestNotice({ field: `line:${lineKey}:${field}`, label, kind: result.notice });
+        setAnnouncement(
+          result.notice === "empty"
+            ? `${label} is empty.`
+            : `${label}: matches the Quotation.`
+        );
+      }
+      if (result.validationError !== null) {
+        setAnnouncement(result.validationError);
+      }
+      if (result.item !== null) {
+        upsertItem(result.item, result.itemChanged);
+        if (result.itemChanged && result.item.Status === "unresolved") {
+          const label = lineFieldLabel(line.displayNumber, field);
+          setAnnouncement(`${label}: differs from the Quotation.`);
+        }
+      }
+    },
+    // sessionKey read for the identity; the transition itself is pure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [findItem, upsertItem, session]
+  );
+
+  const acknowledgeMissing = useCallback(
+    (key: string) => {
+      if (readOnlyRef.current) return;
+      setSession((current) => {
+        if (current === null) return current;
+        const { session: next, changed } = acknowledgeLineMatch(
+          current,
+          key,
+          "acknowledged_missing",
+          actorRef.current.id,
+          new Date().toISOString()
+        );
+        if (changed) {
+          setAnnouncement("Omission acknowledged. It stays recorded on the session.");
+        }
+        return changed ? next : current;
+      });
+    },
+    []
+  );
+
+  const acknowledgeExtra = useCallback(
+    (key: string) => {
+      if (readOnlyRef.current) return;
+      setSession((current) => {
+        if (current === null) return current;
+        const { session: next, changed } = acknowledgeLineMatch(
+          current,
+          key,
+          "acknowledged_extra",
+          actorRef.current.id,
+          new Date().toISOString()
+        );
+        if (changed) {
+          setAnnouncement("Extra line acknowledged. Unknown references still block Final Save until corrected.");
+        }
+        return changed ? next : current;
+      });
+    },
+    []
   );
 
   const requestKeep = useCallback((key: string) => {
@@ -257,9 +498,9 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       const kept = applyKeepResolution(target, actor.id, new Date().toISOString());
       upsertItem(kept, true);
       setKeepConfirmKey(null);
-      const remaining = countUnresolvedHeaderItems(
-        (session?.Items ?? []).map((entry) => (entry.Key === key ? kept : entry))
-      );
+      const remaining = (session?.Items ?? [])
+        .map((entry) => (entry.Key === key ? kept : entry))
+        .filter((entry) => entry.Status === "unresolved").length;
       setAnnouncement(
         `${target.Label} kept from the PO. ${remaining} ${remaining === 1 ? "item" : "items"} to resolve.`
       );
@@ -280,10 +521,49 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       const field = used.Field as HeaderFieldKey;
       if (HEADER_FIELDS[field] !== undefined) {
         applyFieldValueRef.current(field, String(value));
+      } else if (typeof used.Field === "string" && used.Field.startsWith("line:")) {
+        // #517: write the source value back into the editor line. Item keys
+        // carry the stable session key (`line:{sessionKey}:{suffix}`), so it
+        // is mapped back to the editor alias before applying the value.
+        const segments = used.Key.split(":");
+        const suffix = segments[segments.length - 1];
+        const sessionKey = segments.slice(1, -1).join(":");
+        const identities = session?.LineIdentities ?? [];
+        const lineKey =
+          linesRef.current.find((entry) => sessionLineKey(identities, entry) === sessionKey)
+            ?.clientKey ?? sessionKey;
+        const currency = currencyRef.current;
+        if (suffix === "quantity" && typeof value === "number") {
+          applyLineFieldValueRef.current(lineKey, "quantity", formatQuantityScaled(value));
+        } else if (suffix === "unitPrice" && typeof value === "number") {
+          applyLineFieldValueRef.current(
+            lineKey,
+            "unitPrice",
+            formatUnitPriceMinor(currency, value)
+          );
+        } else if (
+          suffix === "discount" &&
+          value !== null &&
+          typeof value === "object" &&
+          "Enabled" in value &&
+          "Percent" in value
+        ) {
+          const discount = value as { Enabled: unknown; Percent: unknown };
+          applyLineFieldValueRef.current(lineKey, "discount", {
+            enabled: discount.Enabled === true,
+            percent: String(discount.Percent ?? 0),
+          });
+        } else if (suffix === "description" || suffix === "uom") {
+          applyLineFieldValueRef.current(
+            lineKey,
+            suffix,
+            typeof value === "string" ? value : String(value ?? "")
+          );
+        }
       }
-      const remaining = countUnresolvedHeaderItems(
-        (session?.Items ?? []).map((entry) => (entry.Key === key ? used : entry))
-      );
+      const remaining = (session?.Items ?? [])
+        .map((entry) => (entry.Key === key ? used : entry))
+        .filter((entry) => entry.Status === "unresolved").length;
       setAnnouncement(
         `${target.Label} updated from the Quotation. ${remaining} ${remaining === 1 ? "item" : "items"} to resolve.`
       );
@@ -322,7 +602,103 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     [transport, orderId, session]
   );
 
-  const unresolvedCount = countUnresolvedHeaderItems(session?.Items ?? []);
+  // #517: named Final Save blockers from the live line set. Unresolved
+  // items of any kind plus unacknowledged missing/extra lines, every
+  // duplicate group and every unknown reference (acknowledged or not).
+  // Memoized on content signatures: the caller builds fresh arrays every
+  // render, and the shell gate effect depends on this reference — a new
+  // identity per render would re-fire the gate and its setState forever.
+  const derivedLineSet = useMemo(
+    () =>
+      sourceLines === null
+        ? null
+        : deriveLineSet(
+            lines.map((entry) => ({
+              sessionKey: sessionLineKey(session?.LineIdentities ?? [], entry),
+              lineNumber: entry.displayNumber,
+              quotationItemNo: entry.quotationItemNo,
+              quotationSubNo: entry.quotationSubNo,
+            })),
+            sourceLines
+          ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session, lineSignature, sourcesSignature]
+  );
+  const ackedMissingRefs = new Set(
+    (session?.Items ?? [])
+      .filter(
+        (entry) =>
+          entry.Kind === "missing_line" &&
+          entry.Status === "resolved" &&
+          typeof entry.SourceLineRef === "string"
+      )
+      .map((entry) => entry.SourceLineRef as string)
+  );
+  const ackedExtraKeys = new Set(
+    (session?.Items ?? [])
+      .filter(
+        (entry) =>
+          entry.Kind === "extra_line" &&
+          (entry.Status === "resolved" ||
+            entry.History.some((event) => event.Resolution === "acknowledged_extra")) &&
+          typeof entry.LineKey === "string"
+      )
+      .map((entry) => entry.LineKey as string)
+  );
+  const blockers: SessionBlocker[] = useMemo(
+    () =>
+      session === null || derivedLineSet === null
+        ? (session?.Items ?? [])
+            .filter((entry) => entry.Status === "unresolved")
+            .map((entry) => ({ kind: "unresolved" as const, label: entry.Label }))
+        : sessionBlockers({
+            items: session.Items,
+            missing: derivedLineSet.missing.map((entry) => ({
+              quotationItemNo: entry.QuotationItemNo,
+              quotationSubNo: entry.QuotationSubNo,
+              acknowledged: ackedMissingRefs.has(
+                sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo)
+              ),
+            })),
+            extra: derivedLineSet.extra.map((entry) => ({
+              sessionKey: entry.sessionKey,
+              label: `Extra line · Line ${entry.lineNumber}`,
+              acknowledged: ackedExtraKeys.has(entry.sessionKey),
+            })),
+            duplicates: derivedLineSet.duplicates,
+            unknown: derivedLineSet.unknown.map((entry) => ({
+              sessionKey: entry.sessionKey,
+              reference: entry.reference,
+              acknowledged: ackedExtraKeys.has(entry.sessionKey),
+            })),
+          }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [session, derivedLineSet]
+  );
+
+  /**
+   * Ticket 05: section 5.5 for lines. Kept line decisions with unchanged
+   * values pre-fill the keep choice under the review's positional keys.
+   */
+  const prefillLines = useCallback((): { [key: string]: "po" } => {
+    const currentSources = sourceLinesRef.current;
+    if (currentSources === null) return {};
+    return prefillLineDecisions(
+      session?.Items ?? [],
+      linesRef.current.map((entry) => ({
+        sessionKey: sessionLineKey(session?.LineIdentities ?? [], entry),
+        displayNumber: entry.displayNumber,
+        values: entry.values,
+      })),
+      currentSources,
+      currencyRef.current
+    );
+  }, [session]);
+
+  const allUnresolvedCount = (session?.Items ?? []).filter(
+    (entry) => entry.Status === "unresolved"
+  ).length;
+  const unresolvedCount = allUnresolvedCount;
   const ordered = orderPaneItems(session?.Items ?? [], filter);
   const counts = paneFilterCounts(session?.Items ?? []);
 
@@ -332,17 +708,27 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     error,
     notices,
     validationErrors,
+    lineNotices,
+    lineValidationErrors,
     latestNotice,
     filter,
     setFilter,
     keepConfirmKey,
     unresolvedCount,
+    blockers,
+    blockingCount: blockers.length,
     ordered,
     counts,
     announcement,
     blockedAnnouncement,
     setBlockedAnnouncement,
     commitField,
+    commitLine,
+    sessionKeyFor,
+    clientKeyForSessionKey,
+    acknowledgeMissing,
+    acknowledgeExtra,
+    prefillLines,
     requestKeep,
     cancelKeep,
     confirmKeep,
