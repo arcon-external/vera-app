@@ -636,6 +636,8 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 			Description:     item.Description,
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       nilIfEmpty(item.ClientKey),
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
@@ -692,6 +694,8 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 		items = append(items, store.PurchaseOrderItem{
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              valueOrZero(item.ID),
+			ClientKey:       stringOrEmpty(item.ClientKey),
 			Description:     item.Description,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
@@ -730,6 +734,20 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 func stringOrEmpty(value *string) string {
 	if value == nil {
 		return ""
+	}
+	return *value
+}
+
+func nilIfEmpty(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func valueOrZero(value *int64) int64 {
+	if value == nil {
+		return 0
 	}
 	return *value
 }

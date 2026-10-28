@@ -282,7 +282,7 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if tag.RowsAffected() != 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotSaved
 	}
-	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 

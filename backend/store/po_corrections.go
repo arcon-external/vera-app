@@ -354,7 +354,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), numberKey); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -386,8 +386,35 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		if item.QuotationSubNo != nil && item.QuotationItemNo == nil {
 			return fmt.Errorf("%w: line %d names a sub-item without its item", ErrPurchaseOrderInvalid, index+1)
 		}
+		if item.ID < 0 {
+			return fmt.Errorf("%w: line %d carries an invalid persisted id", ErrPurchaseOrderInvalid, index+1)
+		}
+		if item.ClientKey != "" && !isPurchaseOrderClientKey(item.ClientKey) {
+			return fmt.Errorf("%w: line %d carries an invalid client key (want `client:<id>`)", ErrPurchaseOrderInvalid, index+1)
+		}
+	}
+	seenClientKeys := map[string]int{}
+	for index, item := range input.Items {
+		if item.ClientKey == "" {
+			continue
+		}
+		if first, taken := seenClientKeys[item.ClientKey]; taken {
+			return fmt.Errorf("%w: lines %d and %d claim the same client key %q",
+				ErrPurchaseOrderInvalid, first+1, index+1, item.ClientKey)
+		}
+		seenClientKeys[item.ClientKey] = index
 	}
 	return nil
+}
+
+// isPurchaseOrderClientKey reports whether the alias belongs to the editor's
+// `client:` namespace: the only alias form a line input may carry. Persisted
+// rows travel in the ID field; `id:<row>` never appears here.
+func isPurchaseOrderClientKey(key string) bool {
+	if len(key) < 8 || len(key) > 120 {
+		return false
+	}
+	return strings.HasPrefix(key, "client:")
 }
 
 // validateSavedPurchaseOrderUpdateInput is the final-save minimum, shared by

@@ -68,11 +68,16 @@ func TestPOReconciliationFinalSaveRefusesUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload after refusal: %v", err)
 	}
-	if len(again.Items) != 1 || again.Items[0].Status != POReconciliationStatusUnresolved {
+	header := findSessionItem(t, again.Items, "header:paymentTerms")
+	if header.Status != POReconciliationStatusUnresolved {
 		t.Fatalf("the refused finalize changed the session: %+v", again.Items)
 	}
-	again.Items[0].Status = POReconciliationStatusResolved
-	again.Items[0].Resolution = strPointer(POReconciliationResolutionKeptPO)
+	for i := range again.Items {
+		if again.Items[i].Key == "header:paymentTerms" {
+			again.Items[i].Status = POReconciliationStatusResolved
+			again.Items[i].Resolution = strPointer(POReconciliationResolutionKeptPO)
+		}
+	}
 	if _, err := database.SavePOReconciliation(ctx, again, user.ID); err != nil {
 		t.Fatalf("resolve item: %v", err)
 	}
@@ -150,8 +155,9 @@ func TestPOReconciliationOmittedItemsAreRetained(t *testing.T) {
 	item.Status = POReconciliationStatusResolved
 	item.Resolution = strPointer(POReconciliationResolutionKeptPO)
 	saved := saveHeaderItem(t, database, ctx, draft.ID, user.ID, item)
-	if len(saved.Items) != 1 || len(saved.Items[0].History) != 1 {
-		t.Fatalf("saved item = %+v; want one item with one event", saved.Items)
+	header := findSessionItem(t, saved.Items, "header:paymentTerms")
+	if len(header.History) != 1 {
+		t.Fatalf("saved item = %+v; want one event", header)
 	}
 	saved.Items = []POReconciliationItem{}
 	if _, err := database.SavePOReconciliation(ctx, saved, user.ID); err != nil {
@@ -161,11 +167,9 @@ func TestPOReconciliationOmittedItemsAreRetained(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen after omission: %v", err)
 	}
-	if len(reopened.Items) != 1 || reopened.Items[0].Key != "header:paymentTerms" {
-		t.Fatalf("omission erased the item: %+v", reopened.Items)
-	}
-	if len(reopened.Items[0].History) != 1 {
-		t.Errorf("history has %d events after an omission; want the retained decision", len(reopened.Items[0].History))
+	header = findSessionItem(t, reopened.Items, "header:paymentTerms")
+	if len(header.History) != 1 {
+		t.Errorf("history has %d events after an omission; want the retained decision", len(header.History))
 	}
 }
 

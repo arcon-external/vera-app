@@ -111,11 +111,38 @@ func TestPOReconciliationSessionCreatedOnDraftCreation(t *testing.T) {
 	if session.POVersion != draft.Version {
 		t.Errorf("session POVersion = %d; want the draft version %d", session.POVersion, draft.Version)
 	}
-	if len(session.Items) != 0 {
-		t.Errorf("new session has %d items; want none until staff decide", len(session.Items))
+	if len(session.Items) != 1 {
+		t.Fatalf("new session has %d items; want the resolved link-time tax item", len(session.Items))
 	}
-	if session.LineIdentities == nil || len(session.LineIdentities) != 0 {
-		t.Errorf("new session identities = %+v; want an empty array, never null", session.LineIdentities)
+	tax := session.Items[0]
+	if tax.Key != "link:taxBasis" || tax.Field != "link:taxBasis" || tax.Kind != POReconciliationKindTaxBasis {
+		t.Errorf("tax item = %+v; want the link:taxBasis tax_basis item", tax)
+	}
+	if tax.Status != POReconciliationStatusResolved || tax.Resolution == nil ||
+		*tax.Resolution != POReconciliationResolutionUsedQuote {
+		t.Errorf("tax item = %s/%v; want resolved used_quotation (source adoption)", tax.Status, tax.Resolution)
+	}
+	if len(session.LineIdentities) != len(draft.Items) {
+		t.Fatalf("new session has %d identities; want one per persisted line (%d)",
+			len(session.LineIdentities), len(draft.Items))
+	}
+	seen := map[int64]string{}
+	for _, identity := range session.LineIdentities {
+		if identity.ID == nil {
+			t.Fatalf("identity %+v has no row id; creation binds every row", identity)
+		}
+		if want := purchaseOrderLineKeyForRow(*identity.ID); identity.Key != want {
+			t.Errorf("identity key = %q; want %q for a source-created line", identity.Key, want)
+		}
+		if other, taken := seen[*identity.ID]; taken {
+			t.Errorf("row %d claimed by %q and %q", *identity.ID, other, identity.Key)
+		}
+		seen[*identity.ID] = identity.Key
+	}
+	for _, line := range draft.Items {
+		if _, ok := seen[line.ID]; !ok {
+			t.Errorf("persisted line %d has no identity", line.ID)
+		}
 	}
 
 	pool, err := database.poolOrError()
@@ -260,16 +287,17 @@ func TestPOReconciliationSaveAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save session: %v", err)
 	}
-	if len(saved.Items) != 1 || saved.Items[0].Status != POReconciliationStatusUnresolved {
-		t.Fatalf("saved items = %+v; want the one unresolved header item", saved.Items)
+	header := findSessionItem(t, saved.Items, "header:paymentTerms")
+	if header.Status != POReconciliationStatusUnresolved {
+		t.Fatalf("saved items = %+v; want the unresolved header item", saved.Items)
 	}
-	if saved.Items[0].ActorID != user.ID {
+	if header.ActorID != user.ID {
 		t.Errorf("item actor = %d; want the authenticated %d, never the client-supplied 999999",
-			saved.Items[0].ActorID, user.ID)
+			header.ActorID, user.ID)
 	}
-	if len(saved.Items[0].History) != 1 || saved.Items[0].History[0].ActorID != user.ID {
+	if len(header.History) != 1 || header.History[0].ActorID != user.ID {
 		t.Errorf("history = %+v; want one server-attributed event, not the client replacement",
-			saved.Items[0].History)
+			header.History)
 	}
 	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
 	if err != nil {
@@ -286,25 +314,29 @@ func TestPOReconciliationSaveAndReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rehydrate after reopen: %v", err)
 	}
-	if len(rehydrated.Items) != 1 || rehydrated.Items[0].Key != "header:paymentTerms" {
-		t.Fatalf("rehydrated items = %+v; want the saved header item", rehydrated.Items)
+	header = findSessionItem(t, rehydrated.Items, "header:paymentTerms")
+	if string(header.POValue) != `"30 days"` {
+		t.Errorf("rehydrated PO value = %s; want %q", header.POValue, "30 days")
 	}
-	if string(rehydrated.Items[0].POValue) != `"30 days"` {
-		t.Errorf("rehydrated PO value = %s; want %q", rehydrated.Items[0].POValue, "30 days")
+	for i := range rehydrated.Items {
+		if rehydrated.Items[i].Key != "header:paymentTerms" {
+			continue
+		}
+		rehydrated.Items[i].Status = POReconciliationStatusResolved
+		kept := POReconciliationResolutionKeptPO
+		rehydrated.Items[i].Resolution = &kept
 	}
-	rehydrated.Items[0].Status = POReconciliationStatusResolved
-	kept := POReconciliationResolutionKeptPO
-	rehydrated.Items[0].Resolution = &kept
 	resolved, err := database.SavePOReconciliation(ctx, rehydrated, user.ID)
 	if err != nil {
 		t.Fatalf("resolve item: %v", err)
 	}
-	if resolved.Items[0].Status != POReconciliationStatusResolved {
-		t.Errorf("resolved status = %q; want resolved", resolved.Items[0].Status)
+	resolvedHeader := findSessionItem(t, resolved.Items, "header:paymentTerms")
+	if resolvedHeader.Status != POReconciliationStatusResolved {
+		t.Errorf("resolved status = %q; want resolved", resolvedHeader.Status)
 	}
-	if len(resolved.Items[0].History) != 2 {
+	if len(resolvedHeader.History) != 2 {
 		t.Errorf("history has %d events; want the retained decision plus the new choice",
-			len(resolved.Items[0].History))
+			len(resolvedHeader.History))
 	}
 }
 
@@ -349,7 +381,8 @@ func TestPOReconciliationStaleVersionConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload after conflict: %v", err)
 	}
-	if len(current.Items) != 1 || current.Items[0].Key != "header:paymentTerms" {
+	header := findSessionItem(t, current.Items, "header:paymentTerms")
+	if header.Status != POReconciliationStatusUnresolved {
 		t.Errorf("conflict overwrote the session: %+v; want the first save retained", current.Items)
 	}
 	if current.POVersion != moved.POVersion {

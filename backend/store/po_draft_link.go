@@ -375,9 +375,26 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 	if err := deactivateReconciliationSessionsTx(ctx, tx, schema, org.ID, stored.ID); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := createReconciliationSessionTx(ctx, tx, schema, org.ID, stored.ID,
+	sessionID, err := createReconciliationSessionTx(ctx, tx, schema, org.ID, stored.ID,
 		source.QuotationID, source.RevisionNumber, source.RevisionID, generation,
-		input.UpdatedBy, lock.Version+1); err != nil {
+		input.UpdatedBy, lock.Version+1)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := seedReconciliationLineIdentitiesTx(ctx, tx, schema, org.ID, sessionID, stored.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
+	// The link review records the tax choice as one resolved link:taxBasis
+	// item (contract section 6): keep-PO carries the draft basis beside the
+	// source basis, use-Quotation adopts the source basis for both sides.
+	poTriple := reconciliationTaxTriple(basis.TaxZone, basis.TaxType, basis.ServiceCategory, basis.TaxCategory)
+	sourceTriple := reconciliationTaxTriple(sourceTax.TaxZone, sourceTax.TaxType, sourceTax.ServiceCategory, sourceTax.TaxCategory)
+	resolution := POReconciliationResolutionKeptPO
+	if taxChoice == PurchaseOrderDraftLinkTaxSource {
+		resolution = POReconciliationResolutionUsedQuote
+	}
+	if err := seedLinkTaxBasisItemTx(ctx, tx, schema, org.ID, sessionID, stored.ID,
+		poTriple, sourceTriple, resolution, input.UpdatedBy); err != nil {
 		return PurchaseOrder{}, err
 	}
 

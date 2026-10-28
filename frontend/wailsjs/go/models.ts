@@ -2002,6 +2002,8 @@ export namespace backend {
 	export class PurchaseOrderItemInput {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
+	    ID?: number;
+	    ClientKey?: string;
 	    Description: string;
 	    QuantityScaled: number;
 	    UoM: string;
@@ -2017,6 +2019,8 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
 	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.ID = source["ID"];
+	        this.ClientKey = source["ClientKey"];
 	        this.Description = source["Description"];
 	        this.QuantityScaled = source["QuantityScaled"];
 	        this.UoM = source["UoM"];
@@ -2111,6 +2115,8 @@ export namespace backend {
 	export class PurchaseOrderItemDTO {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
+	    ID: number;
+	    ClientKey?: string;
 	    LineNumber: number;
 	    Description: string;
 	    QuantityScaled: number;
@@ -2130,6 +2136,8 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
 	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.ID = source["ID"];
+	        this.ClientKey = source["ClientKey"];
 	        this.LineNumber = source["LineNumber"];
 	        this.Description = source["Description"];
 	        this.QuantityScaled = source["QuantityScaled"];

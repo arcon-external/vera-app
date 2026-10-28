@@ -24,6 +24,8 @@ import (
 type PurchaseOrderItemDTO struct {
 	QuotationItemNo *int
 	QuotationSubNo  *int
+	ID              int64
+	ClientKey       *string
 	LineNumber      int
 	Description     string
 	QuantityScaled  int64
@@ -294,6 +296,8 @@ type PurchaseOrderBlankCreateInput struct {
 type PurchaseOrderItemInput struct {
 	QuotationItemNo *int
 	QuotationSubNo  *int
+	ID              *int64
+	ClientKey       *string
 	Description     string
 	QuantityScaled  int64
 	UoM             string
@@ -597,6 +601,8 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       item.ClientKey,
 			Description:     item.Description,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
@@ -660,6 +666,8 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       item.ClientKey,
 			Description:     item.Description,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
@@ -736,6 +744,8 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       item.ClientKey,
 			Description:     item.Description,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
@@ -1063,6 +1073,8 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 			Description:     item.Description,
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       item.ClientKey,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,
 			UnitPriceMinor:  item.UnitPriceMinor,
@@ -1108,6 +1120,8 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo: item.QuotationItemNo,
 			QuotationSubNo:  item.QuotationSubNo,
+			ID:              item.ID,
+			ClientKey:       item.ClientKey,
 			Description:     item.Description,
 			QuantityScaled:  item.QuantityScaled,
 			UoM:             item.UoM,

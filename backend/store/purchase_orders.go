@@ -135,6 +135,13 @@ type PurchaseOrderItem struct {
 	GrossMinor      int64
 	DiscountMinor   int64
 	NetMinor        int64
+	// ClientKey is the editor's stable alias for the line (`client:<UUID>`).
+	// Empty for server-created lines and every row written before migration
+	// 042; those rows are addressed by `id:<row>`. The alias is matched on
+	// every save so a reorder keeps each row's id, and it is unique per
+	// purchase order. It travels in the editor DTO; the review session keys
+	// its items off it for the lifetime of the session.
+	ClientKey string
 }
 
 // PurchaseOrder is a draft or finalized header plus its lines and the explained
@@ -417,13 +424,24 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, fmt.Errorf("insert purchase order: %w", err)
 	}
 
-	if err := replacePurchaseOrderItems(ctx, tx, schema, id, items); err != nil {
+	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, id, items)
+	if err != nil {
 		return PurchaseOrder{}, err
 	}
-
-	if err := createReconciliationSessionTx(ctx, tx, schema, org.ID, id,
+	sessionID, err := createReconciliationSessionTx(ctx, tx, schema, org.ID, id,
 		source.QuotationID, source.RevisionNumber, source.RevisionID, 1,
-		input.CreatedBy, 1); err != nil {
+		input.CreatedBy, 1)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := seedReconciliationLineIdentitiesTx(ctx, tx, schema, org.ID, sessionID, kept); err != nil {
+		return PurchaseOrder{}, err
+	}
+	// A source-created draft adopts its source basis: one resolved
+	// link:taxBasis item recording the adoption (contract section 6).
+	adopted := reconciliationTaxTriple(source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
+	if err := seedLinkTaxBasisItemTx(ctx, tx, schema, org.ID, sessionID, id,
+		adopted, adopted, POReconciliationResolutionUsedQuote, input.CreatedBy); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -506,7 +524,7 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 		return PurchaseOrder{}, fmt.Errorf("insert blank purchase order: %w", err)
 	}
 
-	if err := replacePurchaseOrderItems(ctx, tx, schema, id, nil); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, id, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -881,7 +899,15 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	// #502 ticket 05: the saved line set owns the stable identities. Newly
+	// persisted aliases are recorded, removed rows retire their items as
+	// line_removed, and a surviving duplicate claimant is unblocked. A draft
+	// without a session (never-linked) has nothing to sync.
+	if err := syncReconciliationLineStateTx(ctx, tx, schema, org.ID, input.ID, kept, removed, input.UpdatedBy); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// R-04: an ordinary draft save advances the PO version, so the live
@@ -1272,29 +1298,220 @@ func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int1
 	return lines, calculation, nil
 }
 
-func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, schema string, orderID int64, items []PurchaseOrderItem) error {
-	if _, err := q.Exec(ctx, fmt.Sprintf(
-		"DELETE FROM %s.purchase_order_items WHERE purchase_order_id = $1", schema), orderID); err != nil {
-		return fmt.Errorf("clear purchase order lines: %w", err)
+// replacePurchaseOrderItems stores the submitted lines as the purchase
+// order's full line set while preserving each row's persisted id across
+// saves, so a review item keyed to a line identity survives a reorder
+// (#502, ticket 05). Matching runs per submitted line, in order:
+//
+//  1. a positive ID naming a row of this purchase order keeps that row;
+//  2. else a client key naming a row of this purchase order (by its stored
+//     alias) keeps that row;
+//  3. else an exact value match against an unclaimed row keeps that row, so
+//     a payload without any identity (an older editor) still survives a
+//     reorder and a no-op save without churning ids;
+//  4. else the line is inserted as a new row.
+//
+// A positive ID that names no row of this order, two submitted lines
+// resolving to one row, or an ID/client-key pair disagreeing about the row
+// are refused: a line may never claim another line's identity. Rows that no
+// submitted line claims are deleted; their ids are returned so the caller can
+// retire their review state. Line numbers are assigned from the submitted
+// order. The (purchase_order_id, line_number) uniqueness is DEFERRABLE
+// (migration 042) so a swap of two display positions commits atomically.
+func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, schema string, orderID int64, items []PurchaseOrderItem) (kept []PurchaseOrderItem, removed []int64, err error) {
+	type storedLine struct {
+		item      PurchaseOrderItem
+		clientKey string
 	}
+	rows, err := q.Query(ctx, fmt.Sprintf(`
+		SELECT id, COALESCE(client_key, ''), description, quotation_item_no,
+		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
+		       discount_enabled, discount_percent
+		FROM %s.purchase_order_items
+		WHERE purchase_order_id = $1
+		ORDER BY line_number`, schema), orderID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load purchase order lines: %w", err)
+	}
+	existing := make([]storedLine, 0, len(items)+2)
+	for rows.Next() {
+		var line storedLine
+		var itemNo, subNo pgtype.Int4
+		if err := rows.Scan(&line.item.ID, &line.clientKey, &line.item.Description,
+			&itemNo, &subNo, &line.item.QuantityScaled, &line.item.UoM,
+			&line.item.UnitPriceMinor, &line.item.DiscountEnabled,
+			&line.item.DiscountPercent); err != nil {
+			rows.Close()
+			return nil, nil, fmt.Errorf("scan purchase order line: %w", err)
+		}
+		if itemNo.Valid {
+			value := int(itemNo.Int32)
+			line.item.QuotationItemNo = &value
+		}
+		if subNo.Valid {
+			value := int(subNo.Int32)
+			line.item.QuotationSubNo = &value
+		}
+		existing = append(existing, line)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate purchase order lines: %w", err)
+	}
+
+	byID := make(map[int64]int, len(existing))
+	byClientKey := make(map[string]int, len(existing))
+	for index, line := range existing {
+		byID[line.item.ID] = index
+		if line.clientKey != "" {
+			byClientKey[line.clientKey] = index
+		}
+	}
+	claimed := make([]bool, len(existing))
+	resolved := make([]int, len(items))
+	for index, item := range items {
+		match := -1
+		switch {
+		case item.ID > 0:
+			found, ok := byID[item.ID]
+			if !ok {
+				return nil, nil, fmt.Errorf("%w: line %d names an unknown purchase order line",
+					ErrPurchaseOrderInvalid, index+1)
+			}
+			if item.ClientKey != "" && existing[found].clientKey != "" &&
+				existing[found].clientKey != item.ClientKey {
+				return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
+					ErrPurchaseOrderInvalid, index+1)
+			}
+			match = found
+		case item.ClientKey != "":
+			if found, ok := byClientKey[item.ClientKey]; ok {
+				match = found
+			}
+		default:
+			for candidate, line := range existing {
+				if !claimed[candidate] && purchaseOrderLineValuesEqual(line.item, item) {
+					match = candidate
+					break
+				}
+			}
+		}
+		if match >= 0 {
+			if claimed[match] {
+				return nil, nil, fmt.Errorf("%w: lines %d and %d claim the same purchase order line",
+					ErrPurchaseOrderInvalid, resolvedClaim(resolved, index, match)+1, index+1)
+			}
+			claimed[match] = true
+			resolved[index] = match
+		} else {
+			resolved[index] = -1
+		}
+	}
+
+	removed = make([]int64, 0)
+	for index, line := range existing {
+		if !claimed[index] {
+			removed = append(removed, line.item.ID)
+		}
+	}
+	if len(removed) > 0 {
+		if _, err := q.Exec(ctx, fmt.Sprintf(`
+			DELETE FROM %s.purchase_order_items
+			WHERE purchase_order_id = $1 AND id = ANY($2)`, schema),
+			orderID, removed); err != nil {
+			return nil, nil, fmt.Errorf("clear removed purchase order lines: %w", err)
+		}
+	}
+
+	kept = make([]PurchaseOrderItem, len(items))
 	for index, item := range items {
 		lineNumber := index + 1
-		if _, err := q.Exec(ctx, fmt.Sprintf(`
+		item.LineNumber = lineNumber
+		if resolved[index] >= 0 {
+			row := existing[resolved[index]]
+			clientKey := row.clientKey
+			if item.ClientKey != "" {
+				clientKey = item.ClientKey
+			}
+			if _, err := q.Exec(ctx, fmt.Sprintf(`
+				UPDATE %s.purchase_order_items SET
+					line_number = $2, description = $3, quotation_item_no = $4,
+					quotation_sub_no = $5, quantity_scaled = $6, uom = $7,
+					unit_price_minor = $8, discount_enabled = $9,
+					discount_percent = $10, gross_minor = $11,
+					discount_minor = $12, net_minor = $13, client_key = $14
+				WHERE id = $1`, schema),
+				row.item.ID, lineNumber, item.Description, item.QuotationItemNo,
+				item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
+				item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
+				item.DiscountMinor, item.NetMinor, nilIfEmptyString(clientKey),
+			); err != nil {
+				return nil, nil, fmt.Errorf("update purchase order line %d: %w", lineNumber, err)
+			}
+			item.ID = row.item.ID
+			item.ClientKey = clientKey
+			kept[index] = item
+			continue
+		}
+		var id int64
+		if err := q.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO %s.purchase_order_items (
 				purchase_order_id, line_number, description, quotation_item_no,
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor,
-				discount_minor, net_minor
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, schema),
+				discount_minor, net_minor, client_key
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			RETURNING id`, schema),
 			orderID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
 			item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
-			item.DiscountMinor, item.NetMinor,
-		); err != nil {
-			return fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
+			item.DiscountMinor, item.NetMinor, nilIfEmptyString(item.ClientKey),
+		).Scan(&id); err != nil {
+			return nil, nil, fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
+		}
+		item.ID = id
+		kept[index] = item
+	}
+	return kept, removed, nil
+}
+
+// resolvedClaim finds the first submitted position that already claimed the
+// matched row, for the duplicate-claim error. Every claimed row has exactly
+// one claimant recorded in resolved.
+func resolvedClaim(resolved []int, index, match int) int {
+	for position := 0; position < index; position++ {
+		if resolved[position] == match {
+			return position
 		}
 	}
-	return nil
+	return index
+}
+
+// purchaseOrderLineValuesEqual compares the entered line values, not the
+// display position or the stored calculation: two rows with equal inputs
+// print and calculate identically, so an identity-less resubmission keeps the
+// older row rather than churning its id.
+func purchaseOrderLineValuesEqual(stored, entered PurchaseOrderItem) bool {
+	if stored.Description != entered.Description || stored.UoM != entered.UoM ||
+		stored.QuantityScaled != entered.QuantityScaled ||
+		stored.UnitPriceMinor != entered.UnitPriceMinor ||
+		stored.DiscountEnabled != entered.DiscountEnabled ||
+		stored.DiscountPercent != entered.DiscountPercent {
+		return false
+	}
+	if (stored.QuotationItemNo == nil) != (entered.QuotationItemNo == nil) {
+		return false
+	}
+	if stored.QuotationItemNo != nil && *stored.QuotationItemNo != *entered.QuotationItemNo {
+		return false
+	}
+	if (stored.QuotationSubNo == nil) != (entered.QuotationSubNo == nil) {
+		return false
+	}
+	if stored.QuotationSubNo != nil && *stored.QuotationSubNo != *entered.QuotationSubNo {
+		return false
+	}
+	return true
 }
 
 func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, id int64) (PurchaseOrder, error) {
@@ -1449,7 +1666,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	rows, err := q.Query(ctx, fmt.Sprintf(`
 		SELECT id, line_number, description, quotation_item_no, quotation_sub_no,
 		       quantity_scaled, uom, unit_price_minor, discount_enabled,
-		       discount_percent, gross_minor, discount_minor, net_minor
+		       discount_percent, gross_minor, discount_minor, net_minor, client_key
 		FROM %s.purchase_order_items
 		WHERE purchase_order_id = $1
 		ORDER BY line_number`, schema), id)
@@ -1461,11 +1678,15 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	for rows.Next() {
 		var item PurchaseOrderItem
 		var itemNo, subNo pgtype.Int4
+		var clientKey pgtype.Text
 		if err := rows.Scan(&item.ID, &item.LineNumber, &item.Description, &itemNo,
 			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
-			&item.DiscountMinor, &item.NetMinor); err != nil {
+			&item.DiscountMinor, &item.NetMinor, &clientKey); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
+		}
+		if clientKey.Valid {
+			item.ClientKey = clientKey.String
 		}
 		if itemNo.Valid {
 			value := int(itemNo.Int32)
