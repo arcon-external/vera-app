@@ -377,6 +377,8 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
     expect(payload.Incoterms).toBe("FOB");
     expect(payload.Items).toEqual([
       {
+        ID: null,
+        ClientKey: expect.any(String),
         QuotationItemNo: 2,
         QuotationSubNo: null,
         Description: "Revised widget",

@@ -144,6 +144,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
       state.header.discountPercent = String(tc.Entered.DiscountPercent);
       state.lines = tc.Entered.Lines.map((line, index) => ({
         key: index + 100,
+        clientKey: `client:contract-${index}`,
         description: line.Description,
         uom: line.UoM,
         quantity: formatQuantityScaled(line.QuantityScaled),
@@ -188,7 +189,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
       state.header.adjustment = formatUnitPriceMinor(USD, tc.Input.AdjustmentMinor);
       state.header.adjustmentReason = tc.Input.AdjustmentReason;
       state.lines = tc.Input.Lines.map((line, index) => ({
-        key: index, description: "Widget", uom: "Pc",
+        key: index, clientKey: `client:candidate-${index}`, description: "Widget", uom: "Pc",
         quotationItemNo: 1, quotationSubNo: null,
         quantity: formatQuantityScaled(line.QuantityScaled),
         unitPrice: formatUnitPriceMinor(USD, line.UnitPriceMinor),

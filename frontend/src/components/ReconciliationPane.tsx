@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import type { CurrencyInfo } from "../format";
+import { formatMoney } from "../format";
+import { formatQuantityScaled } from "../purchaseOrder";
 import type {
   LatestNotice,
   PaneFilter,
   ReconciliationItem,
   ReconciliationSession,
 } from "../poReconciliation";
+import { hasAckRecording } from "../poReconciliation.lines";
 import { orderPaneItems } from "../poReconciliation";
 
 export interface ReconciliationPaneHandle {
@@ -41,10 +45,19 @@ export interface ReconciliationPaneContentProps {
   onUse: (key: string) => void;
   onLinkQuotation?: () => void;
   onRetry: () => void;
+  /** Line-set actions (ticket 05); absent in read-only harnesses. */
+  onAddLineFromSource?: (reference: string) => void;
+  onAcknowledgeMissing?: (key: string) => void;
+  onAcknowledgeExtra?: (key: string) => void;
+  onFixMatch?: (lineKey: string) => void;
+  /** Formats money and quantity values; plain text needs none. */
+  currency?: CurrencyInfo;
   /** Renders item actor ids; null when the name is not known client-side. */
   actorNameFor: (actorId: number) => string | null;
   /** Rendered beside the pane title; the sheet passes its Close button. */
   headerActions?: ReactNode;
+  /** Derived totals check, rendered under the heading. Never a decision. */
+  totalsStrip?: ReactNode;
   ref?: Ref<ReconciliationPaneHandle>;
 }
 
@@ -58,12 +71,34 @@ const RESOLUTION_CHIPS: Record<string, string> = {
   line_removed: "Line removed",
 };
 
-function formatPaneValue(value: unknown, field: string): string {
+function formatPaneValue(
+  value: unknown,
+  field: string,
+  currency?: CurrencyInfo
+): string {
   if (typeof value === "number") {
-    return field === "header:discountPercent" ? `${value}%` : String(value);
+    if (field === "header:discountPercent") return `${value}%`;
+    if (field === "line:quantity") return formatQuantityScaled(value);
+    if (field === "line:unitPrice" && currency !== undefined) {
+      return formatMoney(currency, value);
+    }
+    return String(value);
   }
   if (typeof value === "string") {
     return value === "" ? "(empty)" : value;
+  }
+  if (value !== null && typeof value === "object" && "TaxZone" in value) {
+    // Ticket 05: the link-time tax basis triple (contract section 6).
+    const triple = value as { TaxZone?: unknown; TaxType?: unknown; ServiceCategory?: unknown };
+    const parts = [triple.TaxZone, triple.TaxType, triple.ServiceCategory].filter(
+      (part): part is string => typeof part === "string" && part !== ""
+    );
+    return parts.length > 0 ? parts.join(" · ") : "(no basis recorded)";
+  }
+  if (value !== null && typeof value === "object" && "Enabled" in value) {
+    const discount = value as { Enabled: unknown; Percent: unknown };
+    if (discount.Enabled === false) return "No discount";
+    return `${String(discount.Percent)}%`;
   }
   if (value === null || value === undefined) return "(empty)";
   return String(value);
@@ -80,14 +115,6 @@ function formatPaneTime(iso: string): string | null {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function isHeaderItem(item: ReconciliationItem): boolean {
-  return (
-    item.Field === "header:paymentTerms" ||
-    item.Field === "header:incoterms" ||
-    item.Field === "header:discountPercent"
-  );
 }
 
 const FILTERS: { id: PaneFilter; label: string }[] = [
@@ -125,14 +152,20 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     onUse,
     onLinkQuotation,
     onRetry,
+    onAddLineFromSource,
+    onAcknowledgeMissing,
+    onAcknowledgeExtra,
+    onFixMatch,
+    currency,
     actorNameFor,
     headerActions,
+    totalsStrip,
     ref,
   } = props;
 
   const items = session?.Items ?? [];
   const unresolved = items.filter((entry) => entry.Status === "unresolved");
-  const unresolvedCount = unresolved.filter(isHeaderItem).length;
+  const unresolvedCount = unresolved.length;
   const ordered = orderPaneItems(items, filter);
   const counts = {
     all: items.length,
@@ -208,9 +241,194 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   const listId = `${idPrefix}-pane-items`;
   const headingId = `${idPrefix}-pane-heading`;
 
+  const cardShell = (key: string, title: string, pill: ReactNode, body: ReactNode) => (
+    <li key={key}>
+      <div className="rounded-lg border border-rule bg-white p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-small font-medium text-ink-900">{title}</span>
+          {pill}
+        </div>
+        {body}
+      </div>
+    </li>
+  );
+
+  const neutralPill = (text: string) => (
+    <span className="inline-flex items-center rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
+      {text}
+    </span>
+  );
+
+  const dangerPill = (text: string) => (
+    <span className="inline-flex items-center rounded-md border border-danger-200 bg-danger-50 px-2 py-0.5 text-micro font-medium uppercase text-danger-700">
+      {text}
+    </span>
+  );
+
+  const cardButtonClass =
+    "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8";
+  const cardAccentButtonClass =
+    "inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-200 bg-accent-50 px-3.5 text-small font-medium text-accent-700 transition-colors duration-150 hover:bg-accent-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8";
+
+  const renderMissingCard = (item: ReconciliationItem) => {
+    const acknowledged = item.Status === "resolved";
+    return cardShell(
+      item.Key,
+      item.Label,
+      acknowledged ? neutralPill("Acknowledged missing") : neutralPill("Missing line"),
+      <>
+        <p className="mt-1 text-small text-ink-700">
+          {typeof item.SourceValue === "string" && item.SourceValue !== ""
+            ? item.SourceValue
+            : "This quotation line is not on the purchase order."}
+        </p>
+        {acknowledged || readOnly ? null : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              ref={(node) => {
+                if (node === null) actionRefs.current.delete(item.Key);
+                else actionRefs.current.set(item.Key, node);
+              }}
+              aria-label={`Add line from Quotation ${item.SourceLineRef ?? ""}`}
+              onClick={() => onAddLineFromSource?.(String(item.SourceLineRef ?? ""))}
+              className={cardAccentButtonClass}
+            >
+              Add line from Quotation
+            </button>
+            <button
+              type="button"
+              aria-label={`Acknowledge omission of ${item.Label}`}
+              onClick={() => onAcknowledgeMissing?.(item.Key)}
+              className={cardButtonClass}
+            >
+              Acknowledge omission
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderExtraCard = (item: ReconciliationItem) => {
+    const acknowledged = item.Status === "resolved";
+    return cardShell(
+      item.Key,
+      item.Label,
+      acknowledged ? neutralPill("Acknowledged extra") : neutralPill("Extra line"),
+      <>
+        <p className="mt-1 text-small text-ink-700">
+          {formatPaneValue(item.POValue, item.Field, currency)}
+        </p>
+        {acknowledged || readOnly ? null : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              ref={(node) => {
+                if (node === null) actionRefs.current.delete(item.Key);
+                else actionRefs.current.set(item.Key, node);
+              }}
+              aria-label={`Match to Quotation for ${item.Label}`}
+              onClick={() => item.LineKey != null && onFixMatch?.(item.LineKey)}
+              className={cardAccentButtonClass}
+            >
+              Match to Quotation…
+            </button>
+            <button
+              type="button"
+              aria-label={`Acknowledge ${item.Label} as extra`}
+              onClick={() => onAcknowledgeExtra?.(item.Key)}
+              className={cardButtonClass}
+            >
+              Acknowledge extra
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderUnknownCard = (item: ReconciliationItem) => {
+    const reference = typeof item.SourceLineRef === "string" ? item.SourceLineRef : "";
+    const acked = hasAckRecording(item, "acknowledged_extra");
+    return cardShell(
+      item.Key,
+      `Unknown reference · ${reference}`,
+      dangerPill("Unknown reference"),
+      <>
+        <p className="mt-1 text-small text-ink-700">
+          {formatPaneValue(item.POValue, item.Field, currency)}
+        </p>
+        <p className="mt-1 text-caption text-ink-500">
+          No Quotation line {reference} exists.
+          {acked
+            ? " Acknowledged: link a valid Quotation line to finalize."
+            : ""}
+        </p>
+        {readOnly ? null : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              ref={(node) => {
+                if (node === null) actionRefs.current.delete(item.Key);
+                else actionRefs.current.set(item.Key, node);
+              }}
+              aria-label={`Match to Quotation for unknown reference ${reference}`}
+              onClick={() => item.LineKey != null && onFixMatch?.(item.LineKey)}
+              className={cardAccentButtonClass}
+            >
+              Match to Quotation…
+            </button>
+            {acked ? null : (
+              <button
+                type="button"
+                aria-label={`Acknowledge unknown reference ${reference} as extra`}
+                onClick={() => onAcknowledgeExtra?.(item.Key)}
+                className={cardButtonClass}
+              >
+                Acknowledge extra
+              </button>
+            )}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderDuplicateCard = (item: ReconciliationItem) => {
+    const reference =
+      typeof item.SourceLineRef === "string" ? item.SourceLineRef : "";
+    return cardShell(
+      item.Key,
+      `Duplicate match · Quotation ${reference}`,
+      dangerPill("Blocking"),
+      <>
+        <p className="mt-1 text-caption text-ink-500">
+          Two lines claim this quotation line. Correct one match before Final Save.
+        </p>
+        {readOnly ? null : (
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              ref={(node) => {
+                if (node === null) actionRefs.current.delete(item.Key);
+                else actionRefs.current.set(item.Key, node);
+              }}
+              aria-label={`Fix match for Quotation ${reference}`}
+              onClick={() => item.LineKey != null && onFixMatch?.(item.LineKey)}
+              className={cardAccentButtonClass}
+            >
+              Fix match
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const renderItem = (item: ReconciliationItem) => {
     const actionable =
-      !readOnly && item.Status === "unresolved" && isHeaderItem(item);
+      !readOnly && item.Status === "unresolved" && item.Kind === "difference";
     const chip =
       item.Resolution !== null && item.Resolution !== undefined
         ? (RESOLUTION_CHIPS[item.Resolution] ?? item.Resolution)
@@ -220,7 +438,17 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
       item.Resolution !== null && item.Resolution !== undefined
         ? `${actorNameFor(item.ActorID) !== null ? `${chip} by ${actorNameFor(item.ActorID)} · ` : ""}${formatPaneTime(item.UpdatedAt) ?? ""}`
         : null;
-    if (!actionable && item.Status === "resolved" && isHeaderItem(item)) {
+    if (item.Kind === "missing_line") return renderMissingCard(item);
+    if (item.Kind === "extra_line" && item.SourceLineRef !== null && item.SourceLineRef !== undefined && item.SourceLineRef !== "") {
+      return renderUnknownCard(item);
+    }
+    if (item.Kind === "extra_line") return renderExtraCard(item);
+    if (item.Kind === "duplicate_match") return renderDuplicateCard(item);
+    if (
+      !actionable &&
+      item.Status === "resolved" &&
+      item.Kind === "difference"
+    ) {
       return (
         <li key={item.Key}>
           <div className="rounded-lg border border-rule bg-white">
@@ -264,7 +492,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                 <div className="flex gap-2">
                   <dt className="w-[72px] shrink-0 text-caption text-ink-500">PO</dt>
                   <dd className="min-w-0 flex-1 text-ink-900">
-                    {formatPaneValue(item.POValue, item.Field)}
+                    {formatPaneValue(item.POValue, item.Field, currency)}
                   </dd>
                 </div>
                 <div className="flex gap-2">
@@ -272,7 +500,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                     Quotation
                   </dt>
                   <dd className="min-w-0 flex-1 text-ink-700">
-                    {formatPaneValue(item.SourceValue, item.Field)}
+                    {formatPaneValue(item.SourceValue, item.Field, currency)}
                   </dd>
                 </div>
               </dl>
@@ -304,7 +532,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             </div>
             {taxRow ? (
               <p className="mt-1 text-small tabular-nums text-ink-700">
-                {formatPaneValue(item.POValue, item.Field)}{" "}
+                {formatPaneValue(item.POValue, item.Field, currency)}{" "}
                 <svg
                   width="12"
                   height="12"
@@ -327,7 +555,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                 <div className="flex gap-2">
                   <dt className="w-[72px] shrink-0 text-caption text-ink-500">PO</dt>
                   <dd className="min-w-0 flex-1 text-ink-900">
-                    {formatPaneValue(item.POValue, item.Field)}
+                    {formatPaneValue(item.POValue, item.Field, currency)}
                   </dd>
                 </div>
                 <div className="flex gap-2">
@@ -335,7 +563,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                     Quotation
                   </dt>
                   <dd className="min-w-0 flex-1 text-ink-700">
-                    {formatPaneValue(item.SourceValue, item.Field)}
+                    {formatPaneValue(item.SourceValue, item.Field, currency)}
                   </dd>
                 </div>
               </dl>
@@ -367,13 +595,13 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             <div className="flex gap-2">
               <dt className="w-[72px] shrink-0 text-caption text-ink-500">PO</dt>
               <dd className="min-w-0 flex-1 text-ink-900">
-                {formatPaneValue(item.POValue, item.Field)}
+                {formatPaneValue(item.POValue, item.Field, currency)}
               </dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-[72px] shrink-0 text-caption text-ink-500">Quotation</dt>
               <dd className="min-w-0 flex-1 text-ink-700">
-                {formatPaneValue(item.SourceValue, item.Field)}
+                {formatPaneValue(item.SourceValue, item.Field, currency)}
               </dd>
             </div>
           </dl>
@@ -468,6 +696,9 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
         </p>
       ) : null}
       <p className="text-caption text-ink-400">Checked when you leave a field.</p>
+      {totalsStrip !== undefined && totalsStrip !== null ? (
+        <div className="mt-2 rounded-lg border border-rule bg-white p-3">{totalsStrip}</div>
+      ) : null}
 
       {readOnly && readOnlyCaption !== undefined ? (
         <p className="mt-2 text-caption leading-relaxed text-ink-500">{readOnlyCaption}</p>

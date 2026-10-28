@@ -37,6 +37,7 @@ import { AdminDashboard } from "./components/AdminDashboard";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
+import { ReconciliationTotalsStrip } from "./components/ReconciliationTotalsStrip";
 import {
   DeletionChallengePanel,
   DeletionDialogView,
@@ -962,6 +963,118 @@ const PO_RECONCILIATION_SESSION = {
   ],
 };
 
+const PO_RECONCILIATION_LINE_SESSION = {
+  ...PO_RECONCILIATION_SESSION,
+  LineIdentities: [
+    { Key: "client:a", ID: null, Removed: false },
+    { Key: "client:b", ID: null, Removed: false },
+    { Key: "client:u", ID: null, Removed: false },
+  ],
+  Items: [
+    {
+      Key: "line:client:a:quantity",
+      Field: "line:quantity",
+      Kind: "difference",
+      LineKey: "client:a",
+      SourceLineRef: "1",
+      Label: "Line 1 quantity",
+      POValue: 30000,
+      SourceValue: 20000,
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "source:2:match",
+      Field: "source:match",
+      Kind: "missing_line",
+      LineKey: null,
+      SourceLineRef: "2",
+      Label: "Missing line · Quotation 2",
+      POValue: null,
+      SourceValue: "Sprocket",
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "line:client:b:match",
+      Field: "line:match",
+      Kind: "extra_line",
+      LineKey: "client:b",
+      SourceLineRef: null,
+      Label: "Extra line · Line 2",
+      POValue: "Line 2 is not on the quotation",
+      SourceValue: null,
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "line:client:u:match",
+      Field: "line:match",
+      Kind: "extra_line",
+      LineKey: "client:u",
+      SourceLineRef: "99",
+      Label: "Unknown reference · 99",
+      POValue: "Line 3 names quotation line 99, which does not exist",
+      SourceValue: null,
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:05Z",
+      History: [
+        {
+          Kind: "extra_line",
+          SourceLineRef: "99",
+          POValue: "Line 3 names quotation line 99, which does not exist",
+          SourceValue: null,
+          Status: "unresolved",
+          Resolution: "acknowledged_extra",
+          ActorID: 7,
+          At: "2026-10-28T00:00:05Z",
+        },
+      ],
+    },
+    {
+      Key: "source:1:duplicate",
+      Field: "source:match",
+      Kind: "duplicate_match",
+      LineKey: null,
+      SourceLineRef: "1",
+      Label: "Duplicate match · Quotation 1",
+      POValue: null,
+      SourceValue: null,
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "link:taxBasis",
+      Field: "link:taxBasis",
+      Kind: "tax_basis",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Tax basis",
+      POValue: { TaxZone: "FTZ", TaxType: "Goods", ServiceCategory: "" },
+      SourceValue: { TaxZone: "FTZ", TaxType: "Goods", ServiceCategory: "" },
+      Status: "resolved",
+      Resolution: "kept_po",
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:00Z",
+      History: [],
+    },
+  ],
+};
+
 // The issued-Quotation detail header (#467 wave 2): the second PO entry path
 // beside Edit, with the revision picker present because this quotation has
 // three issued revisions. Only the header is rendered; the page fetches its
@@ -1668,6 +1781,52 @@ const CASES: SnapshotCase[] = [
         onUse={() => undefined}
         onRetry={() => undefined}
         actorNameFor={() => null}
+      />
+    ),
+  },
+  {
+    // Ticket 05: the line set in the pane. A differing line field, a missing
+    // line with its Add line action, an extra line, an unknown reference with
+    // its recorded acknowledgement (still blocking), a blocking duplicate and
+    // the link-time tax basis triple, plus the derived totals strip. What
+    // this case cannot show is committing, rematch and the Final Save gate:
+    // those are interaction and stay in the DOM suite and hand-driven review.
+    name: "PurchaseOrderReconciliationLineSet",
+    element: (
+      <ReconciliationPaneContent
+        idPrefix="harness-lineset"
+        session={PO_RECONCILIATION_LINE_SESSION}
+        status="ready"
+        error={null}
+        sourceLabel="QT-2026-018 · revision 02"
+        sourceRevision={2}
+        noSource={false}
+        formerSource={false}
+        readOnly={false}
+        filter="all"
+        onFilterChange={() => undefined}
+        onShowAll={() => undefined}
+        latestNotice={null}
+        keepConfirmKey={null}
+        onRequestKeep={() => undefined}
+        onCancelKeep={() => undefined}
+        onConfirmKeep={() => undefined}
+        onUse={() => undefined}
+        onRetry={() => undefined}
+        onAddLineFromSource={() => undefined}
+        onAcknowledgeMissing={() => undefined}
+        onAcknowledgeExtra={() => undefined}
+        onFixMatch={() => undefined}
+        currency={PO_EDITOR_IDR}
+        actorNameFor={() => null}
+        totalsStrip={
+          <ReconciliationTotalsStrip
+            calculatedMinor={24600}
+            printedMinor={24500}
+            reason="Whole-PO discount 2% vs 0%"
+            currency={PO_EDITOR_IDR}
+          />
+        }
       />
     ),
   },

@@ -403,3 +403,184 @@ describe("ReconciliationSheetTrigger (ticket 04)", () => {
     button("Reconciliation, nothing to resolve. Open panel.");
   });
 });
+
+describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
+  const lineItemWith = (overrides: Partial<ReconciliationItem> = {}) =>
+    item({
+      Key: "source:3:match",
+      Field: "source:match",
+      Kind: "missing_line",
+      LineKey: null,
+      SourceLineRef: "3",
+      Label: "Missing line · Quotation 3",
+      POValue: null,
+      SourceValue: "Sprocket",
+      Status: "unresolved",
+      Resolution: null,
+      ...overrides,
+    });
+
+  async function renderWith(items: ReconciliationItem[], props: Record<string, unknown> = {}) {
+    await renderPane({ session: { ...BASE.session, Items: items }, ...props });
+  }
+
+  it("offers Add line and Acknowledge omission on a missing line", async () => {
+    const onAddLineFromSource = vi.fn();
+    const onAcknowledgeMissing = vi.fn();
+    await renderWith([lineItemWith()], { onAddLineFromSource, onAcknowledgeMissing });
+    expect(document.body.textContent).toContain("Missing line · Quotation 3");
+    expect(document.body.textContent).toContain("Sprocket");
+    button("Add line from Quotation 3").click();
+    expect(onAddLineFromSource).toHaveBeenCalledWith("3");
+    button("Acknowledge omission of Missing line · Quotation 3").click();
+    expect(onAcknowledgeMissing).toHaveBeenCalledWith("source:3:match");
+  });
+
+  it("offers Match to Quotation and Acknowledge extra on an extra line", async () => {
+    const onFixMatch = vi.fn();
+    const onAcknowledgeExtra = vi.fn();
+    await renderWith(
+      [
+        lineItemWith({
+          Key: "line:client:b:match",
+          Field: "line:match",
+          Kind: "extra_line",
+          LineKey: "client:b",
+          SourceLineRef: null,
+          Label: "Extra line · Line 2",
+          POValue: "Custom bracket",
+        }),
+      ],
+      { onFixMatch, onAcknowledgeExtra }
+    );
+    button("Match to Quotation for Extra line · Line 2").click();
+    expect(onFixMatch).toHaveBeenCalledWith("client:b");
+    button("Acknowledge Extra line · Line 2 as extra").click();
+    expect(onAcknowledgeExtra).toHaveBeenCalledWith("line:client:b:match");
+  });
+
+  it("names the saved-reference blocker on an unknown reference", async () => {
+    const onAcknowledgeExtra = vi.fn();
+    await renderWith(
+      [
+        lineItemWith({
+          Key: "line:client:u:match",
+          Field: "line:match",
+          Kind: "extra_line",
+          LineKey: "client:u",
+          SourceLineRef: "99",
+          Label: "Unknown reference · 99",
+          POValue: "Custom bracket",
+        }),
+      ],
+      { onAcknowledgeExtra }
+    );
+    expect(document.body.textContent).toContain("Unknown reference · 99");
+    expect(document.body.textContent).toContain("No Quotation line 99 exists.");
+    button("Acknowledge unknown reference 99 as extra").click();
+    expect(onAcknowledgeExtra).toHaveBeenCalledWith("line:client:u:match");
+  });
+
+  it("shows the recorded acknowledgement without unblocking an unknown line", async () => {
+    await renderWith([
+      lineItemWith({
+        Key: "line:client:u:match",
+        Field: "line:match",
+        Kind: "extra_line",
+        LineKey: "client:u",
+        SourceLineRef: "99",
+        Label: "Unknown reference · 99",
+        POValue: "Custom bracket",
+        History: [
+          {
+            Kind: "extra_line",
+            SourceLineRef: "99",
+            POValue: "Custom bracket",
+            SourceValue: null,
+            Status: "unresolved",
+            Resolution: "acknowledged_extra",
+            ActorID: 7,
+            At: "2026-10-28T00:00:05Z",
+          },
+        ],
+      }),
+    ]);
+    expect(document.body.textContent).toContain("Acknowledged: link a valid Quotation line to finalize.");
+    expect(
+      document.querySelector('button[aria-label="Acknowledge unknown reference 99 as extra"]')
+    ).toBeNull();
+  });
+
+  it("blocks a duplicate match until one match is corrected", async () => {
+    const onFixMatch = vi.fn();
+    await renderWith(
+      [
+        lineItemWith({
+          Key: "source:2:match",
+          Field: "source:match",
+          Kind: "duplicate_match",
+          LineKey: "client:a",
+          SourceLineRef: "2",
+          Label: "Duplicate match · Quotation 2",
+          POValue: null,
+          SourceValue: null,
+        }),
+      ],
+      { onFixMatch }
+    );
+    expect(document.body.textContent).toContain("Duplicate match · Quotation 2");
+    expect(document.body.textContent).toContain("Blocking");
+    button("Fix match for Quotation 2").click();
+    expect(onFixMatch).toHaveBeenCalledWith("client:a");
+  });
+
+  it("focuses the first line-set action for blocked Final Save", async () => {
+    const ref: { current: ReconciliationPaneHandle | null } = { current: null };
+    await act(async () => {
+      root.render(
+        <ReconciliationPaneContent
+          {...BASE}
+          session={{ ...BASE.session, Items: [lineItemWith()] }}
+          ref={ref}
+        />
+      );
+    });
+    expect(ref.current?.focusFirstUnresolved()).toBe(true);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Add line from Quotation 3"
+    );
+  });
+});
+
+describe("ReconciliationPaneContent tax basis (ticket 05)", () => {
+  it("renders the link-time tax basis triple read-only with no actions", async () => {
+    await renderPane({
+      session: {
+        ...BASE.session,
+        Items: [
+          item({
+            Key: "link:taxBasis",
+            Field: "link:taxBasis",
+            Kind: "tax_basis",
+            LineKey: null,
+            SourceLineRef: null,
+            Label: "Tax basis",
+            POValue: { TaxZone: "FTZ", TaxType: "Goods", ServiceCategory: "" },
+            SourceValue: { TaxZone: "FTZ", TaxType: "Goods", ServiceCategory: "" },
+            Status: "resolved",
+            Resolution: "kept_po",
+          }),
+        ],
+      },
+    });
+    expect(document.body.textContent).toContain("Tax basis · linked at revision 2");
+    expect(document.body.textContent).toContain("FTZ · Goods");
+    expect(document.body.textContent).toContain("Protected");
+    // No Keep/Use/Delete actions anywhere: filter tabs are the only buttons.
+    expect(
+      document.querySelector(
+        'button[aria-label^="Keep PO"], button[aria-label^="Use Quotation"], button[aria-label^="Delete"]'
+      )
+    ).toBeNull();
+  });
+});
