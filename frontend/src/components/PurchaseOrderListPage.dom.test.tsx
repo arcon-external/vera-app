@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
+import { PurchaseOrderListView } from "./PurchaseOrderListPage";
+import { initialPOListState } from "../poList";
 import type { POListQuery } from "../poList";
 
 // Issue #481: the archive's Source missing filter is a real request, not a
@@ -143,5 +145,194 @@ describe("PurchaseOrderListPage source-missing filter (issue #481)", () => {
     await flush();
     expect(listMock).toHaveBeenCalledTimes(1);
     expect(listMock.mock.calls[0][0].PageSize).toBe(25);
+  });
+});
+
+describe("PurchaseOrderListView dockets (ticket 03)", () => {
+  let viewRoot: Root;
+  let viewContainer: HTMLDivElement;
+
+  function docketRow(overrides: Record<string, unknown> = {}) {
+    return {
+      UUID: "uuid-1",
+      State: "draft",
+      PONumber: "PO-1",
+      QuoteNumber: "1502260012",
+      CustomerName: "PT. Buyer",
+      ReceivedDate: "2026-10-02",
+      Currency: "IDR",
+      ID: 7,
+      CustomerID: 2,
+      SourceRevision: 1,
+      SourceMissing: false,
+      ...overrides,
+    };
+  }
+
+  function viewState(overrides: Record<string, unknown> = {}) {
+    return {
+      ...initialPOListState,
+      rows: [docketRow()],
+      customers: [{ ID: 2, Name: "PT. Buyer" }],
+      total: 1,
+      totalPages: 1,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    viewContainer = document.createElement("div");
+    document.body.appendChild(viewContainer);
+    viewRoot = createRoot(viewContainer);
+  });
+
+  afterEach(() => {
+    act(() => viewRoot.unmount());
+    viewContainer.remove();
+  });
+
+  async function renderView(props: Record<string, unknown> = {}) {
+    await act(async () => {
+      viewRoot.render(
+        <PurchaseOrderListView
+          state={viewState()}
+          dispatch={() => undefined}
+          onOpen={() => undefined}
+          onAdd={() => undefined}
+          onRetry={() => undefined}
+          {...(props as Record<string, never>)}
+        />
+      );
+    });
+    await flush();
+  }
+
+  it("opens only through the Open button, never through the row body", async () => {
+    const onOpen = vi.fn();
+    await renderView({ onOpen });
+    const open = button("Open purchase order PO-1");
+    open.focus();
+    expect(document.activeElement).toBe(open);
+    click(open);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledWith(7);
+
+    // The row body is not a click target: clicking it opens nothing.
+    const article = document.querySelector("article");
+    if (article === null) throw new Error("no docket card rendered");
+    click(article);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Delete in a separate menu with keyboard close and focus return", async () => {
+    const onDelete = vi.fn();
+    await renderView({ onDelete });
+    // No Delete beside Open: the only delete control lives behind ⋯.
+    expect(
+      document.querySelector('button[aria-label^="Delete purchase order"]')
+    ).toBeNull();
+    const trigger = button("More actions for purchase order PO-1");
+    click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const item = button("Delete purchase order PO-1");
+    click(item);
+    expect(onDelete).toHaveBeenCalledTimes(1);
+
+    // Escape closes the menu and returns focus to the trigger.
+    click(trigger);
+    expect(
+      document.querySelector('button[aria-label="Delete purchase order PO-1"]')
+    ).not.toBeNull();
+    act(() => {
+      trigger.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    expect(
+      document.querySelector('button[aria-label="Delete purchase order PO-1"]')
+    ).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    // Outside pointer closes it too.
+    click(trigger);
+    act(() => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(
+      document.querySelector('button[aria-label="Delete purchase order PO-1"]')
+    ).toBeNull();
+  });
+
+  it("renders no admin column at all for non-admins", async () => {
+    await renderView();
+    expect(
+      document.querySelector('button[aria-label^="More actions for purchase order"]')
+    ).toBeNull();
+    expect(document.body.textContent).not.toContain("Delete");
+  });
+
+  it("reports Opening… on the activating row and recovers on failure", async () => {
+    let rejectOpen!: (error: unknown) => void;
+    const onOpen = vi.fn(
+      () => new Promise<unknown>((_, reject) => (rejectOpen = reject))
+    );
+    await renderView({
+      onOpen,
+      state: viewState({
+        rows: [docketRow(), docketRow({ ID: 8, PONumber: "PO-2", UUID: "uuid-2" })],
+        total: 2,
+      }),
+    });
+    click(button("Open purchase order PO-1"));
+    expect(button("Open purchase order PO-1").textContent).toBe("Opening…");
+    expect(
+      button("Open purchase order PO-1").hasAttribute("disabled")
+    ).toBe(true);
+    // The other row stays usable while one opens.
+    expect(button("Open purchase order PO-2").textContent).toBe("Open");
+    expect(button("Open purchase order PO-2").hasAttribute("disabled")).toBe(
+      false
+    );
+
+    act(() => rejectOpen(new Error("offline")));
+    await flush();
+    expect(button("Open purchase order PO-1").textContent).toBe("Open");
+    expect(button("Open purchase order PO-1").hasAttribute("disabled")).toBe(
+      false
+    );
+  });
+
+  it("toggles the filter panel and removes one dimension through its chip", async () => {
+    const dispatch = vi.fn();
+    await renderView({
+      dispatch,
+      state: viewState({
+        filters: {
+          search: "ACME",
+          customerIds: [2],
+          receivedFrom: "",
+          receivedTo: "",
+          state: "draft",
+          sourceMissing: "any",
+        },
+      }),
+    });
+    const toggle = button("Show filters");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    click(toggle);
+    expect(button("Hide filters").getAttribute("aria-expanded")).toBe("true");
+
+    click(button("Remove ACME filter"));
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "filtersChanged",
+      patch: { search: "" },
+    });
+  });
+
+  it("dims loaded rows while reloading and keeps paging disabled", async () => {
+    await renderView({ state: viewState({ loading: true }) });
+    expect(document.querySelector(".opacity-60")).not.toBeNull();
+    expect(button("Previous page").hasAttribute("disabled")).toBe(true);
+    expect(button("Next page").hasAttribute("disabled")).toBe(true);
   });
 });

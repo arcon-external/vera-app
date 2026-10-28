@@ -1453,13 +1453,13 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // Issue #491: the Drafts tab (issue #469's list with the state pinned to
-    // draft). Search, the customer multi-select, the received range and the
-    // Source filter remain; the State control does not, because the tab owns
-    // it. At 360 the table scrolls inside its card; the filter grid stacks.
+    // Ticket 03: the Drafts tab as a docket list. At ≥1024 a wrapping table
+    // with no min-width and no horizontal scroll; below 1024 the same rows
+    // stack as cards. The filters collapse behind a toggle with chips.
     //
     // What this case cannot show: typing, opening a row, the fetch effect,
-    // focus order and the real scrollbar stay hand-driven.
+    // focus order and the real breakpoint behavior stay hand-driven and are
+    // read from the PNGs, not asserted here.
     name: "PurchaseOrderDrafts",
     element: (
       <PurchaseOrderListView
