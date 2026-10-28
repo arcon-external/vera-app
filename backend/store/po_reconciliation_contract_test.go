@@ -10,67 +10,21 @@ import (
 	"testing"
 )
 
-// Ticket 01 freezes the future wire shape in test-only types. These are NOT
-// production DTOs. Ticket 04 must bind these checks to the real DTOs; until
-// then the transition examples specify behaviour, rather than execute it.
-type reconciliationSessionContract struct {
-	ID                int64
-	PurchaseOrderID   int64
-	SourceQuotationID int64
-	SourceRevision    int16
-	POVersion         int64
-	Active            bool
-	ReadOnly          bool
-	CreatedBy         int64
-	CreatedAt         string
-	UpdatedAt         string
-	LineIdentities    []reconciliationLineIdentityContract
-	Items             []reconciliationItemContract
-}
+// Ticket 04 binds the frozen wire shape to the production DTOs. The session,
+// item, history, line-identity, discount and tax-basis checks below run
+// against the real store types; only the transient feedback/transition
+// examples stay test-only, because notices are never persisted.
+type reconciliationSessionContract = POReconciliationSession
 
-type reconciliationLineIdentityContract struct {
-	Key     string
-	ID      *int64
-	Removed bool
-}
+type reconciliationLineIdentityContract = POReconciliationLineIdentity
 
-type reconciliationItemContract struct {
-	Key           string
-	Field         string
-	Kind          string
-	LineKey       *string
-	SourceLineRef *string
-	Label         string
-	POValue       json.RawMessage
-	SourceValue   json.RawMessage
-	Status        string
-	Resolution    *string
-	ActorID       int64
-	UpdatedAt     string
-	History       []reconciliationEventContract
-}
+type reconciliationItemContract = POReconciliationItem
 
-type reconciliationEventContract struct {
-	Kind          string
-	SourceLineRef *string
-	POValue       json.RawMessage
-	SourceValue   json.RawMessage
-	Status        string
-	Resolution    *string
-	ActorID       int64
-	At            string
-}
+type reconciliationEventContract = POReconciliationHistoryEvent
 
-type reconciliationDiscountContract struct {
-	Enabled bool
-	Percent int16
-}
+type reconciliationDiscountContract = POReconciliationDiscount
 
-type reconciliationTaxBasisContract struct {
-	TaxZone         string
-	TaxType         string
-	ServiceCategory string
-}
+type reconciliationTaxBasisContract = POReconciliationTaxBasis
 
 type reconciliationFeedbackContract struct {
 	Notice     *string

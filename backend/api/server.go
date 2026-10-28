@@ -147,6 +147,11 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/purchase-orders/:id/source-link/review", server.previewPurchaseOrderDraftLink, server.requireSession)
 	server.echo.POST("/v1/purchase-orders/:id/source-link", server.linkPurchaseOrderDraftSource, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id/history", server.getPurchaseOrderHistory, server.requireSession)
+	// #502 ticket 04: live header reconciliation. The session is created with
+	// the draft's first source, saved with optimistic POVersion, and frozen on
+	// Final Save. Reads and writes are org-scoped; a stale write conflicts.
+	server.echo.GET("/v1/purchase-orders/:id/reconciliation", server.getPOReconciliation, server.requireSession)
+	server.echo.PUT("/v1/purchase-orders/:id/reconciliation", server.savePOReconciliation, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.
 	server.echo.POST("/v1/purchase-orders/:id/confirmation-number", server.assignPurchaseOrderConfirmation, server.requireSession)

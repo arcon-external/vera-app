@@ -146,6 +146,10 @@ export function ListQuotations() {
   return window['go']['backend']['Quotation']['ListQuotations']();
 }
 
+export function LoadPOReconciliation(arg1) {
+  return window['go']['backend']['Quotation']['LoadPOReconciliation'](arg1);
+}
+
 export function PickDirectory() {
   return window['go']['backend']['Quotation']['PickDirectory']();
 }
@@ -192,6 +196,10 @@ export function ReviewPurchaseOrderSource(arg1) {
 
 export function SaveDraft(arg1) {
   return window['go']['backend']['Quotation']['SaveDraft'](arg1);
+}
+
+export function SavePOReconciliation(arg1, arg2) {
+  return window['go']['backend']['Quotation']['SavePOReconciliation'](arg1, arg2);
 }
 
 export function SetAuthService(arg1) {

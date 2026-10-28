@@ -590,6 +590,17 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		}
 	}
 
+	// #502 ticket 04: freeze the live reconciliation session before the PO
+	// leaves draft. The session update runs while the PO is still a draft so
+	// the 041 immutability guard allows the readonly transition; pre-041
+	// records have no session and this is a no-op (R-07, no backfill).
+	_, _ = tx.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_order_reconciliation_sessions SET
+			readonly = TRUE, po_version = $3, updated_at = NOW()
+		WHERE purchase_order_id = $1 AND org_id = $2 AND active AND NOT readonly`, schema),
+		input.ID, org.ID, lock.Version+1,
+	)
+
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET

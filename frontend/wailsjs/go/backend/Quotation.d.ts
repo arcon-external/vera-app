@@ -76,6 +76,8 @@ export function ListPurchaseOrders(arg1:backend.PurchaseOrderListQuery):Promise<
 
 export function ListQuotations():Promise<Array<backend.ArchivedQuotationSummary>>;
 
+export function LoadPOReconciliation(arg1:string):Promise<backend.POReconciliationSession>;
+
 export function PickDirectory():Promise<string>;
 
 export function Prepare(arg1:backend.QuotationInput):Promise<void>;
@@ -99,6 +101,8 @@ export function RepairPurchaseOrderSource(arg1:backend.PurchaseOrderSourceRepair
 export function ReviewPurchaseOrderSource(arg1:backend.PurchaseOrderSourceReviewInput):Promise<backend.PurchaseOrderReviewDTO>;
 
 export function SaveDraft(arg1:backend.SavedDraft):Promise<number>;
+
+export function SavePOReconciliation(arg1:string,arg2:backend.POReconciliationSession):Promise<backend.POReconciliationSession>;
 
 export function SetAuthService(arg1:auth.Service):Promise<void>;
 

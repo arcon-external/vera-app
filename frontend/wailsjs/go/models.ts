@@ -1360,6 +1360,154 @@ export namespace backend {
 	        this.ID = source["ID"];
 	    }
 	}
+	export class POReconciliationHistoryEvent {
+	    Kind: string;
+	    SourceLineRef?: string;
+	    POValue: any;
+	    SourceValue: any;
+	    Status: string;
+	    Resolution?: string;
+	    ActorID: number;
+	    At: string;
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationHistoryEvent(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Kind = source["Kind"];
+	        this.SourceLineRef = source["SourceLineRef"];
+	        this.POValue = source["POValue"];
+	        this.SourceValue = source["SourceValue"];
+	        this.Status = source["Status"];
+	        this.Resolution = source["Resolution"];
+	        this.ActorID = source["ActorID"];
+	        this.At = source["At"];
+	    }
+	}
+	export class POReconciliationItem {
+	    Key: string;
+	    Field: string;
+	    Kind: string;
+	    LineKey?: string;
+	    SourceLineRef?: string;
+	    Label: string;
+	    POValue: any;
+	    SourceValue: any;
+	    Status: string;
+	    Resolution?: string;
+	    ActorID: number;
+	    UpdatedAt: string;
+	    History: POReconciliationHistoryEvent[];
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Key = source["Key"];
+	        this.Field = source["Field"];
+	        this.Kind = source["Kind"];
+	        this.LineKey = source["LineKey"];
+	        this.SourceLineRef = source["SourceLineRef"];
+	        this.Label = source["Label"];
+	        this.POValue = source["POValue"];
+	        this.SourceValue = source["SourceValue"];
+	        this.Status = source["Status"];
+	        this.Resolution = source["Resolution"];
+	        this.ActorID = source["ActorID"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.History = this.convertValues(source["History"], POReconciliationHistoryEvent);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class POReconciliationLineIdentity {
+	    Key: string;
+	    ID?: number;
+	    Removed: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationLineIdentity(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Key = source["Key"];
+	        this.ID = source["ID"];
+	        this.Removed = source["Removed"];
+	    }
+	}
+	export class POReconciliationSession {
+	    ID: number;
+	    PurchaseOrderID: number;
+	    SourceQuotationID: number;
+	    SourceRevision: number;
+	    POVersion: number;
+	    Active: boolean;
+	    ReadOnly: boolean;
+	    CreatedBy: number;
+	    CreatedAt: string;
+	    UpdatedAt: string;
+	    LineIdentities: POReconciliationLineIdentity[];
+	    Items: POReconciliationItem[];
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationSession(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.PurchaseOrderID = source["PurchaseOrderID"];
+	        this.SourceQuotationID = source["SourceQuotationID"];
+	        this.SourceRevision = source["SourceRevision"];
+	        this.POVersion = source["POVersion"];
+	        this.Active = source["Active"];
+	        this.ReadOnly = source["ReadOnly"];
+	        this.CreatedBy = source["CreatedBy"];
+	        this.CreatedAt = source["CreatedAt"];
+	        this.UpdatedAt = source["UpdatedAt"];
+	        this.LineIdentities = this.convertValues(source["LineIdentities"], POReconciliationLineIdentity);
+	        this.Items = this.convertValues(source["Items"], POReconciliationItem);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class POSourceActivePODTO {
 	    ID: number;
 	    State: string;

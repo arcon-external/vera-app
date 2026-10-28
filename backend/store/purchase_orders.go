@@ -421,6 +421,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, err
 	}
 
+	if err := createReconciliationSessionTx(ctx, tx, schema, org.ID, id,
+		source.QuotationID, source.RevisionNumber, source.RevisionID, 1,
+		input.CreatedBy, 1); err != nil {
+		return PurchaseOrder{}, err
+	}
+
 	created, err := getPurchaseOrder(ctx, tx, schema, org.ID, id)
 	if err != nil {
 		return PurchaseOrder{}, err

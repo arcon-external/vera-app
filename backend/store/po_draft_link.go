@@ -368,6 +368,12 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
 
+	if err := createReconciliationSessionTx(ctx, tx, schema, org.ID, stored.ID,
+		source.QuotationID, source.RevisionNumber, source.RevisionID, 1,
+		input.UpdatedBy, lock.Version+1); err != nil {
+		return PurchaseOrder{}, err
+	}
+
 	linked, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
 		return PurchaseOrder{}, err
