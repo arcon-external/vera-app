@@ -82,8 +82,17 @@ import type {
   POSourceValidation,
 } from "./poSelector";
 import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
+import type { POEditorShellActions } from "./components/PurchaseOrderEditor";
 import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
+import {
+  isPurchaseOrderWorkspacePage,
+  isQuotationWorkspacePage,
+  isSettingsPage,
+  lastWorkspacePage,
+  popHistory,
+  pushHistory,
+} from "./pageHistory";
 import { usePurchaseOrderWorkspace } from "./poWorkspace";
 import { blankPurchaseOrderDraft } from "./purchaseOrder";
 import { UpdateBanner, useUpdateState } from "./components/UpdateBanner";
@@ -552,19 +561,48 @@ function App() {
       ),
   });
   const closePurchaseOrder = poWorkspace.close;
-  // Leaving the PO page clears the edited draft, so returning to the PO surface
-  // shows the archive rather than a stale editor. The leave guard owns the
-  // dirty-check before this runs.
+  // Ticket 02: the page-history stack. Home → workspace → settings pushes the
+  // page being left; tab switches inside one workspace replace it, so Back
+  // from anywhere in a workspace returns Home rather than the previous tab.
+  // No new global store: the existing shell state holds the stack.
+  const [pageHistoryStack, setPageHistoryStack] = useState<AppPage[]>([]);
+  // Ticket 02: the PO editor's primary actions as the shell action bar
+  // renders them. Reported by the editor's entry view; null everywhere else.
+  const [poShellActions, setPoShellActions] = useState<POEditorShellActions | null>(null);
+  // Ticket 02: window scroll per page, so a settings round-trip returns to
+  // the same scroll position. Memory only: sign-out clears it with the page.
+  const scrollPositions = useRef(new Map<AppPage, number>());
+  const saveScroll = useCallback((current: AppPage) => {
+    try {
+      scrollPositions.current.set(current, window.scrollY);
+    } catch {
+      // A missing or throwing window (plain-node harness) keeps no scroll.
+    }
+  }, []);
+  // Leaving the PO editor for anything but its own settings round-trip
+  // clears the edited draft, so returning to the PO surface shows the
+  // archive rather than a stale editor. The leave guard owns the
+  // dirty-check before this runs. Settings pages keep the record alive
+  // (hidden) for the return trip instead.
   const navigatePage = useCallback(
     (next: AppPage) => {
-      if (next !== "po") closePurchaseOrder();
+      saveScroll(page);
+      setPageHistoryStack((history) => pushHistory(history, page, next));
+      if (
+        page === "po" &&
+        next !== "po" &&
+        next !== "po-settings" &&
+        next !== "settings"
+      ) {
+        closePurchaseOrder();
+      }
       // Issue #494: a successful return to Home ends the remembered workspace
       // context. Only the allowed navigation reaches here; a refused one has
       // no way to clear it.
       if (next === "home") setSettingsOrigin(null);
       setPage(next);
     },
-    [closePurchaseOrder]
+    [closePurchaseOrder, page, saveScroll]
   );
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
@@ -614,34 +652,46 @@ function App() {
     },
   });
 
-  // Issue #494: every settings entry goes through the guard, and the origin is
-  // recorded in the allowed-navigation callback — the same place `after`
-  // already runs for mod+N. Keep editing never invokes it, so a refused visit
-  // leaves the previous context untouched.
+  // Issue #494: the account entry keeps the guard so a dirty Quotation still
+  // asks; the workspace settings entries never ask (ticket 02). A dirty PO
+  // or Quotation editor survives its settings round-trip without a discard
+  // prompt, and the origin is recorded on the direct navigation -- the same
+  // place the guard's allowed-navigation callback recorded it.
   const openAccountSettings = useCallback(() => {
+    // Ticket 02: a settings round-trip from the PO workspace never asks and
+    // never discards -- the editor stays mounted hidden behind the settings.
+    if (isPurchaseOrderWorkspacePage(page)) {
+      saveScroll(page);
+      setPageHistoryStack((history) => pushHistory(history, page, "settings"));
+      setSettingsOrigin(profileMenuContext(page, settingsOrigin));
+      setPage("settings");
+      return;
+    }
     poLeave.request("settings", () => {
+      saveScroll(page);
+      setPageHistoryStack((history) => pushHistory(history, page, "settings"));
       setSettingsOrigin(profileMenuContext(page, settingsOrigin));
       setPage("settings");
     });
-  }, [poLeave.request, page, settingsOrigin]);
+  }, [poLeave.request, page, saveScroll, settingsOrigin]);
 
   const openQuotationSettings = useCallback(() => {
-    poLeave.request("quotation-settings", () => {
-      setSettingsOrigin("quotation");
-      setPage("quotation-settings");
-    });
-  }, [poLeave.request]);
+    saveScroll(page);
+    setPageHistoryStack((history) => pushHistory(history, page, "quotation-settings"));
+    setSettingsOrigin("quotation");
+    setPage("quotation-settings");
+  }, [page, saveScroll]);
 
   const openPurchaseOrderSettings = useCallback(() => {
-    poLeave.request("po-settings", () => {
-      setSettingsOrigin("purchase-order");
-      setPage("po-settings");
-    });
-  }, [poLeave.request]);
+    saveScroll(page);
+    setPageHistoryStack((history) => pushHistory(history, page, "po-settings"));
+    setSettingsOrigin("purchase-order");
+    setPage("po-settings");
+  }, [page, saveScroll]);
 
-  // The shell's own navigation (workspace tabs, the back arrow, Account
-  // settings) still runs through the guard; only Account settings needs the
-  // origin captured on the way.
+  // The shell's own navigation (workspace tabs, Account settings) still runs
+  // through the guard; only Account settings needs the origin captured on
+  // the way.
   const navigateFromShell = useCallback(
     (next: AppPage) => {
       if (next === "settings") {
@@ -652,6 +702,29 @@ function App() {
     },
     [openAccountSettings, poLeave.request]
   );
+
+  // Ticket 02: the shell Back arrow. From a settings page it pops the stack
+  // without asking -- the workspace behind it was kept alive, so there is
+  // nothing to discard. From a workspace it asks first when dirty, then pops
+  // on Discard instead of pushing, so Back never grows the stack.
+  const goBack = useCallback(() => {
+    if (isSettingsPage(page)) {
+      const { history, page: previous } = popHistory(pageHistoryStack);
+      saveScroll(page);
+      setPageHistoryStack(history);
+      if (previous === "home") setSettingsOrigin(null);
+      setPage(previous);
+      return;
+    }
+    const { history, page: previous } = popHistory(pageHistoryStack);
+    poLeave.request(previous, () => {
+      saveScroll(page);
+      setPageHistoryStack(history);
+      if (page === "po" && previous !== "po") closePurchaseOrder();
+      if (previous === "home") setSettingsOrigin(null);
+      setPage(previous);
+    });
+  }, [closePurchaseOrder, page, pageHistoryStack, poLeave.request, saveScroll]);
 
   const [customerId, setCustomerId] = useState(2);
   const [customerOptions, setCustomerOptions] = useState<{ value: number; label: string }[]>([]);
@@ -1111,9 +1184,17 @@ function App() {
       // Issue #494: the remembered workspace context belongs to the session
       // that opened it; the next sign-in starts from Home with none.
       setSettingsOrigin(null);
+      // Ticket 02: unsaved state never survives sign-out. The editor's local
+      // working copy, the history stack, the scroll positions and the shell
+      // actions all reset with the session; app close needs nothing because
+      // none of it is persisted.
+      closePurchaseOrder();
+      setPageHistoryStack([]);
+      setPoShellActions(null);
+      scrollPositions.current.clear();
       setPage("home");
     }
-  }, [resetForm]);
+  }, [closePurchaseOrder, resetForm]);
 
   // Revalidate the session while signed in so server-side revocation
   // (deactivation, approved deletion, password change) signs the device out
@@ -1131,6 +1212,12 @@ function App() {
           resetForm();
           setCompanyDirty(false);
           setSettingsOrigin(null);
+          // Ticket 02: a revoked session signs out exactly like a manual one:
+          // no workspace, history, scroll or shell action survives it.
+          closePurchaseOrder();
+          setPageHistoryStack([]);
+          setPoShellActions(null);
+          scrollPositions.current.clear();
           setPage("home");
           pushToast(
             "error",
@@ -1174,6 +1261,18 @@ function App() {
   useEffect(() => {
     if (signedIn && page === "drafts") void refreshDraftCount();
   }, [signedIn, page, refreshDraftCount]);
+
+  // Ticket 02: restores the scroll position saved when the page was left, so
+  // a settings round-trip returns to the same place. Forward navigation has
+  // no saved position and lands at the top.
+  useEffect(() => {
+    const y = scrollPositions.current.get(page) ?? 0;
+    try {
+      window.scrollTo(0, y);
+    } catch {
+      // Plain-node harness: no window to scroll.
+    }
+  }, [page]);
 
   const handleSaveDraft = useCallback(async () => {
     setSavingDraft(true);
@@ -2147,6 +2246,21 @@ function App() {
   // use this resolved page, so the Admin workspace cannot leak.
   const isAdmin = user?.Role === "admin";
   const visiblePage: AppPage = isAdminPage(page) && !isAdmin ? "home" : page;
+  // Ticket 02: the workspace page kept alive behind a settings page. The
+  // nearest workspace entry in the stack stays mounted hidden, so list
+  // filters, page, scroll, the active tab and the review/confirm step are
+  // the same components on return -- restored exactly, not re-derived.
+  const preservedWorkspacePage = lastWorkspacePage(pageHistoryStack, visiblePage);
+  const preservedPOPage =
+    preservedWorkspacePage !== null &&
+    isPurchaseOrderWorkspacePage(preservedWorkspacePage)
+      ? preservedWorkspacePage
+      : null;
+  const preservedQuotationPage =
+    preservedWorkspacePage !== null &&
+    isQuotationWorkspacePage(preservedWorkspacePage)
+      ? preservedWorkspacePage
+      : null;
 
   return (
     <>
@@ -2232,6 +2346,7 @@ function App() {
       settingsOrigin={settingsOrigin}
       inert={poLeave.pendingPage !== null}
       onNavigate={navigateFromShell}
+      onBack={goBack}
       draftCount={draftCount}
       companyName={companyName}
       user={user}
@@ -2359,6 +2474,55 @@ function App() {
               </Button>
             </div>
           </>
+        ) : poShellActions !== null &&
+          isPurchaseOrderWorkspacePage(visiblePage) ? (
+          <>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-caption text-ink-500">
+                {poShellActions.dirty ? "Unsaved changes" : "All changes saved"}
+                {poShellActions.sourceLess
+                  ? " · Link a Quotation before Final Save."
+                  : ""}
+              </span>
+            </div>
+            <div className="ml-auto flex items-center gap-2.5">
+              <Button
+                variant="secondary"
+                aria-label={
+                  poShellActions.mode === "correction"
+                    ? "Save correction"
+                    : "Save draft"
+                }
+                disabled={poShellActions.saving || poShellActions.reviewLoading}
+                onClick={() => poShellActions?.onSave()}
+              >
+                {poShellActions.saving
+                  ? "Saving…"
+                  : poShellActions.mode === "correction"
+                    ? "Save correction"
+                    : "Save draft"}
+              </Button>
+              {poShellActions.mode === "correction" ? null : (
+                <Button
+                  variant="primary"
+                  aria-label="Final Save"
+                  disabled={
+                    poShellActions.saving ||
+                    poShellActions.reviewLoading ||
+                    poShellActions.sourceLess
+                  }
+                  title={
+                    poShellActions.sourceLess
+                      ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
+                      : undefined
+                  }
+                  onClick={() => poShellActions?.onFinalSave()}
+                >
+                  {poShellActions.reviewLoading ? "Loading review…" : "Final Save"}
+                </Button>
+              )}
+            </div>
+          </>
         ) : null
       }
     >
@@ -2371,13 +2535,18 @@ function App() {
         />
       ) : null}
 
-      {isPurchaseOrderPage(visiblePage) ? (
-        <PurchaseOrderWorkspacePage
-          workspace={poWorkspace}
-          currency={poEntry}
-          uomOptions={storedUoMs ?? []}
-          incotermOptions={INCOTERM_OPTIONS}
-          tab={purchaseOrderTab(visiblePage)}
+      {(isPurchaseOrderPage(visiblePage) || preservedPOPage !== null) ? (
+        <div hidden={preservedPOPage !== null && !isPurchaseOrderPage(visiblePage)}>
+          <PurchaseOrderWorkspacePage
+            workspace={poWorkspace}
+            currency={poEntry}
+            uomOptions={storedUoMs ?? []}
+            incotermOptions={INCOTERM_OPTIONS}
+            tab={
+              isPurchaseOrderPage(visiblePage)
+                ? purchaseOrderTab(visiblePage)
+                : purchaseOrderTab(preservedPOPage ?? "po")
+            }
           pageSize={workspaceSettings.purchaseOrder.listPageSize}
           blankDraft={blankPODraft}
           currencyOptions={currencyCatalogue ?? []}
@@ -2429,11 +2598,18 @@ function App() {
           }}
           onCancel={() => poWorkspace.cancel(poLeave.request, poLeave.setDirty)}
           onDirtyChange={poLeave.setDirty}
+          actionsInShell
+          onShellActions={setPoShellActions}
         />
+        </div>
       ) : null}
 
-      {visiblePage === "create" ? (
-        <div className="flex flex-col gap-6" onPasteCapture={handleCopyPasteCapture}>
+      {(visiblePage === "create" || preservedQuotationPage === "create") ? (
+        <div
+          className="flex flex-col gap-6"
+          hidden={visiblePage !== "create"}
+          onPasteCapture={handleCopyPasteCapture}
+        >
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (
@@ -2562,59 +2738,70 @@ function App() {
         </div>
       ) : null}
 
-      {visiblePage === "drafts" ? (
-        <DraftsPage
-          onOpenDraft={handleOpenDraft}
-          onNewQuotation={handleNewQuotation}
-        />
-      ) : null}
-
-      {visiblePage === "archive" ? (
-        // #390: every row's grand total is live-currency chrome until the
-        // catalogue loads, so nothing renders while the entry is unknown.
-        liveEntry === null ? (
-          <CurrencyUnknownCard
-            code={companyCurrency}
-            onRetry={() => void loadCatalogue()}
-          />
-        ) : (
-          // The currency prop is the initial-render fallback only: ArchivePage
-          // fetches the catalogue itself and resolves each row's REVISION
-          // currency in-page (row.Currency, filled by the server and plumbed
-          // through archive.go). The live entry covers the window before the
-          // catalogue loads, never a row's steady state.
-          <ArchivePage
-            currency={liveEntry}
-            isAdmin={user?.Role === "admin"}
+      {(visiblePage === "drafts" || preservedQuotationPage === "drafts") ? (
+        <div hidden={visiblePage !== "drafts"}>
+          <DraftsPage
+            onOpenDraft={handleOpenDraft}
             onNewQuotation={handleNewQuotation}
-            onOpenQuotation={handleOpenQuotation}
           />
-        )
+        </div>
       ) : null}
 
-      {visiblePage === "detail" && selectedQuotation !== null ? (
-        // #390: the detail page shows margin, tax and nett in the live
-        // currency until the revision's own is resolved.
-        liveEntry === null ? (
-          <CurrencyUnknownCard
-            code={companyCurrency}
-            onRetry={() => void loadCatalogue()}
-          />
-        ) : (
-          // Same fallback shape as ArchivePage: QuotationDetailPage fetches the
-          // catalogue itself and resolves the revision's own currency
-          // (quotation.Currency) in-page once GetQuotationRevision returns. The
-          // live entry is only the initial render's currency until then.
-          <QuotationDetailPage
-            quotationID={selectedQuotation.id}
-            currency={liveEntry}
-            revision={selectedQuotation.revision}
-            onBack={() => setPage("archive")}
-            onEdit={handleEditQuotation}
-            onCreatePurchaseOrder={createPurchaseOrderFromQuotation}
-            onOpenPurchaseOrder={(id) => void openPurchaseOrder(id)}
-          />
-        )
+      {(visiblePage === "archive" || preservedQuotationPage === "archive") ? (
+        <div hidden={visiblePage !== "archive"}>
+          {
+            // #390: every row's grand total is live-currency chrome until the
+            // catalogue loads, so nothing renders while the entry is unknown.
+            liveEntry === null ? (
+              <CurrencyUnknownCard
+                code={companyCurrency}
+                onRetry={() => void loadCatalogue()}
+              />
+            ) : (
+              // The currency prop is the initial-render fallback only: ArchivePage
+              // fetches the catalogue itself and resolves each row's REVISION
+              // currency in-page (row.Currency, filled by the server and plumbed
+              // through archive.go). The live entry covers the window before the
+              // catalogue loads, never a row's steady state.
+              <ArchivePage
+                currency={liveEntry}
+                isAdmin={user?.Role === "admin"}
+                onNewQuotation={handleNewQuotation}
+                onOpenQuotation={handleOpenQuotation}
+              />
+            )
+          }
+        </div>
+      ) : null}
+
+      {(visiblePage === "detail" || preservedQuotationPage === "detail") &&
+      selectedQuotation !== null ? (
+        <div hidden={visiblePage !== "detail"}>
+          {
+            // #390: the detail page shows margin, tax and nett in the live
+            // currency until the revision's own is resolved.
+            liveEntry === null ? (
+              <CurrencyUnknownCard
+                code={companyCurrency}
+                onRetry={() => void loadCatalogue()}
+              />
+            ) : (
+              // Same fallback shape as ArchivePage: QuotationDetailPage fetches the
+              // catalogue itself and resolves the revision's own currency
+              // (quotation.Currency) in-page once GetQuotationRevision returns. The
+              // live entry is only the initial render's currency until then.
+              <QuotationDetailPage
+                quotationID={selectedQuotation.id}
+                currency={liveEntry}
+                revision={selectedQuotation.revision}
+                onBack={() => setPage("archive")}
+                onEdit={handleEditQuotation}
+                onCreatePurchaseOrder={createPurchaseOrderFromQuotation}
+                onOpenPurchaseOrder={(id) => void openPurchaseOrder(id)}
+              />
+            )
+          }
+        </div>
       ) : null}
 
       {isAdminPage(visiblePage) && isAdmin ? (

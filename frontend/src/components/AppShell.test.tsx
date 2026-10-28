@@ -180,7 +180,7 @@ describe("AppShell account settings", () => {
   it("is its own surface with a back arrow and no tabs", () => {
     const html = renderShell("settings");
     expect(html).toContain(">Account settings<");
-    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(buttonTagFor(html, "Back")).toBeDefined();
     expect(html).not.toContain('aria-label="Primary"');
   });
 
@@ -195,7 +195,7 @@ describe("AppShell account settings", () => {
     expect(html).toContain(">Account settings<");
     expect(html).not.toContain(">Quotation settings<");
     expect(html).not.toContain(">Quotation<");
-    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(buttonTagFor(html, "Back")).toBeDefined();
     expect(html).not.toContain('aria-label="Primary"');
     expect(html).toContain('data-workspace="account"');
   });
@@ -207,7 +207,7 @@ describe("AppShell workspace settings (issue #492)", () => {
     // The shell brand is the page title, not "Account settings".
     expect(html).toContain(">Quotation settings<");
     expect(html).not.toContain(">Account settings<");
-    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(buttonTagFor(html, "Back")).toBeDefined();
     expect(html).not.toContain('aria-label="Primary"');
   });
 
@@ -215,7 +215,7 @@ describe("AppShell workspace settings (issue #492)", () => {
     const html = renderShell("po-settings");
     expect(html).toContain(">Purchase Order settings<");
     expect(html).not.toContain(">Purchase Orders<");
-    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(buttonTagFor(html, "Back")).toBeDefined();
     expect(html).not.toContain('aria-label="Primary"');
   });
 });

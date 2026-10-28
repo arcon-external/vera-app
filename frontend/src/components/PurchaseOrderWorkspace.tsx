@@ -12,7 +12,7 @@ import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
 import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
-import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
+import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
 import { PurchaseOrderRepairPage } from "./PurchaseOrderRepair";
@@ -69,6 +69,13 @@ export interface PurchaseOrderWorkspacePageProps {
   /** The editor's Cancel, delegating to the workspace controller. */
   onCancel: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  /**
+   * Ticket 02: renders the editor's Save draft / Final Save in the shell
+   * action bar. Threaded to both editor mounts; the standalone harnesses
+   * leave it unset and keep the footer buttons.
+   */
+  actionsInShell?: boolean;
+  onShellActions?: (actions: POEditorShellActions | null) => void;
 }
 
 /**
@@ -132,6 +139,8 @@ export function PurchaseOrderWorkspacePage({
   onBack,
   onCancel,
   onDirtyChange,
+  actionsInShell = false,
+  onShellActions,
 }: PurchaseOrderWorkspacePageProps) {
   const { draft, phase } = workspace;
 
@@ -169,6 +178,8 @@ export function PurchaseOrderWorkspacePage({
             onSaved?.(updated, corrected);
           }}
           onCancel={onCancel}
+          actionsInShell={actionsInShell}
+          onShellActions={onShellActions}
         />
       );
     }
@@ -275,6 +286,8 @@ export function PurchaseOrderWorkspacePage({
         onSaved?.(updated, corrected);
       }}
       onCancel={onCancel}
+      actionsInShell={actionsInShell}
+      onShellActions={onShellActions}
     />
   );
 }

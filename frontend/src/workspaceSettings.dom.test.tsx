@@ -457,9 +457,11 @@ describe("Quotation settings page (issue #492)", () => {
     await openQuotationSettingsPage();
 
     // Its own surface: the shell names it, and it has no workspace tabs.
+    // Ticket 02: the shell Back arrow is "Back" on a settings page -- it
+    // returns to the workspace, never straight Home.
     expect(document.body.textContent).toContain("Quotation settings");
     expect(document.querySelector('nav[aria-label="Primary"]')).toBeNull();
-    expect(button("Back to Home")).not.toBeNull();
+    expect(button("Back")).not.toBeNull();
 
     typeInto(input("Default validity days"), "45");
     typeInto(input("Default subject"), "Turbine overhaul");
@@ -510,7 +512,10 @@ describe("Quotation settings page (issue #492)", () => {
     expect(input("Default payment term days").value).toBe("1");
   });
 
-  it("asks before opening settings from a dirty quotation", async () => {
+  it("opens settings from a dirty quotation without a discard prompt", async () => {
+    // Ticket 02: a settings round-trip never discards. Opening Quotation
+    // settings from a dirty editor navigates at once, and Back returns to
+    // the same editor with the unsaved values intact.
     await renderApp();
     await act(async () => {
       button("Open Quotation").click();
@@ -525,14 +530,14 @@ describe("Quotation settings page (issue #492)", () => {
 
     expect(
       document.querySelector('[role="alertdialog"][aria-label="Discard unsaved changes?"]')
-    ).not.toBeNull();
-    expect(document.getElementById("quotation-settings-heading")).toBeNull();
-    expect(document.body.textContent).toContain(
-      "The quotation in the editor has unsaved changes."
-    );
+    ).toBeNull();
+    expect(document.getElementById("quotation-settings-heading")).not.toBeNull();
+
     await act(async () => {
-      button("Keep editing").click();
+      button("Back").click();
     });
+    await flush();
+    expect(document.getElementById("quotation-settings-heading")).toBeNull();
     expect(
       document.querySelector<HTMLInputElement>(
         'input[placeholder="Supply and installation of electrical and mechanical systems"]'

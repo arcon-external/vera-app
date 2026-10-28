@@ -359,13 +359,34 @@ describe("settings origin capture (issue #494)", () => {
     await reachSettingsFromQuotation();
     expect(originAttr()).toBe("quotation");
 
+    // Ticket 02: Back from a settings page returns to the preserved
+    // workspace first, never straight Home. The origin survives the first
+    // step so the menu still speaks for the workspace it came from.
+    await act(async () => {
+      button("Back").click();
+    });
+    await flush();
+    expect(workspace()).toBe("quotation");
+    expect(originAttr()).toBe("quotation");
+    openMenu();
+    expect(menuItems()).toEqual([
+      "Account settings",
+      "Quotation settings",
+      "Sign out",
+    ]);
+    // The shell keeps the menu's open state across the navigation, so close
+    // it before leaving: the next opener click must open, not toggle shut.
+    openMenu();
+    expect(menuItems()).toEqual([]);
+
+    // The second Back leaves the workspace for Home, and the successful
+    // return to Home ends the remembered context itself, not merely hiding
+    // it behind Home's own null context.
     await act(async () => {
       button("Back to Home").click();
     });
     await flush();
     expect(workspace()).toBe("home");
-    // The successful return to Home ends the remembered context itself, not
-    // merely hiding it behind Home's own null context.
     expect(originAttr()).toBeNull();
     openMenu();
     expect(menuItems()).toEqual(["Account settings", "Sign out"]);

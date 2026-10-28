@@ -148,6 +148,13 @@ interface AppShellProps {
   user?: SignedInUser | null;
   onSignOut?: () => void;
   /**
+   * Ticket 02: the shell Back arrow follows the page history. When set, the
+   * arrow calls this instead of navigating Home, so Back from a settings
+   * page returns to the preserved workspace and only a second Back reaches
+   * Home. Unset keeps the old Home navigation (standalone harnesses).
+   */
+  onBack?: () => void;
+  /**
    * Issue #492 owns these two settings surfaces. They render only when a
    * caller supplies the callback, so this issue does not grow pages it does
    * not implement.
@@ -210,6 +217,7 @@ export function AppShell({
   actionBar,
   user,
   onSignOut,
+  onBack,
   onOpenQuotationSettings,
   onOpenPurchaseOrderSettings,
   settingsOrigin = null,
@@ -361,8 +369,25 @@ export function AppShell({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                aria-label="Back to Home"
-                onClick={() => onNavigate("home")}
+                // Ticket 02: one Back arrow for the page history. From a
+                // settings page it returns to the preserved workspace (never
+                // straight Home); from a workspace it returns Home. The label
+                // names the nearer target; the visual placement is Jessy's
+                // follow-up and stays out of this structure change.
+                aria-label={
+                  workspace === "account" ||
+                  workspace === "quotation-settings" ||
+                  workspace === "purchase-order-settings"
+                    ? "Back"
+                    : "Back to Home"
+                }
+                onClick={() => {
+                  if (onBack) {
+                    onBack();
+                    return;
+                  }
+                  onNavigate("home");
+                }}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rule bg-white text-ink-600 transition-colors duration-150 hover:bg-paper-muted hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
               >
                 <svg

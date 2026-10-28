@@ -98,6 +98,13 @@ export interface PurchaseOrderEditorViewProps {
   onCorrectionReasonChange?: (value: string) => void;
   /** Shown read-only in correction mode; there is no input for it. */
   confirmationNumber?: string;
+  /**
+   * Ticket 02: the Save draft / Final Save buttons live in the shell action
+   * bar instead of this footer. When true the footer keeps only Cancel and
+   * the status line, so the two primary actions never render twice. The
+   * standalone harnesses leave this unset and keep the footer buttons.
+   */
+  actionsInShell?: boolean;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -140,6 +147,31 @@ export interface PurchaseOrderEditorPageProps {
   onLinkTargetHandled?: () => void;
   /** #497: the link committed; App words its success message. */
   onLinked?: (order: PurchaseOrderDTO) => void;
+  /**
+   * Ticket 02: renders Save draft / Final Save in the shell action bar. When
+   * true the footer keeps only Cancel; the entry view reports its actions
+   * through onShellActions so App can render them in the sticky shell slot
+   * that stays reachable while the form scrolls. Review, confirm and link
+   * views keep their own buttons and report null.
+   */
+  actionsInShell?: boolean;
+  onShellActions?: (actions: POEditorShellActions | null) => void;
+}
+
+/**
+ * Ticket 02: the PO editor's primary actions as App's shell renders them.
+ * The editor owns the enabled rules (saving, source-less) and the callbacks;
+ * App only places the buttons in the sticky action-bar slot. Kept separate
+ * from the footer markup so Jessy's visual follow-up touches one place.
+ */
+export interface POEditorShellActions {
+  mode: "draft" | "correction";
+  dirty: boolean;
+  saving: boolean;
+  reviewLoading: boolean;
+  sourceLess: boolean;
+  onSave: () => void;
+  onFinalSave: () => void;
 }
 
 /**
@@ -536,6 +568,7 @@ export function PurchaseOrderEditorView({
   correctionReason = "",
   onCorrectionReasonChange,
   confirmationNumber = "",
+  actionsInShell = false,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
@@ -997,31 +1030,35 @@ export function PurchaseOrderEditorView({
           <Button aria-label={correcting ? "Cancel correction" : "Cancel draft"} onClick={onCancel}>
             Cancel
           </Button>
-          <Button
-            aria-label={correcting ? "Save correction" : "Save draft"}
-            disabled={state.saving || finalSaving}
-            onClick={onSave}
-          >
-            {state.saving
-              ? "Saving…"
-              : correcting
-                ? "Save correction"
-                : "Save draft"}
-          </Button>
-          {correcting ? null : (
-            <Button
-              variant="primary"
-              aria-label="Final Save"
-              disabled={state.saving || finalSaving || sourceLess}
-              title={
-                sourceLess
-                  ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
-                  : undefined
-              }
-              onClick={onFinalSave}
-            >
-              {finalSaving ? "Loading review…" : "Final Save"}
-            </Button>
+          {actionsInShell ? null : (
+            <>
+              <Button
+                aria-label={correcting ? "Save correction" : "Save draft"}
+                disabled={state.saving || finalSaving}
+                onClick={onSave}
+              >
+                {state.saving
+                  ? "Saving…"
+                  : correcting
+                    ? "Save correction"
+                    : "Save draft"}
+              </Button>
+              {correcting ? null : (
+                <Button
+                  variant="primary"
+                  aria-label="Final Save"
+                  disabled={state.saving || finalSaving || sourceLess}
+                  title={
+                    sourceLess
+                      ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
+                      : undefined
+                  }
+                  onClick={onFinalSave}
+                >
+                  {finalSaving ? "Loading review…" : "Final Save"}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1044,6 +1081,8 @@ export function PurchaseOrderEditorPage({
   onDirtyChange,
   onCorrectionStart,
   mode = "draft",
+  actionsInShell = false,
+  onShellActions,
 }: PurchaseOrderEditorPageProps) {
   // #473 wave 2: a draft write that meets an already-saved record keeps the
   // working copy and continues as a correction. The transition is local to this
@@ -1152,6 +1191,57 @@ export function PurchaseOrderEditorPage({
   useEffect(() => {
     onDirtyChange?.(isPurchaseOrderDirty(state));
   }, [state, onDirtyChange]);
+
+  // Ticket 02: the shell action-bar bridge. The report depends only on
+  // primitives; the callbacks ride a ref updated every render, so a fresh
+  // function identity never retriggers the report and App state never
+  // ping-pongs. Entry view only: review, confirm and link views keep their
+  // own buttons and report null so the shell bar stands down.
+  const shellDirty = isPurchaseOrderDirty(state);
+  const shellSourceLess = state.sourceState !== "live";
+  const shellActionsRef = useRef<{
+    save: (expectedVersion: number, overwrite: boolean) => Promise<void>;
+    startReview: () => Promise<void>;
+  } | null>(null);
+  useEffect(() => {
+    if (!actionsInShell) {
+      onShellActions?.(null);
+      return;
+    }
+    if (view !== "entry" || linkReview !== null) {
+      onShellActions?.(null);
+      return;
+    }
+    const callbacks = shellActionsRef.current;
+    if (callbacks === null) return;
+    const version = state.version;
+    onShellActions?.({
+      mode: correcting ? "correction" : "draft",
+      dirty: shellDirty,
+      saving: state.saving,
+      reviewLoading,
+      sourceLess: shellSourceLess,
+      onSave: () => void callbacks.save(version, false),
+      onFinalSave: () => void callbacks.startReview(),
+    });
+  }, [
+    actionsInShell,
+    view,
+    linkReview,
+    correcting,
+    shellDirty,
+    state.saving,
+    state.version,
+    reviewLoading,
+    shellSourceLess,
+    onShellActions,
+  ]);
+  useEffect(() => {
+    if (!actionsInShell) return;
+    return () => {
+      onShellActions?.(null);
+    };
+  }, [actionsInShell, onShellActions]);
 
   /**
    * Persists the transient row the first time an action needs an id (Save
@@ -1551,6 +1641,10 @@ export function PurchaseOrderEditorPage({
     }
   };
 
+  // Ticket 02: keeps the shell callbacks fresh without retriggering the
+  // report effect above. Assigned every render; the effect reads it.
+  shellActionsRef.current = { save, startReview };
+
   const finalSave = async (expectedVersion: number, overwrite: boolean) => {
     if (review === null) return;
     const result = buildFinalizeInput(
@@ -1842,6 +1936,7 @@ export function PurchaseOrderEditorPage({
         correctionReason={reason}
         onCorrectionReasonChange={setReason}
         confirmationNumber={order.ConfirmationNumber ?? ""}
+        actionsInShell={actionsInShell}
       />
       {conflictPrompt}
     </div>
