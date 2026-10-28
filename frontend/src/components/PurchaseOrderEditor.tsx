@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
   CreatePurchaseOrderBlankDraft,
@@ -64,6 +64,24 @@ import {
   TAX_ZONE_OPTIONS,
 } from "../tax";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import {
+  HEADER_FIELDS,
+  prefillDecisionsFromSession,
+  type CommitNotice,
+  type HeaderFieldKey,
+  type ReconciliationItem,
+  type ReconciliationSourceValues,
+} from "../poReconciliation";
+import {
+  wailsReconciliationTransport,
+  type ReconciliationTransport,
+} from "../poReconciliationAdapter";
+import { useReconciliationSession } from "../useReconciliationSession";
+import {
+  ReconciliationPaneContent,
+  ReconciliationSheetTrigger,
+  type ReconciliationPaneHandle,
+} from "./ReconciliationPane";
 
 // Issue #468: the PO draft workspace. The header keeps the customer snapshot
 // read-only (a directory edit must not rewrite this order) while the agreed
@@ -105,6 +123,25 @@ export interface PurchaseOrderEditorViewProps {
    * standalone harnesses leave this unset and keep the footer buttons.
    */
   actionsInShell?: boolean;
+  /**
+   * Ticket 04: live reconciliation wiring. Notices render under their fields,
+   * the unresolved anchors open the pane, and blur commits the field. Absent
+   * in the standalone harnesses, which keep the static form.
+   */
+  notices?: Record<HeaderFieldKey, CommitNotice>;
+  validationErrors?: Record<HeaderFieldKey, string | null>;
+  unresolvedByField?: Record<HeaderFieldKey, ReconciliationItem | null>;
+  onCommitField?: (field: HeaderFieldKey) => void;
+  onFocusField?: (field: HeaderFieldKey) => void;
+  onShowItem?: (key: string) => void;
+  /**
+   * Ticket 04: the Final Save gate also applies to the standalone footer.
+   * When unresolved items block, the button stays focusable with
+   * aria-disabled and activates the same blocked path as the shell slot.
+   */
+  gateUnresolvedCount?: number;
+  gateBlockedMessage?: string | null;
+  onBlockedActivate?: () => void;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -156,6 +193,14 @@ export interface PurchaseOrderEditorPageProps {
    */
   actionsInShell?: boolean;
   onShellActions?: (actions: POEditorShellActions | null) => void;
+  /**
+   * Ticket 04: the reconciliation backend. Defaults to the Wails bindings;
+   * component tests pass a fake. The pane never touches bindings directly.
+   */
+  reconciliationTransport?: ReconciliationTransport;
+  /** Attribution for local keep/use decisions; the server stamps its own. */
+  actorId?: number;
+  actorName?: string;
 }
 
 /**
@@ -163,6 +208,10 @@ export interface PurchaseOrderEditorPageProps {
  * The editor owns the enabled rules (saving, source-less) and the callbacks;
  * App only places the buttons in the sticky action-bar slot. Kept separate
  * from the footer markup so Jessy's visual follow-up touches one place.
+ *
+ * Ticket 04 extends the bridge with the reconciliation gate: the unresolved
+ * header count, the blocked message, and the blocked-activation path that
+ * focuses the first unresolved item instead of saving.
  */
 export interface POEditorShellActions {
   mode: "draft" | "correction";
@@ -170,8 +219,11 @@ export interface POEditorShellActions {
   saving: boolean;
   reviewLoading: boolean;
   sourceLess: boolean;
+  unresolvedCount: number;
+  blockedMessage: string | null;
   onSave: () => void;
   onFinalSave: () => void;
+  onBlockedActivate: () => void;
 }
 
 /**
@@ -358,12 +410,16 @@ function Field({
   onChange,
   type = "text",
   placeholder,
+  onBlur,
+  onFocus,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: "text" | "date" | "email" | "number";
   placeholder?: string;
+  onBlur?: () => void;
+  onFocus?: () => void;
 }) {
   return (
     <label className="grid gap-1.5">
@@ -375,6 +431,8 @@ function Field({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
+        onFocus={onFocus}
       />
     </label>
   );
@@ -552,6 +610,67 @@ export function PurchaseOrderLineRow({
   );
 }
 
+/**
+ * Ticket 04: the inline feedback under a committed header field. A notice is
+ * inline feedback and never a review item; the pane owns decisions. An
+ * unresolved item instead shows the quiet anchor that focuses it in the pane.
+ */
+function HeaderFieldFeedback({
+  fieldKey,
+  label,
+  notice,
+  validationError,
+  unresolvedItem,
+  onShowItem,
+}: {
+  fieldKey: HeaderFieldKey;
+  label: string;
+  notice: CommitNotice | undefined;
+  validationError: string | null | undefined;
+  unresolvedItem: ReconciliationItem | null | undefined;
+  onShowItem: ((key: string) => void) | undefined;
+}) {
+  if (validationError !== null && validationError !== undefined) {
+    return (
+      <p className="text-caption leading-relaxed text-danger-700">{validationError}</p>
+    );
+  }
+  if (unresolvedItem !== null && unresolvedItem !== undefined && onShowItem !== undefined) {
+    return (
+      <p className="text-caption leading-relaxed text-accent-700">
+        Review · differs from the Quotation{" "}
+        <button
+          type="button"
+          aria-label={`Show review item for ${label}`}
+          onClick={() => onShowItem(unresolvedItem.Key)}
+          className="cursor-pointer font-medium underline underline-offset-2 hover:text-accent-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+        >
+          Show
+        </button>
+      </p>
+    );
+  }
+  if (notice === "empty") {
+    return (
+      <p className="flex items-center gap-1.5 text-caption leading-relaxed text-ink-500">
+        <span aria-hidden="true" className="inline-block h-1.5 w-1.5 rounded-full border border-ink-300" />
+        {label} is empty
+      </p>
+    );
+  }
+  if (notice === "matched") {
+    return (
+      <p className="flex items-center gap-1.5 text-caption leading-relaxed text-success-700">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+          <path d="M2.5 8.5l3.5 3.5 7-8" />
+        </svg>
+        Matches the Quotation
+      </p>
+    );
+  }
+  return null;
+}
+
 export function PurchaseOrderEditorView({
   state,
   dispatch,
@@ -569,6 +688,15 @@ export function PurchaseOrderEditorView({
   onCorrectionReasonChange,
   confirmationNumber = "",
   actionsInShell = false,
+  notices,
+  validationErrors,
+  unresolvedByField,
+  onCommitField,
+  onFocusField,
+  onShowItem,
+  gateUnresolvedCount = 0,
+  gateBlockedMessage = null,
+  onBlockedActivate,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
@@ -872,6 +1000,16 @@ export function PurchaseOrderEditorView({
             onChange={(value) =>
               dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
             }
+            onBlur={() => onCommitField?.("header:paymentTerms")}
+            onFocus={() => onFocusField?.("header:paymentTerms")}
+          />
+          <HeaderFieldFeedback
+            fieldKey="header:paymentTerms"
+            label={HEADER_FIELDS["header:paymentTerms"].label}
+            notice={notices?.["header:paymentTerms"]}
+            validationError={validationErrors?.["header:paymentTerms"]}
+            unresolvedItem={unresolvedByField?.["header:paymentTerms"]}
+            onShowItem={onShowItem}
           />
           <div className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">Incoterms</span>
@@ -879,9 +1017,18 @@ export function PurchaseOrderEditorView({
               ariaLabel="Incoterms"
               value={state.header.incoterms}
               options={incotermOptions}
-              onChange={(value) =>
-                dispatch({ type: "headerChanged", patch: { incoterms: String(value) } })
-              }
+              onChange={(value) => {
+                dispatch({ type: "headerChanged", patch: { incoterms: String(value) } });
+                onCommitField?.("header:incoterms");
+              }}
+            />
+            <HeaderFieldFeedback
+              fieldKey="header:incoterms"
+              label={HEADER_FIELDS["header:incoterms"].label}
+              notice={notices?.["header:incoterms"]}
+              validationError={validationErrors?.["header:incoterms"]}
+              unresolvedItem={unresolvedByField?.["header:incoterms"]}
+              onShowItem={onShowItem}
             />
           </div>
         </div>
@@ -952,6 +1099,16 @@ export function PurchaseOrderEditorView({
                   patch: { discountPercent: event.target.value },
                 })
               }
+              onBlur={() => onCommitField?.("header:discountPercent")}
+              onFocus={() => onFocusField?.("header:discountPercent")}
+            />
+            <HeaderFieldFeedback
+              fieldKey="header:discountPercent"
+              label={HEADER_FIELDS["header:discountPercent"].label}
+              notice={notices?.["header:discountPercent"]}
+              validationError={validationErrors?.["header:discountPercent"]}
+              unresolvedItem={unresolvedByField?.["header:discountPercent"]}
+              onShowItem={onShowItem}
             />
           </label>
           <label className="grid gap-1.5">
@@ -1047,13 +1204,22 @@ export function PurchaseOrderEditorView({
                 <Button
                   variant="primary"
                   aria-label="Final Save"
-                  disabled={state.saving || finalSaving || sourceLess}
-                  title={
-                    sourceLess
-                      ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
-                      : undefined
+                  aria-disabled={gateUnresolvedCount > 0 ? true : undefined}
+                  disabled={
+                    gateUnresolvedCount === 0 &&
+                    (state.saving || finalSaving || sourceLess)
                   }
-                  onClick={onFinalSave}
+                  title={
+                    gateUnresolvedCount > 0
+                      ? gateBlockedMessage ?? undefined
+                      : sourceLess
+                        ? "Link a Quotation before finalizing; the server also refuses a source-less finalize."
+                        : undefined
+                  }
+                  onClick={() => {
+                    if (gateUnresolvedCount > 0) onBlockedActivate?.();
+                    else onFinalSave();
+                  }}
                 >
                   {finalSaving ? "Loading review…" : "Final Save"}
                 </Button>
@@ -1083,6 +1249,9 @@ export function PurchaseOrderEditorPage({
   mode = "draft",
   actionsInShell = false,
   onShellActions,
+  reconciliationTransport,
+  actorId = 0,
+  actorName = "You",
 }: PurchaseOrderEditorPageProps) {
   // #473 wave 2: a draft write that meets an already-saved record keeps the
   // working copy and continues as a correction. The transition is local to this
@@ -1137,6 +1306,82 @@ export function PurchaseOrderEditorPage({
   const editorStateRef = useRef(state);
   editorStateRef.current = state;
 
+  // Ticket 04: live reconciliation. The session the server created for the
+  // linked revision, the blur-commit state machine, notices, filters, the
+  // keep step and announcements. The editor owns the form values; the hook
+  // only reads them at commit time and writes them back on Use Quotation.
+  const [compareSource, setCompareSource] = useState<ReconciliationSourceValues | null>(null);
+  const [sessionBannerError, setSessionBannerError] = useState<string | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const sheetTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const paneRailRef = useRef<ReconciliationPaneHandle | null>(null);
+  const paneSheetRef = useRef<ReconciliationPaneHandle | null>(null);
+  const sheetFocusRef = useRef<
+    { kind: "heading" } | { kind: "first" } | { kind: "item"; key: string } | null
+  >(null);
+  const focusedFieldRef = useRef<HeaderFieldKey | null>(null);
+  const loadedSourceForRef = useRef<number | null>(null);
+
+  const reconciliation = useReconciliationSession({
+    transport: reconciliationTransport ?? wailsReconciliationTransport,
+    orderId: state.orderId,
+    sourceState: state.sourceState,
+    sourceQuotationId: order.QuotationID,
+    sourceRevision: order.SourceRevision,
+    poVersion: state.version,
+    readOnly: correcting,
+    source: compareSource,
+    actor: { id: actorId, name: actorName },
+    getFieldValue: (field) =>
+      field === "header:paymentTerms"
+        ? editorStateRef.current.header.paymentTerms
+        : field === "header:incoterms"
+          ? editorStateRef.current.header.incoterms
+          : editorStateRef.current.header.discountPercent,
+    applyFieldValue: (field, value) => {
+      if (field === "header:paymentTerms") {
+        dispatch({ type: "headerChanged", patch: { paymentTerms: value } });
+      } else if (field === "header:incoterms") {
+        dispatch({ type: "headerChanged", patch: { incoterms: String(value) } });
+      } else {
+        dispatch({ type: "headerChanged", patch: { discountPercent: String(value) } });
+      }
+    },
+  });
+
+  // Loads the exact source once per persisted live record: the commit handler
+  // compares against it, never against typed input. Transient drafts have no
+  // server row to review, so nothing loads until the first persist.
+  useEffect(() => {
+    if (state.orderId < 1 || state.sourceState !== "live") {
+      loadedSourceForRef.current = null;
+      return;
+    }
+    if (loadedSourceForRef.current === state.orderId) return;
+    loadedSourceForRef.current = state.orderId;
+    let cancelled = false;
+    // The binding throws synchronously with no Wails runtime (plain-browser
+    // dev, partial harness mocks); the async wrapper turns that into a
+    // rejection the catch below absorbs.
+    void (async () => {
+      try {
+        const loaded = await GetPurchaseOrderReview(state.orderId);
+        if (cancelled) return;
+        setCompareSource({
+          paymentTerms: loaded.Source.PaymentTerms,
+          incoterms: loaded.Source.Incoterms,
+          discountPercent: loaded.Source.DiscountPercent,
+        });
+      } catch {
+        if (cancelled) return;
+        setCompareSource(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [state.orderId, state.sourceState]);
+
   /**
    * Wave 2 of #473: carry the working copy into the correction flow at the
    * version the server named. Nothing is written here; the reason panel appears
@@ -1173,6 +1418,24 @@ export function PurchaseOrderEditorPage({
   };
 
   /**
+   * Ticket 04: a draft save persists the session with the row version the
+   * draft save just produced (R-04). A session failure never fails the draft
+   * save: the record is stored, the banner names the sync problem, and the
+   * next save retries with the same items.
+   */
+  const handleSaved = async (savedOrder: PurchaseOrderDTO, corrected?: boolean) => {
+    const outcome = await reconciliation.persistAfterDraftSave(savedOrder.Version);
+    if (!outcome.ok) {
+      setSessionBannerError(
+        "The reconciliation could not be saved. Your draft is stored; saving again retries the sync."
+      );
+    } else {
+      setSessionBannerError(null);
+    }
+    onSaved(savedOrder, corrected);
+  };
+
+  /**
    * The answer to a draft write that met a saved record. The earlier warning's
    * actor and time are kept when there is one; a bare po_not_draft has only the
    * version, because the server validated it before its state rule refused.
@@ -1202,7 +1465,67 @@ export function PurchaseOrderEditorPage({
   const shellActionsRef = useRef<{
     save: (expectedVersion: number, overwrite: boolean) => Promise<void>;
     startReview: () => Promise<void>;
+    blockedActivate: () => void;
   } | null>(null);
+
+  // Ticket 04: a blocked Final Save never saves. It announces the blocker
+  // assertively and focuses the first unresolved item: in the rail at 1024
+  // and above, in the sheet below (opened first if closed).
+  const blockedActivate = useCallback(() => {
+    const count = reconciliation.unresolvedCount;
+    reconciliation.setBlockedAnnouncement(
+      `Final Save is blocked. Resolve ${count} ${count === 1 ? "item" : "items"} first.`
+    );
+    const smallViewport =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 1023px)").matches;
+    if (smallViewport || sheetOpen) {
+      sheetFocusRef.current = { kind: "first" };
+      setSheetOpen(true);
+      return;
+    }
+    paneRailRef.current?.focusFirstUnresolved();
+  }, [reconciliation.unresolvedCount, reconciliation.setBlockedAnnouncement, sheetOpen]);
+
+  // Ticket 04: focuses a pane item from the inline anchor under a field.
+  const showPaneItem = useCallback(
+    (key: string) => {
+      const smallViewport =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 1023px)").matches;
+      if (smallViewport || sheetOpen) {
+        sheetFocusRef.current = { kind: "item", key };
+        setSheetOpen(true);
+        return;
+      }
+      paneRailRef.current?.focusItem(key);
+    },
+    [sheetOpen]
+  );
+
+  const closeSheet = useCallback(() => {
+    sheetFocusRef.current = null;
+    setSheetOpen(false);
+    sheetTriggerRef.current?.focus();
+  }, []);
+
+  // Ticket 04: sheet focus contract. A manual open lands on the sheet
+  // heading; a blocked save or Show action lands on the requested item.
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const target = sheetFocusRef.current;
+    sheetFocusRef.current = null;
+    if (target !== null && target.kind !== "heading") {
+      const timer = window.setTimeout(() => {
+        if (target.kind === "first") paneSheetRef.current?.focusFirstUnresolved();
+        else paneSheetRef.current?.focusItem(target.key);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    document.getElementById("sheet-pane-heading")?.focus();
+  }, [sheetOpen]);
   useEffect(() => {
     if (!actionsInShell) {
       onShellActions?.(null);
@@ -1215,14 +1538,21 @@ export function PurchaseOrderEditorPage({
     const callbacks = shellActionsRef.current;
     if (callbacks === null) return;
     const version = state.version;
+    const unresolved = reconciliation.unresolvedCount;
     onShellActions?.({
       mode: correcting ? "correction" : "draft",
       dirty: shellDirty,
       saving: state.saving,
       reviewLoading,
       sourceLess: shellSourceLess,
+      unresolvedCount: unresolved,
+      blockedMessage:
+        unresolved > 0
+          ? `Resolve ${unresolved} ${unresolved === 1 ? "item" : "items"} to enable Final Save`
+          : null,
       onSave: () => void callbacks.save(version, false),
       onFinalSave: () => void callbacks.startReview(),
+      onBlockedActivate: () => callbacks.blockedActivate(),
     });
   }, [
     actionsInShell,
@@ -1234,6 +1564,8 @@ export function PurchaseOrderEditorPage({
     state.version,
     reviewLoading,
     shellSourceLess,
+    reconciliation.unresolvedCount,
+    blockedActivate,
     onShellActions,
   ]);
   useEffect(() => {
@@ -1364,7 +1696,7 @@ export function PurchaseOrderEditorPage({
     const outcome = await shared.promise;
     if (outcome.kind === "saved" && notifySaved && !shared.notified) {
       shared.notified = true;
-      onSaved(outcome.order, correcting);
+      void handleSaved(outcome.order, correcting);
     }
     return outcome;
   };
@@ -1590,7 +1922,7 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
-        onSaved(outcome.order, correcting);
+        void handleSaved(outcome.order, correcting);
         return;
       }
       if (outcome.kind === "conflict") {
@@ -1617,6 +1949,10 @@ export function PurchaseOrderEditorPage({
   };
 
   const startReview = async () => {
+    // Contract section 7: commit the focused input first, before readiness.
+    if (focusedFieldRef.current !== null) {
+      reconciliation.commitField(focusedFieldRef.current);
+    }
     const result = buildPurchaseOrderUpdate(state, activeCurrency);
     if (result.input === null) {
       dispatch({ type: "saveFailed", error: result.error ?? "The draft is incomplete." });
@@ -1626,9 +1962,30 @@ export function PurchaseOrderEditorPage({
     try {
       const persisted = await ensurePersisted();
       const loaded = await GetPurchaseOrderReview(persisted.id);
+      setCompareSource({
+        paymentTerms: loaded.Source.PaymentTerms,
+        incoterms: loaded.Source.Incoterms,
+        discountPercent: loaded.Source.DiscountPercent,
+      });
       const initial = initialFinalizeReviewState();
       setReview(loaded);
-      setDecisions(initial.decisions);
+      // Brief section 5.5: the finalize review reads the session, it does not
+      // re-ask. A kept-PO resolution on unchanged values pre-fills the keep
+      // choice; everything else stays undecided.
+      const prefilled = prefillDecisionsFromSession(
+        reconciliation.items,
+        {
+          paymentTerms: state.header.paymentTerms,
+          incoterms: state.header.incoterms,
+          discountPercent: state.header.discountPercent,
+        },
+        {
+          PaymentTerms: loaded.Source.PaymentTerms,
+          Incoterms: loaded.Source.Incoterms,
+          DiscountPercent: loaded.Source.DiscountPercent,
+        }
+      );
+      setDecisions({ ...initial.decisions, ...prefilled });
       setAcknowledgedMissing(initial.acknowledgedMissing);
       setAcknowledgedExtra(initial.acknowledgedExtra);
       setDocumentConfirmed(initial.documentConfirmed);
@@ -1643,7 +2000,7 @@ export function PurchaseOrderEditorPage({
 
   // Ticket 02: keeps the shell callbacks fresh without retriggering the
   // report effect above. Assigned every render; the effect reads it.
-  shellActionsRef.current = { save, startReview };
+  shellActionsRef.current = { save, startReview, blockedActivate };
 
   const finalSave = async (expectedVersion: number, overwrite: boolean) => {
     if (review === null) return;
@@ -1676,7 +2033,7 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
-        onSaved(outcome.order, correcting);
+        void handleSaved(outcome.order, correcting);
         setReview(null);
         setView("entry");
         return;
@@ -1883,6 +2240,41 @@ export function PurchaseOrderEditorPage({
     );
   }
 
+  // Ticket 04: pane view-model for the entry layout. Notices render under
+  // their fields; the inline anchor appears only for an unresolved item.
+  const reconciliationNotices = reconciliation.notices;
+  const unresolvedHeaderItems: Record<HeaderFieldKey, ReconciliationItem | null> = {
+    "header:paymentTerms": null,
+    "header:incoterms": null,
+    "header:discountPercent": null,
+  };
+  for (const item of reconciliation.items) {
+    if (
+      item.Status === "unresolved" &&
+      (item.Field === "header:paymentTerms" ||
+        item.Field === "header:incoterms" ||
+        item.Field === "header:discountPercent")
+    ) {
+      unresolvedHeaderItems[item.Field as HeaderFieldKey] = item;
+    }
+  }
+  const paneStatus =
+    state.sourceState === "live"
+      ? reconciliation.status === "idle"
+        ? "loading"
+        : reconciliation.status
+      : "ready";
+  const paneSourceLabel =
+    state.sourceState === "never"
+      ? null
+      : `QT-${order.QuoteNumber} · revision ${order.SourceRevision}`;
+  const paneRailListTop = () => {
+    document.getElementById("rail-pane-items")?.scrollTo({ top: 0 });
+  };
+  const paneSheetListTop = () => {
+    document.getElementById("sheet-pane-items")?.scrollTo({ top: 0 });
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {linkLoading ? (
@@ -1893,7 +2285,35 @@ export function PurchaseOrderEditorPage({
       {linkError !== null && linkReview === null ? (
         <StatusBanner tone="danger">{linkError}</StatusBanner>
       ) : null}
-      <PurchaseOrderDocumentPanel
+      {sessionBannerError !== null ? (
+        <StatusBanner tone="danger">{sessionBannerError}</StatusBanner>
+      ) : null}
+      <div className="hidden lg:block">
+        <a
+          href="#rail-pane-heading"
+          className="sr-only focus-visible:not-sr-only focus-visible:inline-flex focus-visible:rounded-lg focus-visible:bg-ink-900 focus-visible:px-4 focus-visible:py-2.5 focus-visible:text-small focus-visible:font-medium focus-visible:text-white"
+        >
+          Skip to reconciliation
+        </a>
+      </div>
+      <ReconciliationSheetTrigger
+        ref={sheetTriggerRef}
+        unresolvedCount={reconciliation.unresolvedCount}
+        sourceLabel={
+          state.sourceState === "never"
+            ? null
+            : `QT-${order.QuoteNumber} · revision ${order.SourceRevision}`
+        }
+        expanded={sheetOpen}
+        onOpen={() => {
+          sheetFocusRef.current = { kind: "heading" };
+          setSheetOpen(true);
+        }}
+      />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0" inert={sheetOpen ? true : undefined}>
+          <div className="flex flex-col gap-6">
+            <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
         // A draft Save remounts this editor through onSaved. Blocking the
         // document controls while it is in flight keeps an attach from starting
@@ -1937,8 +2357,130 @@ export function PurchaseOrderEditorPage({
         onCorrectionReasonChange={setReason}
         confirmationNumber={order.ConfirmationNumber ?? ""}
         actionsInShell={actionsInShell}
+        notices={reconciliationNotices}
+        validationErrors={reconciliation.validationErrors}
+        unresolvedByField={unresolvedHeaderItems}
+        onCommitField={(field) => {
+          focusedFieldRef.current = field;
+          reconciliation.commitField(field);
+        }}
+        onFocusField={(field) => {
+          focusedFieldRef.current = field;
+        }}
+        onShowItem={(key) => showPaneItem(key)}
+        gateUnresolvedCount={reconciliation.unresolvedCount}
+        gateBlockedMessage={
+          reconciliation.unresolvedCount > 0
+            ? `Resolve ${reconciliation.unresolvedCount} ${reconciliation.unresolvedCount === 1 ? "item" : "items"} to enable Final Save`
+            : null
+        }
+        onBlockedActivate={blockedActivate}
       />
       {conflictPrompt}
+          </div>
+        </div>
+        <aside
+          aria-label="Reconciliation"
+          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:block lg:max-h-[calc(100dvh-176px)] lg:flex-col"
+        >
+          <ReconciliationPaneContent
+            idPrefix="rail"
+            ref={paneRailRef}
+            session={reconciliation.session}
+            status={paneStatus}
+            error={reconciliation.error}
+            sourceLabel={paneSourceLabel}
+            sourceRevision={order.SourceRevision}
+            noSource={state.sourceState === "never"}
+            formerSource={state.sourceState === "former"}
+            readOnly={correcting}
+            readOnlyCaption={
+              correcting
+                ? "The saved reconciliation is history. This correction does not change it."
+                : undefined
+            }
+            filter={reconciliation.filter}
+            onFilterChange={(next) => {
+              reconciliation.setFilter(next);
+              paneRailListTop();
+            }}
+            onShowAll={reconciliation.showAll}
+            latestNotice={reconciliation.latestNotice}
+            keepConfirmKey={reconciliation.keepConfirmKey}
+            onRequestKeep={reconciliation.requestKeep}
+            onCancelKeep={reconciliation.cancelKeep}
+            onConfirmKeep={reconciliation.confirmKeep}
+            onUse={reconciliation.useQuotation}
+            onLinkQuotation={onLinkQuotation}
+            onRetry={reconciliation.reload}
+            actorNameFor={(id) => (id === actorId ? actorName : null)}
+          />
+        </aside>
+      </div>
+      {sheetOpen ? (
+        <div
+          role="region"
+          aria-label="Reconciliation"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeSheet();
+            }
+          }}
+          className="fixed inset-x-0 bottom-0 top-16 z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 lg:hidden"
+        >
+          <ReconciliationPaneContent
+            idPrefix="sheet"
+            ref={paneSheetRef}
+            session={reconciliation.session}
+            status={paneStatus}
+            error={reconciliation.error}
+            sourceLabel={paneSourceLabel}
+            sourceRevision={order.SourceRevision}
+            noSource={state.sourceState === "never"}
+            formerSource={state.sourceState === "former"}
+            readOnly={correcting}
+            readOnlyCaption={
+              correcting
+                ? "The saved reconciliation is history. This correction does not change it."
+                : undefined
+            }
+            filter={reconciliation.filter}
+            onFilterChange={(next) => {
+              reconciliation.setFilter(next);
+              paneSheetListTop();
+            }}
+            onShowAll={reconciliation.showAll}
+            latestNotice={reconciliation.latestNotice}
+            keepConfirmKey={reconciliation.keepConfirmKey}
+            onRequestKeep={reconciliation.requestKeep}
+            onCancelKeep={reconciliation.cancelKeep}
+            onConfirmKeep={reconciliation.confirmKeep}
+            onUse={reconciliation.useQuotation}
+            onLinkQuotation={onLinkQuotation}
+            onRetry={reconciliation.reload}
+            actorNameFor={(id) => (id === actorId ? actorName : null)}
+            headerActions={
+              <button
+                type="button"
+                aria-label="Close reconciliation"
+                onClick={closeSheet}
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              >
+                Close
+              </button>
+            }
+          />
+        </div>
+      ) : null}
+      <div role="status" aria-live="polite" className="sr-only">
+        {reconciliation.announcement}
+      </div>
+      {reconciliation.blockedAnnouncement !== "" ? (
+        <div role="alert" className="sr-only">
+          {reconciliation.blockedAnnouncement}
+        </div>
+      ) : null}
     </div>
   );
 }

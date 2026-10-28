@@ -341,6 +341,12 @@ export function AppShell({
       aria-hidden={inert ? true : undefined}
       inert={inert ? true : undefined}
     >
+      <a
+        href="#main-content"
+        className="sr-only focus-visible:not-sr-only focus-visible:absolute focus-visible:left-4 focus-visible:top-4 focus-visible:z-50 focus-visible:rounded-lg focus-visible:bg-ink-900 focus-visible:px-4 focus-visible:py-2.5 focus-visible:text-small focus-visible:font-medium focus-visible:text-white"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
         <div className="mx-auto flex min-h-16 max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-2 lg:px-8">
           {workspace === null ? (
@@ -631,7 +637,7 @@ export function AppShell({
         </div>
       </header>
 
-      <main className="flex-1">
+      <main id="main-content" tabIndex={-1} className="flex-1 focus-visible:outline-hidden">
         <div
           className={`mx-auto w-full max-w-[1560px] px-5 pt-7 lg:px-8 lg:pt-9 ${
             actionBar ? "pb-16" : "pb-10"
