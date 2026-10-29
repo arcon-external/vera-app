@@ -511,11 +511,13 @@ func TestPOReconciliationLineItemValidation(t *testing.T) {
 		var key string
 		for _, line := range updated.Items {
 			if line.Description == "Unmatched freight" {
-				key = purchaseOrderLineKeyForRow(line.ID)
+				// First-seen wins: this row entered with an editor alias,
+				// so the recorded session key is the alias, not id:<row>.
+				key = line.ClientKey
 			}
 		}
 		if key == "" {
-			t.Fatalf("extra line has no persisted id: %+v", updated.Items)
+			t.Fatalf("extra line has no editor alias: %+v", updated.Items)
 		}
 		return updated, key
 	}

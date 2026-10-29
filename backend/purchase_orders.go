@@ -122,14 +122,21 @@ type PurchaseOrderSourceLineDTO struct {
 // PurchaseOrderSourceDTO is the exact revision the final-save review compares
 // against, read fresh on every review.
 type PurchaseOrderSourceDTO struct {
-	QuotationID            int64
-	RevisionNumber         int16
-	QuoteNumber            string
-	CustomerID             int64
-	CustomerName           string
-	Currency               string
-	PaymentTerms           string
-	Incoterms              string
+	QuotationID    int64
+	RevisionNumber int16
+	QuoteNumber    string
+	CustomerID     int64
+	CustomerName   string
+	Currency       string
+	PaymentTerms   string
+	Incoterms      string
+	// TaxZone, TaxType and ServiceCategory are the exact revision's
+	// normalized semantic triple (#502 ticket 05, B4): the link-time tax
+	// evidence the pane shows as read-only context. Normalized through the
+	// legacy TaxCategory resolver, like the recorded link:taxBasis item.
+	TaxZone                string
+	TaxType                string
+	ServiceCategory        string
 	DiscountPercent        int16
 	Lines                  []PurchaseOrderSourceLineDTO
 	PrintedSubtotalMinor   int64
@@ -1376,6 +1383,9 @@ func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseO
 			Currency:               row.Source.Currency,
 			PaymentTerms:           row.Source.PaymentTerms,
 			Incoterms:              row.Source.Incoterms,
+			TaxZone:                row.Source.TaxZone,
+			TaxType:                row.Source.TaxType,
+			ServiceCategory:        row.Source.ServiceCategory,
 			DiscountPercent:        row.Source.DiscountPercent,
 			PrintedSubtotalMinor:   row.Source.PrintedSubtotalMinor,
 			PrintedDiscountMinor:   row.Source.PrintedDiscountMinor,

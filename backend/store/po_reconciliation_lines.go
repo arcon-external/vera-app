@@ -221,6 +221,13 @@ func syncReconciliationLineStateTx(ctx context.Context, q purchaseOrderQuerier, 
 		if _, ok := byKey[key]; ok {
 			return
 		}
+		// First-seen wins: a row already addressed by any session key keeps
+		// that key. Adopting the row-carried editor alias must not emit a
+		// second identity for the same row; the alias stays on the row for
+		// persistence addressing.
+		if len(byID[rowID]) > 0 {
+			return
+		}
 		identities = append(identities, POReconciliationLineIdentity{Key: key, ID: &rowID})
 		byKey[key] = len(identities) - 1
 		byID[rowID] = append(byID[rowID], len(identities)-1)
@@ -460,6 +467,11 @@ func validateReconciliationLineItemShape(item POReconciliationItem) error {
 			return fmt.Errorf("%w: a duplicate match is never merely acknowledged", ErrPurchaseOrderInvalid)
 		}
 	}
+	// A recorded source reference is always canonical reference text, never
+	// display prose: values below bind decisions to it.
+	if item.SourceLineRef != nil && !isReconciliationReference(strings.TrimSpace(*item.SourceLineRef)) {
+		return fmt.Errorf("%w: item %q carries a malformed source reference", ErrPurchaseOrderInvalid, item.Key)
+	}
 	return validateReconciliationLineValue(item)
 }
 
@@ -525,11 +537,23 @@ func validateReconciliationLineValue(item POReconciliationItem) error {
 			if !nonNull(raw) {
 				return fmt.Errorf("%w: item %q must carry discount values", ErrPurchaseOrderInvalid, item.Key)
 			}
-			var discount POReconciliationDiscount
-			if err := decodeReconciliationStrict(raw, &discount); err != nil {
+			members, err := exactReconciliationObject(raw, "discount", "Enabled", "Percent")
+			if err != nil {
 				return fmt.Errorf("%w: item %q must carry a discount value: %v", ErrPurchaseOrderInvalid, item.Key, err)
 			}
-			if discount.Percent < 0 || discount.Percent > 100 {
+			if isReconciliationNull(members["enabled"]) || isReconciliationNull(members["percent"]) {
+				return fmt.Errorf("%w: item %q Enabled and Percent must be non-null", ErrPurchaseOrderInvalid, item.Key)
+			}
+			var enabled bool
+			if err := json.Unmarshal(members["enabled"], &enabled); err != nil {
+				return fmt.Errorf("%w: item %q Enabled must be a boolean", ErrPurchaseOrderInvalid, item.Key)
+			}
+			canonical, err := normalizeReconciliationJSON(members["percent"])
+			if err != nil {
+				return fmt.Errorf("%w: item %q Percent must be an integer", ErrPurchaseOrderInvalid, item.Key)
+			}
+			var percent int64
+			if err := json.Unmarshal(canonical, &percent); err != nil || percent < 0 || percent > 100 {
 				return fmt.Errorf("%w: item %q must carry a percent between 0 and 100", ErrPurchaseOrderInvalid, item.Key)
 			}
 		}
@@ -542,15 +566,17 @@ func validateReconciliationLineValue(item POReconciliationItem) error {
 			if !nonNull(item.POValue) {
 				return fmt.Errorf("%w: item %q must carry the contested reference", ErrPurchaseOrderInvalid, item.Key)
 			}
-			var reference string
-			if err := json.Unmarshal(item.POValue, &reference); err != nil {
+			reference, err := reconciliationReferenceValue(item.POValue)
+			if err != nil {
 				return fmt.Errorf("%w: item %q must carry a reference value", ErrPurchaseOrderInvalid, item.Key)
+			}
+			if item.SourceLineRef == nil || strings.TrimSpace(*item.SourceLineRef) != reference {
+				return fmt.Errorf("%w: item %q must contest its own reference", ErrPurchaseOrderInvalid, item.Key)
 			}
 			return nil
 		}
 		if nonNull(item.POValue) {
-			var reference string
-			if err := json.Unmarshal(item.POValue, &reference); err != nil {
+			if _, err := reconciliationReferenceValue(item.POValue); err != nil {
 				return fmt.Errorf("%w: item %q must carry a reference value", ErrPurchaseOrderInvalid, item.Key)
 			}
 		}
@@ -562,9 +588,9 @@ func validateReconciliationLineValue(item POReconciliationItem) error {
 		if !nonNull(item.SourceValue) {
 			return fmt.Errorf("%w: item %q must carry the missing reference", ErrPurchaseOrderInvalid, item.Key)
 		}
-		var reference string
-		if err := json.Unmarshal(item.SourceValue, &reference); err != nil {
-			return fmt.Errorf("%w: item %q must carry a reference value", ErrPurchaseOrderInvalid, item.Key)
+		reference, err := reconciliationReferenceValue(item.SourceValue)
+		if err != nil || reference != strings.TrimSpace(*item.SourceLineRef) {
+			return fmt.Errorf("%w: item %q must carry its missing reference", ErrPurchaseOrderInvalid, item.Key)
 		}
 		return nil
 	case "link:taxBasis":
@@ -572,9 +598,18 @@ func validateReconciliationLineValue(item POReconciliationItem) error {
 			if !nonNull(raw) {
 				return fmt.Errorf("%w: item %q must carry tax basis values", ErrPurchaseOrderInvalid, item.Key)
 			}
-			var basis POReconciliationTaxBasis
-			if err := decodeReconciliationStrict(raw, &basis); err != nil {
+			members, err := exactReconciliationObject(raw, "tax basis", "TaxZone", "TaxType", "ServiceCategory")
+			if err != nil {
 				return fmt.Errorf("%w: item %q must carry a tax basis value: %v", ErrPurchaseOrderInvalid, item.Key, err)
+			}
+			for _, member := range []string{"taxzone", "taxtype", "servicecategory"} {
+				if isReconciliationNull(members[member]) {
+					return fmt.Errorf("%w: item %q %s must be text", ErrPurchaseOrderInvalid, item.Key, member)
+				}
+				var text string
+				if err := json.Unmarshal(members[member], &text); err != nil {
+					return fmt.Errorf("%w: item %q %s must be text", ErrPurchaseOrderInvalid, item.Key, member)
+				}
 			}
 		}
 		return nil
@@ -582,77 +617,103 @@ func validateReconciliationLineValue(item POReconciliationItem) error {
 	return nil
 }
 
-// decodeReconciliationStrict decodes one JSON value with no unknown fields
-// and no trailing data.
-func decodeReconciliationStrict(raw json.RawMessage, target any) error {
+// isReconciliationNull reports an absent or JSON-null value.
+func isReconciliationNull(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || string(trimmed) == "null"
+}
+
+// exactReconciliationObject decodes a JSON object and requires exactly the
+// wanted member names, matched ASCII case-insensitively per Go's documented
+// field behavior, each present once. Missing, null-extra and unknown members
+// are refused; Go zero-values must never stand in for absent members.
+func exactReconciliationObject(raw json.RawMessage, what string, want ...string) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(raw)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
+	var members map[string]json.RawMessage
+	if err := decoder.Decode(&members); err != nil {
+		return nil, fmt.Errorf("%s must be an object: %v", what, err)
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err == nil {
-		return fmt.Errorf("trailing data after value")
+		return nil, fmt.Errorf("%s carries trailing data", what)
 	}
-	return nil
+	if members == nil {
+		return nil, fmt.Errorf("%s must be an object", what)
+	}
+	folded := make(map[string]json.RawMessage, len(members))
+	for name, value := range members {
+		lowered := strings.ToLower(name)
+		if _, dup := folded[lowered]; dup {
+			return nil, fmt.Errorf("%s repeats member %q", what, name)
+		}
+		folded[lowered] = value
+	}
+	if len(folded) != len(want) {
+		return nil, fmt.Errorf("%s must carry exactly %s", what, strings.Join(want, ", "))
+	}
+	for _, name := range want {
+		if _, ok := folded[strings.ToLower(name)]; !ok {
+			return nil, fmt.Errorf("%s must carry %q", what, name)
+		}
+	}
+	return folded, nil
 }
 
-// resolveReconciliationIdentities validates submitted line references and
-// returns the identity set to persist: the stored set plus additive bindings
-// for rows the stored set never recorded. Submitted LineIdentities are
-// otherwise ignored — the server owns the mapping, and only line persistence
-// (draft saves, links, creation) grows it. A removed entry stays removed.
-//
-//   - An `id:<row>` key must name a live row of this purchase order.
-//   - A `client:` key must be recorded already or belong to a live row
-//     carrying that alias; anything else is refused with guidance to save
-//     the draft first, so the pane cannot invent decisions for rows that do
-//     not exist.
-func resolveReconciliationIdentities(stored []POReconciliationLineIdentity, rows map[int64]string, items []POReconciliationItem) ([]POReconciliationLineIdentity, error) {
-	identities := append([]POReconciliationLineIdentity{}, stored...)
-	byKey := make(map[string]int, len(identities))
-	for index, identity := range identities {
-		byKey[identity.Key] = index
+// reconciliationReferenceValue decodes a canonical source reference:
+// digits with one optional dotted part ("9", "2.1"). Display prose is never
+// a reference.
+func reconciliationReferenceValue(raw json.RawMessage) (string, error) {
+	var reference string
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &reference); err != nil {
+		return "", err
+	}
+	if !isReconciliationReference(strings.TrimSpace(reference)) {
+		return "", fmt.Errorf("%q is not a source reference", reference)
+	}
+	return strings.TrimSpace(reference), nil
+}
+
+// isReconciliationReference reports the canonical reference shape.
+func isReconciliationReference(value string) bool {
+	parts := strings.Split(value, ".")
+	if len(parts) < 1 || len(parts) > 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// checkReconciliationLineIdentities requires every submitted line reference
+// to name a recorded session identity exactly. The server owns the mapping:
+// draft saves, links and creation record one first-seen key per row, and the
+// pane resolves its editor alias to that key before writing (the DTO rows
+// carry both ID and ClientKey for the translation). Unknown keys are refused
+// with guidance to save the draft first, so the pane cannot invent decisions
+// for rows that do not exist.
+func checkReconciliationLineIdentities(stored []POReconciliationLineIdentity, items []POReconciliationItem) error {
+	recorded := make(map[string]bool, len(stored))
+	for _, identity := range stored {
+		recorded[identity.Key] = true
 	}
 	for _, item := range items {
 		if item.LineKey == nil {
 			continue
 		}
-		lineKey := *item.LineKey
-		if index, ok := byKey[lineKey]; ok {
-			if identities[index].ID == nil {
-				if rowID, ok := resolveReconciliationLineRow(lineKey, rows); ok {
-					identities[index].ID = &rowID
-				}
-			}
-			continue
-		}
-		rowID, ok := resolveReconciliationLineRow(lineKey, rows)
-		if !ok {
-			return nil, fmt.Errorf("%w: item %q names an unknown line identity; save the draft first",
+		if !recorded[*item.LineKey] {
+			return fmt.Errorf("%w: item %q names an unknown line identity; reload the session after saving the draft",
 				ErrPurchaseOrderInvalid, item.Key)
 		}
-		identities = append(identities, POReconciliationLineIdentity{Key: lineKey, ID: &rowID})
-		byKey[lineKey] = len(identities) - 1
 	}
-	return identities, nil
-}
-
-// resolveReconciliationLineRow maps a LineKey onto a live row: `id:<row>`
-// names the row directly, a `client:` alias matches the row carrying it.
-func resolveReconciliationLineRow(lineKey string, rows map[int64]string) (int64, bool) {
-	if id, ok := parsePurchaseOrderLineKeyID(lineKey); ok {
-		if _, exists := rows[id]; exists {
-			return id, true
-		}
-		return 0, false
-	}
-	for id, alias := range rows {
-		if alias != "" && alias == lineKey {
-			return id, true
-		}
-	}
-	return 0, false
+	return nil
 }
 
 // checkReconciliationRemovedItems enforces that an item pointing at a removed
@@ -772,28 +833,34 @@ func canonicalReconciliationStoredDiscount(raw json.RawMessage) json.RawMessage 
 	return canonical
 }
 
-// loadPurchaseOrderLineAliases reads the live rows' stable addressing: row id
-// to editor alias (empty when the row carries none).
-func loadPurchaseOrderLineAliases(ctx context.Context, q purchaseOrderQuerier, schema string, poID int64) (map[int64]string, error) {
-	rows, err := q.Query(ctx, fmt.Sprintf(`
-		SELECT id, COALESCE(client_key, '')
-		FROM %s.purchase_order_items
-		WHERE purchase_order_id = $1`, schema), poID)
-	if err != nil {
-		return nil, fmt.Errorf("load purchase order line aliases: %w", err)
-	}
-	defer rows.Close()
-	aliases := map[int64]string{}
-	for rows.Next() {
-		var id int64
-		var alias string
-		if err := rows.Scan(&id, &alias); err != nil {
-			return nil, fmt.Errorf("scan purchase order line alias: %w", err)
+// rejectRetiredAliasReuseTx refuses a line payload that reuses a retired
+// editor alias: an alias whose session mapping is retained as Removed still
+// belongs to its removed row, and a new row must not claim it (contract
+// section 3). History is left intact; nothing is rebound or deleted. Aliases
+// are scoped per purchase order: other POs may use the same alias freely.
+// A draft without a session has no retained mappings to check against.
+func rejectRetiredAliasReuseTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64, items []PurchaseOrderItem) error {
+	wanted := map[string]bool{}
+	for _, item := range items {
+		if item.ClientKey != "" {
+			wanted[item.ClientKey] = true
 		}
-		aliases[id] = alias
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate purchase order line aliases: %w", err)
+	if len(wanted) == 0 {
+		return nil
 	}
-	return aliases, nil
+	session, _, err := loadReconciliationSession(ctx, q, schema, orgID, poID)
+	if err != nil {
+		if errors.Is(err, ErrPOReconciliationNotFound) {
+			return nil
+		}
+		return err
+	}
+	for _, identity := range session.LineIdentities {
+		if identity.Removed && wanted[identity.Key] {
+			return fmt.Errorf("%w: client alias %q belongs to a removed line and cannot identify a new row",
+				ErrPurchaseOrderInvalid, identity.Key)
+		}
+	}
+	return nil
 }

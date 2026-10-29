@@ -299,14 +299,20 @@ type PurchaseOrderSourceLineRow struct {
 // against. It is read from the frozen revision on every review, never from a
 // cache, so a corrected match is always checked against the issued document.
 type PurchaseOrderSourceRow struct {
-	QuotationID            int64                        `json:"quotationId"`
-	RevisionNumber         int16                        `json:"revisionNumber"`
-	QuoteNumber            string                       `json:"quoteNumber"`
-	CustomerID             int64                        `json:"customerId"`
-	CustomerName           string                       `json:"customerName"`
-	Currency               string                       `json:"currency"`
-	PaymentTerms           string                       `json:"paymentTerms"`
-	Incoterms              string                       `json:"incoterms"`
+	QuotationID    int64  `json:"quotationId"`
+	RevisionNumber int16  `json:"revisionNumber"`
+	QuoteNumber    string `json:"quoteNumber"`
+	CustomerID     int64  `json:"customerId"`
+	CustomerName   string `json:"customerName"`
+	Currency       string `json:"currency"`
+	PaymentTerms   string `json:"paymentTerms"`
+	Incoterms      string `json:"incoterms"`
+	// TaxZone, TaxType and ServiceCategory are the exact revision's
+	// normalized semantic triple (#502 ticket 05, B4). Additive surface for
+	// the link-time tax evidence; no billing comparison is added.
+	TaxZone                string                       `json:"taxZone"`
+	TaxType                string                       `json:"taxType"`
+	ServiceCategory        string                       `json:"serviceCategory"`
 	DiscountPercent        int16                        `json:"discountPercent"`
 	Lines                  []PurchaseOrderSourceLineRow `json:"lines"`
 	PrintedSubtotalMinor   int64                        `json:"printedSubtotalMinor"`

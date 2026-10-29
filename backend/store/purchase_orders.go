@@ -857,6 +857,11 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// A retired editor alias still belongs to its removed row: a new row
+	// must not claim it (contract section 3, ticket 05 B2).
+	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
 	// #496: a never-linked or formerly-linked draft still saves its own
 	// PO-owned values. Only the paths that need the frozen revision (review,
 	// finalize, corrections, repairs) require a live source.
@@ -1382,6 +1387,12 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 				existing[found].clientKey != item.ClientKey {
 				return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
 					ErrPurchaseOrderInvalid, index+1)
+			}
+			if item.ClientKey != "" {
+				if other, taken := byClientKey[item.ClientKey]; taken && other != found {
+					return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
+						ErrPurchaseOrderInvalid, index+1)
+				}
 			}
 			match = found
 		case item.ClientKey != "":

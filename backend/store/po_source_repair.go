@@ -154,6 +154,9 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		input.ExpectedVersion, PurchaseOrderStateSaved); err != nil {
 		return PurchaseOrder{}, err
 	}
+	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
 		return PurchaseOrder{}, err

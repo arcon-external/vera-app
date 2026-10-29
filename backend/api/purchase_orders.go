@@ -882,6 +882,7 @@ func mapPurchaseOrderDraftTaxBasis(basis store.PurchaseOrderDraftTaxBasis) apico
 
 func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.PurchaseOrderReviewRow {
 	source := review.Source
+	zone, taxType, serviceCategory := source.SemanticTaxTriple()
 	row := apicontract.PurchaseOrderReviewRow{
 		Order:         mapPurchaseOrder(review.Order),
 		DocumentState: review.DocumentState,
@@ -894,6 +895,9 @@ func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.Purcha
 			Currency:               source.Currency,
 			PaymentTerms:           source.PaymentTerms,
 			Incoterms:              source.Incoterms,
+			TaxZone:                zone,
+			TaxType:                taxType,
+			ServiceCategory:        serviceCategory,
 			DiscountPercent:        source.DiscountPercent,
 			PrintedSubtotalMinor:   source.PrintedSubtotalMinor,
 			PrintedDiscountMinor:   source.PrintedDiscountMinor,

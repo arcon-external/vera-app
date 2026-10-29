@@ -2497,6 +2497,9 @@ export namespace backend {
 	    Currency: string;
 	    PaymentTerms: string;
 	    Incoterms: string;
+	    TaxZone: string;
+	    TaxType: string;
+	    ServiceCategory: string;
 	    DiscountPercent: number;
 	    Lines: PurchaseOrderSourceLineDTO[];
 	    PrintedSubtotalMinor: number;
@@ -2518,6 +2521,9 @@ export namespace backend {
 	        this.Currency = source["Currency"];
 	        this.PaymentTerms = source["PaymentTerms"];
 	        this.Incoterms = source["Incoterms"];
+	        this.TaxZone = source["TaxZone"];
+	        this.TaxType = source["TaxType"];
+	        this.ServiceCategory = source["ServiceCategory"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.Lines = this.convertValues(source["Lines"], PurchaseOrderSourceLineDTO);
 	        this.PrintedSubtotalMinor = source["PrintedSubtotalMinor"];

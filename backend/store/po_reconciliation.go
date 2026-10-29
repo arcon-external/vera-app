@@ -521,33 +521,25 @@ func (s *Store) SavePOReconciliation(ctx context.Context, session POReconciliati
 	if err := checkReconciliationTaxItemsUnchanged(stored.Items, session.Items); err != nil {
 		return POReconciliationSession{}, err
 	}
-	liveRows, err := loadPurchaseOrderLineAliases(ctx, tx, schema, session.PurchaseOrderID)
-	if err != nil {
-		return POReconciliationSession{}, err
-	}
 	// The server owns the line mapping: submitted LineIdentities are
-	// informational only. References resolve against the stored identities
-	// plus the live rows, binding rows the stored set never recorded.
-	identities, err := resolveReconciliationIdentities(stored.LineIdentities, liveRows, session.Items)
-	if err != nil {
+	// informational only and are never persisted here. References must name
+	// recorded session identities exactly; only line persistence (draft
+	// saves, links, creation) grows the mapping.
+	if err := checkReconciliationLineIdentities(stored.LineIdentities, session.Items); err != nil {
 		return POReconciliationSession{}, err
 	}
-	if err := checkReconciliationRemovedItems(identities, session.Items); err != nil {
+	if err := checkReconciliationRemovedItems(stored.LineIdentities, session.Items); err != nil {
 		return POReconciliationSession{}, err
 	}
 	now := time.Now().UTC()
-	lineIdentities, err := json.Marshal(identities)
-	if err != nil {
-		return POReconciliationSession{}, fmt.Errorf("encode reconciliation line identities: %w", err)
-	}
 	newPOVersion := lock.Version + 1
 	var sessionRowID int64
 	err = tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_order_reconciliation_sessions SET
-			po_version = $3, line_identities = $4, updated_at = NOW()
+			po_version = $3, updated_at = NOW()
 		WHERE purchase_order_id = $1 AND org_id = $2 AND active
 		RETURNING id`, schema),
-		session.PurchaseOrderID, org.ID, newPOVersion, lineIdentities).Scan(&sessionRowID)
+		session.PurchaseOrderID, org.ID, newPOVersion).Scan(&sessionRowID)
 	if err != nil {
 		return POReconciliationSession{}, fmt.Errorf("update reconciliation session: %w", err)
 	}

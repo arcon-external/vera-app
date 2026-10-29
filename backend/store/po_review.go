@@ -89,6 +89,15 @@ type PurchaseOrderSource struct {
 	DiscountPercent        int16
 }
 
+// SemanticTaxTriple projects the exact revision's normalized tax triple:
+// the persisted type/service where the revision carries them, resolved
+// through the legacy TaxCategory resolver otherwise. It is the same triple
+// the recorded link:taxBasis item carries, exposed here for review DTOs.
+func (source PurchaseOrderSource) SemanticTaxTriple() (zone, taxType, serviceCategory string) {
+	triple := reconciliationTaxTriple(source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
+	return triple.TaxZone, triple.TaxType, triple.ServiceCategory
+}
+
 // PurchaseOrderReviewState is the entered side of the comparison: the header
 // wording plus the lines, with their references and values. It is built from
 // the values a final save would store, so the review and the saved row cannot
@@ -492,6 +501,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// #496: a never-linked or formerly-linked draft cannot be finalized. The
