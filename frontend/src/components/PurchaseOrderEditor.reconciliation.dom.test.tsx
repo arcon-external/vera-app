@@ -579,7 +579,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     };
   }
 
-  it("an unreviewed difference renders read-only with a route back, never a choice workbench", async () => {
+  it("an unreviewed mixed difference blocks entry and focuses the live field (§5.5)", async () => {
     reviewMock.mockResolvedValue({
       Source: {
         QuotationID: 12,
@@ -645,21 +645,22 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     });
     await flush();
     await flush();
-    expect(document.body.textContent).toContain("Review differences before saving");
-    // No second workbench: an unreviewed row never offers Use buttons.
+    // §5.5: the recorded header choice does not excuse the unreviewed line
+    // difference. Entry blocks before any review opens and focuses the live
+    // quantity field. (Read-only receipt rendering for the mixed case stays
+    // covered at the receipt component seam.)
+    expect(document.body.textContent).not.toContain("Review differences before saving");
     expect(
       document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
     ).toBeNull();
     expect(
       document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
     ).toBeNull();
-    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
-    expect(
-      document.querySelector('button[aria-label="Change Line 1 quantity"]')
-    ).not.toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
   });
 
-  it("a persisted tax-only session with an unreviewed line difference opens a read-only receipt, never a choice workbench (N4/U2)", async () => {
+  it("a persisted tax-only session with an unreviewed line difference blocks entry and focuses the live difference before review (entry readiness)", async () => {
     reviewMock.mockResolvedValue({
       Source: {
         QuotationID: 12,
@@ -726,24 +727,228 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     });
     await flush();
     await flush();
-    // The review still opens, but as a read-only receipt: no second
-    // choice workbench for the unreviewed difference.
-    expect(document.body.textContent).toContain("Review differences before saving");
+    // §5.5 entry readiness: the review must NOT open for an unreviewed
+    // persisted difference. Entry names the blocker and focuses the live
+    // quantity field so it can be committed and resolved in the pane.
+    expect(document.body.textContent).not.toContain("Review differences before saving");
     expect(
       document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
     ).toBeNull();
     expect(
       document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
     ).toBeNull();
-    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
+  });
+
+  it("a persisted empty session with an unreviewed line difference blocks entry and focuses the live field", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // A stored session (ID 3) with no items at all: still recorded
+    // provenance, so the unreviewed quantity blocks entry.
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()] })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
     expect(
-      document.querySelector('button[aria-label="Change Line 1 quantity"]')
-    ).not.toBeNull();
-    // Readiness still blocks: the unreviewed difference has no recorded
-    // choice, even though zero pane items are unresolved.
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
+  });
+
+  it("a first save of recorded content still blocks on a further uncommitted difference", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()], PaymentTerms: "50% advance" }),
+    });
+    // The draft write echoes the working copy including its header, so the
+    // uncommitted payment-terms divergence survives the persist.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          PaymentTerms: String(fields.PaymentTerms ?? "45 days"),
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // No stored session: the first commit builds the local shell.
+    const transport = fakeTransport(null);
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()], PaymentTerms: "50% advance" })
+    );
+
+    // Commit and resolve the quantity in the pane; the header divergence
+    // stays uncommitted with no pane item.
+    const quantity = input("Line 1 quantity");
+    typeInto(quantity, "3");
+    await act(async () => {
+      quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    // The first save persists the recorded line choice (authoritative), but
+    // the uncommitted header difference still blocks entry: no review, and
+    // the live payment-terms field is focused.
+    expect(transport.saves.length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Payment terms");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Payment terms");
+  });
+
+  it("blur, resolve and retry after an entry block opens the receipt (N4/U2 cycle)", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(
+      savedSession([
+        {
+          Key: "link:taxBasis",
+          Field: "link:taxBasis",
+          Kind: "tax_basis",
+          LineKey: null,
+          SourceLineRef: null,
+          Label: "Tax basis",
+          POValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          SourceValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          Status: "resolved",
+          Resolution: "used_quotation",
+          ActorID: 7,
+          UpdatedAt: "2026-10-28T00:00:05Z",
+          History: [],
+        },
+      ])
+    );
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()] })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    // Entry blocks first: no review, live quantity focused.
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+
+    // Commit on blur, Keep in the pane, then retry: the recorded choice
+    // opens the read-only receipt.
+    const quantity = input("Line 1 quantity");
+    typeInto(quantity, "3");
+    await act(async () => {
+      quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
     expect(
-      document.querySelector<HTMLButtonElement>('button[aria-label="Continue final save"]')?.disabled
-    ).toBe(true);
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
   });
 
   it("an identity-only local session keeps the legacy choice workbench (N4/U2 guard)", async () => {

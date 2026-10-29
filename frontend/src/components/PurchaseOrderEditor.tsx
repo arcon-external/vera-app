@@ -2476,16 +2476,16 @@ export function PurchaseOrderEditorPage({
           : [];
       const sessionExtra =
         reconciliation.hasSession === true ? reconciliation.prefillExtra() : [];
-      setAcknowledgedMissing(
+      const mergedMissing =
         reconciliation.hasSession === true
           ? Array.from(new Set([...initial.acknowledgedMissing, ...sessionMissing]))
-          : initial.acknowledgedMissing
-      );
-      setAcknowledgedExtra(
+          : initial.acknowledgedMissing;
+      const mergedExtra =
         reconciliation.hasSession === true
           ? Array.from(new Set([...initial.acknowledgedExtra, ...sessionExtra]))
-          : initial.acknowledgedExtra
-      );
+          : initial.acknowledgedExtra;
+      setAcknowledgedMissing(mergedMissing);
+      setAcknowledgedExtra(mergedExtra);
       // N4/U2: receipt provenance is the authoritative persisted session,
       // not decision counts. An already-stored session (positive ID before
       // this pass, even empty/tax-only/all-unresolved) is recorded
@@ -2499,6 +2499,54 @@ export function PurchaseOrderEditorPage({
       setReceiptAckedMissing(sessionMissing);
       setReceiptAckedExtra(sessionExtra);
       setReceiptHasSession(!correcting && authoritativeSession);
+      // §5.5 entry readiness (authoritative sessions only): the whole
+      // current form is compared with the actual loaded source using the
+      // same pure comparison as the review. A zero item count never implies
+      // ready: an unreviewed difference keeps the editor in entry with the
+      // first blocker named and focused, instead of opening the review.
+      if (!correcting && authoritativeSession) {
+        const gate = evaluateReview(
+          state,
+          loaded.Source,
+          activeCurrency,
+          mergedDecisions,
+          mergedMissing,
+          mergedExtra
+        );
+        if (!gate.canContinue) {
+          reconciliation.setBlockedAnnouncement(
+            `Final Save is blocked. ${gate.blockers.length} ${gate.blockers.length === 1 ? "blocker" : "blockers"}: ${gate.blockers.join("; ")}.`
+          );
+          // Focus the first unreviewed difference's live field so it can be
+          // committed and resolved in the pane; anything without a live
+          // field (missing/extra/duplicate/unknown) reveals the pane.
+          const firstOpen = gate.comparison.differences.find(
+            (entry) => mergedDecisions[entry.key] === undefined
+          );
+          const liveTarget =
+            firstOpen === undefined
+              ? null
+              : document.querySelector<HTMLElement>(
+                  `[aria-label="${firstOpen.label.replace(/"/g, "")}"]`
+                );
+          if (firstOpen !== undefined && liveTarget !== null) {
+            setPendingFocus(firstOpen.label);
+            return;
+          }
+          reconciliation.setFilter("all");
+          const smallViewport =
+            typeof window !== "undefined" &&
+            typeof window.matchMedia === "function" &&
+            window.matchMedia("(max-width: 1023px)").matches;
+          if (smallViewport || sheetOpen) {
+            sheetFocusRef.current = { kind: "first" };
+            setSheetOpen(true);
+            return;
+          }
+          paneRailRef.current?.focusFirstUnresolved();
+          return;
+        }
+      }
       setDocumentConfirmed(initial.documentConfirmed);
       setAssignConfirmation(initial.assignConfirmation);
       setView("review");
