@@ -503,9 +503,6 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
-		return PurchaseOrder{}, err
-	}
 	// #496: a never-linked or formerly-linked draft cannot be finalized. The
 	// refusal happens here, at the server boundary, before any confirmation
 	// number or saved state is written.
@@ -672,7 +669,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if tag.RowsAffected() != 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 

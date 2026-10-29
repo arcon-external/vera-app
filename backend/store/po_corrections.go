@@ -327,9 +327,6 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
-		return PurchaseOrder{}, err
-	}
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -357,7 +354,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), numberKey); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 

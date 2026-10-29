@@ -424,7 +424,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		return PurchaseOrder{}, fmt.Errorf("insert purchase order: %w", err)
 	}
 
-	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, id, items)
+	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, id, items)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -524,7 +524,7 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 		return PurchaseOrder{}, fmt.Errorf("insert blank purchase order: %w", err)
 	}
 
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, id, nil); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, id, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -857,11 +857,6 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	// A retired editor alias still belongs to its removed row: a new row
-	// must not claim it (contract section 3, ticket 05 B2).
-	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
-		return PurchaseOrder{}, err
-	}
 	// #496: a never-linked or formerly-linked draft still saves its own
 	// PO-owned values. Only the paths that need the frozen revision (review,
 	// finalize, corrections, repairs) require a live source.
@@ -904,7 +899,7 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
-	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines)
+	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -1306,29 +1301,54 @@ func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int1
 // replacePurchaseOrderItems stores the submitted lines as the purchase
 // order's full line set while preserving each row's persisted id across
 // saves, so a review item keyed to a line identity survives a reorder
-// (#502, ticket 05). Matching runs per submitted line, in order:
+// (#502, tickets 05-06 round 2). It is the only production INSERT/UPDATE/
+// DELETE site for PO lines: the shared transactional seam for editor-alias
+// ownership. Callers run inside the PO's locked transaction and pass the
+// authenticated org; claim writes add no PO-version increment of their own.
 //
-//  1. a positive ID naming a row of this purchase order keeps that row;
-//  2. else a client key naming a row of this purchase order (by its stored
-//     alias) keeps that row;
+// Matching runs per submitted line, in order:
+//
+//  1. a positive ID naming a live row of this purchase order keeps that row;
+//     a supplied alias must be unclaimed or owned by that same row, never a
+//     NULL reservation, a retired owner or another live row;
+//  2. else a client key resolving through the durable per-PO claims keeps
+//     its original owner row (including an older replaced alias): an edit,
+//     never a creation. A NULL-reserved or retired alias is refused, never
+//     resurrected or rebound;
 //  3. else an exact value match against an unclaimed row keeps that row, so
 //     a payload without any identity (an older editor) still survives a
-//     reorder and a no-op save without churning ids;
-//  4. else the line is inserted as a new row.
+//     reorder and a no-op save without churning ids; the row keeps its
+//     current alias;
+//  4. else the line is inserted as a new row, acquiring its supplied alias
+//     under the generated id before commit.
 //
-// A positive ID that names no row of this order, two submitted lines
-// resolving to one row, or an ID/client-key pair disagreeing about the row
-// are refused: a line may never claim another line's identity. Rows that no
-// submitted line claims are deleted; their ids are returned so the caller can
-// retire their review state. Line numbers are assigned from the submitted
-// order. The (purchase_order_id, line_number) uniqueness is DEFERRABLE
-// (migration 042) so a swap of two display positions commits atomically.
-func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, schema string, orderID int64, items []PurchaseOrderItem) (kept []PurchaseOrderItem, removed []int64, err error) {
+// A positive ID that names no live row of this order, two submitted lines
+// resolving to one row, or an ID/alias pair disagreeing about the row are
+// refused: a line may never claim another line's identity. Ownership claims
+// are append-only and survive row deletion, so a retired alias stays refused
+// without rebinding history. Rows that no submitted line claims are deleted;
+// their ids are returned so the caller can retire their review state. Line
+// numbers are assigned from the submitted order. The
+// (purchase_order_id, line_number) uniqueness is DEFERRABLE (migration 042)
+// so a swap of two display positions commits atomically.
+func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID string, orderID int64, items []PurchaseOrderItem) (kept []PurchaseOrderItem, removed []int64, err error) {
+	var parentOrg string
+	if err := tx.QueryRow(ctx, fmt.Sprintf(
+		`SELECT org_id::text FROM %s.purchase_orders WHERE id = $1`, schema),
+		orderID).Scan(&parentOrg); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, ErrPurchaseOrderNotFound
+		}
+		return nil, nil, fmt.Errorf("verify purchase order %d organisation: %w", orderID, err)
+	}
+	if parentOrg != orgID {
+		return nil, nil, ErrPurchaseOrderNotFound
+	}
 	type storedLine struct {
 		item      PurchaseOrderItem
 		clientKey string
 	}
-	rows, err := q.Query(ctx, fmt.Sprintf(`
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT id, COALESCE(client_key, ''), description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 		       discount_enabled, discount_percent
@@ -1363,6 +1383,37 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("iterate purchase order lines: %w", err)
 	}
+	liveIDs := make(map[int64]bool, len(existing))
+	for _, line := range existing {
+		liveIDs[line.item.ID] = true
+	}
+
+	// Durable per-PO alias claims, consulted before any destructive write.
+	claims, err := loadLineAliasClaimsTx(ctx, tx, schema, orderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Every live alias must already be claimed by its own row. A missing
+	// claim is inserted under the lock; a NULL reservation or a different
+	// owner is inconsistency, never permission to reassign.
+	for _, line := range existing {
+		if line.clientKey == "" {
+			continue
+		}
+		owner, found := claims[line.clientKey]
+		switch {
+		case !found:
+			if err := acquireLineAliasClaimTx(ctx, tx, schema, orgID, orderID, line.clientKey, line.item.ID, liveIDs); err != nil {
+				return nil, nil, err
+			}
+			claims[line.clientKey] = &line.item.ID
+		case owner == nil:
+			return nil, nil, fmt.Errorf("%w: client alias %q is reserved by retained history and cannot identify a new row",
+				ErrPurchaseOrderInvalid, line.clientKey)
+		case *owner != line.item.ID:
+			return nil, nil, refusedLineAliasClaim(line.clientKey, *owner, liveIDs)
+		}
+	}
 
 	byID := make(map[int64]int, len(existing))
 	byClientKey := make(map[string]int, len(existing))
@@ -1372,6 +1423,9 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 			byClientKey[line.clientKey] = index
 		}
 	}
+	// plannedClaims records alias acquisitions this save will make, so a
+	// later submitted line cannot silently reuse them.
+	plannedClaims := make(map[string]int64, len(items))
 	claimed := make([]bool, len(existing))
 	resolved := make([]int, len(items))
 	for index, item := range items {
@@ -1383,22 +1437,45 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 				return nil, nil, fmt.Errorf("%w: line %d names an unknown purchase order line",
 					ErrPurchaseOrderInvalid, index+1)
 			}
-			if item.ClientKey != "" && existing[found].clientKey != "" &&
-				existing[found].clientKey != item.ClientKey {
-				return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
-					ErrPurchaseOrderInvalid, index+1)
-			}
 			if item.ClientKey != "" {
-				if other, taken := byClientKey[item.ClientKey]; taken && other != found {
+				owner, known := claims[item.ClientKey]
+				switch {
+				case !known:
+					// Adopted below, against this known row ID.
+				case owner == nil:
+					return nil, nil, fmt.Errorf("%w: client alias %q is reserved by retained history and cannot identify a new row",
+						ErrPurchaseOrderInvalid, item.ClientKey)
+				case *owner != item.ID:
+					return nil, nil, refusedLineAliasClaim(item.ClientKey, *owner, liveIDs)
+				}
+				if planned, taken := plannedClaims[item.ClientKey]; taken && planned != item.ID {
 					return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
 						ErrPurchaseOrderInvalid, index+1)
 				}
+				plannedClaims[item.ClientKey] = item.ID
 			}
 			match = found
 		case item.ClientKey != "":
-			if found, ok := byClientKey[item.ClientKey]; ok {
-				match = found
+			owner, known := claims[item.ClientKey]
+			switch {
+			case !known:
+				// Genuinely new alias: inserted with the generated row below.
+			case owner == nil:
+				return nil, nil, fmt.Errorf("%w: client alias %q is reserved by retained history and cannot identify a new row",
+					ErrPurchaseOrderInvalid, item.ClientKey)
+			default:
+				ownerIndex, live := byID[*owner]
+				if !live {
+					return nil, nil, fmt.Errorf("%w: client alias %q belongs to a removed line and cannot identify a new row",
+						ErrPurchaseOrderInvalid, item.ClientKey)
+				}
+				match = ownerIndex
 			}
+			if _, taken := plannedClaims[item.ClientKey]; taken {
+				return nil, nil, fmt.Errorf("%w: line %d claims a client key owned by another line",
+					ErrPurchaseOrderInvalid, index+1)
+			}
+			plannedClaims[item.ClientKey] = 0
 		default:
 			for candidate, line := range existing {
 				if !claimed[candidate] && purchaseOrderLineValuesEqual(line.item, item) {
@@ -1426,7 +1503,7 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 		}
 	}
 	if len(removed) > 0 {
-		if _, err := q.Exec(ctx, fmt.Sprintf(`
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`
 			DELETE FROM %s.purchase_order_items
 			WHERE purchase_order_id = $1 AND id = ANY($2)`, schema),
 			orderID, removed); err != nil {
@@ -1444,7 +1521,15 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 			if item.ClientKey != "" {
 				clientKey = item.ClientKey
 			}
-			if _, err := q.Exec(ctx, fmt.Sprintf(`
+			if item.ClientKey != "" && row.clientKey != item.ClientKey {
+				// Alias adoption or replacement: acquire the durable claim
+				// against this known row before changing the row itself.
+				if err := acquireLineAliasClaimTx(ctx, tx, schema, orgID, orderID, item.ClientKey, row.item.ID, liveIDs); err != nil {
+					return nil, nil, err
+				}
+				claims[item.ClientKey] = &row.item.ID
+			}
+			if _, err := tx.Exec(ctx, fmt.Sprintf(`
 				UPDATE %s.purchase_order_items SET
 					line_number = $2, description = $3, quotation_item_no = $4,
 					quotation_sub_no = $5, quantity_scaled = $6, uom = $7,
@@ -1465,7 +1550,7 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 			continue
 		}
 		var id int64
-		if err := q.QueryRow(ctx, fmt.Sprintf(`
+		if err := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO %s.purchase_order_items (
 				purchase_order_id, line_number, description, quotation_item_no,
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
@@ -1480,10 +1565,90 @@ func replacePurchaseOrderItems(ctx context.Context, q purchaseOrderQuerier, sche
 		).Scan(&id); err != nil {
 			return nil, nil, fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
 		}
+		if item.ClientKey != "" {
+			if err := acquireLineAliasClaimTx(ctx, tx, schema, orgID, orderID, item.ClientKey, id, liveIDs); err != nil {
+				return nil, nil, err
+			}
+		}
 		item.ID = id
 		kept[index] = item
 	}
 	return kept, removed, nil
+}
+
+// loadLineAliasClaimsTx reads the durable per-PO alias ownership: alias to
+// owner row ID, where a nil owner is a permanent reservation from retained
+// history that must never identify a new row.
+func loadLineAliasClaimsTx(ctx context.Context, tx pgx.Tx, schema string, orderID int64) (map[string]*int64, error) {
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT client_key, owner_line_id
+		FROM %s.purchase_order_line_aliases
+		WHERE purchase_order_id = $1`, schema), orderID)
+	if err != nil {
+		return nil, fmt.Errorf("load line alias claims: %w", err)
+	}
+	defer rows.Close()
+	claims := map[string]*int64{}
+	for rows.Next() {
+		var alias string
+		var owner pgtype.Int8
+		if err := rows.Scan(&alias, &owner); err != nil {
+			return nil, fmt.Errorf("scan line alias claim: %w", err)
+		}
+		if owner.Valid {
+			id := owner.Int64
+			claims[alias] = &id
+		} else {
+			claims[alias] = nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate line alias claims: %w", err)
+	}
+	return claims, nil
+}
+
+// acquireLineAliasClaimTx records alias ownership for a known row ID,
+// refusing retired, reserved and conflicting claims atomically: the insert
+// is a no-op when the claim already exists, and the scoped read afterward
+// decides. It never overwrites, rebinds or deletes ownership.
+func acquireLineAliasClaimTx(ctx context.Context, tx pgx.Tx, schema, orgID string, orderID int64, alias string, owner int64, liveIDs map[int64]bool) error {
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.purchase_order_line_aliases
+			(org_id, purchase_order_id, client_key, owner_line_id)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT DO NOTHING`, schema),
+		orgID, orderID, alias, owner); err != nil {
+		return fmt.Errorf("acquire line alias claim: %w", err)
+	}
+	var recorded pgtype.Int8
+	if err := tx.QueryRow(ctx, fmt.Sprintf(`
+		SELECT owner_line_id
+		FROM %s.purchase_order_line_aliases
+		WHERE purchase_order_id = $1 AND client_key = $2`, schema),
+		orderID, alias).Scan(&recorded); err != nil {
+		return fmt.Errorf("read line alias claim: %w", err)
+	}
+	if !recorded.Valid {
+		return fmt.Errorf("%w: client alias %q is reserved by retained history and cannot identify a new row",
+			ErrPurchaseOrderInvalid, alias)
+	}
+	if recorded.Int64 != owner {
+		return refusedLineAliasClaim(alias, recorded.Int64, liveIDs)
+	}
+	return nil
+}
+
+// refusedLineAliasClaim names a conflicting alias owner without leaking
+// another tenant's contents: a removed line keeps its alias, a live line
+// keeps its exclusive claim.
+func refusedLineAliasClaim(alias string, owner int64, liveIDs map[int64]bool) error {
+	if liveIDs[owner] {
+		return fmt.Errorf("%w: line claims a client key owned by another line",
+			ErrPurchaseOrderInvalid)
+	}
+	return fmt.Errorf("%w: client alias %q belongs to a removed line and cannot identify a new row",
+		ErrPurchaseOrderInvalid, alias)
 }
 
 // resolvedClaim finds the first submitted position that already claimed the

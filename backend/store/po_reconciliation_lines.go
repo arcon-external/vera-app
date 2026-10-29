@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -629,34 +630,68 @@ func isReconciliationNull(raw json.RawMessage) bool {
 // are refused; Go zero-values must never stand in for absent members.
 func exactReconciliationObject(raw json.RawMessage, what string, want ...string) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(raw)))
-	var members map[string]json.RawMessage
-	if err := decoder.Decode(&members); err != nil {
+	opening, err := decoder.Token()
+	if err != nil {
 		return nil, fmt.Errorf("%s must be an object: %v", what, err)
 	}
-	var extra any
-	if err := decoder.Decode(&extra); err == nil {
-		return nil, fmt.Errorf("%s carries trailing data", what)
-	}
-	if members == nil {
+	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
 		return nil, fmt.Errorf("%s must be an object", what)
 	}
-	folded := make(map[string]json.RawMessage, len(members))
-	for name, value := range members {
-		lowered := strings.ToLower(name)
-		if _, dup := folded[lowered]; dup {
+	// Member names are detected at the token level BEFORE map insertion:
+	// identically spelled, mixed-case and escaped-equivalent duplicates
+	// collide even with identical values, because map decoding would
+	// collapse them with last-value-wins first.
+	folded := make(map[string]json.RawMessage)
+	for decoder.More() {
+		nameToken, err := decoder.Token()
+		if err != nil {
+			return nil, fmt.Errorf("%s carries a malformed member: %v", what, err)
+		}
+		name, ok := nameToken.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s carries a malformed member name", what)
+		}
+		lowered := asciiFoldReconciliationKey(name)
+		if _, duplicate := folded[lowered]; duplicate {
 			return nil, fmt.Errorf("%s repeats member %q", what, name)
 		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, fmt.Errorf("%s carries a malformed value for %q: %v", what, name, err)
+		}
 		folded[lowered] = value
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("%s is truncated: %v", what, err)
+	}
+	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
+		return nil, fmt.Errorf("%s is malformed", what)
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, fmt.Errorf("%s carries trailing data", what)
 	}
 	if len(folded) != len(want) {
 		return nil, fmt.Errorf("%s must carry exactly %s", what, strings.Join(want, ", "))
 	}
 	for _, name := range want {
-		if _, ok := folded[strings.ToLower(name)]; !ok {
+		if _, ok := folded[asciiFoldReconciliationKey(name)]; !ok {
 			return nil, fmt.Errorf("%s must carry %q", what, name)
 		}
 	}
 	return folded, nil
+}
+
+// asciiFoldReconciliationKey folds ASCII A-Z to a-z for member-name
+// comparison, matching the documented compatible casing. Unicode lookalikes
+// are not folded and stay unknown members.
+func asciiFoldReconciliationKey(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= 'A' && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, name)
 }
 
 // reconciliationReferenceValue decodes a canonical source reference:
@@ -831,36 +866,4 @@ func canonicalReconciliationStoredDiscount(raw json.RawMessage) json.RawMessage 
 		return raw
 	}
 	return canonical
-}
-
-// rejectRetiredAliasReuseTx refuses a line payload that reuses a retired
-// editor alias: an alias whose session mapping is retained as Removed still
-// belongs to its removed row, and a new row must not claim it (contract
-// section 3). History is left intact; nothing is rebound or deleted. Aliases
-// are scoped per purchase order: other POs may use the same alias freely.
-// A draft without a session has no retained mappings to check against.
-func rejectRetiredAliasReuseTx(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, poID int64, items []PurchaseOrderItem) error {
-	wanted := map[string]bool{}
-	for _, item := range items {
-		if item.ClientKey != "" {
-			wanted[item.ClientKey] = true
-		}
-	}
-	if len(wanted) == 0 {
-		return nil
-	}
-	session, _, err := loadReconciliationSession(ctx, q, schema, orgID, poID)
-	if err != nil {
-		if errors.Is(err, ErrPOReconciliationNotFound) {
-			return nil
-		}
-		return err
-	}
-	for _, identity := range session.LineIdentities {
-		if identity.Removed && wanted[identity.Key] {
-			return fmt.Errorf("%w: client alias %q belongs to a removed line and cannot identify a new row",
-				ErrPurchaseOrderInvalid, identity.Key)
-		}
-	}
-	return nil
 }

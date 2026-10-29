@@ -154,9 +154,6 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		input.ExpectedVersion, PurchaseOrderStateSaved); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := rejectRetiredAliasReuseTx(ctx, tx, schema, org.ID, input.ID, input.Items); err != nil {
-		return PurchaseOrder{}, err
-	}
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -285,7 +282,7 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if tag.RowsAffected() != 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotSaved
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, input.ID, lines); err != nil {
+	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
 		return PurchaseOrder{}, err
 	}
 
