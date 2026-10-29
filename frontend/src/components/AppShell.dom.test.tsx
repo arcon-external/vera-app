@@ -392,15 +392,15 @@ describe("profile menu keyboard operation (issue #494)", () => {
 });
 
 describe("small-screen shell offsets (U4)", () => {
-  it("header scrolls away below 640px and sticks at 640px and above", async () => {
+  it("header stays sticky at every width so the measured offset clears it", async () => {
     render(STAFF, { page: "create" });
     const header = document.querySelector("header");
     if (header === null) throw new Error("no shell header");
     const tokens = header.className.split(/\s+/);
-    // Static below 640 so the two-row header cannot cover content; sticky
-    // from sm up where it is a single 64px row.
-    expect(tokens).not.toContain("sticky");
-    expect(tokens).toContain("sm:sticky");
+    // Round-2 U4: a static two-row header cannot be cleared reliably across
+    // scroll states, so the header stays sticky and the sheet/trigger start
+    // below its measured height instead of a fixed 64px guess.
+    expect(tokens).toContain("sticky");
     expect(tokens).toContain("top-0");
   });
 });

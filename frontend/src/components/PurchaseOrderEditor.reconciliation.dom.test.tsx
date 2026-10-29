@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderSourceDTO } from "../poFinalize";
-import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { PurchaseOrderDTO, PurchaseOrderDTOItem } from "../purchaseOrder";
 import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
 import type { ReconciliationSession } from "../poReconciliation";
 import type { ReconciliationTransport } from "../poReconciliationAdapter";
@@ -19,17 +19,19 @@ import type { ReconciliationTransport } from "../poReconciliationAdapter";
 const {
   reviewMock,
   updateMock,
+  finalizeMock,
   documentStateMock,
 } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
   updateMock: vi.fn(),
+  finalizeMock: vi.fn(),
   documentStateMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   CorrectPurchaseOrder: vi.fn(),
   CreatePurchaseOrderBlankDraft: vi.fn(),
-  FinalizePurchaseOrder: vi.fn(),
+  FinalizePurchaseOrder: (...args: unknown[]) => finalizeMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   GetPurchaseOrder: vi.fn(),
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
@@ -179,6 +181,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = () => undefined;
   reviewMock.mockReset();
   updateMock.mockReset();
+  finalizeMock.mockReset();
   documentStateMock.mockReset();
   documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
   reviewMock.mockResolvedValue({ Source: SOURCE, DocumentState: "none" });
@@ -234,7 +237,8 @@ function typeInto(element: HTMLInputElement, value: string): void {
 
 async function renderEditor(
   transport: ReconciliationTransport,
-  order: PurchaseOrderDTO = linkedOrder()
+  order: PurchaseOrderDTO = linkedOrder(),
+  mode: "draft" | "correction" = "draft"
 ) {
   await act(async () => {
     root.render(
@@ -252,6 +256,7 @@ async function renderEditor(
         reconciliationTransport={transport}
         actorId={7}
         actorName="Rina"
+        mode={mode}
       />
     );
   });
@@ -523,5 +528,526 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+  });
+});
+
+describe("round-2 Final Save receipt and persistence (real page)", () => {
+  const lineItem = (overrides: Partial<PurchaseOrderDTOItem> = {}): PurchaseOrderDTOItem => ({
+    ID: 101,
+    ClientKey: "client:a",
+    LineNumber: 1,
+    Description: "Widget",
+    QuantityScaled: 30000,
+    UoM: "Pc",
+    UnitPriceMinor: 10000,
+    DiscountEnabled: false,
+    DiscountPercent: 0,
+    GrossMinor: 30000,
+    DiscountMinor: 0,
+    NetMinor: 30000,
+    QuotationItemNo: 1,
+    QuotationSubNo: null,
+    ...overrides,
+  });
+
+  const lineSource = {
+    QuotationItemNo: 1,
+    QuotationSubNo: null,
+    LineLabel: "1",
+    Description: "Widget",
+    UoM: "Pc",
+    QuantityScaled: 20000,
+    UnitPriceMinor: 10000,
+    DiscountEnabled: false,
+    DiscountPercent: 0,
+  };
+
+  function savedSession(items: ReconciliationSession["Items"]): ReconciliationSession {
+    return {
+      ID: 3,
+      PurchaseOrderID: 7,
+      SourceQuotationID: 12,
+      SourceRevision: 1,
+      POVersion: 4,
+      Active: true,
+      ReadOnly: false,
+      CreatedBy: 7,
+      CreatedAt: "2026-10-28T00:00:00Z",
+      UpdatedAt: "2026-10-28T00:00:05Z",
+      LineIdentities: [{ Key: "client:a", ID: 101, Removed: false }],
+      Items: items,
+    };
+  }
+
+  it("an unreviewed difference renders read-only with a route back, never a choice workbench", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    // The draft write round-trips the working copy with its lines, exactly
+    // what Save Draft stores; without the echo the fake would drop them and
+    // the composed difference would vanish.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // A saved session with a recorded header choice: the receipt has
+    // provenance, but the line difference was never reviewed and carries no
+    // choice of its own.
+    const transport = fakeTransport(
+      savedSession([
+        {
+          Key: "header:paymentTerms",
+          Field: "header:paymentTerms",
+          Kind: "difference",
+          LineKey: null,
+          SourceLineRef: null,
+          Label: "Payment terms",
+          POValue: "50% advance",
+          SourceValue: "45 days",
+          Status: "resolved",
+          Resolution: "kept_po",
+          ActorID: 7,
+          UpdatedAt: "2026-10-28T00:00:05Z",
+          History: [],
+        },
+      ])
+    );
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()], PaymentTerms: "50% advance" })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+    // No second workbench: an unreviewed row never offers Use buttons.
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
+    expect(
+      document.querySelector('button[aria-label="Change Line 1 quantity"]')
+    ).not.toBeNull();
+  });
+
+  it("Add line from Quotation focuses the new description and announces once", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [
+          lineSource,
+          {
+            QuotationItemNo: 2,
+            QuotationSubNo: null,
+            LineLabel: "2",
+            Description: "Sprocket",
+            UoM: "Pc",
+            QuantityScaled: 10000,
+            UnitPriceMinor: 5000,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+          },
+        ],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    // Order claims only line 1, so Quotation 2 is missing with an Add action.
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [lineItem()] }));
+    await flush();
+
+    button("Add line from Quotation 2").click();
+    await flush();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 2 description");
+    expect(document.body.textContent).toContain("Line 2 added.");
+  });
+
+  it("the sheet trigger never claims Nothing to resolve without a live source", async () => {
+    // No quotation linked: the pane says to link one, so the trigger must
+    // not report a resolved count of zero as Nothing to resolve.
+    const transport = fakeTransport(null);
+    await renderEditor(transport, linkedOrder({ QuotationID: 0 }));
+    await flush();
+
+    const trigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"]'
+    );
+    if (trigger === null) throw new Error("no sheet trigger");
+    expect(trigger.textContent?.includes("Nothing to resolve")).toBe(false);
+    expect(trigger.getAttribute("aria-label")).toContain("no quotation linked");
+    expect(document.body.textContent).toContain("Link a Quotation to start the comparison.");
+  });
+
+  it("the sheet trigger reports its loading state truthfully", async () => {
+    // A load that never settles: the trigger must not claim resolution.
+    const pending = new Promise<ReconciliationSession>(() => undefined);
+    const loadingTransport: ReconciliationTransport = {
+      load: () => pending,
+      save: vi.fn(async (_poID: string, next: ReconciliationSession) => next),
+    };
+    await renderEditor(loadingTransport);
+    await flush();
+    const loadingTrigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"]'
+    );
+    if (loadingTrigger === null) throw new Error("no sheet trigger while loading");
+    expect(loadingTrigger.textContent?.includes("Nothing to resolve")).toBe(false);
+    expect(loadingTrigger.getAttribute("aria-label")).toContain("loading");
+  });
+
+  it("the sheet trigger reports a failed load as unavailable, never a zero count", async () => {
+    // A failed load: unavailable, never a zero count.
+    const failing: ReconciliationTransport = {
+      load: async () => {
+        throw new Error("boom");
+      },
+      save: vi.fn(async (_poID: string, next: ReconciliationSession) => next),
+    };
+    await renderEditor(failing);
+    await flush();
+    await flush();
+    const errorTrigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"]'
+    );
+    if (errorTrigger === null) throw new Error("no sheet trigger on error");
+    expect(errorTrigger.textContent?.includes("Nothing to resolve")).toBe(false);
+    expect(errorTrigger.getAttribute("aria-label")).toContain("failed to load");
+  });
+
+  it("the sheet trigger shows the resolved count in read-only mode", async () => {
+    const resolved = {
+      Key: "header:paymentTerms",
+      Field: "header:paymentTerms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Payment terms",
+      POValue: "50% advance",
+      SourceValue: "30 days",
+      Status: "resolved",
+      Resolution: "kept_po",
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:05Z",
+      History: [],
+    };
+    const transport = fakeTransport(savedSession([resolved, { ...resolved, Key: "header:incoterms", Field: "header:incoterms", Label: "Incoterms" }]));
+    await renderEditor(transport, linkedOrder(), "correction");
+    await flush();
+
+    const trigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"]'
+    );
+    if (trigger === null) throw new Error("no sheet trigger in read-only mode");
+    expect(trigger.textContent?.includes("Nothing to resolve")).toBe(false);
+    expect(trigger.textContent).toContain("2 resolved");
+  });
+
+  it("Final Save persists the resolved session before opening the review", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    // Production-like update echo: the working copy round-trips with its
+    // lines and the server version, exactly what Save Draft stores.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const persisted = savedSession([
+      {
+        Key: "line:client:a:quantity",
+        Field: "line:quantity",
+        Kind: "difference",
+        LineKey: "client:a",
+        SourceLineRef: null,
+        Label: "Line 1 quantity",
+        POValue: 30000,
+        SourceValue: 20000,
+        Status: "unresolved",
+        Resolution: null,
+        ActorID: 7,
+        UpdatedAt: "2026-10-28T00:00:05Z",
+        History: [],
+      },
+    ]);
+    const transport = fakeTransport(persisted);
+    await renderEditor(transport, linkedOrder({ Items: [lineItem()] }));
+    await flush();
+
+    // Resolve the reopened persisted item in the pane.
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+    expect(document.body.textContent).toContain("Kept PO");
+
+    // No manual Save Draft: straight to Final Save.
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+    // The resolved decision reached the persisted session first: without
+    // this write the backend gate refuses the finalize as unresolved.
+    expect(transport.saves.length).toBeGreaterThan(0);
+    const sent = transport.saves[transport.saves.length - 1];
+    expect(
+      sent.Items.find((entry) => entry.Key === "line:client:a:quantity")
+    ).toMatchObject({ Status: "resolved", Resolution: "kept_po" });
+    // The kept choice is retained into the receipt.
+    expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
+  });
+
+  it("Save Draft then Final Save finalizes with the session-bumped row version", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    // Server-accurate versions: every draft write and every session save
+    // bumps the row version, exactly like the real store (R-04).
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      const next = Number(fields.ExpectedVersion ?? 4) + 1;
+      return {
+        Order: linkedOrder({ Items: [lineItem()], Version: next }),
+      };
+    });
+    finalizeMock.mockImplementation(async (input: unknown) => {
+      const saved = linkedOrder({ Items: [lineItem()], Version: 99, State: "saved" });
+      void input;
+      return { Order: saved, Conflict: null };
+    });
+    const persisted = savedSession([
+      {
+        Key: "line:client:a:quantity",
+        Field: "line:quantity",
+        Kind: "difference",
+        LineKey: "client:a",
+        SourceLineRef: null,
+        Label: "Line 1 quantity",
+        POValue: 30000,
+        SourceValue: 20000,
+        Status: "unresolved",
+        Resolution: null,
+        ActorID: 7,
+        UpdatedAt: "2026-10-28T00:00:05Z",
+        History: [],
+      },
+    ]);
+    const transport = fakeTransport(persisted);
+    await renderEditor(transport, linkedOrder({ Items: [lineItem()] }));
+    await flush();
+
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+
+    await act(async () => {
+      button("Continue final save").click();
+    });
+    await flush();
+    const confirmBox = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Confirm saving without the customer PDF"]'
+    );
+    if (confirmBox === null) throw new Error("no document confirmation");
+    await act(async () => {
+      confirmBox.click();
+    });
+    await flush();
+    await act(async () => {
+      button("Final save").click();
+    });
+    await flush();
+    await flush();
+
+    expect(finalizeMock).toHaveBeenCalledTimes(1);
+    const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
+    // Draft write 4->5, session save 5->6: the finalize must carry 6, not
+    // the pre-save version 4 the editor loaded.
+    expect(payload.ExpectedVersion).toBe(6);
+  });
+
+  it("a successful Final Save never writes the session again", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    finalizeMock.mockImplementation(async () => {
+      const saved = linkedOrder({ Items: [lineItem()], Version: 7, State: "saved" });
+      return { Order: saved, Conflict: null };
+    });
+    const persisted = savedSession([
+      {
+        Key: "line:client:a:quantity",
+        Field: "line:quantity",
+        Kind: "difference",
+        LineKey: "client:a",
+        SourceLineRef: null,
+        Label: "Line 1 quantity",
+        POValue: 30000,
+        SourceValue: 20000,
+        Status: "unresolved",
+        Resolution: null,
+        ActorID: 7,
+        UpdatedAt: "2026-10-28T00:00:05Z",
+        History: [],
+      },
+    ]);
+    const transport = fakeTransport(persisted);
+    await renderEditor(transport, linkedOrder({ Items: [lineItem()] }));
+    await flush();
+
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    const savesAtReview = transport.saves.length;
+    expect(savesAtReview).toBeGreaterThan(0);
+
+    await act(async () => {
+      button("Continue final save").click();
+    });
+    await flush();
+    const confirmBox = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Confirm saving without the customer PDF"]'
+    );
+    if (confirmBox === null) throw new Error("no document confirmation");
+    await act(async () => {
+      confirmBox.click();
+    });
+    await flush();
+    await act(async () => {
+      button("Final save").click();
+    });
+    await flush();
+    await flush();
+
+    expect(finalizeMock).toHaveBeenCalledTimes(1);
+    // The saved record is read-only: no session write may follow success,
+    // and no false sync banner may appear.
+    expect(transport.saves.length).toBe(savesAtReview);
+    expect(document.body.textContent?.includes("could not be saved")).toBe(false);
   });
 });

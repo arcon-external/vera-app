@@ -270,8 +270,7 @@ describe("final-save receipt from a recorded session (U2)", () => {
     expect(built.input?.AcknowledgedExtra).toEqual([]);
   });
 
-  it("preserves the legacy choice workbench when no session exists", async () => {
-    const full = initialPurchaseOrderEditorState(ORDER, USD);
+  it("preserves the legacy choice workbench when no session exists", async () => {    const full = initialPurchaseOrderEditorState(ORDER, USD);
     const state = { ...full, lines: full.lines.slice(0, 1) };
     await act(async () => {
       root.render(
@@ -302,6 +301,94 @@ describe("final-save receipt from a recorded session (U2)", () => {
     ).not.toBeNull();
     expect(
       document.querySelector('button[aria-label="Line 1 quotation match"]')
+    ).not.toBeNull();
+  });
+
+  it("writes the whole receipt sentence with no legacy tail and receipt match intro", async () => {
+    const full = initialPurchaseOrderEditorState(ORDER, USD);
+    const state = { ...full, lines: full.lines.slice(0, 1) };
+    await act(async () => {
+      root.render(
+        <PurchaseOrderDifferenceReviewView
+          state={state}
+          source={REVIEW.Source}
+          currency={USD}
+          quoteNumber="1502260042"
+          documentState="none"
+          decisions={{ "header:paymentTerms": "po" }}
+          acknowledgedMissing={["3"]}
+          acknowledgedExtra={[]}
+          onDecision={() => undefined}
+          onToggleMissing={() => undefined}
+          onToggleExtra={() => undefined}
+          onMatchChange={() => undefined}
+          onBack={() => undefined}
+          onContinue={() => undefined}
+          receiptResolvedKeys={["header:paymentTerms"]}
+          receiptAckedMissing={["3"]}
+          receiptAckedExtra={[]}
+          hasSession
+          onEditDifference={() => undefined}
+          onEditLine={() => undefined}
+        />
+      );
+    });
+
+    // One coherent receipt sentence; the legacy choice tail cannot append.
+    expect(document.body.textContent).toContain(
+      "Values that still need review appear below without choices; resolve them in the pane."
+    );
+    expect(document.body.textContent?.includes("value when you continue")).toBe(false);
+    expect(document.body.textContent?.includes("Use PO entry keeps what you entered")).toBe(false);
+    // The line-match intro matches the read-only receipt, not the editor.
+    expect(document.body.textContent).toContain("Matches are recorded in the reconciliation pane");
+    expect(document.body.textContent?.includes("Correct any match")).toBe(false);
+  });
+
+  it("renders an undecided difference read-only with a route back, never Use buttons", async () => {
+    const full = initialPurchaseOrderEditorState(ORDER, USD);
+    const state = { ...full, lines: full.lines.slice(0, 1) };
+    await act(async () => {
+      root.render(
+        <PurchaseOrderDifferenceReviewView
+          state={state}
+          source={REVIEW.Source}
+          currency={USD}
+          quoteNumber="1502260042"
+          documentState="none"
+          decisions={{ "header:paymentTerms": "po" }}
+          acknowledgedMissing={["3"]}
+          acknowledgedExtra={[]}
+          onDecision={() => undefined}
+          onToggleMissing={() => undefined}
+          onToggleExtra={() => undefined}
+          onMatchChange={() => undefined}
+          onBack={() => undefined}
+          onContinue={() => undefined}
+          receiptResolvedKeys={["header:paymentTerms"]}
+          receiptAckedMissing={["3"]}
+          receiptAckedExtra={[]}
+          hasSession
+          onEditDifference={() => undefined}
+          onEditLine={() => undefined}
+        />
+      );
+    });
+
+    // The resolved header stays a receipt row.
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Payment terms"]')
+    ).toBeNull();
+    // The undecided line difference is read-only with a route back.
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 unit price"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use Quotation for Line 1 unit price"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
+    expect(
+      document.querySelector('button[aria-label="Change Line 1 unit price"]')
     ).not.toBeNull();
   });
 });

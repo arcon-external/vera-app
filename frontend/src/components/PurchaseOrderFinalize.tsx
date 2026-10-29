@@ -164,6 +164,15 @@ export function PurchaseOrderDifferenceReviewView({
   const resolvedSet = new Set(receiptResolvedKeys);
   const ackedMissingSet = new Set(receiptAckedMissing);
   const ackedExtraSet = new Set(receiptAckedExtra);
+  // R2-U2: receipt mode needs recorded provenance for THIS comparison, not
+  // just a session object. The line-set sync creates identity-only local
+  // sessions (no decisions, no acks); rendering those as a receipt would
+  // strand a never-reviewed draft in a blocked read-only review. With
+  // nothing recorded the legacy choice workbench stays: it is the first
+  // decision point, not a second one, and invents no audit history.
+  const showReceipt =
+    isReceipt &&
+    (resolvedSet.size > 0 || ackedMissingSet.size > 0 || ackedExtraSet.size > 0);
   const repairing = mode === "repair";
   const linking = mode === "link";
   const currencyMismatch = source.Currency !== state.currency;
@@ -248,10 +257,16 @@ export function PurchaseOrderDifferenceReviewView({
           <div className="mt-2 grid gap-3">
             {comparison.differences.map((difference) => {
               const choice = decisions[difference.key];
-              // U2: a session-resolved difference is a receipt row, not a
-              // second decision. The recorded choice and both values are
-              // shown read-only; Change returns to the entry field.
-              if (isReceipt && resolvedSet.has(difference.key) && (choice === "po" || choice === "quotation")) {
+              // U2/R2-U2: in receipt mode EVERY difference is read-only, not
+              // a second decision workbench. A recorded choice shows its
+              // provenance; an unreviewed one shows needs-review provenance
+              // with a Change route back to the live pane. Either way there
+              // are no Use buttons; readiness stays blocked for undecided
+              // rows through the evaluation blockers.
+              if (showReceipt) {
+                const recorded =
+                  resolvedSet.has(difference.key) &&
+                  (choice === "po" || choice === "quotation");
                 return (
                   <div
                     key={difference.key}
@@ -274,9 +289,11 @@ export function PurchaseOrderDifferenceReviewView({
                         </span>
                       </p>
                       <p className="text-caption text-ink-500">
-                        {choice === "po"
-                          ? "PO entry kept in the reconciliation pane."
-                          : "Quotation value used from the reconciliation pane."}
+                        {recorded
+                          ? choice === "po"
+                            ? "PO entry kept in the reconciliation pane."
+                            : "Quotation value used from the reconciliation pane."
+                          : "Needs review in the reconciliation pane."}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -338,16 +355,32 @@ export function PurchaseOrderDifferenceReviewView({
             })}
           </div>
         )}
+        {/* R2-U2: the receipt sentence is written whole under showReceipt so
+            the legacy choice tail can never append to receipt copy. */}
         <p className="mt-3 text-caption text-ink-500">
-          {isReceipt
-            ? "These are the choices recorded in the reconciliation pane. Unresolved values do not appear here with choices; they stay in the pane until resolved. "
-            : "Choose a side for each difference. Use Quotation takes the quotation's"}
-          value when you continue; Use PO entry keeps what you entered.{" "}
-          {repairing
-            ? "Back without repairing leaves the saved purchase order and its source link unchanged."
-            : linking
-              ? "Back without linking leaves the draft unlinked and its entered values unchanged."
-              : "Back to entry leaves the purchase order as entered."}
+          {showReceipt ? (
+            <>
+              These are the choices recorded in the reconciliation pane.
+              Values that still need review appear below without choices;
+              resolve them in the pane.{" "}
+              {repairing
+                ? "Back without repairing leaves the saved purchase order and its source link unchanged."
+                : linking
+                  ? "Back without linking leaves the draft unlinked and its entered values unchanged."
+                  : "Back to entry leaves the purchase order as entered."}
+            </>
+          ) : (
+            <>
+              Choose a side for each difference. Use Quotation takes the
+              quotation&apos;s value when you continue; Use PO entry keeps
+              what you entered.{" "}
+              {repairing
+                ? "Back without repairing leaves the saved purchase order and its source link unchanged."
+                : linking
+                  ? "Back without linking leaves the draft unlinked and its entered values unchanged."
+                  : "Back to entry leaves the purchase order as entered."}
+            </>
+          )}
         </p>
       </Card>
 
@@ -357,9 +390,9 @@ export function PurchaseOrderDifferenceReviewView({
           hint="Matched by reference, not by position"
         />
         <p className="mt-2 text-caption text-ink-500">
-          Every line keeps its customer line number. Correct any match that
-          follows a different quotation line; a corrected match is saved on the
-          purchase order line.
+          {showReceipt
+            ? "Matches are recorded in the reconciliation pane; Change returns to the entry line."
+            : "Every line keeps its customer line number. Correct any match that follows a different quotation line; a corrected match is saved on the purchase order line."}
         </p>
         <div className="mt-3 grid gap-2">
           {state.lines.map((line, index) => {
@@ -370,7 +403,7 @@ export function PurchaseOrderDifferenceReviewView({
             );
             // U2: in receipt mode the match is recorded evidence, not an
             // editor. Change returns to the entry line's match control.
-            if (isReceipt) {
+            if (showReceipt) {
               return (
                 <div
                   key={line.key}
@@ -453,7 +486,7 @@ export function PurchaseOrderDifferenceReviewView({
               On the quotation, not on this purchase order
             </legend>
             {comparison.missing.map((line) => {
-              const acked = isReceipt && ackedMissingSet.has(line.LineLabel);
+              const acked = showReceipt && ackedMissingSet.has(line.LineLabel);
               if (acked) {
                 return (
                   <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
@@ -464,7 +497,7 @@ export function PurchaseOrderDifferenceReviewView({
                   </p>
                 );
               }
-              if (isReceipt) {
+              if (showReceipt) {
                 return (
                   <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
                     <span>
@@ -501,7 +534,7 @@ export function PurchaseOrderDifferenceReviewView({
             </legend>
             {comparison.extraLineNumbers.map((lineNumber) => {
               const line = state.lines[lineNumber - 1];
-              const acked = isReceipt && ackedExtraSet.has(lineNumber);
+              const acked = showReceipt && ackedExtraSet.has(lineNumber);
               if (acked) {
                 return (
                   <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
@@ -512,7 +545,7 @@ export function PurchaseOrderDifferenceReviewView({
                   </p>
                 );
               }
-              if (isReceipt) {
+              if (showReceipt) {
                 return (
                   <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
                     <span>

@@ -608,7 +608,7 @@ export function PurchaseOrderLineRow({
         </span>
         {matchOptions !== undefined && onMatchChange !== undefined && onToggleMatch !== undefined ? (
           <>
-            <span className="inline-flex items-center rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
+            <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
               {matchRef === null ? "Extra line" : `Quotation ${matchRef}`}
             </span>
             <button
@@ -1738,8 +1738,20 @@ export function PurchaseOrderEditorPage({
    * Ticket 04: a draft save persists the session with the row version the
    * draft save just produced (R-04). A session failure never fails the draft
    * save: the record is stored, the banner names the sync problem, and the
-   * next save retries with the same items.
+   * next save retries with the same items. A session save that bumps the row
+   * version is adopted, so the next submit names the version the server now
+   * holds rather than the draft-save one (round-2 N3).
    */
+  const adoptSessionVersion = (
+    orderId: number,
+    draftVersion: number,
+    sessionVersion: number | undefined
+  ) => {
+    if (sessionVersion === undefined || sessionVersion === draftVersion) return;
+    dispatch({ type: "versionAdopted", version: sessionVersion });
+    persistedRef.current = { id: orderId, version: sessionVersion };
+  };
+
   const handleSaved = async (savedOrder: PurchaseOrderDTO, corrected?: boolean) => {
     const outcome = await reconciliation.persistAfterDraftSave(savedOrder.Version);
     if (!outcome.ok) {
@@ -1748,6 +1760,7 @@ export function PurchaseOrderEditorPage({
       );
     } else {
       setSessionBannerError(null);
+      adoptSessionVersion(savedOrder.ID, savedOrder.Version, outcome.version);
     }
     onSaved(savedOrder, corrected);
   };
@@ -2373,7 +2386,46 @@ export function PurchaseOrderEditorPage({
     }
     setReviewLoading(true);
     try {
-      const persisted = await ensurePersisted();
+      // Round-2 N1: a Final Save without a manual Save Draft must still
+      // persist the working copy and the session BEFORE the review loads.
+      // The backend gate reads the persisted session, so opening the review
+      // on unsaved decisions would finalize against stale items. In
+      // correction mode the session is read-only history and the working
+      // copy is written by Save correction, so the legacy path is kept.
+      let persisted = { id: state.orderId, version: state.version };
+      if (!correcting) {
+        const saved = await persistWorkingCopy(false);
+        if (saved.kind === 'conflict') {
+          dispatch({ type: 'saveConflict' });
+          setPendingWrite('save');
+          setConflict(saved.conflict);
+          return;
+        }
+        if (saved.kind === 'savedRecord') {
+          dispatch({ type: 'saveConflict' });
+          setPendingWrite('save');
+          setConflict(savedRecordAnswer(state.version));
+          return;
+        }
+        if (saved.kind === 'error') {
+          dispatch({ type: 'saveFailed', error: saved.message });
+          return;
+        }
+        const synced = await reconciliation.persistAfterDraftSave(saved.order.Version);
+        if (!synced.ok) {
+          setSessionBannerError(
+            'The reconciliation could not be saved. Your draft is stored; saving again retries the sync.'
+          );
+          dispatch({ type: 'saveFailed', error: synced.message ?? 'The reconciliation decisions could not be saved yet.' });
+          return;
+        }
+        setSessionBannerError(null);
+        const finalVersion = synced.version ?? saved.order.Version;
+        adoptSessionVersion(saved.order.ID, saved.order.Version, synced.version);
+        persisted = { id: saved.order.ID, version: finalVersion };
+      } else {
+        persisted = await ensurePersisted();
+      }
       const loaded = await GetPurchaseOrderReview(persisted.id);
       setCompareSource({
         paymentTerms: loaded.Source.PaymentTerms,
@@ -2471,7 +2523,12 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
-        void handleSaved(outcome.order, correcting);
+        // Round-2 N2: the saved record (and its session) is read-only. Never
+        // attempt a session write after success: the server refuses it and
+        // the UI would show a false sync banner. Just clear any earlier sync
+        // error and report the saved order.
+        setSessionBannerError(null);
+        onSaved(outcome.order, correcting);
         setReview(null);
         setView("entry");
         return;
@@ -2766,12 +2823,19 @@ export function PurchaseOrderEditorPage({
     const [head, tail] = reference.split(".");
     const itemNo = Number(head);
     if (!Number.isInteger(itemNo) || itemNo < 1) return;
+    // R2-U3: like addLine, the new row takes focus and announces once, so a
+    // pointer or keyboard user lands on the new description instead of the
+    // body. The match reference, count and history are untouched.
+    const at = state.lines.length + 1;
     dispatch({
       type: "lineAddedFromSource",
       uom: uomOptions[0]?.value ?? "",
       quotationItemNo: itemNo,
       quotationSubNo: tail === undefined ? null : Number(tail),
     });
+    setOpenMatchLineKey(null);
+    setPendingFocus(`Line ${at} description`);
+    reconciliation.announce(`Line ${at} added.`);
   };
   // U6/R-09: the reason follows the visible comparable-input order. The
   // form renders the Lines section before Discounts and adjustment, so
@@ -2907,6 +2971,10 @@ export function PurchaseOrderEditorPage({
       <ReconciliationSheetTrigger
         ref={sheetTriggerRef}
         unresolvedCount={reconciliation.unresolvedCount}
+        status={paneStatus}
+        noSource={state.sourceState === "never"}
+        readOnly={correcting}
+        resolvedCount={reconciliation.counts.resolved}
         sourceLabel={
           state.sourceState === "never"
             ? null
@@ -3074,7 +3142,7 @@ export function PurchaseOrderEditorPage({
               closeSheet();
             }
           }}
-          className="fixed inset-x-0 bottom-0 top-0 z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 sm:top-16 lg:hidden"
+          className="fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 lg:hidden"
         >
           <ReconciliationPaneContent
             idPrefix="sheet"

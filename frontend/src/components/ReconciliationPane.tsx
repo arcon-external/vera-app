@@ -825,7 +825,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
           Reconciliation
         </h2>
         {headerActions}
-        {status === "loading" || noSource ? null : (
+        {status === "loading" || status === "error" || noSource ? null : (
           <span
             ref={countRef}
             tabIndex={-1}
@@ -989,33 +989,72 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
 /**
  * The sticky count bar that opens the sheet below 1024. Never a modal: the
  * shell header and action bar stay interactive, Escape closes with focus back
- * on this trigger.
+ * on this trigger. The count is state-aware like the pane count: loading,
+ * error and no-source states never claim Nothing to resolve, and a read-only
+ * record shows its resolved count.
  */
 export function ReconciliationSheetTrigger({
   unresolvedCount,
+  status = "ready",
+  noSource = false,
+  readOnly = false,
+  resolvedCount = 0,
   sourceLabel,
   expanded,
   onOpen,
   ref,
 }: {
   unresolvedCount: number;
+  /** Pane load state; loading/error suppress the count. Defaults to ready. */
+  status?: "loading" | "error" | "ready";
+  /** No quotation linked: there is nothing to count yet. */
+  noSource?: boolean;
+  /** A read-only record shows its resolved count instead. */
+  readOnly?: boolean;
+  resolvedCount?: number;
   sourceLabel: string | null;
   expanded: boolean;
   onOpen: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {
+  const stateLabel =
+    status === "loading"
+      ? "loading"
+      : status === "error"
+        ? "failed to load"
+        : noSource
+          ? "no quotation linked"
+          : readOnly
+            ? `${resolvedCount} ${resolvedCount === 1 ? "item" : "items"} resolved`
+            : unresolvedCount === 0
+              ? "nothing to resolve"
+              : `${unresolvedCount} ${unresolvedCount === 1 ? "item" : "items"} to resolve`;
+  const pill =
+    status === "loading" ? (
+      <span className="tnum inline-flex h-7 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800">
+        …
+      </span>
+    ) : status === "error" ? (
+      <span className="tnum inline-flex h-7 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800">
+        Unavailable
+      </span>
+    ) : noSource ? null : (
+      <span className="tnum inline-flex h-7 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800">
+        {readOnly
+          ? `${resolvedCount} resolved`
+          : unresolvedCount === 0
+            ? "Nothing to resolve"
+            : `${unresolvedCount} to resolve`}
+      </span>
+    );
   return (
     <button
       ref={ref}
       type="button"
       aria-expanded={expanded}
-      aria-label={
-        unresolvedCount === 0
-          ? "Reconciliation, nothing to resolve. Open panel."
-          : `Reconciliation, ${unresolvedCount} ${unresolvedCount === 1 ? "item" : "items"} to resolve. Open panel.`
-      }
+      aria-label={`Reconciliation, ${stateLabel}. Open panel.`}
       onClick={onOpen}
-      className="sticky top-0 z-20 flex min-h-14 w-full cursor-pointer items-center justify-between gap-2 border-b border-rule bg-paper/95 px-5 py-2 backdrop-blur transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40 sm:top-16 lg:hidden"
+      className="sticky top-[var(--shell-header-h,64px)] z-20 flex min-h-14 w-full cursor-pointer items-center justify-between gap-2 border-b border-rule bg-paper/95 px-5 py-2 backdrop-blur transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40 lg:hidden"
     >
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="text-small font-medium text-ink-700">Reconciliation</span>
@@ -1026,11 +1065,7 @@ export function ReconciliationSheetTrigger({
         ) : null}
       </span>
       <span className="flex shrink-0 items-center gap-2">
-        <span className="tnum inline-flex h-7 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800">
-          {unresolvedCount === 0
-            ? "Nothing to resolve"
-            : `${unresolvedCount} to resolve`}
-        </span>
+        {pill}
         <svg
           width="12"
           height="12"

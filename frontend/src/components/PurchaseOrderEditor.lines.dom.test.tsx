@@ -600,8 +600,9 @@ describe("small-screen sheet bounds (U4)", () => {
     const sheet = document.querySelector('[role="region"][aria-label="Reconciliation"]');
     if (sheet === null) throw new Error("no open sheet");
     const tokens = sheet.className.split(/\s+/);
-    expect(tokens).toContain("top-0");
-    expect(tokens).toContain("sm:top-16");
+    // Round-2 U4: the sheet starts below the measured shell header instead of
+    // viewport top, so the heading and Close stay visible at 360.
+    expect(tokens).toContain("top-[var(--shell-header-h,64px)]");
   });
 });
 
@@ -612,6 +613,10 @@ describe("line identity and match control (U1)", () => {
     await renderEditor(transport);
 
     expect(document.body.textContent).toContain("Line 1");
+    // The narrow 360 header never wraps the identity chip (P3).
+    const chip = Array.from(document.querySelectorAll('span')).find((node) => (node.textContent ?? '').startsWith('Quotation 1'));
+    if (chip === undefined) throw new Error('no match chip');
+    expect(chip.className).toContain('whitespace-nowrap');
     // Only the Change control is visible; the select opens on demand.
     expect(document.querySelector('button[aria-label="Change quotation match for line 1"]')).not.toBeNull();
     expect(document.querySelector('button[aria-label="Line 1 quotation match"]')).toBeNull();

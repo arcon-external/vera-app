@@ -590,7 +590,9 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * is skipped; a session failure never fails the draft save.
    */
   const persistAfterDraftSave = useCallback(
-    async (rowVersion: number): Promise<{ ok: boolean; message?: string }> => {
+    async (
+      rowVersion: number
+    ): Promise<{ ok: boolean; message?: string; version?: number }> => {
       if (readOnlyRef.current || !liveRef.current) return { ok: true };
       const current = session;
       // Nothing compared and no stored row: nothing to persist.
@@ -606,7 +608,10 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       if (result.status === "saved") {
         savedItemsRef.current = JSON.stringify(result.session.Items);
         setSession(result.session);
-        return { ok: true };
+        // The session save bumps the row version (R-04) exactly like a draft
+        // save does. Callers adopt the returned version so the next submit
+        // names the row as the server now stands, not the draft-save one.
+        return { ok: true, version: result.session.POVersion };
       }
       return { ok: false, message: result.message };
     },

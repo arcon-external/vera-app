@@ -133,6 +133,9 @@ describe("ReconciliationPaneContent states (ticket 04)", () => {
     expect(document.body.textContent).toContain("Save draft still works.");
     buttonWithText("Try again").click();
     expect(onRetry).toHaveBeenCalledTimes(1);
+    // Round-2: an error shows no count at all, never a zero resolved count.
+    expect(document.querySelector('[aria-label$="to resolve"]')).toBeNull();
+    expect(document.body.textContent?.includes("Nothing to resolve")).toBe(false);
   });
 
   it("shows the linked empty state with real filter counts", async () => {
@@ -424,8 +427,9 @@ describe("ReconciliationSheetTrigger (ticket 04)", () => {
     const trigger = document.querySelector("button.sticky");
     if (trigger === null) throw new Error("no sticky sheet trigger");
     const tokens = trigger.className.split(/\s+/);
-    expect(tokens).toContain("top-0");
-    expect(tokens).toContain("sm:top-16");
+    // Round-2 U4: the trigger sticks below the measured shell header, not a
+    // fixed 64px guess, so a wrapped two-row header cannot cover it.
+    expect(tokens).toContain("top-[var(--shell-header-h,64px)]");
   });
 });
 

@@ -16,10 +16,13 @@ import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 // The bindings are replaced at their module boundary, which is what the
 // desktop provides; everything inside the editor and the review is real.
 
-const { reviewMock, finalizeMock, assignConfirmationMock } = vi.hoisted(() => ({
+const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessionMock, saveSessionMock } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
+  updateMock: vi.fn(),
   finalizeMock: vi.fn(),
   assignConfirmationMock: vi.fn(),
+  loadSessionMock: vi.fn(),
+  saveSessionMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
@@ -27,7 +30,9 @@ vi.mock("@backend/backend/Quotation", () => ({
   FinalizePurchaseOrder: (...args: unknown[]) => finalizeMock(...args),
   AssignPurchaseOrderConfirmationNumber: (...args: unknown[]) =>
     assignConfirmationMock(...args),
-  UpdatePurchaseOrderDraft: vi.fn(),
+  UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
+  LoadPOReconciliation: (...args: unknown[]) => loadSessionMock(...args),
+  SavePOReconciliation: (...args: unknown[]) => saveSessionMock(...args),
   GetPurchaseOrderHistory: vi.fn(async () => []),
   GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
   AttachPurchaseOrderDocument: vi.fn(),
@@ -187,7 +192,46 @@ let root: Root;
 
 beforeEach(() => {
   reviewMock.mockReset();
-  finalizeMock.mockReset();
+  updateMock.mockReset();
+  loadSessionMock.mockReset();
+  saveSessionMock.mockReset();
+  loadSessionMock.mockRejectedValue(new Error("no reconciliation recorded"));
+  saveSessionMock.mockImplementation(async (_poID: unknown, next: unknown) => next);
+  // Round-2 N1: startReview persists the working copy before loading the
+  // review. Echo the submitted values back with their aliases so the
+  // editor keeps its lines; the version echoes the expected row version.
+  updateMock.mockImplementation(async (input: unknown) => {
+    const fields = (input ?? {}) as Record<string, unknown>;
+    const items = ((fields.Items ?? []) as Array<Record<string, unknown>>).map(
+      (entry, index) => ({
+        ID: (entry.ID ?? null) as number | null,
+        ClientKey: (entry.ClientKey ?? null) as string | null,
+        LineNumber: index + 1,
+        Description: entry.Description ?? "",
+        QuantityScaled: entry.QuantityScaled ?? 0,
+        UoM: entry.UoM ?? "",
+        UnitPriceMinor: entry.UnitPriceMinor ?? 0,
+        DiscountEnabled: entry.DiscountEnabled ?? false,
+        DiscountPercent: entry.DiscountPercent ?? 0,
+        GrossMinor: 0,
+        DiscountMinor: 0,
+        NetMinor: 0,
+        QuotationItemNo: (entry.QuotationItemNo ?? null) as number | null,
+        QuotationSubNo: (entry.QuotationSubNo ?? null) as number | null,
+      })
+    );
+    return {
+      Order: {
+        ...(ORDER as unknown as Record<string, unknown>),
+        PONumber: fields.PONumber ?? ORDER.PONumber,
+        PaymentTerms: fields.PaymentTerms ?? ORDER.PaymentTerms,
+        Incoterms: fields.Incoterms ?? ORDER.Incoterms,
+        DiscountPercent: fields.DiscountPercent ?? ORDER.DiscountPercent,
+        Items: items,
+        Version: Number(fields.ExpectedVersion ?? ORDER.Version),
+      },
+    };
+  });
   assignConfirmationMock.mockReset();
   reviewMock.mockResolvedValue(REVIEW);
   finalizeMock.mockResolvedValue({

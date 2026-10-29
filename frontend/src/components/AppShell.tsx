@@ -229,6 +229,27 @@ export function AppShell({
   // The trigger and its popover are one dismissal group: focus or a pointer
   // leaving this node closes the menu, whichever gesture opened it.
   const menuGroupRef = useRef<HTMLDivElement>(null);
+  // Round-2 U4: the visible shell-header height drives the sheet/trigger top
+  // offset below 1024 (the header wraps to two rows on narrow screens, so a
+  // fixed 64px offset would hide the sheet heading). Measured, never guessed:
+  // a ResizeObserver keeps --shell-header-h exact across wraps and zooms.
+  // No ResizeObserver (older runtimes, jsdom) leaves the 64px CSS fallback.
+  const shellRootRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const header = headerRef.current;
+    const root = shellRootRef.current;
+    if (header === null || root === null) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      const height = Math.max(0, Math.round(header.getBoundingClientRect().height));
+      root.style.setProperty('--shell-header-h', height + 'px');
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
   // Set only when a keyboard gesture opens the menu, so a pointer click does
   // not steal focus from the trigger.
   const focusOnOpen = useRef<"first" | "last" | null>(null);
@@ -334,6 +355,7 @@ export function AppShell({
     // reads, the same way data-workspace exposes the page's workspace, so the
     // Home-reset and no-capture-on-Keep behaviours are observable in tests.
     <div
+      ref={shellRootRef}
       className="flex min-h-full flex-col bg-paper"
       data-app-shell=""
       data-workspace={workspace ?? "home"}
@@ -347,7 +369,7 @@ export function AppShell({
       >
         Skip to main content
       </a>
-      <header className="top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur sm:sticky">
+      <header ref={headerRef} className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
         <div className="mx-auto flex min-h-16 max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-2 lg:px-8">
           {workspace === null ? (
             <div className="flex items-center gap-2">
