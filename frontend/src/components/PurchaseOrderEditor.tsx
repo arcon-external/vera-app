@@ -1474,6 +1474,33 @@ export function PurchaseOrderEditorView({
   );
 }
 
+/**
+ * Live focus targets for a §5.5 entry-blocked difference. Comparison keys
+ * choose the control: every matched-line field and header maps to its entry
+ * control by label, except the row discount whose label ("Line N discount")
+ * names neither the percent input nor the enabled checkbox. The enabled
+ * percent input commits the shown value unchanged on blur; when the row
+ * discount is off its percent input is disabled, so the checkbox is the
+ * usable target (toggling it commits for Keep/Use review). Candidates are
+ * tried in order; the caller focuses the first existing enabled match.
+ */
+function gateFocusCandidates(
+  key: string,
+  label: string,
+  lines: { discountEnabled: boolean }[]
+): string[] {
+  const line = /^line:(\d+):(.+)$/.exec(key);
+  if (line !== null && line[2] === "discount") {
+    const row = lines[Number(line[1]) - 1];
+    const name = `Line ${line[1]}`;
+    if (row !== undefined && row.discountEnabled) {
+      return [`${name} discount percent`, `${name} discount enabled`];
+    }
+    return [`${name} discount enabled`, `${name} discount percent`];
+  }
+  return [label];
+}
+
 export function PurchaseOrderEditorPage({
   order,
   currency,
@@ -2520,30 +2547,51 @@ export function PurchaseOrderEditorPage({
           // Focus the first unreviewed difference's live field so it can be
           // committed and resolved in the pane; anything without a live
           // field (missing/extra/duplicate/unknown) reveals the pane.
+          // Semantic comparison keys choose the control, not display-label
+          // coincidence: the row-discount label ("Line N discount") names
+          // neither the percent input nor the enabled checkbox.
           const firstOpen = gate.comparison.differences.find(
             (entry) => mergedDecisions[entry.key] === undefined
           );
-          const liveTarget =
+          const candidates =
             firstOpen === undefined
-              ? null
-              : document.querySelector<HTMLElement>(
-                  `[aria-label="${firstOpen.label.replace(/"/g, "")}"]`
-                );
-          if (firstOpen !== undefined && liveTarget !== null) {
-            setPendingFocus(firstOpen.label);
-            return;
+              ? []
+              : gateFocusCandidates(firstOpen.key, firstOpen.label, state.lines);
+          let focused = false;
+          for (const candidate of candidates) {
+            const target = document.querySelector<HTMLElement>(
+              `[aria-label="${candidate.replace(/"/g, "")}"]`
+            );
+            if (target !== null && !(target as HTMLInputElement).disabled) {
+              setPendingFocus(candidate);
+              focused = true;
+              break;
+            }
           }
+          if (focused) return;
+          // No live field (missing/extra/duplicate/unknown): reveal the
+          // pane. Focus the first unresolved action when one exists;
+          // otherwise focus the pane heading so the block never strands
+          // focus on BODY with no target.
           reconciliation.setFilter("all");
+          const hasUnresolvedAction = (persistedSession?.Items ?? []).some(
+            (entry) => entry.Status === "unresolved"
+          );
           const smallViewport =
             typeof window !== "undefined" &&
             typeof window.matchMedia === "function" &&
             window.matchMedia("(max-width: 1023px)").matches;
           if (smallViewport || sheetOpen) {
-            sheetFocusRef.current = { kind: "first" };
+            sheetFocusRef.current = hasUnresolvedAction ? { kind: "first" } : { kind: "heading" };
             setSheetOpen(true);
             return;
           }
-          paneRailRef.current?.focusFirstUnresolved();
+          if (
+            !hasUnresolvedAction ||
+            !paneRailRef.current?.focusFirstUnresolved()
+          ) {
+            document.getElementById("rail-pane-heading")?.focus();
+          }
           return;
         }
       }

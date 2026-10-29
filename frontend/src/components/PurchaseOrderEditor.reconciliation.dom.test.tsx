@@ -741,8 +741,474 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
   });
 
-  it("a persisted empty session with an unreviewed line difference blocks entry and focuses the live field", async () => {
+  it("an unreviewed enabled-zero row discount blocks entry and focuses its usable percent control", async () => {
+    // Root discount counterexample: quantity matches (2 vs 2); the ONLY
+    // difference is PO row discount enabled 0% vs source disabled 0%.
+    // The comparison label ("Line 1 discount") names neither live control;
+    // the usable target is the enabled percent input, whose blur commits
+    // the value unchanged for Keep/Use resolution in the pane.
+    const discounted = lineItem({ QuantityScaled: 20000, DiscountEnabled: true, DiscountPercent: 0 });
     reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [discounted] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [discounted],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(
+      savedSession([
+        {
+          Key: "link:taxBasis",
+          Field: "link:taxBasis",
+          Kind: "tax_basis",
+          LineKey: null,
+          SourceLineRef: null,
+          Label: "Tax basis",
+          POValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          SourceValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          Status: "resolved",
+          Resolution: "used_quotation",
+          ActorID: 7,
+          UpdatedAt: "2026-10-28T00:00:05Z",
+          History: [],
+        },
+      ])
+    );
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [discounted] })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 discount"]')
+    ).toBeNull();
+    // A usable live target receives focus: the enabled percent input keeps
+    // the entered 0 reviewable by blur-commit without changing any value.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
+  });
+
+  it("a disabled-zero row discount against an enabled source focuses the checkbox", async () => {
+    // Reverse direction: PO disabled 0% vs source enabled 10%. The percent
+    // input is disabled, so the checkbox is the usable target; toggling it
+    // on commits for Keep/Use review.
+    const plain = lineItem({ QuantityScaled: 20000 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, DiscountEnabled: true, DiscountPercent: 10 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [plain] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [plain],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [plain] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount enabled");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
+  });
+
+  it("a both-enabled percent difference focuses the percent control", async () => {
+    const marked = lineItem({ QuantityScaled: 20000, DiscountEnabled: true, DiscountPercent: 15 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, DiscountEnabled: true, DiscountPercent: 10 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [marked] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [marked],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [marked] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
+  });
+
+  it("a blocked discount difference commits, keeps and retries into the receipt", async () => {
+    const discounted = lineItem({ QuantityScaled: 20000, DiscountEnabled: true, DiscountPercent: 0 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [discounted] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [discounted],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [discounted] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+
+    // Blur commits the shown 0 unchanged, Keep preserves enabled 0, and the
+    // retry opens the read-only receipt with kept provenance.
+    const percent = input("Line 1 discount percent");
+    await act(async () => {
+      percent.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    button("Keep PO entry for Line 1 discount").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 discount").click();
+    await flush();
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 discount"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
+  });
+
+  it("an unreviewed description blocks entry and focuses its field", async () => {
+    const renamed = lineItem({ QuantityScaled: 20000, Description: "WidgetX" });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [renamed] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [renamed],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [renamed] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 description");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 description");
+  });
+
+  it("an unreviewed unit of measure blocks entry and focuses its select", async () => {
+    const reboxed = lineItem({ QuantityScaled: 20000, UoM: "Box" });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [reboxed] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [reboxed],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [reboxed] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 unit of measure");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 unit of measure");
+  });
+
+  it("an unreviewed unit price blocks entry and focuses its field", async () => {
+    const repriced = lineItem({ QuantityScaled: 20000, UnitPriceMinor: 20000 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [repriced] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [repriced],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [repriced] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 unit price");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 unit price");
+  });
+
+  it("an unreviewed incoterms value blocks entry and focuses its select", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, QuantityScaled: 20000 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], Incoterms: "CIF" }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem({ QuantityScaled: 20000 })],
+          Incoterms: String(fields.Incoterms ?? "EXW"),
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], Incoterms: "CIF" })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Incoterms");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Incoterms");
+  });
+
+  it("an unreviewed whole-PO discount blocks entry and focuses its field", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, QuantityScaled: 20000 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], DiscountPercent: 1 }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem({ QuantityScaled: 20000 })],
+          DiscountPercent: Number(fields.DiscountPercent ?? 0),
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], DiscountPercent: 1 })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Whole-PO discount");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Whole-PO discount");
+  });
+
+  it("a persisted empty session with an unreviewed line difference blocks entry and focuses the live field", async () => {    reviewMock.mockResolvedValue({
       Source: {
         QuotationID: 12,
         RevisionNumber: 1,
