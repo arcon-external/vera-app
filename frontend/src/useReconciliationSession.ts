@@ -312,12 +312,13 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * wires onBlur (and Select onChange, which is itself a commit).
    */
   const commitField = useCallback(
-    (field: HeaderFieldKey) => {
+    (field: HeaderFieldKey, explicitValue?: string) => {
       if (readOnlyRef.current || !liveRef.current) return;
       const currentSource = sourceRef.current;
       if (currentSource === null) return;
       const def = fieldDef(field);
-      const poValue = getFieldValueRef.current(field);
+      // F3: selects commit the NEW value, not React's previous render.
+      const poValue = explicitValue ?? getFieldValueRef.current(field);
       const sourceValue =
         field === "header:discountPercent"
           ? currentSource.discountPercent
@@ -372,7 +373,11 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * lines never compare; invalid numbers are validation errors, never items.
    */
   const commitLine = useCallback(
-    (lineKey: string, field: LineField) => {
+    (
+      lineKey: string,
+      field: LineField,
+      explicitRaw?: string | { enabled: boolean; percent: string | number }
+    ) => {
       if (readOnlyRef.current || !liveRef.current) return;
       const currentSources = sourceLinesRef.current;
       if (currentSources === null) return;
@@ -390,18 +395,20 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
         currentSources
       );
       const pair = set.matched.find((entry) => entry.line.sessionKey === sessionKey);
-      const feedbackKey = `${lineKey}:${field}`;
+      const feedbackKey = `${sessionKey}:${field}`;
       const raw =
-        field === "discount"
-          ? { enabled: line.values.discountEnabled, percent: line.values.discountPercent }
-          : line.values[field];
+        explicitRaw !== undefined
+          ? explicitRaw
+          : field === "discount"
+            ? { enabled: line.values.discountEnabled, percent: line.values.discountPercent }
+            : line.values[field];
       const result = commitLineField({
         lineKey: sessionKey,
         displayNumber: line.displayNumber,
         field,
         poValue: raw,
         source: pair?.source ?? null,
-        existingItem: findItem(`line:${lineKey}:${LINE_FIELD_SUFFIX[field]}`),
+        existingItem: findItem(`line:${sessionKey}:${LINE_FIELD_SUFFIX[field]}`),
         actorId: actorRef.current.id,
         now: new Date().toISOString(),
         currency: currencyRef.current,
@@ -413,7 +420,7 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       }));
       if (result.notice !== null) {
         const label = lineFieldLabel(line.displayNumber, field);
-        setLatestNotice({ field: `line:${lineKey}:${field}`, label, kind: result.notice });
+        setLatestNotice({ field: `line:${sessionKey}:${field}`, label, kind: result.notice });
         setAnnouncement(
           result.notice === "empty"
             ? `${label} is empty.`

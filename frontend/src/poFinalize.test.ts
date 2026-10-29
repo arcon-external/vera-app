@@ -699,3 +699,31 @@ describe("review fixture sanity", () => {
     expect(review().DocumentState).toBe("none");
   });
 });
+
+describe("source tax triple (F5)", () => {
+  it("exposes the frozen triple without changing the comparison", () => {
+    const withTriple: PurchaseOrderSourceDTO = {
+      ...SOURCE,
+      TaxZone: "FTZ",
+      TaxType: "Goods",
+      ServiceCategory: "",
+    };
+    expect(withTriple.TaxZone).toBe("FTZ");
+    expect(withTriple.TaxType).toBe("Goods");
+    expect(withTriple.ServiceCategory).toBe("");
+    // The triple is context only: matching ignores it.
+    const state = stateFrom(order({}));
+    const comparison = comparePurchaseOrder(state, withTriple, USD);
+    expect(comparison.differences.map((entry) => entry.key)).not.toContain("link:taxBasis");
+  });
+
+  it("tolerates an older server without the triple", () => {
+    const legacy = { ...SOURCE };
+    delete (legacy as Partial<PurchaseOrderSourceDTO>).TaxZone;
+    delete (legacy as Partial<PurchaseOrderSourceDTO>).TaxType;
+    delete (legacy as Partial<PurchaseOrderSourceDTO>).ServiceCategory;
+    expect(legacy.TaxZone).toBeUndefined();
+    const state = stateFrom(order({}));
+    expect(() => comparePurchaseOrder(state, legacy, USD)).not.toThrow();
+  });
+});

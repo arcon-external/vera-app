@@ -58,6 +58,15 @@ export interface PurchaseOrderSourceDTO {
   Currency: string;
   PaymentTerms: string;
   Incoterms: string;
+  /**
+   * F5: the source triple, matching the regenerated Wails fields
+   * (TaxZone/TaxType/ServiceCategory; HTTP taxZone/taxType/serviceCategory).
+   * Optional for older servers: absence is honest, never a fabricated tax
+   * choice, and link:taxBasis stays the protected source of truth.
+   */
+  TaxZone?: string;
+  TaxType?: string;
+  ServiceCategory?: string;
   DiscountPercent: number;
   Lines: PurchaseOrderSourceLineDTO[];
   PrintedSubtotalMinor: number;

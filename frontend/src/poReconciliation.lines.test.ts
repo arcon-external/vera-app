@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { CurrencyInfo } from "./format";
 import type { PurchaseOrderSourceLineDTO } from "./poFinalize";
 import {
+  canonicalLineFieldValue,
+  canonicalSourceLineValue,
   commitLineField,
   countBlockingItems,
   deriveLineSet,
@@ -30,6 +32,16 @@ const IDR: CurrencyInfo = {
   position: "before",
   groupSep: ".",
   decimalSep: ",",
+  symbolSpaced: false,
+};
+
+const USD: CurrencyInfo = {
+  code: "USD",
+  exponent: 2,
+  symbol: "$",
+  position: "before",
+  groupSep: ",",
+  decimalSep: ".",
   symbolSpaced: false,
 };
 
@@ -559,8 +571,21 @@ describe("reconcileLineSession (declarative line-set sync)", () => {
       { sessionKey: "client:c", displayNumber: 2, quotationItemNo: 1, quotationSubNo: null },
     ];
     const { session } = reconcileLineSession({ session: sessionWith([]), lines, sources: [sourceLine()], actorId: 7, now: env.now });
-    const dup = session.Items.find((entry) => entry.Kind === "duplicate_match");
-    expect(dup).toMatchObject({ Key: "source:1:duplicate", Status: "unresolved", SourceLineRef: "1" });
+    for (const claimant of ["client:a", "client:c"]) {
+      const dup = session.Items.find((entry) => entry.Key === `line:${claimant}:match`);
+      expect(dup).toMatchObject({
+        Kind: "duplicate_match",
+        Field: "line:match",
+        LineKey: claimant,
+        SourceLineRef: "1",
+        POValue: "1",
+        SourceValue: null,
+        Status: "unresolved",
+      });
+    }
+    expect(
+      session.Items.some((entry) => entry.Key === "source:1:duplicate")
+    ).toBe(false);
 
     const blockers = sessionBlockers({
       items: session.Items,
@@ -569,10 +594,12 @@ describe("reconcileLineSession (declarative line-set sync)", () => {
       duplicates: [{ reference: "1", lineKeys: ["client:a", "client:c"] }],
       unknown: [],
     });
-    // The unresolved duplicate item names the blocker; the covered set entry
-    // adds no second blocker.
-    expect(blockers).toHaveLength(1);
-    expect(blockers[0]).toMatchObject({ kind: "unresolved", label: "Duplicate match · Quotation 1" });
+    // Each unresolved claimant item names the blocker; the covered set
+    // entry adds no third blocker.
+    expect(blockers).toHaveLength(2);
+    for (const blocker of blockers) {
+      expect(blocker).toMatchObject({ kind: "unresolved", label: "Duplicate match · Quotation 1" });
+    }
 
     // Correcting the second claim to a free reference resolves the duplicate.
     const fixed = reconcileLineSession({
@@ -585,15 +612,25 @@ describe("reconcileLineSession (declarative line-set sync)", () => {
       actorId: 7,
       now: "2026-10-28T00:03:00Z",
     });
-    const resolvedDup = fixed.session.Items.find((entry) => entry.Key === "source:1:duplicate");
+    const resolvedDup = fixed.session.Items.find((entry) => entry.Key === "line:client:a:match");
     expect(resolvedDup).toMatchObject({ Status: "resolved", Resolution: "match_corrected" });
+    const correctedClaim = fixed.session.Items.find((entry) => entry.Key === "line:client:c:match");
+    expect(correctedClaim).toMatchObject({ Status: "resolved", Resolution: "match_corrected" });
   });
 
   it("flags an unknown reference and keeps it blocking after acknowledgement", () => {
     const lines = [{ sessionKey: "client:u", displayNumber: 1, quotationItemNo: 99, quotationSubNo: null }];
     const { session } = reconcileLineSession({ session: sessionWith([]), lines, sources: [sourceLine()], actorId: 7, now: env.now });
     const unknown = session.Items.find((entry) => entry.Key === "line:client:u:match");
-    expect(unknown).toMatchObject({ Kind: "extra_line", Status: "unresolved", SourceLineRef: "99" });
+    expect(unknown).toMatchObject({
+      Kind: "extra_line",
+      Field: "line:match",
+      LineKey: "client:u",
+      Status: "unresolved",
+      SourceLineRef: null,
+      POValue: "99",
+      SourceValue: null,
+    });
 
     const acked = acknowledgeLineMatch(session, "line:client:u:match", "acknowledged_extra", 7, "2026-10-28T00:04:00Z");
     expect(acked.changed).toBe(true);
@@ -669,5 +706,267 @@ describe("sessionLineKey across save and reopen (first-seen wins)", () => {
     expect(
       sessionLineKey(identities, { persistedId: 101, dtoAlias: "client:aaa", clientKey: "client:aaa" })
     ).toBe("client:aaa");
+  });
+});
+
+describe("canonical disabled discount (F4: dormant percent is 0, Enabled stays distinct)", () => {
+  it("canonicalizes a dormant disabled percent to 0 on the PO side", () => {
+    expect(
+      canonicalLineFieldValue("discount", { enabled: false, percent: 25 }, USD)
+    ).toEqual({ ok: true, value: { Enabled: false, Percent: 0 } });
+  });
+
+  it("canonicalizes a dormant disabled percent to 0 on the source side", () => {
+    expect(
+      canonicalSourceLineValue("discount", { ...sourceLine(), DiscountPercent: 25 })
+    ).toEqual({ Enabled: false, Percent: 0 });
+  });
+
+  it("does not invent a difference for two disabled discounts with different dormant percentages", () => {
+    const result = commitLineField({
+      lineKey: "client:probe-first",
+      displayNumber: 1,
+      field: "discount",
+      poValue: { enabled: false, percent: 25 },
+      source: sourceLine({ DiscountEnabled: false, DiscountPercent: 0 }),
+      existingItem: null,
+      actorId: 7,
+      now: "2026-10-29T00:00:00Z",
+      currency: USD,
+    });
+    expect(result.notice).toBe("matched");
+    expect(result.item).toBeNull();
+  });
+
+  it("still treats enabled 0% as different from disabled 0%", () => {
+    const result = commitLineField({
+      lineKey: "client:probe-first",
+      displayNumber: 1,
+      field: "discount",
+      poValue: { enabled: true, percent: 0 },
+      source: sourceLine({ DiscountEnabled: false, DiscountPercent: 0 }),
+      existingItem: null,
+      actorId: 7,
+      now: "2026-10-29T00:00:00Z",
+      currency: USD,
+    });
+    expect(result.item?.Status).toBe("unresolved");
+  });
+});
+
+describe("canonical line-set wire values (F1)", () => {
+  const env = {
+    sources: [
+      sourceLine(),
+      sourceLine({ QuotationItemNo: 2, LineLabel: "2", Description: "Sprocket" }),
+      sourceLine({ QuotationItemNo: 2, QuotationSubNo: 1, LineLabel: "2.1", Description: "Sub widget" }),
+    ],
+    actorId: 7,
+    now: "2026-10-29T00:00:00Z",
+  };
+  const emptySession = (): ReconciliationSession => ({
+    ID: 1,
+    PurchaseOrderID: 7,
+    SourceQuotationID: 12,
+    SourceRevision: 1,
+    POVersion: 4,
+    Active: true,
+    ReadOnly: false,
+    CreatedBy: 7,
+    CreatedAt: "2026-10-29T00:00:00Z",
+    UpdatedAt: "2026-10-29T00:00:00Z",
+    LineIdentities: [],
+    Items: [],
+  });
+  const line = (
+    sessionKey: string,
+    displayNumber: number,
+    quotationItemNo: number | null,
+    quotationSubNo: number | null = null
+  ) => ({ sessionKey, persistedId: null, displayNumber, quotationItemNo, quotationSubNo });
+
+  it("emits a plain extra with null wire values", () => {
+    const { session } = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:b", 2, null), line("client:a", 1, 1)],
+      ...env,
+    });
+    const extra = session.Items.find((entry) => entry.Key === "line:client:b:match");
+    expect(extra).toMatchObject({
+      Key: "line:client:b:match",
+      Field: "line:match",
+      Kind: "extra_line",
+      LineKey: "client:b",
+      SourceLineRef: null,
+      POValue: null,
+      SourceValue: null,
+      Status: "unresolved",
+    });
+  });
+
+  it("emits an unknown reference with the reference string and no source ref", () => {
+    const { session } = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:u", 1, 99)],
+      ...env,
+    });
+    const unknown = session.Items.find((entry) => entry.Key === "line:client:u:match");
+    expect(unknown).toMatchObject({
+      Key: "line:client:u:match",
+      Field: "line:match",
+      Kind: "extra_line",
+      LineKey: "client:u",
+      SourceLineRef: null,
+      POValue: "99",
+      SourceValue: null,
+      Status: "unresolved",
+    });
+  });
+
+  it("emits a missing sub-line with the canonical reference value", () => {
+    const { session } = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:a", 1, 1)],
+      ...env,
+    });
+    const missing = session.Items.find((entry) => entry.Key === "source:2.1:match");
+    expect(missing).toMatchObject({
+      Key: "source:2.1:match",
+      Field: "source:match",
+      Kind: "missing_line",
+      LineKey: null,
+      SourceLineRef: "2.1",
+      POValue: null,
+      SourceValue: "2.1",
+      Status: "unresolved",
+    });
+  });
+
+  it("emits one duplicate item per claimant, never a source-side duplicate", () => {
+    const { session } = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:a", 1, 1), line("client:c", 2, 1)],
+      ...env,
+    });
+    expect(session.Items.some((entry) => entry.Key === "source:1:duplicate")).toBe(false);
+    for (const claimant of ["client:a", "client:c"]) {
+      const dup = session.Items.find((entry) => entry.Key === `line:${claimant}:match`);
+      expect(dup).toMatchObject({
+        Key: `line:${claimant}:match`,
+        Field: "line:match",
+        Kind: "duplicate_match",
+        LineKey: claimant,
+        SourceLineRef: "1",
+        POValue: "1",
+        SourceValue: null,
+        Status: "unresolved",
+      });
+    }
+  });
+
+  it("removing one duplicate claimant resolves it as line_removed and the survivor as match_corrected", () => {
+    const first = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:a", 1, 1), line("client:c", 2, 1)],
+      ...env,
+    });
+    const second = reconcileLineSession({
+      session: first.session,
+      lines: [line("client:a", 1, 1)],
+      sources: env.sources,
+      actorId: 7,
+      now: "2026-10-29T00:01:00Z",
+    });
+    const removed = second.session.Items.find((entry) => entry.Key === "line:client:c:match");
+    expect(removed).toMatchObject({ Status: "resolved", Resolution: "line_removed" });
+    expect(removed?.History.length).toBeGreaterThan(0);
+    const survivor = second.session.Items.find((entry) => entry.Key === "line:client:a:match");
+    expect(survivor).toMatchObject({ Status: "resolved", Resolution: "match_corrected" });
+  });
+
+  it("correcting an unknown match keeps a valid shape with history", () => {
+    const first = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:u", 1, 99)],
+      ...env,
+    });
+    const second = reconcileLineSession({
+      session: first.session,
+      lines: [line("client:u", 1, 2)],
+      sources: env.sources,
+      actorId: 7,
+      now: "2026-10-29T00:01:00Z",
+    });
+    const corrected = second.session.Items.find(
+      (entry) => entry.Key === "line:client:u:match"
+    );
+    expect(corrected).toMatchObject({
+      Status: "resolved",
+      Resolution: "match_corrected",
+      SourceLineRef: null,
+      POValue: null,
+      SourceValue: null,
+    });
+    expect(corrected?.History.length).toBeGreaterThan(0);
+  });
+
+  it("moving an unknown claim to another unknown reference keeps a valid shape", () => {
+    const first = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:u", 1, 99)],
+      ...env,
+    });
+    const second = reconcileLineSession({
+      session: first.session,
+      lines: [line("client:u", 1, 98)],
+      sources: env.sources,
+      actorId: 7,
+      now: "2026-10-29T00:01:00Z",
+    });
+    const moved = second.session.Items.find((entry) => entry.Key === "line:client:u:match");
+    expect(moved).toMatchObject({
+      Status: "unresolved",
+      Resolution: null,
+      SourceLineRef: null,
+      POValue: "98",
+    });
+    expect(moved?.History.length).toBeGreaterThan(0);
+  });
+
+  it("an acknowledged unknown stays unresolved with recorded history", () => {
+    const first = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:u", 1, 99)],
+      ...env,
+    });
+    const acked = acknowledgeLineMatch(
+      first.session,
+      "line:client:u:match",
+      "acknowledged_extra",
+      7,
+      "2026-10-29T00:02:00Z"
+    );
+    expect(acked.changed).toBe(true);
+    const kept = acked.session.Items.find((entry) => entry.Key === "line:client:u:match");
+    expect(kept?.Status).toBe("unresolved");
+    expect(hasAckRecording(kept!, "acknowledged_extra")).toBe(true);
+  });
+
+  it("an acknowledged plain extra resolves", () => {
+    const first = reconcileLineSession({
+      session: emptySession(),
+      lines: [line("client:b", 2, null), line("client:a", 1, 1)],
+      ...env,
+    });
+    const acked = acknowledgeLineMatch(
+      first.session,
+      "line:client:b:match",
+      "acknowledged_extra",
+      7,
+      "2026-10-29T00:02:00Z"
+    );
+    expect(
+      acked.session.Items.find((entry) => entry.Key === "line:client:b:match")
+    ).toMatchObject({ Status: "resolved", Resolution: "acknowledged_extra" });
   });
 });

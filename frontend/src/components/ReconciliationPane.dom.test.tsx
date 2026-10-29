@@ -414,7 +414,7 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
       SourceLineRef: "3",
       Label: "Missing line · Quotation 3",
       POValue: null,
-      SourceValue: "Sprocket",
+      SourceValue: "3",
       Status: "unresolved",
       Resolution: null,
       ...overrides,
@@ -427,7 +427,11 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
   it("offers Add line and Acknowledge omission on a missing line", async () => {
     const onAddLineFromSource = vi.fn();
     const onAcknowledgeMissing = vi.fn();
-    await renderWith([lineItemWith()], { onAddLineFromSource, onAcknowledgeMissing });
+    await renderWith([lineItemWith()], {
+      onAddLineFromSource,
+      onAcknowledgeMissing,
+      sourceDescriptions: { "3": "Sprocket" },
+    });
     expect(document.body.textContent).toContain("Missing line · Quotation 3");
     expect(document.body.textContent).toContain("Sprocket");
     button("Add line from Quotation 3").click();
@@ -448,10 +452,15 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
           LineKey: "client:b",
           SourceLineRef: null,
           Label: "Extra line · Line 2",
-          POValue: "Custom bracket",
+          POValue: null,
+          SourceValue: null,
         }),
       ],
-      { onFixMatch, onAcknowledgeExtra }
+      {
+        onFixMatch,
+        onAcknowledgeExtra,
+        lineSummaries: { "client:b": { displayNumber: 2, description: "Custom bracket" } },
+      }
     );
     button("Match to Quotation for Extra line · Line 2").click();
     expect(onFixMatch).toHaveBeenCalledWith("client:b");
@@ -468,12 +477,16 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
           Field: "line:match",
           Kind: "extra_line",
           LineKey: "client:u",
-          SourceLineRef: "99",
+          SourceLineRef: null,
           Label: "Unknown reference · 99",
-          POValue: "Custom bracket",
+          POValue: "99",
+          SourceValue: null,
         }),
       ],
-      { onAcknowledgeExtra }
+      {
+        onAcknowledgeExtra,
+        lineSummaries: { "client:u": { displayNumber: 1, description: "Custom bracket" } },
+      }
     );
     expect(document.body.textContent).toContain("Unknown reference · 99");
     expect(document.body.textContent).toContain("No Quotation line 99 exists.");
@@ -488,14 +501,15 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
         Field: "line:match",
         Kind: "extra_line",
         LineKey: "client:u",
-        SourceLineRef: "99",
+        SourceLineRef: null,
         Label: "Unknown reference · 99",
-        POValue: "Custom bracket",
+        POValue: "99",
+        SourceValue: null,
         History: [
           {
             Kind: "extra_line",
-            SourceLineRef: "99",
-            POValue: "Custom bracket",
+            SourceLineRef: null,
+            POValue: "99",
             SourceValue: null,
             Status: "unresolved",
             Resolution: "acknowledged_extra",
@@ -516,17 +530,20 @@ describe("ReconciliationPaneContent line-set cards (ticket 05)", () => {
     await renderWith(
       [
         lineItemWith({
-          Key: "source:2:match",
-          Field: "source:match",
+          Key: "line:client:a:match",
+          Field: "line:match",
           Kind: "duplicate_match",
           LineKey: "client:a",
           SourceLineRef: "2",
           Label: "Duplicate match · Quotation 2",
-          POValue: null,
+          POValue: "2",
           SourceValue: null,
         }),
       ],
-      { onFixMatch }
+      {
+        onFixMatch,
+        lineSummaries: { "client:a": { displayNumber: 1, description: "Widget" } },
+      }
     );
     expect(document.body.textContent).toContain("Duplicate match · Quotation 2");
     expect(document.body.textContent).toContain("Blocking");

@@ -151,7 +151,14 @@ export function canonicalLineFieldValue(
   ) {
     return { ok: false, error: "Discount must be between 0 and 100." };
   }
-  return { ok: true, value: { Enabled: entered.enabled, Percent: percent } };
+  // F4: a disabled discount carries canonical Percent 0 whatever dormant
+  // percentage the editor holds (backend canonicalizes the same way);
+  // the raw editor value is untouched. Enabled 0% stays distinct from
+  // disabled 0% (R-10).
+  return {
+    ok: true,
+    value: { Enabled: entered.enabled, Percent: entered.enabled ? percent : 0 },
+  };
 }
 
 /** Canonicalises one source line column for comparison. */
@@ -169,7 +176,11 @@ export function canonicalSourceLineValue(
     case "unitPrice":
       return source.UnitPriceMinor;
     case "discount":
-      return { Enabled: source.DiscountEnabled, Percent: source.DiscountPercent };
+      // F4: canonical disabled Percent is 0 on the source side too.
+      return {
+        Enabled: source.DiscountEnabled,
+        Percent: source.DiscountEnabled ? source.DiscountPercent : 0,
+      };
   }
 }
 
@@ -558,6 +569,18 @@ export function sessionBlockers(input: SessionBlockerInput): SessionBlocker[] {
   const unresolvedByKey = new Set(
     input.items.filter((item) => item.Status === "unresolved").map((item) => item.Key)
   );
+  // F1: duplicates are per-claimant items, so the set entry is covered when
+  // any unresolved duplicate_match item already contests the reference.
+  const contestedRefs = new Set(
+    input.items
+      .filter(
+        (item) =>
+          item.Status === "unresolved" &&
+          item.Kind === "duplicate_match" &&
+          typeof item.SourceLineRef === "string"
+      )
+      .map((item) => item.SourceLineRef as string)
+  );
   for (const item of orderPaneItems(input.items, "all")) {
     if (item.Status !== "unresolved") continue;
     blockers.push({ kind: "unresolved", label: item.Label });
@@ -579,7 +602,7 @@ export function sessionBlockers(input: SessionBlockerInput): SessionBlocker[] {
     blockers.push({ kind: "extra", label: extra.label });
   }
   for (const duplicate of input.duplicates) {
-    if (unresolvedByKey.has(`source:${duplicate.reference}:duplicate`)) continue;
+    if (contestedRefs.has(duplicate.reference)) continue;
     blockers.push({
       kind: "duplicate",
       label: `Duplicate match · Quotation ${duplicate.reference}`,
@@ -673,7 +696,16 @@ export function prefillLineDecisions(
         : line.values[suffix];
     const canonical = canonicalLineFieldValue(suffix, raw, currency);
     if (!canonical.ok) continue;
-    if (!lineValuesEqual(canonical.value, item.POValue)) continue;
+    // F4: the recorded side canonicalizes the same way — a disabled
+    // decision stored with a dormant percent still matches.
+    const recorded =
+      suffix === "discount" &&
+      typeof item.POValue === "object" &&
+      item.POValue !== null &&
+      (item.POValue as { Enabled?: unknown }).Enabled === false
+        ? { ...(item.POValue as Record<string, unknown>), Percent: 0 }
+        : item.POValue;
+    if (!lineValuesEqual(canonical.value, recorded)) continue;
     // The recorded source value must still match the linked revision;
     // otherwise the decision belongs to a different comparison.
     if (typeof item.SourceLineRef === "string") {
@@ -708,6 +740,14 @@ export interface ReconcileLineSessionInput {
   now: string;
 }
 
+/**
+ * F1: one match item for a no-reference (plain extra) or unknown-reference
+ * line. Wire values are canonical and separate from display prose: plain
+ * extras carry null values; an unknown claim carries only its reference
+ * string in POValue. SourceLineRef is always null — the source side of a
+ * line:match claim is never named. The pane derives its card and labels
+ * from Kind + POValue, never the reverse.
+ */
 function matchItemOf(
   sessionKey: string,
   line: ReconcileLineInput,
@@ -715,15 +755,14 @@ function matchItemOf(
   actorId: number,
   now: string
 ): ReconciliationItem {
-  const unknown = reference !== null;
   return {
     Key: `line:${sessionKey}:match`,
     Field: "line:match",
     Kind: "extra_line",
     LineKey: sessionKey,
-    SourceLineRef: reference,
-    Label: unknown ? `Unknown reference · ${reference}` : `Extra line · Line ${line.displayNumber}`,
-    POValue: unknown ? `Line ${line.displayNumber} names quotation line ${reference}, which does not exist` : `Line ${line.displayNumber} is not on the quotation`,
+    SourceLineRef: null,
+    Label: reference !== null ? `Unknown reference · ${reference}` : `Extra line · Line ${line.displayNumber}`,
+    POValue: reference,
     SourceValue: null,
     Status: "unresolved",
     Resolution: null,
@@ -735,7 +774,6 @@ function matchItemOf(
 
 function missingItemOf(
   reference: string,
-  source: PurchaseOrderSourceLineDTO,
   actorId: number,
   now: string
 ): ReconciliationItem {
@@ -747,7 +785,7 @@ function missingItemOf(
     SourceLineRef: reference,
     Label: `Missing line · Quotation ${reference}`,
     POValue: null,
-    SourceValue: source.Description,
+    SourceValue: reference,
     Status: "unresolved",
     Resolution: null,
     ActorID: actorId,
@@ -756,21 +794,28 @@ function missingItemOf(
   };
 }
 
+/**
+ * F1: one duplicate item per claimant line. The contested reference lives
+ * in SourceLineRef and POValue; SourceValue stays null. Removal resolves a
+ * claimant's item as line_removed through its LineKey; the surviving
+ * claimant resolves as match_corrected once the contest ends.
+ */
 function duplicateItemOf(
+  sessionKey: string,
   reference: string,
   actorId: number,
   now: string
 ): ReconciliationItem {
   return {
-    Key: `source:${reference}:duplicate`,
-    Field: "source:match",
+    Key: `line:${sessionKey}:match`,
+    Field: "line:match",
     Kind: "duplicate_match",
-    LineKey: null,
+    LineKey: sessionKey,
     SourceLineRef: reference,
     Label: `Duplicate match · Quotation ${reference}`,
-    POValue: null,
+    POValue: reference,
     SourceValue: null,
-    Status: "resolved",
+    Status: "unresolved",
     Resolution: null,
     ActorID: actorId,
     UpdatedAt: now,
@@ -891,7 +936,7 @@ export function reconcileLineSession(
     const reference = sourceLineRef(source.QuotationItemNo, source.QuotationSubNo);
     const existing = byKey.get(`source:${reference}:match`);
     if (existing === undefined) {
-      upsert(missingItemOf(reference, source, actorId, now), false);
+      upsert(missingItemOf(reference, actorId, now), false);
     }
   }
   for (const item of items) {
@@ -905,41 +950,47 @@ export function reconcileLineSession(
     }
   }
 
-  // Extra / unknown: one match item per line, keyed by stable identity.
+  // Extra: one match item per unmatched line. A formerly unknown line that
+  // is now a plain extra drops its reference claim; a rematched line keeps
+  // its correction history below. A recorded extra acknowledgement stands.
   for (const extra of set.extra) {
     const line = lines.find((entry) => entry.sessionKey === extra.sessionKey);
     const key = `line:${extra.sessionKey}:match`;
     const existing = byKey.get(key);
     if (existing === undefined) {
       upsert(matchItemOf(extra.sessionKey, line ?? { ...extra, displayNumber: extra.lineNumber }, null, actorId, now), false);
-    } else if (
-      existing.SourceLineRef !== null &&
-      existing.Status === "resolved" &&
-      existing.Resolution !== "match_corrected"
-    ) {
-      // A formerly unknown line is now a plain extra: re-explain it.
-      upsert(
-        {
-          ...existing,
-          SourceLineRef: null,
-          Label: `Extra line · Line ${extra.lineNumber}`,
-          POValue: `Line ${extra.lineNumber} is not on the quotation`,
-          Status: "unresolved",
-          Resolution: null,
-          ActorID: actorId,
-          UpdatedAt: now,
-        },
-        true
-      );
-    } else if (
-      existing.SourceLineRef === null &&
-      existing.Status === "resolved" &&
-      existing.Resolution !== "acknowledged_extra" &&
-      existing.Resolution !== "match_corrected"
-    ) {
-      void 0;
+      continue;
     }
+    if (existing.Kind !== "extra_line") continue;
+    const clearsClaim = existing.POValue !== null;
+    const reopensCorrection =
+      existing.Status === "resolved" && existing.Resolution === "match_corrected";
+    if (!clearsClaim && !reopensCorrection) continue;
+    upsert(
+      {
+        ...existing,
+        POValue: null,
+        Status: "unresolved",
+        Resolution: null,
+        ActorID: actorId,
+        UpdatedAt: now,
+        History: [
+          ...existing.History,
+          lineHistoryEventOf(
+            { ...existing, POValue: null },
+            "unresolved",
+            null,
+            actorId,
+            now
+          ),
+        ],
+      },
+      true
+    );
   }
+  // Unknown: one match item per line claiming an absent reference. The claim
+  // lives only in POValue; SourceLineRef stays null per the wire contract.
+  // A changed claim reopens on the new reference with history kept.
   for (const unknown of set.unknown) {
     const key = `line:${unknown.sessionKey}:match`;
     const existing = byKey.get(key);
@@ -949,14 +1000,14 @@ export function reconcileLineSession(
         matchItemOf(unknown.sessionKey, line ?? { sessionKey: "", persistedId: null, displayNumber: unknown.lineNumber, quotationItemNo: null, quotationSubNo: null }, unknown.reference, actorId, now),
         false
       );
-    } else if (existing.SourceLineRef !== unknown.reference) {
-      // The claim moved to another unknown reference: reopen on the new one.
+      continue;
+    }
+    if (existing.Kind !== "extra_line") continue;
+    if (existing.POValue !== unknown.reference || existing.Status !== "unresolved") {
       upsert(
         {
           ...existing,
-          SourceLineRef: unknown.reference,
-          Label: `Unknown reference · ${unknown.reference}`,
-          POValue: `Line ${unknown.lineNumber} names quotation line ${unknown.reference}, which does not exist`,
+          POValue: unknown.reference,
           Status: "unresolved",
           Resolution: null,
           ActorID: actorId,
@@ -964,7 +1015,7 @@ export function reconcileLineSession(
           History: [
             ...existing.History,
             lineHistoryEventOf(
-              { ...existing, SourceLineRef: unknown.reference },
+              { ...existing, POValue: unknown.reference },
               "unresolved",
               null,
               actorId,
@@ -977,42 +1028,94 @@ export function reconcileLineSession(
     }
   }
   // Matched lines: a stale extra/unknown match item resolves as corrected.
+  // Matched lines: a stale extra claim resolves as corrected with a valid
+  // shape (the unknown reference is cleared, never carried). Duplicate
+  // claimants are handled below; skip them here so one run does not record
+  // both a correction and a contest.
   const matchedKeys = new Set(set.matched.map((entry) => entry.line.sessionKey));
+  const contestedKeys = new Set(
+    set.duplicates.flatMap((entry) => entry.lineKeys)
+  );
   for (const pair of set.matched) {
+    if (contestedKeys.has(pair.line.sessionKey)) continue;
     const key = `line:${pair.line.sessionKey}:match`;
     const existing = byKey.get(key);
-    if (
-      existing !== undefined &&
-      existing.Status !== "resolved" &&
-      existing.Kind === "extra_line"
-    ) {
-      upsert(resolveAs(existing, "resolved", "match_corrected", actorId, now), true);
+    if (existing === undefined) continue;
+    if (existing.Kind === "extra_line" && existing.Resolution !== "match_corrected") {
+      upsert(
+        {
+          ...resolveAs(existing, "resolved", "match_corrected", actorId, now),
+          POValue: null,
+        },
+        true
+      );
     } else if (
-      existing !== undefined &&
-      existing.Status === "resolved" &&
-      existing.Resolution !== "match_corrected" &&
-      existing.Kind === "extra_line"
+      existing.Kind === "duplicate_match" &&
+      existing.Status === "unresolved"
     ) {
+      // Sole surviving claimant: the contest is over, the match stands.
       upsert(resolveAs(existing, "resolved", "match_corrected", actorId, now), true);
     }
   }
   void matchedKeys;
 
-  // Duplicates: one blocking item per over-claimed reference.
+  // Duplicates: one blocking item per claimant of an over-claimed
+  // reference — never a source-side duplicate. A claimant arriving from a
+  // plain extra has its item converted to the contest; removal resolves the
+  // removed claimant as line_removed (step 2) while the survivor corrects
+  // above.
   const dupRefs = new Set(set.duplicates.map((entry) => entry.reference));
   for (const duplicate of set.duplicates) {
-    const key = `source:${duplicate.reference}:duplicate`;
-    if (byKey.get(key) === undefined) {
-      upsert(duplicateItemOf(duplicate.reference, actorId, now), false);
-      const created = next.find((entry) => entry.Key === key);
-      if (created !== undefined) {
-        upsert({ ...created, Status: "unresolved", Resolution: null }, true);
-      }
-    } else {
+    for (const claimant of duplicate.lineKeys) {
+      const key = `line:${claimant}:match`;
       const existing = byKey.get(key);
-      if (existing !== undefined && existing.Status === "resolved" && existing.Resolution !== "match_corrected") {
-        upsert({ ...existing, Status: "unresolved", Resolution: null, ActorID: actorId, UpdatedAt: now }, true);
+      if (existing === undefined) {
+        upsert(duplicateItemOf(claimant, duplicate.reference, actorId, now), false);
+        continue;
       }
+      if (existing.Kind === "duplicate_match") {
+        if (
+          existing.Status === "resolved" &&
+          existing.Resolution !== "match_corrected"
+        ) {
+          upsert(
+            { ...existing, Status: "unresolved", Resolution: null, ActorID: actorId, UpdatedAt: now },
+            true
+          );
+        }
+        continue;
+      }
+      if (existing.Kind !== "extra_line") continue;
+      upsert(
+        {
+          ...existing,
+          Kind: "duplicate_match",
+          SourceLineRef: duplicate.reference,
+          POValue: duplicate.reference,
+          SourceValue: null,
+          Status: "unresolved",
+          Resolution: null,
+          ActorID: actorId,
+          UpdatedAt: now,
+          History: [
+            ...existing.History,
+            lineHistoryEventOf(
+              {
+                ...existing,
+                Kind: "duplicate_match",
+                SourceLineRef: duplicate.reference,
+                POValue: duplicate.reference,
+                SourceValue: null,
+              },
+              "unresolved",
+              null,
+              actorId,
+              now
+            ),
+          ],
+        },
+        true
+      );
     }
   }
   for (const item of items) {
@@ -1047,10 +1150,13 @@ export function acknowledgeLineMatch(
   if (target === undefined || target.Status === "resolved") {
     return { session, changed: false };
   }
+  // F1: an unknown claim is an extra_line whose POValue names the absent
+  // reference (SourceLineRef is always null on line:match items). The
+  // acknowledgement records the decision but never clears it (R-02).
   const unknown =
     resolution === "acknowledged_extra" &&
-    typeof target.SourceLineRef === "string" &&
-    target.SourceLineRef !== "";
+    typeof target.POValue === "string" &&
+    target.POValue !== "";
   if (unknown) {
     const noted: ReconciliationItem = {
       ...target,

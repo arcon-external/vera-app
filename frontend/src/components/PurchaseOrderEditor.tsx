@@ -139,8 +139,10 @@ export interface PurchaseOrderEditorViewProps {
   notices?: Record<HeaderFieldKey, CommitNotice>;
   validationErrors?: Record<HeaderFieldKey, string | null>;
   unresolvedByField?: Record<HeaderFieldKey, ReconciliationItem | null>;
-  onCommitField?: (field: HeaderFieldKey) => void;
+  onCommitField?: (field: HeaderFieldKey, explicitValue?: string) => void;
   onFocusField?: (field: HeaderFieldKey) => void;
+  /** F2: resolves an editor alias to its first-seen session key. */
+  sessionKeyFor?: (clientKey: string) => string;
   onShowItem?: (key: string) => void;
   /**
    * Ticket 05: line reconciliation wiring. Match choices come from the
@@ -149,7 +151,11 @@ export interface PurchaseOrderEditorViewProps {
    */
   matchOptions?: { value: string; label: string }[];
   onMatchChange?: (lineKey: string, quotationItemNo: number | null, quotationSubNo: number | null) => void;
-  onCommitLine?: (lineKey: string, field: LineField) => void;
+  onCommitLine?: (
+    lineKey: string,
+    field: LineField,
+    explicitRaw?: string | { enabled: boolean; percent: string | number }
+  ) => void;
   lineNotices?: Record<string, CommitNotice | null>;
   lineErrors?: Record<string, string | null>;
   unresolvedByLineField?: Record<string, ReconciliationItem | null>;
@@ -494,6 +500,7 @@ export function PurchaseOrderLineRow({
   dispatch,
   matchOptions,
   onMatchChange,
+  sessionKey,
   onCommitLine,
   lineNotices,
   lineErrors,
@@ -509,14 +516,27 @@ export function PurchaseOrderLineRow({
   /** Quotation match choices; absent when no source is linked. */
   matchOptions?: { value: string; label: string }[];
   onMatchChange?: (quotationItemNo: number | null, quotationSubNo: number | null) => void;
-  /** Blur-commit of one line field; absent when reconciliation is off. */
-  onCommitLine?: (field: LineField) => void;
+  /**
+   * F2: the stable session key for this row's feedback and item lookups,
+   * resolved by the editor from the session identities (first-seen wins).
+   */
+  sessionKey?: string;
+  /**
+   * Blur-commit of one line field; absent when reconciliation is off.
+   * Selects and checkboxes pass their NEW value explicitly (F3) instead of
+   * reading React's previous render.
+   */
+  onCommitLine?: (
+    field: LineField,
+    explicitRaw?: string | { enabled: boolean; percent: string | number }
+  ) => void;
   lineNotices?: Record<string, CommitNotice | null>;
   lineErrors?: Record<string, string | null>;
   unresolvedByLineField?: Record<string, ReconciliationItem | null>;
   onShowItem?: (key: string) => void;
 }) {
-  const feedbackKey = (field: LineField) => `${line.clientKey}:${field}`;
+  // F2/U7b: feedback maps are keyed by session key, matching item LineKeys.
+  const feedbackKey = (field: LineField) => `${sessionKey ?? line.clientKey}:${field}`;
   const feedback = (field: LineField, label: string) => (
     <HeaderFieldFeedback
       fieldKey={feedbackKey(field)}
@@ -528,6 +548,10 @@ export function PurchaseOrderLineRow({
     />
   );
   const commit = (field: LineField) => () => onCommitLine?.(field);
+  const commitValue = (
+    field: LineField,
+    explicitRaw: string | { enabled: boolean; percent: string | number }
+  ) => onCommitLine?.(field, explicitRaw);
   return (
     <div
       className="grid gap-3 rounded-lg border border-rule bg-white p-3 sm:grid-cols-[minmax(0,1fr)_120px_140px_170px_auto] sm:items-end"
@@ -605,12 +629,13 @@ export function PurchaseOrderLineRow({
           value={line.uom}
           options={uomOptions.length > 0 ? uomOptions : [{ value: line.uom, label: line.uom || "—" }]}
           onChange={(value) => {
+            const next = String(value);
             dispatch({
               type: "lineChanged",
               key: line.key,
-              patch: { uom: String(value) },
+              patch: { uom: next },
             });
-            onCommitLine?.("uom");
+            commitValue("uom", next);
           }}
         />
         {feedback("uom", `Line ${index + 1} unit of measure`)}
@@ -649,12 +674,13 @@ export function PurchaseOrderLineRow({
             aria-label={`Line ${index + 1} discount enabled`}
             checked={line.discountEnabled}
             onChange={(event) => {
+              const enabled = event.target.checked;
               dispatch({
                 type: "lineChanged",
                 key: line.key,
-                patch: { discountEnabled: event.target.checked },
+                patch: { discountEnabled: enabled },
               });
-              onCommitLine?.("discount");
+              commitValue("discount", { enabled, percent: line.discountPercent });
             }}
           />
           Row discount
@@ -777,6 +803,7 @@ export function PurchaseOrderEditorView({
   onCommitField,
   onFocusField,
   onShowItem,
+  sessionKeyFor,
   matchOptions,
   onMatchChange,
   onCommitLine,
@@ -1107,8 +1134,9 @@ export function PurchaseOrderEditorView({
               value={state.header.incoterms}
               options={incotermOptions}
               onChange={(value) => {
-                dispatch({ type: "headerChanged", patch: { incoterms: String(value) } });
-                onCommitField?.("header:incoterms");
+                const next = String(value);
+                dispatch({ type: "headerChanged", patch: { incoterms: next } });
+                onCommitField?.("header:incoterms", next);
               }}
             />
             <HeaderFieldFeedback
@@ -1168,10 +1196,12 @@ export function PurchaseOrderEditorView({
                     : (quotationItemNo, quotationSubNo) =>
                         onMatchChange(line.clientKey, quotationItemNo, quotationSubNo)
                 }
+                sessionKey={sessionKeyFor?.(line.clientKey)}
                 onCommitLine={
                   onCommitLine === undefined
                     ? undefined
-                    : (field) => onCommitLine(line.clientKey, field)
+                    : (field, explicitRaw) =>
+                        onCommitLine(line.clientKey, field, explicitRaw)
                 }
                 lineNotices={lineNotices}
                 lineErrors={lineErrors}
@@ -2515,6 +2545,21 @@ export function PurchaseOrderEditorPage({
         ? "loading"
         : reconciliation.status
       : "ready";
+  // F1: display context for line-set cards, keyed by stable session key.
+  // Wire values stay canonical; human descriptions travel here.
+  const lineSummaries: Record<string, { displayNumber: number; description: string }> =
+    Object.fromEntries(
+      state.lines.map((line, index) => [
+        reconciliation.sessionKeyFor(line.clientKey),
+        { displayNumber: index + 1, description: line.description },
+      ])
+    );
+  const sourceDescriptions: Record<string, string> = Object.fromEntries(
+    (compareLines ?? []).map((entry) => [
+      sourceLineRef(entry.QuotationItemNo, entry.QuotationSubNo),
+      entry.Description,
+    ])
+  );
   const paneSourceLabel =
     state.sourceState === "never"
       ? null
@@ -2611,10 +2656,11 @@ export function PurchaseOrderEditorPage({
         notices={reconciliationNotices}
         validationErrors={reconciliation.validationErrors}
         unresolvedByField={unresolvedHeaderItems}
-        onCommitField={(field) => {
+        onCommitField={(field, explicitValue) => {
           focusedFieldRef.current = field;
-          reconciliation.commitField(field);
+          reconciliation.commitField(field, explicitValue);
         }}
+        sessionKeyFor={reconciliation.sessionKeyFor}
         onFocusField={(field) => {
           focusedFieldRef.current = field;
         }}
@@ -2629,7 +2675,9 @@ export function PurchaseOrderEditorPage({
             patch: { quotationItemNo, quotationSubNo },
           });
         }}
-        onCommitLine={(lineKey, field) => reconciliation.commitLine(lineKey, field)}
+        onCommitLine={(lineKey, field, explicitRaw) =>
+          reconciliation.commitLine(lineKey, field, explicitRaw)
+        }
         lineNotices={reconciliation.lineNotices}
         lineErrors={reconciliation.lineValidationErrors}
         unresolvedByLineField={unresolvedByLineField}
@@ -2682,6 +2730,8 @@ export function PurchaseOrderEditorPage({
             onAcknowledgeMissing={reconciliation.acknowledgeMissing}
             onAcknowledgeExtra={reconciliation.acknowledgeExtra}
             onFixMatch={focusLineMatch}
+            lineSummaries={lineSummaries}
+            sourceDescriptions={sourceDescriptions}
             currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
             totalsStrip={totalsStrip}
@@ -2734,6 +2784,8 @@ export function PurchaseOrderEditorPage({
             onAcknowledgeMissing={reconciliation.acknowledgeMissing}
             onAcknowledgeExtra={reconciliation.acknowledgeExtra}
             onFixMatch={focusLineMatch}
+            lineSummaries={lineSummaries}
+            sourceDescriptions={sourceDescriptions}
             currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
             totalsStrip={totalsStrip}

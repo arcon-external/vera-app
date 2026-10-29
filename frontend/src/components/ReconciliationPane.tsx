@@ -47,6 +47,14 @@ export interface ReconciliationPaneContentProps {
   onRetry: () => void;
   /** Line-set actions (ticket 05); absent in read-only harnesses. */
   onAddLineFromSource?: (reference: string) => void;
+  /**
+   * F1: display context for line-set cards, keyed by stable session key.
+   * Wire values stay canonical (null/reference); human descriptions travel
+   * here, never inside POValue/SourceValue.
+   */
+  lineSummaries?: Record<string, { displayNumber: number; description: string }>;
+  /** Source line descriptions keyed by canonical reference ("2", "2.1"). */
+  sourceDescriptions?: Record<string, string>;
   onAcknowledgeMissing?: (key: string) => void;
   onAcknowledgeExtra?: (key: string) => void;
   onFixMatch?: (lineKey: string) => void;
@@ -59,6 +67,16 @@ export interface ReconciliationPaneContentProps {
   /** Derived totals check, rendered under the heading. Never a decision. */
   totalsStrip?: ReactNode;
   ref?: Ref<ReconciliationPaneHandle>;
+}
+
+function lineDescriptionOf(
+  summaries: Record<string, { displayNumber: number; description: string }> | undefined,
+  lineKey: string | null | undefined
+): string | null {
+  if (lineKey === null || lineKey === undefined) return null;
+  const summary = summaries?.[lineKey];
+  if (summary === undefined || summary.description.trim() === "") return null;
+  return summary.description;
 }
 
 const RESOLUTION_CHIPS: Record<string, string> = {
@@ -156,6 +174,8 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     onAcknowledgeMissing,
     onAcknowledgeExtra,
     onFixMatch,
+    lineSummaries,
+    sourceDescriptions,
     currency,
     actorNameFor,
     headerActions,
@@ -272,14 +292,22 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
 
   const renderMissingCard = (item: ReconciliationItem) => {
     const acknowledged = item.Status === "resolved";
+    const corrected =
+      item.Status === "resolved" && item.Resolution === "match_corrected";
     return cardShell(
       item.Key,
       item.Label,
-      acknowledged ? neutralPill("Acknowledged missing") : neutralPill("Missing line"),
+      corrected
+        ? neutralPill("Match corrected")
+        : acknowledged
+          ? neutralPill("Acknowledged missing")
+          : neutralPill("Missing line"),
       <>
         <p className="mt-1 text-small text-ink-700">
-          {typeof item.SourceValue === "string" && item.SourceValue !== ""
-            ? item.SourceValue
+          {typeof item.SourceLineRef === "string" &&
+          sourceDescriptions?.[item.SourceLineRef] !== undefined &&
+          sourceDescriptions[item.SourceLineRef] !== ""
+            ? sourceDescriptions[item.SourceLineRef]
             : "This quotation line is not on the purchase order."}
         </p>
         {acknowledged || readOnly ? null : (
@@ -312,13 +340,20 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
 
   const renderExtraCard = (item: ReconciliationItem) => {
     const acknowledged = item.Status === "resolved";
+    const corrected =
+      item.Status === "resolved" && item.Resolution === "match_corrected";
+    const description = lineDescriptionOf(lineSummaries, item.LineKey);
     return cardShell(
       item.Key,
       item.Label,
-      acknowledged ? neutralPill("Acknowledged extra") : neutralPill("Extra line"),
+      corrected
+        ? neutralPill("Match corrected")
+        : acknowledged
+          ? neutralPill("Acknowledged extra")
+          : neutralPill("Extra line"),
       <>
         <p className="mt-1 text-small text-ink-700">
-          {formatPaneValue(item.POValue, item.Field, currency)}
+          {description ?? "An extra line with no quotation match."}
         </p>
         {acknowledged || readOnly ? null : (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -349,16 +384,19 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   };
 
   const renderUnknownCard = (item: ReconciliationItem) => {
-    const reference = typeof item.SourceLineRef === "string" ? item.SourceLineRef : "";
+    // F1: the unknown claim lives in POValue (a reference string);
+    // SourceLineRef is always null on line:match items.
+    const reference = typeof item.POValue === "string" ? item.POValue : "";
     const acked = hasAckRecording(item, "acknowledged_extra");
+    const description = lineDescriptionOf(lineSummaries, item.LineKey);
     return cardShell(
       item.Key,
       `Unknown reference · ${reference}`,
       dangerPill("Unknown reference"),
       <>
-        <p className="mt-1 text-small text-ink-700">
-          {formatPaneValue(item.POValue, item.Field, currency)}
-        </p>
+        {description === null ? null : (
+          <p className="mt-1 text-small text-ink-700">{description}</p>
+        )}
         <p className="mt-1 text-caption text-ink-500">
           No Quotation line {reference} exists.
           {acked
@@ -398,13 +436,21 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   const renderDuplicateCard = (item: ReconciliationItem) => {
     const reference =
       typeof item.SourceLineRef === "string" ? item.SourceLineRef : "";
+    const summary =
+      item.LineKey !== null &&
+      item.LineKey !== undefined &&
+      lineSummaries?.[item.LineKey] !== undefined
+        ? lineSummaries[item.LineKey]
+        : null;
     return cardShell(
       item.Key,
       `Duplicate match · Quotation ${reference}`,
       dangerPill("Blocking"),
       <>
         <p className="mt-1 text-caption text-ink-500">
-          Two lines claim this quotation line. Correct one match before Final Save.
+          {summary !== null
+            ? `Line ${summary.displayNumber}${summary.description.trim() !== "" ? ` (${summary.description})` : ""} also claims this quotation line. Correct one match before Final Save.`
+            : "Two lines claim this quotation line. Correct one match before Final Save."}
         </p>
         {readOnly ? null : (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -439,7 +485,14 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
         ? `${actorNameFor(item.ActorID) !== null ? `${chip} by ${actorNameFor(item.ActorID)} · ` : ""}${formatPaneTime(item.UpdatedAt) ?? ""}`
         : null;
     if (item.Kind === "missing_line") return renderMissingCard(item);
-    if (item.Kind === "extra_line" && item.SourceLineRef !== null && item.SourceLineRef !== undefined && item.SourceLineRef !== "") {
+    // F1: an unknown claim is an extra_line whose POValue names the absent
+    // reference; a plain extra carries a null POValue. SourceLineRef is
+    // never set on line:match items.
+    if (
+      item.Kind === "extra_line" &&
+      typeof item.POValue === "string" &&
+      item.POValue !== ""
+    ) {
       return renderUnknownCard(item);
     }
     if (item.Kind === "extra_line") return renderExtraCard(item);

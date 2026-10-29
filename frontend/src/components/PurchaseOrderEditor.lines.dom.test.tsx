@@ -75,7 +75,10 @@ const IDR: CurrencyInfo = {
   symbolSpaced: false,
 };
 
-const UOMS = [{ value: "Pc", label: "Pc" }];
+const UOMS = [
+  { value: "Pc", label: "Pc" },
+  { value: "Box", label: "Box" },
+];
 const INCOTERMS = [
   { value: "EXW", label: "EXW" },
   { value: "CIF", label: "CIF" },
@@ -382,6 +385,40 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     expect(shellActions.blockedMessage).toContain("Extra line");
   });
 
+  it("an unknown reference blocks until corrected to a valid match", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(
+      transport,
+      linkedOrder({
+        Items: [dtoItem({ QuotationItemNo: 99, QuotationSubNo: null, Description: "Mystery" })],
+      })
+    );
+
+    // Canonical unknown card: names the reference, offers correction.
+    await flush();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(document.body.textContent).toContain("Unknown reference · 99");
+    expect(document.body.textContent).toContain("No Quotation line 99 exists.");
+    expect(shellActions.blockedMessage).toContain("Unknown reference · 99");
+
+    // Correcting the match to the valid reference keeps a valid shape.
+    button("Line 1 quotation match").click();
+    await flush();
+    const allOptions = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    );
+    const valid = allOptions.find((el) => (el.textContent ?? "").includes("Quotation item 1 ·"));
+    if (valid === undefined) throw new Error("no Quotation item 1 option");
+    valid.click();
+    await flush();
+    await flush();
+
+    // The correction resolves everything: no blocker remains.
+    expect(shellActions.blockedMessage).toBeNull();
+    expect(document.body.textContent).toContain("Match corrected");
+  });
+
   it("removing a matched line resolves its items as line_removed with history kept", async () => {
     reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
     const transport = fakeTransport(null);
@@ -474,5 +511,70 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     expect(session.LineIdentities).toEqual([
       { Key: "client:aaa", ID: 101, Removed: false },
     ]);
+  });
+});
+
+describe("committed select and checkbox values (F3)", () => {
+  it("selecting a different UoM commits the new value, not the stale one", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    button("Line 1 unit of measure").click();
+    await flush();
+    const box = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    ).find((el) => el.textContent === "Box");
+    if (box === undefined) throw new Error("no Box option");
+    box.click();
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain("Line 1 unit of measure");
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Line 1 unit of measure"]')
+    ).not.toBeNull();
+  });
+
+  it("toggling a row discount commits the new enabled state, not the stale one", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    const toggle = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Line 1 discount enabled"]'
+    );
+    if (toggle === null) throw new Error("no discount toggle");
+    await act(async () => {
+      toggle.click();
+    });
+    await flush();
+    await flush();
+
+    // Enabled 0% differs from the source disabled 0%: a decision is recorded.
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
+    ).not.toBeNull();
+  });
+
+  it("changing Incoterms commits the selected value, not the stale one", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    button("Incoterms").click();
+    await flush();
+    const cif = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    ).find((el) => el.textContent === "CIF");
+    if (cif === undefined) throw new Error("no CIF option");
+    cif.click();
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain("Incoterms");
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Incoterms"]')
+    ).not.toBeNull();
   });
 });
