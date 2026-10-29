@@ -187,7 +187,10 @@ describe("PurchaseOrderDifferenceReviewView (issue #471)", () => {
     expect(html).toContain("Use PO entry for Payment terms");
     expect(html).toContain("Use Quotation for Payment terms");
     expect(html).not.toContain('aria-pressed="true"');
-    expect(html).toContain("No choice is selected for you");
+    // U2: the legacy no-session workbench keeps its choice UI with accurate
+    // copy; the old "No choice is selected for you" misled once kept choices
+    // pre-filled, so the receipt states its provenance instead.
+    expect(html).toContain("Choose a side for each difference.");
   });
 
   it("marks the chosen side and enables Continue once every value is decided", () => {

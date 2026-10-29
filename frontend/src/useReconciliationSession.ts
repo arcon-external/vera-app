@@ -8,6 +8,7 @@ import {
   orderPaneItems,
   paneFilterCounts,
   type CommitNotice,
+  type CommitResult,
   type HeaderFieldDef,
   type HeaderFieldKey,
   type LatestNotice,
@@ -26,6 +27,7 @@ import {
   LINE_FIELD_SUFFIX,
   sourceLineRef,
   prefillLineDecisions,
+  type LineCommitResult,
   type LineField,
   type LineValuesInput,
   sessionLineKey,
@@ -312,10 +314,10 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * wires onBlur (and Select onChange, which is itself a commit).
    */
   const commitField = useCallback(
-    (field: HeaderFieldKey, explicitValue?: string) => {
-      if (readOnlyRef.current || !liveRef.current) return;
+    (field: HeaderFieldKey, explicitValue?: string): CommitResult | null => {
+      if (readOnlyRef.current || !liveRef.current) return null;
       const currentSource = sourceRef.current;
-      if (currentSource === null) return;
+      if (currentSource === null) return null;
       const def = fieldDef(field);
       // F3: selects commit the NEW value, not React's previous render.
       const poValue = explicitValue ?? getFieldValueRef.current(field);
@@ -361,6 +363,7 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
           );
         }
       }
+      return result;
     },
     // session read for the count only; the transition itself is pure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -377,12 +380,12 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       lineKey: string,
       field: LineField,
       explicitRaw?: string | { enabled: boolean; percent: string | number }
-    ) => {
-      if (readOnlyRef.current || !liveRef.current) return;
+    ): LineCommitResult | null => {
+      if (readOnlyRef.current || !liveRef.current) return null;
       const currentSources = sourceLinesRef.current;
-      if (currentSources === null) return;
+      if (currentSources === null) return null;
       const line = linesRef.current.find((entry) => entry.clientKey === lineKey);
-      if (line === undefined) return;
+      if (line === undefined) return null;
       const identities = session?.LineIdentities ?? [];
       const sessionKey = sessionLineKey(identities, line);
       const set = deriveLineSet(
@@ -437,6 +440,7 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
           setAnnouncement(`${label}: differs from the Quotation.`);
         }
       }
+      return result;
     },
     // sessionKey read for the identity; the transition itself is pure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -687,7 +691,55 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * Ticket 05: section 5.5 for lines. Kept line decisions with unchanged
    * values pre-fill the keep choice under the review's positional keys.
    */
-  const prefillLines = useCallback((): { [key: string]: "po" } => {
+  const prefillMissing = useCallback(
+    (sources: PurchaseOrderSourceLineDTO[]): string[] => {
+      if (session === null) return [];
+      const acked = new Set(
+        session.Items.filter(
+          (entry) =>
+            entry.Kind === "missing_line" &&
+            entry.Status === "resolved" &&
+            typeof entry.SourceLineRef === "string"
+        ).map((entry) => entry.SourceLineRef as string)
+      );
+      // U2: the review keys acknowledgements by the source label it renders.
+      // The label prefers LineLabel and falls back to the numeric reference;
+      // accept either so a session ack survives a label/reference mismatch.
+      return sources
+        .map((source) => ({
+          label:
+            source.LineLabel !== ""
+              ? source.LineLabel
+              : source.QuotationSubNo === null || source.QuotationSubNo === undefined
+                ? String(source.QuotationItemNo)
+                : `${source.QuotationItemNo}.${source.QuotationSubNo}`,
+          ref: sourceLineRef(source.QuotationItemNo, source.QuotationSubNo),
+        }))
+        .filter((entry) => acked.has(entry.label) || acked.has(entry.ref))
+        .map((entry) => entry.label);
+    },
+    [session]
+  );
+
+  const prefillExtra = useCallback((): number[] => {
+    if (session === null) return [];
+    const ackedKeys = new Set(
+      session.Items.filter(
+        (entry) =>
+          entry.Kind === "extra_line" &&
+          (entry.Status === "resolved" ||
+            entry.History.some((event) => event.Resolution === "acknowledged_extra")) &&
+          typeof entry.LineKey === "string"
+      ).map((entry) => entry.LineKey as string)
+    );
+    return linesRef.current
+      .filter((entry) =>
+        ackedKeys.has(sessionLineKey(session?.LineIdentities ?? [], entry))
+      )
+      .map((entry) => entry.displayNumber);
+  }, [session]);
+
+  const prefillLines = useCallback((): { [key: string]: "po" | "quotation" } => {
     const currentSources = sourceLinesRef.current;
     if (currentSources === null) return {};
     return prefillLineDecisions(
@@ -709,9 +761,14 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
   const ordered = orderPaneItems(session?.Items ?? [], filter);
   const counts = paneFilterCounts(session?.Items ?? []);
 
+  const announce = useCallback((message: string) => {
+    setAnnouncement(message);
+  }, []);
+
   return {
     session,
     status,
+    announce,
     error,
     notices,
     validationErrors,
@@ -736,6 +793,9 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     acknowledgeMissing,
     acknowledgeExtra,
     prefillLines,
+    prefillMissing,
+    prefillExtra,
+    hasSession: session !== null,
     requestKeep,
     cancelKeep,
     confirmKeep,

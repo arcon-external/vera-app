@@ -454,3 +454,53 @@ describe("normalizeSession", () => {
     expect(normalized.Items[0].History[0].SourceLineRef).toBeNull();
   });
 });
+
+describe("prefill used_quotation decisions", () => {
+  it("pre-fills the quotation choice when the field still holds the recorded PO value", () => {
+    const used = {
+      Key: "header:paymentTerms",
+      Field: "header:paymentTerms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Payment terms",
+      POValue: "50% advance",
+      SourceValue: "30 days",
+      Status: "resolved",
+      Resolution: "used_quotation",
+      ActorID: 7,
+      UpdatedAt: "2026-10-29T00:00:05Z",
+      History: [],
+    };
+    const decisions = prefillDecisionsFromSession(
+      [used],
+      { paymentTerms: "50% advance", incoterms: "CIF", discountPercent: "0" },
+      { PaymentTerms: "30 days", Incoterms: "CIF", DiscountPercent: 0 }
+    );
+    expect(decisions).toEqual({ "header:paymentTerms": "quotation" });
+  });
+
+  it("does not pre-fill a used choice whose value moved away from the recorded one", () => {
+    const used = {
+      Key: "header:paymentTerms",
+      Field: "header:paymentTerms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Payment terms",
+      POValue: "30 days",
+      SourceValue: "30 days",
+      Status: "resolved",
+      Resolution: "used_quotation",
+      ActorID: 7,
+      UpdatedAt: "2026-10-29T00:00:05Z",
+      History: [],
+    };
+    const decisions = prefillDecisionsFromSession(
+      [used],
+      { paymentTerms: "50% advance", incoterms: "CIF", discountPercent: "0" },
+      { PaymentTerms: "30 days", Incoterms: "CIF", DiscountPercent: 0 }
+    );
+    expect(decisions).toEqual({});
+  });
+});

@@ -405,7 +405,8 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
 
     if (shellActions === null) throw new Error("no shell actions reported");
     expect(shellActions.unresolvedCount).toBe(1);
-    expect(shellActions.blockedMessage).toContain("Resolve 1 item to enable Final Save");
+    expect(shellActions.blockedMessage).toContain("Resolve 1 blocker to enable Final Save");
+    expect(shellActions.blockedMessage).toContain("Payment terms");
 
     // The review must not open: activating the blocked save focuses the
     // first unresolved item and announces the blocker assertively.
@@ -414,11 +415,113 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     });
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.querySelector('[role="alert"]')?.textContent).toBe(
-      "Final Save is blocked. Resolve 1 item first: Payment terms"
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+      "Final Save is blocked. 1 blocker: Payment terms."
     );
     expect(document.activeElement?.getAttribute("aria-label")).toBe(
       "Keep PO entry for Payment terms"
     );
+  });
+
+  it("the shell names every blocker and validation failures focus their field", async () => {
+    const orderWithLine = linkedOrder({
+      Items: [
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineNumber: 1,
+          Description: "Widget",
+          QuantityScaled: 20000,
+          UoM: "Pc",
+          UnitPriceMinor: 10000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+          GrossMinor: 20000,
+          DiscountMinor: 0,
+          NetMinor: 20000,
+        },
+      ],
+    });
+    const transport = fakeTransport(null);
+    await renderEditor(transport, orderWithLine);
+
+    // Invalidate four text fields. All four must be named; nothing is
+    // silently sliced after the third.
+    typeInto(input("Line 1 quantity"), "");
+    await act(async () => {
+      input("Line 1 quantity").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    typeInto(input("Line 1 unit price"), "abc");
+    await act(async () => {
+      input("Line 1 unit price").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    typeInto(input("Whole-PO discount"), "999");
+    await act(async () => {
+      input("Whole-PO discount").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    typeInto(input("Adjustment"), "abc");
+    await act(async () => {
+      input("Adjustment").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBeGreaterThan(3);
+    for (const label of ["Line 1 quantity", "Line 1 unit price", "Whole-PO discount", "Adjustment"]) {
+      expect(shellActions.blockedMessage).toContain(label);
+    }
+
+    await act(async () => {
+      shellActions?.onBlockedActivate();
+    });
+    await flush();
+    // The first invalid field is focused so its error becomes visible.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map(
+      (node) => node.textContent
+    );
+    expect(
+      alerts.some((text) => (text ?? "").includes("Final Save is blocked."))
+    ).toBe(true);
+  });
+
+  it("Final Save commits the focused field before readiness and blocks on its error", async () => {
+    const orderWithLine = linkedOrder({
+      Items: [
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineNumber: 1,
+          Description: "Widget",
+          QuantityScaled: 20000,
+          UoM: "Pc",
+          UnitPriceMinor: 10000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+          GrossMinor: 20000,
+          DiscountMinor: 0,
+          NetMinor: 20000,
+        },
+      ],
+    });
+    const transport = fakeTransport(null);
+    await renderEditor(transport, orderWithLine);
+
+    // Focus the quantity, make it invalid, and invoke Final Save without
+    // blurring first. Readiness must commit the pending value and block.
+    const field = input("Line 1 quantity");
+    await act(async () => {
+      field.focus();
+    });
+    typeInto(field, "");
+    await flush();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
   });
 });

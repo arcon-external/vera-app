@@ -1008,7 +1008,7 @@ const PO_RECONCILIATION_LINE_SESSION = {
       LineKey: "client:b",
       SourceLineRef: null,
       Label: "Extra line · Line 2",
-      POValue: "Line 2 is not on the quotation",
+      POValue: null,
       SourceValue: null,
       Status: "unresolved",
       Resolution: null,
@@ -1021,9 +1021,9 @@ const PO_RECONCILIATION_LINE_SESSION = {
       Field: "line:match",
       Kind: "extra_line",
       LineKey: "client:u",
-      SourceLineRef: "99",
+      SourceLineRef: null,
       Label: "Unknown reference · 99",
-      POValue: "Line 3 names quotation line 99, which does not exist",
+      POValue: "99",
       SourceValue: null,
       Status: "unresolved",
       Resolution: null,
@@ -1032,8 +1032,8 @@ const PO_RECONCILIATION_LINE_SESSION = {
       History: [
         {
           Kind: "extra_line",
-          SourceLineRef: "99",
-          POValue: "Line 3 names quotation line 99, which does not exist",
+          SourceLineRef: null,
+          POValue: "99",
           SourceValue: null,
           Status: "unresolved",
           Resolution: "acknowledged_extra",
@@ -1043,13 +1043,28 @@ const PO_RECONCILIATION_LINE_SESSION = {
       ],
     },
     {
-      Key: "source:1:duplicate",
-      Field: "source:match",
+      Key: "line:client:c:match",
+      Field: "line:match",
       Kind: "duplicate_match",
-      LineKey: null,
+      LineKey: "client:c",
       SourceLineRef: "1",
       Label: "Duplicate match · Quotation 1",
-      POValue: null,
+      POValue: "1",
+      SourceValue: null,
+      Status: "unresolved",
+      Resolution: null,
+      ActorID: 7,
+      UpdatedAt: "2026-10-28T00:00:03Z",
+      History: [],
+    },
+    {
+      Key: "line:client:d:match",
+      Field: "line:match",
+      Kind: "duplicate_match",
+      LineKey: "client:d",
+      SourceLineRef: "1",
+      Label: "Duplicate match · Quotation 1",
+      POValue: "1",
       SourceValue: null,
       Status: "unresolved",
       Resolution: null,
@@ -1793,6 +1808,7 @@ const CASES: SnapshotCase[] = [
     // those are interaction and stay in the DOM suite and hand-driven review.
     name: "PurchaseOrderReconciliationLineSet",
     element: (
+      <div className="flex min-h-0 flex-col gap-3">
       <ReconciliationPaneContent
         idPrefix="harness-lineset"
         session={PO_RECONCILIATION_LINE_SESSION}
@@ -1819,15 +1835,36 @@ const CASES: SnapshotCase[] = [
         onFixMatch={() => undefined}
         currency={PO_EDITOR_IDR}
         actorNameFor={() => null}
-        totalsStrip={
-          <ReconciliationTotalsStrip
-            calculatedMinor={24600}
-            printedMinor={24500}
-            reason="Whole-PO discount 2% vs 0%"
-            currency={PO_EDITOR_IDR}
-          />
-        }
+        fillHeight={false}
+        lineSummaries={{
+          "client:a": { displayNumber: 1, description: "Widget" },
+          "client:b": { displayNumber: 2, description: "Gadget" },
+          "client:u": { displayNumber: 3, description: "Thingamajig" },
+          "client:c": { displayNumber: 4, description: "Widget duplicate" },
+          "client:d": { displayNumber: 5, description: "Sprocket" },
+        }}
+        sourceDescriptions={{ "1": "Widget", "2": "Sprocket" }}
       />
+      <div className="rounded-lg border border-rule bg-white p-3">
+        <ReconciliationTotalsStrip
+          calculated={{
+            subtotalMinor: 20000,
+            discountMinor: 400,
+            ppnMinor: 1960,
+            adjustmentMinor: 0,
+            grandTotalMinor: 21560,
+          }}
+          printed={{
+            subtotalMinor: 20000,
+            discountMinor: 0,
+            ppnMinor: 2000,
+            grandTotalMinor: 22000,
+          }}
+          reason="Whole-PO discount 2% vs 0%"
+          currency={PO_EDITOR_IDR}
+        />
+      </div>
+    </div>
     ),
   },
   {

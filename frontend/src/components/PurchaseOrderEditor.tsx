@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
   CreatePurchaseOrderBlankDraft,
@@ -30,6 +30,7 @@ import {
 import {
   buildPurchaseOrderUpdate,
   calculatePurchaseOrder,
+  listValidationBlockers,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
   parseDiscountPercent,
@@ -141,9 +142,17 @@ export interface PurchaseOrderEditorViewProps {
   unresolvedByField?: Record<HeaderFieldKey, ReconciliationItem | null>;
   onCommitField?: (field: HeaderFieldKey, explicitValue?: string) => void;
   onFocusField?: (field: HeaderFieldKey) => void;
+  onFocusLine?: (lineKey: string, field: LineField) => void;
   /** F2: resolves an editor alias to its first-seen session key. */
   sessionKeyFor?: (clientKey: string) => string;
   onShowItem?: (key: string) => void;
+  /** U1: which line's match select is expanded (only one at a time). */
+  openMatchLineKey?: string | null;
+  onToggleMatch?: (lineKey: string) => void;
+  /** U1: removal that moves focus and announces; falls back to plain dispatch. */
+  onRemoveLine?: (lineKey: string) => void;
+  /** U1: adding a line focuses the new description and announces it. */
+  onAddLine?: () => void;
   /**
    * Ticket 05: line reconciliation wiring. Match choices come from the
    * linked source; blur commits each line field; feedback keys are
@@ -502,10 +511,14 @@ export function PurchaseOrderLineRow({
   onMatchChange,
   sessionKey,
   onCommitLine,
+  onFocusLine,
   lineNotices,
   lineErrors,
   unresolvedByLineField,
   onShowItem,
+  matchOpen = false,
+  onToggleMatch,
+  onRemoveLine,
 }: {
   line: PurchaseOrderEditorState["lines"][number];
   index: number;
@@ -530,12 +543,18 @@ export function PurchaseOrderLineRow({
     field: LineField,
     explicitRaw?: string | { enabled: boolean; percent: string | number }
   ) => void;
+  /** U8: tracks the focused line field so Final Save can commit it first. */
+  onFocusLine?: (field: LineField) => void;
   lineNotices?: Record<string, CommitNotice | null>;
   lineErrors?: Record<string, string | null>;
   unresolvedByLineField?: Record<string, ReconciliationItem | null>;
   onShowItem?: (key: string) => void;
+  /** U1: whether this row's match select is expanded (only one at a time). */
+  matchOpen?: boolean;
+  onToggleMatch?: () => void;
+  /** U1: removal that also moves focus and announces; falls back to plain dispatch. */
+  onRemoveLine?: (lineKey: string) => void;
 }) {
-  // F2/U7b: feedback maps are keyed by session key, matching item LineKeys.
   const feedbackKey = (field: LineField) => `${sessionKey ?? line.clientKey}:${field}`;
   const feedback = (field: LineField, label: string) => (
     <HeaderFieldFeedback
@@ -548,42 +567,99 @@ export function PurchaseOrderLineRow({
     />
   );
   const commit = (field: LineField) => () => onCommitLine?.(field);
+  const focus = (field: LineField) => () => onFocusLine?.(field);
   const commitValue = (
     field: LineField,
     explicitRaw: string | { enabled: boolean; percent: string | number }
   ) => onCommitLine?.(field, explicitRaw);
+  const matchRef =
+    line.quotationItemNo === null
+      ? null
+      : line.quotationSubNo === null
+        ? String(line.quotationItemNo)
+        : `${line.quotationItemNo}.${line.quotationSubNo}`;
+  const matchValue =
+    line.quotationItemNo === null
+      ? ""
+      : line.quotationSubNo === null
+        ? String(line.quotationItemNo)
+        : `${line.quotationItemNo}.${line.quotationSubNo}`;
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  // U1: focusing the revealed match select is part of opening it. The pane's
+  // Fix match and the header Change button share this path.
+  const wasOpen = useRef(matchOpen);
+  useEffect(() => {
+    if (matchOpen && !wasOpen.current) {
+      rowRef.current
+        ?.querySelector<HTMLElement>(`[aria-label="Line ${index + 1} quotation match"]`)
+        ?.focus();
+    }
+    wasOpen.current = matchOpen;
+  }, [matchOpen, index]);
   return (
     <div
-      className="grid gap-3 rounded-lg border border-rule bg-white p-3 sm:grid-cols-[minmax(0,1fr)_120px_140px_170px_auto] sm:items-end"
+      ref={rowRef}
+      className="grid gap-3 rounded-lg border border-rule bg-white p-3"
       data-po-line={index + 1}
     >
-      <label className="grid gap-1.5">
-        <span className="text-small font-medium text-ink-700">
-          Description
+      <div className="flex items-center gap-2">
+        <span className="text-small font-medium text-ink-900">
+          Line {index + 1}
         </span>
-        <input
-          aria-label={`Line ${index + 1} description`}
-          className={fieldClass}
-          value={line.description}
-          onChange={(event) =>
-            dispatch({
-              type: "lineChanged",
-              key: line.key,
-              patch: { description: event.target.value },
-            })
-          }
-          onBlur={commit("description")}
-        />
-        {matchOptions !== undefined && onMatchChange !== undefined ? (
+        {matchOptions !== undefined && onMatchChange !== undefined && onToggleMatch !== undefined ? (
+          <>
+            <span className="inline-flex items-center rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
+              {matchRef === null ? "Extra line" : `Quotation ${matchRef}`}
+            </span>
+            <button
+              type="button"
+              aria-label={`Change quotation match for line ${index + 1}`}
+              aria-expanded={matchOpen}
+              onClick={onToggleMatch}
+              className="cursor-pointer rounded-md px-2 py-1 text-small font-medium text-accent-700 underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+            >
+              Change
+            </button>
+          </>
+        ) : (
+          <span className="text-caption text-ink-400">
+            {matchLabel(line.quotationItemNo, line.quotationSubNo)}
+          </span>
+        )}
+        <span className="ml-auto">
+          <Button
+            size="sm"
+            aria-label={`Remove line ${index + 1}`}
+            onClick={() => {
+              if (onRemoveLine !== undefined) onRemoveLine(line.clientKey);
+              else dispatch({ type: "lineRemoved", key: line.key });
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+              className="@min-[560px]:hidden"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+            <span className="max-@min-[560px]:hidden [@min-[560px]]:inline">Remove</span>
+          </Button>
+        </span>
+      </div>
+      {matchOptions !== undefined && onMatchChange !== undefined && matchOpen ? (
+        <div className="grid gap-1.5">
+          <span className="text-small font-medium text-ink-700" id={`line-${index + 1}-match-heading`}>
+            Quotation match
+          </span>
           <Select
             ariaLabel={`Line ${index + 1} quotation match`}
-            value={
-              line.quotationItemNo === null
-                ? ""
-                : line.quotationSubNo === null
-                  ? String(line.quotationItemNo)
-                  : `${line.quotationItemNo}.${line.quotationSubNo}`
-            }
+            value={matchValue}
             options={matchOptions}
             onChange={(value) => {
               const text = String(value);
@@ -597,77 +673,89 @@ export function PurchaseOrderLineRow({
               onMatchChange(itemNo, tail === undefined ? null : Number(tail));
             }}
           />
-        ) : (
-          <span className="text-caption text-ink-400">
-            {matchLabel(line.quotationItemNo, line.quotationSubNo)}
+        </div>
+      ) : null}
+      <div className="grid gap-3 @min-[560px]:grid-cols-[1fr_1fr_1.2fr] @min-[700px]:grid-cols-[minmax(0,1fr)_104px_120px_150px]">
+        <label className="grid gap-1.5 @min-[560px]:col-span-full @min-[700px]:col-span-1">
+          <span className="text-small font-medium text-ink-700">
+            Description
           </span>
-        )}
-        {feedback("description", `Line ${index + 1} description`)}
-      </label>
-      <label className="grid gap-1.5">
-        <span className="text-small font-medium text-ink-700">Quantity</span>
-        <input
-          inputMode="decimal"
-          aria-label={`Line ${index + 1} quantity`}
-          className={fieldClass}
-          value={line.quantity}
-          onChange={(event) =>
-            dispatch({
-              type: "lineChanged",
-              key: line.key,
-              patch: { quantity: event.target.value },
-            })
-          }
-          onBlur={commit("quantity")}
-        />
-        {feedback("quantity", `Line ${index + 1} quantity`)}
-      </label>
-      <div className="grid gap-1.5">
-        <span className="text-small font-medium text-ink-700">UoM</span>
-        <Select
-          ariaLabel={`Line ${index + 1} unit of measure`}
-          value={line.uom}
-          options={uomOptions.length > 0 ? uomOptions : [{ value: line.uom, label: line.uom || "—" }]}
-          onChange={(value) => {
-            const next = String(value);
-            dispatch({
-              type: "lineChanged",
-              key: line.key,
-              patch: { uom: next },
-            });
-            commitValue("uom", next);
-          }}
-        />
-        {feedback("uom", `Line ${index + 1} unit of measure`)}
+          <input
+            aria-label={`Line ${index + 1} description`}
+            className={fieldClass}
+            value={line.description}
+            onChange={(event) =>
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { description: event.target.value },
+              })
+            }
+            onBlur={commit("description")}
+          onFocus={focus("description")}
+          />
+          {feedback("description", `Line ${index + 1} description`)}
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-small font-medium text-ink-700">Quantity</span>
+          <input
+            inputMode="decimal"
+            aria-label={`Line ${index + 1} quantity`}
+            className={fieldClass}
+            value={line.quantity}
+            onChange={(event) =>
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { quantity: event.target.value },
+              })
+            }
+            onBlur={commit("quantity")}
+          onFocus={focus("quantity")}
+          />
+          {feedback("quantity", `Line ${index + 1} quantity`)}
+        </label>
+        <div className="grid gap-1.5">
+          <span className="text-small font-medium text-ink-700">UoM</span>
+          <Select
+            ariaLabel={`Line ${index + 1} unit of measure`}
+            value={line.uom}
+            options={uomOptions.length > 0 ? uomOptions : [{ value: line.uom, label: line.uom || "—" }]}
+            onChange={(value) => {
+              const next = String(value);
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { uom: next },
+              });
+              commitValue("uom", next);
+            }}
+          />
+          {feedback("uom", `Line ${index + 1} unit of measure`)}
+        </div>
+        <label className="grid gap-1.5 @min-[560px]:col-span-full @min-[700px]:col-span-1">
+          <span className="text-small font-medium text-ink-700">
+            Unit price ({currency.code})
+          </span>
+          <input
+            inputMode="decimal"
+            aria-label={`Line ${index + 1} unit price`}
+            className={fieldClass}
+            value={line.unitPrice}
+            onChange={(event) =>
+              dispatch({
+                type: "lineChanged",
+                key: line.key,
+                patch: { unitPrice: event.target.value },
+              })
+            }
+            onBlur={commit("unitPrice")}
+          onFocus={focus("unitPrice")}
+          />
+          {feedback("unitPrice", `Line ${index + 1} unit price`)}
+        </label>
       </div>
-      <label className="grid gap-1.5">
-        <span className="text-small font-medium text-ink-700">
-          Unit price ({currency.code})
-        </span>
-        <input
-          inputMode="decimal"
-          aria-label={`Line ${index + 1} unit price`}
-          className={fieldClass}
-          value={line.unitPrice}
-          onChange={(event) =>
-            dispatch({
-              type: "lineChanged",
-              key: line.key,
-              patch: { unitPrice: event.target.value },
-            })
-          }
-          onBlur={commit("unitPrice")}
-        />
-        {feedback("unitPrice", `Line ${index + 1} unit price`)}
-      </label>
-      <Button
-        size="sm"
-        aria-label={`Remove line ${index + 1}`}
-        onClick={() => dispatch({ type: "lineRemoved", key: line.key })}
-      >
-        Remove
-      </Button>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-2 sm:col-span-5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-2">
         <label className="flex items-center gap-2 text-small text-ink-700">
           <input
             type="checkbox"
@@ -700,6 +788,7 @@ export function PurchaseOrderLineRow({
               })
             }
             onBlur={commit("discount")}
+            onFocus={focus("discount")}
           />
           <span className="text-small text-ink-500">%</span>
         </div>
@@ -718,7 +807,6 @@ export function PurchaseOrderLineRow({
     </div>
   );
 }
-
 /**
  * Ticket 04: the inline feedback under a committed header field. A notice is
  * inline feedback and never a review item; the pane owns decisions. An
@@ -802,8 +890,13 @@ export function PurchaseOrderEditorView({
   unresolvedByField,
   onCommitField,
   onFocusField,
+  onFocusLine,
   onShowItem,
   sessionKeyFor,
+  openMatchLineKey,
+  onToggleMatch,
+  onRemoveLine,
+  onAddLine,
   matchOptions,
   onMatchChange,
   onCommitLine,
@@ -1166,9 +1259,10 @@ export function PurchaseOrderEditorView({
             <Button
               size="sm"
               aria-label="Add line"
-              onClick={() =>
-                dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" })
-              }
+              onClick={() => {
+                if (onAddLine !== undefined) onAddLine();
+                else dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
+              }}
             >
               Add line
             </Button>
@@ -1189,6 +1283,13 @@ export function PurchaseOrderEditorView({
                 uomOptions={uomOptions}
                 calculation={calculation.lines[index] ?? null}
                 dispatch={dispatch}
+                matchOpen={openMatchLineKey !== undefined && openMatchLineKey === line.clientKey}
+                onToggleMatch={
+                  onToggleMatch === undefined
+                    ? undefined
+                    : () => onToggleMatch(line.clientKey)
+                }
+                onRemoveLine={onRemoveLine}
                 matchOptions={matchOptions}
                 onMatchChange={
                   onMatchChange === undefined
@@ -1202,6 +1303,11 @@ export function PurchaseOrderEditorView({
                     ? undefined
                     : (field, explicitRaw) =>
                         onCommitLine(line.clientKey, field, explicitRaw)
+                }
+                onFocusLine={
+                  onFocusLine === undefined
+                    ? undefined
+                    : (field) => onFocusLine(line.clientKey, field)
                 }
                 lineNotices={lineNotices}
                 lineErrors={lineErrors}
@@ -1448,6 +1554,26 @@ export function PurchaseOrderEditorPage({
   const [compareSource, setCompareSource] = useState<ReconciliationSourceValues | null>(null);
   // Ticket 05: source lines for line matching; loaded with the scalars.
   const [compareLines, setCompareLines] = useState<PurchaseOrderSourceLineDTO[] | null>(null);
+  const [openMatchLineKey, setOpenMatchLineKey] = useState<string | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  const addLine = () => {
+    const at = state.lines.length + 1;
+    dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
+    setOpenMatchLineKey(null);
+    setPendingFocus(`Line ${at} description`);
+    reconciliation.announce(`Line ${at} added.`);
+  };
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    setPendingFocus(null);
+    const target = document.querySelector<HTMLElement>(
+      `[aria-label="${pendingFocus.replace(/"/g, "")}"]`
+    );
+    if (target !== null) {
+      target.scrollIntoView({ block: "nearest" });
+      target.focus();
+    }
+  }, [pendingFocus, state.lines.length]);
   const [sessionBannerError, setSessionBannerError] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const sheetTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -1457,6 +1583,22 @@ export function PurchaseOrderEditorPage({
     { kind: "heading" } | { kind: "first" } | { kind: "item"; key: string } | null
   >(null);
   const focusedFieldRef = useRef<HeaderFieldKey | null>(null);
+  const focusedLineRef = useRef<{ clientKey: string; field: LineField } | null>(null);
+  // U8: validation readiness uses the same rules as the payload builder
+  // (no new requiredness): named per-field blockers with focus targets.
+  // Defined early so the shell gate and blocked activation can name every
+  // validation blocker alongside every session blocker.
+  const validationBlockers = useMemo(
+    () => listValidationBlockers(state, activeCurrency),
+    [state, activeCurrency]
+  );
+  // U2: receipt provenance for the review. When a session exists, the review
+  // is a read-only receipt of these session-recorded choices and
+  // acknowledgements; legacy no-session reviews keep the choice workbench.
+  const [receiptResolvedKeys, setReceiptResolvedKeys] = useState<string[]>([]);
+  const [receiptAckedMissing, setReceiptAckedMissing] = useState<string[]>([]);
+  const [receiptAckedExtra, setReceiptAckedExtra] = useState<number[]>([]);
+  const [receiptHasSession, setReceiptHasSession] = useState(false);
   const loadedSourceForRef = useRef<number | null>(null);
 
   const reconciliation = useReconciliationSession({
@@ -1643,26 +1785,60 @@ export function PurchaseOrderEditorPage({
     blockedActivate: () => void;
   } | null>(null);
 
-  // Ticket 04: a blocked Final Save never saves. It announces the blocker
-  // assertively and focuses the first unresolved item: in the rail at 1024
-  // and above, in the sheet below (opened first if closed).
-  const blockedActivate = useCallback(() => {
-    const count = reconciliation.blockingCount;
-    const named = reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ");
-    reconciliation.setBlockedAnnouncement(
-      `Final Save is blocked. Resolve ${count} ${count === 1 ? "item" : "items"} first${named !== "" ? `: ${named}` : "."}`
+  // U8: a blocked Final Save never saves. It names every validation and
+  // session blocker (no silent slicing after the third), announces them
+  // assertively, and focuses the first blocker so its error becomes visible.
+  // Validation blockers focus their field; session blockers reveal the pane
+  // (switching the filter to All so a Resolved-filter view cannot hide the
+  // blocker) and focus the item.
+  const focusValidationBlocker = useCallback((fieldLabel: string) => {
+    const target = document.querySelector<HTMLElement>(
+      `[aria-label="${fieldLabel.replace(/"/g, "")}"]`
     );
-    const smallViewport =
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(max-width: 1023px)").matches;
-    if (smallViewport || sheetOpen) {
-      sheetFocusRef.current = { kind: "first" };
-      setSheetOpen(true);
-      return;
+    if (target !== null) {
+      target.scrollIntoView({ block: "nearest" });
+      target.focus();
+      return true;
     }
-    paneRailRef.current?.focusFirstUnresolved();
-  }, [reconciliation.blockingCount, reconciliation.blockers, reconciliation.setBlockedAnnouncement, sheetOpen]);
+    return false;
+  }, []);
+  const blockedActivate = useCallback(() => {
+    const validationMessages = validationBlockers.map((entry) => entry.message);
+    const sessionLabels = reconciliation.blockers.map((entry) => entry.label);
+    const all = [...validationMessages, ...sessionLabels];
+    const count = all.length;
+    reconciliation.setBlockedAnnouncement(
+      count === 0
+        ? "Final Save is ready."
+        : `Final Save is blocked. ${count} ${count === 1 ? "blocker" : "blockers"}: ${all.join("; ")}.`
+    );
+    // Focus the first blocker: a validation failure focuses its field,
+    // otherwise the first unresolved pane item is revealed and focused.
+    if (validationBlockers.length > 0) {
+      if (focusValidationBlocker(validationBlockers[0]?.fieldLabel ?? "")) return;
+    }
+    if (reconciliation.blockingCount > 0) {
+      reconciliation.setFilter("all");
+      const smallViewport =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 1023px)").matches;
+      if (smallViewport || sheetOpen) {
+        sheetFocusRef.current = { kind: "first" };
+        setSheetOpen(true);
+        return;
+      }
+      paneRailRef.current?.focusFirstUnresolved();
+    }
+  }, [
+    validationBlockers,
+    reconciliation.blockingCount,
+    reconciliation.blockers,
+    reconciliation.setBlockedAnnouncement,
+    reconciliation.setFilter,
+    focusValidationBlocker,
+    sheetOpen,
+  ]);
 
   // Ticket 04: focuses a pane item from the inline anchor under a field.
   const showPaneItem = useCallback(
@@ -1714,8 +1890,14 @@ export function PurchaseOrderEditorPage({
     const callbacks = shellActionsRef.current;
     if (callbacks === null) return;
     const version = state.version;
-    const unresolved = reconciliation.blockingCount;
-    const namedBlockers = reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ");
+    // U8/F11: the shell names every validation and session blocker, never a
+    // silent first-three slice. The count covers both so an invalid field
+    // blocks exactly like an unresolved pane item.
+    const allBlockerLabels = [
+      ...validationBlockers.map((entry) => entry.label),
+      ...reconciliation.blockers.map((entry) => entry.label),
+    ];
+    const unresolved = allBlockerLabels.length;
     onShellActions?.({
       mode: correcting ? "correction" : "draft",
       dirty: shellDirty,
@@ -1725,7 +1907,7 @@ export function PurchaseOrderEditorPage({
       unresolvedCount: unresolved,
       blockedMessage:
         unresolved > 0
-          ? `Resolve ${unresolved} ${unresolved === 1 ? "item" : "items"} to enable Final Save${namedBlockers !== "" ? `: ${namedBlockers}` : ""}`
+          ? `Resolve ${unresolved} ${unresolved === 1 ? "blocker" : "blockers"} to enable Final Save: ${allBlockerLabels.join("; ")}`
           : null,
       onSave: () => void callbacks.save(version, false),
       onFinalSave: () => void callbacks.startReview(),
@@ -1741,7 +1923,7 @@ export function PurchaseOrderEditorPage({
     state.version,
     reviewLoading,
     shellSourceLess,
-    reconciliation.blockingCount,
+    validationBlockers,
     reconciliation.blockers,
     blockedActivate,
     onShellActions,
@@ -2128,8 +2310,61 @@ export function PurchaseOrderEditorPage({
 
   const startReview = async () => {
     // Contract section 7: commit the focused input first, before readiness.
-    if (focusedFieldRef.current !== null) {
-      reconciliation.commitField(focusedFieldRef.current);
+    // The commit result is the readiness truth: a focused field that still
+    // fails validation blocks with its message and focus.
+    let focusedCommitFailed = false;
+    if (focusedLineRef.current !== null) {
+      const target = focusedLineRef.current;
+      focusedLineRef.current = null;
+      const result = reconciliation.commitLine(
+        target.clientKey,
+        target.field
+      );
+      if (result !== null && result !== undefined) {
+        const failed =
+          (result as { validationError?: string | null }).validationError != null ||
+          ((result as { item?: unknown }).item !== null &&
+            (result as { itemChanged?: boolean }).itemChanged === true &&
+            (result as unknown as { item: { Status: string } }).item.Status === "unresolved");
+        if (failed) focusedCommitFailed = true;
+      }
+    } else if (focusedFieldRef.current !== null) {
+      const field = focusedFieldRef.current;
+      focusedFieldRef.current = null;
+      const result = reconciliation.commitField(field);
+      if (result !== null && result !== undefined) {
+        const failed =
+          (result as { validationError?: string | null }).validationError != null ||
+          ((result as { item?: unknown }).item !== null &&
+            (result as { itemChanged?: boolean }).itemChanged === true &&
+            (result as unknown as { item: { Status: string } }).item.Status === "unresolved");
+        if (failed) focusedCommitFailed = true;
+      }
+    }
+    // U8: named readiness before any save. Validation blockers use the same
+    // rules as the payload builder (no new requiredness); session blockers
+    // come from the live line set. The first blocker is focused so its error
+    // becomes visible; the review never opens while blocked.
+    const liveValidation = listValidationBlockers(state, activeCurrency);
+    const liveSessionCount = reconciliation.blockingCount;
+    if (liveValidation.length > 0 || liveSessionCount > 0 || focusedCommitFailed) {
+      const firstValidation = liveValidation[0];
+      if (firstValidation !== undefined) {
+        dispatch({ type: "saveFailed", error: firstValidation.message });
+        reconciliation.setBlockedAnnouncement(
+          `Final Save is blocked. ${liveValidation.length + liveSessionCount} ${liveValidation.length + liveSessionCount === 1 ? "blocker" : "blockers"}: ${[...liveValidation.map((entry) => entry.message), ...reconciliation.blockers.map((entry) => entry.label)].join("; ")}.`
+        );
+        const target = document.querySelector<HTMLElement>(
+          `[aria-label="${firstValidation.fieldLabel.replace(/"/g, "")}"]`
+        );
+        if (target !== null) {
+          target.scrollIntoView({ block: "nearest" });
+          target.focus();
+        }
+        return;
+      }
+      blockedActivate();
+      return;
     }
     const result = buildPurchaseOrderUpdate(state, activeCurrency);
     if (result.input === null) {
@@ -2148,9 +2383,10 @@ export function PurchaseOrderEditorPage({
       setCompareLines(loaded.Source.Lines);
       const initial = initialFinalizeReviewState();
       setReview(loaded);
-      // Brief section 5.5: the finalize review reads the session, it does not
-      // re-ask. A kept-PO resolution on unchanged values pre-fills the keep
-      // choice; everything else stays undecided.
+      // U2: the finalize review is a receipt of the recorded session, not a
+      // second workbench. Kept/used choices pre-fill from unchanged session
+      // resolutions; missing/extra acknowledgements pre-fill from the
+      // session's recorded acks. Everything else stays undecided and blocks.
       const prefilled = prefillDecisionsFromSession(
         reconciliation.items,
         {
@@ -2164,9 +2400,32 @@ export function PurchaseOrderEditorPage({
           DiscountPercent: loaded.Source.DiscountPercent,
         }
       );
-      setDecisions({ ...initial.decisions, ...prefilled, ...reconciliation.prefillLines() });
-      setAcknowledgedMissing(initial.acknowledgedMissing);
-      setAcknowledgedExtra(initial.acknowledgedExtra);
+      const prefilledLines = reconciliation.prefillLines();
+      const mergedDecisions = { ...initial.decisions, ...prefilled, ...prefilledLines };
+      setDecisions(mergedDecisions);
+      // Session-recorded acks survive into the review; without a session the
+      // legacy empty initial state is preserved (no invented history).
+      const sessionMissing =
+        reconciliation.hasSession === true
+          ? reconciliation.prefillMissing(loaded.Source.Lines)
+          : [];
+      const sessionExtra =
+        reconciliation.hasSession === true ? reconciliation.prefillExtra() : [];
+      setAcknowledgedMissing(
+        reconciliation.hasSession === true
+          ? Array.from(new Set([...initial.acknowledgedMissing, ...sessionMissing]))
+          : initial.acknowledgedMissing
+      );
+      setAcknowledgedExtra(
+        reconciliation.hasSession === true
+          ? Array.from(new Set([...initial.acknowledgedExtra, ...sessionExtra]))
+          : initial.acknowledgedExtra
+      );
+      // U2: receipt provenance — which choices/acks came from the session.
+      setReceiptResolvedKeys(Object.keys(mergedDecisions));
+      setReceiptAckedMissing(sessionMissing);
+      setReceiptAckedExtra(sessionExtra);
+      setReceiptHasSession(reconciliation.hasSession === true);
       setDocumentConfirmed(initial.documentConfirmed);
       setAssignConfirmation(initial.assignConfirmation);
       setView("review");
@@ -2276,6 +2535,23 @@ export function PurchaseOrderEditorPage({
   // #497: the link review replaces the editor view while it is open, exactly as
   // the final-save review does. The working copy is already saved, so Back
   // returns to the same values without an unsaved-change prompt.
+  // U2: receipt Change links leave the review for the entry form and focus
+  // the relevant control after render (fields by accessible name, line
+  // matches by opening the row's match select).
+  const editReviewDifference = (key: string, label: string) => {
+    setView("entry");
+    setPendingFocus(label);
+  };
+  const editReviewLine = (lineNumber: number) => {
+    const line = state.lines[lineNumber - 1];
+    setView("entry");
+    if (line !== undefined) {
+      setOpenMatchLineKey(line.clientKey);
+      setPendingFocus(`Line ${lineNumber} quotation match`);
+    } else {
+      setPendingFocus(`Line ${lineNumber} description`);
+    }
+  };
   if (linkReview !== null) {
     return (
       <PurchaseOrderDraftLinkReviewPanel
@@ -2342,6 +2618,12 @@ export function PurchaseOrderEditorPage({
         decisions={decisions}
         acknowledgedMissing={acknowledgedMissing}
         acknowledgedExtra={acknowledgedExtra}
+        receiptResolvedKeys={receiptResolvedKeys}
+        receiptAckedMissing={receiptAckedMissing}
+        receiptAckedExtra={receiptAckedExtra}
+        hasSession={receiptHasSession}
+        onEditDifference={editReviewDifference}
+        onEditLine={editReviewLine}
         onDecision={(key: string, choice: POReviewChoice) =>
           setDecisions((current) => ({ ...current, [key]: choice }))
         }
@@ -2453,17 +2735,32 @@ export function PurchaseOrderEditorPage({
       unresolvedByLineField[`${item.LineKey}:${suffix}`] = item;
     }
   }
-  // #517: focusing a line's match select from a pane card. The pane hands
-  // the stable session key; the editor works in aliases.
+  // U1: focusing a line's match select from a pane card. The pane hands
+  // the stable session key; the editor works in aliases. Opening the select
+  // is part of focusing it; the pending-focus effect focuses after render.
   const focusLineMatch = (sessionKey: string) => {
     const clientKey = reconciliation.clientKeyForSessionKey(sessionKey);
     if (clientKey === null) return;
     const at = state.lines.findIndex((line) => line.clientKey === clientKey);
     if (at === -1) return;
-    document
-      .querySelector(`[aria-label="Line ${at + 1} quotation match"]`)
-      ?.scrollIntoView({ block: "nearest" });
-    (document.querySelector(`[aria-label="Line ${at + 1} quotation match"]`) as HTMLElement | null)?.focus();
+    setOpenMatchLineKey(clientKey);
+    setPendingFocus(`Line ${at + 1} quotation match`);
+  };
+  // U1: immediate removal keeps review history server-side; focus moves to
+  // the next line's description (or Add line) and never falls to body.
+  const removeLine = (clientKey: string) => {
+    const at = state.lines.findIndex((line) => line.clientKey === clientKey);
+    if (at === -1) return;
+    const target = editorStateRef.current.lines[at + 1];
+    dispatch({ type: "lineRemoved", key: state.lines[at]?.key ?? -1 });
+    setOpenMatchLineKey(null);
+    if (target !== undefined) {
+      const nextAt = state.lines.findIndex((line) => line.clientKey === target.clientKey);
+      setPendingFocus(`Line ${nextAt === -1 ? at + 1 : nextAt + 1} description`);
+    } else {
+      setPendingFocus("Add line");
+    }
+    reconciliation.announce(`Line ${at + 1} removed. Its review items are kept as history.`);
   };
   const addLineFromSource = (reference: string) => {
     const [head, tail] = reference.split(".");
@@ -2476,13 +2773,16 @@ export function PurchaseOrderEditorPage({
       quotationSubNo: tail === undefined ? null : Number(tail),
     });
   };
-  // Ticket 05: derived totals strip inputs, in document order. Null while the
-  // source is still loading; the strip reads pending then.
+  // U6/R-09: the reason follows the visible comparable-input order. The
+  // form renders the Lines section before Discounts and adjustment, so
+  // matched lines come first in display order (quantity, unit price, row
+  // discount per line) and the whole-PO discount last. No duplicate discount
+  // input, no pricing change; the helper itself is order-agnostic and the
+  // R-09 unit test covers first-differs-wins.
   const totalsStripReason: string | null =
     compareSource === null || compareLines === null
       ? null
       : explainTotalsDifference([
-          headerDiscountDifference(state.header.discountPercent, compareSource.discountPercent),
           ...lineMoneyDifferences(
             state.lines.map((line, index) => ({
               displayNumber: index + 1,
@@ -2505,12 +2805,24 @@ export function PurchaseOrderEditorPage({
             })),
             activeCurrency
           ),
+          headerDiscountDifference(state.header.discountPercent, compareSource.discountPercent),
         ]);
+  const calculatedTotals = calculatePurchaseOrder(state, activeCurrency).totals;
   const totalsStrip =
     state.sourceState !== "live" || !state.printedTotalsKnown ? null : (
       <ReconciliationTotalsStrip
-        calculatedMinor={calculatePurchaseOrder(state, activeCurrency).totals?.grandTotalMinor ?? null}
-        printedMinor={state.printedTotals.grandTotalMinor}
+        calculated={
+          calculatedTotals === null || calculatedTotals === undefined
+            ? null
+            : {
+                subtotalMinor: calculatedTotals.subtotalMinor,
+                discountMinor: calculatedTotals.discountMinor,
+                ppnMinor: calculatedTotals.ppnMinor,
+                adjustmentMinor: calculatedTotals.adjustmentMinor,
+                grandTotalMinor: calculatedTotals.grandTotalMinor,
+              }
+        }
+        printed={state.printedTotals}
         reason={totalsStripReason}
         currency={activeCurrency}
       />
@@ -2607,35 +2919,8 @@ export function PurchaseOrderEditorPage({
         }}
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="min-w-0" inert={sheetOpen ? true : undefined}>
+        <div className="@container min-w-0" inert={sheetOpen ? true : undefined}>
           <div className="flex flex-col gap-6">
-            <PurchaseOrderDocumentPanel
-        purchaseOrderId={state.orderId}
-        // A draft Save remounts this editor through onSaved. Blocking the
-        // document controls while it is in flight keeps an attach from starting
-        // against a panel that is about to disappear (and losing its error).
-        disabled={state.saving}
-        // #493: an upload must persist the working copy before attaching,
-        // so a reload cannot lose the values staff saw when they chose the file.
-        // It notifies no one: onSaved would remount this editor mid-attach and a
-        // failed upload's error would be set on the unmounted panel. The shared
-        // save still dispatches saveSucceeded, which keeps the editor's local
-        // id and version. The panel's interface is unchanged: it still only asks
-        // for an id.
-        resolvePurchaseOrderId={async () => {
-          const outcome = await persistWorkingCopy(false);
-          if (outcome.kind === "saved") return outcome.order.ID;
-          if (outcome.kind === "conflict") {
-            throw new Error(draftLinkConflictWarning(outcome.conflict));
-          }
-          if (outcome.kind === "savedRecord") {
-            throw new Error(
-              "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
-            );
-          }
-          throw new Error(outcome.message);
-        }}
-      />
       <PurchaseOrderEditorView
         state={state}
         dispatch={dispatch}
@@ -2663,8 +2948,19 @@ export function PurchaseOrderEditorPage({
         sessionKeyFor={reconciliation.sessionKeyFor}
         onFocusField={(field) => {
           focusedFieldRef.current = field;
+          focusedLineRef.current = null;
+        }}
+        onFocusLine={(lineKey, field) => {
+          focusedFieldRef.current = null;
+          focusedLineRef.current = { clientKey: lineKey, field };
         }}
         onShowItem={(key) => showPaneItem(key)}
+        openMatchLineKey={openMatchLineKey}
+        onToggleMatch={(lineKey) =>
+          setOpenMatchLineKey((current) => (current === lineKey ? null : lineKey))
+        }
+        onRemoveLine={removeLine}
+        onAddLine={addLine}
         matchOptions={matchOptions}
         onMatchChange={(lineKey, quotationItemNo, quotationSubNo) => {
           const target = state.lines.find((line) => line.clientKey === lineKey);
@@ -2681,10 +2977,12 @@ export function PurchaseOrderEditorPage({
         lineNotices={reconciliation.lineNotices}
         lineErrors={reconciliation.lineValidationErrors}
         unresolvedByLineField={unresolvedByLineField}
-        gateUnresolvedCount={reconciliation.blockingCount}
+        gateUnresolvedCount={
+          validationBlockers.length + reconciliation.blockingCount
+        }
         gateBlockedMessage={
-          reconciliation.blockingCount > 0
-            ? `Resolve ${reconciliation.blockingCount} ${reconciliation.blockingCount === 1 ? "item" : "items"} to enable Final Save: ${reconciliation.blockers.slice(0, 3).map((entry) => entry.label).join("; ")}`
+          validationBlockers.length + reconciliation.blockingCount > 0
+            ? `Resolve ${validationBlockers.length + reconciliation.blockingCount} ${validationBlockers.length + reconciliation.blockingCount === 1 ? "blocker" : "blockers"} to enable Final Save: ${[...validationBlockers.map((entry) => entry.label), ...reconciliation.blockers.map((entry) => entry.label)].join("; ")}`
             : null
         }
         onBlockedActivate={blockedActivate}
@@ -2694,8 +2992,9 @@ export function PurchaseOrderEditorPage({
         </div>
         <aside
           aria-label="Reconciliation"
-          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:block lg:max-h-[calc(100dvh-176px)] lg:flex-col"
+          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-176px)] lg:flex-col lg:gap-3 [@media(max-height:719px)]:lg:max-h-none"
         >
+          <div className="min-h-0 flex-1 overflow-hidden [@media(max-height:719px)]:overflow-visible">
           <ReconciliationPaneContent
             idPrefix="rail"
             ref={paneRailRef}
@@ -2734,8 +3033,35 @@ export function PurchaseOrderEditorPage({
             sourceDescriptions={sourceDescriptions}
             currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
-            totalsStrip={totalsStrip}
+            fillHeight
           />
+          </div>
+          <div className="shrink-0">
+            {/* U4: the rail owns the customer PO document; the form must not
+                repeat it. An upload persists the working copy first so a
+                reload cannot lose the values staff saw when they chose the
+                file (#493). */}
+            <PurchaseOrderDocumentPanel
+              purchaseOrderId={state.orderId}
+              disabled={state.saving}
+              resolvePurchaseOrderId={async () => {
+                const outcome = await persistWorkingCopy(false);
+                if (outcome.kind === "saved") return outcome.order.ID;
+                if (outcome.kind === "conflict") {
+                  throw new Error(draftLinkConflictWarning(outcome.conflict));
+                }
+                if (outcome.kind === "savedRecord") {
+                  throw new Error(
+                    "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
+                  );
+                }
+                throw new Error(outcome.message);
+              }}
+            />
+          </div>
+          {totalsStrip === null ? null : (
+            <div className="shrink-0 rounded-lg border border-rule bg-white p-3">{totalsStrip}</div>
+          )}
         </aside>
       </div>
       {sheetOpen ? (
@@ -2748,7 +3074,7 @@ export function PurchaseOrderEditorPage({
               closeSheet();
             }
           }}
-          className="fixed inset-x-0 bottom-0 top-16 z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 lg:hidden"
+          className="fixed inset-x-0 bottom-0 top-0 z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 sm:top-16 lg:hidden"
         >
           <ReconciliationPaneContent
             idPrefix="sheet"
@@ -2788,7 +3114,6 @@ export function PurchaseOrderEditorPage({
             sourceDescriptions={sourceDescriptions}
             currency={activeCurrency}
             actorNameFor={(id) => (id === actorId ? actorName : null)}
-            totalsStrip={totalsStrip}
             headerActions={
               <button
                 type="button"
@@ -2800,6 +3125,26 @@ export function PurchaseOrderEditorPage({
               </button>
             }
           />
+          <PurchaseOrderDocumentPanel
+            purchaseOrderId={state.orderId}
+            disabled={state.saving}
+            resolvePurchaseOrderId={async () => {
+              const outcome = await persistWorkingCopy(false);
+              if (outcome.kind === "saved") return outcome.order.ID;
+              if (outcome.kind === "conflict") {
+                throw new Error(draftLinkConflictWarning(outcome.conflict));
+              }
+              if (outcome.kind === "savedRecord") {
+                throw new Error(
+                  "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
+                );
+              }
+              throw new Error(outcome.message);
+            }}
+          />
+          {totalsStrip === null ? null : (
+            <div className="rounded-lg border border-rule bg-white p-3">{totalsStrip}</div>
+          )}
         </div>
       ) : null}
       <div role="status" aria-live="polite" className="sr-only">

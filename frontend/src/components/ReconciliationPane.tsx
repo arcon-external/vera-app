@@ -64,8 +64,11 @@ export interface ReconciliationPaneContentProps {
   actorNameFor: (actorId: number) => string | null;
   /** Rendered beside the pane title; the sheet passes its Close button. */
   headerActions?: ReactNode;
-  /** Derived totals check, rendered under the heading. Never a decision. */
-  totalsStrip?: ReactNode;
+  /**
+   * U4: fill the bounded rail wrapper so only the item list scrolls. The
+   * sheet leaves this unset and scrolls the whole pane instead.
+   */
+  fillHeight?: boolean;
   ref?: Ref<ReconciliationPaneHandle>;
 }
 
@@ -179,7 +182,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     currency,
     actorNameFor,
     headerActions,
-    totalsStrip,
+    fillHeight,
     ref,
   } = props;
 
@@ -198,6 +201,37 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   const actionRefs = useRef(new Map<string, HTMLButtonElement>());
   const confirmYesRefs = useRef(new Map<string, HTMLButtonElement>());
   const handleRef = useRef<ReconciliationPaneHandle | null>(null);
+  // U9: after a pane action resolves or cancels, focus moves to the next
+  // unresolved action (or the count) instead of falling to the body.
+  // Set before calling the parent; the effect below runs after its update.
+  const [pendingAfterAction, setPendingAfterAction] = useState<
+    { kind: "next"; exclude: string } | { kind: "same"; key: string } | null
+  >(null);
+  // U9: every pane decision moves focus after the parent's state lands.
+  // Resolving actions land on the next unresolved action (or the count);
+  // cancelling a keep confirm returns to that item's Keep trigger.
+  const focusNextUnresolved = (excludeKey: string | null) => {
+    const orderedAll = orderPaneItems(items, "all");
+    const next =
+      excludeKey === null
+        ? orderedAll.find((entry) => entry.Status === "unresolved")
+        : orderedAll.find(
+            (entry) => entry.Status === "unresolved" && entry.Key !== excludeKey
+          );
+    const target =
+      next !== undefined ? actionRefs.current.get(next.Key) : undefined;
+    (target ?? countRef.current)?.focus();
+  };
+  const afterAction = (
+    key: string,
+    run: () => void,
+    mode: "next" | "same"
+  ) => {
+    setPendingAfterAction(
+      mode === "next" ? { kind: "next", exclude: key } : { kind: "same", key }
+    );
+    run();
+  };
   // Resolved rows are 44px summaries; their read-only values expand in place.
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const toggleExpanded = (key: string) =>
@@ -211,10 +245,35 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     confirmYesRefs.current.get(keepConfirmKey)?.focus();
   }, [keepConfirmKey]);
 
+  // U9: runs after the parent's state update lands, so the focused button
+  // exists in the new list (or the count takes over when nothing is left).
+  useEffect(() => {
+    if (pendingAfterAction === null) return;
+    setPendingAfterAction(null);
+    if (pendingAfterAction.kind === "same") {
+      const target = actionRefs.current.get(pendingAfterAction.key);
+      if (target !== undefined) {
+        target.focus();
+        return;
+      }
+    }
+    focusNextUnresolved(
+      pendingAfterAction.kind === "next" ? pendingAfterAction.exclude : null
+    );
+    // Intentionally runs on the items identity, not the full list: the
+    // parent owns ordering and the refs map only holds rendered actions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAfterAction, items]);
+
   useEffect(() => {
     handleRef.current = {
       focusFirstUnresolved: () => {
-        const first = ordered.find((entry) => entry.Status === "unresolved");
+        // U9: blocked activation reveals the first blocker even when the
+        // visible filter hides it; the editor switches the filter to All
+        // before calling, so the action below is rendered.
+        const first = orderPaneItems(items, "all").find(
+          (entry) => entry.Status === "unresolved"
+        );
         if (first === undefined) return false;
         const target = actionRefs.current.get(first.Key);
         if (target === undefined) return false;
@@ -225,6 +284,8 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
         countRef.current?.focus();
       },
       focusItem: (key: string) => {
+        const found = items.some((entry) => entry.Key === key);
+        if (!found) return false;
         const target = actionRefs.current.get(key);
         if (target === undefined) return false;
         target.focus();
@@ -274,13 +335,13 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   );
 
   const neutralPill = (text: string) => (
-    <span className="inline-flex items-center rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
       {text}
     </span>
   );
 
   const dangerPill = (text: string) => (
-    <span className="inline-flex items-center rounded-md border border-danger-200 bg-danger-50 px-2 py-0.5 text-micro font-medium uppercase text-danger-700">
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-danger-200 bg-danger-50 px-2 py-0.5 text-micro font-medium uppercase text-danger-700">
       {text}
     </span>
   );
@@ -327,7 +388,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             <button
               type="button"
               aria-label={`Acknowledge omission of ${item.Label}`}
-              onClick={() => onAcknowledgeMissing?.(item.Key)}
+              onClick={() => afterAction(item.Key, () => onAcknowledgeMissing?.(item.Key), "next")}
               className={cardButtonClass}
             >
               Acknowledge omission
@@ -372,7 +433,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             <button
               type="button"
               aria-label={`Acknowledge ${item.Label} as extra`}
-              onClick={() => onAcknowledgeExtra?.(item.Key)}
+              onClick={() => afterAction(item.Key, () => onAcknowledgeExtra?.(item.Key), "next")}
               className={cardButtonClass}
             >
               Acknowledge extra
@@ -421,7 +482,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
               <button
                 type="button"
                 aria-label={`Acknowledge unknown reference ${reference} as extra`}
-                onClick={() => onAcknowledgeExtra?.(item.Key)}
+                onClick={() => afterAction(item.Key, () => onAcknowledgeExtra?.(item.Key), "next")}
                 className={cardButtonClass}
               >
                 Acknowledge extra
@@ -436,6 +497,16 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   const renderDuplicateCard = (item: ReconciliationItem) => {
     const reference =
       typeof item.SourceLineRef === "string" ? item.SourceLineRef : "";
+    // U7: name every claimant line ("Lines 3 and 5"), not just this card's
+    // own line — the wire items are per-claimant but the staff decision is
+    // about the shared reference.
+    const claimantNumbers = items
+      .filter(
+        (entry) =>
+          entry.Kind === "duplicate_match" && entry.SourceLineRef === reference && typeof entry.LineKey === "string"
+      )
+      .map((entry) => lineSummaries?.[entry.LineKey as string]?.displayNumber)
+      .filter((number): number is number => typeof number === "number");
     const summary =
       item.LineKey !== null &&
       item.LineKey !== undefined &&
@@ -448,9 +519,13 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
       dangerPill("Blocking"),
       <>
         <p className="mt-1 text-caption text-ink-500">
-          {summary !== null
-            ? `Line ${summary.displayNumber}${summary.description.trim() !== "" ? ` (${summary.description})` : ""} also claims this quotation line. Correct one match before Final Save.`
-            : "Two lines claim this quotation line. Correct one match before Final Save."}
+          {claimantNumbers.length > 1
+            ? `Lines ${claimantNumbers.join(" and ")} claim this quotation line. `
+            : "Two lines claim this quotation line. "}
+          {summary !== null && summary.description.trim() !== ""
+            ? `This card is line ${summary.displayNumber} (${summary.description}). `
+            : ""}
+          Correct one match before Final Save.
         </p>
         {readOnly ? null : (
           <div className="mt-2 flex flex-wrap gap-2">
@@ -472,6 +547,13 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     );
   };
 
+  const actorNameForItem = (actorId: number): string | null => {
+    // U12: every resolved row names its actor; fall back to the id when no
+    // display name is known rather than printing a bare date.
+    const known = actorNameFor(actorId);
+    if (known !== null) return known;
+    return actorId > 0 ? `User #${actorId}` : null;
+  };
   const renderItem = (item: ReconciliationItem) => {
     const actionable =
       !readOnly && item.Status === "unresolved" && item.Kind === "difference";
@@ -482,7 +564,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     const expanded = expandedKeys.includes(item.Key);
     const attribution =
       item.Resolution !== null && item.Resolution !== undefined
-        ? `${actorNameFor(item.ActorID) !== null ? `${chip} by ${actorNameFor(item.ActorID)} · ` : ""}${formatPaneTime(item.UpdatedAt) ?? ""}`
+        ? `${actorNameForItem(item.ActorID) !== null ? `${chip} by ${actorNameForItem(item.ActorID)} · ` : ""}${formatPaneTime(item.UpdatedAt) ?? ""}`
         : null;
     if (item.Kind === "missing_line") return renderMissingCard(item);
     // F1: an unknown claim is an extra_line whose POValue names the absent
@@ -584,25 +666,41 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
               ) : null}
             </div>
             {taxRow ? (
-              <p className="mt-1 text-small tabular-nums text-ink-700">
-                {formatPaneValue(item.POValue, item.Field, currency)}{" "}
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                  className="inline-block shrink-0 text-ink-400"
-                >
-                  <rect x="5" y="11" width="14" height="9" rx="1.5" />
-                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                </svg>
-                <span className="sr-only">Protected: changing the basis later is a correction or source repair.</span>
-              </p>
+              <>
+                <p className="mt-1 text-small tabular-nums text-ink-700">
+                  {formatPaneValue(item.POValue, item.Field, currency)}{" "}
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className="inline-block shrink-0 text-ink-400"
+                  >
+                    <rect x="5" y="11" width="14" height="9" rx="1.5" />
+                    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+                  </svg>
+                  <span className="sr-only">Protected: changing the basis later is a correction or source repair.</span>
+                </p>
+                {(() => {
+                  const source = item.SourceValue as { TaxZone?: unknown; TaxType?: unknown; ServiceCategory?: unknown } | null;
+                  const parts = [source?.TaxZone, source?.TaxType, source?.ServiceCategory].filter(
+                    (part): part is string => typeof part === "string" && part !== ""
+                  );
+                  if (parts.length === 0) return null;
+                  const poText = formatPaneValue(item.POValue, item.Field, currency);
+                  if (parts.join(" · ") === poText) return null;
+                  return (
+                    <p className="mt-1 text-caption text-ink-500">
+                      Quotation: {parts.join(" · ")}
+                    </p>
+                  );
+                })()}
+              </>
             ) : (
               <dl className="mt-1.5 grid gap-1 text-small">
                 <div className="flex gap-2">
@@ -623,8 +721,8 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             )}
             {item.Resolution !== null ? (
               <p className="mt-1 text-caption text-ink-500">
-                {actorNameFor(item.ActorID) !== null
-                  ? `${chip} by ${actorNameFor(item.ActorID)} · `
+                {actorNameForItem(item.ActorID) !== null
+                  ? `${chip} by ${actorNameForItem(item.ActorID)} · `
                   : ""}
                 {formatPaneTime(item.UpdatedAt) ?? ""}
               </p>
@@ -672,7 +770,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                   }}
                   type="button"
                   aria-label={`Yes, keep PO entry for ${item.Label}`}
-                  onClick={() => onConfirmKeep(item.Key)}
+                  onClick={() => afterAction(item.Key, () => onConfirmKeep(item.Key), "next")}
                   className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-200 bg-accent-50 px-3.5 text-small font-medium text-accent-700 transition-colors duration-150 hover:bg-accent-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8"
                 >
                   Yes, keep PO entry
@@ -680,7 +778,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                 <button
                   type="button"
                   aria-label={`Cancel keeping PO entry for ${item.Label}`}
-                  onClick={onCancelKeep}
+                  onClick={() => afterAction(item.Key, onCancelKeep, "same")}
                   className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8"
                 >
                   Cancel
@@ -704,7 +802,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
               <button
                 type="button"
                 aria-label={`Use Quotation value for ${item.Label}`}
-                onClick={() => onUse(item.Key)}
+                onClick={() => afterAction(item.Key, () => onUse(item.Key), "next")}
                 className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-accent-200 bg-accent-50 px-3.5 text-small font-medium text-accent-700 transition-colors duration-150 hover:bg-accent-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8"
               >
                 Use Quotation
@@ -717,7 +815,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   };
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className={`flex min-h-0 flex-col${fillHeight === true ? " h-full" : ""}`}>
       <div className="flex items-center justify-between gap-2">
         <h2
           id={headingId}
@@ -727,21 +825,26 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
           Reconciliation
         </h2>
         {headerActions}
-        <span
-          ref={countRef}
-          tabIndex={-1}
-          role="status"
-          aria-label={
-            unresolvedCount === 0
-              ? "Nothing to resolve"
-              : `${unresolvedCount} ${unresolvedCount === 1 ? "item" : "items"} to resolve`
-          }
-          className="tnum inline-flex h-7 shrink-0 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
-        >
-          {unresolvedCount === 0
-            ? "Nothing to resolve"
-            : `${unresolvedCount} to resolve`}
-        </span>
+        {status === "loading" || noSource ? null : (
+          <span
+            ref={countRef}
+            tabIndex={-1}
+            aria-label={
+              readOnly
+                ? `${counts.resolved} ${counts.resolved === 1 ? "item" : "items"} resolved`
+                : unresolvedCount === 0
+                  ? "Nothing to resolve"
+                  : `${unresolvedCount} ${unresolvedCount === 1 ? "item" : "items"} to resolve`
+            }
+            className="tnum inline-flex h-7 shrink-0 items-center rounded-full bg-accent-100 px-2.5 text-caption font-semibold text-accent-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+          >
+            {readOnly
+              ? `${counts.resolved} resolved`
+              : unresolvedCount === 0
+                ? "Nothing to resolve"
+                : `${unresolvedCount} to resolve`}
+          </span>
+        )}
       </div>
       {sourceLabel !== null ? (
         <p className="mt-0.5 text-caption text-ink-500">
@@ -749,9 +852,6 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
         </p>
       ) : null}
       <p className="text-caption text-ink-400">Checked when you leave a field.</p>
-      {totalsStrip !== undefined && totalsStrip !== null ? (
-        <div className="mt-2 rounded-lg border border-rule bg-white p-3">{totalsStrip}</div>
-      ) : null}
 
       {readOnly && readOnlyCaption !== undefined ? (
         <p className="mt-2 text-caption leading-relaxed text-ink-500">{readOnlyCaption}</p>
@@ -803,13 +903,6 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             This reconciliation is read-only until a new source is linked.
           </p>
         </div>
-      ) : items.length === 0 ? (
-        <div className="mt-3">
-          <p className="text-small font-medium text-ink-900">No differences yet</p>
-          <p className="mt-1 text-caption text-ink-500">
-            Values are checked when you leave a field.
-          </p>
-        </div>
       ) : (
         <>
           <div
@@ -836,7 +929,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
                   aria-controls={listId}
                   tabIndex={active ? 0 : -1}
                   onClick={() => onFilterChange(entry.id)}
-                  className={`tnum inline-flex min-h-8 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-small transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
+                  className={`tnum inline-flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-small transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8 ${
                     active
                       ? "bg-white font-medium text-ink-900 shadow-sm ring-1 ring-rule"
                       : "text-ink-500 hover:text-ink-900"
@@ -857,29 +950,36 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             </p>
           ) : null}
 
-          {ordered.length === 0 ? (
-            <div className="mt-3">
-              <p className="text-small font-medium text-ink-900">
-                {filter === "unresolved" ? "No unresolved items" : "No resolved items yet"}
-              </p>
-              <p className="mt-1 text-caption text-ink-500">
-                {filter === "unresolved"
-                  ? "No differences to resolve."
-                  : "Kept and accepted values will appear here."}
-              </p>
-              <button
-                type="button"
-                onClick={onShowAll}
-                className="mt-2 inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
-              >
-                Show all
-              </button>
-            </div>
-          ) : (
-            <div ref={listRef} role="tabpanel" id={listId} className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div ref={listRef} role="tabpanel" id={listId} tabIndex={-1} className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40">
+            {items.length === 0 ? (
+              <div className="mt-1">
+                <p className="text-small font-medium text-ink-900">No differences yet</p>
+                <p className="mt-1 text-caption text-ink-500">
+                  Values are checked when you leave a field.
+                </p>
+              </div>
+            ) : ordered.length === 0 ? (
+              <div className="mt-1">
+                <p className="text-small font-medium text-ink-900">
+                  {filter === "unresolved" ? "No unresolved items" : "No resolved items yet"}
+                </p>
+                <p className="mt-1 text-caption text-ink-500">
+                  {filter === "unresolved"
+                    ? "No differences to resolve."
+                    : "Kept and accepted values will appear here."}
+                </p>
+                <button
+                  type="button"
+                  onClick={onShowAll}
+                  className="mt-2 inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40 lg:min-h-8"
+                >
+                  Show all
+                </button>
+              </div>
+            ) : (
               <ul className="flex flex-col gap-2 pb-1">{ordered.map(renderItem)}</ul>
-            </div>
-          )}
+            )}
+          </div>
         </>
       )}
     </div>
@@ -915,7 +1015,7 @@ export function ReconciliationSheetTrigger({
           : `Reconciliation, ${unresolvedCount} ${unresolvedCount === 1 ? "item" : "items"} to resolve. Open panel.`
       }
       onClick={onOpen}
-      className="sticky top-16 z-20 flex min-h-14 w-full cursor-pointer items-center justify-between gap-2 border-b border-rule bg-paper/95 px-5 py-2 backdrop-blur transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40 lg:hidden"
+      className="sticky top-0 z-20 flex min-h-14 w-full cursor-pointer items-center justify-between gap-2 border-b border-rule bg-paper/95 px-5 py-2 backdrop-blur transition-colors duration-150 hover:bg-paper-muted focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40 sm:top-16 lg:hidden"
     >
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="text-small font-medium text-ink-700">Reconciliation</span>

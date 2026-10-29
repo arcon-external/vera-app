@@ -347,7 +347,7 @@ export function AppShell({
       >
         Skip to main content
       </a>
-      <header className="sticky top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur">
+      <header className="top-0 z-30 border-b border-rule bg-paper/90 backdrop-blur sm:sticky">
         <div className="mx-auto flex min-h-16 max-w-[1560px] flex-wrap items-center gap-x-6 gap-y-2 px-5 py-2 lg:px-8">
           {workspace === null ? (
             <div className="flex items-center gap-2">

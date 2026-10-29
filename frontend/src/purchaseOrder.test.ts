@@ -14,6 +14,7 @@ import {
   formatUnitPriceMinor,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
+  listValidationBlockers,
   MAX_PAYMENT_TERMS_LENGTH,
   parseAdjustmentMinor,
   parseDiscountPercent,
@@ -1418,5 +1419,73 @@ describe("#517 stable line identity across load, payload and save", () => {
     });
     const carried = after.lines.find((line) => line.persistedId === 109);
     expect(carried?.clientKey).toBe(fresh.clientKey);
+  });
+});
+
+describe("validation blockers for the readiness gate (U8)", () => {
+  it("names each invalid line field with its focus target", () => {
+    const state = initial({
+      Items: [
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineNumber: 1,
+          Description: "Widget",
+          QuantityScaled: 0,
+          UoM: "Pc",
+          UnitPriceMinor: -5,
+          DiscountEnabled: true,
+          DiscountPercent: 101,
+          GrossMinor: 0,
+          DiscountMinor: 0,
+          NetMinor: 0,
+        },
+      ],
+    });
+    // Quantity is empty in the fixture order below; make it invalid text.
+    const edited = {
+      ...state,
+      lines: state.lines.map((line) => ({ ...line, quantity: "" })),
+    };
+    const blockers = listValidationBlockers(edited, USD);
+    expect(blockers.map((entry) => entry.key)).toEqual([
+      "line:1:quantity",
+      "line:1:unitPrice",
+      "line:1:discount",
+    ]);
+    expect(blockers[0]).toMatchObject({
+      label: "Line 1 quantity",
+      fieldLabel: "Line 1 quantity",
+    });
+    expect(blockers[0]?.message).toContain("quantity must be positive");
+  });
+
+  it("names invalid header fields and an invalid whole-PO discount", () => {
+    const state = initial({
+      PaymentTerms: "x".repeat(600),
+      Items: [],
+    });
+    const edited: PurchaseOrderEditorState = {
+      ...state,
+      header: {
+        ...state.header,
+        poDate: "not-a-date",
+        discountPercent: "101",
+      },
+      lines: [],
+    };
+    const blockers = listValidationBlockers(edited, USD);
+    expect(blockers.map((entry) => entry.key)).toContain("header:poDate");
+    expect(blockers.map((entry) => entry.key)).toContain("header:discountPercent");
+    expect(blockers.map((entry) => entry.key)).toContain("header:paymentTerms");
+  });
+
+  it("is empty for a fully valid draft", () => {
+    const state = initial({
+      PODate: "2026-10-01",
+      RequestedDeliveryDate: "2026-11-20",
+    });
+    expect(buildPurchaseOrderUpdate(state, USD).error).toBeNull();
+    expect(listValidationBlockers(state, USD)).toEqual([]);
   });
 });

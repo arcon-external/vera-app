@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from "react";
+import * as React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -180,7 +181,10 @@ describe("ReconciliationPaneContent states (ticket 04)", () => {
       )
     ).map((node) => node.textContent);
     expect(labels).toEqual(["Incoterms", "Payment terms", "Whole-PO discount"]);
-    expect(document.querySelector('[role="status"]')?.textContent).toContain("2 to resolve");
+    // U10: the count is state, not a live region — announcements come from
+    // the single workbench live region instead.
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    expect(document.body.textContent).toContain("2 to resolve");
     // Header/footer of the pane name the state, not a warning colour.
     expect(document.body.textContent).toContain("Unresolved");
     expect(document.body.textContent).toContain("Kept PO");
@@ -364,7 +368,10 @@ describe("ReconciliationPaneContent focus contract (ticket 04)", () => {
       );
     });
     ref.current?.focusCount();
-    expect(document.activeElement?.getAttribute("role")).toBe("status");
+    // U10: the count is focusable state, not a live region.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "1 item to resolve"
+    );
   });
 });
 
@@ -401,6 +408,24 @@ describe("ReconciliationSheetTrigger (ticket 04)", () => {
       );
     });
     button("Reconciliation, nothing to resolve. Open panel.");
+  });
+
+  it("sticks to the viewport top below 640px and below the shell header above", async () => {
+    await act(async () => {
+      root.render(
+        <ReconciliationSheetTrigger
+          unresolvedCount={1}
+          sourceLabel={null}
+          expanded={false}
+          onOpen={() => undefined}
+        />
+      );
+    });
+    const trigger = document.querySelector("button.sticky");
+    if (trigger === null) throw new Error("no sticky sheet trigger");
+    const tokens = trigger.className.split(/\s+/);
+    expect(tokens).toContain("top-0");
+    expect(tokens).toContain("sm:top-16");
   });
 });
 
@@ -599,5 +624,156 @@ describe("ReconciliationPaneContent tax basis (ticket 05)", () => {
         'button[aria-label^="Keep PO"], button[aria-label^="Use Quotation"], button[aria-label^="Delete"]'
       )
     ).toBeNull();
+  });
+});
+
+describe("ReconciliationPaneContent focus, count and context (U6-U10)", () => {
+  const twoUnresolved = () => [
+    item({
+      Key: "header:paymentTerms",
+      Label: "Payment terms",
+      POValue: "50% advance",
+      SourceValue: "30 days",
+    }),
+    item({
+      Key: "header:incoterms",
+      Field: "header:incoterms",
+      Label: "Incoterms",
+      POValue: "EXW",
+      SourceValue: "CIF",
+    }),
+  ];
+
+  it("moves focus to the next unresolved action after Use Quotation", async () => {
+    const onUse = vi.fn();
+    await renderPane({ session: { ...BASE.session, Items: twoUnresolved() }, onUse });
+    button("Use Quotation value for Payment terms").click();
+    expect(onUse).toHaveBeenCalledWith("header:paymentTerms");
+    await act(async () => {});
+    // The mock leaves the session unchanged, so focus moves to the next
+    // unresolved action rather than falling to the body.
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Keep PO entry for Incoterms"
+    );
+  });
+
+  it("returns focus to Keep after cancelling the keep confirmation", async () => {
+    const onCancelKeep = vi.fn();
+    function Harness() {
+      const [confirm, setConfirm] = React.useState<string | null>("header:paymentTerms");
+      return (
+        <ReconciliationPaneContent
+          {...BASE}
+          session={{ ...BASE.session, Items: twoUnresolved() }}
+          keepConfirmKey={confirm}
+          onCancelKeep={() => {
+            setConfirm(null);
+            onCancelKeep();
+          }}
+        />
+      );
+    }
+    await act(async () => {
+      root.render(<Harness />);
+    });
+    button("Cancel keeping PO entry for Payment terms").click();
+    expect(onCancelKeep).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Keep PO entry for Payment terms"
+    );
+  });
+
+  it("hides the count while loading and with no source", async () => {
+    await renderPane({ status: "loading", session: { ...BASE.session, Items: [] } });
+    expect(document.querySelector("[aria-label$='to resolve']")).toBeNull();
+    expect(document.body.textContent).toContain("Loading the reconciliation");
+    await renderPane({ noSource: true, session: { ...BASE.session, Items: [] } });
+    expect(document.querySelector("[aria-label$='to resolve']")).toBeNull();
+    expect(document.body.textContent).toContain("Link a Quotation to start the comparison.");
+  });
+
+  it("shows the resolved count in read-only mode", async () => {
+    await renderPane({
+      readOnly: true,
+      readOnlyCaption: "The saved reconciliation is history.",
+      session: {
+        ...BASE.session,
+        Items: [
+          item({ Status: "resolved", Resolution: "kept_po" }),
+          item({ Key: "header:incoterms", Field: "header:incoterms", Status: "resolved", Resolution: "used_quotation" }),
+        ],
+      },
+    });
+    expect(document.body.textContent).toContain("2 resolved");
+    expect(document.body.textContent?.includes("Nothing to resolve")).toBe(false);
+  });
+
+  it("names every claimant line on a duplicate card", async () => {
+    await renderPane({
+      session: {
+        ...BASE.session,
+        Items: [
+          item({
+            Key: "line:client:a:match",
+            Field: "line:match",
+            Kind: "duplicate_match",
+            LineKey: "client:a",
+            SourceLineRef: "1",
+            Label: "Duplicate match · Quotation 1",
+            POValue: "1",
+            SourceValue: null,
+          }),
+          item({
+            Key: "line:client:b:match",
+            Field: "line:match",
+            Kind: "duplicate_match",
+            LineKey: "client:b",
+            SourceLineRef: "1",
+            Label: "Duplicate match · Quotation 1",
+            POValue: "1",
+            SourceValue: null,
+          }),
+        ],
+      },
+      lineSummaries: {
+        "client:a": { displayNumber: 3, description: "Widget" },
+        "client:b": { displayNumber: 5, description: "Sprocket" },
+      },
+    });
+    expect(document.body.textContent).toContain("Lines 3 and 5 claim this quotation line.");
+  });
+
+  it("shows the source triple on the tax row when it differs and falls back to User #id", async () => {
+    await renderPane({
+      session: {
+        ...BASE.session,
+        Items: [
+          item({
+            Key: "link:taxBasis",
+            Field: "link:taxBasis",
+            Kind: "tax_basis",
+            LineKey: null,
+            SourceLineRef: null,
+            Label: "Tax basis",
+            POValue: { TaxZone: "FTZ", TaxType: "Goods", ServiceCategory: "" },
+            SourceValue: { TaxZone: "FTZ", TaxType: "Services", ServiceCategory: "Construction" },
+            Status: "resolved",
+            Resolution: "kept_po",
+            ActorID: 9,
+          }),
+        ],
+      },
+    });
+    expect(document.body.textContent).toContain("Quotation: FTZ · Services · Construction");
+    expect(document.body.textContent).toContain("User #9");
+  });
+
+  it("keeps filter tabs at 44px below 1024 and the tabpanel associated when empty", async () => {
+    await renderPane({ session: { ...BASE.session, Items: [] }, filter: "unresolved" });
+    const tab = document.querySelector('[role="tab"]');
+    if (tab === null) throw new Error("no filter tab");
+    expect(tab.className).toContain("min-h-11");
+    expect(document.querySelector('[role="tabpanel"]')).not.toBeNull();
   });
 });

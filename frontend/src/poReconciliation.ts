@@ -490,12 +490,24 @@ export function prefillDecisionsFromSession(
     ) {
       continue;
     }
-    if (item.Status !== "resolved" || item.Resolution !== "kept_po") continue;
+    if (item.Status !== "resolved") continue;
     const key = item.Field as HeaderFieldKey;
-    if (scalarOf(item) !== currentByKey[key]) continue;
-    if ((item.SourceValue as string | number) !== sourceByKey[key]) continue;
-    if (currentByKey[key] === sourceByKey[key]) continue;
-    decisions[key] = "po";
+    if (item.Resolution === "kept_po") {
+      if (scalarOf(item) !== currentByKey[key]) continue;
+      if ((item.SourceValue as string | number) !== sourceByKey[key]) continue;
+      if (currentByKey[key] === sourceByKey[key]) continue;
+      decisions[key] = "po";
+    } else if (item.Resolution === "used_quotation") {
+      // U2: a used decision pre-fills the quotation choice under the same
+      // staleness guards as a keep: the field still holds the recorded PO
+      // value (the recorded choice has not been edited away) and the recorded
+      // source still matches the linked revision. A field already matching
+      // the source has no difference row, so nothing is pre-filled for it.
+      if (scalarOf(item) !== currentByKey[key]) continue;
+      if ((item.SourceValue as string | number) !== sourceByKey[key]) continue;
+      if (currentByKey[key] === sourceByKey[key]) continue;
+      decisions[key] = "quotation";
+    }
   }
   return decisions;
 }

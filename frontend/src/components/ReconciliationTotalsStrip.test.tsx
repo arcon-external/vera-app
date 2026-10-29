@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ReconciliationTotalsStrip } from "./ReconciliationTotalsStrip";
+import { ReconciliationTotalsStrip, type TotalsStripProps } from "./ReconciliationTotalsStrip";
 import type { CurrencyInfo } from "../format";
 
 const IDR: CurrencyInfo = {
@@ -31,48 +31,77 @@ afterEach(() => {
   host.remove();
 });
 
-async function renderStrip(props: {
-  calculatedMinor: number | null;
-  printedMinor: number;
-  reason: string | null;
-}) {
+const STAGES = {
+  subtotalMinor: 20000,
+  discountMinor: 0,
+  ppnMinor: 2000,
+  adjustmentMinor: 0,
+  grandTotalMinor: 22000,
+};
+
+async function renderStrip(props: Omit<TotalsStripProps, "currency">) {
   await act(async () => {
     root.render(<ReconciliationTotalsStrip {...props} currency={IDR} />);
   });
 }
 
-describe("ReconciliationTotalsStrip", () => {
-  it("reads matched when the calculation equals the printed total", async () => {
-    await renderStrip({ calculatedMinor: 24600, printedMinor: 24600, reason: null });
-    expect(document.body.textContent).toContain("Matched");
+function button(label: string): HTMLButtonElement {
+  const found = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (el) => (el.textContent ?? "").includes(label) || (el.getAttribute("aria-label") ?? "").includes(label)
+  );
+  if (found === undefined) throw new Error(`no button ${label}`);
+  return found;
+}
+
+describe("ReconciliationTotalsStrip (U6)", () => {
+  it("reads matched when every stage equals the printed figures", async () => {
+    await renderStrip({ calculated: { ...STAGES }, printed: { ...STAGES }, reason: null });
+    expect(document.body.textContent).toContain("Matches the printed totals");
     expect(document.body.textContent).toContain("Derived only");
     expect(document.body.textContent?.includes("Explaining input")).toBe(false);
+    // Neutral status copy: never a danger pill.
+    expect(document.querySelector(".border-danger-200, .bg-danger-50, .text-danger-700")).toBeNull();
   });
 
-  it("names the first differing input when different", async () => {
+  it("reads different when offsetting stage differences net out", async () => {
+    // Subtotal +1000, discount +1000: the grand total matches but the stages do not.
     await renderStrip({
-      calculatedMinor: 24600,
-      printedMinor: 24500,
+      calculated: { ...STAGES, subtotalMinor: 21000, discountMinor: 1000 },
+      printed: { ...STAGES },
       reason: "Whole-PO discount 2% vs 0%",
     });
     expect(document.body.textContent).toContain("Different");
     expect(document.body.textContent).toContain("Whole-PO discount 2% vs 0%");
+    expect(document.querySelector(".border-danger-200, .bg-danger-50, .text-danger-700")).toBeNull();
+  });
+
+  it("expands to per-stage rows on demand", async () => {
+    await renderStrip({ calculated: { ...STAGES }, printed: { ...STAGES }, reason: null });
+    expect(document.body.textContent?.includes("Subtotal")).toBe(false);
+    button("Show stages").click();
+    await act(async () => {});
+    expect(document.body.textContent).toContain("Subtotal");
+    expect(document.body.textContent).toContain("PPN");
+    expect(document.body.textContent).toContain("Grand total");
   });
 
   it("reads pending while any amount is invalid", async () => {
-    await renderStrip({ calculatedMinor: null, printedMinor: 24500, reason: null });
+    await renderStrip({ calculated: null, printed: { ...STAGES }, reason: null });
     expect(document.body.textContent).toContain("Pending");
-    expect(document.body.textContent).toContain("Complete every amount");
+    expect(document.body.textContent).toContain("Fix the highlighted input.");
+  });
+
+  it("says unavailable with no linked source", async () => {
+    await renderStrip({ calculated: { ...STAGES }, printed: null, reason: null });
+    expect(document.body.textContent).toContain("unavailable until a Quotation is linked");
   });
 
   it("says so when no input difference explains the printed total", async () => {
     await renderStrip({
-      calculatedMinor: 24600,
-      printedMinor: 24500,
+      calculated: { ...STAGES, grandTotalMinor: 24600 },
+      printed: { ...STAGES, grandTotalMinor: 24500 },
       reason: "no input difference explains the printed total",
     });
-    expect(document.body.textContent).toContain(
-      "no input difference explains the printed total"
-    );
+    expect(document.body.textContent).toContain("no input difference explains the printed total");
   });
 });

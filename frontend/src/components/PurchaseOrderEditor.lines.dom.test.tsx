@@ -311,8 +311,8 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     const transport = fakeTransport(null);
     await renderEditor(transport);
 
-    // The match select names the linked quotation line.
-    expect(document.body.textContent).toContain("Quotation item 1");
+    // The match chip names the linked quotation line.
+    expect(document.body.textContent).toContain("Quotation 1");
 
     const quantity = input("Line 1 quantity");
     typeInto(quantity, "3");
@@ -371,6 +371,8 @@ describe("line reconciliation in the editor (ticket 05)", () => {
 
     // Correcting line 2 to an extra line clears the duplicate blocker (the
     // resolved duplicate stays visible as history; the gate moves on).
+    button("Change quotation match for line 2").click();
+    await flush();
     button("Line 2 quotation match").click();
     await flush();
     const extra = document.querySelector<HTMLButtonElement>('button[role="option"]');
@@ -403,6 +405,8 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     expect(shellActions.blockedMessage).toContain("Unknown reference · 99");
 
     // Correcting the match to the valid reference keeps a valid shape.
+    button("Change quotation match for line 1").click();
+    await flush();
     button("Line 1 quotation match").click();
     await flush();
     const allOptions = Array.from(
@@ -453,7 +457,7 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     await renderEditor(transport);
 
     expect(document.body.textContent).toContain("Totals check");
-    expect(document.body.textContent).toContain("Matched");
+    expect(document.body.textContent).toContain("Matches the printed totals");
 
     const quantity = input("Line 1 quantity");
     typeInto(quantity, "3");
@@ -576,5 +580,60 @@ describe("committed select and checkbox values (F3)", () => {
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Incoterms"]')
     ).not.toBeNull();
+  });
+});
+
+describe("small-screen sheet bounds (U4)", () => {
+  it("sheet starts at the viewport top below 640px and below the header above", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    const trigger = document.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"]'
+    );
+    if (trigger === null) throw new Error("no sheet trigger");
+    await act(async () => {
+      trigger.click();
+    });
+    await flush();
+    const sheet = document.querySelector('[role="region"][aria-label="Reconciliation"]');
+    if (sheet === null) throw new Error("no open sheet");
+    const tokens = sheet.className.split(/\s+/);
+    expect(tokens).toContain("top-0");
+    expect(tokens).toContain("sm:top-16");
+  });
+});
+
+describe("line identity and match control (U1)", () => {
+  it("shows Line n with its match chip and opens one select at a time", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    expect(document.body.textContent).toContain("Line 1");
+    // Only the Change control is visible; the select opens on demand.
+    expect(document.querySelector('button[aria-label="Change quotation match for line 1"]')).not.toBeNull();
+    expect(document.querySelector('button[aria-label="Line 1 quotation match"]')).toBeNull();
+
+    button("Change quotation match for line 1").click();
+    await flush();
+    expect(document.querySelector('button[aria-label="Line 1 quotation match"]')).not.toBeNull();
+  });
+
+  it("adding a line focuses the new description and removing focuses the next line", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    button("Add line").click();
+    await flush();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 2 description");
+    expect(document.body.textContent).toContain("Line 2 added.");
+
+    button("Remove line 1").click();
+    await flush();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 description");
+    expect(document.body.textContent).toContain("Line 1 removed.");
   });
 });

@@ -659,8 +659,8 @@ export function prefillLineDecisions(
   lines: { sessionKey: string; displayNumber: number; values: LineValuesInput }[],
   sources: PurchaseOrderSourceLineDTO[],
   currency: CurrencyInfo
-): { [key: string]: "po" } {
-  const decisions: { [key: string]: "po" } = {};
+): { [key: string]: "po" | "quotation" } {
+  const decisions: { [key: string]: "po" | "quotation" } = {};
   const bySessionKey = new Map(lines.map((line) => [line.sessionKey, line]));
   const byRef = new Map(
     sources.map((source) => [
@@ -669,7 +669,8 @@ export function prefillLineDecisions(
     ])
   );
   for (const item of items) {
-    if (item.Status !== "resolved" || item.Resolution !== "kept_po") continue;
+    if (item.Status !== "resolved") continue;
+    if (item.Resolution !== "kept_po" && item.Resolution !== "used_quotation") continue;
     if (item.LineKey === null || item.LineKey === undefined) continue;
     const line = bySessionKey.get(item.LineKey);
     if (line === undefined) continue;
@@ -705,7 +706,14 @@ export function prefillLineDecisions(
       (item.POValue as { Enabled?: unknown }).Enabled === false
         ? { ...(item.POValue as Record<string, unknown>), Percent: 0 }
         : item.POValue;
-    if (!lineValuesEqual(canonical.value, recorded)) continue;
+    if (item.Resolution === "kept_po") {
+      if (!lineValuesEqual(canonical.value, recorded)) continue;
+    } else {
+      // U2: a used decision pre-fills under the same staleness guards as a
+      // keep: the field still holds the recorded value and the recorded
+      // source still matches the linked revision.
+      if (!lineValuesEqual(canonical.value, recorded)) continue;
+    }
     // The recorded source value must still match the linked revision;
     // otherwise the decision belongs to a different comparison.
     if (typeof item.SourceLineRef === "string") {
@@ -714,7 +722,7 @@ export function prefillLineDecisions(
       const currentSource = canonicalSourceLineValue(suffix, source);
       if (!lineValuesEqual(item.SourceValue, currentSource)) continue;
     }
-    decisions[`line:${line.displayNumber}:${suffix}`] = "po";
+    decisions[`line:${line.displayNumber}:${suffix}`] = item.Resolution === "used_quotation" ? "quotation" : "po";
   }
   return decisions;
 }

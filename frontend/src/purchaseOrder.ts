@@ -1195,6 +1195,120 @@ export function buildPurchaseOrderUpdate(
   };
 }
 
+/** One named validation blocker with its focus target. The gate names it;
+ * activating it focuses the field so its error becomes visible. */
+export interface ValidationBlocker {
+  key: string;
+  label: string;
+  message: string;
+  /** The input's accessible name, for focusing the field. */
+  fieldLabel: string;
+}
+
+/**
+ * Every invalid or incomplete entry that blocks a save, named per field.
+ * Mirrors buildPurchaseOrderUpdate's checks one for one (same messages, same
+ * order) so the gate can name blockers the payload builder would only report
+ * as the first failure. No new requiredness is introduced: empty fields are
+ * only blockers where the payload already refuses them.
+ */
+export function listValidationBlockers(
+  state: PurchaseOrderEditorState,
+  currency: CurrencyInfo
+): ValidationBlocker[] {
+  const blockers: ValidationBlocker[] = [];
+  if (!validDateField(state.header.poDate)) {
+    blockers.push({
+      key: "header:poDate",
+      label: "PO date",
+      message: "PO date must be YYYY-MM-DD.",
+      fieldLabel: "PO date",
+    });
+  }
+  if (state.header.receivedDate.trim() === "" || !validDateField(state.header.receivedDate)) {
+    blockers.push({
+      key: "header:receivedDate",
+      label: "Received date",
+      message: "Received date must be YYYY-MM-DD.",
+      fieldLabel: "Received date",
+    });
+  }
+  if (!validDateField(state.header.requestedDeliveryDate)) {
+    blockers.push({
+      key: "header:requestedDeliveryDate",
+      label: "Requested delivery date",
+      message: "Requested delivery date must be YYYY-MM-DD.",
+      fieldLabel: "Requested delivery date",
+    });
+  }
+  const paymentTerms = state.header.paymentTerms.trim();
+  if (characterCount(paymentTerms) > MAX_PAYMENT_TERMS_LENGTH) {
+    blockers.push({
+      key: "header:paymentTerms",
+      label: "Payment terms",
+      message: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
+      fieldLabel: "Payment terms",
+    });
+  }
+  state.lines.forEach((line, index) => {
+    const display = `Line ${index + 1}`;
+    if (parseQuantityScaled(line.quantity) === null) {
+      blockers.push({
+        key: `line:${index + 1}:quantity`,
+        label: `${display} quantity`,
+        message: `Line ${index + 1}: quantity must be positive with up to 4 decimal places and within the supported range.`,
+        fieldLabel: `Line ${index + 1} quantity`,
+      });
+    }
+    if (parseUnitPriceMinor(currency, line.unitPrice) === null) {
+      blockers.push({
+        key: `line:${index + 1}:unitPrice`,
+        label: `${display} unit price`,
+        message: `Line ${index + 1}: unit price must be a nonnegative ${currency.code} amount within the supported range.`,
+        fieldLabel: `Line ${index + 1} unit price`,
+      });
+    }
+    if (parseDiscountPercent(line.discountPercent) === null) {
+      blockers.push({
+        key: `line:${index + 1}:discount`,
+        label: `${display} discount`,
+        message: `Line ${index + 1}: discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
+        fieldLabel: `Line ${index + 1} discount percent`,
+      });
+    }
+  });
+  if (parseDiscountPercent(state.header.discountPercent) === null) {
+    blockers.push({
+      key: "header:discountPercent",
+      label: "Whole-PO discount",
+      message: `Whole-PO discount must be between 0 and ${MAX_DISCOUNT_PERCENT}.`,
+      fieldLabel: "Whole-PO discount",
+    });
+  }
+  if (parseAdjustmentMinor(currency, state.header.adjustment) === null) {
+    blockers.push({
+      key: "header:adjustment",
+      label: "Adjustment",
+      message: `Adjustment must be a signed ${currency.code} amount.`,
+      fieldLabel: "Adjustment",
+    });
+  }
+  // Mirrors the payload builder's final guard: adjustment reason, negative
+  // totals and range refusals. Skipped when an earlier blocker already names
+  // the same failure so the gate never double-counts one invalid input.
+  const calculation = calculatePurchaseOrder(state, currency);
+  if (calculation.error !== null && !blockers.some((entry) => entry.message === calculation.error)) {
+    const reasonLike = /reason/i.test(calculation.error);
+    blockers.push({
+      key: "calculation:error",
+      label: "Totals",
+      message: calculation.error,
+      fieldLabel: reasonLike ? "Adjustment reason" : "Adjustment",
+    });
+  }
+  return blockers;
+}
+
 /** The reducer; pure, so the dirty guard is testable without a DOM. */
 export function purchaseOrderEditorReducer(
   state: PurchaseOrderEditorState,

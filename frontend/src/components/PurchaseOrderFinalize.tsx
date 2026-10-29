@@ -110,6 +110,22 @@ export interface PurchaseOrderDifferenceReviewViewProps {
    * The link's tax decision lives here so there is one page header, not two.
    */
   beforeDifferences?: ReactNode;
+  /**
+   * U2: receipt provenance from the recorded reconciliation session. When
+   * hasSession is true the review is a read-only receipt: resolved choices
+   * and recorded acknowledgements render without duplicate Keep/Use or
+   * matching controls. Unresolved values keep their choice path but are
+   * expected not to reach the review (the entry gate blocks them). Without
+   * a session the legacy choice workbench is preserved with no invented
+   * history.
+   */
+  receiptResolvedKeys?: string[];
+  receiptAckedMissing?: string[];
+  receiptAckedExtra?: number[];
+  hasSession?: boolean;
+  /** U2: Change links return focus to the relevant form or pane field. */
+  onEditDifference?: (key: string, label: string) => void;
+  onEditLine?: (lineNumber: number) => void;
 }
 
 function differenceValue(value: string): string {
@@ -137,7 +153,17 @@ export function PurchaseOrderDifferenceReviewView({
   busy = false,
   blocked = false,
   beforeDifferences,
+  receiptResolvedKeys = [],
+  receiptAckedMissing = [],
+  receiptAckedExtra = [],
+  hasSession = false,
+  onEditDifference,
+  onEditLine,
 }: PurchaseOrderDifferenceReviewViewProps) {
+  const isReceipt = hasSession === true;
+  const resolvedSet = new Set(receiptResolvedKeys);
+  const ackedMissingSet = new Set(receiptAckedMissing);
+  const ackedExtraSet = new Set(receiptAckedExtra);
   const repairing = mode === "repair";
   const linking = mode === "link";
   const currencyMismatch = source.Currency !== state.currency;
@@ -222,6 +248,49 @@ export function PurchaseOrderDifferenceReviewView({
           <div className="mt-2 grid gap-3">
             {comparison.differences.map((difference) => {
               const choice = decisions[difference.key];
+              // U2: a session-resolved difference is a receipt row, not a
+              // second decision. The recorded choice and both values are
+              // shown read-only; Change returns to the entry field.
+              if (isReceipt && resolvedSet.has(difference.key) && (choice === "po" || choice === "quotation")) {
+                return (
+                  <div
+                    key={difference.key}
+                    role="group"
+                    aria-label={difference.label}
+                    className="grid gap-3 rounded-lg border border-rule bg-paper-subtle/40 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  >
+                    <div className="grid gap-1">
+                      <p className="text-small font-medium text-ink-900">
+                        {difference.label}
+                      </p>
+                      <p className="text-caption text-ink-600">
+                        PO entry:{" "}
+                        <span className="tnum whitespace-nowrap font-medium text-ink-900">
+                          {differenceValue(difference.poValue)}
+                        </span>{" "}
+                        · Quotation:{" "}
+                        <span className="tnum whitespace-nowrap font-medium text-ink-900">
+                          {differenceValue(difference.sourceValue)}
+                        </span>
+                      </p>
+                      <p className="text-caption text-ink-500">
+                        {choice === "po"
+                          ? "PO entry kept in the reconciliation pane."
+                          : "Quotation value used from the reconciliation pane."}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        aria-label={`Change ${difference.label}`}
+                        onClick={() => onEditDifference?.(difference.key, difference.label)}
+                      >
+                        Change
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={difference.key}
@@ -270,7 +339,9 @@ export function PurchaseOrderDifferenceReviewView({
           </div>
         )}
         <p className="mt-3 text-caption text-ink-500">
-          No choice is selected for you. Use Quotation takes the quotation's
+          {isReceipt
+            ? "These are the choices recorded in the reconciliation pane. Unresolved values do not appear here with choices; they stay in the pane until resolved. "
+            : "Choose a side for each difference. Use Quotation takes the quotation's"}
           value when you continue; Use PO entry keeps what you entered.{" "}
           {repairing
             ? "Back without repairing leaves the saved purchase order and its source link unchanged."
@@ -297,6 +368,36 @@ export function PurchaseOrderDifferenceReviewView({
             const suggestion = comparison.suggestions.find(
               (candidate) => candidate.lineNumber === lineNumber
             );
+            // U2: in receipt mode the match is recorded evidence, not an
+            // editor. Change returns to the entry line's match control.
+            if (isReceipt) {
+              return (
+                <div
+                  key={line.key}
+                  className="grid gap-2 rounded-lg border border-rule p-3 sm:grid-cols-2 sm:items-end"
+                >
+                  <div className="grid gap-1">
+                    <p className="text-small font-medium text-ink-900">
+                      Line {lineNumber} — {line.description || "(no description)"}
+                    </p>
+                    <p className="text-caption text-ink-500">
+                      {current === undefined
+                        ? "Currently extra (no quotation match) · recorded in the pane."
+                        : `Currently quotation line ${current.LineLabel} · recorded in the pane.`}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-end justify-end gap-2">
+                    <Button
+                      size="sm"
+                      aria-label={`Change match for line ${lineNumber}`}
+                      onClick={() => onEditLine?.(lineNumber)}
+                    >
+                      Change
+                    </Button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={line.key}
@@ -351,23 +452,45 @@ export function PurchaseOrderDifferenceReviewView({
             <legend className="text-small font-medium text-ink-700">
               On the quotation, not on this purchase order
             </legend>
-            {comparison.missing.map((line) => (
-              <label
-                key={line.LineLabel}
-                className="flex items-start gap-2 text-small text-ink-700"
-              >
-                <input
-                  type="checkbox"
-                  className="mt-0.5 h-4 w-4 accent-accent-700"
-                  aria-label={`Acknowledge omission of quotation line ${line.LineLabel}`}
-                  checked={acknowledgedMissing.includes(line.LineLabel)}
-                  onChange={() => onToggleMissing(line.LineLabel)}
-                />
-                <span>
-                  Quotation line {line.LineLabel} — {line.Description || "(no description)"}
-                </span>
-              </label>
-            ))}
+            {comparison.missing.map((line) => {
+              const acked = isReceipt && ackedMissingSet.has(line.LineLabel);
+              if (acked) {
+                return (
+                  <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
+                    <span aria-hidden="true" className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded border border-rule bg-paper-subtle text-caption text-ink-500">✓</span>
+                    <span>
+                      Quotation line {line.LineLabel} — {line.Description || "(no description)"} · omission acknowledged in the pane.
+                    </span>
+                  </p>
+                );
+              }
+              if (isReceipt) {
+                return (
+                  <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
+                    <span>
+                      Quotation line {line.LineLabel} — {line.Description || "(no description)"} · needs acknowledgement in the reconciliation pane. Return to entry and resolve it there.
+                    </span>
+                  </p>
+                );
+              }
+              return (
+                <label
+                  key={line.LineLabel}
+                  className="flex items-start gap-2 text-small text-ink-700"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-accent-700"
+                    aria-label={`Acknowledge omission of quotation line ${line.LineLabel}`}
+                    checked={acknowledgedMissing.includes(line.LineLabel)}
+                    onChange={() => onToggleMissing(line.LineLabel)}
+                  />
+                  <span>
+                    Quotation line {line.LineLabel} — {line.Description || "(no description)"}
+                  </span>
+                </label>
+              );
+            })}
           </fieldset>
         ) : null}
 
@@ -378,6 +501,26 @@ export function PurchaseOrderDifferenceReviewView({
             </legend>
             {comparison.extraLineNumbers.map((lineNumber) => {
               const line = state.lines[lineNumber - 1];
+              const acked = isReceipt && ackedExtraSet.has(lineNumber);
+              if (acked) {
+                return (
+                  <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
+                    <span aria-hidden="true" className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded border border-rule bg-paper-subtle text-caption text-ink-500">✓</span>
+                    <span>
+                      Line {lineNumber} — {line.description || "(no description)"} · acknowledged as extra in the pane.
+                    </span>
+                  </p>
+                );
+              }
+              if (isReceipt) {
+                return (
+                  <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
+                    <span>
+                      Line {lineNumber} — {line.description || "(no description)"} · needs acknowledgement in the reconciliation pane. Return to entry and resolve it there.
+                    </span>
+                  </p>
+                );
+              }
               return (
                 <label
                   key={lineNumber}
