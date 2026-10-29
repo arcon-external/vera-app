@@ -111,13 +111,15 @@ export interface PurchaseOrderDifferenceReviewViewProps {
    */
   beforeDifferences?: ReactNode;
   /**
-   * U2: receipt provenance from the recorded reconciliation session. When
-   * hasSession is true the review is a read-only receipt: resolved choices
-   * and recorded acknowledgements render without duplicate Keep/Use or
-   * matching controls. Unresolved values keep their choice path but are
-   * expected not to reach the review (the entry gate blocks them). Without
-   * a session the legacy choice workbench is preserved with no invented
-   * history.
+   * U2/N4: receipt provenance from the recorded reconciliation session.
+   * hasSession is true only for an authoritative persisted session
+   * (positive stored ID, even when empty, tax-only or all-unresolved, and
+   * including the session just created by the first save). The review is
+   * then a read-only receipt: resolved choices keep their provenance,
+   * unreviewed differences show needs-review provenance with a Change
+   * route, and matches/acks render without editors. Identity-only local
+   * (ID 0) and no-session drafts pass false and keep the legacy choice
+   * workbench with no invented history.
    */
   receiptResolvedKeys?: string[];
   receiptAckedMissing?: string[];
@@ -164,15 +166,17 @@ export function PurchaseOrderDifferenceReviewView({
   const resolvedSet = new Set(receiptResolvedKeys);
   const ackedMissingSet = new Set(receiptAckedMissing);
   const ackedExtraSet = new Set(receiptAckedExtra);
-  // R2-U2: receipt mode needs recorded provenance for THIS comparison, not
-  // just a session object. The line-set sync creates identity-only local
-  // sessions (no decisions, no acks); rendering those as a receipt would
-  // strand a never-reviewed draft in a blocked read-only review. With
-  // nothing recorded the legacy choice workbench stays: it is the first
-  // decision point, not a second one, and invents no audit history.
-  const showReceipt =
-    isReceipt &&
-    (resolvedSet.size > 0 || ackedMissingSet.size > 0 || ackedExtraSet.size > 0);
+  // N4/U2: receipt mode is keyed on authoritative persisted-session
+  // provenance, not on recorded comparison choices. The caller passes
+  // hasSession only for a stored session (positive persisted ID, including
+  // after the first save): an empty, tax-only or all-unresolved persisted
+  // session is still a recorded session, so every difference, match and ack
+  // renders read-only with a Change route back. Genuinely local
+  // identity-only (ID 0) and no-session drafts keep the legacy choice
+  // workbench: a never-reviewed draft has no recorded provenance, so the
+  // workbench is its first decision point, not a second one, and invents no
+  // audit history.
+  const showReceipt = isReceipt;
   const repairing = mode === "repair";
   const linking = mode === "link";
   const currencyMismatch = source.Currency !== state.currency;

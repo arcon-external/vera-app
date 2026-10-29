@@ -659,6 +659,228 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     ).not.toBeNull();
   });
 
+  it("a persisted tax-only session with an unreviewed line difference opens a read-only receipt, never a choice workbench (N4/U2)", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    // Same production-like update echo as the sibling receipt test: the
+    // draft write round-trips the working copy with its lines.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // A persisted session (stored ID 3) whose only recorded provenance is
+    // the resolved link-time tax basis: no recorded comparison choice or
+    // ack, and the line quantity was never committed in the pane.
+    const transport = fakeTransport(
+      savedSession([
+        {
+          Key: "link:taxBasis",
+          Field: "link:taxBasis",
+          Kind: "tax_basis",
+          LineKey: null,
+          SourceLineRef: null,
+          Label: "Tax basis",
+          POValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          SourceValue: { TaxType: "Goods", TaxZone: "FTZ", ServiceCategory: "" },
+          Status: "resolved",
+          Resolution: "used_quotation",
+          ActorID: 7,
+          UpdatedAt: "2026-10-28T00:00:05Z",
+          History: [],
+        },
+      ])
+    );
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()] })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    // The quantity difference was never committed, so no pane item blocks it.
+    expect(shellActions.unresolvedCount).toBe(0);
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    // The review still opens, but as a read-only receipt: no second
+    // choice workbench for the unreviewed difference.
+    expect(document.body.textContent).toContain("Review differences before saving");
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
+    expect(
+      document.querySelector('button[aria-label="Change Line 1 quantity"]')
+    ).not.toBeNull();
+    // Readiness still blocks: the unreviewed difference has no recorded
+    // choice, even though zero pane items are unresolved.
+    expect(
+      document.querySelector<HTMLButtonElement>('button[aria-label="Continue final save"]')?.disabled
+    ).toBe(true);
+  });
+
+  it("an identity-only local session keeps the legacy choice workbench (N4/U2 guard)", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // Identity-only local shell: stored ID 0, no recorded items at all.
+    // A never-reviewed draft keeps its first decision point.
+    const transport = fakeTransport({
+      ID: 0,
+      PurchaseOrderID: 7,
+      SourceQuotationID: 12,
+      SourceRevision: 1,
+      POVersion: 4,
+      Active: true,
+      ReadOnly: false,
+      CreatedBy: 7,
+      CreatedAt: "2026-10-28T00:00:00Z",
+      UpdatedAt: "2026-10-28T00:00:05Z",
+      LineIdentities: [{ Key: "client:a", ID: 101, Removed: false }],
+      Items: [],
+    });
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()] })
+    );
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+    // Legacy workbench preserved: the unreviewed difference still offers
+    // its first decision point, with no invented receipt provenance.
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
+    ).not.toBeNull();
+  });
+
+  it("a first save flips a local session to receipt provenance (N4/U2)", async () => {
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [lineSource],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [lineItem()] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [lineItem()],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    // No stored session: the first commit builds an identity-only local
+    // shell (ID 0), and Final Save persists it before the review loads.
+    const transport = fakeTransport(null);
+    await renderEditor(
+      transport,
+      linkedOrder({ Items: [lineItem()] })
+    );
+
+    // Commit the quantity difference, then resolve it in the pane so the
+    // review has recorded provenance to render.
+    const quantity = input("Line 1 quantity");
+    typeInto(quantity, "3");
+    await act(async () => {
+      quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    button("Keep PO entry for Line 1 quantity").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 quantity").click();
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    // The session save ran inside startReview (no manual Save Draft), the
+    // stored answer carries a positive ID, and the review is a receipt.
+    expect(transport.saves.length).toBeGreaterThan(0);
+    expect(document.body.textContent).toContain("Review differences before saving");
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
+  });
+
   it("Add line from Quotation focuses the new description and announces once", async () => {
     reviewMock.mockResolvedValue({
       Source: {

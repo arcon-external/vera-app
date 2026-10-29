@@ -72,6 +72,7 @@ import {
   type CommitNotice,
   type HeaderFieldKey,
   type ReconciliationItem,
+  type ReconciliationSession,
   type ReconciliationSourceValues,
 } from "../poReconciliation";
 import {
@@ -1592,9 +1593,12 @@ export function PurchaseOrderEditorPage({
     () => listValidationBlockers(state, activeCurrency),
     [state, activeCurrency]
   );
-  // U2: receipt provenance for the review. When a session exists, the review
-  // is a read-only receipt of these session-recorded choices and
-  // acknowledgements; legacy no-session reviews keep the choice workbench.
+  // N4/U2: receipt provenance for the review. An authoritative persisted
+  // session (stored ID before the pass, or a first save of already-recorded
+  // items) makes the review a read-only receipt of the session-recorded
+  // choices and acknowledgements, with needs-review rows and Change routes
+  // for anything unrecorded. Identity-only local and no-session reviews keep
+  // the legacy choice workbench.
   const [receiptResolvedKeys, setReceiptResolvedKeys] = useState<string[]>([]);
   const [receiptAckedMissing, setReceiptAckedMissing] = useState<string[]>([]);
   const [receiptAckedExtra, setReceiptAckedExtra] = useState<number[]>([]);
@@ -2393,6 +2397,14 @@ export function PurchaseOrderEditorPage({
       // correction mode the session is read-only history and the working
       // copy is written by Save correction, so the legacy path is kept.
       let persisted = { id: state.orderId, version: state.version };
+      // N4/U2: receipt-provenance inputs. The pre-save session is captured
+      // before the persist; the post-save truth is read from the persist
+      // answer, never from the stale render closure, so the first save can
+      // flip provenance in this same pass.
+      const preSaveSession = reconciliation.session ?? null;
+      let persistedSession: ReconciliationSession | null = preSaveSession;
+      const preSaveId = preSaveSession?.ID ?? 0;
+      const preSaveItems = preSaveSession?.Items.length ?? 0;
       if (!correcting) {
         const saved = await persistWorkingCopy(false);
         if (saved.kind === 'conflict') {
@@ -2423,6 +2435,7 @@ export function PurchaseOrderEditorPage({
         const finalVersion = synced.version ?? saved.order.Version;
         adoptSessionVersion(saved.order.ID, saved.order.Version, synced.version);
         persisted = { id: saved.order.ID, version: finalVersion };
+        persistedSession = synced.session ?? persistedSession;
       } else {
         persisted = await ensurePersisted();
       }
@@ -2473,11 +2486,19 @@ export function PurchaseOrderEditorPage({
           ? Array.from(new Set([...initial.acknowledgedExtra, ...sessionExtra]))
           : initial.acknowledgedExtra
       );
-      // U2: receipt provenance — which choices/acks came from the session.
+      // N4/U2: receipt provenance is the authoritative persisted session,
+      // not decision counts. An already-stored session (positive ID before
+      // this pass, even empty/tax-only/all-unresolved) is recorded
+      // provenance by definition. A first save in this same pass counts only
+      // when the pre-save session already recorded something (items), so a
+      // genuinely local identity-only shell or a no-session draft keeps the
+      // legacy choice workbench instead of a dead-end receipt.
+      const authoritativeSession =
+        preSaveId > 0 || ((persistedSession?.ID ?? 0) > 0 && preSaveItems > 0);
       setReceiptResolvedKeys(Object.keys(mergedDecisions));
       setReceiptAckedMissing(sessionMissing);
       setReceiptAckedExtra(sessionExtra);
-      setReceiptHasSession(reconciliation.hasSession === true);
+      setReceiptHasSession(!correcting && authoritativeSession);
       setDocumentConfirmed(initial.documentConfirmed);
       setAssignConfirmation(initial.assignConfirmation);
       setView("review");

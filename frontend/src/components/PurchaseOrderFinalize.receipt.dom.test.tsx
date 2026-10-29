@@ -391,4 +391,61 @@ describe("final-save receipt from a recorded session (U2)", () => {
       document.querySelector('button[aria-label="Change Line 1 unit price"]')
     ).not.toBeNull();
   });
+
+  it("a persisted session with no recorded choices still renders every difference read-only (N4/U2)", async () => {
+    // N4: the session is authoritative (persisted, ID > 0) but carries no
+    // recorded comparison choice or ack — e.g. only link-time tax
+    // provenance. The receipt must not fall back to the choice workbench.
+    const full = initialPurchaseOrderEditorState(ORDER, USD);
+    const state = { ...full, lines: full.lines.slice(0, 1) };
+    await act(async () => {
+      root.render(
+        <PurchaseOrderDifferenceReviewView
+          state={state}
+          source={REVIEW.Source}
+          currency={USD}
+          quoteNumber="1502260042"
+          documentState="none"
+          decisions={{}}
+          acknowledgedMissing={[]}
+          acknowledgedExtra={[]}
+          onDecision={() => undefined}
+          onToggleMissing={() => undefined}
+          onToggleExtra={() => undefined}
+          onMatchChange={() => undefined}
+          onBack={() => undefined}
+          onContinue={() => undefined}
+          receiptResolvedKeys={[]}
+          receiptAckedMissing={[]}
+          receiptAckedExtra={[]}
+          hasSession
+          onEditDifference={() => undefined}
+          onEditLine={() => undefined}
+        />
+      );
+    });
+
+    // No second workbench anywhere: no Use buttons, no match select, no
+    // acknowledgement checkboxes.
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 unit price"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use Quotation for Line 1 unit price"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Line 1 quotation match"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('input[aria-label="Acknowledge omission of quotation line 3"]')
+    ).toBeNull();
+    // The unrecorded difference is named with a route back.
+    expect(document.body.textContent).toContain("Needs review in the reconciliation pane.");
+    expect(
+      document.querySelector('button[aria-label="Change Line 1 unit price"]')
+    ).not.toBeNull();
+    // Receipt copy, not the legacy choice sentence.
+    expect(document.body.textContent).toContain("recorded in the reconciliation pane");
+    expect(document.body.textContent?.includes("Choose a side for each difference")).toBe(false);
+  });
 });

@@ -587,19 +587,22 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
   /**
    * Persists the session after a successful draft save, carrying the row
    * version the draft save just produced (R-04). A save with no new content
-   * is skipped; a session failure never fails the draft save.
+   * is skipped; a session failure never fails the draft save. The returned
+   * session is the post-call truth (the server's answer after a save, the
+   * current session when skipped) so callers never reason from a stale
+   * render closure about whether the session is persisted yet (N4/U2).
    */
   const persistAfterDraftSave = useCallback(
     async (
       rowVersion: number
-    ): Promise<{ ok: boolean; message?: string; version?: number }> => {
-      if (readOnlyRef.current || !liveRef.current) return { ok: true };
+    ): Promise<{ ok: boolean; message?: string; version?: number; session: ReconciliationSession | null }> => {
+      if (readOnlyRef.current || !liveRef.current) return { ok: true, session };
       const current = session;
       // Nothing compared and no stored row: nothing to persist.
-      if (current === null) return { ok: true };
+      if (current === null) return { ok: true, session: null };
       const serialized = JSON.stringify(current.Items);
       if (current.ID > 0 && serialized === savedItemsRef.current) {
-        return { ok: true };
+        return { ok: true, session: current };
       }
       const result = await saveSession(transport, String(orderId), {
         ...current,
@@ -611,9 +614,9 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
         // The session save bumps the row version (R-04) exactly like a draft
         // save does. Callers adopt the returned version so the next submit
         // names the row as the server now stands, not the draft-save one.
-        return { ok: true, version: result.session.POVersion };
+        return { ok: true, version: result.session.POVersion, session: result.session };
       }
-      return { ok: false, message: result.message };
+      return { ok: false, message: result.message, session: current };
     },
     [transport, orderId, session]
   );
