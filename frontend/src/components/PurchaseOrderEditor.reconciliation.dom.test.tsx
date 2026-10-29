@@ -227,6 +227,12 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+function checkbox(label: string): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
+  if (found === null || found.type !== "checkbox") throw new Error(`no checkbox labelled ${label}`);
+  return found;
+}
+
 function typeInto(element: HTMLInputElement, value: string): void {
   act(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -816,6 +822,199 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     // the entered 0 reviewable by blur-commit without changing any value.
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
+  });
+
+  it("a disabled-zero row discount commits on blur without toggling and Keeps through retry", async () => {
+    // Root current-value requirement: the unchecked checkbox commits its
+    // shown disabled 0% on blur — no toggle on/off needed to expose the
+    // unresolved difference for Keep resolution.
+    const plain = lineItem({ QuantityScaled: 20000 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, DiscountEnabled: true, DiscountPercent: 0 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [plain] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [plain],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [plain] }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).not.toContain("Review differences before saving");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount enabled");
+    const box = checkbox("Line 1 discount enabled");
+    expect(box.checked).toBe(false);
+    expect(box.disabled).toBe(false);
+    expect(input("Line 1 discount percent").disabled).toBe(true);
+
+    // Blur commits the current disabled value without changing it.
+    await act(async () => {
+      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    expect(box.checked).toBe(false);
+    button("Keep PO entry for Line 1 discount").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 discount").click();
+    await flush();
+    expect(checkbox("Line 1 discount enabled").checked).toBe(false);
+    expect(input("Line 1 discount percent").value).toBe("0");
+
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Review differences before saving");
+    expect(
+      document.querySelector('button[aria-label="Use PO entry for Line 1 discount"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
+  });
+
+  it("toggling the discount checkbox on then blurring does not duplicate or reopen anything", async () => {
+    // onChange commits the toggled value; the following blur recommits the
+    // same value and must be a no-op: no duplicate item, no reopened choice,
+    // no appended history.
+    const plain = lineItem({ QuantityScaled: 20000 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, DiscountEnabled: true, DiscountPercent: 0 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [plain] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [plain],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [plain] }));
+
+    const box = checkbox("Line 1 discount enabled");
+    await act(async () => {
+      box.click();
+    });
+    await flush();
+    expect(box.checked).toBe(true);
+    expect(document.body.textContent).toContain("Matches the Quotation");
+    // Blur with the toggled value still current: still matched, still no item.
+    await act(async () => {
+      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    expect(box.checked).toBe(true);
+    expect(document.body.textContent).toContain("Matches the Quotation");
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
+    ).toBeNull();
+  });
+
+  it("re-blurring a kept discount does not reopen the choice or duplicate history", async () => {
+    const plain = lineItem({ QuantityScaled: 20000 });
+    reviewMock.mockResolvedValue({
+      Source: {
+        QuotationID: 12,
+        RevisionNumber: 1,
+        QuoteNumber: "1502260052",
+        CustomerID: 2,
+        CustomerName: "PT. Buyer",
+        Currency: "IDR",
+        PaymentTerms: "45 days",
+        Incoterms: "EXW",
+        DiscountPercent: 0,
+        PrintedSubtotalMinor: 20000,
+        PrintedDiscountMinor: 0,
+        PrintedPpnMinor: 0,
+        PrintedGrandTotalMinor: 20000,
+        Lines: [{ ...lineSource, DiscountEnabled: true, DiscountPercent: 0 }],
+      },
+      DocumentState: "none",
+      Order: linkedOrder({ Items: [plain] }),
+    });
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          Items: [plain],
+          Version: Number(fields.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    const transport = fakeTransport(savedSession([]));
+    await renderEditor(transport, linkedOrder({ Items: [plain] }));
+
+    // Blur the unchecked box: commits disabled 0, exposes Keep.
+    const box = checkbox("Line 1 discount enabled");
+    await act(async () => {
+      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    button("Keep PO entry for Line 1 discount").click();
+    await flush();
+    button("Yes, keep PO entry for Line 1 discount").click();
+    await flush();
+    expect(document.body.textContent).toContain("Kept PO");
+
+    // Re-blur the kept value: the resolved choice stays, history untouched.
+    await act(async () => {
+      checkbox("Line 1 discount enabled").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true })
+      );
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Kept PO");
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Yes, keep PO entry for Line 1 discount"]')
+    ).toBeNull();
   });
 
   it("a disabled-zero row discount against an enabled source focuses the checkbox", async () => {

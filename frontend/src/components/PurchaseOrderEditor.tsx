@@ -771,6 +771,8 @@ export function PurchaseOrderLineRow({
               });
               commitValue("discount", { enabled, percent: line.discountPercent });
             }}
+            onBlur={commit("discount")}
+            onFocus={focus("discount")}
           />
           Row discount
         </label>
@@ -1501,6 +1503,34 @@ function gateFocusCandidates(
   return [label];
 }
 
+/**
+ * Reveal a live blocker target between the actual sticky chrome and focus
+ * it without letting native focus scrolling undo the reveal. The header
+ * height comes from the shell's live measurement, and the bottom save bar
+ * is measured in place, so the target rests clear of both at the current
+ * viewport instead of at a fixed offset. Shared by entry-gate and
+ * validation focus routing.
+ */
+function revealIntoView(target: HTMLElement): void {
+  const shell = document.querySelector<HTMLElement>("[data-app-shell]");
+  const declared =
+    shell === null ? "" : getComputedStyle(shell).getPropertyValue("--shell-header-h");
+  const headerH = Number.parseFloat(declared) || 0;
+  const bar = document.querySelector<HTMLElement>("div.sticky.bottom-0");
+  const barH = bar === null ? 0 : bar.getBoundingClientRect().height;
+  const freeTop = headerH + 8;
+  const freeBottom = window.innerHeight - barH - 8;
+  const rect = target.getBoundingClientRect();
+  if (freeBottom > freeTop && (rect.top < freeTop || rect.bottom > freeBottom)) {
+    const visibleH = Math.min(rect.height, freeBottom - freeTop);
+    const offset = freeTop + Math.max(0, (freeBottom - freeTop - visibleH) / 2);
+    window.scrollTo({ top: window.scrollY + rect.top - offset, behavior: "auto" });
+  } else if (freeBottom <= freeTop) {
+    target.scrollIntoView({ block: "center" });
+  }
+  target.focus({ preventScroll: true });
+}
+
 export function PurchaseOrderEditorPage({
   order,
   currency,
@@ -1598,8 +1628,7 @@ export function PurchaseOrderEditorPage({
       `[aria-label="${pendingFocus.replace(/"/g, "")}"]`
     );
     if (target !== null) {
-      target.scrollIntoView({ block: "nearest" });
-      target.focus();
+      revealIntoView(target);
     }
   }, [pendingFocus, state.lines.length]);
   const [sessionBannerError, setSessionBannerError] = useState<string | null>(null);
@@ -1840,8 +1869,7 @@ export function PurchaseOrderEditorPage({
       `[aria-label="${fieldLabel.replace(/"/g, "")}"]`
     );
     if (target !== null) {
-      target.scrollIntoView({ block: "nearest" });
-      target.focus();
+      revealIntoView(target);
       return true;
     }
     return false;
