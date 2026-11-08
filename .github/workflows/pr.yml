@@ -210,23 +210,28 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
 
-      - name: go test with race detector
-        # No -short.
-        #
-        # It used to skip TestGeneratePDF for want of a Chrome sandbox, but since
-        # v0.4.0 the active renderer is native Go (render.Active is gpdf), so
-        # nothing needs a browser. The flag bought 611ms by excluding the only
-        # end-to-end export test in the Go suite -- the one that builds a
-        # quotation and produces real PDF bytes, which is exactly the path a
-        # broken renderer would break.
-        #
-        # The 10m timeout is go test's per-package default, and backend/api's
-        # Postgres-backed suite now passes it on a hosted runner (the PO work
-        # added several schema-per-test suites). A package timeout is reported
-        # as a deadlock dump, which reads like a hang rather than a slow suite;
-        # give the suite headroom instead of misdiagnosing it as one.
+      - name: go test with race detector (DB-backed packages, serialized)
+        # The Postgres-backed suites each apply the full migration chain per
+        # test schema. Run together in one `go test ./...`, their concurrent
+        # DDL exhausts the service Postgres lock table -- `out of shared
+        # memory (SQLSTATE 53200)` in pg_dump, migration apply and session
+        # setup (PR #484 run 42498252482). `-p 1` keeps these suites off each
+        # other; the packages that never open a test database still run in
+        # parallel in the next step. Raising the table
+        # (`max_locks_per_transaction`) is not an option here: it is a
+        # postmaster-context GUC, and the service container exposes no
+        # command/config override or restart path, so a bigger table cannot
+        # be applied without fragile entrypoint hacks.
         if: steps.scope.outputs.needs_go != 'false'
-        run: go test -race -timeout 30m ./...
+        run: go test -race -timeout 30m -p 1 ./backend/api/... ./backend/auth/... ./backend/localseed/... ./backend/store/... ./cmd/vera/...
+
+      - name: go test with race detector (remaining packages)
+        # Everything that never opens a test database; still fully parallel.
+        # Computed rather than listed so a new package cannot silently skip
+        # both steps: `go list` enumerates the module and only the DB set
+        # above is excluded.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: go test -race -timeout 30m $(go list ./... | grep -vE '/backend/(api|auth|store)$|/backend/localseed$|/cmd/vera($|/)')
 
       - name: Prove the export test actually ran
         # A green tick cannot distinguish a test that ran from one that skipped,
