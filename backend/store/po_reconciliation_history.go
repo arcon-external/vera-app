@@ -23,6 +23,17 @@ import (
 // current version that belongs to a generation the caller never receives (or
 // the reverse). One transaction, one snapshot, one answer.
 
+// testOnlyAfterVersionRead is nil in production. A test sets it to pause this
+// read after the current PO version and before the generations, so a commit can
+// be interleaved deterministically instead of raced. It is never assigned by
+// non-test code.
+var testOnlyAfterVersionRead func(poID int64)
+
+// reconciliationHistoryIsolation is the isolation level the history read uses:
+// RepeatableRead in production. A test may weaken it to prove the snapshot
+// assertions depend on it.
+var reconciliationHistoryIsolation = pgx.RepeatableRead
+
 // POReconciliationSessions is every reconciliation generation recorded for one
 // purchase order, newest first.
 type POReconciliationSessions struct {
@@ -68,7 +79,7 @@ func (s *Store) ListPOReconciliationSessions(ctx context.Context, poID int64) (P
 	schema := s.configSchema()
 
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{
-		IsoLevel:   pgx.RepeatableRead,
+		IsoLevel:   reconciliationHistoryIsolation,
 		AccessMode: pgx.ReadOnly,
 	})
 	if err != nil {
@@ -84,6 +95,9 @@ func (s *Store) ListPOReconciliationSessions(ctx context.Context, poID int64) (P
 			return POReconciliationSessions{}, ErrPurchaseOrderNotFound
 		}
 		return POReconciliationSessions{}, fmt.Errorf("read purchase order %d for reconciliation history: %w", poID, err)
+	}
+	if hook := testOnlyAfterVersionRead; hook != nil {
+		hook(poID)
 	}
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`

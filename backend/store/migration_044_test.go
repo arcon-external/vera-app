@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -144,6 +146,17 @@ func po518RevisionN(t *testing.T, database *Store, first QuotationRecord, revisi
 				MarginalizedUnitPrice: 100,
 				MarginalizedTotal:     200,
 				ListUnitPrice:         100,
+			},
+			{
+				ItemNo:                3,
+				Description:           "Zero-value line",
+				Qty:                   1,
+				UoM:                   "Lot",
+				UnitPrice:             0,
+				OriginalTotal:         0,
+				MarginalizedUnitPrice: 0,
+				MarginalizedTotal:     0,
+				ListUnitPrice:         0,
 			},
 		},
 		Totals: RevisionTotals{
@@ -707,6 +720,58 @@ func po518ApplyThrough(t *testing.T, database *Store, maxVersion int) {
 	}
 }
 
+// po518RetainedJSON captures the complete retained history content for one PO,
+// excluding only the columns 044 adds, so a pre/post upgrade comparison proves
+// 044 rewrote nothing.
+func po518RetainedJSON(t *testing.T, ctx context.Context, database *Store, poID int64) map[string]string {
+	t.Helper()
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+	queries := map[string]string{
+		"sessions": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) - 'repair_correction_id' ORDER BY t.id)::text, '[]')
+			FROM %s.purchase_order_reconciliation_sessions t WHERE t.purchase_order_id = $1`,
+		"session_items": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.session_id, t.key)::text, '[]')
+			FROM %s.purchase_order_reconciliation_items t WHERE t.purchase_order_id = $1`,
+		"corrections": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.id)::text, '[]')
+			FROM %s.purchase_order_corrections t WHERE t.purchase_order_id = $1`,
+		"correction_items": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.correction_id, t.line_number)::text, '[]')
+			FROM %s.purchase_order_correction_items t
+			WHERE t.correction_id IN (
+				SELECT id FROM %s.purchase_order_corrections WHERE purchase_order_id = $1)`,
+		"source_repairs": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) - 'reconciliation_seed_xid' ORDER BY t.correction_id)::text, '[]')
+			FROM %s.purchase_order_source_repairs t
+			WHERE t.correction_id IN (
+				SELECT id FROM %s.purchase_order_corrections WHERE purchase_order_id = $1)`,
+		"source_repair_decisions": `
+			SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY t.correction_id, t.key)::text, '[]')
+			FROM %s.purchase_order_source_repair_decisions t
+			WHERE t.correction_id IN (
+				SELECT id FROM %s.purchase_order_corrections WHERE purchase_order_id = $1)`,
+	}
+	out := make(map[string]string, len(queries))
+	for name, query := range queries {
+		placeholders := strings.Count(query, "%s")
+		args := make([]any, placeholders)
+		for index := range args {
+			args[index] = schema
+		}
+		var value string
+		if err := pool.QueryRow(ctx, fmt.Sprintf(query, args...), poID).Scan(&value); err != nil {
+			t.Fatalf("retained %s: %v", name, err)
+		}
+		out[name] = value
+	}
+	return out
+}
+
 // TestMigration044Genuine043Upgrade builds a real pre-044 schema by applying the
 // production migrations 1..43, writes the old-shape history rows, then lets
 // Migrate apply 044. It is not a downgrade simulation: every object below 044
@@ -771,6 +836,10 @@ func TestMigration044Genuine043Upgrade(t *testing.T) {
 		t.Fatalf("read version: %v", err)
 	}
 
+	// Complete retained content before the upgrade, excluding only 044's new
+	// columns: the migration must rewrite nothing.
+	retainedBefore := po518RetainedJSON(t, ctx, database, saved.ID)
+
 	// The migration under test.
 	if err := database.Migrate(ctx); err != nil {
 		t.Fatalf("apply 044 to a real 043 schema: %v", err)
@@ -808,6 +877,13 @@ func TestMigration044Genuine043Upgrade(t *testing.T) {
 	}
 	if versionAfter != versionBefore {
 		t.Fatalf("the upgrade moved PO version %d -> %d", versionBefore, versionAfter)
+	}
+
+	retainedAfter := po518RetainedJSON(t, ctx, database, saved.ID)
+	for name, before := range retainedBefore {
+		if after := retainedAfter[name]; after != before {
+			t.Errorf("%s changed across the upgrade:\n  before: %s\n  after:  %s", name, before, after)
+		}
 	}
 
 	// The guards are live on the upgraded schema.
@@ -1048,6 +1124,167 @@ func TestMigration044ItemBootstrapRequiresActiveCanonicalItems(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("canonical item refused: %v", err)
+			}
+		})
+	}
+}
+
+// po518HistoryEvent builds one canonical HistoryEvent JSON document.
+func po518HistoryEvent(t *testing.T, kind, status, resolution, poValue, sourceValue string, actor int, at string) string {
+	t.Helper()
+	resolutionJSON := "null"
+	if resolution != "" {
+		encoded, err := json.Marshal(resolution)
+		if err != nil {
+			t.Fatalf("encode resolution: %v", err)
+		}
+		resolutionJSON = string(encoded)
+	}
+	return fmt.Sprintf(
+		`[{"Kind":%q,"SourceLineRef":null,"POValue":%s,"SourceValue":%s,"Status":%q,"Resolution":%s,"ActorID":%d,"At":%q}]`,
+		kind, poValue, sourceValue, status, resolutionJSON, actor, at)
+}
+
+// TestMigration044CanonicalShapeRejections is the fail-closed half of the shape
+// guard: every near-miss must raise 23514 rather than slip through a NULL.
+func TestMigration044CanonicalShapeRejections(t *testing.T) {
+	database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
+		t, "vera_po_518_shape_reject", "PO-518-REJECT")
+	schema := database.configSchema()
+	target := po518RevisionN(t, database, seed, 1)
+	lineKey := func(value string) *string { return &value }
+	ref := "1"
+	at := "2026-11-08T00:00:00Z"
+	validHeaderHistory := func() string {
+		return po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at)
+	}
+	validDiscountHistory := func() string {
+		return po518HistoryEvent(t, "line:discount", "resolved", "kept_po", `{"Enabled":true,"Percent":5}`, `{"Enabled":false,"Percent":0}`, 1, at)
+	}
+
+	cases := []struct {
+		name       string
+		key        string
+		field      string
+		kind       string
+		lineKey    *string
+		sourceRef  *string
+		poValue    string
+		sourceVal  string
+		history    string
+		status     string
+		resolution string
+		wantErr    bool
+	}{
+		{
+			name: "object-valued payment terms",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `{"PaymentTerms":"Net 30"}`, sourceVal: `"Net 60"`,
+			history: validHeaderHistory(), status: "resolved", resolution: "kept_po",
+			wantErr: true,
+		},
+		{
+			name: "header key that disagrees with its field",
+			key:  "header:incoterms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: validHeaderHistory(), status: "resolved", resolution: "kept_po",
+			wantErr: true,
+		},
+		{
+			name: "discount Percent as a numeric string",
+			key:  "line:id:1:discount", field: "line:discount", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `{"Enabled":true,"Percent":"5"}`, sourceVal: `{"Enabled":false,"Percent":0}`,
+			history: validDiscountHistory(), status: "resolved", resolution: "kept_po",
+			wantErr: true,
+		},
+		{
+			name: "discount Percent as null",
+			key:  "line:id:1:discount", field: "line:discount", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `{"Enabled":true,"Percent":null}`, sourceVal: `{"Enabled":false,"Percent":0}`,
+			history: validDiscountHistory(), status: "resolved", resolution: "kept_po",
+			wantErr: true,
+		},
+		{
+			name: "canonical discount is accepted",
+			key:  "line:id:1:discount", field: "line:discount", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `{"Enabled":true,"Percent":5}`, sourceVal: `{"Enabled":false,"Percent":0}`,
+			history: validDiscountHistory(), status: "resolved", resolution: "kept_po",
+		},
+		{
+			name: "history Kind outside the field-key set",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:bogus", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history Status outside the enum",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "done", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history Resolution outside the enum",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po_lol", `"Net 30"`, `"Net 60"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history value as an array",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `[1,2]`, `"Net 60"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history value as an untyped object",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `{"Whatever":1}`, `"Net 60"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history actor that is not positive",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 0, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history timestamp that is not RFC3339",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, "2026-11-08 00:00:00"),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repair := po518BeginRepair(t, database, ctx, saved, target, orgID)
+			sessionID, err := po518InstallSession(ctx, schema, repair.Tx, repair, po518SessionParams{})
+			if err != nil {
+				t.Fatalf("install terminal session: %v", err)
+			}
+			err = po518InsertItemRow(ctx, schema, repair.Tx, repair, sessionID,
+				tc.key, tc.field, tc.kind, tc.lineKey, tc.sourceRef,
+				tc.poValue, tc.sourceVal, tc.history, tc.status, tc.resolution)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("the fail-closed guard accepted %q", tc.name)
+				}
+				if !isSQLState(t, err, "23514") {
+					t.Fatalf("rejection error = %v; want 23514", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonical case refused: %v", err)
 			}
 		})
 	}

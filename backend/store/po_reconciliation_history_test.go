@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // The archive read (#518 B1): every generation, in one snapshot, with the
@@ -251,99 +251,119 @@ func TestListPOReconciliationSessionsLegacyAndTenant(t *testing.T) {
 	}
 }
 
-// TestListPOReconciliationSessionsSnapshotAcrossRepair exercises the production
-// reader while real repairs commit, and checks the single-snapshot invariant on
-// every returned envelope:
-//
-//	generations == current version - initial version + 1
-//	the active generation's stored POVersion == the outer POVersion
-//
-// A read that mixed the PO row from after a commit with generations from before
-// it (or the reverse) breaks the first equality; READ COMMITTED would allow it.
-// The test drives ListPOReconciliationSessions itself, not a transaction it owns.
-func TestListPOReconciliationSessionsSnapshotAcrossRepair(t *testing.T) {
-	database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
-		t, "vera_po_518_read_snapshot", "PO-518-READ-SNAP")
-	initialVersion := saved.Version
-	targets := []QuotationRecord{
-		po518RevisionN(t, database, seed, 1),
-		po518RevisionN(t, database, seed, 2),
-	}
+// po518ReadWithCommit runs one production history read while a repair commits
+// exactly between its version read and its generation read. The test-only hook
+// makes the interleaving deterministic; no timing is relied on.
+func po518ReadWithCommit(t *testing.T, database *Store, ctx context.Context,
+	saved PurchaseOrder, admin AuthUser, target QuotationRecord, orgID string,
+) (POReconciliationSessions, error) {
+	t.Helper()
+	input := repairInput(t, saved, admin, target, "controlled snapshot repair")
 
-	stop := make(chan struct{})
-	var reader sync.WaitGroup
-	var reads int64
-	var problems []string
-	var problemMu sync.Mutex
-	record := func(format string, args ...any) {
-		problemMu.Lock()
-		problems = append(problems, fmt.Sprintf(format, args...))
-		problemMu.Unlock()
+	paused := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	testOnlyAfterVersionRead = func(int64) {
+		once.Do(func() { close(paused) })
+		<-release
 	}
-	reader.Add(1)
+	defer func() { testOnlyAfterVersionRead = nil }()
+
+	repairErr := make(chan error, 1)
+	repairContext := ContextWithOrg(context.Background(), orgID)
 	go func() {
-		defer reader.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			history, err := database.ListPOReconciliationSessions(ctx, saved.ID)
-			if err != nil {
-				record("reader error: %v", err)
-				return
-			}
-			atomic.AddInt64(&reads, 1)
-			want := int(history.POVersion-initialVersion) + 1
-			if len(history.Sessions) != want {
-				record("mixed snapshot: version %d carries %d generations; want %d",
-					history.POVersion, len(history.Sessions), want)
-				continue
-			}
-			active := 0
-			for _, generation := range history.Sessions {
-				if generation.Session.Active {
-					active++
-					if generation.Session.POVersion != history.POVersion {
-						record("mixed snapshot: outer version %d, active generation %d",
-							history.POVersion, generation.Session.POVersion)
-					}
-				}
-			}
-			if active != 1 && len(history.Sessions) > 0 {
-				record("active generations = %d for version %d", active, history.POVersion)
-			}
-		}
+		<-paused
+		_, err := database.RepairPurchaseOrderSource(repairContext, input)
+		repairErr <- err
+		close(release)
 	}()
 
-	current := saved
-	for index := 0; index < 4; index++ {
-		current = po518CommitRepair(t, database, ctx, current, targets[index%2], orgID)
+	history, err := database.ListPOReconciliationSessions(ctx, saved.ID)
+	if repairErrValue := <-repairErr; repairErrValue != nil {
+		t.Fatalf("controlled repair: %v", repairErrValue)
 	}
-	close(stop)
-	reader.Wait()
-	problemMu.Lock()
-	defer problemMu.Unlock()
-	if len(problems) > 0 {
-		t.Fatalf("production reader saw an inconsistent envelope:\n  %s", strings.Join(problems, "\n  "))
-	}
-	if reads == 0 {
-		t.Fatalf("the concurrent reader never completed a read")
-	}
+	return history, err
+}
 
-	final, err := database.ListPOReconciliationSessions(ctx, saved.ID)
-	if err != nil {
-		t.Fatalf("final history read: %v", err)
+// po518SnapshotViolations applies the single-snapshot invariant to one envelope.
+// The paused read must satisfy it; a weakened isolation must break it.
+func po518SnapshotViolations(history POReconciliationSessions, initialVersion int64) []string {
+	var violations []string
+	want := int(history.POVersion-initialVersion) + 1
+	if len(history.Sessions) != want {
+		violations = append(violations, fmt.Sprintf(
+			"version %d carries %d generations; want %d", history.POVersion, len(history.Sessions), want))
 	}
-	if final.POVersion != initialVersion+4 {
-		t.Errorf("final version = %d; want %d", final.POVersion, initialVersion+4)
+	for _, generation := range history.Sessions {
+		if generation.Session.Active && generation.Session.POVersion != history.POVersion {
+			violations = append(violations, fmt.Sprintf(
+				"outer version %d carries an active generation recorded at %d",
+				history.POVersion, generation.Session.POVersion))
+		}
 	}
-	if len(final.Sessions) != 5 {
-		t.Errorf("final generations = %d; want 5", len(final.Sessions))
-	}
-	if final.Sessions[0].Session.POVersion != final.POVersion {
-		t.Errorf("final active generation version = %d; want the outer %d",
-			final.Sessions[0].Session.POVersion, final.POVersion)
-	}
+	return violations
+}
+
+// TestListPOReconciliationSessionsSnapshotIsDeterministic proves the production
+// reader's single snapshot with a controlled commit between its two statements,
+// and proves the assertion fails when that isolation is weakened.
+func TestListPOReconciliationSessionsSnapshotIsDeterministic(t *testing.T) {
+	t.Run("repeatable read keeps the pre-commit snapshot", func(t *testing.T) {
+		database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
+			t, "vera_po_518_snapshot_ok", "PO-518-SNAP-OK")
+		admin := poRepairAdmin(t, database)
+		target := po518RevisionN(t, database, seed, 1)
+		initialVersion := saved.Version
+
+		history, err := po518ReadWithCommit(t, database, ctx, saved, admin, target, orgID)
+		if err != nil {
+			t.Fatalf("history read: %v", err)
+		}
+		if history.POVersion != initialVersion {
+			t.Errorf("paused read version = %d; want the pre-commit %d", history.POVersion, initialVersion)
+		}
+		if len(history.Sessions) != 1 {
+			t.Errorf("paused read generations = %d; want the pre-commit 1", len(history.Sessions))
+		}
+		if violations := po518SnapshotViolations(history, initialVersion); len(violations) > 0 {
+			t.Errorf("the paused read violated the single-snapshot invariant: %v", violations)
+		}
+
+		// The commit did happen: a fresh read sees the installed generation.
+		after, err := database.ListPOReconciliationSessions(ctx, saved.ID)
+		if err != nil {
+			t.Fatalf("fresh read: %v", err)
+		}
+		if after.POVersion != initialVersion+1 || len(after.Sessions) != 2 {
+			t.Errorf("post-commit read = version %d with %d generations; want %d with 2",
+				after.POVersion, len(after.Sessions), initialVersion+1)
+		}
+	})
+
+	t.Run("read committed is detected as mixed", func(t *testing.T) {
+		database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
+			t, "vera_po_518_snapshot_weak", "PO-518-SNAP-WEAK")
+		admin := poRepairAdmin(t, database)
+		target := po518RevisionN(t, database, seed, 1)
+		initialVersion := saved.Version
+
+		previous := reconciliationHistoryIsolation
+		reconciliationHistoryIsolation = pgx.ReadCommitted
+		defer func() { reconciliationHistoryIsolation = previous }()
+
+		history, err := po518ReadWithCommit(t, database, ctx, saved, admin, target, orgID)
+		if err != nil {
+			t.Fatalf("history read: %v", err)
+		}
+		if history.POVersion != initialVersion {
+			t.Fatalf("weakened read version = %d; want the pre-commit %d", history.POVersion, initialVersion)
+		}
+		// The same assertion the production default must satisfy has to fail
+		// here. If it still holds, the test cannot detect a weakened reader.
+		violations := po518SnapshotViolations(history, initialVersion)
+		if len(violations) == 0 {
+			t.Fatalf("read committed produced a consistent snapshot; the assertion is not isolation-sensitive")
+		}
+		t.Logf("read committed mixed the snapshot as expected: %v", violations)
+	})
 }

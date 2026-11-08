@@ -338,6 +338,36 @@ CREATE TRIGGER purchase_order_reconciliation_sessions_guard_trigger
 -- key/field/line-key/reference agreement, typed values, and a history array of
 -- the exact HistoryEvent member set. This runs only inside the repair seed, so
 -- ordinary draft writes keep their existing validator path.
+-- 6c. The two documented value objects a history snapshot may carry: a line
+-- discount and a tax basis. Anything else object-shaped is untyped evidence and
+-- is refused by the shape guard above.
+CREATE OR REPLACE FUNCTION {{schema}}.purchase_order_reconciliation_value_object_ok(
+    p_value JSONB
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $reconciliation_value_object$
+BEGIN
+    IF jsonb_typeof(p_value) IS DISTINCT FROM 'object' THEN
+        RETURN FALSE;
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(p_value)) = 2
+       AND p_value ? 'Enabled' AND p_value ? 'Percent' THEN
+        RETURN jsonb_typeof(p_value->'Enabled') = 'boolean'
+           AND jsonb_typeof(p_value->'Percent') = 'number'
+           AND (p_value->>'Percent') ~ '^[0-9]{1,3}$'
+           AND (p_value->>'Percent')::numeric <= 100;
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(p_value)) = 3
+       AND p_value ? 'TaxZone' AND p_value ? 'TaxType' AND p_value ? 'ServiceCategory' THEN
+        RETURN jsonb_typeof(p_value->'TaxZone') = 'string'
+           AND jsonb_typeof(p_value->'TaxType') = 'string'
+           AND jsonb_typeof(p_value->'ServiceCategory') = 'string';
+    END IF;
+    RETURN FALSE;
+END;
+$reconciliation_value_object$;
+
 CREATE OR REPLACE FUNCTION {{schema}}.purchase_order_reconciliation_item_shape_ok(
     p_key TEXT,
     p_field TEXT,
@@ -356,49 +386,84 @@ LANGUAGE plpgsql
 AS $reconciliation_item_shape$
 DECLARE
     suffix TEXT;
-    member_count INTEGER;
+    percent NUMERIC;
 BEGIN
-    IF p_status IS DISTINCT FROM 'resolved' OR p_resolution IS NULL OR p_actor_id IS NULL THEN
+    -- Fail closed: every comparison below is null-safe, so a missing member,
+    -- a JSON null, a mistyped scalar or an array can never turn a refusal into
+    -- SQL NULL and slip past the caller's IF NOT.
+    IF p_status IS DISTINCT FROM 'resolved' OR p_resolution IS NULL OR p_actor_id IS NULL OR p_actor_id < 1 THEN
         RETURN FALSE;
     END IF;
-    -- History is a non-empty array of exactly the frozen HistoryEvent members.
-    IF p_history IS NULL OR jsonb_typeof(p_history) <> 'array'
-       OR jsonb_array_length(p_history) = 0 THEN
+
+    IF jsonb_typeof(p_history) IS DISTINCT FROM 'array' OR jsonb_array_length(p_history) = 0 THEN
         RETURN FALSE;
     END IF;
     IF EXISTS (
         SELECT 1
         FROM jsonb_array_elements(p_history) AS event
-        WHERE jsonb_typeof(event) <> 'object'
+        WHERE jsonb_typeof(event) IS DISTINCT FROM 'object'
            OR (SELECT count(*) FROM jsonb_object_keys(event)) <> 8
            OR NOT (event ? 'Kind' AND event ? 'SourceLineRef' AND event ? 'POValue'
                    AND event ? 'SourceValue' AND event ? 'Status'
                    AND event ? 'Resolution' AND event ? 'ActorID' AND event ? 'At')
-           OR jsonb_typeof(event->'Kind') <> 'string'
+           -- Kind is one of the review field keys, never free text.
+           OR (event->>'Kind') IS NULL
+           OR (event->>'Kind') NOT IN (
+                'header:paymentTerms', 'header:incoterms', 'header:discountPercent',
+                'line:description', 'line:uom', 'line:quantity', 'line:unitPrice',
+                'line:discount', 'line:match', 'source:match', 'link:taxBasis')
            OR jsonb_typeof(event->'SourceLineRef') NOT IN ('string', 'null')
-           OR jsonb_typeof(event->'Status') <> 'string'
+           OR jsonb_typeof(event->'SourceLineRef') IS NULL
+           -- Status and Resolution are the frozen enums.
+           OR (event->>'Status') IS NULL
+           OR (event->>'Status') NOT IN ('resolved', 'unresolved')
+           OR jsonb_typeof(event->'Resolution') IS NULL
+           OR (jsonb_typeof(event->'Resolution') = 'string'
+               AND (event->>'Resolution') NOT IN (
+                    'kept_po', 'used_quotation', 'values_now_match',
+                    'acknowledged_missing', 'acknowledged_extra',
+                    'match_corrected', 'line_removed'))
            OR jsonb_typeof(event->'Resolution') NOT IN ('string', 'null')
-           OR jsonb_typeof(event->'ActorID') <> 'number'
-           OR jsonb_typeof(event->'At') <> 'string'
+           -- ActorID is a positive integer, At is RFC3339 text.
+           OR jsonb_typeof(event->'ActorID') IS DISTINCT FROM 'number'
+           OR (event->>'ActorID') !~ '^[0-9]+$'
+           OR (event->>'ActorID')::numeric <= 0
+           OR jsonb_typeof(event->'At') IS DISTINCT FROM 'string'
+           OR (event->>'At') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+           -- Values are typed scalars, null, or one of the two value objects.
+           OR jsonb_typeof(event->'POValue') IS NULL
+           OR jsonb_typeof(event->'POValue') NOT IN ('string', 'number', 'boolean', 'null', 'object')
+           OR jsonb_typeof(event->'SourceValue') IS NULL
+           OR jsonb_typeof(event->'SourceValue') NOT IN ('string', 'number', 'boolean', 'null', 'object')
+           OR (jsonb_typeof(event->'POValue') = 'object'
+               AND NOT {{schema}}.purchase_order_reconciliation_value_object_ok(event->'POValue'))
+           OR (jsonb_typeof(event->'SourceValue') = 'object'
+               AND NOT {{schema}}.purchase_order_reconciliation_value_object_ok(event->'SourceValue'))
     ) THEN
         RETURN FALSE;
     END IF;
 
     IF p_field IN ('header:paymentTerms', 'header:incoterms') THEN
-        IF p_line_key IS NOT NULL OR p_source_ref IS NOT NULL OR p_kind <> 'difference' THEN
+        IF p_key IS DISTINCT FROM p_field
+           OR p_line_key IS NOT NULL OR p_source_ref IS NOT NULL
+           OR p_kind IS DISTINCT FROM 'difference' THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value) <> 'string' OR jsonb_typeof(p_source_value) <> 'string' THEN
+        IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'string'
+           OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'string' THEN
             RETURN FALSE;
         END IF;
         RETURN p_resolution IN ('kept_po', 'used_quotation', 'values_now_match');
     END IF;
 
     IF p_field = 'header:discountPercent' THEN
-        IF p_line_key IS NOT NULL OR p_source_ref IS NOT NULL OR p_kind <> 'difference' THEN
+        IF p_key IS DISTINCT FROM p_field
+           OR p_line_key IS NOT NULL OR p_source_ref IS NOT NULL
+           OR p_kind IS DISTINCT FROM 'difference' THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value) <> 'number' OR jsonb_typeof(p_source_value) <> 'number' THEN
+        IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'number'
+           OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'number' THEN
             RETURN FALSE;
         END IF;
         IF (p_po_value #>> '{}') !~ '^[0-9]{1,3}$' OR (p_source_value #>> '{}') !~ '^[0-9]{1,3}$' THEN
@@ -411,11 +476,11 @@ BEGIN
     END IF;
 
     IF p_field IN ('line:description', 'line:uom', 'line:quantity', 'line:unitPrice', 'line:discount') THEN
-        IF p_line_key IS NULL OR p_source_ref IS NULL OR p_kind <> 'difference' THEN
+        IF p_line_key IS NULL OR p_source_ref IS NULL OR p_kind IS DISTINCT FROM 'difference' THEN
             RETURN FALSE;
         END IF;
         suffix := split_part(p_field, ':', 2);
-        IF p_key <> 'line:' || p_line_key || ':' || suffix THEN
+        IF p_key IS DISTINCT FROM 'line:' || p_line_key || ':' || suffix THEN
             RETURN FALSE;
         END IF;
         IF NOT (p_line_key ~ '^id:[0-9]+$' OR p_line_key LIKE 'client:%') THEN
@@ -428,7 +493,8 @@ BEGIN
             RETURN jsonb_typeof(p_po_value) = 'string' AND jsonb_typeof(p_source_value) = 'string';
         END IF;
         IF p_field IN ('line:quantity', 'line:unitPrice') THEN
-            IF jsonb_typeof(p_po_value) <> 'number' OR jsonb_typeof(p_source_value) <> 'number' THEN
+            IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'number'
+               OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'number' THEN
                 RETURN FALSE;
             END IF;
             IF (p_po_value #>> '{}') !~ '^-?[0-9]+$' OR (p_source_value #>> '{}') !~ '^-?[0-9]+$' THEN
@@ -444,8 +510,11 @@ BEGIN
             END IF;
             RETURN TRUE;
         END IF;
-        -- line:discount uses exactly {Enabled, Percent}.
-        IF jsonb_typeof(p_po_value) <> 'object' OR jsonb_typeof(p_source_value) <> 'object' THEN
+        -- line:discount is exactly {Enabled, Percent}; Percent is a JSON number,
+        -- never a numeric string and never null, so the regex below cannot be
+        -- bypassed through ->>.
+        IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'object'
+           OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'object' THEN
             RETURN FALSE;
         END IF;
         IF (SELECT count(*) FROM jsonb_object_keys(p_po_value)) <> 2
@@ -456,58 +525,70 @@ BEGIN
                 AND p_source_value ? 'Enabled' AND p_source_value ? 'Percent') THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value->'Enabled') <> 'boolean'
-           OR jsonb_typeof(p_source_value->'Enabled') <> 'boolean' THEN
+        IF jsonb_typeof(p_po_value->'Enabled') IS DISTINCT FROM 'boolean'
+           OR jsonb_typeof(p_source_value->'Enabled') IS DISTINCT FROM 'boolean' THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value->'Percent') IS DISTINCT FROM 'number'
+           OR jsonb_typeof(p_source_value->'Percent') IS DISTINCT FROM 'number' THEN
             RETURN FALSE;
         END IF;
         IF (p_po_value->>'Percent') !~ '^[0-9]{1,3}$'
            OR (p_source_value->>'Percent') !~ '^[0-9]{1,3}$' THEN
             RETURN FALSE;
         END IF;
-        RETURN (p_po_value->>'Percent')::numeric <= 100 AND (p_source_value->>'Percent')::numeric <= 100;
+        percent := (p_po_value->>'Percent')::numeric;
+        IF percent > 100 OR (p_source_value->>'Percent')::numeric > 100 THEN
+            RETURN FALSE;
+        END IF;
+        RETURN TRUE;
     END IF;
 
     IF p_field = 'line:match' THEN
         IF p_line_key IS NULL THEN
             RETURN FALSE;
         END IF;
-        IF p_key <> 'line:' || p_line_key || ':match' THEN
+        IF p_key IS DISTINCT FROM 'line:' || p_line_key || ':match' THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_source_value) <> 'null' THEN
+        IF jsonb_typeof(p_source_value) IS DISTINCT FROM 'null' THEN
             RETURN FALSE;
         END IF;
         IF p_kind = 'extra_line' THEN
             IF p_source_ref IS NOT NULL THEN
                 RETURN FALSE;
             END IF;
-            IF jsonb_typeof(p_po_value) NOT IN ('string', 'null') THEN
+            IF jsonb_typeof(p_po_value) NOT IN ('string', 'null')
+               OR jsonb_typeof(p_po_value) IS NULL THEN
                 RETURN FALSE;
             END IF;
         ELSIF p_kind = 'duplicate_match' THEN
             IF p_source_ref IS NULL OR p_source_ref !~ '^[0-9]+(\.[0-9]+)?$' THEN
                 RETURN FALSE;
             END IF;
-            IF jsonb_typeof(p_po_value) <> 'string' OR (p_po_value #>> '{}') IS DISTINCT FROM p_source_ref THEN
+            IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'string'
+               OR (p_po_value #>> '{}') IS DISTINCT FROM p_source_ref THEN
                 RETURN FALSE;
             END IF;
         ELSE
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value) = 'string' AND (p_po_value #>> '{}') !~ '^[0-9]+(\.[0-9]+)?$' THEN
+        IF jsonb_typeof(p_po_value) = 'string'
+           AND (p_po_value #>> '{}') !~ '^[0-9]+(\.[0-9]+)?$' THEN
             RETURN FALSE;
         END IF;
         RETURN TRUE;
     END IF;
 
     IF p_field = 'source:match' THEN
-        IF p_line_key IS NOT NULL OR p_source_ref IS NULL OR p_kind <> 'missing_line' THEN
+        IF p_line_key IS NOT NULL OR p_source_ref IS NULL OR p_kind IS DISTINCT FROM 'missing_line' THEN
             RETURN FALSE;
         END IF;
-        IF p_key <> 'source:' || p_source_ref || ':match' THEN
+        IF p_key IS DISTINCT FROM 'source:' || p_source_ref || ':match' THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value) <> 'null' OR jsonb_typeof(p_source_value) <> 'string' THEN
+        IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'null'
+           OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'string' THEN
             RETURN FALSE;
         END IF;
         IF (p_source_value #>> '{}') IS DISTINCT FROM p_source_ref THEN
@@ -517,14 +598,15 @@ BEGIN
     END IF;
 
     IF p_field = 'link:taxBasis' THEN
-        IF p_key <> 'link:taxBasis' OR p_line_key IS NOT NULL OR p_source_ref IS NOT NULL
-           OR p_kind <> 'tax_basis' THEN
+        IF p_key IS DISTINCT FROM 'link:taxBasis' OR p_line_key IS NOT NULL
+           OR p_source_ref IS NOT NULL OR p_kind IS DISTINCT FROM 'tax_basis' THEN
             RETURN FALSE;
         END IF;
         IF p_resolution NOT IN ('kept_po', 'used_quotation') THEN
             RETURN FALSE;
         END IF;
-        IF jsonb_typeof(p_po_value) <> 'object' OR jsonb_typeof(p_source_value) <> 'object' THEN
+        IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'object'
+           OR jsonb_typeof(p_source_value) IS DISTINCT FROM 'object' THEN
             RETURN FALSE;
         END IF;
         IF (SELECT count(*) FROM jsonb_object_keys(p_po_value)) <> 3
@@ -547,6 +629,8 @@ BEGIN
     RETURN FALSE;
 END;
 $reconciliation_item_shape$;
+
+
 
 -- 7. Item guard. UPDATE/DELETE/retarget refusals stay exactly as 041 wrote
 -- them. The INSERT branch keeps its two refusals but opens them for a genuine
