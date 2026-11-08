@@ -365,7 +365,7 @@ func po518InstallItem(ctx context.Context, schema string, q po518Querier,
 		) VALUES ($1,$2,$3,'header:paymentTerms','header:paymentTerms','difference',
 			'Payment terms','"Net 30"','"Net 60"',$4,$5,$6,
 			jsonb_build_array(jsonb_build_object(
-				'Kind','header:paymentTerms','SourceLineRef',NULL,
+				'Kind','difference','SourceLineRef',NULL,
 				'POValue','"Net 30"'::jsonb,'SourceValue','"Net 60"'::jsonb,
 				'Status',$4::text,'Resolution',$5::text,'ActorID',$6::bigint,
 				'At','2026-11-08T00:00:00Z')))`, schema),
@@ -992,7 +992,7 @@ func TestMigration044LinkedAuditCannotBeDeletedDirectly(t *testing.T) {
 // the shape guard can be exercised independently of the composer.
 func po518InsertItemRow(ctx context.Context, schema string, q po518Querier,
 	repair po518Repair, sessionID int64, key, field, kind string,
-	lineKey, sourceRef *string, poValue, sourceValue, history, status, resolution string) error {
+	lineKey, sourceRef *string, poValue, sourceValue any, history, status, resolution string) error {
 	var lineKeyArg, sourceRefArg, resolutionArg any
 	if lineKey != nil {
 		lineKeyArg = *lineKey
@@ -1024,7 +1024,7 @@ func TestMigration044ItemBootstrapRequiresActiveCanonicalItems(t *testing.T) {
 		t, "vera_po_518_shape", "PO-518-SHAPE")
 	schema := database.configSchema()
 	target := po518RevisionN(t, database, seed, 1)
-	validHistory := `[{"Kind":"header:paymentTerms","SourceLineRef":null,"POValue":"Net 30","SourceValue":"Net 60","Status":"resolved","Resolution":"kept_po","ActorID":1,"At":"2026-11-08T00:00:00Z"}]`
+	validHistory := `[{"Kind":"difference","SourceLineRef":null,"POValue":"Net 30","SourceValue":"Net 60","Status":"resolved","Resolution":"kept_po","ActorID":1,"At":"2026-11-08T00:00:00Z"}]`
 
 	lineKey := func(value string) *string { return &value }
 	ref := "1"
@@ -1037,8 +1037,8 @@ func TestMigration044ItemBootstrapRequiresActiveCanonicalItems(t *testing.T) {
 		kind       string
 		lineKey    *string
 		sourceRef  *string
-		poValue    string
-		sourceVal  string
+		poValue    any
+		sourceVal  any
 		history    string
 		status     string
 		resolution string
@@ -1079,7 +1079,7 @@ func TestMigration044ItemBootstrapRequiresActiveCanonicalItems(t *testing.T) {
 		{
 			name: "history with a missing member is refused",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
-			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: `[{"Kind":"header:paymentTerms"}]`,
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: `[{"Kind":"difference"}]`,
 			status: "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
@@ -1156,10 +1156,10 @@ func TestMigration044CanonicalShapeRejections(t *testing.T) {
 	ref := "1"
 	at := "2026-11-08T00:00:00Z"
 	validHeaderHistory := func() string {
-		return po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at)
+		return po518HistoryEvent(t, "difference", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at)
 	}
 	validDiscountHistory := func() string {
-		return po518HistoryEvent(t, "line:discount", "resolved", "kept_po", `{"Enabled":true,"Percent":5}`, `{"Enabled":false,"Percent":0}`, 1, at)
+		return po518HistoryEvent(t, "difference", "resolved", "kept_po", `{"Enabled":true,"Percent":5}`, `{"Enabled":false,"Percent":0}`, 1, at)
 	}
 
 	cases := []struct {
@@ -1169,8 +1169,8 @@ func TestMigration044CanonicalShapeRejections(t *testing.T) {
 		kind       string
 		lineKey    *string
 		sourceRef  *string
-		poValue    string
-		sourceVal  string
+		poValue    any
+		sourceVal  any
 		history    string
 		status     string
 		resolution string
@@ -1214,52 +1214,92 @@ func TestMigration044CanonicalShapeRejections(t *testing.T) {
 			history: validDiscountHistory(), status: "resolved", resolution: "kept_po",
 		},
 		{
-			name: "history Kind outside the field-key set",
+			name: "SQL NULL purchase-order description value",
+			key:  "line:id:1:description", field: "line:description", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: nil, sourceVal: `"Priced widget"`,
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"A"`, `"B"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "SQL NULL source description value",
+			key:  "line:id:1:description", field: "line:description", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `"Priced widget"`, sourceVal: nil,
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"A"`, `"B"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "SQL NULL purchase-order unit-of-measure value",
+			key:  "line:id:1:uom", field: "line:uom", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: nil, sourceVal: `"Pc"`,
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"A"`, `"B"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "SQL NULL source unit-of-measure value",
+			key:  "line:id:1:uom", field: "line:uom", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `"Pc"`, sourceVal: nil,
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"A"`, `"B"`, 1, at),
+			status:  "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "valid missing-line history with the contract kind is accepted",
+			key:  "source:1:match", field: "source:match", kind: "missing_line",
+			sourceRef: &ref,
+			poValue:   `null`, sourceVal: `"1"`,
+			history: po518HistoryEvent(t, "missing_line", "resolved", "acknowledged_missing", `null`, `"1"`, 1, at),
+			status:  "resolved", resolution: "acknowledged_missing",
+		},
+		{
+			name: "history Kind uses the old field-id convention",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:bogus", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
+			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history Status outside the enum",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "done", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
+			history: po518HistoryEvent(t, "difference", "done", "kept_po", `"Net 30"`, `"Net 60"`, 1, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history Resolution outside the enum",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po_lol", `"Net 30"`, `"Net 60"`, 1, at),
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po_lol", `"Net 30"`, `"Net 60"`, 1, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history value as an array",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `[1,2]`, `"Net 60"`, 1, at),
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `[1,2]`, `"Net 60"`, 1, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history value as an untyped object",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `{"Whatever":1}`, `"Net 60"`, 1, at),
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `{"Whatever":1}`, `"Net 60"`, 1, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history actor that is not positive",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 0, at),
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 0, at),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 		{
 			name: "history timestamp that is not RFC3339",
 			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
 			poValue: `"Net 30"`, sourceVal: `"Net 60"`,
-			history: po518HistoryEvent(t, "header:paymentTerms", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, "2026-11-08 00:00:00"),
+			history: po518HistoryEvent(t, "difference", "resolved", "kept_po", `"Net 30"`, `"Net 60"`, 1, "2026-11-08 00:00:00"),
 			status:  "resolved", resolution: "kept_po", wantErr: true,
 		},
 	}
@@ -1285,6 +1325,56 @@ func TestMigration044CanonicalShapeRejections(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("canonical case refused: %v", err)
+			}
+		})
+	}
+}
+
+// TestMigration044ShapeFunctionFailsClosedOnSQLNull calls the canonical shape
+// function directly with SQL-NULL value columns. The function must return
+// exactly FALSE, never SQL NULL: the caller is `IF NOT shape_ok(...)`, and
+// `NOT NULL` is NULL, so a NULL answer is an acceptance, not a refusal.
+func TestMigration044ShapeFunctionFailsClosedOnSQLNull(t *testing.T) {
+	database, ctx, _, _, _, _, _ := po518SavedFixture(
+		t, "vera_po_518_shape_null", "PO-518-NULL")
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+	history := po518HistoryEvent(t, "difference", "resolved", "kept_po", `"A"`, `"B"`, 1, "2026-11-08T00:00:00Z")
+
+	cases := []struct {
+		name        string
+		field       string
+		poValue     any
+		sourceValue any
+	}{
+		{name: "purchase-order value is SQL NULL", field: "line:description",
+			poValue: nil, sourceValue: `"A"`},
+		{name: "source value is SQL NULL", field: "line:description",
+			poValue: `"A"`, sourceValue: nil},
+		{name: "both values are SQL NULL", field: "line:uom",
+			poValue: nil, sourceValue: nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			suffix := strings.TrimPrefix(tc.field, "line:")
+			var result *bool
+			if err := pool.QueryRow(ctx, fmt.Sprintf(`
+				SELECT %s.purchase_order_reconciliation_item_shape_ok(
+					$1, $2, 'difference', 'id:1', '1', $3, $4,
+					'resolved', 'kept_po', 1, $5::jsonb)`, schema),
+				"line:id:1:"+suffix, tc.field, tc.poValue, tc.sourceValue, history).
+				Scan(&result); err != nil {
+				t.Fatalf("call the shape function: %v", err)
+			}
+			if result == nil {
+				t.Fatalf("the shape function returned SQL NULL for %s, which the caller treats as accepted", tc.name)
+			}
+			if *result {
+				t.Fatalf("the shape function accepted %s", tc.name)
 			}
 		})
 	}

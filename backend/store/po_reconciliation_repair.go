@@ -463,7 +463,7 @@ func buildRepairReconciliationSeed(
 		}
 		for _, observation := range draft.observed {
 			item.History = append(item.History, POReconciliationHistoryEvent{
-				Kind:          draft.field,
+				Kind:          draft.kind,
 				SourceLineRef: item.SourceLineRef,
 				POValue:       observation.po,
 				SourceValue:   observation.src,
@@ -473,7 +473,7 @@ func buildRepairReconciliationSeed(
 			})
 		}
 		terminal := POReconciliationHistoryEvent{
-			Kind:          draft.field,
+			Kind:          draft.kind,
 			SourceLineRef: item.SourceLineRef,
 			POValue:       item.POValue,
 			SourceValue:   item.SourceValue,
@@ -684,7 +684,7 @@ func repairTaxBasisItem(stored PurchaseOrder, source PurchaseOrderSource, actorI
 		ActorID:     actorID,
 		UpdatedAt:   now,
 		History: []POReconciliationHistoryEvent{{
-			Kind:        "link:taxBasis",
+			Kind:        POReconciliationKindTaxBasis,
 			POValue:     beforeRaw,
 			SourceValue: afterRaw,
 			Status:      POReconciliationStatusResolved,

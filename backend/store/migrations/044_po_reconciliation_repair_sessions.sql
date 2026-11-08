@@ -406,12 +406,10 @@ BEGIN
            OR NOT (event ? 'Kind' AND event ? 'SourceLineRef' AND event ? 'POValue'
                    AND event ? 'SourceValue' AND event ? 'Status'
                    AND event ? 'Resolution' AND event ? 'ActorID' AND event ? 'At')
-           -- Kind is one of the review field keys, never free text.
+           -- Kind is the frozen item-kind enum, never the field id.
            OR (event->>'Kind') IS NULL
            OR (event->>'Kind') NOT IN (
-                'header:paymentTerms', 'header:incoterms', 'header:discountPercent',
-                'line:description', 'line:uom', 'line:quantity', 'line:unitPrice',
-                'line:discount', 'line:match', 'source:match', 'link:taxBasis')
+                'difference', 'missing_line', 'extra_line', 'duplicate_match', 'tax_basis')
            OR jsonb_typeof(event->'SourceLineRef') NOT IN ('string', 'null')
            OR jsonb_typeof(event->'SourceLineRef') IS NULL
            -- Status and Resolution are the frozen enums.
@@ -490,7 +488,10 @@ BEGIN
             RETURN FALSE;
         END IF;
         IF p_field IN ('line:description', 'line:uom') THEN
-            RETURN jsonb_typeof(p_po_value) = 'string' AND jsonb_typeof(p_source_value) = 'string';
+            -- IS TRUE, not a bare comparison: a SQL-NULL column would otherwise
+            -- make this NULL and the caller's IF NOT would accept the row.
+            RETURN (jsonb_typeof(p_po_value) = 'string'
+                    AND jsonb_typeof(p_source_value) = 'string') IS TRUE;
         END IF;
         IF p_field IN ('line:quantity', 'line:unitPrice') THEN
             IF jsonb_typeof(p_po_value) IS DISTINCT FROM 'number'
@@ -618,12 +619,12 @@ BEGIN
                 AND p_source_value ? 'ServiceCategory') THEN
             RETURN FALSE;
         END IF;
-        RETURN jsonb_typeof(p_po_value->'TaxZone') = 'string'
-           AND jsonb_typeof(p_po_value->'TaxType') = 'string'
-           AND jsonb_typeof(p_po_value->'ServiceCategory') = 'string'
-           AND jsonb_typeof(p_source_value->'TaxZone') = 'string'
-           AND jsonb_typeof(p_source_value->'TaxType') = 'string'
-           AND jsonb_typeof(p_source_value->'ServiceCategory') = 'string';
+        RETURN (jsonb_typeof(p_po_value->'TaxZone') = 'string'
+                AND jsonb_typeof(p_po_value->'TaxType') = 'string'
+                AND jsonb_typeof(p_po_value->'ServiceCategory') = 'string'
+                AND jsonb_typeof(p_source_value->'TaxZone') = 'string'
+                AND jsonb_typeof(p_source_value->'TaxType') = 'string'
+                AND jsonb_typeof(p_source_value->'ServiceCategory') = 'string') IS TRUE;
     END IF;
 
     RETURN FALSE;
