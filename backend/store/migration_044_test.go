@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Migration 044 installs the one construction window a saved record's
@@ -349,7 +350,12 @@ func po518InstallItem(ctx context.Context, schema string, q po518Querier,
 			org_id, session_id, purchase_order_id, key, field, kind,
 			label, po_value, source_value, status, resolution, actor_id, history
 		) VALUES ($1,$2,$3,'header:paymentTerms','header:paymentTerms','difference',
-			'Payment terms','"Net 30"','"Net 60"',$4,$5,$6,'[]')`, schema),
+			'Payment terms','"Net 30"','"Net 60"',$4,$5,$6,
+			jsonb_build_array(jsonb_build_object(
+				'Kind','header:paymentTerms','SourceLineRef',NULL,
+				'POValue','"Net 30"'::jsonb,'SourceValue','"Net 60"'::jsonb,
+				'Status',$4::text,'Resolution',$5::text,'ActorID',$6::bigint,
+				'At','2026-11-08T00:00:00Z')))`, schema),
 		repair.OrgID, sessionID, repair.POID, status, resolutionArg, actorArg)
 	return err
 }
@@ -639,70 +645,109 @@ func ptrInt64(value int64) *int64 { return &value }
 func ptrInt16(value int16) *int16 { return &value }
 func ptrBool(value bool) *bool    { return &value }
 
-// po518DowngradeTo043 puts a schema back into the shape a real 043 database has
-// before this migration: no link column, no stamp, no new indexes or FKs, and
-// no ledger row for 44. It is the upgrade fixture, not a rollback promise.
-func po518DowngradeTo043(t *testing.T, database *Store, schema string) {
+// po518Unmigrated opens a schema without running Migrate, so a test can build a
+// real historical schema by applying the production migrations itself.
+func po518Unmigrated(t *testing.T, schema string) *Store {
 	t.Helper()
+	resetTestSchema(t, testDSN(t), schema)
+	pool, err := pgxpool.New(context.Background(), testDSN(t))
+	if err != nil {
+		t.Fatalf("connect for a pre-migration schema: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return &Store{pool: pool, config: Config{DSN: testDSN(t), Schema: schema}}
+}
+
+// po518ApplyThrough applies the real migrations up to and including maxVersion,
+// exactly as Migrate does: one transaction per file and one ledger row.
+func po518ApplyThrough(t *testing.T, database *Store, maxVersion int) {
+	t.Helper()
+	ctx := context.Background()
 	pool, err := database.poolOrError()
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
-	for _, statement := range []string{
-		`ALTER TABLE %s.purchase_order_reconciliation_sessions
-			DROP CONSTRAINT IF EXISTS purchase_order_reconciliation_repair_correction_fk`,
-		`ALTER TABLE %s.purchase_order_reconciliation_sessions
-			DROP CONSTRAINT IF EXISTS purchase_order_reconciliation_repair_audit_fk`,
-		`DROP INDEX IF EXISTS %s.purchase_order_reconciliation_repair_idx`,
-		`DROP INDEX IF EXISTS %s.purchase_order_corrections_identity_idx`,
-		`ALTER TABLE %s.purchase_order_reconciliation_sessions
-			DROP COLUMN IF EXISTS repair_correction_id`,
-		`ALTER TABLE %s.purchase_order_source_repairs
-			DROP COLUMN IF EXISTS reconciliation_seed_xid`,
-		`DELETE FROM %s.schema_migrations WHERE version = 44`,
-	} {
-		if _, err := pool.Exec(context.Background(), fmt.Sprintf(statement, schema)); err != nil {
-			t.Fatalf("downgrade to 043 (%s): %v", statement, err)
+	schema := database.configSchema()
+	if _, err := pool.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.schema_migrations (
+			version INTEGER PRIMARY KEY,
+			name TEXT NOT NULL,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`, schema)); err != nil {
+		t.Fatalf("create migration ledger: %v", err)
+	}
+	migrations, err := loadMigrations(database.config.Schema)
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	for _, migration := range migrations {
+		if migration.version > maxVersion {
+			continue
+		}
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin migration %d: %v", migration.version, err)
+		}
+		if _, err := tx.Exec(ctx, migration.sql); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("apply migration %d: %v", migration.version, err)
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			`INSERT INTO %s.schema_migrations (version, name) VALUES ($1, $2)`, schema),
+			migration.version, migration.name); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("record migration %d: %v", migration.version, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit migration %d: %v", migration.version, err)
 		}
 	}
 }
 
-// TestMigration044FreshAndGenuine043Upgrade applies 044 to a fresh schema, then
-// to a real 043-shaped schema that already holds a session and a repair row.
-// Old rows must keep NULL link and NULL stamp; no historical row is
-// retro-linked by guesswork, and repeated Migrate is idempotent.
-func TestMigration044FreshAndGenuine043Upgrade(t *testing.T) {
-	database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
-		t, "vera_po_518_upgrade", "PO-518-UPG")
-	schema := database.configSchema()
+// TestMigration044Genuine043Upgrade builds a real pre-044 schema by applying the
+// production migrations 1..43, writes the old-shape history rows, then lets
+// Migrate apply 044. It is not a downgrade simulation: every object below 044
+// is created by its own migration file.
+func TestMigration044Genuine043Upgrade(t *testing.T) {
+	database := po518Unmigrated(t, "vera_po_518_upgrade")
+	po518ApplyThrough(t, database, 43)
+	ctx := poContext(t, database)
+
 	pool, err := database.poolOrError()
 	if err != nil {
 		t.Fatalf("pool: %v", err)
 	}
-	if !po518HasColumn(t, pool, database.config.Schema,
+	schema := database.configSchema()
+	if po518HasColumn(t, pool, database.config.Schema,
 		"purchase_order_reconciliation_sessions", "repair_correction_id") {
-		t.Fatalf("fresh schema is missing 044's session column")
-	}
-	if err := database.Migrate(ctx); err != nil {
-		t.Fatalf("repeat Migrate: %v", err)
-	}
-	if err := database.Migrate(ctx); err != nil {
-		t.Fatalf("second repeat Migrate: %v", err)
+		t.Fatalf("the pre-044 schema already has 044's column")
 	}
 
-	// A pre-044 repair row: correction + satellite written the old way, with no
-	// session yet.
+	// Real 043-era data: a saved record with its session, a repair audit and a
+	// satellite row.
+	staff := poTestUser(t, database)
+	admin := poRepairAdmin(t, database)
+	original := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "B1 upgrade")
+	target := po518RevisionN(t, database, original, 1)
+	saved := savedPurchaseOrder(t, database, ctx, staff, original, "PO-518-UPG")
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	admin := poRepairAdmin(t, database)
+	var orgID string
+	if err := tx.QueryRow(ctx, fmt.Sprintf(
+		`SELECT org_id::text FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&orgID); err != nil {
+		t.Fatalf("read org: %v", err)
+	}
 	correctionID, err := insertPurchaseOrderCorrection(ctx, tx, schema, saved, orgID,
 		PurchaseOrderCorrectionKindSourceRepair, "legacy repair", admin.ID)
 	if err != nil {
 		t.Fatalf("legacy correction: %v", err)
 	}
-	target := po518NextRevision(t, database, seed)
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, target.ID, target.RevisionNumber)
 	if err != nil {
 		t.Fatalf("legacy source: %v", err)
@@ -712,25 +757,32 @@ func TestMigration044FreshAndGenuine043Upgrade(t *testing.T) {
 		t.Fatalf("legacy satellite: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		t.Fatalf("commit legacy repair: %v", err)
-	}
-	var beforeVersion int64
-	if err := pool.QueryRow(ctx, fmt.Sprintf(
-		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&beforeVersion); err != nil {
-		t.Fatalf("read version: %v", err)
+		t.Fatalf("commit legacy audit: %v", err)
 	}
 	var sessionIDBefore int64
+	var versionBefore int64
 	if err := pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT id FROM %s.purchase_order_reconciliation_sessions
 		WHERE purchase_order_id = $1 AND active`, schema), saved.ID).Scan(&sessionIDBefore); err != nil {
 		t.Fatalf("read legacy session: %v", err)
 	}
-
-	po518DowngradeTo043(t, database, schema)
-	if err := database.Migrate(ctx); err != nil {
-		t.Fatalf("upgrade Migrate: %v", err)
+	if err := pool.QueryRow(ctx, fmt.Sprintf(
+		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&versionBefore); err != nil {
+		t.Fatalf("read version: %v", err)
 	}
 
+	// The migration under test.
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("apply 044 to a real 043 schema: %v", err)
+	}
+	if err := database.Migrate(ctx); err != nil {
+		t.Fatalf("repeat Migrate: %v", err)
+	}
+
+	if !po518HasColumn(t, pool, database.config.Schema,
+		"purchase_order_reconciliation_sessions", "repair_correction_id") {
+		t.Fatalf("044's session column is missing after the upgrade")
+	}
 	var link *int64
 	if err := pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT repair_correction_id FROM %s.purchase_order_reconciliation_sessions
@@ -738,7 +790,7 @@ func TestMigration044FreshAndGenuine043Upgrade(t *testing.T) {
 		t.Fatalf("read upgraded session: %v", err)
 	}
 	if link != nil {
-		t.Fatalf("upgrade backfilled a repair link on a pre-044 session: %d", *link)
+		t.Fatalf("the upgrade backfilled a repair link on a pre-044 session: %d", *link)
 	}
 	var stamp *string
 	if err := pool.QueryRow(ctx, fmt.Sprintf(`
@@ -747,18 +799,18 @@ func TestMigration044FreshAndGenuine043Upgrade(t *testing.T) {
 		t.Fatalf("read upgraded satellite: %v", err)
 	}
 	if stamp != nil {
-		t.Fatalf("upgrade backfilled a transaction stamp on a pre-044 repair: %q", *stamp)
+		t.Fatalf("the upgrade backfilled a transaction stamp on a pre-044 repair: %q", *stamp)
 	}
-	var afterVersion int64
+	var versionAfter int64
 	if err := pool.QueryRow(ctx, fmt.Sprintf(
-		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&afterVersion); err != nil {
+		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&versionAfter); err != nil {
 		t.Fatalf("read version after upgrade: %v", err)
 	}
-	if afterVersion != beforeVersion {
-		t.Fatalf("upgrade moved PO version %d -> %d", beforeVersion, afterVersion)
+	if versionAfter != versionBefore {
+		t.Fatalf("the upgrade moved PO version %d -> %d", versionBefore, versionAfter)
 	}
 
-	// The guard is live on the upgraded schema too.
+	// The guards are live on the upgraded schema.
 	if _, err := pool.Exec(ctx, fmt.Sprintf(`
 		INSERT INTO %s.purchase_order_reconciliation_sessions (
 			org_id, purchase_order_id, source_quotation_id, source_revision,
@@ -857,5 +909,146 @@ func TestMigration044LinkedAuditCannotBeDeletedDirectly(t *testing.T) {
 	}
 	if err := tx.Commit(ctx); err == nil {
 		t.Fatalf("deleting the repair audit outlived its linked session")
+	}
+}
+
+// po518InsertItemRow writes one raw terminal item with caller-chosen shapes, so
+// the shape guard can be exercised independently of the composer.
+func po518InsertItemRow(ctx context.Context, schema string, q po518Querier,
+	repair po518Repair, sessionID int64, key, field, kind string,
+	lineKey, sourceRef *string, poValue, sourceValue, history, status, resolution string) error {
+	var lineKeyArg, sourceRefArg, resolutionArg any
+	if lineKey != nil {
+		lineKeyArg = *lineKey
+	}
+	if sourceRef != nil {
+		sourceRefArg = *sourceRef
+	}
+	if resolution != "" {
+		resolutionArg = resolution
+	}
+	_, err := q.Exec(ctx, fmt.Sprintf(`
+		INSERT INTO %s.purchase_order_reconciliation_items (
+			org_id, session_id, purchase_order_id, key, field, kind,
+			line_key, source_line_ref, label, po_value, source_value,
+			status, resolution, actor_id, history
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Label',$9,$10,$11,$12,$13,$14)`, schema),
+		repair.OrgID, sessionID, repair.POID, key, field, kind,
+		lineKeyArg, sourceRefArg, poValue, sourceValue, status, resolutionArg,
+		repair.Actor.ID, history)
+	return err
+}
+
+// TestMigration044ItemBootstrapRequiresActiveCanonicalItems pins the stricter
+// bootstrap: only an active generation may be seeded, and every item must match
+// the frozen contract shapes (key/field/value/history), not merely the 041
+// CHECKs.
+func TestMigration044ItemBootstrapRequiresActiveCanonicalItems(t *testing.T) {
+	database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
+		t, "vera_po_518_shape", "PO-518-SHAPE")
+	schema := database.configSchema()
+	target := po518RevisionN(t, database, seed, 1)
+	validHistory := `[{"Kind":"header:paymentTerms","SourceLineRef":null,"POValue":"Net 30","SourceValue":"Net 60","Status":"resolved","Resolution":"kept_po","ActorID":1,"At":"2026-11-08T00:00:00Z"}]`
+
+	lineKey := func(value string) *string { return &value }
+	ref := "1"
+
+	cases := []struct {
+		name       string
+		mutate     func(tx pgx.Tx, sessionID int64) error
+		key        string
+		field      string
+		kind       string
+		lineKey    *string
+		sourceRef  *string
+		poValue    string
+		sourceVal  string
+		history    string
+		status     string
+		resolution string
+		wantErr    bool
+	}{
+		{
+			name: "canonical header item is accepted",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: validHistory,
+			status: "resolved", resolution: "kept_po",
+		},
+		{
+			name: "inactive generation is refused",
+			mutate: func(tx pgx.Tx, sessionID int64) error {
+				_, err := tx.Exec(ctx, fmt.Sprintf(
+					`UPDATE %s.purchase_order_reconciliation_sessions SET active = FALSE WHERE id = $1`, schema),
+					sessionID)
+				return err
+			},
+			key: "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: validHistory,
+			status: "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "text quantity is refused",
+			key:  "line:id:1:quantity", field: "line:quantity", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `"3"`, sourceVal: `2`, history: validHistory,
+			status: "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "key that disagrees with its field is refused",
+			key:  "line:id:1:description", field: "line:quantity", kind: "difference",
+			lineKey: lineKey("id:1"), sourceRef: &ref,
+			poValue: `3`, sourceVal: `2`, history: validHistory,
+			status: "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "history with a missing member is refused",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: `[{"Kind":"header:paymentTerms"}]`,
+			status: "resolved", resolution: "kept_po", wantErr: true,
+		},
+		{
+			name: "unresolved item is refused",
+			key:  "header:paymentTerms", field: "header:paymentTerms", kind: "difference",
+			poValue: `"Net 30"`, sourceVal: `"Net 60"`, history: validHistory,
+			status: "unresolved", resolution: "", wantErr: true,
+		},
+		{
+			name: "tax basis with an extra member is refused",
+			key:  "link:taxBasis", field: "link:taxBasis", kind: "tax_basis",
+			poValue:   `{"TaxZone":"FTZ","TaxType":"Goods","ServiceCategory":"","Extra":"x"}`,
+			sourceVal: `{"TaxZone":"FTZ","TaxType":"Goods","ServiceCategory":""}`,
+			history:   validHistory,
+			status:    "resolved", resolution: "used_quotation", wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repair := po518BeginRepair(t, database, ctx, saved, target, orgID)
+			sessionID, err := po518InstallSession(ctx, schema, repair.Tx, repair, po518SessionParams{})
+			if err != nil {
+				t.Fatalf("install terminal session: %v", err)
+			}
+			if tc.mutate != nil {
+				if err := tc.mutate(repair.Tx, sessionID); err != nil {
+					t.Fatalf("mutate session: %v", err)
+				}
+			}
+			err = po518InsertItemRow(ctx, schema, repair.Tx, repair, sessionID,
+				tc.key, tc.field, tc.kind, tc.lineKey, tc.sourceRef,
+				tc.poValue, tc.sourceVal, tc.history, tc.status, tc.resolution)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("the stricter bootstrap accepted %q", tc.name)
+				}
+				if !isSQLState(t, err, "23514") {
+					t.Fatalf("shape refusal error = %v; want 23514", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("canonical item refused: %v", err)
+			}
+		})
 	}
 }

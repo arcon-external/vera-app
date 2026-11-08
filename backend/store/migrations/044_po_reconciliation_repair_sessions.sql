@@ -331,6 +331,223 @@ CREATE TRIGGER purchase_order_reconciliation_sessions_guard_trigger
     FOR EACH ROW
     EXECUTE FUNCTION {{schema}}.purchase_order_reconciliation_session_guard();
 
+
+-- 6b. Canonical item shape. Migration 041's CHECKs pin kind/status/key length
+-- only; a terminal seed written by the database itself must also match the
+-- frozen contract shapes exactly (docs/po-reconciliation-contract.md section 5):
+-- key/field/line-key/reference agreement, typed values, and a history array of
+-- the exact HistoryEvent member set. This runs only inside the repair seed, so
+-- ordinary draft writes keep their existing validator path.
+CREATE OR REPLACE FUNCTION {{schema}}.purchase_order_reconciliation_item_shape_ok(
+    p_key TEXT,
+    p_field TEXT,
+    p_kind TEXT,
+    p_line_key TEXT,
+    p_source_ref TEXT,
+    p_po_value JSONB,
+    p_source_value JSONB,
+    p_status TEXT,
+    p_resolution TEXT,
+    p_actor_id BIGINT,
+    p_history JSONB
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $reconciliation_item_shape$
+DECLARE
+    suffix TEXT;
+    member_count INTEGER;
+BEGIN
+    IF p_status IS DISTINCT FROM 'resolved' OR p_resolution IS NULL OR p_actor_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    -- History is a non-empty array of exactly the frozen HistoryEvent members.
+    IF p_history IS NULL OR jsonb_typeof(p_history) <> 'array'
+       OR jsonb_array_length(p_history) = 0 THEN
+        RETURN FALSE;
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(p_history) AS event
+        WHERE jsonb_typeof(event) <> 'object'
+           OR (SELECT count(*) FROM jsonb_object_keys(event)) <> 8
+           OR NOT (event ? 'Kind' AND event ? 'SourceLineRef' AND event ? 'POValue'
+                   AND event ? 'SourceValue' AND event ? 'Status'
+                   AND event ? 'Resolution' AND event ? 'ActorID' AND event ? 'At')
+           OR jsonb_typeof(event->'Kind') <> 'string'
+           OR jsonb_typeof(event->'SourceLineRef') NOT IN ('string', 'null')
+           OR jsonb_typeof(event->'Status') <> 'string'
+           OR jsonb_typeof(event->'Resolution') NOT IN ('string', 'null')
+           OR jsonb_typeof(event->'ActorID') <> 'number'
+           OR jsonb_typeof(event->'At') <> 'string'
+    ) THEN
+        RETURN FALSE;
+    END IF;
+
+    IF p_field IN ('header:paymentTerms', 'header:incoterms') THEN
+        IF p_line_key IS NOT NULL OR p_source_ref IS NOT NULL OR p_kind <> 'difference' THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value) <> 'string' OR jsonb_typeof(p_source_value) <> 'string' THEN
+            RETURN FALSE;
+        END IF;
+        RETURN p_resolution IN ('kept_po', 'used_quotation', 'values_now_match');
+    END IF;
+
+    IF p_field = 'header:discountPercent' THEN
+        IF p_line_key IS NOT NULL OR p_source_ref IS NOT NULL OR p_kind <> 'difference' THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value) <> 'number' OR jsonb_typeof(p_source_value) <> 'number' THEN
+            RETURN FALSE;
+        END IF;
+        IF (p_po_value #>> '{}') !~ '^[0-9]{1,3}$' OR (p_source_value #>> '{}') !~ '^[0-9]{1,3}$' THEN
+            RETURN FALSE;
+        END IF;
+        IF (p_po_value #>> '{}')::numeric > 100 OR (p_source_value #>> '{}')::numeric > 100 THEN
+            RETURN FALSE;
+        END IF;
+        RETURN p_resolution IN ('kept_po', 'used_quotation', 'values_now_match');
+    END IF;
+
+    IF p_field IN ('line:description', 'line:uom', 'line:quantity', 'line:unitPrice', 'line:discount') THEN
+        IF p_line_key IS NULL OR p_source_ref IS NULL OR p_kind <> 'difference' THEN
+            RETURN FALSE;
+        END IF;
+        suffix := split_part(p_field, ':', 2);
+        IF p_key <> 'line:' || p_line_key || ':' || suffix THEN
+            RETURN FALSE;
+        END IF;
+        IF NOT (p_line_key ~ '^id:[0-9]+$' OR p_line_key LIKE 'client:%') THEN
+            RETURN FALSE;
+        END IF;
+        IF p_resolution NOT IN ('kept_po', 'used_quotation', 'values_now_match', 'line_removed') THEN
+            RETURN FALSE;
+        END IF;
+        IF p_field IN ('line:description', 'line:uom') THEN
+            RETURN jsonb_typeof(p_po_value) = 'string' AND jsonb_typeof(p_source_value) = 'string';
+        END IF;
+        IF p_field IN ('line:quantity', 'line:unitPrice') THEN
+            IF jsonb_typeof(p_po_value) <> 'number' OR jsonb_typeof(p_source_value) <> 'number' THEN
+                RETURN FALSE;
+            END IF;
+            IF (p_po_value #>> '{}') !~ '^-?[0-9]+$' OR (p_source_value #>> '{}') !~ '^-?[0-9]+$' THEN
+                RETURN FALSE;
+            END IF;
+            IF p_field = 'line:quantity'
+               AND ((p_po_value #>> '{}')::numeric <= 0 OR (p_source_value #>> '{}')::numeric <= 0) THEN
+                RETURN FALSE;
+            END IF;
+            IF p_field = 'line:unitPrice'
+               AND ((p_po_value #>> '{}')::numeric < 0 OR (p_source_value #>> '{}')::numeric < 0) THEN
+                RETURN FALSE;
+            END IF;
+            RETURN TRUE;
+        END IF;
+        -- line:discount uses exactly {Enabled, Percent}.
+        IF jsonb_typeof(p_po_value) <> 'object' OR jsonb_typeof(p_source_value) <> 'object' THEN
+            RETURN FALSE;
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(p_po_value)) <> 2
+           OR (SELECT count(*) FROM jsonb_object_keys(p_source_value)) <> 2 THEN
+            RETURN FALSE;
+        END IF;
+        IF NOT (p_po_value ? 'Enabled' AND p_po_value ? 'Percent'
+                AND p_source_value ? 'Enabled' AND p_source_value ? 'Percent') THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value->'Enabled') <> 'boolean'
+           OR jsonb_typeof(p_source_value->'Enabled') <> 'boolean' THEN
+            RETURN FALSE;
+        END IF;
+        IF (p_po_value->>'Percent') !~ '^[0-9]{1,3}$'
+           OR (p_source_value->>'Percent') !~ '^[0-9]{1,3}$' THEN
+            RETURN FALSE;
+        END IF;
+        RETURN (p_po_value->>'Percent')::numeric <= 100 AND (p_source_value->>'Percent')::numeric <= 100;
+    END IF;
+
+    IF p_field = 'line:match' THEN
+        IF p_line_key IS NULL THEN
+            RETURN FALSE;
+        END IF;
+        IF p_key <> 'line:' || p_line_key || ':match' THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_source_value) <> 'null' THEN
+            RETURN FALSE;
+        END IF;
+        IF p_kind = 'extra_line' THEN
+            IF p_source_ref IS NOT NULL THEN
+                RETURN FALSE;
+            END IF;
+            IF jsonb_typeof(p_po_value) NOT IN ('string', 'null') THEN
+                RETURN FALSE;
+            END IF;
+        ELSIF p_kind = 'duplicate_match' THEN
+            IF p_source_ref IS NULL OR p_source_ref !~ '^[0-9]+(\.[0-9]+)?$' THEN
+                RETURN FALSE;
+            END IF;
+            IF jsonb_typeof(p_po_value) <> 'string' OR (p_po_value #>> '{}') IS DISTINCT FROM p_source_ref THEN
+                RETURN FALSE;
+            END IF;
+        ELSE
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value) = 'string' AND (p_po_value #>> '{}') !~ '^[0-9]+(\.[0-9]+)?$' THEN
+            RETURN FALSE;
+        END IF;
+        RETURN TRUE;
+    END IF;
+
+    IF p_field = 'source:match' THEN
+        IF p_line_key IS NOT NULL OR p_source_ref IS NULL OR p_kind <> 'missing_line' THEN
+            RETURN FALSE;
+        END IF;
+        IF p_key <> 'source:' || p_source_ref || ':match' THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value) <> 'null' OR jsonb_typeof(p_source_value) <> 'string' THEN
+            RETURN FALSE;
+        END IF;
+        IF (p_source_value #>> '{}') IS DISTINCT FROM p_source_ref THEN
+            RETURN FALSE;
+        END IF;
+        RETURN p_source_ref ~ '^[0-9]+(\.[0-9]+)?$';
+    END IF;
+
+    IF p_field = 'link:taxBasis' THEN
+        IF p_key <> 'link:taxBasis' OR p_line_key IS NOT NULL OR p_source_ref IS NOT NULL
+           OR p_kind <> 'tax_basis' THEN
+            RETURN FALSE;
+        END IF;
+        IF p_resolution NOT IN ('kept_po', 'used_quotation') THEN
+            RETURN FALSE;
+        END IF;
+        IF jsonb_typeof(p_po_value) <> 'object' OR jsonb_typeof(p_source_value) <> 'object' THEN
+            RETURN FALSE;
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(p_po_value)) <> 3
+           OR (SELECT count(*) FROM jsonb_object_keys(p_source_value)) <> 3 THEN
+            RETURN FALSE;
+        END IF;
+        IF NOT (p_po_value ? 'TaxZone' AND p_po_value ? 'TaxType' AND p_po_value ? 'ServiceCategory'
+                AND p_source_value ? 'TaxZone' AND p_source_value ? 'TaxType'
+                AND p_source_value ? 'ServiceCategory') THEN
+            RETURN FALSE;
+        END IF;
+        RETURN jsonb_typeof(p_po_value->'TaxZone') = 'string'
+           AND jsonb_typeof(p_po_value->'TaxType') = 'string'
+           AND jsonb_typeof(p_po_value->'ServiceCategory') = 'string'
+           AND jsonb_typeof(p_source_value->'TaxZone') = 'string'
+           AND jsonb_typeof(p_source_value->'TaxType') = 'string'
+           AND jsonb_typeof(p_source_value->'ServiceCategory') = 'string';
+    END IF;
+
+    RETURN FALSE;
+END;
+$reconciliation_item_shape$;
+
 -- 7. Item guard. UPDATE/DELETE/retarget refusals stay exactly as 041 wrote
 -- them. The INSERT branch keeps its two refusals but opens them for a genuine
 -- repair seed, and only for an item that is already terminal and written by the
@@ -341,6 +558,7 @@ LANGUAGE plpgsql
 AS $reconciliation_item_guard$
 DECLARE
     session_readonly BOOLEAN;
+    session_active BOOLEAN;
     session_found BOOLEAN;
     session_created_by BIGINT;
     session_repair_id BIGINT;
@@ -353,10 +571,10 @@ DECLARE
     seed_ok BOOLEAN;
 BEGIN
     IF TG_OP = 'INSERT' THEN
-        SELECT s.readonly, s.created_by, s.repair_correction_id,
+        SELECT s.readonly, s.active, s.created_by, s.repair_correction_id,
                s.source_quotation_id, s.source_revision, s.source_revision_id,
                s.po_version
-          INTO session_readonly, session_created_by, session_repair_id,
+          INTO session_readonly, session_active, session_created_by, session_repair_id,
                session_quotation_id, session_revision, session_revision_id,
                session_po_version
         FROM {{schema}}.purchase_order_reconciliation_sessions s
@@ -390,9 +608,20 @@ BEGIN
                     'a repair session may only be seeded by the actor who performed the repair'
                     USING ERRCODE = '23514';
             END IF;
-            IF NEW.status <> 'resolved' OR NEW.resolution IS NULL THEN
+            -- The generation being constructed must still be the active one; an
+            -- already-retired generation gains nothing.
+            IF NOT COALESCE(session_active, FALSE) THEN
                 RAISE EXCEPTION
-                    'a repair session may only be seeded with resolved items'
+                    'a repair session must be active while it is being seeded'
+                    USING ERRCODE = '23514';
+            END IF;
+            -- Canonical item/value/key/history shapes (contract section 5).
+            IF NOT {{schema}}.purchase_order_reconciliation_item_shape_ok(
+                NEW.key, NEW.field, NEW.kind, NEW.line_key, NEW.source_line_ref,
+                NEW.po_value, NEW.source_value, NEW.status, NEW.resolution,
+                NEW.actor_id, NEW.history) THEN
+                RAISE EXCEPTION
+                    'reconciliation item % is not a canonical terminal item', NEW.key
                     USING ERRCODE = '23514';
             END IF;
         END IF;

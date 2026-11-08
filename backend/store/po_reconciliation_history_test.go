@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // The archive read (#518 B1): every generation, in one snapshot, with the
@@ -250,71 +251,99 @@ func TestListPOReconciliationSessionsLegacyAndTenant(t *testing.T) {
 	}
 }
 
-// TestListPOReconciliationSessionsSnapshotAcrossRepair proves the isolation the
-// store relies on with two real connections: a read that started before a repair
-// commits never sees the new generation, and never mixes versions.
+// TestListPOReconciliationSessionsSnapshotAcrossRepair exercises the production
+// reader while real repairs commit, and checks the single-snapshot invariant on
+// every returned envelope:
+//
+//	generations == current version - initial version + 1
+//	the active generation's stored POVersion == the outer POVersion
+//
+// A read that mixed the PO row from after a commit with generations from before
+// it (or the reverse) breaks the first equality; READ COMMITTED would allow it.
+// The test drives ListPOReconciliationSessions itself, not a transaction it owns.
 func TestListPOReconciliationSessionsSnapshotAcrossRepair(t *testing.T) {
 	database, ctx, saved, seed, _, orgID, _ := po518SavedFixture(
 		t, "vera_po_518_read_snapshot", "PO-518-READ-SNAP")
-	pool, err := database.poolOrError()
+	initialVersion := saved.Version
+	targets := []QuotationRecord{
+		po518RevisionN(t, database, seed, 1),
+		po518RevisionN(t, database, seed, 2),
+	}
+
+	stop := make(chan struct{})
+	var reader sync.WaitGroup
+	var reads int64
+	var problems []string
+	var problemMu sync.Mutex
+	record := func(format string, args ...any) {
+		problemMu.Lock()
+		problems = append(problems, fmt.Sprintf(format, args...))
+		problemMu.Unlock()
+	}
+	reader.Add(1)
+	go func() {
+		defer reader.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			history, err := database.ListPOReconciliationSessions(ctx, saved.ID)
+			if err != nil {
+				record("reader error: %v", err)
+				return
+			}
+			atomic.AddInt64(&reads, 1)
+			want := int(history.POVersion-initialVersion) + 1
+			if len(history.Sessions) != want {
+				record("mixed snapshot: version %d carries %d generations; want %d",
+					history.POVersion, len(history.Sessions), want)
+				continue
+			}
+			active := 0
+			for _, generation := range history.Sessions {
+				if generation.Session.Active {
+					active++
+					if generation.Session.POVersion != history.POVersion {
+						record("mixed snapshot: outer version %d, active generation %d",
+							history.POVersion, generation.Session.POVersion)
+					}
+				}
+			}
+			if active != 1 && len(history.Sessions) > 0 {
+				record("active generations = %d for version %d", active, history.POVersion)
+			}
+		}
+	}()
+
+	current := saved
+	for index := 0; index < 4; index++ {
+		current = po518CommitRepair(t, database, ctx, current, targets[index%2], orgID)
+	}
+	close(stop)
+	reader.Wait()
+	problemMu.Lock()
+	defer problemMu.Unlock()
+	if len(problems) > 0 {
+		t.Fatalf("production reader saw an inconsistent envelope:\n  %s", strings.Join(problems, "\n  "))
+	}
+	if reads == 0 {
+		t.Fatalf("the concurrent reader never completed a read")
+	}
+
+	final, err := database.ListPOReconciliationSessions(ctx, saved.ID)
 	if err != nil {
-		t.Fatalf("pool: %v", err)
+		t.Fatalf("final history read: %v", err)
 	}
-	schema := database.configSchema()
-
-	reader, err := pool.BeginTx(ctx, pgx.TxOptions{
-		IsoLevel:   pgx.RepeatableRead,
-		AccessMode: pgx.ReadOnly,
-	})
-	if err != nil {
-		t.Fatalf("begin snapshot reader: %v", err)
+	if final.POVersion != initialVersion+4 {
+		t.Errorf("final version = %d; want %d", final.POVersion, initialVersion+4)
 	}
-	defer func() { _ = reader.Rollback(ctx) }()
-
-	var versionBefore int64
-	if err := reader.QueryRow(ctx, fmt.Sprintf(
-		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&versionBefore); err != nil {
-		t.Fatalf("read snapshot version: %v", err)
+	if len(final.Sessions) != 5 {
+		t.Errorf("final generations = %d; want 5", len(final.Sessions))
 	}
-	var generationsBefore int
-	if err := reader.QueryRow(ctx, fmt.Sprintf(
-		`SELECT COUNT(*) FROM %s.purchase_order_reconciliation_sessions WHERE purchase_order_id = $1`, schema),
-		saved.ID).Scan(&generationsBefore); err != nil {
-		t.Fatalf("read snapshot generations: %v", err)
-	}
-
-	// Another connection completes the repair and commits.
-	po518CommitRepair(t, database, ctx, saved,
-		po518RevisionN(t, database, seed, 1), orgID)
-
-	var versionAfter int64
-	var generationsAfter int
-	if err := reader.QueryRow(ctx, fmt.Sprintf(
-		`SELECT version FROM %s.purchase_orders WHERE id = $1`, schema), saved.ID).Scan(&versionAfter); err != nil {
-		t.Fatalf("re-read snapshot version: %v", err)
-	}
-	if err := reader.QueryRow(ctx, fmt.Sprintf(
-		`SELECT COUNT(*) FROM %s.purchase_order_reconciliation_sessions WHERE purchase_order_id = $1`, schema),
-		saved.ID).Scan(&generationsAfter); err != nil {
-		t.Fatalf("re-read snapshot generations: %v", err)
-	}
-	if versionAfter != versionBefore || generationsAfter != generationsBefore {
-		t.Fatalf("snapshot mixed states: version %d->%d, generations %d->%d",
-			versionBefore, versionAfter, generationsBefore, generationsAfter)
-	}
-	if err := reader.Commit(ctx); err != nil {
-		t.Fatalf("close snapshot reader: %v", err)
-	}
-
-	// A read started after the commit does see both generations.
-	history, err := database.ListPOReconciliationSessions(ctx, saved.ID)
-	if err != nil {
-		t.Fatalf("post-commit history: %v", err)
-	}
-	if len(history.Sessions) != 2 {
-		t.Fatalf("post-commit generations = %d; want 2", len(history.Sessions))
-	}
-	if history.POVersion <= versionBefore {
-		t.Fatalf("post-commit POVersion = %d; want a version newer than %d", history.POVersion, versionBefore)
+	if final.Sessions[0].Session.POVersion != final.POVersion {
+		t.Errorf("final active generation version = %d; want the outer %d",
+			final.Sessions[0].Session.POVersion, final.POVersion)
 	}
 }
