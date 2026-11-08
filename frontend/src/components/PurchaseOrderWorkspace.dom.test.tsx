@@ -38,6 +38,11 @@ vi.mock("@backend/backend/Quotation", () => ({
   FinalizePurchaseOrder: vi.fn(),
   GetPurchaseOrderReview: vi.fn(),
   GetPurchaseOrderHistory: vi.fn(async () => []),
+  ListPOReconciliationSessions: vi.fn(async () => ({
+    PurchaseOrderID: 0,
+    POVersion: 0,
+    Sessions: [],
+  })),
   AssignPurchaseOrderConfirmationNumber: vi.fn(),
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
   AttachPurchaseOrderDocument: vi.fn(),

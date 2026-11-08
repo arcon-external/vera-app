@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, JSX, ReactNode } from "react";
+import type { ButtonHTMLAttributes, JSX, ReactNode, Ref } from "react";
 
 type ButtonVariant = "primary" | "dark" | "secondary" | "ghost" | "danger";
 type ButtonSize = "xs" | "sm" | "md";
@@ -7,6 +7,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   leading?: ReactNode;
+  /**
+   * #518: a caller may hold the element (the saved record returns focus to the
+   * repair action after a cancelled repair). Forwarded to the real button.
+   */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 const base =

@@ -19,6 +19,7 @@ const USD: CurrencyInfo = {
 };
 
 const CORRECTION: PurchaseOrderHistoryEntry = {
+  ID: 1,
   UUID: "corr-1",
   Kind: "correction",
   State: "saved",
@@ -72,6 +73,7 @@ const CORRECTION: PurchaseOrderHistoryEntry = {
 
 const SOURCE_REPAIR: PurchaseOrderHistoryEntry = {
   ...CORRECTION,
+  ID: 3,
   UUID: "corr-3",
   Kind: "source_repair",
   Reason: "The order followed the wrong revision",
@@ -94,6 +96,7 @@ const SOURCE_REPAIR: PurchaseOrderHistoryEntry = {
 
 const DRAFT_OVERWRITE: PurchaseOrderHistoryEntry = {
   ...CORRECTION,
+  ID: 2,
   UUID: "corr-2",
   Kind: "draft_overwrite",
   State: "draft",

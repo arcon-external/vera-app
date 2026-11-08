@@ -46,6 +46,12 @@ export interface PurchaseOrderHistoryItem {
  * of the generated model import.
  */
 export interface PurchaseOrderHistoryEntry {
+  /**
+   * The stored correction id (#518). The generated DTO already carries it;
+   * the saved reconciliation's `RepairCorrectionID` joins on it, so a history
+   * row and the generation it produced can name the same event.
+   */
+  ID: number;
   UUID: string;
   Kind: string;
   State: string;

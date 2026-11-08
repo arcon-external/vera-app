@@ -34,6 +34,11 @@ vi.mock("@backend/backend/Quotation", () => ({
   LoadPOReconciliation: (...args: unknown[]) => loadSessionMock(...args),
   SavePOReconciliation: (...args: unknown[]) => saveSessionMock(...args),
   GetPurchaseOrderHistory: vi.fn(async () => []),
+  ListPOReconciliationSessions: vi.fn(async () => ({
+    PurchaseOrderID: 0,
+    POVersion: 0,
+    Sessions: [],
+  })),
   GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
   AttachPurchaseOrderDocument: vi.fn(),
   GetActivePurchaseOrderDocumentContent: vi.fn(),

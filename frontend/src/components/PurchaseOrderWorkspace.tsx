@@ -7,6 +7,7 @@
 // only supplies the page-level callbacks it owns (opening a row, toasting a
 // save, the leave guard).
 
+import { useState } from "react";
 import type { CompanyUnitOption } from "../companyUnits";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
@@ -14,7 +15,7 @@ import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
 import type { ReconciliationTransport } from "../poReconciliationAdapter";
-import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
+import { PurchaseOrderSavedView, type RepairReturn } from "./PurchaseOrderFinalize";
 import { PurchaseOrderListPage } from "./PurchaseOrderListPage";
 import { PurchaseOrderRepairPage } from "./PurchaseOrderRepair";
 import { Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -154,6 +155,10 @@ export function PurchaseOrderWorkspacePage({
   actorName,
 }: PurchaseOrderWorkspacePageProps) {
   const { draft, phase } = workspace;
+  // #518: one-shot focus signal for returning from the repair flow. The saved
+  // view consumes it and the parent clears it, so a later re-render cannot
+  // steal focus again.
+  const [repairReturn, setRepairReturn] = useState<RepairReturn | null>(null);
 
   if (phase === "list" || draft === null) {
     if (tab === "editor" && blankDraft !== null) {
@@ -253,10 +258,14 @@ export function PurchaseOrderWorkspacePage({
         onCancel={() => {
           onDirtyChange(false);
           workspace.cancelRepair();
+          // #518: a cancelled repair returns focus to the action that opened it.
+          setRepairReturn({ kind: "cancelled" });
         }}
         onRepaired={(order) => {
           workspace.repaired(order);
           onRepaired?.(order);
+          // #518: a successful repair lands on the new current generation.
+          setRepairReturn({ kind: "repaired", revision: order.SourceRevision });
         }}
         onDirtyChange={onDirtyChange}
       />
@@ -276,6 +285,11 @@ export function PurchaseOrderWorkspacePage({
         onRepairSource={onRepairSource}
         onAssigned={workspace.assigned}
         onBack={onBack}
+        actorId={actorId}
+        actorName={actorName}
+        onReload={() => onOpen(draft.ID)}
+        repairReturn={repairReturn}
+        onRepairReturnHandled={() => setRepairReturn(null)}
       />
     );
   }

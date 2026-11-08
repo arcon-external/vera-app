@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AssignPurchaseOrderConfirmationNumber,
@@ -32,8 +32,16 @@ import type {
   PurchaseOrderDocumentStateDTO,
 } from "../purchaseOrderDocument";
 import { sourceReferenceLabel, sourceRepairActionLabel } from "../poRepair";
+import type { ReconciliationHistoryInput } from "../poReconciliationHistory";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
+import {
+  SavedReconciliationPanel,
+  SavedReconciliationTrigger,
+  useSavedReconciliation,
+  type ReconciliationHistoryTransport,
+  type SavedReconciliationState,
+} from "./PurchaseOrderReconciliationHistory";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -930,7 +938,38 @@ export interface PurchaseOrderSavedViewProps {
   /** The history the parent already has; omitted in the app so it fetches. */
   historyInitial?: PurchaseOrderHistoryEntry[] | null;
   historyInitialError?: string | null;
+  /**
+   * #518: the saved reconciliation generations. Omitted in the app so the
+   * saved view performs the read; supplied by SSR and tests.
+   */
+  reconciliationInitial?: ReconciliationHistoryInput | null;
+  reconciliationInitialError?: string | null;
+  /** The read seam; tests substitute a fake, the app uses Wails. */
+  reconciliationTransport?: ReconciliationHistoryTransport;
+  /**
+   * #518: the signed-in actor, so an item's resolution can name the person
+   * only when this view knows that person. An unknown id renders "User #id".
+   */
+  actorId?: number;
+  actorName?: string;
+  /**
+   * #518: refetches the record after a stale reconciliation read. The saved
+   * view cannot reload the purchase order itself.
+   */
+  onReload?: () => void;
+  /**
+   * #518: how the saved record was re-entered from the source-repair flow.
+   * A successful repair focuses the new generation and announces it; a cancel
+   * returns focus to the repair action. The parent clears it after one run.
+   */
+  repairReturn?: RepairReturn | null;
+  onRepairReturnHandled?: () => void;
 }
+
+/** What just happened in the repair flow, for the saved record's focus. */
+export type RepairReturn =
+  | { kind: "repaired"; revision: number }
+  | { kind: "cancelled" };
 
 /**
  * A saved record, read-only. This is the behaviour chosen for #471: #473 owns
@@ -950,6 +989,14 @@ export function PurchaseOrderSavedView({
   onDocumentStateChange,
   historyInitial,
   historyInitialError = null,
+  reconciliationInitial,
+  reconciliationInitialError = null,
+  reconciliationTransport,
+  actorId,
+  actorName,
+  onReload,
+  repairReturn = null,
+  onRepairReturnHandled,
 }: PurchaseOrderSavedViewProps) {
   // #474: a later assignment is the one write this read-only view performs.
   // It keeps the server's answer locally and reports it upward, so the number
@@ -976,6 +1023,60 @@ export function PurchaseOrderSavedView({
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
   const state = initialPurchaseOrderEditorState(order, currency);
+  // #518: one read feeds the >=1024 rail, the <1024 trigger and the sheet, so
+  // the three cannot disagree about the current generation or the filter.
+  const reconciliation = useSavedReconciliation({
+    orderId: order.ID,
+    orderVersion: current.Version,
+    initial: reconciliationInitial,
+    initialError: reconciliationInitialError,
+    transport: reconciliationTransport,
+  });
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const savedTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const repairActionRef = useRef<HTMLButtonElement | null>(null);
+  const handledRepairReturn = useRef<RepairReturn | null>(null);
+  const actorNameFor = (id: number): string | null =>
+    actorId !== undefined &&
+    id === actorId &&
+    actorName !== undefined &&
+    actorName !== ""
+      ? actorName
+      : null;
+  const closeSheet = () => {
+    setSheetOpen(false);
+    savedTriggerRef.current?.focus();
+  };
+  // A manual open lands on the sheet heading; Close/Escape returns to the
+  // trigger, never the body.
+  useEffect(() => {
+    if (!sheetOpen) return;
+    document.getElementById("saved-sheet-pane-heading")?.focus();
+  }, [sheetOpen]);
+  // #518: returning from the repair flow is one focus move. A successful
+  // repair lands on the new current generation and says so; a cancel returns
+  // to the action that opened the repair. The parent clears the signal after
+  // this run, and the ref guards a re-render before it does.
+  useEffect(() => {
+    if (repairReturn === null || handledRepairReturn.current === repairReturn) return;
+    handledRepairReturn.current = repairReturn;
+    if (repairReturn.kind === "repaired") {
+      const small =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(max-width: 1023px)").matches;
+      // The rail heading only exists visually from 1024; below that the saved
+      // surface's own entry control is the honest focus target.
+      const heading = small ? null : document.getElementById("saved-rail-pane-heading");
+      (heading ?? savedTriggerRef.current)?.focus();
+      reconciliation.announce(
+        `Source repaired. Showing saved session revision ${repairReturn.revision}.`
+      );
+    } else {
+      repairActionRef.current?.focus();
+    }
+    onRepairReturnHandled?.();
+  }, [repairReturn, onRepairReturnHandled, reconciliation.announce]);
 
   useEffect(() => {
     if (historyInitial !== undefined && historyInitial !== null) {
@@ -1058,261 +1159,381 @@ export function PurchaseOrderSavedView({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <SectionHeading title="Purchase Order" hint={`Saved record ${order.ID}`} />
-          <h1 className="tnum text-display font-semibold text-ink-950">
-            {order.PONumber}
-          </h1>
-          <p className="mt-1 text-body text-ink-500">
-            {order.CustomerName} · {sourceReferenceLabel(current)} ·{" "}
-            {order.Currency.toUpperCase()}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="success">Saved</Badge>
-          {current.SourceMissing ? (
-            <Badge tone="danger">Source missing</Badge>
-          ) : null}
-          {/*
-            #481: a correction needs the frozen source revision to compare
-            against, and the server refuses one while the source is missing
-            (po_source_missing). Offering the action would be a dead end; the
-            admin's Link Quotation is the one repair path in this state.
-          */}
-          {onCorrect !== undefined && !current.SourceMissing ? (
-            <Button size="sm" aria-label="Correct purchase order" onClick={onCorrect}>
-              Correct
-            </Button>
-          ) : null}
-          {canRepairSource && onRepairSource !== undefined ? (
-            <Button
-              size="sm"
-              aria-label={sourceRepairActionLabel(current)}
-              onClick={onRepairSource}
-            >
-              {sourceRepairActionLabel(current)}
-            </Button>
-          ) : null}
-        </div>
+      <div className="hidden lg:block">
+        <a
+          href="#saved-rail-pane-heading"
+          className="sr-only focus-visible:not-sr-only focus-visible:inline-flex focus-visible:rounded-lg focus-visible:bg-ink-900 focus-visible:px-4 focus-visible:py-2.5 focus-visible:text-small focus-visible:font-medium focus-visible:text-white"
+        >
+          Skip to reconciliation
+        </a>
       </div>
+      <SavedReconciliationTrigger
+        ref={savedTriggerRef}
+        status={reconciliation.status}
+        resolvedCount={reconciliation.counts.resolved}
+        open={sheetOpen}
+        onOpen={() => setSheetOpen(true)}
+      />
+      {/* #518: the record keeps its single column below 1024; from 1024 the
+          reconciliation history takes the rail column. */}
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="@container flex min-w-0 flex-col gap-5" inert={sheetOpen ? true : undefined}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <SectionHeading title="Purchase Order" hint={`Saved record ${order.ID}`} />
+              <h1 className="tnum text-display font-semibold text-ink-950">
+                {order.PONumber}
+              </h1>
+              <p className="mt-1 text-body text-ink-500">
+                {order.CustomerName} · {sourceReferenceLabel(current)} ·{" "}
+                {order.Currency.toUpperCase()}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="success">Saved</Badge>
+              {current.SourceMissing ? (
+                <Badge tone="danger">Source missing</Badge>
+              ) : null}
+              {/*
+                #481: a correction needs the frozen source revision to compare
+                against, and the server refuses one while the source is missing
+                (po_source_missing). Offering the action would be a dead end; the
+                admin's Link Quotation is the one repair path in this state.
+              */}
+              {onCorrect !== undefined && !current.SourceMissing ? (
+                <Button size="sm" aria-label="Correct purchase order" onClick={onCorrect}>
+                  Correct
+                </Button>
+              ) : null}
+              {canRepairSource && onRepairSource !== undefined ? (
+                <Button
+                  ref={repairActionRef}
+                  size="sm"
+                  aria-label={sourceRepairActionLabel(current)}
+                  onClick={onRepairSource}
+                >
+                  {sourceRepairActionLabel(current)}
+                </Button>
+              ) : null}
+            </div>
+          </div>
 
-      <StatusBanner tone="info">
-        Finalized entry data for later documents. This is not a business
-        approval.
-      </StatusBanner>
-      {current.SourceMissing ? (
-        <>
-          <StatusBanner tone="danger">
-            <span className="font-medium">Source missing. </span>
-            The quotation this purchase order followed was permanently deleted.
-            The purchase order, its recorded values and its customer PO PDF are
-            kept. No new Delivery Order or Invoice can be created from this
-            purchase order until the source is linked. This release does not
-            create Delivery Orders or Invoices.
+          <StatusBanner tone="info">
+            Finalized entry data for later documents. This is not a business
+            approval.
           </StatusBanner>
-          <p className="text-caption text-ink-500">
-            {canRepairSource
-              ? "Link a quotation to repair the source; the values above stay the starting point and the difference review is repeated."
-              : "An administrator can link a quotation to repair the source."}
-          </p>
-        </>
-      ) : null}
-      <StatusBanner tone="info">
-        Corrections need a reason and keep the values they replace in the
-        correction history. The customer PO PDF can still be attached, replaced
-        or removed; the customer, quotation link, currency and confirmation
-        number stay protected. An admin can repair a wrong source link; that
-        repeats the difference review and is recorded with the old and new
-        source.
-      </StatusBanner>
-
-      <Card className="p-4">
-        <SectionHeading title="Confirmation number" hint="Customer-system reference" />
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <span
-            className={
-              confirmationNumber === ""
-                ? "text-small text-ink-600"
-                : "tnum whitespace-nowrap text-h2 font-semibold text-ink-950"
-            }
-          >
-            {confirmationNumberLabel(current)}
-          </span>
-          {confirmationNumber !== "" ? (
-            <Button
-              size="sm"
-              aria-label="Copy confirmation number"
-              onClick={() => void copyConfirmation()}
-            >
-              Copy
-            </Button>
-          ) : canAssign ? (
-            <Button
-              size="sm"
-              variant="primary"
-              aria-label="Assign confirmation number"
-              disabled={assigning}
-              onClick={() => void assignConfirmation()}
-            >
-              {assigning ? "Assigning…" : "Assign confirmation number"}
-            </Button>
+          {current.SourceMissing ? (
+            <>
+              <StatusBanner tone="danger">
+                <span className="font-medium">Source missing. </span>
+                The quotation this purchase order followed was permanently deleted.
+                The purchase order, its recorded values and its customer PO PDF are
+                kept. No new Delivery Order or Invoice can be created from this
+                purchase order until the source is linked. This release does not
+                create Delivery Orders or Invoices.
+              </StatusBanner>
+              <p className="text-caption text-ink-500">
+                {canRepairSource
+                  ? "Link a quotation to repair the source; the values above stay the starting point and the difference review is repeated."
+                  : "An administrator can link a quotation to repair the source."}
+              </p>
+            </>
           ) : null}
-        </div>
-        <p className="mt-2 text-caption text-ink-500">
-          This number is a reference for manual submission to the customer
-          system. Vera does not submit it, and this record is not marked as
-          submitted. Once assigned, the number is fixed: it cannot be edited,
-          cleared or regenerated.
-        </p>
-        {current.ConfirmationWarn ? (
-          <div className="mt-2">
-            <StatusBanner tone="info">
-              <span className="font-medium">Confirmation sequence warning: </span>
-              this customer's cycle has reached the 8,000 warning threshold.
-              Numbers keep issuing; past 9,999 the sequence widens to five
-              digits instead of wrapping.
-            </StatusBanner>
-          </div>
-        ) : null}
-        {copyStatus !== null ? (
-          <p role="status" className="mt-2 text-caption text-ink-600">
-            {copyStatus}
-          </p>
-        ) : null}
-        {assignError !== null ? (
-          <div className="mt-2">
-            <StatusBanner tone="danger">{assignError}</StatusBanner>
-          </div>
-        ) : null}
-      </Card>
+          <StatusBanner tone="info">
+            Corrections need a reason and keep the values they replace in the
+            correction history. The customer PO PDF can still be attached, replaced
+            or removed; the customer, quotation link, currency and confirmation
+            number stay protected. An admin can repair a wrong source link; that
+            repeats the difference review and is recorded with the old and new
+            source.
+          </StatusBanner>
 
-      <Card className="p-4">
-        <SectionHeading title="Recorded details" hint="Snapshots kept as entered" />
-        <dl className="mt-2 grid gap-3 text-small sm:grid-cols-2">
-          <div>
-            <dt className="text-caption text-ink-500">Customer</dt>
-            <dd className="text-ink-900">{order.CustomerName}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Customer PO date</dt>
-            <dd className="tnum text-ink-900">{order.PODate ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Received date</dt>
-            <dd className="tnum text-ink-900">{order.ReceivedDate}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Requested delivery</dt>
-            <dd className="tnum text-ink-900">{order.RequestedDeliveryDate ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Payment terms</dt>
-            <dd className="text-ink-900">{order.PaymentTerms || "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Incoterms</dt>
-            <dd className="text-ink-900">{order.Incoterms || "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Billing address</dt>
-            <dd className="text-ink-900">{order.BillingAddress || "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Delivery address</dt>
-            <dd className="text-ink-900">{order.DeliveryAddress || "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Contact</dt>
-            <dd className="text-ink-900">
-              {[order.ContactEmail, order.ContactPhone].filter((value) => value !== "").join(" · ") || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-caption text-ink-500">Ship-to code</dt>
-            <dd className="text-ink-900">{order.ShipToCode || "—"}</dd>
-          </div>
-        </dl>
-      </Card>
+          <Card className="p-4">
+            <SectionHeading title="Confirmation number" hint="Customer-system reference" />
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <span
+                className={
+                  confirmationNumber === ""
+                    ? "text-small text-ink-600"
+                    : "tnum whitespace-nowrap text-h2 font-semibold text-ink-950"
+                }
+              >
+                {confirmationNumberLabel(current)}
+              </span>
+              {confirmationNumber !== "" ? (
+                <Button
+                  size="sm"
+                  aria-label="Copy confirmation number"
+                  onClick={() => void copyConfirmation()}
+                >
+                  Copy
+                </Button>
+              ) : canAssign ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  aria-label="Assign confirmation number"
+                  disabled={assigning}
+                  onClick={() => void assignConfirmation()}
+                >
+                  {assigning ? "Assigning…" : "Assign confirmation number"}
+                </Button>
+              ) : null}
+            </div>
+            <p className="mt-2 text-caption text-ink-500">
+              This number is a reference for manual submission to the customer
+              system. Vera does not submit it, and this record is not marked as
+              submitted. Once assigned, the number is fixed: it cannot be edited,
+              cleared or regenerated.
+            </p>
+            {current.ConfirmationWarn ? (
+              <div className="mt-2">
+                <StatusBanner tone="info">
+                  <span className="font-medium">Confirmation sequence warning: </span>
+                  this customer's cycle has reached the 8,000 warning threshold.
+                  Numbers keep issuing; past 9,999 the sequence widens to five
+                  digits instead of wrapping.
+                </StatusBanner>
+              </div>
+            ) : null}
+            {copyStatus !== null ? (
+              <p role="status" className="mt-2 text-caption text-ink-600">
+                {copyStatus}
+              </p>
+            ) : null}
+            {assignError !== null ? (
+              <div className="mt-2">
+                <StatusBanner tone="danger">{assignError}</StatusBanner>
+              </div>
+            ) : null}
+          </Card>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto scroll-thin">
-          <table className="w-full min-w-[720px] text-left text-body">
-            <caption className="sr-only">Saved purchase order lines</caption>
-            <thead>
-              <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
-                <th className="px-4 py-3 font-medium">Line</th>
-                <th className="px-4 py-3 font-medium">Description</th>
-                <th className="px-4 py-3 font-medium">Match</th>
-                <th className="px-4 py-3 text-right font-medium">Quantity</th>
-                <th className="px-4 py-3 text-right font-medium">Unit price</th>
-                <th className="px-4 py-3 text-right font-medium">Discount</th>
-                <th className="px-4 py-3 text-right font-medium">Line total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rule">
+          <Card className="p-4">
+            <SectionHeading title="Recorded details" hint="Snapshots kept as entered" />
+            <dl className="mt-2 grid gap-3 text-small sm:grid-cols-2">
+              <div>
+                <dt className="text-caption text-ink-500">Customer</dt>
+                <dd className="text-ink-900">{order.CustomerName}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Customer PO date</dt>
+                <dd className="tnum text-ink-900">{order.PODate ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Received date</dt>
+                <dd className="tnum text-ink-900">{order.ReceivedDate}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Requested delivery</dt>
+                <dd className="tnum text-ink-900">{order.RequestedDeliveryDate ?? "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Payment terms</dt>
+                <dd className="text-ink-900">{order.PaymentTerms || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Incoterms</dt>
+                <dd className="text-ink-900">{order.Incoterms || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Billing address</dt>
+                <dd className="text-ink-900">{order.BillingAddress || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Delivery address</dt>
+                <dd className="text-ink-900">{order.DeliveryAddress || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Contact</dt>
+                <dd className="text-ink-900">
+                  {[order.ContactEmail, order.ContactPhone].filter((value) => value !== "").join(" · ") || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Ship-to code</dt>
+                <dd className="text-ink-900">{order.ShipToCode || "—"}</dd>
+              </div>
+            </dl>
+          </Card>
+
+          {/*
+            #518 layout B: below a 720px container the saved lines read as a
+            stacked list; at 720 or wider the table returns. The query is on
+            the record's main column (container), not the viewport, so the 1024
+            rail never forces a sideways scroll.
+          */}
+          <Card className="overflow-hidden">
+            <ul className="divide-y divide-rule @min-[720px]:hidden">
               {state.lines.map((line: PurchaseOrderLine, index) => (
-                <tr key={line.key}>
-                  <td className="tnum px-4 py-3 align-middle text-ink-700">
-                    {index + 1}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-ink-900">
-                    {line.description || "—"}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-ink-700">
-                    {line.quotationItemNo === null
-                      ? "Extra line"
-                      : `Quotation ${line.quotationItemNo}${
-                          line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
-                        }`}
-                  </td>
-                  <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                    {line.quantity}
-                  </td>
-                  <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-700">
-                    {line.unitPrice}
-                  </td>
-                  <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                    {line.discountEnabled ? `${line.discountPercent}%` : "—"}
-                  </td>
-                  <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
-                    {formatMoney(currency, order.Items[index]?.NetMinor ?? 0)}
-                  </td>
-                </tr>
+                <li key={line.key} className="px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-small font-medium text-ink-900">
+                        {line.description || "—"}
+                      </p>
+                      <p className="mt-0.5 text-caption text-ink-500">
+                        Line {index + 1} ·{" "}
+                        {line.quotationItemNo === null
+                          ? "Extra line"
+                          : `Quotation ${line.quotationItemNo}${
+                              line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
+                            }`}
+                      </p>
+                    </div>
+                    <span className="tnum shrink-0 text-small font-medium text-ink-900">
+                      {formatMoney(currency, order.Items[index]?.NetMinor ?? 0)}
+                    </span>
+                  </div>
+                  <dl className="mt-2 grid grid-cols-3 gap-2 text-caption">
+                    <div className="min-w-0">
+                      <dt className="text-ink-500">Quantity</dt>
+                      <dd className="tnum truncate text-ink-700">{line.quantity}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-ink-500">Unit price</dt>
+                      <dd className="tnum truncate text-ink-700">{line.unitPrice}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-ink-500">Discount</dt>
+                      <dd className="tnum truncate text-ink-700">
+                        {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                </li>
               ))}
-            </tbody>
-          </table>
+            </ul>
+            <div className="hidden @min-[720px]:block">
+              <table className="w-full text-left text-body">
+                <caption className="sr-only">Saved purchase order lines</caption>
+                <thead>
+                  <tr className="border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
+                    <th className="px-4 py-3 font-medium">Line</th>
+                    <th className="px-4 py-3 font-medium">Description</th>
+                    <th className="px-4 py-3 font-medium">Match</th>
+                    <th className="px-4 py-3 text-right font-medium">Quantity</th>
+                    <th className="px-4 py-3 text-right font-medium">Unit price</th>
+                    <th className="px-4 py-3 text-right font-medium">Discount</th>
+                    <th className="px-4 py-3 text-right font-medium">Line total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rule">
+                  {state.lines.map((line: PurchaseOrderLine, index) => (
+                    <tr key={line.key}>
+                      <td className="tnum px-4 py-3 align-middle text-ink-700">
+                        {index + 1}
+                      </td>
+                      <td className="px-4 py-3 align-middle text-ink-900">
+                        {line.description || "—"}
+                      </td>
+                      <td className="px-4 py-3 align-middle text-ink-700">
+                        {line.quotationItemNo === null
+                          ? "Extra line"
+                          : `Quotation ${line.quotationItemNo}${
+                              line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
+                            }`}
+                      </td>
+                      <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                        {line.quantity}
+                      </td>
+                      <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-700">
+                        {line.unitPrice}
+                      </td>
+                      <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                        {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                      </td>
+                      <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
+                        {formatMoney(currency, order.Items[index]?.NetMinor ?? 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          <PurchaseOrderTotals
+            totals={totals}
+            currency={currency}
+            discountPercent={order.DiscountPercent}
+            ppnBps={order.PpnBps}
+            adjustmentReason={order.AdjustmentReason.trim()}
+            printedTotals={state.printedTotals}
+            sourceRevision={order.SourceRevision}
+          />
+
+          <PurchaseOrderDocumentPanel
+            purchaseOrderId={order.ID}
+            initialState={documentInitialState}
+            absenceConfirmed={order.PdfAbsentConfirmed === true}
+            onStateChange={onDocumentStateChange}
+          />
+
+          <PurchaseOrderHistoryPanel
+            entries={history}
+            currency={currency}
+            loading={historyLoading}
+            error={historyError}
+          />
+
+          <div className="border-t border-rule pt-4">
+            <Button aria-label="Back to archive" onClick={onBack}>
+              Back to archive
+            </Button>
+          </div>
         </div>
-      </Card>
-
-      <PurchaseOrderTotals
-        totals={totals}
-        currency={currency}
-        discountPercent={order.DiscountPercent}
-        ppnBps={order.PpnBps}
-        adjustmentReason={order.AdjustmentReason.trim()}
-        printedTotals={state.printedTotals}
-        sourceRevision={order.SourceRevision}
-      />
-
-      <PurchaseOrderDocumentPanel
-        purchaseOrderId={order.ID}
-        initialState={documentInitialState}
-        absenceConfirmed={order.PdfAbsentConfirmed === true}
-        onStateChange={onDocumentStateChange}
-      />
-
-      <PurchaseOrderHistoryPanel
-        entries={history}
-        currency={currency}
-        loading={historyLoading}
-        error={historyError}
-      />
-
-      <div className="border-t border-rule pt-4">
-        <Button aria-label="Back to purchase orders" onClick={onBack}>
-          Back to purchase orders
-        </Button>
+        <aside
+          aria-label="Reconciliation"
+          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-112px)] lg:flex-col"
+        >
+          <SavedReconciliationPanel
+            idPrefix="saved-rail"
+            state={reconciliation}
+            order={current}
+            history={history}
+            currency={currency}
+            actorNameFor={actorNameFor}
+            onReload={onReload}
+            takesFocus={!sheetOpen}
+            fillHeight
+          />
+        </aside>
+      </div>
+      {sheetOpen ? (
+        <div
+          role="region"
+          aria-label="Reconciliation"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeSheet();
+            }
+          }}
+          className="fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-8 pt-4 lg:hidden"
+        >
+          <SavedReconciliationPanel
+            idPrefix="saved-sheet"
+            state={reconciliation}
+            order={current}
+            history={history}
+            currency={currency}
+            actorNameFor={actorNameFor}
+            onReload={onReload}
+            headerActions={
+              <button
+                type="button"
+                aria-label="Close reconciliation"
+                onClick={closeSheet}
+                className="inline-flex min-h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700 transition-colors duration-150 hover:border-ink-300 hover:text-ink-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+              >
+                Close
+              </button>
+            }
+          />
+        </div>
+      ) : null}
+      <div role="status" aria-live="polite" className="sr-only">
+        {reconciliation.announcement}
       </div>
     </div>
   );

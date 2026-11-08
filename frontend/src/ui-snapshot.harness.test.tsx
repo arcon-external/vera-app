@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { backend } from "@backend/models";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import type { EditorItem } from "./components/ItemEditor";
@@ -325,6 +326,7 @@ const PO_CORRECTING_STATE = initialPurchaseOrderEditorState(
 );
 const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
   {
+    ID: 2,
     UUID: "corr-2",
     Kind: "correction",
     State: "saved",
@@ -385,6 +387,7 @@ const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
     ],
   },
   {
+    ID: 1,
     UUID: "corr-1",
     Kind: "draft_overwrite",
     State: "draft",
@@ -432,6 +435,80 @@ const PO_HISTORY: PurchaseOrderHistoryEntry[] = [
     ],
   },
 ];
+
+// #518: the saved record's reconciliation read. The outer POVersion matches
+// the record above (1) so the snapshot shows the settled current generation;
+// the older generation exists so the Session history disclosure is visible.
+const PO_SAVED_RECONCILIATION_SESSION: backend.POReconciliationSession = {
+  ID: 21,
+  PurchaseOrderID: 7,
+  SourceQuotationID: 12,
+  SourceRevision: 2,
+  POVersion: 1,
+  Active: true,
+  ReadOnly: true,
+  CreatedBy: 3,
+  CreatedAt: "2026-10-21T09:00:00Z",
+  UpdatedAt: "2026-10-21T09:05:00Z",
+  LineIdentities: [],
+  Items: [
+    {
+      Key: "header:paymentTerms",
+      Field: "header:paymentTerms",
+      Kind: "difference",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Payment terms",
+      POValue: "30 days",
+      SourceValue: "30 days",
+      Status: "resolved",
+      Resolution: "values_now_match",
+      ActorID: 3,
+      UpdatedAt: "2026-10-21T09:05:00Z",
+      History: [],
+    },
+    {
+      Key: "link:taxBasis",
+      Field: "link:taxBasis",
+      Kind: "tax_basis",
+      LineKey: null,
+      SourceLineRef: null,
+      Label: "Tax basis",
+      POValue: { TaxZone: "FTZ", TaxType: "PPN", ServiceCategory: "" },
+      SourceValue: { TaxZone: "FTZ", TaxType: "PPN", ServiceCategory: "" },
+      Status: "resolved",
+      Resolution: "used_quotation",
+      ActorID: 3,
+      UpdatedAt: "2026-10-21T09:05:00Z",
+      History: [],
+    },
+  ],
+} as unknown as backend.POReconciliationSession;
+
+const PO_SAVED_RECONCILIATION_READ: backend.POReconciliationSessions = {
+  PurchaseOrderID: 7,
+  POVersion: 1,
+  Sessions: [
+    {
+      Generation: 1,
+      SourceAvailable: true,
+      RepairCorrectionID: null,
+      Session: PO_SAVED_RECONCILIATION_SESSION,
+    },
+    {
+      Generation: 0,
+      SourceAvailable: true,
+      RepairCorrectionID: null,
+      Session: {
+        ...PO_SAVED_RECONCILIATION_SESSION,
+        ID: 14,
+        Active: false,
+        SourceRevision: 1,
+        CreatedAt: "2026-10-20T09:00:00Z",
+      },
+    },
+  ],
+} as unknown as backend.POReconciliationSessions;
 
 const PO_EDITOR_UOM_OPTIONS = [
   { value: "Lot", label: "Lot" },
@@ -2294,6 +2371,67 @@ const CASES: SnapshotCase[] = [
         onBack={() => undefined}
         documentInitialState={PO_DOCUMENT_NONE}
         historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // #518: the saved record's read-only reconciliation history. The rail
+    // holds the current generation (context line, count, saved-only filters,
+    // the resolved difference and the tax triple), the 360 trigger duplicates
+    // its state, and the previous generation is disclosed — never the current
+    // one. No Keep/Use/acknowledge control exists.
+    name: "PurchaseOrderSavedReconciliation",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitial={PO_SAVED_RECONCILIATION_READ}
+        actorId={3}
+        actorName="Budi Santoso"
+      />
+    ),
+  },
+  {
+    // #518: a saved PO that predates reconciliation sessions. The exact
+    // no-session sentence, no count, no filters and no history disclosure.
+    name: "PurchaseOrderSavedReconciliationNone",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitial={{ PurchaseOrderID: 7, POVersion: 1, Sessions: [] }}
+      />
+    ),
+  },
+  {
+    // #518: a saved session that recorded no differences. The empty-session
+    // sentence and a 0 resolved count, with no filters and no history.
+    name: "PurchaseOrderSavedReconciliationEmpty",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitial={{
+          PurchaseOrderID: 7,
+          POVersion: 1,
+          Sessions: [
+            {
+              Generation: 1,
+              SourceAvailable: true,
+              RepairCorrectionID: null,
+              Session: { ...PO_SAVED_RECONCILIATION_SESSION, Items: [] },
+            },
+          ],
+        }}
       />
     ),
   },

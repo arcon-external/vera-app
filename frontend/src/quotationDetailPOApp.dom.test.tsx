@@ -98,6 +98,11 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     CreatePurchaseOrderDraft: (...args: unknown[]) => mocks.createDraft(...args),
     GetPurchaseOrder: (...args: unknown[]) => mocks.getPurchaseOrder(...args),
     GetPurchaseOrderHistory: vi.fn(async () => []),
+    ListPOReconciliationSessions: vi.fn(async () => ({
+      PurchaseOrderID: 0,
+      POVersion: 0,
+      Sessions: [],
+    })),
     GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
     AttachPurchaseOrderDocument: vi.fn(),
     RemovePurchaseOrderDocument: vi.fn(),

@@ -34,6 +34,12 @@ export interface ReconciliationPaneContentProps {
   /** Correction mode and saved views display the stored session read-only. */
   readOnly: boolean;
   readOnlyCaption?: string;
+  /**
+   * #518: a saved session's history. Adds the saved-only All/Resolved filter,
+   * the saved copy and the empty-session sentence; every action is already
+   * suppressed by `readOnly`. Never set on the draft editor or a correction.
+   */
+  savedHistory?: boolean;
   filter: PaneFilter;
   onFilterChange: (filter: PaneFilter) => void;
   onShowAll: () => void;
@@ -144,6 +150,12 @@ const FILTERS: { id: PaneFilter; label: string }[] = [
   { id: "resolved", label: "Resolved" },
 ];
 
+// #518: a saved session's list is frozen, so it offers All and Resolved only.
+const SAVED_FILTERS: { id: PaneFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "resolved", label: "Resolved" },
+];
+
 /**
  * Ticket 04: the reconciliation pane content, shared by the rail (aside, at
  * 1024 and above) and the sheet (below 1024). One component, two shells: the
@@ -162,6 +174,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     formerSource,
     readOnly,
     readOnlyCaption,
+    savedHistory = false,
     filter,
     onFilterChange,
     onShowAll,
@@ -195,6 +208,10 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
     unresolved: items.filter((entry) => entry.Status === "unresolved").length,
     resolved: items.filter((entry) => entry.Status === "resolved").length,
   };
+
+  // #518: a saved session has no Unresolved tab. The list is frozen, so the
+  // saved surface offers All and Resolved only; the draft editor keeps three.
+  const filters = savedHistory ? SAVED_FILTERS : FILTERS;
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const countRef = useRef<HTMLSpanElement | null>(null);
@@ -304,16 +321,16 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
   });
 
   const onFilterKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const current = FILTERS.findIndex((entry) => entry.id === filter);
+    const current = filters.findIndex((entry) => entry.id === filter);
     let next = current;
-    if (event.key === "ArrowRight") next = (current + 1) % FILTERS.length;
+    if (event.key === "ArrowRight") next = (current + 1) % filters.length;
     else if (event.key === "ArrowLeft")
-      next = (current + FILTERS.length - 1) % FILTERS.length;
+      next = (current + filters.length - 1) % filters.length;
     else if (event.key === "Home") next = 0;
-    else if (event.key === "End") next = FILTERS.length - 1;
+    else if (event.key === "End") next = filters.length - 1;
     else return;
     event.preventDefault();
-    const target = FILTERS[next];
+    const target = filters[next];
     if (target === undefined) return;
     onFilterChange(target.id);
     document.getElementById(`${idPrefix}-filter-${target.id}`)?.focus();
@@ -851,7 +868,11 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
           Compared with {sourceLabel}
         </p>
       ) : null}
-      <p className="text-caption text-ink-400">Checked when you leave a field.</p>
+      <p className="text-caption text-ink-400">
+        {savedHistory
+          ? "Recorded when this purchase order was finalized."
+          : "Checked when you leave a field."}
+      </p>
 
       {readOnly && readOnlyCaption !== undefined ? (
         <p className="mt-2 text-caption leading-relaxed text-ink-500">{readOnlyCaption}</p>
@@ -859,7 +880,11 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
 
       {status === "loading" ? (
         <div className="mt-3 space-y-3" aria-busy="true">
-          <span className="sr-only">Loading the reconciliation…</span>
+          <span className="sr-only">
+            {savedHistory
+              ? "Loading the saved reconciliation…"
+              : "Loading the reconciliation…"}
+          </span>
           {[0, 1, 2].map((row) => (
             <div key={row} className="h-11 animate-pulse rounded-lg bg-paper-muted" />
           ))}
@@ -867,11 +892,15 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
       ) : status === "error" ? (
         <div className="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-4" role="alert">
           <p className="text-small font-medium text-danger-700">
-            The reconciliation could not be loaded.
+            {savedHistory
+              ? "The saved reconciliation history could not be loaded."
+              : "The reconciliation could not be loaded."}
           </p>
-          <p className="mt-1 text-caption text-danger-700/80">
-            Save draft still works. Final Save is blocked until it loads.
-          </p>
+          {savedHistory ? null : (
+            <p className="mt-1 text-caption text-danger-700/80">
+              Save draft still works. Final Save is blocked until it loads.
+            </p>
+          )}
           <button
             type="button"
             onClick={onRetry}
@@ -904,14 +933,21 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
           </p>
         </div>
       ) : (
+        savedHistory && items.length === 0 ? (
+          <p className="mt-3 text-small text-ink-700">
+            No differences were recorded for this session.
+          </p>
+        ) : (
         <>
           <div
             role="tablist"
             aria-label="Reconciliation filters"
             onKeyDown={onFilterKeyDown}
-            className="mt-3 grid grid-cols-3 gap-1 rounded-lg bg-paper-muted p-1"
+            className={`mt-3 grid gap-1 rounded-lg bg-paper-muted p-1 ${
+              savedHistory ? "grid-cols-2" : "grid-cols-3"
+            }`}
           >
-            {FILTERS.map((entry) => {
+            {filters.map((entry) => {
               const count =
                 entry.id === "all"
                   ? counts.all
@@ -981,6 +1017,7 @@ export function ReconciliationPaneContent(props: ReconciliationPaneContentProps)
             )}
           </div>
         </>
+        )
       )}
     </div>
   );
