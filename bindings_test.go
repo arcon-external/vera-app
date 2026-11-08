@@ -216,3 +216,40 @@ func generatedClassBlock(models, class string) (string, bool) {
 	}
 	return rest[:end], true
 }
+
+// TestGeneratedBindingsDeclareTheReconciliationHistoryRead closes the gap the
+// method-name guard leaves: the .d.ts promise and the models.ts field shapes of
+// the #518 archive read (#502). A missing or mistyped declaration compiles here
+// and fails in the frontend, which is exactly the failure mode this whole file
+// exists to prevent.
+func TestGeneratedBindingsDeclareTheReconciliationHistoryRead(t *testing.T) {
+	declaration, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "backend", "Quotation.d.ts"))
+	if err != nil {
+		t.Fatalf("cannot read the Quotation declaration: %v", err)
+	}
+	want := "ListPOReconciliationSessions(arg1:string):Promise<backend.POReconciliationSessions>;"
+	if !strings.Contains(string(declaration), want) {
+		t.Errorf("Quotation.d.ts does not declare %q; run: wails generate module", want)
+	}
+
+	raw, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "models.ts"))
+	if err != nil {
+		t.Fatalf("cannot read generated models: %v", err)
+	}
+	models := string(raw)
+	for class, fields := range map[string][]string{
+		"POReconciliationSessions":      {"PurchaseOrderID: number;", "POVersion: number;", "Sessions: POReconciliationSessionRecord[];"},
+		"POReconciliationSessionRecord": {"Generation: number;", "SourceAvailable: boolean;", "RepairCorrectionID?: number;", "Session: POReconciliationSession;"},
+	} {
+		block, ok := generatedClassBlock(models, class)
+		if !ok {
+			t.Errorf("models.ts has no class %s; run: wails generate module", class)
+			continue
+		}
+		for _, field := range fields {
+			if !strings.Contains(block, field) {
+				t.Errorf("%s does not declare %q; run: wails generate module", class, field)
+			}
+		}
+	}
+}

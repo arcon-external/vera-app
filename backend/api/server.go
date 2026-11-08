@@ -152,6 +152,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// Final Save. Reads and writes are org-scoped; a stale write conflicts.
 	server.echo.GET("/v1/purchase-orders/:id/reconciliation", server.getPOReconciliation, server.requireSession)
 	server.echo.PUT("/v1/purchase-orders/:id/reconciliation", server.savePOReconciliation, server.requireSession)
+	server.echo.GET("/v1/purchase-orders/:id/reconciliation-sessions", server.getPOReconciliationSessions, server.requireSession)
 	// #474: the optional customer-system confirmation number. POST with no body:
 	// the client asks for assignment and never supplies the identifier.
 	server.echo.POST("/v1/purchase-orders/:id/confirmation-number", server.assignPurchaseOrderConfirmation, server.requireSession)

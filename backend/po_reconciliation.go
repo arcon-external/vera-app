@@ -99,6 +99,40 @@ func anyToRaw(value any) json.RawMessage {
 	return raw
 }
 
+// POReconciliationSessions is the #518 archive read: every generation recorded
+// for one saved record, plus the version it currently carries. The nested
+// Session is the unchanged, frozen session shape.
+type POReconciliationSessions struct {
+	PurchaseOrderID int64
+	POVersion       int64
+	Sessions        []POReconciliationSessionRecord
+}
+
+// POReconciliationSessionRecord is one generation in the archive.
+type POReconciliationSessionRecord struct {
+	Generation         int
+	SourceAvailable    bool
+	RepairCorrectionID *int64
+	Session            POReconciliationSession
+}
+
+func mapPOReconciliationSessions(sessions store.POReconciliationSessions) POReconciliationSessions {
+	out := POReconciliationSessions{
+		PurchaseOrderID: sessions.PurchaseOrderID,
+		POVersion:       sessions.POVersion,
+		Sessions:        make([]POReconciliationSessionRecord, 0, len(sessions.Sessions)),
+	}
+	for _, record := range sessions.Sessions {
+		out.Sessions = append(out.Sessions, POReconciliationSessionRecord{
+			Generation:         record.Generation,
+			SourceAvailable:    record.SourceAvailable,
+			RepairCorrectionID: record.RepairCorrectionID,
+			Session:            mapPOReconciliationSession(record.Session),
+		})
+	}
+	return out
+}
+
 func mapPOReconciliationSession(session store.POReconciliationSession) POReconciliationSession {
 	out := POReconciliationSession{
 		ID:                session.ID,
@@ -220,6 +254,28 @@ func (q *Quotation) LoadPOReconciliation(poID string) (POReconciliationSession, 
 		return POReconciliationSession{}, err
 	}
 	return mapPOReconciliationSession(response), nil
+}
+
+// ListPOReconciliationSessions reads every reconciliation generation recorded
+// for one purchase order. It is a read: an older server that does not know this
+// endpoint returns a visible error, never a false "no sessions" answer.
+func (q *Quotation) ListPOReconciliationSessions(poID string) (POReconciliationSessions, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return POReconciliationSessions{}, err
+	}
+	id, err := parsePOReconciliationID(poID)
+	if err != nil {
+		return POReconciliationSessions{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return POReconciliationSessions{}, err
+	}
+	var response store.POReconciliationSessions
+	if err := client.Get("/v1/purchase-orders/"+strconv.FormatInt(id, 10)+"/reconciliation-sessions", &response); err != nil {
+		return POReconciliationSessions{}, err
+	}
+	return mapPOReconciliationSessions(response), nil
 }
 
 func (q *Quotation) SavePOReconciliation(poID string, session POReconciliationSession) (POReconciliationSession, error) {

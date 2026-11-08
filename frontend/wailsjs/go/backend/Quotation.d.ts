@@ -68,6 +68,8 @@ export function ListCustomers():Promise<Array<backend.ManagedClient>>;
 
 export function ListDrafts():Promise<Array<backend.DraftSummaryDTO>>;
 
+export function ListPOReconciliationSessions(arg1:string):Promise<backend.POReconciliationSessions>;
+
 export function ListPOSourceQuotations(arg1:backend.POSourceQuery):Promise<backend.POSourcePageDTO>;
 
 export function ListPOSourceRevisions(arg1:number):Promise<backend.POSourceRevisionsDTO>;

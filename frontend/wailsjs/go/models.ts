@@ -1508,6 +1508,76 @@ export namespace backend {
 		    return a;
 		}
 	}
+	export class POReconciliationSessionRecord {
+	    Generation: number;
+	    SourceAvailable: boolean;
+	    RepairCorrectionID?: number;
+	    Session: POReconciliationSession;
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationSessionRecord(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Generation = source["Generation"];
+	        this.SourceAvailable = source["SourceAvailable"];
+	        this.RepairCorrectionID = source["RepairCorrectionID"];
+	        this.Session = this.convertValues(source["Session"], POReconciliationSession);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class POReconciliationSessions {
+	    PurchaseOrderID: number;
+	    POVersion: number;
+	    Sessions: POReconciliationSessionRecord[];
+
+	    static createFrom(source: any = {}) {
+	        return new POReconciliationSessions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.PurchaseOrderID = source["PurchaseOrderID"];
+	        this.POVersion = source["POVersion"];
+	        this.Sessions = this.convertValues(source["Sessions"], POReconciliationSessionRecord);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class POSourceActivePODTO {
 	    ID: number;
 	    State: string;

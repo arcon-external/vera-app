@@ -130,6 +130,10 @@ export function ListDrafts() {
   return window['go']['backend']['Quotation']['ListDrafts']();
 }
 
+export function ListPOReconciliationSessions(arg1) {
+  return window['go']['backend']['Quotation']['ListPOReconciliationSessions'](arg1);
+}
+
 export function ListPOSourceQuotations(arg1) {
   return window['go']['backend']['Quotation']['ListPOSourceQuotations'](arg1);
 }

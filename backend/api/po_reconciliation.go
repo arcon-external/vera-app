@@ -64,3 +64,23 @@ func (s *Server) savePOReconciliation(context echo.Context) error {
 	}
 	return context.JSON(http.StatusOK, updated)
 }
+
+// getPOReconciliationSessions is the #518 archive read: the current PO version
+// plus every retained generation, in one consistent snapshot. A known record
+// with no session is 200 with an empty list; an unknown or foreign record is
+// 404 and leaks nothing.
+func (s *Server) getPOReconciliationSessions(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid purchase order id"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	history, err := s.database.ListPOReconciliationSessions(requestContext, id)
+	if err != nil {
+		return purchaseOrderError(context, err)
+	}
+	return context.JSON(http.StatusOK, history)
+}
