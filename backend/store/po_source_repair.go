@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
@@ -197,6 +198,14 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		return PurchaseOrder{}, err
 	}
 
+	// The identity map of the generation this repair retires decides the new
+	// generation's first-seen keys; it must be read before the new session
+	// exists.
+	oldIdentities, err := loadLatestReconciliationIdentitiesTx(ctx, tx, schema, org.ID, stored.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+
 	correctionID, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
 		PurchaseOrderCorrectionKindSourceRepair, input.Reason, input.UpdatedBy)
 	if err != nil {
@@ -219,7 +228,8 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		billingAddress = source.BillingAddress
 	}
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
-	tag, err := tx.Exec(ctx, fmt.Sprintf(`
+	var resultingVersion int64
+	err = tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET
 			quotation_id = $3,
 			source_revision = $4,
@@ -257,9 +267,12 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 			printed_discount_minor = $30,
 			printed_ppn_minor = $31,
 			printed_grand_total_minor = $32,
+			tax_type = $34,
+			service_category = $35,
 			updated_by = $33,
 			updated_at = NOW()
-		WHERE id = $1 AND org_id = $2 AND state = 'saved'`, schema),
+		WHERE id = $1 AND org_id = $2 AND state = 'saved'
+		RETURNING version`, schema),
 		input.ID, org.ID, source.QuotationID, source.RevisionNumber,
 		source.CustomerID, customerName,
 		billingAddress, input.DeliveryAddress, input.ShipToCode,
@@ -272,17 +285,54 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		calculation.AdjustmentReason, calculation.GrandTotalMinor,
 		source.PrintedSubtotalMinor, source.PrintedDiscountMinor,
 		source.PrintedPpnMinor, source.PrintedGrandTotalMinor, input.UpdatedBy,
-	)
+		source.TaxType, source.ServiceCategory,
+	).Scan(&resultingVersion)
 	if err != nil {
 		if mapped := purchaseOrderRepairConflict(err); mapped != nil {
 			return PurchaseOrder{}, mapped
 		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PurchaseOrder{}, ErrPurchaseOrderNotSaved
+		}
 		return PurchaseOrder{}, fmt.Errorf("repair purchase order %d source: %w", input.ID, err)
 	}
-	if tag.RowsAffected() != 1 {
-		return PurchaseOrder{}, ErrPurchaseOrderNotSaved
+	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
+	if err != nil {
+		return PurchaseOrder{}, err
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
+
+	// Seed the terminal reconciliation generation this repair installs. The
+	// comparison, the identity map and the item set are all built in memory
+	// here; the database only sees the finished, already-resolved generation.
+	now := time.Now().UTC()
+	seed, err := buildRepairReconciliationSeed(
+		stored, lines, kept, removed, oldIdentities, source,
+		repairHeaders{
+			PaymentTerms:    input.PaymentTerms,
+			Incoterms:       input.Incoterms,
+			DiscountPercent: input.DiscountPercent,
+		},
+		input.Decisions, input.AcknowledgedMissing, input.AcknowledgedExtra,
+		input.UpdatedBy, now,
+	)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := deactivateReconciliationSessionsTx(ctx, tx, schema, org.ID, stored.ID); err != nil {
+		return PurchaseOrder{}, err
+	}
+	generation, err := nextReconciliationGeneration(ctx, tx, schema, org.ID, stored.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	sessionID, err := insertTerminalReconciliationSessionTx(ctx, tx, schema, org.ID,
+		stored.ID, source, generation, resultingVersion, seed.Identities,
+		correctionID, input.UpdatedBy)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := insertRepairReconciliationItemsTx(ctx, tx, schema, org.ID,
+		stored.ID, sessionID, seed.Items); err != nil {
 		return PurchaseOrder{}, err
 	}
 

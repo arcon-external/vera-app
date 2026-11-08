@@ -59,18 +59,81 @@ type repairQuotationOptions struct {
 	Currency        string
 	TaxZone         string
 	TaxType         string
+	ServiceCategory string
 	UnitPrice       int64
-	PaymentTermDays int16
+	// Quantity is the first line's quantity; zero keeps the historical 2.
+	Quantity int64
+	// ExtraItemNo adds a third issued line the stored record may not claim;
+	// ExtraItemQuantity defaults to 2 and ExtraItemPrice to 0.
+	ExtraItemNo       int
+	ExtraItemQuantity int64
+	ExtraItemPrice    int64
+	PaymentTermDays   int16
 }
 
 // seedRepairQuotationWith writes one issued revision with the chosen values,
 // so a repair to it produces a reviewable difference.
 func seedRepairQuotationWith(t *testing.T, database *Store, opts repairQuotationOptions) QuotationRecord {
 	t.Helper()
-	subtotal := opts.UnitPrice * 2
+	quantity := opts.Quantity
+	if quantity <= 0 {
+		quantity = 2
+	}
+	extraQuantity := opts.ExtraItemQuantity
+	if extraQuantity <= 0 {
+		extraQuantity = 2
+	}
+	extraTotal := int64(0)
+	if opts.ExtraItemNo > 0 {
+		extraTotal = opts.ExtraItemPrice * extraQuantity
+	}
+	subtotal := opts.UnitPrice*quantity + extraTotal
 	ppn := int64(0)
 	if opts.TaxZone == "NonFTZ" && opts.TaxType == "Goods" {
 		ppn = subtotal * 11 / 100
+	}
+	items := []RevisionItem{
+		{
+			ItemNo:                1,
+			Description:           "Priced widget",
+			Qty:                   quantity,
+			UoM:                   "Pc",
+			UnitPrice:             opts.UnitPrice,
+			MarginPercent:         0,
+			MarginAmount:          0,
+			OriginalTotal:         opts.UnitPrice * quantity,
+			MarginalizedUnitPrice: opts.UnitPrice,
+			MarginalizedTotal:     opts.UnitPrice * quantity,
+			ListUnitPrice:         opts.UnitPrice,
+		},
+		{
+			ItemNo:                3,
+			Description:           "Zero-value line",
+			Qty:                   1,
+			UoM:                   "Lot",
+			UnitPrice:             0,
+			MarginPercent:         0,
+			MarginAmount:          0,
+			OriginalTotal:         0,
+			MarginalizedUnitPrice: 0,
+			MarginalizedTotal:     0,
+			ListUnitPrice:         0,
+		},
+	}
+	if opts.ExtraItemNo > 0 {
+		items = append(items, RevisionItem{
+			ItemNo:                opts.ExtraItemNo,
+			Description:           "Later issued line",
+			Qty:                   extraQuantity,
+			UoM:                   "Pc",
+			UnitPrice:             opts.ExtraItemPrice,
+			MarginPercent:         0,
+			MarginAmount:          0,
+			OriginalTotal:         extraTotal,
+			MarginalizedUnitPrice: opts.ExtraItemPrice,
+			MarginalizedTotal:     extraTotal,
+			ListUnitPrice:         opts.ExtraItemPrice,
+		})
 	}
 	record, err := database.SaveRevision(context.Background(), RevisionDraft{
 		CustomerCode:    int16(opts.CustomerCode),
@@ -88,37 +151,11 @@ func seedRepairQuotationWith(t *testing.T, database *Store, opts repairQuotation
 		DiscountPercent:  0,
 		TaxZone:          opts.TaxZone,
 		TaxType:          opts.TaxType,
+		ServiceCategory:  opts.ServiceCategory,
 		TaxRateBps:       0,
 		Currency:         opts.Currency,
 		HTMLSnapshot:     "<html>repair snapshot</html>",
-		Items: []RevisionItem{
-			{
-				ItemNo:                1,
-				Description:           "Priced widget",
-				Qty:                   2,
-				UoM:                   "Pc",
-				UnitPrice:             opts.UnitPrice,
-				MarginPercent:         0,
-				MarginAmount:          0,
-				OriginalTotal:         subtotal,
-				MarginalizedUnitPrice: opts.UnitPrice,
-				MarginalizedTotal:     subtotal,
-				ListUnitPrice:         opts.UnitPrice,
-			},
-			{
-				ItemNo:                3,
-				Description:           "Zero-value line",
-				Qty:                   1,
-				UoM:                   "Lot",
-				UnitPrice:             0,
-				MarginPercent:         0,
-				MarginAmount:          0,
-				OriginalTotal:         0,
-				MarginalizedUnitPrice: 0,
-				MarginalizedTotal:     0,
-				ListUnitPrice:         0,
-			},
-		},
+		Items:            items,
 		Totals: RevisionTotals{
 			OriginalSubtotal:          subtotal,
 			OriginalGrand:             subtotal,
