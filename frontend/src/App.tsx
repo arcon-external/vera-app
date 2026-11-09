@@ -36,7 +36,7 @@ import {
   currencyEditBlockMessage,
   normalizeCurrencyCode,
 } from "./drafts";
-import type { DraftSummaryDTO } from "./drafts";
+import type { DraftPayload, DraftSummaryDTO } from "./drafts";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
@@ -114,6 +114,7 @@ import {
   type WorkspaceSettings,
 } from "./workspaceSettings";
 import { CheckSession, GetCompany, Logout, RenewSession, RestoreSession } from "@backend/backend/AuthAPI";
+import { ClearRecovery, LoadRecovery, SaveRecovery } from "@backend/backend/RecoveryAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
@@ -127,6 +128,14 @@ import {
   type SessionStatus,
 } from "./session";
 import { SessionRenewBanner } from "./components/SessionRenewBanner";
+import { RecoveryBanner } from "./components/RecoveryBanner";
+import {
+  RECOVERY_DEBOUNCE_MS,
+  buildRecoverySnapshot,
+  parseRecoverySnapshot,
+  recoveryLabel,
+  type RecoverySnapshot,
+} from "./recovery";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -803,6 +812,52 @@ function App() {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+  // Issue #537: the local recovery snapshot offered after a crash or a power
+  // loss. It is device-local, scoped to the signed-in account and the API
+  // endpoint by the Go side, and never replaces work the editor already holds.
+  const [recoveryPending, setRecoveryPending] = useState<{
+    snapshot: RecoverySnapshot;
+    label: string;
+  } | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  // One log line per signed-in session: a debounced save that fails must not
+  // toast on every keystroke, and a plain-browser dev build has no Wails
+  // runtime to save through at all.
+  const recoveryLoggedError = useRef(false);
+  // The pending debounce timer is cancelled by every deliberate clear, so an
+  // export or a saved draft cannot be re-snapshotted by a timer that was
+  // already running when it succeeded.
+  const recoveryTimer = useRef<number | null>(null);
+  // The load runs once per account; this is how it knows whether the editor
+  // already holds newer work than the file on disk.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  const recoveryUserId = user?.ID ?? null;
+
+  // Clears the crash snapshot for one account. Best-effort by design: a clear
+  // that fails leaves the file, and the next launch may offer it again, which
+  // is safer than losing the work. A missing file is success on the Go side.
+  const clearRecoverySnapshot = useCallback((userID: number | null) => {
+    if (recoveryTimer.current !== null) {
+      clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+    }
+    if (userID === null || userID <= 0) return;
+    try {
+      void ClearRecovery(userID).catch((error: unknown) => {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("clear recovery snapshot failed", error);
+      });
+    } catch (error: unknown) {
+      if (recoveryLoggedError.current) return;
+      recoveryLoggedError.current = true;
+      console.error("clear recovery snapshot failed", error);
+    }
+  }, []);
   // Issue #492: the account's device-local Quotation and PO defaults. They are
   // read when the signed-in account changes and written by the settings pages;
   // signing out resets this copy but never removes the saved records.
@@ -1170,9 +1225,138 @@ function App() {
     setActiveDraftId(0);
     setDraftSavedAt(null);
     void ClearDraftContext().catch(() => undefined);
+    // Issue #537: a deliberate reset discards the editor's work, so the crash
+    // copy of it goes too. On a manual sign-out userRef still names the
+    // account being signed out; after an involuntary end it is already null,
+    // which is exactly why the snapshot survives that path.
+    clearRecoverySnapshot(userRef.current?.ID ?? null);
+    setRecoveryPending(null);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview, customerOptions, canonicalUnit, workspaceSettings.quotation]);
+  }, [clearPreview, clearRecoverySnapshot, customerOptions, canonicalUnit, workspaceSettings.quotation]);
+
+  // Issue #537: offer the crash snapshot when an account becomes signed in,
+  // whether by a fresh sign-in or a restored remembered session. A snapshot
+  // never replaces work already in the editor: after an involuntary session
+  // end the workspace is still here and is newer than anything on disk.
+  useEffect(() => {
+    setRecoveryPending(null);
+    setRecoveryError(null);
+    setRecoveryBusy(false);
+    recoveryLoggedError.current = false;
+    if (recoveryUserId === null) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const raw = await LoadRecovery(recoveryUserId);
+        if (cancelled || userRef.current?.ID !== recoveryUserId) return;
+        const snapshot = parseRecoverySnapshot(raw);
+        if (snapshot === null || dirtyRef.current) return;
+        setRecoveryPending({ snapshot, label: recoveryLabel(snapshot) });
+      } catch (error: unknown) {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("load recovery snapshot failed", error);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [recoveryUserId]);
+
+  // The debounced save. It runs only for signed-in work that is actually
+  // dirty, and it stands still while the banner is waiting for an answer:
+  // snapshotting the blank editor under a pending restore would overwrite the
+  // very file the user is deciding about.
+  useEffect(() => {
+    if (!signedIn || recoveryUserId === null) return;
+    if (!dirty || recoveryPending !== null) return;
+    const timer = window.setTimeout(() => {
+      recoveryTimer.current = null;
+      const payload = JSON.stringify(
+        buildRecoverySnapshot(
+          { items, details, customerId },
+          new Date().toISOString()
+        )
+      );
+      const logFailure = (error: unknown) => {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("save recovery snapshot failed", error);
+      };
+      try {
+        void SaveRecovery(recoveryUserId, payload).catch(logFailure);
+      } catch (error: unknown) {
+        logFailure(error);
+      }
+    }, RECOVERY_DEBOUNCE_MS);
+    recoveryTimer.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (recoveryTimer.current === timer) recoveryTimer.current = null;
+    };
+  }, [items, details, customerId, signedIn, recoveryUserId, dirty, recoveryPending]);
+
+  // Applies a restored snapshot exactly like opening a draft: fresh row keys,
+  // the stored details (including the note), and no server draft or revision
+  // context, because the work never reached the server.
+  const applyRecoveryDraft = useCallback(
+    (restored: DraftPayload) => {
+      nextKey.current = restored.items.length;
+      nextSubId.current =
+        restored.items.reduce(
+          (highest, item) =>
+            Math.max(highest, ...item.subItems.map((sub) => sub.id)),
+          0
+        ) + 1;
+      setItems(restored.items);
+      setDetails(restored.details);
+      setPristineSubject(null);
+      setCustomerId(
+        restored.customerId || pickCustomerId(customerOptions, customerId)
+      );
+      setEditingQuote(null);
+      setActiveDraftId(0);
+      setDraftSavedAt(null);
+      void ClearDraftContext().catch(() => undefined);
+      clearPreview();
+      setStatus({ type: "idle", message: "" });
+      setPage("create");
+    },
+    [clearPreview, customerOptions, customerId]
+  );
+
+  const handleRestoreRecovery = useCallback(() => {
+    const pending = recoveryPending;
+    if (pending === null) return;
+    applyRecoveryDraft(pending.snapshot.draft);
+    setRecoveryPending(null);
+    setRecoveryError(null);
+    // Clearing after applying is what stops a second restore from offering the
+    // same work again. If the clear fails the editor already holds it; the next
+    // launch may offer it once more, which is the safer failure.
+    clearRecoverySnapshot(userRef.current?.ID ?? null);
+  }, [applyRecoveryDraft, clearRecoverySnapshot, recoveryPending]);
+
+  const handleDiscardRecovery = useCallback(async () => {
+    if (recoveryPending === null) return;
+    const userID = userRef.current?.ID ?? null;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      if (userID !== null) await ClearRecovery(userID);
+      setRecoveryPending(null);
+    } catch (error: unknown) {
+      // The file may still exist, so the banner stays up with the reason
+      // rather than claiming the work was discarded.
+      setRecoveryError(
+        errorMessage(error, "The unsaved work could not be discarded.")
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, [recoveryPending]);
 
   // Server-owned client directory: the editor dropdown reads here, and new
   // clients appear without a rebuild. Prepare validates server-side.
@@ -1221,13 +1405,16 @@ function App() {
     } finally {
       endedUser.current = null;
       setSessionEnded(false);
+      // A manual sign-out is deliberate: the device is left clean, so the
+      // crash copy goes with the workspace (issue #537).
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       setUser(null);
       setSessionExpiresAt(null);
       setSessionCanRenew(false);
       setRenewError(null);
       clearWorkspace();
     }
-  }, [clearWorkspace]);
+  }, [clearWorkspace, clearRecoverySnapshot]);
 
   // Re-login after an involuntary session end. The same account gets its
   // preserved workspace back; a different account starts clean.
@@ -1397,6 +1584,8 @@ function App() {
       setDraftSavedAt(new Date().toISOString());
       void SetDraftContext(id).catch(() => undefined);
       setDraftCount((count) => (activeDraftId === 0 ? count + 1 : count));
+      // The work is on the server now; the crash copy has nothing left to save.
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       pushToast(
         "success",
         activeDraftId === 0
@@ -1411,7 +1600,7 @@ function App() {
     } finally {
       setSavingDraft(false);
     }
-  }, [items, details, customerId, customerOptions, activeDraftId, pushToast]);
+  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot]);
 
   const handleOpenDraft = useCallback(
     async (id: number) => {
@@ -2147,6 +2336,9 @@ function App() {
       setActiveDraftId(0);
       setDraftSavedAt(null);
       if (fromDraft) setDraftCount((count) => Math.max(0, count - 1));
+      // The signed revision is stored; the crash copy is no longer the only
+      // place this work exists.
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       setStatus({ type: "idle", message: "" });
       pushToast("success", "Quotation exported.");
     } catch (error: unknown) {
@@ -2163,7 +2355,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [activeDraftId, clearPreview, pushToast, liveEntry]);
+  }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
@@ -2442,6 +2634,15 @@ function App() {
         <LoginPage onSignedIn={handleSignedIn} sessionEnded={sessionEnded} />
       ) : (
     <>
+      {recoveryPending !== null ? (
+        <RecoveryBanner
+          label={recoveryPending.label}
+          busy={recoveryBusy}
+          error={recoveryError}
+          onRestore={handleRestoreRecovery}
+          onDiscard={() => void handleDiscardRecovery()}
+        />
+      ) : null}
       {renewalDue(sessionExpiresAt, sessionNow, sessionCanRenew) ? (
         <SessionRenewBanner
           minutesLeft={minutesUntil(sessionExpiresAt, sessionNow)}

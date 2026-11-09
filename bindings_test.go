@@ -35,10 +35,11 @@ import (
 // four generated files.
 func boundObjects() map[string]any {
 	return map[string]any{
-		"Quotation": &backend.Quotation{},
-		"AuthAPI":   backend.NewAuthAPI(),
-		"AdminAPI":  backend.NewAdminAPI(),
-		"UpdateAPI": backend.NewUpdateAPI(),
+		"Quotation":   &backend.Quotation{},
+		"AuthAPI":     backend.NewAuthAPI(),
+		"AdminAPI":    backend.NewAdminAPI(),
+		"UpdateAPI":   backend.NewUpdateAPI(),
+		"RecoveryAPI": backend.NewRecoveryAPI(),
 	}
 }
 
