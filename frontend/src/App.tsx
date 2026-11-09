@@ -113,13 +113,20 @@ import {
   type PurchaseOrderSettings,
   type WorkspaceSettings,
 } from "./workspaceSettings";
-import { CheckSession, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { CheckSession, GetCompany, Logout, RenewSession, RestoreSession } from "@backend/backend/AuthAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
 import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
 import { errorMessage } from "./errors";
-import { isSessionEnd, sameUser, type SessionStatus } from "./session";
+import {
+  isSessionEnd,
+  minutesUntil,
+  renewalDue,
+  sameUser,
+  type SessionStatus,
+} from "./session";
+import { SessionRenewBanner } from "./components/SessionRenewBanner";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -781,6 +788,14 @@ function App() {
   const [sessionEnded, setSessionEnded] = useState(false);
   const endedUser = useRef<SignedInUser | null>(null);
   const userRef = useRef<SignedInUser | null>(null);
+  // Ticket #536: the session's idle deadline as the server last reported it.
+  // The "Stay signed in" banner counts down to it and a successful renewal
+  // replaces it; nothing here is authoritative — the server owns the clock.
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+  const [sessionCanRenew, setSessionCanRenew] = useState(false);
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const [renewingSession, setRenewingSession] = useState(false);
+  const [renewError, setRenewError] = useState<string | null>(null);
   useEffect(() => {
     userRef.current = user;
   }, [user]);
@@ -1203,6 +1218,9 @@ function App() {
       endedUser.current = null;
       setSessionEnded(false);
       setUser(null);
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      setRenewError(null);
       clearWorkspace();
     }
   }, [clearWorkspace]);
@@ -1216,6 +1234,7 @@ function App() {
       }
       endedUser.current = null;
       setSessionEnded(false);
+      setRenewError(null);
       setUser(next);
     },
     [clearWorkspace]
@@ -1224,23 +1243,36 @@ function App() {
   // Revalidate the session while signed in. Only a real session-end status
   // signs the user out; transport, 5xx, 429 and malformed responses are
   // connection states and leave the editor exactly where it was (issue #531).
+  // The same answer carries the idle deadline the "Stay signed in" banner
+  // counts down to (ticket #536), so the poll also records it.
   useEffect(() => {
-    if (!signedIn) return;
+    if (!signedIn) {
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      setRenewError(null);
+      return;
+    }
     const timer = window.setInterval(() => {
       void (async () => {
+        // Advance the countdown even when the check itself fails: a flaky
+        // connection must not freeze the banner's clock.
+        setSessionNow(Date.now());
         try {
-          // The generated binding declares the result as unknown until the
-          // Wails models are regenerated after the backend slices merge; the
-          // local SessionStatus is the contract this poll acts on.
+          // The generated binding carries backend.SessionStatus; the local
+          // shape is the subset this poll acts on.
           const status = (await CheckSession()) as SessionStatus;
           if (status.State === "active") {
             if (status.User) setUser(status.User as SignedInUser);
+            setSessionExpiresAt(status.ExpiresAt || null);
+            setSessionCanRenew(Boolean(status.CanRenew));
             return;
           }
           if (!isSessionEnd(status.State)) return;
           endedUser.current = userRef.current;
           setSessionEnded(true);
           setUser(null);
+          setSessionExpiresAt(null);
+          setSessionCanRenew(false);
           pushToast(
             "error",
             "Your session ended. Sign in to continue where you left off."
@@ -1252,6 +1284,48 @@ function App() {
     }, 60000);
     return () => window.clearInterval(timer);
   }, [signedIn, pushToast]);
+
+  // "Stay signed in" (ticket #536). A successful renewal moves the idle
+  // deadline; a real session end takes #531's preservation path; anything
+  // operational keeps the session and leaves the banner up with its reason.
+  const handleRenewSession = useCallback(async () => {
+    setRenewingSession(true);
+    setRenewError(null);
+    try {
+      const status = (await RenewSession()) as SessionStatus;
+      setSessionNow(Date.now());
+      if (status.State === "active") {
+        if (status.User) setUser(status.User as SignedInUser);
+        setSessionExpiresAt(status.ExpiresAt || null);
+        setSessionCanRenew(Boolean(status.CanRenew));
+        pushToast("success", "Your session was extended.");
+        return;
+      }
+      if (!isSessionEnd(status.State)) {
+        setRenewError(
+          status.Message ||
+            "The session could not be renewed. Keep working; we will try again."
+        );
+        return;
+      }
+      endedUser.current = userRef.current;
+      setSessionEnded(true);
+      setUser(null);
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      pushToast(
+        "error",
+        "Your session ended. Sign in to continue where you left off."
+      );
+    } catch {
+      // A binding rejection is not a session end. Keep the session.
+      setRenewError(
+        "The session could not be renewed. Keep working; we will try again."
+      );
+    } finally {
+      setRenewingSession(false);
+    }
+  }, [pushToast]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);
@@ -2363,6 +2437,14 @@ function App() {
         <LoginPage onSignedIn={handleSignedIn} sessionEnded={sessionEnded} />
       ) : (
     <>
+      {renewalDue(sessionExpiresAt, sessionNow, sessionCanRenew) ? (
+        <SessionRenewBanner
+          minutesLeft={minutesUntil(sessionExpiresAt, sessionNow)}
+          busy={renewingSession}
+          error={renewError}
+          onRenew={() => void handleRenewSession()}
+        />
+      ) : null}
       {updateState?.UpdateAvailable ? (
         <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
       ) : null}

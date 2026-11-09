@@ -512,3 +512,169 @@ func TestAnotherUnauthorizedDoesNotClearTheToken(t *testing.T) {
 		t.Error("an unrelated 401 deleted the keychain token")
 	}
 }
+
+// Ticket #536: the session check now carries the expiry the desktop needs for
+// the "Stay signed in" window, and renewal is the same typed contract —
+// data for every expected outcome, and a real session end is the only outcome
+// that clears the token.
+
+func sessionServer(t *testing.T, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestCheckSessionCarriesTheExpiry(t *testing.T) {
+	stubSessionKeyring(t, &fakeKeyring{})
+	issue531APIClient(t, sessionServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/auth/me" {
+			t.Errorf("unexpected path %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"id":7,"email":"staff@example.com","displayName":"Staff","role":"staff",
+			"expiresAt":"2026-11-09T10:00:00Z",
+			"absoluteExpiresAt":"2026-11-16T00:00:00Z",
+			"canRenew":true,"remembered":false
+		}`))
+	}).URL)
+	setSessionTokenMemory("live-token")
+
+	got := (&AuthAPI{}).CheckSession()
+	if got.State != SessionStateActive {
+		t.Fatalf("State = %q; want active", got.State)
+	}
+	if got.ExpiresAt != "2026-11-09T10:00:00Z" {
+		t.Errorf("ExpiresAt = %q; want the server's idle deadline", got.ExpiresAt)
+	}
+	if !got.CanRenew {
+		t.Error("CanRenew = false; the server said the session is renewable")
+	}
+}
+
+func TestRenewSessionReturnsTypedStatus(t *testing.T) {
+	keyring := &fakeKeyring{}
+	stubSessionKeyring(t, keyring)
+	var renewals int
+	issue531APIClient(t, sessionServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/auth/renew" || request.Method != http.MethodPost {
+			t.Errorf("unexpected %s %s", request.Method, request.URL.Path)
+		}
+		renewals++
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"id":7,"email":"staff@example.com","displayName":"Staff","role":"staff",
+			"expiresAt":"2026-11-09T18:00:00Z",
+			"absoluteExpiresAt":"2026-11-16T00:00:00Z",
+			"canRenew":true,"remembered":false
+		}`))
+	}).URL)
+	setSessionTokenMemory("live-token")
+
+	got := (&AuthAPI{}).RenewSession()
+	if renewals != 1 {
+		t.Fatalf("renewal requests = %d; want 1", renewals)
+	}
+	if got.State != SessionStateActive {
+		t.Fatalf("State = %q; want active (message %q)", got.State, got.Message)
+	}
+	if got.ExpiresAt != "2026-11-09T18:00:00Z" {
+		t.Errorf("ExpiresAt = %q; want the renewed deadline", got.ExpiresAt)
+	}
+	if got.User.ID != 7 {
+		t.Errorf("User = %+v; want the server's user", got.User)
+	}
+	if SessionToken() != "live-token" {
+		t.Error("a successful renewal changed the session token")
+	}
+	if keyring.deleteCount() != 0 {
+		t.Error("a successful renewal deleted the keychain token")
+	}
+}
+
+func TestRenewSessionOnARealEndClearsTheToken(t *testing.T) {
+	keyring := &fakeKeyring{}
+	stubSessionKeyring(t, keyring)
+	issue531APIClient(t, sessionServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"error":"session expired","code":"session_expired"}`))
+	}).URL)
+	setSessionTokenMemory("dead-token")
+
+	got := (&AuthAPI{}).RenewSession()
+	if got.State != SessionStateExpired {
+		t.Fatalf("State = %q; want expired", got.State)
+	}
+	if SessionToken() != "" {
+		t.Error("the expired session token survived the renewal")
+	}
+	if keyring.deleteCount() == 0 {
+		t.Error("the keychain token was not deleted on a real session end")
+	}
+}
+
+// TestRenewSessionOperationalFailuresKeepTheSession is #531's poll rule
+// applied to the renewal button: a 5xx, a 429, a transport failure or a
+// rejected binding must never sign the user out.
+func TestRenewSessionOperationalFailuresKeepTheSession(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"server error", http.StatusServiceUnavailable, `{"error":"session renewal failed","code":"session_check_failed"}`},
+		{"rate limited", http.StatusTooManyRequests, `{"error":"too many requests"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			keyring := &fakeKeyring{}
+			stubSessionKeyring(t, keyring)
+			issue531APIClient(t, sessionServer(t, func(writer http.ResponseWriter, request *http.Request) {
+				writer.Header().Set("Content-Type", "application/json")
+				writer.WriteHeader(tc.status)
+				_, _ = writer.Write([]byte(tc.body))
+			}).URL)
+			setSessionTokenMemory("kept-token")
+
+			got := (&AuthAPI{}).RenewSession()
+			if got.State == SessionStateActive || isSessionEndState(got.State) {
+				t.Fatalf("State = %q; want an operational state", got.State)
+			}
+			if SessionToken() != "kept-token" {
+				t.Errorf("%s cleared the session token", tc.name)
+			}
+			if keyring.deleteCount() != 0 {
+				t.Errorf("%s deleted the keychain token", tc.name)
+			}
+		})
+	}
+
+	t.Run("transport", func(t *testing.T) {
+		stubSessionKeyring(t, &fakeKeyring{})
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		url := server.URL
+		server.Close()
+		issue531APIClient(t, url)
+		setSessionTokenMemory("kept-token")
+
+		got := (&AuthAPI{}).RenewSession()
+		if got.State != SessionStateUnreachable {
+			t.Fatalf("State = %q; want unreachable", got.State)
+		}
+		if SessionToken() != "kept-token" {
+			t.Error("a transport failure cleared the session token")
+		}
+	})
+}
+
+// isSessionEndState mirrors the frontend's isSessionEnd so the test states
+// the contract rather than the absence of one status.
+func isSessionEndState(state string) bool {
+	switch state {
+	case SessionStateExpired, SessionStateRevoked, SessionStateInactive, SessionStateInvalid:
+		return true
+	}
+	return false
+}

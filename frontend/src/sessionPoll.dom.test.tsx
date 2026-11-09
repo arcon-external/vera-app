@@ -13,6 +13,7 @@ import { ToastProvider } from "./toast";
 const mocks = vi.hoisted(() => ({
   restoreSession: vi.fn((..._args: unknown[]): unknown => undefined),
   checkSession: vi.fn((..._args: unknown[]): unknown => undefined),
+  renewSession: vi.fn((..._args: unknown[]): unknown => undefined),
   login: vi.fn((..._args: unknown[]): unknown => undefined),
   logout: vi.fn(async (..._args: unknown[]) => {}),
   getCompany: vi.fn((..._args: unknown[]): unknown => undefined),
@@ -50,6 +51,7 @@ vi.mock("@backend/backend/AuthAPI", async (importOriginal) => {
     ...actual,
     RestoreSession: (...args: unknown[]) => mocks.restoreSession(...args),
     CheckSession: (...args: unknown[]) => mocks.checkSession(...args),
+    RenewSession: (...args: unknown[]) => mocks.renewSession(...args),
     Login: (...args: unknown[]) => mocks.login(...args),
     Logout: (...args: unknown[]) => mocks.logout(...args),
     GetCompany: (...args: unknown[]) => mocks.getCompany(...args),
@@ -137,6 +139,7 @@ beforeEach(() => {
   for (const mock of Object.values(mocks)) mock.mockClear();
   mocks.restoreSession.mockResolvedValue(USER);
   mocks.checkSession.mockResolvedValue({ State: "active", User: USER });
+  mocks.renewSession.mockResolvedValue({ State: "active", User: USER });
   mocks.login.mockResolvedValue(USER);
   mocks.getCompany.mockResolvedValue(PROFILE);
   mocks.getCompanyProfile.mockResolvedValue(PROFILE);
@@ -358,5 +361,131 @@ describe("Typed session poll (issue #531)", () => {
     mocks.login.mockResolvedValue(USER);
     await signIn("admin@example.com", "correct horse");
     expect(subjectInput()).toBeNull();
+  });
+});
+
+// Ticket #536: the "Stay signed in" window. The banner appears only inside
+// the last ten minutes of a live, renewable session; renewal extends it, and
+// a renewal that reports a real end uses #531's preservation path rather than
+// the destructive reset.
+describe("Stay signed in (#536)", () => {
+  function expiryIn(ms: number): string {
+    return new Date(Date.now() + ms).toISOString();
+  }
+
+  function renewButton(): HTMLButtonElement | null {
+    return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+      (node) => node.textContent?.trim() === "Stay signed in"
+    ) ?? null;
+  }
+
+  function nearExpiry(canRenew = true): Record<string, unknown> {
+    return {
+      State: "active",
+      User: USER,
+      Code: "session_active",
+      ExpiresAt: expiryIn(5 * 60 * 1000),
+      CanRenew: canRenew,
+    };
+  }
+
+  it("offers renewal inside the window and extends the session on click", async () => {
+    mocks.checkSession.mockResolvedValue(nearExpiry());
+    mocks.renewSession.mockResolvedValue({
+      State: "active",
+      User: USER,
+      Code: "session_active",
+      ExpiresAt: expiryIn(8 * 60 * 60 * 1000),
+      CanRenew: true,
+    });
+    await renderApp();
+    await runPolls();
+
+    expect(document.body.textContent).toContain("Your session ends");
+    const renew = renewButton();
+    if (renew === null) throw new Error("no Stay signed in button");
+
+    await act(async () => {
+      renew.click();
+    });
+    await flush();
+
+    expect(mocks.renewSession).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("Your session ends");
+  });
+
+  it("stays hidden before the window and when the server forbids renewal", async () => {
+    mocks.checkSession.mockResolvedValue({
+      ...nearExpiry(),
+      ExpiresAt: expiryIn(30 * 60 * 1000),
+    });
+    await renderApp();
+    await runPolls();
+    expect(document.body.textContent).not.toContain("Your session ends");
+
+    mocks.checkSession.mockResolvedValue(nearExpiry(false));
+    await runPolls();
+    expect(document.body.textContent).not.toContain("Your session ends");
+  });
+
+  it("preserves the work when renewal reports a real session end", async () => {
+    mocks.checkSession.mockResolvedValue(nearExpiry());
+    await renderApp();
+    await runPolls();
+    await openQuotationWithWork();
+
+    mocks.renewSession.mockResolvedValue({
+      State: "revoked",
+      Code: "session_revoked",
+      Message: "session was signed out",
+    });
+    const renew = renewButton();
+    if (renew === null) throw new Error("no Stay signed in button");
+    await act(async () => {
+      renew.click();
+    });
+    await flush();
+
+    expect(signInButton()).not.toBeNull();
+    expect(document.body.textContent).toContain("Your session ended");
+
+    mocks.login.mockResolvedValue(USER);
+    await signIn("admin@example.com", "correct horse");
+    expect(signInButton()).toBeNull();
+    expect(subjectInput()?.value).toBe("Unsaved quotation work");
+  });
+
+  it("keeps the session and the work when renewal fails operationally", async () => {
+    mocks.checkSession.mockResolvedValue(nearExpiry());
+    await renderApp();
+    await runPolls();
+    await openQuotationWithWork();
+
+    for (const failure of [
+      { State: "unreachable", Code: "session_unreachable", Message: "reach the quotation server: EOF" },
+      { State: "server_error", Code: "session_check_failed", Message: "session renewal failed" },
+    ]) {
+      mocks.renewSession.mockResolvedValue(failure);
+      const renew = renewButton();
+      if (renew === null) throw new Error("no Stay signed in button");
+      await act(async () => {
+        renew.click();
+      });
+      await flush();
+
+      expect(signInButton(), failure.State).toBeNull();
+      expect(subjectInput()?.value, failure.State).toBe("Unsaved quotation work");
+      expect(document.body.textContent, failure.State).toContain("Your session ends");
+    }
+
+    mocks.renewSession.mockRejectedValue(new Error("Wails rejected the binding"));
+    const renew = renewButton();
+    if (renew === null) throw new Error("no Stay signed in button");
+    await act(async () => {
+      renew.click();
+    });
+    await flush();
+    expect(signInButton()).toBeNull();
+    expect(subjectInput()?.value).toBe("Unsaved quotation work");
   });
 });

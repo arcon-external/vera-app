@@ -32,6 +32,7 @@ import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
 import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
+import { SessionRenewBanner } from "./components/SessionRenewBanner";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
@@ -1413,6 +1414,31 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
 });
 
 const CASES: SnapshotCase[] = [
+  {
+    // Ticket #536: the "Stay signed in" window, idle and with the last
+    // operational failure shown. The 360 render is the informative one: the
+    // sentence and the button have to wrap inside the narrowest column.
+    name: "SessionRenewBanner",
+    element: (
+      <SessionRenewBanner
+        minutesLeft={10}
+        busy={false}
+        error={null}
+        onRenew={() => undefined}
+      />
+    ),
+  },
+  {
+    name: "SessionRenewBannerError",
+    element: (
+      <SessionRenewBanner
+        minutesLeft={1}
+        busy={false}
+        error="The session could not be renewed. Keep working; we will try again."
+        onRenew={() => undefined}
+      />
+    ),
+  },
   {
     name: "DetailsPanel",
     element: (

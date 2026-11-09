@@ -42,6 +42,10 @@ export function RedeemInvite(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['RedeemInvite'](arg1, arg2);
 }
 
+export function RenewSession() {
+  return window['go']['backend']['AuthAPI']['RenewSession']();
+}
+
 export function RequestDeletion(arg1) {
   return window['go']['backend']['AuthAPI']['RequestDeletion'](arg1);
 }

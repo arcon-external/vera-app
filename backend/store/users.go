@@ -156,16 +156,35 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return count, nil
 }
 
-// CreateSession stores a session token hash with its expiry.
-func (s *Store) CreateSession(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time) error {
+// SessionInfo is the expiry state of a live session. ExpiresAt is the idle
+// deadline a renewal may push forward; AbsoluteExpiresAt is the hard cap no
+// renewal may cross.
+type SessionInfo struct {
+	ExpiresAt         time.Time
+	AbsoluteExpiresAt time.Time
+	LastSeenAt        time.Time
+	Remembered        bool
+}
+
+// CanRenew reports whether a renewal could still extend the idle deadline.
+// A session at its absolute cap has nothing left to give, and a legacy
+// session whose cap is its stamped expiry is not renewable either.
+func (i SessionInfo) CanRenew(now time.Time) bool {
+	return i.AbsoluteExpiresAt.After(now) && i.ExpiresAt.Before(i.AbsoluteExpiresAt)
+}
+
+// CreateSession stores a session token hash with its idle and absolute
+// deadlines. The idle deadline is the one renewal slides; the absolute one is
+// the cap it can never cross.
+func (s *Store) CreateSession(ctx context.Context, userID int64, tokenHash string, idleExpiresAt, absoluteExpiresAt time.Time, remembered bool) error {
 	pool, err := s.poolOrError()
 	if err != nil {
 		return err
 	}
 	if _, err := pool.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.sessions (user_id, token_hash, expires_at)
-		VALUES ($1, $2, $3)`, s.configSchema()),
-		userID, tokenHash, expiresAt); err != nil {
+		INSERT INTO %s.sessions (user_id, token_hash, expires_at, absolute_expires_at, last_seen_at, remembered)
+		VALUES ($1, $2, $3, $4, NOW(), $5)`, s.configSchema()),
+		userID, tokenHash, idleExpiresAt, absoluteExpiresAt, remembered); err != nil {
 		return fmt.Errorf("create session: %w", err)
 	}
 	return nil
@@ -194,17 +213,25 @@ func (s *Store) DeleteStaleSessions(ctx context.Context, before time.Time) (int6
 // stable 401 codes. A real database error stays an ordinary error so the
 // middleware can answer 503 instead of pretending the session ended.
 func (s *Store) GetSessionUser(ctx context.Context, tokenHash string, now time.Time) (AuthUser, error) {
+	user, _, err := s.GetSession(ctx, tokenHash, now)
+	return user, err
+}
+
+// GetSession returns the live user and the session's expiry state. A session
+// is over when either deadline has passed: the idle deadline is the one a
+// renewal may slide, and the absolute deadline is the cap it can never cross.
+func (s *Store) GetSession(ctx context.Context, tokenHash string, now time.Time) (AuthUser, SessionInfo, error) {
 	pool, err := s.poolOrError()
 	if err != nil {
-		return AuthUser{}, err
+		return AuthUser{}, SessionInfo{}, err
 	}
 	var user AuthUser
 	var lastLogin, revokedAt *time.Time
-	var expiresAt time.Time
+	var info SessionInfo
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT u.id, u.email, u.display_name, u.password_hash,
 		       u.role, u.is_active, u.must_change_password, u.last_login_at, u.avatar, u.avatar_mime,
-		       s.revoked_at, s.expires_at
+		       s.revoked_at, s.expires_at, s.absolute_expires_at, s.last_seen_at, s.remembered
 		FROM %s.sessions s
 		JOIN %s.users u ON u.id = s.user_id
 		WHERE s.token_hash = $1`, s.configSchema(), s.configSchema()),
@@ -212,25 +239,67 @@ func (s *Store) GetSessionUser(ctx context.Context, tokenHash string, now time.T
 		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 		&user.Role, &user.IsActive, &user.MustChangePassword,
 		&lastLogin, &user.Avatar, &user.AvatarMime,
-		&revokedAt, &expiresAt)
+		&revokedAt, &info.ExpiresAt, &info.AbsoluteExpiresAt, &info.LastSeenAt, &info.Remembered)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return AuthUser{}, &SessionError{Code: SessionCodeInvalid, Message: "invalid session"}
+		return AuthUser{}, SessionInfo{}, &SessionError{Code: SessionCodeInvalid, Message: "invalid session"}
 	}
 	if err != nil {
-		return AuthUser{}, fmt.Errorf("get session user: %w", err)
+		return AuthUser{}, SessionInfo{}, fmt.Errorf("get session user: %w", err)
 	}
 	switch {
 	case revokedAt != nil:
-		return AuthUser{}, &SessionError{Code: SessionCodeRevoked, Message: "session was signed out"}
-	case !expiresAt.After(now):
-		return AuthUser{}, &SessionError{Code: SessionCodeExpired, Message: "session expired"}
+		return AuthUser{}, SessionInfo{}, &SessionError{Code: SessionCodeRevoked, Message: "session was signed out"}
+	case !info.ExpiresAt.After(now) || !info.AbsoluteExpiresAt.After(now):
+		return AuthUser{}, SessionInfo{}, &SessionError{Code: SessionCodeExpired, Message: "session expired"}
 	case !user.IsActive:
-		return AuthUser{}, &SessionError{Code: SessionCodeInactive, Message: "account is inactive"}
+		return AuthUser{}, SessionInfo{}, &SessionError{Code: SessionCodeInactive, Message: "account is inactive"}
 	}
 	if lastLogin != nil {
 		user.LastLoginAt = *lastLogin
 	}
-	return user, nil
+	return user, info, nil
+}
+
+// RenewSession slides a live session's idle deadline to now+idle, clamped to
+// the absolute cap. The update re-checks the session state in its WHERE
+// clause, so a session that ended between the read and the write is refused
+// with the same typed SessionError the read path uses.
+func (s *Store) RenewSession(ctx context.Context, tokenHash string, now time.Time, idle time.Duration) (SessionInfo, error) {
+	_, info, err := s.GetSession(ctx, tokenHash, now)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	deadline := now.Add(idle)
+	if deadline.After(info.AbsoluteExpiresAt) {
+		deadline = info.AbsoluteExpiresAt
+	}
+	pool, err := s.poolOrError()
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	command, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.sessions
+		SET expires_at = $2, last_seen_at = $3
+		WHERE token_hash = $1
+		  AND revoked_at IS NULL
+		  AND expires_at > $3
+		  AND absolute_expires_at > $3`, s.configSchema()),
+		tokenHash, deadline, now)
+	if err != nil {
+		return SessionInfo{}, fmt.Errorf("renew session: %w", err)
+	}
+	if command.RowsAffected() == 0 {
+		// The session ended between the read and the write. Ask the read
+		// path which typed answer applies now; a live row here would mean a
+		// rule the UPDATE did not express, so treat that as expired.
+		if _, _, readErr := s.GetSession(ctx, tokenHash, now); readErr != nil {
+			return SessionInfo{}, readErr
+		}
+		return SessionInfo{}, &SessionError{Code: SessionCodeExpired, Message: "session expired"}
+	}
+	info.ExpiresAt = deadline
+	info.LastSeenAt = now
+	return info, nil
 }
 
 // RevokeSession marks one session revoked.

@@ -172,10 +172,16 @@ func TestCreateUserRequiresPassword(t *testing.T) {
 	}
 }
 
-// sessionExpiry reads the stored expiry of the session a token identifies,
-// straight from the sessions row: the value under test is what the database
-// keeps, not what the service remembers.
-func sessionExpiry(t *testing.T, schema, token string) time.Time {
+// sessionRow is the stored expiry state of the session a token identifies,
+// read straight from the sessions row: the values under test are what the
+// database keeps, not what the service remembers.
+type sessionRow struct {
+	ExpiresAt         time.Time
+	AbsoluteExpiresAt time.Time
+	Remembered        bool
+}
+
+func readSessionRow(t *testing.T, schema, token string) sessionRow {
 	t.Helper()
 	pool, err := pgxpool.New(context.Background(),
 		strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")))
@@ -183,13 +189,14 @@ func sessionExpiry(t *testing.T, schema, token string) time.Time {
 		t.Fatalf("connect to read session expiry: %v", err)
 	}
 	defer pool.Close()
-	var expiresAt time.Time
+	var row sessionRow
 	if err := pool.QueryRow(context.Background(),
-		`SELECT expires_at FROM "`+strings.ReplaceAll(schema, `"`, `""`)+`".sessions WHERE token_hash = $1`,
-		HashSessionToken(token)).Scan(&expiresAt); err != nil {
+		`SELECT expires_at, absolute_expires_at, remembered FROM "`+
+			strings.ReplaceAll(schema, `"`, `""`)+`".sessions WHERE token_hash = $1`,
+		HashSessionToken(token)).Scan(&row.ExpiresAt, &row.AbsoluteExpiresAt, &row.Remembered); err != nil {
 		t.Fatalf("read session expiry: %v", err)
 	}
-	return expiresAt
+	return row
 }
 
 func TestLoginIssuesTheLifetimeTheClientAskedFor(t *testing.T) {
@@ -205,25 +212,82 @@ func TestLoginIssuesTheLifetimeTheClientAskedFor(t *testing.T) {
 	service.now = func() time.Time { return fixed }
 
 	for _, tc := range []struct {
-		name     string
-		remember bool
-		want     time.Duration
+		name       string
+		remember   bool
+		wantIdle   time.Duration
+		wantCap    time.Duration
+		remembered bool
 	}{
 		// The values are written out, not the constants: a test that
 		// asserts the same symbol the implementation picks proves the
 		// wiring but pins nothing about the duration.
-		{"unremembered session lasts a working day", false, 8 * time.Hour},
-		{"remembered session lasts thirty days", true, 30 * 24 * time.Hour},
+		{"unremembered session idles for a working day under a week cap", false, 8 * time.Hour, 7 * 24 * time.Hour, false},
+		{"remembered session idles for thirty days under a ninety-day cap", true, 30 * 24 * time.Hour, 90 * 24 * time.Hour, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			token, _, err := service.Login(ctx, "lifetime@example.com", "initial-password", tc.remember)
 			if err != nil {
 				t.Fatalf("Login failed: %v", err)
 			}
-			want := fixed.Add(tc.want)
-			if got := sessionExpiry(t, "vera_auth_test_lifetime", token); !got.Equal(want) {
+			row := readSessionRow(t, "vera_auth_test_lifetime", token)
+			if want := fixed.Add(tc.wantIdle); !row.ExpiresAt.Equal(want) {
 				t.Errorf("expires_at = %s; want %s (issued %s with remember=%v, one of the lifetimes is wrong)",
-					got.Format(time.RFC3339), want.Format(time.RFC3339), fixed.Format(time.RFC3339), tc.remember)
+					row.ExpiresAt.Format(time.RFC3339), want.Format(time.RFC3339), fixed.Format(time.RFC3339), tc.remember)
+			}
+			if want := fixed.Add(tc.wantCap); !row.AbsoluteExpiresAt.Equal(want) {
+				t.Errorf("absolute_expires_at = %s; want %s (the cap is wrong for remember=%v)",
+					row.AbsoluteExpiresAt.Format(time.RFC3339), want.Format(time.RFC3339), tc.remember)
+			}
+			if row.Remembered != tc.remembered {
+				t.Errorf("remembered = %v; want %v", row.Remembered, tc.remembered)
+			}
+		})
+	}
+}
+
+// TestRenewSessionSlidesTheIdleDeadlineByTheSessionsOwnLifetime pins the
+// service half of renewal: a standard session slides by a working day and a
+// remembered one by thirty days, and neither moves the absolute cap.
+func TestRenewSessionSlidesTheIdleDeadlineByTheSessionsOwnLifetime(t *testing.T) {
+	database := testStore(t, "vera_auth_test_renew")
+	ctx := context.Background()
+	service := NewService(database)
+	if _, err := service.Bootstrap(ctx, "renew@example.com", "Renew", "initial-password"); err != nil {
+		t.Fatalf("Bootstrap failed: %v", err)
+	}
+	issued := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return issued }
+
+	for _, tc := range []struct {
+		name     string
+		remember bool
+		idle     time.Duration
+	}{
+		{"standard", false, 8 * time.Hour},
+		{"remembered", true, 30 * 24 * time.Hour},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token, _, err := service.Login(ctx, "renew@example.com", "initial-password", tc.remember)
+			if err != nil {
+				t.Fatalf("Login failed: %v", err)
+			}
+			before := readSessionRow(t, "vera_auth_test_renew", token)
+
+			later := issued.Add(2 * time.Hour)
+			service.now = func() time.Time { return later }
+			info, err := service.RenewSession(ctx, token)
+			if err != nil {
+				t.Fatalf("RenewSession: %v", err)
+			}
+			if want := later.Add(tc.idle); !info.ExpiresAt.Equal(want) {
+				t.Errorf("renewed expires_at = %s; want %s", info.ExpiresAt, want)
+			}
+			if !info.AbsoluteExpiresAt.Equal(before.AbsoluteExpiresAt) {
+				t.Errorf("renewal moved the absolute cap: %s -> %s",
+					before.AbsoluteExpiresAt, info.AbsoluteExpiresAt)
+			}
+			if info.Remembered != tc.remember {
+				t.Errorf("renewed remembered = %v; want %v", info.Remembered, tc.remember)
 			}
 		})
 	}
