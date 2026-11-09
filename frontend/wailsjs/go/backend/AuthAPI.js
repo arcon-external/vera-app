@@ -42,6 +42,10 @@ export function RedeemInvite(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['RedeemInvite'](arg1, arg2);
 }
 
+export function RenewSession() {
+  return window['go']['backend']['AuthAPI']['RenewSession']();
+}
+
 export function RequestDeletion(arg1) {
   return window['go']['backend']['AuthAPI']['RequestDeletion'](arg1);
 }
@@ -52,10 +56,6 @@ export function RequestEmailChange(arg1) {
 
 export function RestoreSession() {
   return window['go']['backend']['AuthAPI']['RestoreSession']();
-}
-
-export function RenewSession() {
-  return window['go']['backend']['AuthAPI']['RenewSession']();
 }
 
 export function UpdateProfile(arg1, arg2, arg3, arg4) {

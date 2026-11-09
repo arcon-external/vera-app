@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -201,5 +203,53 @@ func TestRenewOperationalFailureIs503(t *testing.T) {
 	code, body := doAdminRequest(t, server, token, http.MethodPost, "/v1/auth/renew", "")
 	if code != http.StatusServiceUnavailable || body["code"] != "session_check_failed" {
 		t.Fatalf("renew with a closed database = %d %v; want coded 503", code, body)
+	}
+}
+
+// TestRenewHandlerMapsFailuresDirectly covers the handler's own error mapping.
+// In production requireSession rejects an ended session before renew runs, so
+// these branches exist for the race between the middleware's read and the
+// renewal's write (and for a database that fails mid-request). Calling the
+// handler directly is the only way to exercise them without simulating that
+// race.
+func TestRenewHandlerMapsFailuresDirectly(t *testing.T) {
+	server, database, _ := adminTestSetup(t, "vera_536_renew_handler_map")
+
+	revoked := doLogin(t, server, "api-admin@example.com", "test-password")
+	if code, _ := doAdminRequest(t, server, revoked, http.MethodPost, "/v1/auth/logout", ""); code != http.StatusNoContent {
+		t.Fatalf("logout = %d; want 204", code)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/auth/renew", nil)
+	request.Header.Set("Authorization", "Bearer "+revoked)
+	recorder := httptest.NewRecorder()
+	context := server.echo.NewContext(request, recorder)
+	if err := server.renew(context); err != nil {
+		t.Fatalf("renew handler returned %v; want a JSON response", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusUnauthorized || body["code"] != "session_revoked" {
+		t.Fatalf("handler on a revoked session = %d %v; want coded 401 session_revoked",
+			recorder.Code, body)
+	}
+
+	database.Close()
+	request = httptest.NewRequest(http.MethodPost, "/v1/auth/renew", nil)
+	request.Header.Set("Authorization", "Bearer "+revoked)
+	recorder = httptest.NewRecorder()
+	context = server.echo.NewContext(request, recorder)
+	if err := server.renew(context); err != nil {
+		t.Fatalf("renew handler returned %v; want a JSON response", err)
+	}
+	body = nil
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if recorder.Code != http.StatusServiceUnavailable || body["code"] != "session_check_failed" {
+		t.Fatalf("handler with a closed database = %d %v; want coded 503",
+			recorder.Code, body)
 	}
 }

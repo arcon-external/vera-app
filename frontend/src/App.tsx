@@ -1258,9 +1258,8 @@ function App() {
         // connection must not freeze the banner's clock.
         setSessionNow(Date.now());
         try {
-          // The generated binding declares the result as unknown until the
-          // Wails models are regenerated after the backend slices merge; the
-          // local SessionStatus is the contract this poll acts on.
+          // The generated binding carries backend.SessionStatus; the local
+          // shape is the subset this poll acts on.
           const status = (await CheckSession()) as SessionStatus;
           if (status.State === "active") {
             if (status.User) setUser(status.User as SignedInUser);

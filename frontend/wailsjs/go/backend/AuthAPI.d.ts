@@ -22,12 +22,12 @@ export function MyEmailChangeRequests():Promise<Array<backend.EmailChangeRequest
 
 export function RedeemInvite(arg1:string,arg2:string):Promise<string>;
 
+export function RenewSession():Promise<backend.SessionStatus>;
+
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;
 
 export function RequestEmailChange(arg1:string):Promise<backend.EmailChangeRequest>;
 
 export function RestoreSession():Promise<backend.AuthUserDTO>;
-
-export function RenewSession():Promise<unknown>;
 
 export function UpdateProfile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<backend.AuthUserDTO>;
