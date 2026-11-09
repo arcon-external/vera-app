@@ -4,8 +4,8 @@ go 1.26.10
 
 require (
 	cloud.google.com/go/storage v1.70.0
-	github.com/chromedp/cdproto v0.158.1
-	github.com/chromedp/chromedp v0.21.0
+	github.com/chromedp/cdproto v0.159.0
+	github.com/chromedp/chromedp v0.23.0
 	github.com/gpdf-dev/gpdf v1.0.13
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
