@@ -159,7 +159,7 @@ export function PurchaseOrderHistoryPanel({
               </p>
 
               <details className="mt-2" open={expandPreviousValues}>
-                <summary className="cursor-pointer text-small font-medium text-accent-700">
+                <summary className="cursor-pointer text-small font-medium text-accent-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40">
                   Previous values
                 </summary>
                 <div className="mt-3 grid gap-4">
