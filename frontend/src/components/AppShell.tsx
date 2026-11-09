@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FocusEvent, KeyboardEvent, ReactNode } from "react";
 import { NotificationBell } from "./NotificationBell";
 import { VeraLogo } from "./VeraLogo";
@@ -236,6 +236,14 @@ export function AppShell({
   // No ResizeObserver (older runtimes, jsdom) leaves the 64px CSS fallback.
   const shellRootRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  // Enter-only page motion. Two identical animation names alternate on each
+  // page change, so the CSS animation restarts without removing the class for
+  // a frame (which would flash the new page) and without remounting the
+  // preserved workspace below it.
+  const [pageMotion, setPageMotion] = useState<"a" | "b">("a");
+  useLayoutEffect(() => {
+    setPageMotion((current) => (current === "a" ? "b" : "a"));
+  }, [page]);
   useEffect(() => {
     const header = headerRef.current;
     const root = shellRootRef.current;
@@ -663,7 +671,7 @@ export function AppShell({
         <div
           className={`mx-auto w-full max-w-[1560px] px-5 pt-7 lg:px-8 lg:pt-9 ${
             actionBar ? "pb-16" : "pb-10"
-          }`}
+          } ${pageMotion === "a" ? "animate-page-in-a" : "animate-page-in-b"}`}
         >
           {children}
         </div>

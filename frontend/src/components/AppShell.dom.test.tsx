@@ -391,6 +391,15 @@ describe("profile menu keyboard operation (issue #494)", () => {
   });
 });
 
+describe("page motion (issue #519)", () => {
+  it("applies an enter-only page animation class", () => {
+    render(STAFF);
+    expect(
+      container.querySelector(".animate-page-in-a, .animate-page-in-b")
+    ).not.toBeNull();
+  });
+});
+
 describe("small-screen shell offsets (U4)", () => {
   it("header stays sticky at every width so the measured offset clears it", async () => {
     render(STAFF, { page: "create" });

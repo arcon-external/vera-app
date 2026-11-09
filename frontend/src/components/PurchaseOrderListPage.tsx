@@ -665,7 +665,7 @@ export function PurchaseOrderListView({
                     return (
                       <tr
                         key={row.ID}
-                        className="h-14 transition-colors duration-150 hover:bg-paper-subtle/60"
+                        className="h-14 transition-colors duration-150 hover:bg-paper-subtle/60 active:bg-paper-muted/70"
                       >
                         <td className="px-5 py-3 align-middle">
                           <span
@@ -749,7 +749,7 @@ export function PurchaseOrderListView({
                   <li key={row.ID}>
                     <article
                       aria-label={`Purchase order ${poNumberLabel(row)}`}
-                      className="rounded-lg border border-rule bg-white p-3"
+                      className="rounded-lg border border-rule bg-white p-3 transition-colors duration-150 active:bg-paper-subtle/60"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
