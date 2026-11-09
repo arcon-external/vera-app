@@ -296,26 +296,29 @@ describe("Typed session poll (issue #531)", () => {
     expect(subjectInput()?.value).toBe("Unsaved quotation work");
   });
 
-  it("signs out on a real session end, preserves the work, and restores it for the same user", async () => {
-    await renderApp();
-    await openQuotationWithWork();
+  it.each(["expired", "revoked", "inactive", "invalid"])(
+    "signs out on a real %s session end, preserves the work, and restores it for the same user",
+    async (state) => {
+      await renderApp();
+      await openQuotationWithWork();
 
-    mocks.checkSession.mockResolvedValue({
-      State: "expired",
-      Code: "session_expired",
-      Message: "session expired",
-    });
-    await runPolls();
+      mocks.checkSession.mockResolvedValue({
+        State: state,
+        Code: `session_${state}`,
+        Message: `session ${state}`,
+      });
+      await runPolls();
 
-    expect(signInButton()).not.toBeNull();
-    expect(document.body.textContent).toContain("Your session ended");
+      expect(signInButton()).not.toBeNull();
+      expect(document.body.textContent).toContain("Your session ended");
 
-    mocks.login.mockResolvedValue(USER);
-    await signIn("admin@example.com", "correct horse");
+      mocks.login.mockResolvedValue(USER);
+      await signIn("admin@example.com", "correct horse");
 
-    expect(signInButton()).toBeNull();
-    expect(subjectInput()?.value).toBe("Unsaved quotation work");
-  });
+      expect(signInButton()).toBeNull();
+      expect(subjectInput()?.value).toBe("Unsaved quotation work");
+    }
+  );
 
   it("clears the preserved work when a different user signs in", async () => {
     await renderApp();
