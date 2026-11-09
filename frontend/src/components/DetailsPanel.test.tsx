@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DetailsPanel,
   formatLeadTimeSegment,
@@ -7,6 +10,13 @@ import {
   type DetailsState,
 } from "./DetailsPanel";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "../tax";
+
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
+  .IS_REACT_ACT_ENVIRONMENT = true;
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
 
 const DETAILS: DetailsState = {
   subject: "",
@@ -22,6 +32,7 @@ const DETAILS: DetailsState = {
   taxZone: "FTZ",
   taxType: "Goods",
   serviceCategory: "",
+  note: "",
 };
 
 function render(details: DetailsState = DETAILS): string {
@@ -123,5 +134,54 @@ describe("DetailsPanel lead time", () => {
     expect(html).toContain('value="5"');
     expect(html).not.toContain("2 Years");
     expect(html).not.toContain("and 5 Days");
+  });
+});
+
+describe("DetailsPanel note editor (#535)", () => {
+  it("renders the note field full width under Subject with its print hint", () => {
+    const html = render();
+    expect(html).toContain('aria-label="Note"');
+    expect(html).toContain('role="textbox"');
+    expect(html).toContain('aria-multiline="true"');
+    expect(html).toContain("Prints under the line items on the customer quotation.");
+    // The toolbar is the supported subset, nothing else.
+    for (const label of ["Bold", "Italic", "Bullet list", "Numbered list"]) {
+      expect(html).toContain(`aria-label="${label}"`);
+    }
+    expect(html).not.toContain('aria-label="Underline"');
+  });
+
+  it("writes a note edit through onChange as a details patch", () => {
+    const onChange = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <DetailsPanel
+          value={DETAILS}
+          customerOptions={[{ value: 2, label: "Client" }]}
+          customerId={2}
+          incotermOptions={[{ value: "EXW", label: "EXW" }]}
+          taxZoneOptions={TAX_ZONE_OPTIONS}
+          taxTypeOptions={TAX_TYPE_OPTIONS}
+          onChange={onChange}
+          onCustomerChange={() => undefined}
+          onPaste={() => undefined}
+        />
+      );
+    });
+    const editor = container.querySelector<HTMLElement>(
+      '[role="textbox"][aria-label="Note"]'
+    );
+    if (editor === null) throw new Error("note editor not rendered");
+    act(() => {
+      editor.innerHTML = "<p>Delivery is <strong>ex-works</strong>.</p>";
+      editor.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(onChange).toHaveBeenLastCalledWith({
+      note: "Delivery is **ex-works**.",
+    });
+    act(() => root.unmount());
   });
 });

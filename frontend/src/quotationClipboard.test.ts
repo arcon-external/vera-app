@@ -33,6 +33,7 @@ function makeArchived(overrides: Partial<ArchivedQuotation> = {}): ArchivedQuota
     DisplayGrand: "",
     RecipientName: "Jane",
     RecipientAddress: "Gedung Penerima 3",
+    Note: "",
     Incoterm: "DAP",
     ValidityDays: 45,
     PaymentTermDays: 60,
@@ -496,5 +497,47 @@ describe("copyQuotationToClipboard", () => {
     expect(toasts).toEqual([
       { type: "error", message: "We couldn't copy this quotation. Try again." },
     ]);
+  });
+});
+
+describe("quotation note copy/paste (#535)", () => {
+  const NOTE = "Delivery is **ex-works**.\n- Two copies\n- One original";
+
+  it("carries the note through build, parse and apply", () => {
+    const archived = makeArchived({ Note: NOTE });
+    const parsed = parseQuotationCopy(
+      buildQuotationCopy(archived)
+    ) as QuotationCopyPayload;
+    expect(parsed.quotation.note).toBe(NOTE);
+    const applied = applyQuotationCopy(parsed, CUSTOMERS);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.details.note).toBe(NOTE);
+  });
+
+  it("carries the note into a revision opened for edit", () => {
+    expect(archivedToEditorDraft(makeArchived({ Note: NOTE })).details.note).toBe(
+      NOTE
+    );
+  });
+
+  it("parses an old payload without a note as an empty note", () => {
+    // Version stays 1: a payload copied by a build before #535 has no note
+    // key, and must still paste.
+    const raw = JSON.parse(buildQuotationCopy(makeArchived({ Note: NOTE })));
+    delete raw.quotation.note;
+    const parsed = parseQuotationCopy(JSON.stringify(raw));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.quotation.note).toBe("");
+    const applied = applyQuotationCopy(parsed!, CUSTOMERS);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.details.note).toBe("");
+  });
+
+  it("rejects a payload whose note is not a string", () => {
+    const raw = JSON.parse(buildQuotationCopy(makeArchived()));
+    raw.quotation.note = 42;
+    expect(parseQuotationCopy(JSON.stringify(raw))).toBeNull();
   });
 });

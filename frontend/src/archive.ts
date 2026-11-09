@@ -117,6 +117,8 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   CustomerAddress: string;
   RecipientName: string;
   RecipientAddress: string;
+  /** The revision's note source (#540). Empty on revisions issued before it. */
+  Note: string;
   Incoterm: string;
   /** The code the revision was issued in. Editing under a live profile with a
    * different code is blocked rather than reinterpreting the stored amounts. */
