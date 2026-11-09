@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -332,15 +333,30 @@ func (s *Server) me(context echo.Context) error {
 }
 
 // requireSession validates the bearer token and stores the user for handlers.
+//
+// An ended session is a coded 401 so the desktop can tell expired, revoked,
+// inactive and unknown tokens apart. A database failure is a coded 503: it is
+// an operational problem, and the desktop must not sign anyone out for it
+// (issue #531).
 func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(context echo.Context) error {
 		token, ok := bearerToken(context.Request())
 		if !ok {
-			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "missing session"})
+			return context.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "missing session", "code": "session_missing",
+			})
 		}
 		user, err := s.service.Validate(context.Request().Context(), token)
 		if err != nil {
-			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired session"})
+			var sessionErr *store.SessionError
+			if errors.As(err, &sessionErr) {
+				return context.JSON(http.StatusUnauthorized, map[string]string{
+					"error": sessionErr.Message, "code": sessionErr.Code,
+				})
+			}
+			return context.JSON(http.StatusServiceUnavailable, map[string]string{
+				"error": "session check failed", "code": "session_check_failed",
+			})
 		}
 		context.Set("user", user)
 		if user.MustChangePassword {

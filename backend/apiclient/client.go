@@ -17,11 +17,15 @@ import (
 
 // Client talks to veraserver over TLS. The zero token provider means
 // unauthenticated (used for login and health checks).
+//
+// There is deliberately no "any 401 clears the session" hook (issue #531): a
+// 401 can be a wrong current password or a database error mapped to 401, and
+// only the desktop's typed session check and a manual sign-out may end a
+// session.
 type Client struct {
-	token          func() string
-	http           *http.Client
-	OnUnauthorized func()
-	baseURL        string
+	token   func() string
+	http    *http.Client
+	baseURL string
 }
 
 // ConflictInfo is the current state a stale PO save was refused against
@@ -51,6 +55,25 @@ type DeletionChangeInfo struct {
 type DeletionConflictInfo struct {
 	Changes []DeletionChangeInfo `json:"changes"`
 	Preview json.RawMessage      `json:"preview"`
+}
+
+// TransportError reports that a request never reached the server: DNS,
+// connection, TLS, or a timeout. It is deliberately distinct from a server
+// response (StatusError) and from an unreadable response, because the
+// desktop's session check must treat only this one as "offline" and must not
+// sign anyone out for it.
+type TransportError struct{ Err error }
+
+func (e *TransportError) Error() string {
+	return "reach the quotation server: " + e.Err.Error()
+}
+
+func (e *TransportError) Unwrap() error { return e.Err }
+
+// IsTransport reports whether err means the request never got a response.
+func IsTransport(err error) bool {
+	var transport *TransportError
+	return errors.As(err, &transport)
 }
 
 // StatusError is a response the server refused: anything outside 2xx, and the
@@ -194,15 +217,12 @@ func (c *Client) do(method, path string, body any, out any) error {
 
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("reach the quotation server: %w", err)
+		return &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusUnauthorized {
-		if c.OnUnauthorized != nil {
-			c.OnUnauthorized()
-		}
-		return &StatusError{StatusCode: response.StatusCode, Message: apiError(response, "signed out; sign in again")}
+		return decodeStatusError(response, "signed out; sign in again")
 	}
 	if response.StatusCode == http.StatusNoContent {
 		return nil
@@ -293,7 +313,7 @@ func (c *Client) PostForm(path string, form map[string]string) (string, error) {
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("reach the quotation server: %w", err)
+		return "", &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -301,10 +321,7 @@ func (c *Client) PostForm(path string, form map[string]string) (string, error) {
 		return "", fmt.Errorf("read server response: %w", err)
 	}
 	if response.StatusCode == http.StatusUnauthorized {
-		if c.OnUnauthorized != nil {
-			c.OnUnauthorized()
-		}
-		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "signed out; sign in again")}
+		return "", statusErrorFromBody(response.StatusCode, body, "signed out; sign in again")
 	}
 	// 404 is a real answer from the portal -- "no document matches that code" --
 	// and its page still has to be read, so only 5xx counts as a failure here.
@@ -330,7 +347,7 @@ func (c *Client) GetBody(path string) (string, error) {
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("reach the quotation server: %w", err)
+		return "", &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
@@ -338,15 +355,26 @@ func (c *Client) GetBody(path string) (string, error) {
 		return "", fmt.Errorf("read server response: %w", err)
 	}
 	if response.StatusCode == http.StatusUnauthorized {
-		if c.OnUnauthorized != nil {
-			c.OnUnauthorized()
-		}
-		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "signed out; sign in again")}
+		return "", statusErrorFromBody(response.StatusCode, body, "signed out; sign in again")
 	}
 	if response.StatusCode != http.StatusOK {
 		return "", &StatusError{StatusCode: response.StatusCode, Message: apiErrorBody(body, "server request failed")}
 	}
 	return string(body), nil
+}
+
+// statusErrorFromBody builds a refusal from an already-read body, keeping the
+// server's stable code when it sent one. The raw-body methods use it so a 401
+// reaches the caller with the same code vocabulary as a decoded request.
+func statusErrorFromBody(statusCode int, body []byte, fallback string) *StatusError {
+	failure := &StatusError{StatusCode: statusCode, Message: apiErrorBody(body, fallback)}
+	var envelope struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(body, &envelope) == nil {
+		failure.Code = envelope.Code
+	}
+	return failure
 }
 
 // apiErrorBody is apiError for a body already read.
@@ -424,13 +452,10 @@ func (c *Client) Upload(path, fieldName, filename string, data []byte, out any) 
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("reach the quotation server: %w", err)
+		return &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
-		if c.OnUnauthorized != nil {
-			c.OnUnauthorized()
-		}
 		return &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -458,13 +483,10 @@ func (c *Client) GetBytes(path string) (data []byte, header http.Header, err err
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reach the quotation server: %w", err)
+		return nil, nil, &TransportError{Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusUnauthorized {
-		if c.OnUnauthorized != nil {
-			c.OnUnauthorized()
-		}
 		return nil, nil, &StatusError{StatusCode: response.StatusCode, Message: "signed out; sign in again"}
 	}
 	if response.StatusCode != http.StatusOK {

@@ -252,3 +252,263 @@ func TestLogoutClearsMemoryAndTheKeychainAfterBothSignIns(t *testing.T) {
 		}
 	}
 }
+
+// --- Issue #531: typed session check -------------------------------------
+
+// issue531APIClient points the shared client at a URL and restores the
+// previous one afterwards. Unlike pointAPIClientAt it takes a URL, so a test
+// can close the server first and exercise the unreachable branch.
+func issue531APIClient(t *testing.T, url string) {
+	t.Helper()
+	previous := apiClient
+	ConfigureAPI(apiclient.New(url, SessionToken))
+	t.Cleanup(func() { apiClient = previous })
+}
+
+// issue531Server answers /v1/auth/me with one fixed status and body.
+func issue531Server(t *testing.T, status int, body string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/auth/me" {
+			t.Errorf("unexpected path %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(status)
+		_, _ = writer.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// TestCheckSessionClassifiesEveryOutcome is the status matrix the desktop acts
+// on. A status is data, never an error, so every expected outcome (including
+// transport and malformed responses) has to arrive as a value.
+func TestCheckSessionClassifiesEveryOutcome(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    int
+		body      string
+		wantState string
+		wantCode  string
+	}{
+		{
+			name:      "active",
+			status:    http.StatusOK,
+			body:      `{"id":7,"email":"staff@example.com","displayName":"Staff","role":"staff"}`,
+			wantState: "active",
+			wantCode:  "session_active",
+		},
+		{
+			name:      "expired",
+			status:    http.StatusUnauthorized,
+			body:      `{"error":"session expired","code":"session_expired"}`,
+			wantState: "expired",
+			wantCode:  "session_expired",
+		},
+		{
+			name:      "revoked",
+			status:    http.StatusUnauthorized,
+			body:      `{"error":"session was signed out","code":"session_revoked"}`,
+			wantState: "revoked",
+			wantCode:  "session_revoked",
+		},
+		{
+			name:      "inactive",
+			status:    http.StatusUnauthorized,
+			body:      `{"error":"account is inactive","code":"session_inactive"}`,
+			wantState: "inactive",
+			wantCode:  "session_inactive",
+		},
+		{
+			name:      "invalid",
+			status:    http.StatusUnauthorized,
+			body:      `{"error":"invalid session","code":"session_invalid"}`,
+			wantState: "invalid",
+			wantCode:  "session_invalid",
+		},
+		{
+			name:      "legacy 401 without a code",
+			status:    http.StatusUnauthorized,
+			body:      `{"error":"invalid or expired session"}`,
+			wantState: "invalid",
+			wantCode:  "session_invalid",
+		},
+		{
+			name:      "server error",
+			status:    http.StatusServiceUnavailable,
+			body:      `{"error":"session check failed","code":"session_check_failed"}`,
+			wantState: "server_error",
+			wantCode:  "session_check_failed",
+		},
+		{
+			name:      "rate limited",
+			status:    http.StatusTooManyRequests,
+			body:      `{"error":"too many requests"}`,
+			wantState: "rate_limited",
+			wantCode:  "rate_limited",
+		},
+		{
+			name:      "malformed response",
+			status:    http.StatusOK,
+			body:      `not-json`,
+			wantState: "incompatible",
+			wantCode:  "session_incompatible",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubSessionKeyring(t, &fakeKeyring{})
+			issue531APIClient(t, issue531Server(t, tc.status, tc.body).URL)
+			setSessionTokenMemory("test-token")
+
+			got := (&AuthAPI{}).CheckSession()
+			if got.State != tc.wantState {
+				t.Errorf("State = %q; want %q (message %q)", got.State, tc.wantState, got.Message)
+			}
+			if got.Code != tc.wantCode {
+				t.Errorf("Code = %q; want %q", got.Code, tc.wantCode)
+			}
+			if tc.wantState == "active" && (got.User.ID != 7 || got.User.Email != "staff@example.com") {
+				t.Errorf("User = %+v; want the server's user", got.User)
+			}
+		})
+	}
+}
+
+// TestCheckSessionReportsUnreachable covers a request that never reaches the
+// server: the laptop is offline, not signed out.
+func TestCheckSessionReportsUnreachable(t *testing.T) {
+	stubSessionKeyring(t, &fakeKeyring{})
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := server.URL
+	server.Close()
+	issue531APIClient(t, url)
+	setSessionTokenMemory("kept-token")
+
+	got := (&AuthAPI{}).CheckSession()
+	if got.State != "unreachable" {
+		t.Fatalf("State = %q; want unreachable (message %q)", got.State, got.Message)
+	}
+	if SessionToken() != "kept-token" {
+		t.Error("a transport failure cleared the session token")
+	}
+}
+
+func TestCheckSessionWithoutATokenIsInvalid(t *testing.T) {
+	stubSessionKeyring(t, &fakeKeyring{})
+	forgetMemory()
+
+	got := (&AuthAPI{}).CheckSession()
+	if got.State != "invalid" {
+		t.Fatalf("State = %q; want invalid", got.State)
+	}
+}
+
+// TestCheckSessionClearsTheTokenOnlyOnARealSessionEnd pins the token
+// lifecycle: a real session end is the only poll outcome allowed to clear the
+// keychain. 5xx, 429 and transport failures keep it.
+func TestCheckSessionClearsTheTokenOnlyOnARealSessionEnd(t *testing.T) {
+	t.Run("expired clears", func(t *testing.T) {
+		keyring := &fakeKeyring{}
+		stubSessionKeyring(t, keyring)
+		issue531APIClient(t, issue531Server(t, http.StatusUnauthorized,
+			`{"error":"session expired","code":"session_expired"}`).URL)
+		setSessionTokenMemory("dead-token")
+
+		if got := (&AuthAPI{}).CheckSession(); got.State != "expired" {
+			t.Fatalf("State = %q; want expired", got.State)
+		}
+		if SessionToken() != "" {
+			t.Error("the expired session token survived")
+		}
+		if keyring.deleteCount() == 0 {
+			t.Error("the keychain token was not deleted on a real session end")
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"server error", http.StatusServiceUnavailable, `{"error":"session check failed","code":"session_check_failed"}`},
+		{"rate limited", http.StatusTooManyRequests, `{"error":"too many requests"}`},
+	} {
+		t.Run(tc.name+" keeps", func(t *testing.T) {
+			keyring := &fakeKeyring{}
+			stubSessionKeyring(t, keyring)
+			issue531APIClient(t, issue531Server(t, tc.status, tc.body).URL)
+			setSessionTokenMemory("kept-token")
+
+			if got := (&AuthAPI{}).CheckSession(); got.State == "expired" {
+				t.Fatalf("State = %q; want an operational state", got.State)
+			}
+			if SessionToken() != "kept-token" {
+				t.Errorf("%s cleared the session token", tc.name)
+			}
+			if keyring.deleteCount() != 0 {
+				t.Errorf("%s deleted the keychain token", tc.name)
+			}
+		})
+	}
+}
+
+// TestChangePasswordWrongCurrentKeepsTheSession is the desktop half of the
+// wrong-password contract: a 401 carrying current_password_incorrect is a
+// refusal, not a session end, and the token must survive it.
+func TestChangePasswordWrongCurrentKeepsTheSession(t *testing.T) {
+	keyring := &fakeKeyring{}
+	stubSessionKeyring(t, keyring)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/auth/password" {
+			t.Errorf("unexpected path %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"error":"current password is incorrect","code":"current_password_incorrect"}`))
+	}))
+	t.Cleanup(server.Close)
+	issue531APIClient(t, server.URL)
+	setSessionTokenMemory("kept-token")
+
+	err := (&AuthAPI{}).ChangePassword("wrong-password", "brand-new-password")
+	if err == nil {
+		t.Fatal("wrong current password was accepted")
+	}
+	if code := apiclient.CodeOf(err); code != "current_password_incorrect" {
+		t.Errorf("CodeOf = %q; want current_password_incorrect", code)
+	}
+	if SessionToken() != "kept-token" {
+		t.Error("a wrong current password cleared the session token")
+	}
+	if keyring.deleteCount() != 0 {
+		t.Error("a wrong current password deleted the keychain token")
+	}
+}
+
+// TestAnotherUnauthorizedDoesNotClearTheToken is the regression for the removed
+// global "any 401 clears the token" hook. Only CheckSession's session-end path
+// and a manual Logout may clear it.
+func TestAnotherUnauthorizedDoesNotClearTheToken(t *testing.T) {
+	keyring := &fakeKeyring{}
+	stubSessionKeyring(t, keyring)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"error":"invalid or expired session"}`))
+	}))
+	t.Cleanup(server.Close)
+	issue531APIClient(t, server.URL)
+	setSessionTokenMemory("kept-token")
+
+	if _, err := (&AuthAPI{}).GetCompany(); err == nil {
+		t.Fatal("expected the 401 to surface")
+	}
+	if SessionToken() != "kept-token" {
+		t.Error("an unrelated 401 cleared the session token")
+	}
+	if keyring.deleteCount() != 0 {
+		t.Error("an unrelated 401 deleted the keychain token")
+	}
+}

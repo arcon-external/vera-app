@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CheckForUpdates } from "@backend/backend/UpdateAPI";
 import { backend } from "@backend/models";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
+import { errorMessage } from "../errors";
 import { useToast } from "../toast";
 import { Button, StatusBanner } from "./ui";
 
@@ -54,7 +55,7 @@ export function useUpdateState(signedIn: boolean): {
         // Cache is best-effort.
       }
     } catch (err: unknown) {
-      const message = typeof err === "string" && err.trim() ? err : "";
+      const message = errorMessage(err, "");
       // Offline or unreachable server: fall back to cache, stay silent.
       // Anything else surfaces once so a broken check is visible.
       if (/reach|network|fetch|failed|econn|timeout/i.test(message)) {
