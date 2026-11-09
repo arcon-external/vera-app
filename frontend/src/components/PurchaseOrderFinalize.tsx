@@ -895,6 +895,7 @@ export function PurchaseOrderFinalConfirmationView({
         <div
           ref={errorRef}
           tabIndex={-1}
+          data-testid="final-save-error"
           className="rounded-lg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-500/40"
         >
           <StatusBanner tone="danger">{error}</StatusBanner>
@@ -911,7 +912,7 @@ export function PurchaseOrderFinalConfirmationView({
             <span>Saving purchase order…</span>
             <span
               aria-hidden="true"
-              className="relative h-1 w-32 overflow-hidden rounded-full bg-accent-100 motion-reduce:h-0.5 motion-reduce:bg-accent-500/40"
+              className="relative h-0.5 w-32 overflow-hidden rounded-full bg-accent-100 motion-reduce:bg-accent-500/40"
             >
               <span className="absolute inset-y-0 left-0 w-1/2 animate-final-save-sweep rounded-full bg-accent-500 motion-reduce:hidden" />
             </span>

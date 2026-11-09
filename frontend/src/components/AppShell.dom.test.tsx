@@ -412,6 +412,32 @@ describe("page motion (issue #519)", () => {
     expect(second).toBeDefined();
     expect(first).not.toBe(second);
   });
+
+  it("does not replay the entrance on a workspace tab switch", () => {
+    render(STAFF, { page: "create" });
+    const first = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    render(STAFF, { page: "drafts" });
+    const second = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+  });
+
+  it("does not replay the entrance on a return from settings", () => {
+    render(STAFF, { page: "po-settings", settingsOrigin: "purchase-order" });
+    const first = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    render(STAFF, { page: "po" });
+    const second = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+  });
 });
 
 describe("small-screen shell offsets (U4)", () => {
