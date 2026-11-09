@@ -35,6 +35,12 @@ pushed.
 #482 and #464 are not waiting on holdout inputs or an accuracy signoff. The rest
 of the sprint record below stands as verified.
 
+> **Post-merge update (2026-11-09):** the sprint is merged on `main` at
+> `841b704` (#484 at `6a8c245`, #519/#524 at `841b704`); the separate sign-in
+> fix is at `e15cb4d`. No release has been made. The remaining hand-driven Mac
+> signoff is #501. §10 records the post-merge state; the table above is the
+> original 2026-10-22 record.
+
 ## 1. Manual and PDF workflows
 
 ### Entry paths
@@ -333,6 +339,9 @@ as its Docker and API tests documented at the time.
 
 ## 8. Remaining unverified / hand-driven
 
+> The administrative state in this section is the 2026-10-22 record. §10
+> supersedes it after the merge.
+
 - **Real desktop Wails interactions** — clicking either entry path, typing,
   native focus/keyboard in the webview, file picker, PDF preview, window
   resize. jsdom substitutes for focus/keyboard logic; it is not a browser.
@@ -383,3 +392,57 @@ as its Docker and API tests documented at the time.
 - Pricing, signing, release and production code were not changed. The only
   product-code change is the D1 copy/test fix (`22879b4`); this document and
   the PR body are the verification artifacts.
+
+## 10. Post-merge close-out (2026-11-09)
+
+The sprint is merged on `main`; this section supersedes the administrative state
+in §8 where the two disagree.
+
+- `main` at `e15cb4d`:
+  - `6a8c245` — #464/#502/#518 via PR #484 (the sprint’s integration PR).
+  - `841b704` — #519 motion/a11y and #524 focus ring via PR #525.
+  - `e15cb4d` — #526 sign-in refusal message via PR #527 (a separate
+    post-sprint fix, not part of this spec).
+- #513–#518 are closed as implemented on `main`; #519/#524 closed with PR #525;
+  #526 closed with PR #527.
+- No release or tag has been made. The latest release remains **v0.14.5**; the
+  API deploy runs from `main`, but no desktop version was pushed.
+- **#501 remains the hand-driven Mac signoff.** #482 closes with this record;
+  #464/#502 stay open until #501 closes.
+
+### Post-merge gates
+
+| Command / run | Exit | Result |
+| --- | --- | --- |
+| PR #525 CI (`e23239c`, run `42576212958`) | 0 | Frontend build pass (37s), Go gates pass (16m39s) |
+| `npm --prefix frontend run build` (`e23239c`) | 0 | 102 modules; 48.55 kB CSS / 846.51 kB JS |
+| `npm --prefix frontend test` (`e23239c`) | 0 | 89 files passed, 1 skipped; 1166 passed, 70 skipped |
+| Snapshot harness (`UI_SNAPSHOT=1 …`) | 0 | 70 cases, including `PurchaseOrderReconciliationSurfaces` |
+| PR #527 CI (`f7652e1`) | 0 | Frontend build pass (45s), Go gates pass (21s; frontend-only scope skipped the Go steps) |
+| `npm --prefix frontend test -- src/components/LoginPage.test.tsx` | 0 | 21/21 |
+
+### #519/#524 evidence
+
+- Judge **PASS** on `e23239c` after the first pass found a persistent-transform
+  containing block, a page animation that never restarted, and reduced-motion
+  transforms. All were fixed and re-measured in Chrome.
+- The Judge measured: no persistent transform on the page/step/rail/sheet
+  wrappers; fixed sheets/dialogs viewport-positioned; `page-in-a`/`page-in-b`
+  distinct and restarting on a page change; reduced motion removes transforms
+  while keeping the static 2 px progress line and the focus rings.
+- The snapshot case `PurchaseOrderReconciliationSurfaces` renders the sheet at
+  360 and the rail at 1280.
+- The hand-driven keyboard/focus/paste, screen-reader and 200% zoom checks are
+  **not** proven here; they remain #501.
+
+### Still hand-driven (#501)
+
+- Real Wails clicks for both entry paths, typing, native focus/keyboard, file
+  pickers, PDF preview and window resize.
+- The screen-reader announcement itself.
+- 200% zoom and the live 1024 boundary.
+- The Mac fixture manifest, loopback service, repeat-run edit preservation and
+  synthetic-PDF limitations.
+- Local-only `wails dev` versus packaged/default/debug-packaged API selection
+  under a conflicting development override, and no secrets in the desktop
+  binary.
