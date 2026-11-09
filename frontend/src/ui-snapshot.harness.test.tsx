@@ -2266,6 +2266,26 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #518: the confirmation repeats the review's line acknowledgements, so
+    // the whole comparison is visible before the repair writes.
+    name: "PurchaseOrderRepairAckSummary",
+    element: (
+      <PurchaseOrderRepairConfirmationView
+        review={PO_REPAIR_REVIEW_DTO}
+        evaluation={PO_REPAIR_EVALUATION}
+        currency={PO_EDITOR_USD}
+        reason="The order followed the wrong quotation revision"
+        onReasonChange={() => undefined}
+        onBack={() => undefined}
+        onSave={() => undefined}
+        saving={false}
+        error={null}
+        acknowledgedMissing={["3", "5"]}
+        acknowledgedExtra={[2]}
+      />
+    ),
+  },
+  {
     // The required final confirmation when no customer PDF exists (#471).
     // The checkbox is unchecked and Final save is disabled: the deliberate
     // acknowledgement must be given, not assumed.
@@ -2395,9 +2415,55 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #518: the same record with an earlier generation selected — the
+    // "Previous saved session" context, the Previous badge and Back to current
+    // session. The harness selects it up front because SSR cannot click.
+    name: "PurchaseOrderSavedReconciliationHistory",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitial={PO_SAVED_RECONCILIATION_READ}
+        reconciliationInitialSelection={0}
+      />
+    ),
+  },
+  {
+    // #518: the read is still in flight. The loading sentence and skeleton,
+    // no count and no filters, while the saved record itself stays readable.
+    name: "PurchaseOrderSavedReconciliationLoading",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
+    // #518: the read failed. The alert sentence and Try again, never the
+    // no-session claim.
+    name: "PurchaseOrderSavedReconciliationError",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitialError="The connection was reset while reading the reconciliation history."
+      />
+    ),
+  },
+  {
     // #518: a saved PO that predates reconciliation sessions. The exact
     // no-session sentence, no count, no filters and no history disclosure.
-    name: "PurchaseOrderSavedReconciliationNone",
+    name: "PurchaseOrderSavedReconciliationNoSession",
     element: (
       <PurchaseOrderSavedView
         order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
@@ -2406,6 +2472,37 @@ const CASES: SnapshotCase[] = [
         documentInitialState={PO_DOCUMENT_NONE}
         historyInitial={PO_HISTORY}
         reconciliationInitial={{ PurchaseOrderID: 7, POVersion: 1, Sessions: [] }}
+      />
+    ),
+  },
+  {
+    // #518: the saved session's source quotation was deleted. The notice names
+    // the stored source and revision, and the retained items still render —
+    // availability is context, not the no-session branch.
+    name: "PurchaseOrderSavedReconciliationSourceDeleted",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: true }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        documentInitialState={PO_DOCUMENT_NONE}
+        historyInitial={PO_HISTORY}
+        reconciliationInitial={{
+          PurchaseOrderID: 7,
+          POVersion: 1,
+          Sessions: [
+            {
+              Generation: 2,
+              SourceAvailable: false,
+              RepairCorrectionID: null,
+              Session: {
+                ...PO_SAVED_RECONCILIATION_SESSION,
+                ID: 22,
+                SourceRevision: 1,
+              },
+            },
+          ],
+        }}
       />
     ),
   },

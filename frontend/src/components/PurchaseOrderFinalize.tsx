@@ -944,6 +944,12 @@ export interface PurchaseOrderSavedViewProps {
    */
   reconciliationInitial?: ReconciliationHistoryInput | null;
   reconciliationInitialError?: string | null;
+  /**
+   * Solves the snapshot's one unrenderable state: the harness can capture the
+   * history-selected layout only if the generation is chosen up front. The app
+   * never sets it and always opens on the current session.
+   */
+  reconciliationInitialSelection?: number | null;
   /** The read seam; tests substitute a fake, the app uses Wails. */
   reconciliationTransport?: ReconciliationHistoryTransport;
   /**
@@ -991,6 +997,7 @@ export function PurchaseOrderSavedView({
   historyInitialError = null,
   reconciliationInitial,
   reconciliationInitialError = null,
+  reconciliationInitialSelection,
   reconciliationTransport,
   actorId,
   actorName,
@@ -1030,6 +1037,7 @@ export function PurchaseOrderSavedView({
     orderVersion: current.Version,
     initial: reconciliationInitial,
     initialError: reconciliationInitialError,
+    initialSelection: reconciliationInitialSelection,
     transport: reconciliationTransport,
   });
   const [sheetOpen, setSheetOpen] = useState(false);

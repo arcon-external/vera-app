@@ -36,6 +36,15 @@ function plain(html: string): string {
   return html.replaceAll("<!-- -->", "");
 }
 
+// A phrase across an inline element (a labelled summary line) only reads as one
+// sentence once the tags are gone.
+function text(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, "")
+    .replaceAll("&#x27;", "'")
+    .replaceAll("&amp;", "&");
+}
+
 const USD: CurrencyInfo = {
   code: "USD",
   exponent: 2,
@@ -180,7 +189,8 @@ function repairReviewMarkup(reviewRow: PurchaseOrderReviewDTO): string {
 function confirmationMarkup(
   reviewRow: PurchaseOrderReviewDTO,
   reason: string,
-  decisions: Record<string, "po" | "quotation"> = {}
+  decisions: Record<string, "po" | "quotation"> = {},
+  acknowledgements: { missing?: string[]; extra?: number[] } = {}
 ): string {
   const state = initialPurchaseOrderEditorState(reviewRow.Order, USD);
   const evaluation = evaluateReview(
@@ -188,8 +198,8 @@ function confirmationMarkup(
     reviewRow.Source,
     USD,
     decisions,
-    [],
-    []
+    acknowledgements.missing ?? [],
+    acknowledgements.extra ?? []
   );
   return renderToString(
     <PurchaseOrderRepairConfirmationView
@@ -202,6 +212,8 @@ function confirmationMarkup(
       onSave={() => undefined}
       saving={false}
       error={null}
+      acknowledgedMissing={acknowledgements.missing ?? []}
+      acknowledgedExtra={acknowledgements.extra ?? []}
     />
   );
 }
@@ -371,6 +383,28 @@ describe("PurchaseOrderRepairConfirmationView (issue #475)", () => {
     expect(html).toContain(
       "The quotation this record followed was deleted. Its current values are the starting point."
     );
+  });
+
+  it("lists the acknowledged omissions and extra lines before the write", () => {
+    const html = text(
+      confirmationMarkup(
+        review(),
+        "switch to the corrected revision",
+        {},
+        { missing: ["3", "5"], extra: [2] }
+      )
+    );
+    expect(html).toContain(
+      "Acknowledged omissions: Quotation line 3, Quotation line 5"
+    );
+    expect(html).toContain("Acknowledged extra lines: Line 2");
+    expect(html).toContain("Values this repair stores");
+  });
+
+  it("says None for an empty acknowledgement set", () => {
+    const html = text(confirmationMarkup(review(), "switch revision"));
+    expect(html).toContain("Acknowledged omissions: None");
+    expect(html).toContain("Acknowledged extra lines: None");
   });
 
   it("disables the save when the customer would change after assignment", () => {

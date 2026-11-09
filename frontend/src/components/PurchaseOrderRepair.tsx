@@ -139,6 +139,13 @@ export interface PurchaseOrderRepairConfirmationViewProps {
   /** A named version conflict: the values must be re-read before retrying. */
   stale?: boolean;
   error: string | null;
+  /**
+   * #518: what the review settled for lines with no match on the other side.
+   * They are not a new decision here — the summary repeats them so the whole
+   * comparison is visible before the write.
+   */
+  acknowledgedMissing?: string[];
+  acknowledgedExtra?: number[];
 }
 
 /**
@@ -157,6 +164,8 @@ export function PurchaseOrderRepairConfirmationView({
   saving,
   stale = false,
   error,
+  acknowledgedMissing = [],
+  acknowledgedExtra = [],
 }: PurchaseOrderRepairConfirmationViewProps) {
   const reasonError = repairReasonError(reason);
   const confirmationNumber = review.Order.ConfirmationNumber ?? null;
@@ -215,6 +224,23 @@ export function PurchaseOrderRepairConfirmationView({
           <span className="tnum whitespace-nowrap">
             {total === null ? "—" : formatMoney(currency, total)}
           </span>
+        </p>
+        {/* #518: the full comparison's line acknowledgements, restated. */}
+        <p className="mt-1 text-small text-ink-700">
+          <span className="font-medium text-ink-900">Acknowledged omissions: </span>
+          {acknowledgedMissing.length === 0
+            ? "None"
+            : acknowledgedMissing
+                .map((label) => `Quotation line ${label}`)
+                .join(", ")}
+        </p>
+        <p className="mt-1 text-small text-ink-700">
+          <span className="font-medium text-ink-900">
+            Acknowledged extra lines:{" "}
+          </span>
+          {acknowledgedExtra.length === 0
+            ? "None"
+            : acknowledgedExtra.map((lineNumber) => `Line ${lineNumber}`).join(", ")}
         </p>
       </Card>
 
@@ -417,6 +443,8 @@ export function PurchaseOrderRepairPage({
         saving={saving}
         stale={stale}
         error={error}
+        acknowledgedMissing={acknowledgedMissing}
+        acknowledgedExtra={acknowledgedExtra}
       />
     );
   }

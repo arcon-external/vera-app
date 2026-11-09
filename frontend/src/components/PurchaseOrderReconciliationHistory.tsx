@@ -95,6 +95,12 @@ export interface UseSavedReconciliationOptions {
    */
   initial?: ReconciliationHistoryInput | null;
   initialError?: string | null;
+  /**
+   * The generation to show first. Only the snapshot harness sets it, so the
+   * history-selected layout can be captured without interaction; the app
+   * always opens on the current session.
+   */
+  initialSelection?: number | null;
   transport?: ReconciliationHistoryTransport;
 }
 
@@ -106,6 +112,7 @@ export function useSavedReconciliation(
     orderVersion,
     initial,
     initialError = null,
+    initialSelection = null,
     transport = wailsReconciliationHistoryTransport,
   } = options;
   const supplied = initial !== undefined && initial !== null;
@@ -121,7 +128,9 @@ export function useSavedReconciliation(
   const [error, setError] = useState<string | null>(initialError);
   const [token, setToken] = useState(0);
   const [filter, setFilterState] = useState<PaneFilter>("all");
-  const [selectedGeneration, setSelectedGeneration] = useState<number | null>(null);
+  const [selectedGeneration, setSelectedGeneration] = useState<number | null>(
+    initialSelection
+  );
   const [announcement, setAnnouncement] = useState("");
   const [focusToken, setFocusToken] = useState(0);
   const focusAfterLoad = useRef(false);
