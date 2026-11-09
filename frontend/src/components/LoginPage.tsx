@@ -39,6 +39,19 @@ export function signInDeps(deps: {
   };
 }
 
+/** The message Wails hands back for a refused sign-in. The binding rejects
+ *  with an Error or a `{message}` object, not always a bare string; the
+ *  generic sentence is only for an error with no readable message. */
+function signInErrorMessage(err: unknown): string {
+  if (typeof err === "string" && err.trim()) return err;
+  if (err instanceof Error && err.message.trim()) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "We couldn't sign you in. Try again.";
+}
+
 /** The sign-in form's submit, extracted from the component so a test can
  *  drive it without a DOM (the house pattern — SettingsPage's saves and
  *  companySaves.ts; there are no DOM tests in this repo). The remember flag
@@ -55,7 +68,7 @@ export async function submitSignIn(
   try {
     deps.onSignedIn(await deps.login(state.email.trim(), state.password, state.remember));
   } catch (err: unknown) {
-    deps.setError(typeof err === "string" ? err : "We couldn't sign you in. Try again.");
+    deps.setError(signInErrorMessage(err));
   } finally {
     deps.setBusy(false);
   }
