@@ -28,4 +28,6 @@ export function RequestEmailChange(arg1:string):Promise<backend.EmailChangeReque
 
 export function RestoreSession():Promise<backend.AuthUserDTO>;
 
+export function RenewSession():Promise<unknown>;
+
 export function UpdateProfile(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<backend.AuthUserDTO>;

@@ -52,8 +52,10 @@ func (s *Service) Bootstrap(ctx context.Context, email, displayName, password st
 
 // Login verifies credentials and issues a session token. Failures return a
 // generic error that does not reveal whether the email exists. A remembered
-// session lasts SessionLifetimeRemembered; every other one lasts
-// SessionLifetimeStandard, which is what a client that omits the flag gets.
+// session gets the thirty-day idle lifetime under a ninety-day cap; every
+// other one gets a working day under a seven-day cap, which is what a client
+// that omits the flag gets. Renewal slides the idle deadline; the cap never
+// moves.
 func (s *Service) Login(ctx context.Context, email, password string, remember bool) (string, store.AuthUser, error) {
 	now := s.now()
 	key := strings.ToLower(strings.TrimSpace(email))
@@ -89,13 +91,14 @@ func (s *Service) Login(ctx context.Context, email, password string, remember bo
 	if err != nil {
 		return "", store.AuthUser{}, err
 	}
-	// The lifetime is fixed at issuance and never extended, so a remembered
-	// session is a calendar month and a standard one a working day.
-	lifetime := SessionLifetimeStandard
+	// The idle lifetime slides on renewal; the absolute one is stamped once
+	// and never extended, so a session cannot outlive its cap however often
+	// the user clicks "Stay signed in".
+	idle, absolute := SessionLifetimeStandard, SessionAbsoluteStandard
 	if remember {
-		lifetime = SessionLifetimeRemembered
+		idle, absolute = SessionLifetimeRemembered, SessionAbsoluteRemembered
 	}
-	if err := s.store.CreateSession(ctx, user.ID, tokenHash, now.Add(lifetime)); err != nil {
+	if err := s.store.CreateSession(ctx, user.ID, tokenHash, now.Add(idle), now.Add(absolute), remember); err != nil {
 		return "", store.AuthUser{}, err
 	}
 	if err := s.store.TouchLogin(ctx, user.ID, now); err != nil {
@@ -108,10 +111,41 @@ func (s *Service) Login(ctx context.Context, email, password string, remember bo
 
 // Validate resolves a session token to its active user.
 func (s *Service) Validate(ctx context.Context, token string) (store.AuthUser, error) {
+	user, _, err := s.ValidateSession(ctx, token)
+	return user, err
+}
+
+// ValidateSession resolves a session token to its active user and the
+// session's expiry state, which the API reports so the desktop knows when the
+// idle deadline is and whether a renewal can still extend it.
+func (s *Service) ValidateSession(ctx context.Context, token string) (store.AuthUser, store.SessionInfo, error) {
 	if strings.TrimSpace(token) == "" {
-		return store.AuthUser{}, fmt.Errorf("missing session")
+		return store.AuthUser{}, store.SessionInfo{}, fmt.Errorf("missing session")
 	}
-	return s.store.GetSessionUser(ctx, HashSessionToken(token), s.now())
+	return s.store.GetSession(ctx, HashSessionToken(token), s.now())
+}
+
+// RenewSession slides a live session's idle deadline by its own lifetime:
+// a working day for a standard session, thirty days for a remembered one.
+// The absolute cap is never moved, and an ended session returns the same
+// typed *store.SessionError the session check uses.
+func (s *Service) RenewSession(ctx context.Context, token string) (store.SessionInfo, error) {
+	if strings.TrimSpace(token) == "" {
+		return store.SessionInfo{}, &store.SessionError{Code: store.SessionCodeInvalid, Message: "invalid session"}
+	}
+	now := s.now()
+	tokenHash := HashSessionToken(token)
+	// The class is fixed at issuance, so this read only chooses the idle
+	// lifetime; the store re-checks the session state when it writes.
+	_, current, err := s.store.GetSession(ctx, tokenHash, now)
+	if err != nil {
+		return store.SessionInfo{}, err
+	}
+	idle := SessionLifetimeStandard
+	if current.Remembered {
+		idle = SessionLifetimeRemembered
+	}
+	return s.store.RenewSession(ctx, tokenHash, now, idle)
 }
 
 // Logout revokes a single session token.

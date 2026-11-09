@@ -33,8 +33,9 @@ func TestDeleteStaleSessions(t *testing.T) {
 		{"revoked-31d", now.Add(24 * time.Hour), timePtr(now.Add(-31 * 24 * time.Hour))},
 		{"revoked-1d", now.Add(-31 * 24 * time.Hour), timePtr(now.Add(-24 * time.Hour))},
 	} {
-		_, err := pool.Exec(ctx, fmt.Sprintf(`INSERT INTO %s.sessions (user_id, token_hash, expires_at, revoked_at)
-			VALUES ($1, $2, $3, $4)`, database.configSchema()), user.ID, row.name, row.expires, row.revoked)
+		_, err := pool.Exec(ctx, fmt.Sprintf(`INSERT INTO %s.sessions
+			(user_id, token_hash, expires_at, absolute_expires_at, last_seen_at, revoked_at)
+			VALUES ($1, $2, $3, $3, $3, $4)`, database.configSchema()), user.ID, row.name, row.expires, row.revoked)
 		if err != nil {
 			t.Fatalf("insert %s: %v", row.name, err)
 		}

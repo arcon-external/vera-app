@@ -32,6 +32,17 @@ type serverUser struct {
 	MustChangePassword bool   `json:"mustChangePassword"`
 }
 
+// serverMe is the /v1/auth/me and /v1/auth/renew payload: the user plus the
+// live session's expiry state, so the desktop can offer renewal at T-10
+// minutes without a second request.
+type serverMe struct {
+	serverUser
+	ExpiresAt         string `json:"expiresAt"`
+	AbsoluteExpiresAt string `json:"absoluteExpiresAt"`
+	CanRenew          bool   `json:"canRenew"`
+	Remembered        bool   `json:"remembered"`
+}
+
 // Session states returned by CheckSession. Only the first four are a real
 // session end; the rest are connection or server states and must never sign
 // the desktop out.
@@ -198,11 +209,11 @@ func (a *AuthAPI) CheckSession() SessionStatus {
 		}
 	}
 
-	var user serverUser
-	if err := client.Get("/v1/auth/me", &user); err != nil {
+	var me serverMe
+	if err := client.Get("/v1/auth/me", &me); err != nil {
 		return classifySessionError(err)
 	}
-	if user.ID == 0 || strings.TrimSpace(user.Email) == "" {
+	if me.ID == 0 || strings.TrimSpace(me.Email) == "" {
 		return SessionStatus{
 			State:   SessionStateIncompatible,
 			Code:    "session_incompatible",
@@ -210,9 +221,54 @@ func (a *AuthAPI) CheckSession() SessionStatus {
 		}
 	}
 	return SessionStatus{
-		State: SessionStateActive,
-		User:  toAuthUserDTO(user),
-		Code:  "session_active",
+		State:     SessionStateActive,
+		User:      toAuthUserDTO(me.serverUser),
+		Code:      "session_active",
+		ExpiresAt: me.ExpiresAt,
+		CanRenew:  me.CanRenew,
+	}
+}
+
+// RenewSession asks the server to slide the current session's idle deadline.
+//
+// Like CheckSession it returns typed data for every expected outcome, never an
+// error: the "Stay signed in" button must distinguish "the session really
+// ended" from "the laptop is offline" without parsing prose. A real end is
+// the only outcome that clears the token (issue #531's rule).
+func (a *AuthAPI) RenewSession() SessionStatus {
+	if SessionToken() == "" {
+		return SessionStatus{
+			State:   SessionStateInvalid,
+			Code:    "session_missing",
+			Message: "no saved session",
+		}
+	}
+	client, err := api()
+	if err != nil {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_check_unavailable",
+			Message: err.Error(),
+		}
+	}
+
+	var me serverMe
+	if err := client.Post("/v1/auth/renew", nil, &me); err != nil {
+		return classifySessionError(err)
+	}
+	if me.ID == 0 || strings.TrimSpace(me.Email) == "" {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_incompatible",
+			Message: "the server's session response was not understood",
+		}
+	}
+	return SessionStatus{
+		State:     SessionStateActive,
+		User:      toAuthUserDTO(me.serverUser),
+		Code:      "session_active",
+		ExpiresAt: me.ExpiresAt,
+		CanRenew:  me.CanRenew,
 	}
 }
 

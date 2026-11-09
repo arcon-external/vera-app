@@ -129,7 +129,8 @@ func TestSessionMiddlewareReturnsStableCodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.CreateSession(ctx, expiredUser.ID, auth.HashSessionToken("expired-session"), time.Now().Add(-time.Hour)); err != nil {
+	if err := database.CreateSession(ctx, expiredUser.ID, auth.HashSessionToken("expired-session"),
+		time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour), false); err != nil {
 		t.Fatal(err)
 	}
 	code, body = doAdminRequest(t, server, "expired-session", http.MethodGet, "/v1/auth/me", "")
