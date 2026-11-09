@@ -59,7 +59,16 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		Ink:    in.Theme.Ink,
 	})
 
-	return eng.Render(Input{
+	return eng.Render(engineInput(in))
+}
+
+// engineInput converts the application's renderer-neutral quotation into this
+// engine's own rendering-shaped model. It is a named function rather than an
+// inline literal so the mapping itself is testable: a field the application
+// put on the seam and this engine forgot to read would otherwise show up only
+// as a document that prints in the browser and not in the native PDF.
+func engineInput(in quotation.Input) Input {
+	return Input{
 		CompanyName:    in.CompanyName,
 		CompanyAddress: splitLines(in.CompanyAddress),
 		LogoPNG:        in.LogoPNG,
@@ -73,6 +82,8 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		Date:        in.Date,
 		ValidUntil:  in.ValidUntil,
 		Revision:    fmt.Sprintf("%02d", in.RevisionID),
+
+		Note: in.Note,
 
 		// The application resolved the effective labels and substituted the
 		// terms sentences; this renderer prints them. It composes no wording of
@@ -100,7 +111,7 @@ func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 		Closing:          in.Labels.Closing,
 		VerificationCode: in.VerificationCode,
 		QRPNG:            in.QRPNG,
-	})
+	}
 }
 
 // engineItems flattens quotation lines into the engine's row model. A plain

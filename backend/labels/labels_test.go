@@ -52,6 +52,7 @@ var wantDefaults = map[LabelKey]string{
 	LabelMetaValidUntil:    "Valid Until",
 	LabelMetaRevision:      "Revision",
 	LabelSubject:           "Subject",
+	LabelNote:              "Note",
 	LabelColumnNo:          "No.",
 	LabelColumnDescription: "Description",
 	LabelColumnQty:         "Qty.",
@@ -120,8 +121,27 @@ func TestDefaultLabelsFillEveryField(t *testing.T) {
 			t.Errorf("DefaultLabels().%s is empty; every field must carry its default", def.Key)
 		}
 	}
-	if got := len(LabelDefaults()); got != 26 {
-		t.Errorf("the editable set is %d keys (22 labels + 4 terms sentences); want 26", got)
+	if got := len(LabelDefaults()); got != 27 {
+		t.Errorf("the editable set is %d keys (23 labels + 4 terms sentences); want 27", got)
+	}
+}
+
+// TestNoteLabelDefault pins the one label #534 adds: the heading over the
+// optional quotation note. The note itself is data; only its label is wording,
+// so this is the whole of the note's presence in the editable set.
+func TestNoteLabelDefault(t *testing.T) {
+	def, ok := Declaration(LabelNote)
+	if !ok {
+		t.Fatal("LabelNote is not declared; the note card's heading would print blank")
+	}
+	if def.Default != "Note" {
+		t.Errorf("note label default = %q; want %q", def.Default, "Note")
+	}
+	if def.MaxLen < 20 || def.MaxLen > 60 {
+		t.Errorf("note label cap = %d; a heading needs a sensible cap between 20 and 60", def.MaxLen)
+	}
+	if got := DefaultLabels().Note; got != "Note" {
+		t.Errorf("DefaultLabels().Note = %q; want %q", got, "Note")
 	}
 }
 
