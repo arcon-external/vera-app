@@ -1845,6 +1845,90 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // Ticket 07: the reconciliation surfaces at both widths. At 360 the sheet
+    // fills the viewport between the header and the action bar; at 1280 the
+    // rail is the same pane. The editor's sheet state is internal, so this
+    // case renders the settled sheet shell directly; the fixed action bar is
+    // included so the bottom offset is visible.
+    name: "PurchaseOrderReconciliationSurfaces",
+    element: (
+      <div className="flex min-h-[560px] flex-col">
+        <div className="lg:hidden">
+          <div
+            role="region"
+            aria-label="Reconciliation"
+            className="animate-sheet-in fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4"
+          >
+            <ReconciliationPaneContent
+              idPrefix="harness-sheet"
+              session={PO_RECONCILIATION_SESSION}
+              status="ready"
+              error={null}
+              sourceLabel="QT-2026-018 · revision 02"
+              sourceRevision={2}
+              noSource={false}
+              formerSource={false}
+              readOnly={false}
+              filter="all"
+              onFilterChange={() => undefined}
+              onShowAll={() => undefined}
+              latestNotice={null}
+              keepConfirmKey={null}
+              onRequestKeep={() => undefined}
+              onCancelKeep={() => undefined}
+              onConfirmKeep={() => undefined}
+              onUse={() => undefined}
+              onRetry={() => undefined}
+              actorNameFor={() => null}
+            />
+          </div>
+        </div>
+        <div className="hidden lg:block">
+          <aside
+            aria-label="Reconciliation"
+            className="animate-rail-in min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-176px)] lg:flex-col"
+          >
+            <ReconciliationPaneContent
+              idPrefix="harness-rail"
+              session={PO_RECONCILIATION_SESSION}
+              status="ready"
+              error={null}
+              sourceLabel="QT-2026-018 · revision 02"
+              sourceRevision={2}
+              noSource={false}
+              formerSource={false}
+              readOnly={false}
+              filter="all"
+              onFilterChange={() => undefined}
+              onShowAll={() => undefined}
+              latestNotice={null}
+              keepConfirmKey={null}
+              onRequestKeep={() => undefined}
+              onCancelKeep={() => undefined}
+              onConfirmKeep={() => undefined}
+              onUse={() => undefined}
+              onRetry={() => undefined}
+              actorNameFor={() => null}
+            />
+          </aside>
+        </div>
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-rule bg-paper/95 px-5 py-3">
+          <div className="mx-auto flex max-w-[1560px] items-center justify-between gap-3">
+            <span className="text-caption text-ink-500">Unsaved changes</span>
+            <span className="flex items-center gap-2">
+              <span className="inline-flex min-h-9 items-center rounded-lg border border-rule-strong bg-white px-3.5 text-small font-medium text-ink-700">
+                Save draft
+              </span>
+              <span className="inline-flex min-h-9 items-center rounded-lg bg-accent-700 px-3.5 text-small font-medium text-white">
+                Final Save
+              </span>
+            </span>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+  {
     // Ticket 04: the live reconciliation pane with an unresolved difference,
     // a kept resolution and the link-time tax basis. Unresolved first, then
     // resolved; the count reads 1 to resolve. What this case cannot show is

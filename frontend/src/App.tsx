@@ -2597,7 +2597,9 @@ function App() {
               corrected
                 ? "Purchase order corrected. The previous values are in the history."
                 : updated.State === "saved"
-                  ? "Purchase order saved and finalized."
+                  ? updated.ConfirmationNumber
+                    ? `Purchase order saved. Confirmation number ${updated.ConfirmationNumber}.`
+                    : "Purchase order saved and finalized."
                   : "Purchase order draft saved."
             );
           }}

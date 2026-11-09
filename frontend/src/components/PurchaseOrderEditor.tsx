@@ -2655,6 +2655,13 @@ export function PurchaseOrderEditorPage({
       setView("confirm");
       return;
     }
+    const progressStarted = Date.now();
+    const waitForProgress = async () => {
+      const remaining = 300 - (Date.now() - progressStarted);
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+    };
     setFinalSaving(true);
     try {
       const saved = await FinalizePurchaseOrder(
@@ -2666,6 +2673,7 @@ export function PurchaseOrderEditorPage({
       );
       const outcome = writeOutcome(saved);
       if (outcome.kind === "saved") {
+        await waitForProgress();
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
         // Round-2 N2: the saved record (and its session) is read-only. Never

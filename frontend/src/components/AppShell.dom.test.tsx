@@ -398,6 +398,20 @@ describe("page motion (issue #519)", () => {
       container.querySelector(".animate-page-in-a, .animate-page-in-b")
     ).not.toBeNull();
   });
+
+  it("alternates the animation name on navigation so the animation restarts", () => {
+    render(STAFF, { page: "create" });
+    const first = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    render(STAFF, { page: "po" });
+    const second = container.querySelector<HTMLElement>(
+      ".animate-page-in-a, .animate-page-in-b"
+    )?.className;
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(first).not.toBe(second);
+  });
 });
 
 describe("small-screen shell offsets (U4)", () => {

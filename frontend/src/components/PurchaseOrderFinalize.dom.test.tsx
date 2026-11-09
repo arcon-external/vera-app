@@ -411,6 +411,9 @@ describe("final save from the editor (issue #471)", () => {
       expect.arrayContaining([{ Key: "line:1:unitPrice", Choice: "po" }])
     );
     expect((payload.Items as Array<{ UnitPriceMinor: number }>)[0].UnitPriceMinor).toBe(10000);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    });
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect((onSaved.mock.calls[0][0] as PurchaseOrderDTO).State).toBe("saved");
   });
@@ -448,6 +451,9 @@ describe("final save from the editor (issue #471)", () => {
     expect(finalizeMock).toHaveBeenCalledTimes(1);
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.PONumber).toBe("UNSAVED-NEW");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    });
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 

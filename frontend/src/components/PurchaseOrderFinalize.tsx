@@ -751,6 +751,10 @@ export function PurchaseOrderFinalConfirmationView({
   const { Order: order, DocumentState: documentState } = review;
   const noDocument = documentState !== "attached";
   const ready = !saving && (!noDocument || documentConfirmed);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (error !== null) errorRef.current?.focus();
+  }, [error]);
   return (
     <div className="animate-step-in flex flex-col gap-5">
       <div>
@@ -887,7 +891,15 @@ export function PurchaseOrderFinalConfirmationView({
         </p>
       </Card>
 
-      {error !== null ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+      {error !== null ? (
+        <div
+          ref={errorRef}
+          tabIndex={-1}
+          className="rounded-lg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-500/40"
+        >
+          <StatusBanner tone="danger">{error}</StatusBanner>
+        </div>
+      ) : null}
 
       {saving ? (
         <div
@@ -899,9 +911,9 @@ export function PurchaseOrderFinalConfirmationView({
             <span>Saving purchase order…</span>
             <span
               aria-hidden="true"
-              className="relative h-1 w-32 overflow-hidden rounded-full bg-accent-100"
+              className="relative h-1 w-32 overflow-hidden rounded-full bg-accent-100 motion-reduce:h-0.5 motion-reduce:bg-accent-500/40"
             >
-              <span className="absolute inset-y-0 left-0 w-1/2 animate-final-save-sweep rounded-full bg-accent-500" />
+              <span className="absolute inset-y-0 left-0 w-1/2 animate-final-save-sweep rounded-full bg-accent-500 motion-reduce:hidden" />
             </span>
           </div>
         </div>
@@ -1063,9 +1075,12 @@ export function PurchaseOrderSavedView({
   const savedHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const repairActionRef = useRef<HTMLButtonElement | null>(null);
   // The saved record is the arrival of the Final Save handoff. Focus its
-  // heading so keyboard users land at the top of the new surface.
+  // heading so keyboard users land at the top of the new surface. A repair
+  // return has its own focus target; skip the heading there so the repair
+  // flow stays one focus move.
+  const initialRepairReturn = useRef(repairReturn);
   useEffect(() => {
-    savedHeadingRef.current?.focus();
+    if (initialRepairReturn.current == null) savedHeadingRef.current?.focus();
   }, []);
   const handledRepairReturn = useRef<RepairReturn | null>(null);
   const actorNameFor = (id: number): string | null =>
