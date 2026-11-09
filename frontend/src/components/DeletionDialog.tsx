@@ -4,6 +4,7 @@ import {
   CreateDeletionChallenge,
   PreviewDeletion,
 } from "@backend/backend/Quotation";
+import { errorMessage } from "../errors";
 import {
   buildDeletionChallengeInput,
   buildDeletionConfirmInput,
@@ -521,7 +522,7 @@ export function DeletionDialog({
       })
       .catch((error: unknown) => {
         if (!mounted.current) return;
-        dispatch({ type: "previewFailed", message: errorMessage(error) });
+        dispatch({ type: "previewFailed", message: errorMessage(error, "The deletion could not be completed. Try again.") });
       });
   }, [targetType, targetId]);
 
@@ -546,7 +547,7 @@ export function DeletionDialog({
       }
     } catch (error) {
       if (!mounted.current) return;
-      dispatch({ type: "challengeRequestFailed", message: errorMessage(error) });
+      dispatch({ type: "challengeRequestFailed", message: errorMessage(error, "The deletion could not be completed. Try again.") });
     }
   }, [state, adoptChanged]);
 
@@ -576,7 +577,7 @@ export function DeletionDialog({
       dispatch({ type: "failed", message: "The deletion did not complete." });
     } catch (error) {
       if (!mounted.current) return;
-      dispatch({ type: "failed", message: errorMessage(error) });
+      dispatch({ type: "failed", message: errorMessage(error, "The deletion could not be completed. Try again.") });
     }
   }, [state, lastPreview, adoptChanged, onDeleted]);
 
@@ -596,14 +597,4 @@ export function DeletionDialog({
       onConfirm={() => void confirm()}
     />
   );
-}
-
-function errorMessage(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The deletion could not be completed. Try again.";
 }

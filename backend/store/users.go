@@ -5,9 +5,29 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// SessionError reports why a token did not resolve to a live session. The
+// Code is the stable vocabulary the API middleware returns to the desktop's
+// typed session check; the Message is what a person reads.
+type SessionError struct {
+	Code    string
+	Message string
+}
+
+func (e *SessionError) Error() string { return e.Message }
+
+const (
+	SessionCodeInvalid  = "session_invalid"
+	SessionCodeExpired  = "session_expired"
+	SessionCodeRevoked  = "session_revoked"
+	SessionCodeInactive = "session_inactive"
 )
 
 // AuthUser is the user record used by the authentication service.
@@ -167,26 +187,45 @@ func (s *Store) DeleteStaleSessions(ctx context.Context, before time.Time) (int6
 }
 
 // GetSessionUser returns the active user for a live session token hash.
+//
+// A token that resolves to no live session returns a *SessionError naming why:
+// unknown, revoked, expired or belonging to an inactive account. Those are
+// expected answers, not database failures, and the API middleware maps them to
+// stable 401 codes. A real database error stays an ordinary error so the
+// middleware can answer 503 instead of pretending the session ended.
 func (s *Store) GetSessionUser(ctx context.Context, tokenHash string, now time.Time) (AuthUser, error) {
 	pool, err := s.poolOrError()
 	if err != nil {
 		return AuthUser{}, err
 	}
 	var user AuthUser
-	var lastLogin *time.Time
+	var lastLogin, revokedAt *time.Time
+	var expiresAt time.Time
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT u.id, u.email, u.display_name, u.password_hash,
-		       u.role, u.is_active, u.must_change_password, u.last_login_at, u.avatar, u.avatar_mime
+		       u.role, u.is_active, u.must_change_password, u.last_login_at, u.avatar, u.avatar_mime,
+		       s.revoked_at, s.expires_at
 		FROM %s.sessions s
 		JOIN %s.users u ON u.id = s.user_id
-		WHERE s.token_hash = $1 AND s.revoked_at IS NULL
-		  AND s.expires_at > $2 AND u.is_active = TRUE`, s.configSchema(), s.configSchema()),
-		tokenHash, now).Scan(
+		WHERE s.token_hash = $1`, s.configSchema(), s.configSchema()),
+		tokenHash).Scan(
 		&user.ID, &user.Email, &user.DisplayName, &user.PasswordHash,
 		&user.Role, &user.IsActive, &user.MustChangePassword,
-		&lastLogin, &user.Avatar, &user.AvatarMime)
+		&lastLogin, &user.Avatar, &user.AvatarMime,
+		&revokedAt, &expiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return AuthUser{}, &SessionError{Code: SessionCodeInvalid, Message: "invalid session"}
+	}
 	if err != nil {
 		return AuthUser{}, fmt.Errorf("get session user: %w", err)
+	}
+	switch {
+	case revokedAt != nil:
+		return AuthUser{}, &SessionError{Code: SessionCodeRevoked, Message: "session was signed out"}
+	case !expiresAt.After(now):
+		return AuthUser{}, &SessionError{Code: SessionCodeExpired, Message: "session expired"}
+	case !user.IsActive:
+		return AuthUser{}, &SessionError{Code: SessionCodeInactive, Message: "account is inactive"}
 	}
 	if lastLogin != nil {
 		user.LastLoginAt = *lastLogin
@@ -220,6 +259,24 @@ func (s *Store) RevokeUserSessions(ctx context.Context, userID int64) error {
 		WHERE user_id = $1 AND revoked_at IS NULL`, s.configSchema()),
 		userID); err != nil {
 		return fmt.Errorf("revoke user sessions: %w", err)
+	}
+	return nil
+}
+
+// RevokeOtherUserSessions marks every live session of a user revoked except
+// the one identified by keepTokenHash. A password change uses it so the device
+// that performed the change stays signed in while every other device is
+// signed out.
+func (s *Store) RevokeOtherUserSessions(ctx context.Context, userID int64, keepTokenHash string) error {
+	pool, err := s.poolOrError()
+	if err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.sessions SET revoked_at = NOW()
+		WHERE user_id = $1 AND revoked_at IS NULL AND token_hash <> $2`, s.configSchema()),
+		userID, keepTokenHash); err != nil {
+		return fmt.Errorf("revoke other user sessions: %w", err)
 	}
 	return nil
 }

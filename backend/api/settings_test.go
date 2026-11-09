@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
+
+	"vera-app/backend/auth"
 )
 
 func TestMustChangePasswordBlocksOtherRoutes(t *testing.T) {
@@ -54,10 +57,16 @@ func TestMustChangePasswordBlocksOtherRoutes(t *testing.T) {
 func TestChangePasswordRequiresCurrent(t *testing.T) {
 	server, _ := testServer(t, "vera_api_settings_password")
 	token := doLogin(t, server, "api-admin@example.com", "test-password")
+	otherDevice := doLogin(t, server, "api-admin@example.com", "test-password")
 
-	if code, _ := doAdminRequest(t, server, token, http.MethodPatch, "/v1/auth/password",
-		`{"currentPassword":"wrong-password","newPassword":"brand-new-password"}`); code != http.StatusUnauthorized {
-		t.Fatalf("change with wrong current = %d; want 401", code)
+	code, body := doAdminRequest(t, server, token, http.MethodPatch, "/v1/auth/password",
+		`{"currentPassword":"wrong-password","newPassword":"brand-new-password"}`)
+	if code != http.StatusUnauthorized || body["code"] != "current_password_incorrect" {
+		t.Fatalf("change with wrong current = %d %v; want coded 401", code, body)
+	}
+	// A wrong current password is a refusal, not a session end.
+	if code, _ := doAdminRequest(t, server, token, http.MethodGet, "/v1/auth/me", ""); code != http.StatusOK {
+		t.Fatalf("session after a wrong current password = %d; want 200", code)
 	}
 
 	if code, _ := doAdminRequest(t, server, token, http.MethodPatch, "/v1/auth/password",
@@ -79,9 +88,80 @@ func TestChangePasswordRequiresCurrent(t *testing.T) {
 	if code, _ := doAdminRequest(t, server, fresh, http.MethodGet, "/v1/auth/me", ""); code != http.StatusOK {
 		t.Fatalf("login with new password then me = %d; want 200", code)
 	}
-	// Password change revokes other sessions, including the one that made it.
-	if code, _ := doAdminRequest(t, server, token, http.MethodGet, "/v1/auth/me", ""); code != http.StatusUnauthorized {
-		t.Fatalf("pre-change session = %d; want 401 after password change", code)
+	// The device that changed the password stays signed in.
+	if code, _ := doAdminRequest(t, server, token, http.MethodGet, "/v1/auth/me", ""); code != http.StatusOK {
+		t.Fatalf("the changing session = %d; want 200 after password change", code)
+	}
+	// Every other session is revoked.
+	if code, _ := doAdminRequest(t, server, otherDevice, http.MethodGet, "/v1/auth/me", ""); code != http.StatusUnauthorized {
+		t.Fatalf("other device session = %d; want 401 after password change", code)
+	}
+}
+
+// TestSessionMiddlewareReturnsStableCodes is issue #531's server half: an
+// invalid session is a coded 401, and the desktop can tell expired, revoked,
+// inactive and unknown tokens apart without matching English prose.
+func TestSessionMiddlewareReturnsStableCodes(t *testing.T) {
+	server, database, _ := adminTestSetup(t, "vera_531_session_codes")
+	ctx := context.Background()
+
+	code, body := doAdminRequest(t, server, "", http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusUnauthorized || body["code"] != "session_missing" {
+		t.Fatalf("missing session = %d %v; want coded 401", code, body)
+	}
+
+	code, body = doAdminRequest(t, server, "not-a-session", http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusUnauthorized || body["code"] != "session_invalid" {
+		t.Fatalf("invalid session = %d %v; want coded 401", code, body)
+	}
+
+	revoked := doLogin(t, server, "api-admin@example.com", "test-password")
+	if code, _ := doAdminRequest(t, server, revoked, http.MethodPost, "/v1/auth/logout", ""); code != http.StatusNoContent {
+		t.Fatalf("logout = %d; want 204", code)
+	}
+	code, body = doAdminRequest(t, server, revoked, http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusUnauthorized || body["code"] != "session_revoked" {
+		t.Fatalf("revoked session = %d %v; want coded 401", code, body)
+	}
+
+	seedStaff(t, database, "expired@example.com", "staff-password")
+	expiredUser, err := database.GetUserByEmail(ctx, "expired@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CreateSession(ctx, expiredUser.ID, auth.HashSessionToken("expired-session"), time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	code, body = doAdminRequest(t, server, "expired-session", http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusUnauthorized || body["code"] != "session_expired" {
+		t.Fatalf("expired session = %d %v; want coded 401", code, body)
+	}
+
+	seedStaff(t, database, "inactive@example.com", "staff-password")
+	inactiveToken := doLogin(t, server, "inactive@example.com", "staff-password")
+	inactiveUser, err := database.GetUserByEmail(ctx, "inactive@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetUserActive(ctx, inactiveUser.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	code, body = doAdminRequest(t, server, inactiveToken, http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusUnauthorized || body["code"] != "session_inactive" {
+		t.Fatalf("inactive user session = %d %v; want coded 401", code, body)
+	}
+}
+
+// TestSessionMiddlewareOperationalFailureReturns503 keeps a database outage
+// out of the 401 bucket: it is a server failure, not a session end, and the
+// desktop must not sign anyone out for it.
+func TestSessionMiddlewareOperationalFailureReturns503(t *testing.T) {
+	server, database, token := adminTestSetup(t, "vera_531_session_operational")
+	database.Close()
+
+	code, body := doAdminRequest(t, server, token, http.MethodGet, "/v1/auth/me", "")
+	if code != http.StatusServiceUnavailable || body["code"] != "session_check_failed" {
+		t.Fatalf("session check with a closed database = %d %v; want coded 503", code, body)
 	}
 }
 
