@@ -500,6 +500,18 @@ describe("Local recovery snapshot (#537)", () => {
     await renderApp();
     expect(recoveryBannerShown()).toBe(true);
 
+    // The user can keep typing while deciding. That edit is real work, so the
+    // debounce would otherwise fire and replace the snapshot the banner is
+    // asking about. The pending guard is what must stop it.
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+    const subject = subjectInput();
+    if (subject === null) throw new Error("subject field not found");
+    typeInto(subject, "Work typed while the banner waits");
+    await flush();
+
     await advance(RECOVERY_DEBOUNCE_MS * 2);
     expect(mocks.saveRecovery).not.toHaveBeenCalled();
   });
