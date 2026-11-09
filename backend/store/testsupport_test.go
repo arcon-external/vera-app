@@ -50,3 +50,19 @@ func resetTestSchema(t *testing.T, dsn, schema string) {
 		t.Fatalf("reset schema %s: %v", schema, err)
 	}
 }
+
+// updateDraft performs a real draft save for tests that exercise a rule other
+// than optimistic concurrency: it fills the version the record currently
+// carries when the test did not state one. The versioning rule itself is
+// exercised through UpdatePurchaseOrderDraft directly by po_corrections_test.go.
+func updateDraft(t *testing.T, database *Store, ctx context.Context, input PurchaseOrderUpdate) (PurchaseOrder, error) {
+	t.Helper()
+	if input.ExpectedVersion == 0 {
+		current, err := database.GetPurchaseOrder(ctx, input.ID)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+		input.ExpectedVersion = current.Version
+	}
+	return database.UpdatePurchaseOrderDraft(ctx, input)
+}

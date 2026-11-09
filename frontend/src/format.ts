@@ -170,6 +170,11 @@ export function parseMoneyInput(entry: CurrencyInfo, raw: string): number {
 }
 
 /** Nullable core of parseMoneyInput; null means "not a number". */
+export function tryParseMoneyInput(entry: CurrencyInfo, raw: string): number | null {
+  return tryParseMinor(entry, raw);
+}
+
+/** Nullable core of parseMoneyInput; null means "not a number". */
 function tryParseMinor(entry: CurrencyInfo, raw: string): number | null {
   const { exponent, groupSep, decimalSep } = displayFields(entry);
   let text = raw.replace(/\u00a0/g, " ").trim();

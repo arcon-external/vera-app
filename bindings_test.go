@@ -163,3 +163,93 @@ func contains(haystack []string, needle string) bool {
 	}
 	return false
 }
+
+// TestGeneratedModelsExposeTheBase64DocumentFields is the field-shape half of
+// the binding guard.
+//
+// The method-name check above cannot see a generated model whose field type is
+// wrong, and that is exactly how the customer PO PDF preview shipped broken:
+// Go returned []byte, Wails put base64 text on the wire, and models.ts declared
+// number[]. The panel then built a zero-length Uint8Array. The Go DTO now says
+// DataBase64, and this test holds the generated TypeScript to the same promise.
+//
+// It reads the committed file rather than regenerating it because the Wails CLI
+// is not a build dependency of this repository; a mismatch means someone edited
+// a Go DTO and forgot `wails generate module`.
+func TestGeneratedModelsExposeTheBase64DocumentFields(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "models.ts"))
+	if err != nil {
+		t.Fatalf("cannot read generated models: %v", err)
+	}
+	models := string(raw)
+
+	for _, class := range []string{
+		"PurchaseOrderDocumentContentDTO",
+		"PurchaseOrderDocumentUploadInput",
+	} {
+		block, ok := generatedClassBlock(models, class)
+		if !ok {
+			t.Errorf("models.ts has no class %s; run: wails generate module", class)
+			continue
+		}
+		if !strings.Contains(block, "DataBase64: string;") {
+			t.Errorf("%s does not declare DataBase64: string; run: wails generate module\n%s", class, block)
+		}
+		if strings.Contains(block, "Data: number[]") || strings.Contains(block, "FilePath: string") {
+			t.Errorf("%s still declares the stale raw-bytes/path fields; run: wails generate module\n%s", class, block)
+		}
+	}
+}
+
+// generatedClassBlock returns the body of `export class <name> { ... }` up to
+// the next exported class.
+func generatedClassBlock(models, class string) (string, bool) {
+	header := "export class " + class + " {"
+	start := strings.Index(models, header)
+	if start < 0 {
+		return "", false
+	}
+	rest := models[start+len(header):]
+	end := strings.Index(rest, "export class ")
+	if end < 0 {
+		return rest, true
+	}
+	return rest[:end], true
+}
+
+// TestGeneratedBindingsDeclareTheReconciliationHistoryRead closes the gap the
+// method-name guard leaves: the .d.ts promise and the models.ts field shapes of
+// the #518 archive read (#502). A missing or mistyped declaration compiles here
+// and fails in the frontend, which is exactly the failure mode this whole file
+// exists to prevent.
+func TestGeneratedBindingsDeclareTheReconciliationHistoryRead(t *testing.T) {
+	declaration, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "backend", "Quotation.d.ts"))
+	if err != nil {
+		t.Fatalf("cannot read the Quotation declaration: %v", err)
+	}
+	want := "ListPOReconciliationSessions(arg1:string):Promise<backend.POReconciliationSessions>;"
+	if !strings.Contains(string(declaration), want) {
+		t.Errorf("Quotation.d.ts does not declare %q; run: wails generate module", want)
+	}
+
+	raw, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "models.ts"))
+	if err != nil {
+		t.Fatalf("cannot read generated models: %v", err)
+	}
+	models := string(raw)
+	for class, fields := range map[string][]string{
+		"POReconciliationSessions":      {"PurchaseOrderID: number;", "POVersion: number;", "Sessions: POReconciliationSessionRecord[];"},
+		"POReconciliationSessionRecord": {"Generation: number;", "SourceAvailable: boolean;", "RepairCorrectionID?: number;", "Session: POReconciliationSession;"},
+	} {
+		block, ok := generatedClassBlock(models, class)
+		if !ok {
+			t.Errorf("models.ts has no class %s; run: wails generate module", class)
+			continue
+		}
+		for _, field := range fields {
+			if !strings.Contains(block, field) {
+				t.Errorf("%s does not declare %q; run: wails generate module", class, field)
+			}
+		}
+	}
+}

@@ -300,14 +300,3 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			detail.AvailableRevisions...),
 	}, nil
 }
-
-func (q *Quotation) DeleteQuotation(id int64) error {
-	if err := q.requireAdmin(q.ctx); err != nil {
-		return err
-	}
-	client, err := api()
-	if err != nil {
-		return err
-	}
-	return client.Delete("/v1/quotations/"+strconv.FormatInt(id, 10), nil)
-}

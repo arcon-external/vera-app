@@ -1,0 +1,41 @@
+{
+  "blank": [
+    { "codePoint": 9, "name": "tab" },
+    { "codePoint": 10, "name": "line feed" },
+    { "codePoint": 11, "name": "vertical tab" },
+    { "codePoint": 12, "name": "form feed" },
+    { "codePoint": 13, "name": "carriage return" },
+    { "codePoint": 32, "name": "space" },
+    { "codePoint": 133, "name": "next line" },
+    { "codePoint": 160, "name": "no-break space" },
+    { "codePoint": 5760, "name": "ogham space mark" },
+    { "codePoint": 8192, "name": "en quad" },
+    { "codePoint": 8193, "name": "em quad" },
+    { "codePoint": 8194, "name": "en space" },
+    { "codePoint": 8195, "name": "em space" },
+    { "codePoint": 8196, "name": "three-per-em space" },
+    { "codePoint": 8197, "name": "four-per-em space" },
+    { "codePoint": 8198, "name": "six-per-em space" },
+    { "codePoint": 8199, "name": "figure space" },
+    { "codePoint": 8200, "name": "punctuation space" },
+    { "codePoint": 8201, "name": "thin space" },
+    { "codePoint": 8202, "name": "hair space" },
+    { "codePoint": 8232, "name": "line separator" },
+    { "codePoint": 8233, "name": "paragraph separator" },
+    { "codePoint": 8239, "name": "narrow no-break space" },
+    { "codePoint": 8287, "name": "medium mathematical space" },
+    { "codePoint": 12288, "name": "ideographic space" }
+  ],
+  "content": [
+    {
+      "codePoint": 65279,
+      "name": "zero width no-break space (BOM)",
+      "why": "Go's unicode.IsSpace does not remove it and the SQL backstop does not either; JavaScript's String.trim() would, so the editor must not use it."
+    },
+    {
+      "codePoint": 8203,
+      "name": "zero width space",
+      "why": "Not whitespace in Unicode; a reason made of it is still content in all three layers."
+    }
+  ]
+}

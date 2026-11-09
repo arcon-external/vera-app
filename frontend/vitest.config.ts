@@ -10,11 +10,11 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    // Pure modules, plus components rendered to a string. Nothing here needs a
-    // DOM: renderToString runs in node, which is enough to catch a component
-    // that throws during render -- the failure that blanked the app after
-    // Prepare. Interaction still is not automatable; that needs a DOM runner
-    // and is a bigger decision than this suite.
+    // Pure modules, plus components rendered to a string, run on node: that is
+    // enough to catch a component that throws during render -- the failure that
+    // blanked the app after Prepare. Interaction is driven in jsdom instead;
+    // an interaction test opts in per file with `// @vitest-environment jsdom`,
+    // so the rest of the suite keeps the cheaper node environment.
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },

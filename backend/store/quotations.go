@@ -516,6 +516,12 @@ func (s *Store) ListRevisionNumbers(ctx context.Context, quotationID int64) ([]i
 	return revisions, nil
 }
 
+// DeleteQuotation removes a quotation and its cascade directly. It is the
+// internal primitive older integration tests use; the HTTP API no longer exposes
+// it (#480 replaced the unconfirmed route with POST /v1/deletions, which requires
+// an admin, a reason, the typed number and -- for a chain -- the ten-letter
+// challenge). Do not add a handler for this method: a deletion without the
+// confirmation contract is the bypass #480 exists to close.
 func (s *Store) DeleteQuotation(ctx context.Context, quotationID int64) error {
 	pool, err := s.poolOrError()
 	if err != nil {

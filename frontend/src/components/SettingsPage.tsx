@@ -112,54 +112,36 @@ export function SettingsPage({
   isAdmin,
   user,
   onProfileChanged,
-  onCompanyChanged,
 }: {
   isAdmin: boolean;
   user: SignedInUser;
   onProfileChanged: (user: SignedInUser) => void;
-  onCompanyChanged?: () => void;
 }) {
-  const [section, setSection] = useState<"general" | "company" | "backups" | "keyboard">("general");
-  const tabs = (
-    [
-      { id: "general", label: "General", adminOnly: false },
-      { id: "company", label: "Company", adminOnly: true },
-      { id: "backups", label: "Backups", adminOnly: true },
-      { id: "keyboard", label: "Keyboard", adminOnly: false },
-    ] as const
-  ).filter((tab) => isAdmin || !tab.adminOnly);
+  const [section, setSection] = useState<"general" | "keyboard">("general");
   return (
     <section aria-labelledby="settings-heading" className="space-y-6">
       <div>
         <h1 id="settings-heading" className="text-display font-semibold text-ink-950">
-          Settings
+          Account settings
         </h1>
         <p className="mt-1.5 max-w-3xl text-body text-ink-500">
-          {section === "company"
-            ? "How the company appears across the app. Only admins see this section."
-            : section === "backups"
-              ? "Database safety nets. Only admins see this section."
-              : section === "keyboard"
-                ? "Your keyboard shortcuts. Stored on this device, editable anytime."
-                : "Your own account. Team management lives on the Team page for admins."}
+          {section === "keyboard"
+            ? "Your keyboard shortcuts. Stored on this device, editable anytime."
+            : "Your own account. Company settings live on the Admin Dashboard."}
         </p>
       </div>
 
       <TabBar
-        items={tabs.map((tab) => ({ id: tab.id, label: tab.label }))}
+        items={[
+          { id: "general", label: "General" },
+          { id: "keyboard", label: "Keyboard" },
+        ]}
         active={section}
-        onSelect={(id) => setSection(id as "general" | "company" | "backups" | "keyboard")}
-        label="Settings sections"
+        onSelect={(id) => setSection(id as "general" | "keyboard")}
+        label="Account sections"
       />
 
-      {section === "company" && isAdmin ? (
-        <CompanyProfileCard onSaved={onCompanyChanged} />
-      ) : section === "backups" && isAdmin ? (
-        <>
-          <BackupCard />
-          <RestoreCard />
-        </>
-      ) : section === "keyboard" ? (
+      {section === "keyboard" ? (
         <KeyboardCard />
       ) : (
         <div className="grid items-stretch gap-6 lg:grid-cols-2 xl:grid-cols-3">
@@ -560,7 +542,17 @@ export function companySaveDeps(): CompanySaveDeps {
   };
 }
 
-export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
+export function CompanyProfileCard({
+  onSaved,
+  onDirtyChange,
+}: {
+  onSaved?: () => void;
+  /**
+   * Issue #491: App's leave guard needs to know whether this card holds
+   * unsaved work before another workspace tab unmounts it.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const [companyTab, setCompanyTab] = useState<CompanyTabId>("general");
   const [form, setForm] = useState<CompanyForm>({
     legalName: "",
@@ -648,6 +640,23 @@ export function CompanyProfileCard({ onSaved }: { onSaved?: () => void }) {
     quotation: companyTabDirty("quotation", latest.current, fingerprints),
     portal: portalDirty,
   };
+  // Issue #491: one flag for the whole Company surface. App's leave guard
+  // blocks leaving the Admin dashboard's Company tab while any sub-tab has
+  // unsaved work; the unmount cleanup clears it so returning later reads the
+  // served values rather than a stale dirty verdict.
+  const companyDirty =
+    dirty.general || dirty.units || dirty.quotation || dirty.portal;
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => {
+    onDirtyChangeRef.current?.(companyDirty);
+  }, [companyDirty]);
+  useEffect(
+    () => () => {
+      onDirtyChangeRef.current?.(false);
+    },
+    []
+  );
 
   // The store's own wording rules, mirrored for the button: a set the server
   // would refuse is never offered as saved.
@@ -1183,7 +1192,7 @@ function PasswordCard() {
   );
 }
 
-function BackupCard() {
+export function BackupCard() {
   const [busy, setBusy] = useState(false);
   const { pushToast } = useToast();
 
@@ -1223,7 +1232,7 @@ interface RestoreOutcome {
   Revisions: number;
 }
 
-function RestoreCard() {
+export function RestoreCard() {
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<RestoreOutcome | null>(null);
@@ -1584,7 +1593,7 @@ function KeyboardCard() {
 
   const groups: { title: string; ids: ActionId[] }[] = [
     { title: "Editor", ids: ["exportPdf", "prepare", "newQuotation", "gridUp", "gridDown", "gridLeft", "gridRight", "gridEnter", "gridEnterBack"] },
-    { title: "Pages", ids: ["gotoEditor", "gotoArchive", "gotoClients", "gotoTeam", "gotoSettings", "toggleHelp"] },
+    { title: "Pages", ids: ["gotoHome", "gotoEditor", "gotoDrafts", "gotoArchive", "gotoPurchaseOrder", "gotoAdmin", "gotoSettings", "toggleHelp"] },
     { title: "Archive", ids: ["archiveUp", "archiveDown", "archiveOpen"] },
   ];
 

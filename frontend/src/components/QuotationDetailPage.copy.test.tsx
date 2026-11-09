@@ -73,7 +73,14 @@ describe("QuotationDetailPage copy action", () => {
   it("shows no copy button while the revision loads", () => {
     const html = renderToString(
       <ToastProvider>
-        <QuotationDetailPage quotationID={5} revision={3} onBack={noop} onEdit={noop} />
+        <QuotationDetailPage
+          quotationID={5}
+          revision={3}
+          onBack={noop}
+          onEdit={noop}
+          onCreatePurchaseOrder={async () => {}}
+          onOpenPurchaseOrder={noop}
+        />
       </ToastProvider>
     );
     expect(html).toContain("Loading quotation");

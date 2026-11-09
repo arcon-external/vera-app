@@ -35,6 +35,7 @@ export function GetPortalPreviewHTML(arg1:string,arg2:string,arg3:string,arg4:st
 export function IssuePasswordReset(arg1:number):Promise<string>;
 
 export function ListClients():Promise<Array<backend.ManagedClient>>;
+
 export function ListDeletionRequests():Promise<Array<backend.DeletionRequest>>;
 
 export function ListEmailChangeRequests():Promise<Array<backend.EmailChangeRow>>;

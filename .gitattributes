@@ -1,0 +1,3 @@
+# PDF test fixtures are binary: a CRLF conversion would change the byte
+# offsets the structural validator follows.
+*.pdf -text

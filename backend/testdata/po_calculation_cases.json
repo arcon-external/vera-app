@@ -1,0 +1,37 @@
+{
+  "cases": [
+    {
+      "name": "two maximum lines at a full row discount",
+      "why": "The API accepts this order: every line gross is at the exact transport bound and the nets sum to zero. The editor must publish totals and build the save payload for the same order instead of refusing the aggregate gross, which it never sends or stores.",
+      "lines": [
+        {
+          "quantityScaled": 10000,
+          "unitPriceMinor": 9007199254740991,
+          "discountEnabled": true,
+          "discountPercent": 100
+        },
+        {
+          "quantityScaled": 10000,
+          "unitPriceMinor": 9007199254740991,
+          "discountEnabled": true,
+          "discountPercent": 100
+        }
+      ],
+      "discountPercent": 0,
+      "ppnBps": 0,
+      "adjustmentMinor": 0,
+      "adjustmentReason": "",
+      "want": {
+        "lineGrossMinor": 9007199254740991,
+        "lineDiscountMinor": 9007199254740991,
+        "lineNetMinor": 0,
+        "subtotalMinor": 0,
+        "discountMinor": 0,
+        "afterDiscountMinor": 0,
+        "ppnMinor": 0,
+        "adjustmentMinor": 0,
+        "grandTotalMinor": 0
+      }
+    }
+  ]
+}

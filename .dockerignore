@@ -1,0 +1,14 @@
+# The extractor image needs Go source and the module files; it does not need
+# the desktop frontend, local PDFs, credentials, or repository history.
+#
+# Excluding test-data is a privacy rule as much as a size one: those are local
+# customer documents and must never enter a build context or image layer.
+.git
+.env
+.env.*
+test-data
+frontend/node_modules
+frontend/dist
+build
+dist
+*.pdf
