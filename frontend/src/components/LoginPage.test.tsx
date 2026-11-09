@@ -1,4 +1,4 @@
-import { renderToString } from "react-dom/server";
+import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { backend } from "@backend/models";
 import { Login } from "@backend/backend/AuthAPI";
@@ -77,7 +77,9 @@ function renderNotice(props: {
   notesURL: string;
   required: boolean;
 }): string {
-  return renderToString(<LoginUpdateNotice {...props} />);
+  // Static markup has no React comment separators, so the sentence asserts
+  // exactly what a reader sees (the notice has no client-only state).
+  return renderToStaticMarkup(<LoginUpdateNotice {...props} />);
 }
 
 describe("loginUpdateNotice resolves the served check", () => {
@@ -128,15 +130,41 @@ describe("fetchLoginUpdateNotice is the silent mount check", () => {
 
 describe("LoginUpdateNotice markup", () => {
   it("prints both versions and a Download update button beside the copy", () => {
-    // The <!-- --> separators are React's own, between the text and each
-    // interpolation; the sentence they render reads
-    // "Vera v0.13.1 is available — you're on v0.12.1."
     const html = renderNotice(loginUpdateNotice(NEWER)!);
     expect(html).toContain(
-      "Vera v<!-- -->0.13.1<!-- --> is available — you&#x27;re on v<!-- -->0.12.1<!-- -->."
+      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
     );
     expect(html).toContain(">Download update</button>");
     expect(html).toContain('role="status"');
+  });
+
+  it("never prints a doubled v when the served versions already carry the prefix", () => {
+    // Issue #546: the live contract serves "v0.15.0" and the Go build stamps
+    // "v0.14.5", so the old literal "v" in the JSX rendered "vv0.15.0". The
+    // notice must accept either shape and still print exactly one v.
+    const html = renderNotice(
+      loginUpdateNotice({
+        ...NEWER,
+        Current: "v0.12.1",
+        Latest: "v0.13.1",
+      })!
+    );
+    expect(html).toContain(
+      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
+    );
+    expect(html).not.toContain("vv");
+
+    const requiredHTML = renderNotice(
+      loginUpdateNotice({
+        ...REQUIRED,
+        Current: "v0.12.1",
+        Latest: "v0.13.1",
+      })!
+    );
+    expect(requiredHTML).toContain(
+      "This Vera (v0.12.1) is below the minimum supported version. Please update to v0.13.1 to keep working."
+    );
+    expect(requiredHTML).not.toContain("vv");
   });
 
   it("states the lock-out as danger, in UpdateBanner's words, when the build is below the minimum supported version", () => {
@@ -152,7 +180,7 @@ describe("LoginUpdateNotice markup", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("bg-danger-50 text-danger-700");
     expect(html).toContain(
-      "This Vera (v<!-- -->0.12.1<!-- -->) is below the minimum supported version. Please update to v<!-- -->0.13.1<!-- --> to keep working."
+      "This Vera (v0.12.1) is below the minimum supported version. Please update to v0.13.1 to keep working."
     );
     expect(html).toContain(">Download update</button>");
   });

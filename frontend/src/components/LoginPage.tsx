@@ -4,6 +4,7 @@ import { CheckForUpdates } from "@backend/backend/UpdateAPI";
 import { backend } from "@backend/models";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { errorMessage } from "../errors";
+import { displayVersion } from "../version";
 import { Button, Card, StatusBanner } from "./ui";
 import { VeraLogo } from "./VeraLogo";
 
@@ -231,11 +232,15 @@ export function LoginUpdateNotice({
           <span>
             {required ? (
               <>
-                This Vera (v{current}) is below the minimum supported
-                version. Please update to v{latest} to keep working.
+                This Vera ({displayVersion(current)}) is below the minimum
+                supported version. Please update to {displayVersion(latest)} to
+                keep working.
               </>
             ) : (
-              <>Vera v{latest} is available — you're on v{current}.</>
+              <>
+                Vera {displayVersion(latest)} is available — you're on{" "}
+                {displayVersion(current)}.
+              </>
             )}
           </span>
           <Button
