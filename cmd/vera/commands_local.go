@@ -51,7 +51,7 @@ const exampleInput = `{
   "customerCode": 2,
   "subject": "Supply and installation of electrical and mechanical systems",
   "recipientName": "Dr. A. Wibowo",
-  "note": "Delivery is ex-works; installation by the customer.",
+  "note": "Delivery is ex-works.\n- **Installation** by the customer\n- Access *after* 09:00",
   "incoterm": "DAP",
   "validityDays": 30,
   "paymentTermDays": 90,
@@ -127,8 +127,10 @@ func inputReference() string {
   customerCode      required. The two-digit client code; 'vera clients list' shows them.
   subject           required. The quotation's subject line.
   recipientName     required. Who it is addressed to.
-  note              optional, up to 1000 characters. Printed once under the
-                    line items; line breaks are preserved in the document.
+  note              optional, up to 1000 characters. The source is restricted
+                    Markdown: **bold**, *italic*, "- " bullets, "1. " numbered
+                    items, paragraphs and line breaks. Other markup prints
+                    literally. Printed once under the line items.
   incoterm          EXW (default), DAP, FCA, FOB, ...
   validityDays      30 by default.
   paymentTermDays   90 by default.

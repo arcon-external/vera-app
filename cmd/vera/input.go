@@ -29,9 +29,11 @@ type InputDoc struct {
 	CustomerCode  int    `json:"customerCode"`
 	Subject       string `json:"subject"`
 	RecipientName string `json:"recipientName,omitempty"`
-	// Note is the optional quotation-level note. It is printed once under the
-	// line items, outer whitespace is trimmed, internal line breaks survive,
-	// and the maximum is 1000 characters.
+	// Note is the optional quotation-level note. Its source is the restricted
+	// Markdown subset (**bold**, *italic*, "- " bullets, "1. " numbered items,
+	// paragraphs and line breaks); other markup prints literally. It is printed
+	// once under the line items, outer whitespace is trimmed, internal line
+	// breaks survive, and the maximum is 1000 characters.
 	Note        string `json:"note,omitempty"`
 	Incoterm    string `json:"incoterm,omitempty"`
 	Validity    int    `json:"validityDays,omitempty"`

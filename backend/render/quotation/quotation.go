@@ -87,10 +87,11 @@ type Input struct {
 	Subject  string
 
 	// Note is the optional quotation-level note, printed once under the last
-	// line row and above the terms (#534). It is plain text with its outer
-	// whitespace trimmed and its internal line breaks preserved; empty means
-	// no block. The template prints it and the native renderer draws its own
-	// card, so the same string travels to both.
+	// line row and above the terms (#534). Its source is the restricted
+	// Markdown subset (#540) with its outer whitespace trimmed and its internal
+	// line breaks preserved; empty means no block. The template prints the
+	// parsed HTML and the native renderer parses the same source itself, so the
+	// same string travels to both.
 	Note string
 
 	RecipientName     string

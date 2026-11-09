@@ -224,7 +224,7 @@ a rounding bug into a pricing system.
   "customerCode": 2,
   "subject": "Supply and installation of electrical and mechanical systems",
   "recipientName": "Dr. A. Wibowo",
-  "note": "Delivery is ex-works; installation by the customer.",
+  "note": "Delivery is ex-works.\n- **Installation** by the customer\n- Access *after* 09:00",
   "incoterm": "DAP",
   "validityDays": 30,
   "paymentTermDays": 90,
@@ -287,7 +287,7 @@ a rounding bug into a pricing system.
 | `customerCode` | **Required.** The two-digit client code. `vera clients list` shows them. |
 | `subject` | **Required.** The subject line. |
 | `recipientName` | **Required.** Who it is addressed to. |
-| `note` | Optional, up to 1000 characters. Printed once under the line items; outer whitespace is trimmed and line breaks survive. |
+| `note` | Optional, up to 1000 characters. The source is restricted Markdown: `**bold**`, `*italic*` (or `_italic_`), `- ` bullets, `1. ` numbered items, paragraphs and line breaks. Other markup prints literally. Printed once under the line items; outer whitespace is trimmed and line breaks survive. |
 | `incoterm` | `EXW` by default. |
 | `validityDays` | `30` by default. |
 | `paymentTermDays` | `90` by default. |
