@@ -38,6 +38,10 @@ import (
 //	verifyCode      template-fixed.html:246  draw.go:1207
 //	terms*          template-fixed.html:197  gpdf.go:218 (termsLines)
 //
+// The note label (#534) is the one exception: the note itself is new with that
+// feature, so its heading was never a pre-#339 literal. Its default is still
+// pinned here, because it now prints on every note-bearing document.
+//
 // The three price column headers, the discount row and the code line print a
 // figure beside the label -- the currency code, the discount percent, the
 // short id -- exactly as they did before: the label is the lead-in text and
