@@ -144,6 +144,7 @@ const DETAILS: DetailsState = {
   taxZone: "NonFTZ",
   taxType: "Goods",
   serviceCategory: "",
+  note: "",
 };
 
 interface SnapshotCase {

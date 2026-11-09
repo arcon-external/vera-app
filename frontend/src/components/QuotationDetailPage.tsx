@@ -46,6 +46,7 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
 }
 import { useToast } from "../toast";
 import { copyQuotationToClipboard } from "../quotationClipboard";
+import { NoteCard } from "./NoteCard";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
@@ -470,6 +471,10 @@ export function QuotationDetailPage({
           void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
         }
       />
+
+      {/* The note belongs to this revision: it travels with the fetched
+          record, so switching revisions switches the note. */}
+      <NoteCard source={quotation.Note} />
 
       <Card className="border-internal-200 bg-internal-50/40 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

@@ -179,6 +179,8 @@ export function parseDraftPayload(payload: string): DraftPayload | null {
     taxZone: asString(details.taxZone, "FTZ"),
     taxType: asString(details.taxType, "Goods"),
     serviceCategory: asString(details.serviceCategory),
+    // A draft written before #535 has no note; it opens with none.
+    note: asString(details.note),
   };
   // The legacy single figure must not survive the restore: the editor state it
   // re-saves would otherwise carry both shapes forever.

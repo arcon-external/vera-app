@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Card, SectionHeading } from "./ui";
+import { NoteEditor } from "./NoteEditor";
 import { Select } from "./Select";
 import {
   SERVICE_CATEGORY_OPTIONS,
@@ -26,6 +27,8 @@ export interface DetailsState {
   taxZone: string;
   taxType: string;
   serviceCategory: string;
+  /** The quotation-level note source (#540). One note, printed once. */
+  note: string;
 }
 
 interface DetailsPanelProps {
@@ -213,6 +216,14 @@ export function DetailsPanel({
               className={fieldClass}
             />
           </Field>
+        </div>
+
+        <div className="lg:col-span-2">
+          <NoteEditor
+            value={value.note}
+            onChange={(note) => onChange({ note })}
+            hint="Prints under the line items on the customer quotation."
+          />
         </div>
 
         <Field label="Customer">

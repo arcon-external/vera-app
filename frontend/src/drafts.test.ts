@@ -21,6 +21,7 @@ const DETAILS: DetailsState = {
   taxZone: "NonFTZ",
   taxType: "Goods",
   serviceCategory: "",
+  note: "Delivery is ex-works.\n\n**Crated** and *sealed*.\n- Two copies\n- One original",
 };
 
 function sampleItems(): EditorItem[] {
@@ -260,6 +261,28 @@ describe("draft payloads", () => {
     expect(restored).not.toBeNull();
     expect(restored!.items).toEqual([]);
     expect(restored!.customerId).toBe(0);
+  });
+
+  it("restores a formatted note exactly (#535)", () => {
+    const restored = roundTrip(sampleItems());
+    expect(restored!.details.note).toBe(DETAILS.note);
+    expect(restored!.details.note).toContain("**Crated**");
+    expect(restored!.details.note).toContain("\n- Two copies");
+  });
+
+  it("opens a draft written before the note existed with an empty note", () => {
+    // The payload is the editor's own state stored verbatim: a pre-#535 draft
+    // has no note key at all, and must not open as undefined.
+    const restored = parseDraftPayload(
+      JSON.stringify({
+        items: [],
+        details: { subject: "Old draft", recipientName: "", validity: 30 },
+        customerId: 2,
+      })
+    );
+    expect(restored).not.toBeNull();
+    expect(restored!.details.note).toBe("");
+    expect(parseDraftPayload("{}")!.details.note).toBe("");
   });
 });
 

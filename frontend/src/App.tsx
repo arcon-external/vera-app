@@ -213,6 +213,7 @@ const DEFAULT_DETAILS: DetailsState = {
   taxZone: "FTZ",
   taxType: "Goods",
   serviceCategory: "",
+  note: "",
 };
 
 /**
@@ -632,6 +633,9 @@ function App() {
     editingQuote !== null ||
     (subject !== "" && subject !== (pristineSubject ?? "")) ||
     details.recipientName.trim() !== "" ||
+    // The note is quotation content: a note-only edit is unsaved work, so it
+    // must enable Save draft and trip the leave guard like any other field.
+    details.note.trim() !== "" ||
     items.some(
       (item) =>
         item.description.trim() !== "" ||
@@ -2045,6 +2049,7 @@ function App() {
       LeadTimeDays: details.leadTimeDays,
       CustomerID: customerId,
       Incoterm: details.incoterm,
+      Note: details.note,
     });
 
     try {

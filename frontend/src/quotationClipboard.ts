@@ -84,6 +84,11 @@ export interface QuotationCopyQuotation {
   taxType: string;
   serviceCategory: string;
   taxCategory: string;
+  /**
+   * The quotation-level note source (#540). Optional in a payload written
+   * before #535: a missing field parses as "", so old copy text still pastes.
+   */
+  note: string;
   items: QuotationCopyItem[];
 }
 
@@ -138,6 +143,7 @@ export function buildQuotationCopy(quotation: ArchivedQuotation): string {
       taxType: quotation.TaxType,
       serviceCategory: quotation.ServiceCategory,
       taxCategory: quotation.TaxCategory,
+      note: quotation.Note ?? "",
       items: quotation.Items.map((item) => ({
         description: item.Description,
         qty: item.Qty,
@@ -306,6 +312,10 @@ export function parseQuotationCopy(text: string): QuotationCopyPayload | null {
     if (parsed === null) return null;
     items.push(parsed);
   }
+  // A payload from before #535 has no note key; anything else non-string is a
+  // malformed payload, not a silent empty note.
+  const note = q.note === undefined ? "" : q.note;
+  if (!isString(note)) return null;
   return {
     kind: QUOTATION_COPY_KIND,
     version: QUOTATION_COPY_VERSION,
@@ -328,6 +338,7 @@ export function parseQuotationCopy(text: string): QuotationCopyPayload | null {
       taxType: q.taxType,
       serviceCategory: q.serviceCategory,
       taxCategory: q.taxCategory,
+      note,
       items,
     },
   };
@@ -366,6 +377,7 @@ export function archivedToEditorDraft(quotation: ArchivedQuotation): ArchivedEdi
       taxZone: quotation.TaxZone,
       taxType: quotation.TaxType || legacyTaxType(quotation.TaxCategory),
       serviceCategory: quotation.ServiceCategory || legacyServiceCategory(quotation.TaxCategory),
+      note: quotation.Note ?? "",
     },
     customerCode: quotation.CustomerCode,
     items: quotation.Items.map((item) => {
@@ -476,6 +488,7 @@ export function applyQuotationCopy(
       taxZone: q.taxZone,
       taxType: q.taxType || legacyTaxType(q.taxCategory),
       serviceCategory: q.serviceCategory || legacyServiceCategory(q.taxCategory),
+      note: q.note,
     },
     customerCode: code,
     items,

@@ -25,6 +25,7 @@ function archived(): ArchivedQuotation {
     DisplayGrand: "",
     RecipientName: "Jane",
     RecipientAddress: "Gedung Penerima 3",
+    Note: "",
     Incoterm: "DAP",
     ValidityDays: 45,
     PaymentTermDays: 60,
