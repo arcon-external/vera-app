@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	texttemplate "text/template"
+	"unicode/utf8"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -26,9 +27,13 @@ import (
 // QuotationInput is the data contract between the frontend and the backend.
 // The frontend sends this struct via Wails bindings when calling Prepare.
 type QuotationInput struct {
-	Incoterm        string
-	Subject         string
-	RecipientName   string
+	Incoterm      string
+	Subject       string
+	RecipientName string
+	// Note is the optional quotation-level note. Prepare trims its outer
+	// whitespace, preserves internal line breaks, and refuses more than
+	// apicontract.MaxNoteLength characters.
+	Note            string
 	TaxZone         string
 	TaxCategory     string
 	TaxType         string
@@ -224,17 +229,21 @@ type QuotationData struct {
 	// wherever the bases are set (readTemplate at startup, refreshCustomCSS
 	// after Prepare) so the stylesheet always executes against the current
 	// brand. See backend/theme for the derivation.
-	Palette                   theme.Palette
-	RecipientName             string
-	RecipientCompany          string
-	RecipientAddress          string
-	QuoteNumber               string
-	QuoteUUID                 string
-	VerifyURL                 string
-	VerifyQRBase64            string
-	VerifyShortID             string
-	ServiceCategory           string
-	Subject                   string
+	Palette          theme.Palette
+	RecipientName    string
+	RecipientCompany string
+	RecipientAddress string
+	QuoteNumber      string
+	QuoteUUID        string
+	VerifyURL        string
+	VerifyQRBase64   string
+	VerifyShortID    string
+	ServiceCategory  string
+	Subject          string
+	// Note is the optional quotation-level note as entered (outer whitespace
+	// trimmed, internal line breaks preserved). It is printed once under the
+	// line items (#534) and signed only when non-empty.
+	Note                      string
 	DisplaySubTotal           string
 	TaxType                   string
 	CustomCSS                 template.CSS
@@ -1037,6 +1046,17 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("subject is required")
 	}
 
+	// One optional note for the whole quotation. Outer whitespace is trimmed
+	// once here so the printed document, the stored revision and the signed
+	// payload all carry the same text; internal line breaks are presentation
+	// and survive (flattened only for signing). The limit is counted in
+	// characters, matching the migration's CHECK and the editor's counter.
+	note := strings.TrimSpace(input.Note)
+	if utf8.RuneCountInString(note) > apicontract.MaxNoteLength {
+		return fmt.Errorf("note cannot be longer than %d characters", apicontract.MaxNoteLength)
+	}
+	input.Note = note
+
 	if strings.TrimSpace(input.RecipientName) == "" {
 		return fmt.Errorf("recipient name are required")
 	}
@@ -1112,6 +1132,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.CurrencyPrefix, q.Data.CurrencySuffix = currency.Affixes(q.Data.Currency)
 
 	q.Data.Subject = input.Subject
+	q.Data.Note = input.Note
 	q.Data.Validity = input.Validity
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTimeYears = input.LeadTimeYears
@@ -1409,6 +1430,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 		RecipientName:    q.Data.RecipientName,
 		RecipientAddress: q.Data.RecipientAddress,
 		Subject:          q.Data.Subject,
+		Note:             q.Data.Note,
 		Incoterm:         q.Data.Incoterm,
 		ValidityDays:     int16(q.Data.Validity),
 		PaymentTermDays:  int16(q.Data.PaymentTerm),

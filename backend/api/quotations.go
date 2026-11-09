@@ -450,6 +450,7 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		AvailableRevisions: record.AvailableRevisions,
 		CustomerName:       record.CustomerName,
 		Subject:            record.Subject,
+		Note:               record.Note,
 		Currency:           currency.Normalize(record.Currency),
 		RecipientName:      record.RecipientName,
 		RecipientAddress:   record.RecipientAddress,

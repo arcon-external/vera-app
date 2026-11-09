@@ -35,7 +35,14 @@ type SignableRevision struct {
 	// byte-identical canonical bytes to one signed before this field
 	// existed, so every printed verification code keeps verifying. Never
 	// bump CanonicalPrefix for this.
-	Currency       string
+	Currency string
+	// Note is the optional quotation-level note. It is emitted only when
+	// non-empty, after currency and before item_count, so a revision without
+	// one produces byte-identical canonical bytes to every revision signed
+	// before this field existed. Newlines are flattened for signing: the
+	// printed document preserves them (#534), but they are presentation, not
+	// commercial content. Never bump CanonicalPrefix for this.
+	Note           string
 	Items          []SignableItem
 	Subtotal       int64
 	DiscountAmount int64
@@ -134,6 +141,12 @@ func CanonicalRevision(revision SignableRevision) []byte {
 	writeField(&b, "discount_percent", strconv.Itoa(int(revision.DiscountPercent)))
 	writeField(&b, "issuer", revision.IssuerName)
 	writeField(&b, "currency", currency.Normalize(revision.Currency))
+	// Zero means no note, which is every revision signed before this field
+	// existed. Emitting nothing then is what keeps those signatures
+	// byte-identical.
+	if note := flattenNote(revision.Note); strings.TrimSpace(note) != "" {
+		writeField(&b, "note", note)
+	}
 	writeField(&b, "item_count", strconv.Itoa(len(revision.Items)))
 	for i, item := range revision.Items {
 		writeField(&b, fmt.Sprintf("item_%d", i+1), strings.Join([]string{
@@ -186,6 +199,13 @@ func writeField(b *strings.Builder, label, value string) {
 	b.WriteString(label)
 	b.WriteString(": ")
 	b.WriteString(value)
+}
+
+// flattenNote turns every line break into a space before the note enters the
+// canonical payload. The printed document preserves them (#534); the signature
+// covers the text, not its presentation.
+func flattenNote(value string) string {
+	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ").Replace(value)
 }
 
 // CanonicalDigest is the SHA-256 of the canonical bytes, stored beside the

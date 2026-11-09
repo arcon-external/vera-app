@@ -17,6 +17,12 @@ import (
 //	QuotationInput      152 bytes -> class 160   ...  144 bytes -> class 144
 //	QuotationItemInput   56 bytes -> class  64   ...   48 bytes -> class  48
 //
+// QuotationInput moved back to class 160 with the quotation note (#533): the
+// note is an eighth string, so the content is 160 bytes and class 144 is no
+// longer reachable without dropping a field. The test still catches the next
+// field being added in a padding position, where it would cost another 8 or 16
+// bytes per quotation. QuotationItemInput is unchanged.
+//
 // Everything else the analyzer flagged lands in the same class either way --
 // ArchivedQuotation is 592 or 584, both out of a 640-byte bucket -- so it costs a
 // large diff and returns nothing. These tests pin the two that pay, so a field
@@ -35,9 +41,9 @@ func classOf(n uintptr) uintptr {
 
 func TestQuotationInputStaysInTheSmallerSizeClass(t *testing.T) {
 	got := unsafe.Sizeof(QuotationInput{})
-	if class := classOf(got); class != 144 {
-		t.Errorf("QuotationInput is %d bytes, landing in size class %d; the reordering put it in class 144. "+
-			"A field was added in a position that costs 16 bytes per quotation.", got, class)
+	if class := classOf(got); class != 160 {
+		t.Errorf("QuotationInput is %d bytes, landing in size class %d; the field order puts it in class 160. "+
+			"A field was added in a position that costs another 8 or 16 bytes per quotation.", got, class)
 	}
 }
 
