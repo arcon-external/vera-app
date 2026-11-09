@@ -92,6 +92,9 @@ type RevisionEvidence struct {
 	QuoteNumber      string
 	ShortID          string
 	RecipientName    string
+	// RecipientCompany is the company name the revision printed and signed.
+	// It comes from the revision's snapshot; a revision written before that
+	// column existed falls back to the live customer legal name.
 	RecipientCompany string
 	IssuerName       string
 	// Currency is the code the revision was issued in, so SignableFromEvidence
@@ -169,7 +172,8 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 	var evidence RevisionEvidence
 	err = pool.QueryRow(ctx, fmt.Sprintf(`
 		SELECT r.short_id, q.id, q.quote_number, r.revision_number,
-		       r.recipient_name, r.recipient_address, c.legal_name,
+		       r.recipient_name, r.recipient_address,
+		       COALESCE(NULLIF(r.recipient_company, ''), c.legal_name),
 		       r.subject, r.incoterm, r.currency,
 		       r.validity_days, r.payment_term_days, r.lead_time_days,
 		       r.lead_time_years, r.lead_time_months, r.lead_time_weeks,
