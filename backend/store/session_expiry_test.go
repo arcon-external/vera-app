@@ -180,6 +180,70 @@ func TestRenewSessionRefusesEndedSessions(t *testing.T) {
 	}
 }
 
+// TestRenewSessionRefusesAnEndBetweenReadAndWrite proves the UPDATE's WHERE
+// clause, not just the read path. The session row is locked, the renewal's
+// read completes and its UPDATE blocks; the transaction then expires the row
+// and commits. Without the WHERE guards the blocked UPDATE would slide an
+// expired session forward and report success.
+func TestRenewSessionRefusesAnEndBetweenReadAndWrite(t *testing.T) {
+	database := openTestSchema(t, "vera_test_session_renew_race")
+	ctx := context.Background()
+	user, err := database.CreateUser(ctx, "race@example.com", "Race", "test-hash", "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	idle := now.Add(8 * time.Hour)
+	if err := database.CreateSession(ctx, user.ID, "race-token", idle, now.Add(7*24*time.Hour), false); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	tx, err := database.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	var locked string
+	if err := tx.QueryRow(ctx, fmt.Sprintf(
+		`SELECT token_hash FROM %s.sessions WHERE token_hash = $1 FOR UPDATE`,
+		database.configSchema()), "race-token").Scan(&locked); err != nil {
+		t.Fatalf("lock session: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, renewErr := database.RenewSession(ctx, "race-token", now, 8*time.Hour)
+		done <- renewErr
+	}()
+
+	// The read is a plain MVCC read and does not wait on the lock; the UPDATE
+	// does. Half a second is far longer than the read takes locally, so by now
+	// the renewal is parked on the row lock.
+	time.Sleep(500 * time.Millisecond)
+
+	expired := now.Add(-time.Minute)
+	if _, err := tx.Exec(ctx, fmt.Sprintf(
+		`UPDATE %s.sessions SET expires_at = $2 WHERE token_hash = $1`,
+		database.configSchema()), "race-token", expired); err != nil {
+		t.Fatalf("expire session: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	wantSessionCode(t, <-done, SessionCodeExpired)
+
+	var stored time.Time
+	if err := database.pool.QueryRow(ctx, fmt.Sprintf(
+		`SELECT expires_at FROM %s.sessions WHERE token_hash = $1`,
+		database.configSchema()), "race-token").Scan(&stored); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if !stored.Equal(expired) {
+		t.Errorf("expires_at = %s after the refused renewal; want the expired value %s", stored, expired)
+	}
+}
+
 func TestRenewSessionRefusesAnInactiveAccount(t *testing.T) {
 	database := openTestSchema(t, "vera_test_session_renew_inactive")
 	ctx := context.Background()
