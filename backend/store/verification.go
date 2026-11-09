@@ -100,8 +100,11 @@ type RevisionEvidence struct {
 	// Currency is the code the revision was issued in, so SignableFromEvidence
 	// reproduces the signed bytes. Revisions written before the column read
 	// back as IDR, which is what they were signed as.
-	Currency        string
-	Subject         string
+	Currency string
+	Subject  string
+	// Note is the quotation-level note the revision printed and signed. It is
+	// empty for every revision issued before the note existed.
+	Note            string
 	Incoterm        string
 	CanonicalSHA256 string
 	SigKeyID        string
@@ -174,7 +177,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		SELECT r.short_id, q.id, q.quote_number, r.revision_number,
 		       r.recipient_name, r.recipient_address,
 		       COALESCE(NULLIF(r.recipient_company, ''), c.legal_name),
-		       r.subject, r.incoterm, r.currency,
+		       r.subject, r.incoterm, r.currency, r.note,
 		       r.validity_days, r.payment_term_days, r.lead_time_days,
 		       r.lead_time_years, r.lead_time_months, r.lead_time_weeks,
 		       r.discount_percent, r.created_at,
@@ -189,7 +192,7 @@ func (s *Store) GetRevisionEvidenceByShortID(ctx context.Context, shortID string
 		normalized).Scan(
 		&evidence.ShortID, &evidence.QuotationID, &evidence.QuoteNumber, &evidence.RevisionNumber,
 		&evidence.RecipientName, &evidence.RecipientAddress, &evidence.RecipientCompany,
-		&evidence.Subject, &evidence.Incoterm, &evidence.Currency,
+		&evidence.Subject, &evidence.Incoterm, &evidence.Currency, &evidence.Note,
 		&evidence.ValidityDays, &evidence.PaymentTermDays, &evidence.LeadTimeDays,
 		&evidence.LeadTimeYears, &evidence.LeadTimeMonths, &evidence.LeadTimeWeeks,
 		&evidence.DiscountPercent, &evidence.CreatedAt,

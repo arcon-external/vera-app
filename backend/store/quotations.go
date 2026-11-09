@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -92,8 +93,12 @@ type RevisionDraft struct {
 	RecipientName    string
 	RecipientAddress string
 	Subject          string
-	Incoterm         string
-	IssuerName       string
+	// Note is the optional quotation-level note the revision printed and
+	// signed. Empty means no note; it is emitted only then in the canonical
+	// payload, which is what keeps pre-note codes verifying.
+	Note       string
+	Incoterm   string
+	IssuerName string
 	// Currency is the company's ISO 4217 code at issue time, stored per
 	// revision beside the issuer name: a later company change must not
 	// rewrite history or break old signatures.
@@ -148,6 +153,9 @@ type QuotationRecord struct {
 	TaxZone          string
 	TaxCategory      string
 	HTMLSnapshot     string
+	// Note is the quotation-level note this revision printed and signed.
+	// Empty for revisions issued before the note existed.
+	Note string
 	// HasDocument reports whether the revision has a stored document: PDF bytes
 	// or a path. It is scanned from the same expression the separate
 	// HasDocumentPDF query used, so the answer is identical -- including for an
@@ -244,6 +252,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       r.discount_percent, r.tax_zone, r.tax_category,
 		       r.tax_rate_bps, r.tax_type, r.service_category, r.created_at,
 		       r.currency,
+		       r.note,
 		       d.html_snapshot, d.pdf_data,
 		       (d.pdf_data IS NOT NULL OR d.pdf_path IS NOT NULL) AS has_document,
 		       COALESCE(d.pdf_path, ''),
@@ -297,6 +306,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.ServiceCategory,
 		&record.CreatedAt,
 		&record.Currency,
+		&record.Note,
 		&record.HTMLSnapshot,
 		&record.PDFData,
 		&record.HasDocument,
@@ -586,8 +596,8 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 			discount_percent, tax_zone, tax_category, tax_rate_bps,
 			tax_type, service_category,
 			short_id, signature, sig_key_id, canonical_sha256, issuer_name, currency,
-			recipient_company
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+			recipient_company, note
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)
 		RETURNING id`, schema),
 		quoteID,
 		revisionNumber,
@@ -617,6 +627,9 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		// currency snapshots so a later customer rename cannot rewrite the
 		// document or the bytes its verification code recomputes.
 		draft.CustomerName,
+		// The quotation-level note, part of this immutable revision. Empty
+		// stores as the column default and emits nothing when signed.
+		draft.Note,
 	).Scan(&revisionID)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("insert quotation revision %d: %w", revisionNumber, err)
@@ -763,6 +776,7 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		RecipientName:    draft.RecipientName,
 		RecipientAddress: draft.RecipientAddress,
 		Incoterm:         draft.Incoterm,
+		Note:             draft.Note,
 		ValidityDays:     draft.ValidityDays,
 		PaymentTermDays:  draft.PaymentTermDays,
 		LeadTimeDays:     draft.LeadTimeDays,
@@ -787,6 +801,9 @@ func validateRevisionDraft(draft RevisionDraft) error {
 	}
 	if draft.Subject == "" || draft.RecipientName == "" || draft.RecipientAddress == "" {
 		return fmt.Errorf("recipient and subject are required")
+	}
+	if utf8.RuneCountInString(draft.Note) > apicontract.MaxNoteLength {
+		return fmt.Errorf("note cannot be longer than %d characters", apicontract.MaxNoteLength)
 	}
 	if len(draft.Items) == 0 {
 		return fmt.Errorf("at least one quotation item is required")
