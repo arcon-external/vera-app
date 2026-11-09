@@ -1,6 +1,7 @@
 import { useReducer, useState } from "react";
 import { RepairPurchaseOrderSource } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
+import { errorMessage } from "../errors";
 import { formatMoney, type CurrencyInfo } from "../format";
 import { writeOutcome } from "../poCorrection";
 import {
@@ -420,11 +421,7 @@ export function PurchaseOrderRepairPage({
       }
       setError("The repair was not applied. Reload the purchase order and try again.");
     } catch (failure) {
-      setError(
-        failure instanceof Error && failure.message.trim() !== ""
-          ? failure.message
-          : "The source repair failed. Try again."
-      );
+      setError(errorMessage(failure, "The source repair failed. Try again."));
     } finally {
       setSaving(false);
     }

@@ -3,6 +3,7 @@ import { Login, RedeemInvite } from "@backend/backend/AuthAPI";
 import { CheckForUpdates } from "@backend/backend/UpdateAPI";
 import { backend } from "@backend/models";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
+import { errorMessage } from "../errors";
 import { Button, Card, StatusBanner } from "./ui";
 import { VeraLogo } from "./VeraLogo";
 
@@ -39,19 +40,6 @@ export function signInDeps(deps: {
   };
 }
 
-/** The message Wails hands back for a refused sign-in. The binding rejects
- *  with an Error or a `{message}` object, not always a bare string; the
- *  generic sentence is only for an error with no readable message. */
-function signInErrorMessage(err: unknown): string {
-  if (typeof err === "string" && err.trim()) return err;
-  if (err instanceof Error && err.message.trim()) return err.message;
-  if (typeof err === "object" && err !== null && "message" in err) {
-    const message = (err as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return "We couldn't sign you in. Try again.";
-}
-
 /** The sign-in form's submit, extracted from the component so a test can
  *  drive it without a DOM (the house pattern — SettingsPage's saves and
  *  companySaves.ts; there are no DOM tests in this repo). The remember flag
@@ -68,7 +56,7 @@ export async function submitSignIn(
   try {
     deps.onSignedIn(await deps.login(state.email.trim(), state.password, state.remember));
   } catch (err: unknown) {
-    deps.setError(signInErrorMessage(err));
+    deps.setError(errorMessage(err, "We couldn't sign you in. Try again."));
   } finally {
     deps.setBusy(false);
   }
@@ -263,7 +251,15 @@ export function LoginUpdateNotice({
   );
 }
 
-export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => void }) {
+export function LoginPage({
+  onSignedIn,
+  sessionEnded = false,
+}: {
+  onSignedIn: (user: SignedInUser) => void;
+  /** True when an involuntary session end preserved work on this device. The
+   *  form explains why it reappeared; a normal sign-in shows no notice. */
+  sessionEnded?: boolean;
+}) {
   const [mode, setMode] = useState<"signin" | "setup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -343,7 +339,7 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
       setNewPassword("");
       setConfirmPassword("");
     } catch (err: unknown) {
-      const message = typeof err === "string" ? err : "";
+      const message = errorMessage(err, "");
       if (/invalid|expired/i.test(message)) {
         setError("That code is invalid or expired. Ask your administrator for a new one.");
       } else {
@@ -374,6 +370,13 @@ export function LoginPage({ onSignedIn }: { onSignedIn: (user: SignedInUser) => 
         </div>
         {mode === "signin" && updateNotice !== null ? (
           <LoginUpdateNotice {...updateNotice} />
+        ) : null}
+        {mode === "signin" && sessionEnded ? (
+          <div className="mb-4" role="status">
+            <StatusBanner tone="info">
+              Your session ended. Sign in to continue where you left off.
+            </StatusBanner>
+          </div>
         ) : null}
         <Card className="p-6">
           {mode === "signin" ? (

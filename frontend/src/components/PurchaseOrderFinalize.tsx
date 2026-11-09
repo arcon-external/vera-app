@@ -4,6 +4,7 @@ import {
   AssignPurchaseOrderConfirmationNumber,
   GetPurchaseOrderHistory,
 } from "@backend/backend/Quotation";
+import { errorMessage } from "../errors";
 import { formatMoney, type CurrencyInfo } from "../format";
 import type { PurchaseOrderHistoryEntry } from "../poCorrection";
 import {
@@ -45,17 +46,6 @@ import {
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
-
-/** The server's message when it has one, so the panel names the real refusal. */
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== "") {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim() !== "") {
-    return error;
-  }
-  return "The confirmation number could not be assigned.";
-}
 
 // Issue #471: the final-save review. Three assembled views live here:
 //
@@ -1144,7 +1134,7 @@ export function PurchaseOrderSavedView({
       .catch((error: unknown) => {
         if (cancelled) return;
         setHistory([]);
-        setHistoryError(errorMessage(error));
+        setHistoryError(errorMessage(error, "The purchase order history could not be loaded."));
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false);
@@ -1186,7 +1176,7 @@ export function PurchaseOrderSavedView({
       setAssignedOrder(assigned);
       onAssigned?.(assigned);
     } catch (error) {
-      setAssignError(errorMessage(error));
+      setAssignError(errorMessage(error, "The confirmation number could not be assigned."));
     } finally {
       setAssigning(false);
     }

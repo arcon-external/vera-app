@@ -6,6 +6,7 @@ import {
 import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotation } from "../archive";
 import { resolveCurrencyEntry } from "../archive";
+import { errorMessage } from "../errors";
 import {
   decorateMoney,
   formatMoney,
@@ -81,20 +82,6 @@ export function QuotationCopyButton({
 export interface QuotationDetailPurchaseOrder {
   id: number;
   state: "draft" | "saved";
-}
-
-// A refused create hands the server's message through (the bindings marshal a
-// typed error as {message}); this reads it without letting an object render as
-// "[object Object]". Same shape as App's local helper, kept here because that
-// one is not exported and a component does not import the app shell.
-function purchaseOrderErrorMessage(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return fallback;
 }
 
 interface QuotationDetailPageProps {
@@ -426,10 +413,7 @@ export function QuotationDetailPage({
       } else {
         pushToast(
           "error",
-          purchaseOrderErrorMessage(
-            error,
-            "The purchase order could not be created."
-          )
+          errorMessage(error, "The purchase order could not be created.")
         );
       }
     } finally {

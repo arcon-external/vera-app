@@ -6,6 +6,8 @@
 // client only bounds the file size before uploading, because a 20 MB rejected
 // round trip is wasteful.
 
+import { errorMessage } from "./errors";
+
 /** The one active PDF as the desktop binding returns it (PascalCase = Wails). */
 export interface PurchaseOrderDocumentDTO {
   UUID: string;
@@ -190,13 +192,7 @@ export function finalSaveSendsAbsenceConfirmation(
 }
 
 function messageOf(error: unknown): string {
-  if (typeof error === "string") return error.trim();
-  if (error instanceof Error) return error.message.trim();
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string") return message.trim();
-  }
-  return "";
+  return errorMessage(error, "").trim();
 }
 
 /**

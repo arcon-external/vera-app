@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ListPurchaseOrders } from "@backend/backend/Quotation";
+import { errorMessage } from "../errors";
 import {
   activeFilterCount,
   buildPOListQuery,
@@ -72,16 +73,6 @@ export interface PurchaseOrderListViewProps {
   mode?: POListMode;
   /** Present only for an admin; absent renders no ⋯ menu column at all. */
   onDelete?: (row: POListRowDTO) => void;
-}
-
-function errorText(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The purchase orders could not be loaded. Try again.";
 }
 
 const STATE_OPTIONS = [
@@ -909,7 +900,11 @@ export function PurchaseOrderListPage({
         })
         .catch((cause: unknown) => {
           if (cancelled) return;
-          dispatch({ type: "queryFailed", seq, error: errorText(cause) });
+          dispatch({
+            type: "queryFailed",
+            seq,
+            error: errorMessage(cause, "The purchase orders could not be loaded. Try again."),
+          });
         });
     }, delay);
     return () => {

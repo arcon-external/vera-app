@@ -31,6 +31,11 @@ import {
 } from "./companyLabels";
 import type { CompanyForm, CompanyTheme, StoredCompanyExtras } from "./company";
 import type { CompanyUnitOption } from "./companyUnits";
+import { errorMessage } from "./errors";
+
+// Re-exported so the existing call sites and their tests keep one import
+// path while the implementation lives in the shared helper (issue #531).
+export { errorMessage };
 
 export type CompanyTabId = "general" | "units" | "quotation" | "portal";
 
@@ -48,16 +53,6 @@ export const COMPANY_TAB_SAVES: Record<CompanyTabId, { label: string; button: st
   quotation: { label: "Quotation", button: "Save wording and colours", busy: "Saving…" },
   portal: { label: "Portal", button: "Save colours", busy: "Saving…" },
 };
-
-/** The Wails rejection's message when it sent one, or the caller's fallback.
- *  The runtime rejects with the Go error — a string, or an Error wrapping it —
- *  and those messages are descriptive ("company legal name is required"). An
- *  Error carrying an empty message, or anything else, keeps the fallback. */
-export function errorMessage(err: unknown, fallback: string): string {
-  if (typeof err === "string") return err.trim() === "" ? fallback : err;
-  if (err instanceof Error) return err.message.trim() === "" ? fallback : err.message;
-  return fallback;
-}
 
 /** The six General-tab values, trimmed where the store trims: the legal name
  *  and address are trimmed, the hidden extras (phone, email, tax ID) and the

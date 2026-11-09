@@ -37,18 +37,45 @@ func TestClientSendsBearerToken(t *testing.T) {
 	}
 }
 
-func TestClientClearsSessionOn401(t *testing.T) {
-	cleared := false
+// TestClientSurfacesThe401CodeWithoutClearingAnything replaces the old
+// "any 401 clears the token" hook (issue #531). The client now reports the
+// status and the stable code; only the session-check binding and a manual
+// sign-out may clear the token.
+func TestClientSurfacesThe401CodeWithoutClearingAnything(t *testing.T) {
 	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusUnauthorized)
-		_, _ = writer.Write([]byte(`{"error":"invalid or expired session"}`))
+		_, _ = writer.Write([]byte(`{"error":"session expired","code":"session_expired"}`))
 	})
-	client.OnUnauthorized = func() { cleared = true }
-	if err := client.Health(); err == nil {
+	err := client.Health()
+	if err == nil {
 		t.Fatal("expected error on 401")
 	}
-	if !cleared {
-		t.Error("401 did not trigger the session-clear hook")
+	if got := StatusOf(err); got != http.StatusUnauthorized {
+		t.Errorf("StatusOf = %d; want 401", got)
+	}
+	if got := CodeOf(err); got != "session_expired" {
+		t.Errorf("CodeOf = %q; want session_expired", got)
+	}
+}
+
+// TestIsTransportDistinguishesAnUnansweredRequest pins the difference the
+// typed session check needs: an offline laptop never reached the server, while
+// a 5xx or a malformed body did.
+func TestIsTransportDistinguishesAnUnansweredRequest(t *testing.T) {
+	unreachable := New("http://127.0.0.1:1", func() string { return "" })
+	if err := unreachable.Health(); err == nil {
+		t.Fatal("expected a network error")
+	} else if !IsTransport(err) {
+		t.Errorf("IsTransport(%v) = false; want true for a request that never reached the server", err)
+	}
+
+	client, _ := stubServer(t, func(writer http.ResponseWriter, request *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	})
+	if err := client.Health(); err == nil {
+		t.Fatal("expected a server error")
+	} else if IsTransport(err) {
+		t.Errorf("IsTransport(%v) = true; want false when the server answered", err)
 	}
 }
 

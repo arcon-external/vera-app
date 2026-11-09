@@ -113,11 +113,13 @@ import {
   type PurchaseOrderSettings,
   type WorkspaceSettings,
 } from "./workspaceSettings";
-import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { CheckSession, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
 import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
+import { errorMessage } from "./errors";
+import { isSessionEnd, sameUser, type SessionStatus } from "./session";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -487,16 +489,6 @@ function buildDescription(description: string, bullets: string[]): string {
   return parts.join("\n");
 }
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return fallback;
-}
-
 /** Issue #491: the three PO tabs share one workspace. */
 export function isPurchaseOrderPage(page: AppPage): boolean {
   return page === "po" || page === "po-drafts" || page === "po-archive";
@@ -554,7 +546,7 @@ function App() {
     onRefreshError: (error) =>
       pushToast(
         "error",
-        getErrorMessage(
+        errorMessage(
           error,
           "The saved purchase order could not be reloaded, so the archive is shown."
         )
@@ -776,13 +768,22 @@ function App() {
       } catch (error) {
         pushToast(
           "error",
-          getErrorMessage(error, "The purchase order could not be opened.")
+          errorMessage(error, "The purchase order could not be opened.")
         );
       }
     },
     [poLeave, poWorkspace.open, pushToast]
   );
   const [user, setUser] = useState<SignedInUser | null>(null);
+  // Issue #531: an involuntary session end preserves the workspace and shows
+  // a re-login surface. endedUser is the account whose work is preserved, so
+  // the same account can restore it and a different one starts clean.
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const endedUser = useRef<SignedInUser | null>(null);
+  const userRef = useRef<SignedInUser | null>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
   // Issue #492: the account's device-local Quotation and PO defaults. They are
   // read when the signed-in account changes and written by the settings pages;
   // signing out resets this copy but never removes the saved records.
@@ -1172,61 +1173,85 @@ function App() {
   }, [signedIn, loadCustomers]);
 
 
+  // The destructive reset shared by a manual sign-out and a different user
+  // signing in. An involuntary session end deliberately does NOT call this:
+  // it preserves the editor, page, history, scroll and PO workspace for the
+  // same user's re-login (issue #531).
+  const clearWorkspace = useCallback(() => {
+    resetForm();
+    setCompanyDirty(false);
+    // Issue #494: the remembered workspace context belongs to the session
+    // that opened it; the next sign-in starts from Home with none.
+    setSettingsOrigin(null);
+    // Ticket 02: unsaved state never survives a destructive reset. The
+    // editor's local working copy, the history stack, the scroll positions and
+    // the shell actions all reset with the session; app close needs nothing
+    // because none of it is persisted.
+    closePurchaseOrder();
+    setPageHistoryStack([]);
+    setPoShellActions(null);
+    scrollPositions.current.clear();
+    setPage("home");
+  }, [closePurchaseOrder, resetForm]);
+
   const handleSignOut = useCallback(async () => {
     try {
       await Logout();
     } catch {
       // Session may already be invalid; sign out locally regardless.
     } finally {
+      endedUser.current = null;
+      setSessionEnded(false);
       setUser(null);
-      resetForm();
-      setCompanyDirty(false);
-      // Issue #494: the remembered workspace context belongs to the session
-      // that opened it; the next sign-in starts from Home with none.
-      setSettingsOrigin(null);
-      // Ticket 02: unsaved state never survives sign-out. The editor's local
-      // working copy, the history stack, the scroll positions and the shell
-      // actions all reset with the session; app close needs nothing because
-      // none of it is persisted.
-      closePurchaseOrder();
-      setPageHistoryStack([]);
-      setPoShellActions(null);
-      scrollPositions.current.clear();
-      setPage("home");
+      clearWorkspace();
     }
-  }, [closePurchaseOrder, resetForm]);
+  }, [clearWorkspace]);
 
-  // Revalidate the session while signed in so server-side revocation
-  // (deactivation, approved deletion, password change) signs the device out
-  // within about a minute. Network errors are ignored: an offline laptop
-  // waking up must not be signed out by a failed poll.
+  // Re-login after an involuntary session end. The same account gets its
+  // preserved workspace back; a different account starts clean.
+  const handleSignedIn = useCallback(
+    (next: SignedInUser) => {
+      if (endedUser.current !== null && !sameUser(endedUser.current, next)) {
+        clearWorkspace();
+      }
+      endedUser.current = null;
+      setSessionEnded(false);
+      setUser(next);
+    },
+    [clearWorkspace]
+  );
+
+  // Revalidate the session while signed in. Only a real session-end status
+  // signs the user out; transport, 5xx, 429 and malformed responses are
+  // connection states and leave the editor exactly where it was (issue #531).
   useEffect(() => {
     if (!signedIn) return;
     const timer = window.setInterval(() => {
-      CurrentUser()
-        .then((restored) => setUser(restored as SignedInUser))
-        .catch((err: unknown) => {
-          const message = typeof err === "string" ? err : "";
-          if (message.startsWith("reach the quotation server")) return;
+      void (async () => {
+        try {
+          // The generated binding declares the result as unknown until the
+          // Wails models are regenerated after the backend slices merge; the
+          // local SessionStatus is the contract this poll acts on.
+          const status = (await CheckSession()) as SessionStatus;
+          if (status.State === "active") {
+            if (status.User) setUser(status.User as SignedInUser);
+            return;
+          }
+          if (!isSessionEnd(status.State)) return;
+          endedUser.current = userRef.current;
+          setSessionEnded(true);
           setUser(null);
-          resetForm();
-          setCompanyDirty(false);
-          setSettingsOrigin(null);
-          // Ticket 02: a revoked session signs out exactly like a manual one:
-          // no workspace, history, scroll or shell action survives it.
-          closePurchaseOrder();
-          setPageHistoryStack([]);
-          setPoShellActions(null);
-          scrollPositions.current.clear();
-          setPage("home");
           pushToast(
             "error",
-            "You've been signed out. Contact your administrator if this was unexpected."
+            "Your session ended. Sign in to continue where you left off."
           );
-        });
+        } catch {
+          // A binding rejection is not a session end. Keep the session.
+        }
+      })();
     }, 60000);
     return () => window.clearInterval(timer);
-  }, [signedIn, resetForm, pushToast]);
+  }, [signedIn, pushToast]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);
@@ -1303,7 +1328,7 @@ function App() {
     } catch (error: unknown) {
       pushToast(
         "error",
-        getErrorMessage(error, "We couldn't save this draft. Try again.")
+        errorMessage(error, "We couldn't save this draft. Try again.")
       );
     } finally {
       setSavingDraft(false);
@@ -1962,7 +1987,7 @@ function App() {
       pushToast("success", "Quotation prepared. Review the totals before exporting.");
     } catch (error: unknown) {
       clearPreview();
-      const message = getErrorMessage(
+      const message = errorMessage(
         error,
         "We couldn't prepare the quotation. Check the form and try again."
       );
@@ -2046,7 +2071,7 @@ function App() {
       setStatus({ type: "idle", message: "" });
       pushToast("success", "Quotation exported.");
     } catch (error: unknown) {
-      const message = getErrorMessage(
+      const message = errorMessage(
         error,
         "We couldn't export the quotation. Check the save location and try again."
       );
@@ -2322,7 +2347,7 @@ function App() {
           } catch (error) {
             pushToast(
               "error",
-              getErrorMessage(error, "The purchase order draft could not be opened.")
+              errorMessage(error, "The purchase order draft could not be opened.")
             );
           }
         }}
@@ -2335,7 +2360,7 @@ function App() {
           <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />
         </div>
       ) : user === null ? (
-        <LoginPage onSignedIn={setUser} />
+        <LoginPage onSignedIn={handleSignedIn} sessionEnded={sessionEnded} />
       ) : (
     <>
       {updateState?.UpdateAvailable ? (
