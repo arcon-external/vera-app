@@ -26,8 +26,8 @@ Managed Postgres (Neon, Singapore, PG18, schema `vera`)
   archive browser, admin screens. Holds **no database credentials** — only a
   remembered session token in the OS keychain; unremembered tokens stay in memory.
 - **API** (`cmd/veraserver`, Echo/Go): the sole trust boundary. Owns auth
-  (Argon2id, 8h standard / 30d remembered fixed-lifetime sessions, login rate limit 5 failures →
-  cooldown), user admin, quotation numbering, archive, backup download/restore,
+  (Argon2id, 8h idle / 7d absolute standard and 30d idle / 90d absolute remembered
+  sessions, renewable below the cap, login rate limit 5 failures → cooldown), user admin, quotation numbering, archive, backup download/restore,
   audit log. Stateless: all state is in Postgres.
 - **Database**: Neon project `vera-app`, region AWS Singapore, Postgres 18,
   database `neondb`, schema `vera`. Plain Postgres, **no extensions**. ~11 MB
@@ -234,8 +234,10 @@ previous image tag until the new one is verified.
 - Internet exposure is limited to the staff HTTPS URL; the database accepts
   no inbound host ports anywhere.
 - Passwords: Argon2id, ≥10 chars on setup; rate-limited login; sessions
-  8h standard / 30d remembered, fixed at issuance and revocation-checked per
-  request. Logout revokes server-side; remembered tokens live in the OS keychain.
+  8h idle / 7d absolute standard and 30d idle / 90d absolute remembered,
+  renewal slides the idle deadline but never the cap, and every request is
+  revocation-checked. Logout revokes server-side; remembered tokens live in
+  the OS keychain.
 - Abuse posture today is adequate for a team app behind no public signup;
   revisit before any public/exposed-contract use (WAF, lockout review).
 - Desktop distribution stays unsigned until the $99 Apple decision; document
