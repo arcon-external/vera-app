@@ -1654,6 +1654,7 @@ func TestPurchaseOrderMigration031RefusesToFabricatePrintedTotals(t *testing.T) 
 	database := &Store{pool: pool, config: Config{DSN: dsn, Schema: schema}}
 	t.Cleanup(database.Close)
 	seedRecipientCompanyColumnOnLegacySchema(t, pool, schema)
+	seedQuotationNoteColumnOnLegacySchema(t, pool, schema)
 
 	quotation := seedPOQuotation(t, database, "PT. Buyer", "Missing printed evidence")
 	user := poTestUser(t, database)
