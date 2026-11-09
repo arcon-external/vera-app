@@ -37,9 +37,9 @@ of the sprint record below stands as verified.
 
 > **Post-merge update (2026-11-09):** the sprint is merged on `main` at
 > `841b704` (#484 at `6a8c245`, #519/#524 at `841b704`); the separate sign-in
-> fix is at `e15cb4d`. No release has been made. The remaining hand-driven Mac
-> signoff is #501. §10 records the post-merge state; the table above is the
-> original 2026-10-22 record.
+> fix is at `e15cb4d`; this record is at `0ece338`. No release has been made.
+> The #501 browser E2E is recorded in §11. §10 records the post-merge state;
+> the table above is the original 2026-10-22 record.
 
 ## 1. Manual and PDF workflows
 
@@ -398,17 +398,18 @@ as its Docker and API tests documented at the time.
 The sprint is merged on `main`; this section supersedes the administrative state
 in §8 where the two disagree.
 
-- `main` at `e15cb4d`:
+- `main` at `0ece338`:
   - `6a8c245` — #464/#502/#518 via PR #484 (the sprint’s integration PR).
   - `841b704` — #519 motion/a11y and #524 focus ring via PR #525.
   - `e15cb4d` — #526 sign-in refusal message via PR #527 (a separate
     post-sprint fix, not part of this spec).
+  - `0ece338` — this post-merge verification record via PR #528.
 - #513–#518 are closed as implemented on `main`; #519/#524 closed with PR #525;
-  #526 closed with PR #527.
+  #526 closed with PR #527; #482 closed with PR #528.
 - No release or tag has been made. The latest release remains **v0.14.5**; the
   API deploy runs from `main`, but no desktop version was pushed.
-- **#501 remains the hand-driven Mac signoff.** #482 closes with this record;
-  #464/#502 stay open until #501 closes.
+- **#501 browser E2E is recorded in §11.** #482 and #501 close with this record;
+  #464/#502 close after it.
 
 ### Post-merge gates
 
@@ -432,17 +433,53 @@ in §8 where the two disagree.
   while keeping the static 2 px progress line and the focus rings.
 - The snapshot case `PurchaseOrderReconciliationSurfaces` renders the sheet at
   360 and the rail at 1280.
-- The hand-driven keyboard/focus/paste, screen-reader and 200% zoom checks are
-  **not** proven here; they remain #501.
+- The keyboard/focus/paste and 200% page-scale checks are recorded in §11; the
+  screen reader remains unverified.
 
-### Still hand-driven (#501)
+### Residual after the browser pass (#501)
 
-- Real Wails clicks for both entry paths, typing, native focus/keyboard, file
-  pickers, PDF preview and window resize.
-- The screen-reader announcement itself.
-- 200% zoom and the live 1024 boundary.
-- The Mac fixture manifest, loopback service, repeat-run edit preservation and
-  synthetic-PDF limitations.
-- Local-only `wails dev` versus packaged/default/debug-packaged API selection
-  under a conflicting development override, and no secrets in the desktop
-  binary.
+- The real macOS WKWebView window: the browser pass used the Wails dev server in
+  Chrome, so the bindings and API path are real but the webview is not.
+- A screen reader’s announcement (only DOM roles/`aria-live` and text changes
+  were checked).
+- The native file picker and OS PDF viewer (the PDF controls are present; the
+  picker was not exercised).
+- The Mac’s own loopback API/Postgres service: the dev app used the Linux API
+  through the existing SSH tunnel; the Mac’s Postgres was not running.
+- A real macOS 200% display zoom: CDP page scale 2x was used; the layout looked
+  correct but this is not the OS display setting.
+
+## 11. Browser E2E (#501, 2026-11-09)
+
+The PO workbench was driven in the Wails dev server from headless Chrome over
+CDP, against the local `veratest` database (6 quotations / 8 POs). The Mac’s
+`wails dev` served `http://localhost:34115`; a Linux Chrome connected over an
+SSH tunnel. The Go bindings are the real ones, so this exercises the real
+store/API path, not a mock.
+
+### Verified
+
+| Flow | Evidence |
+| --- | --- |
+| Home | Four destinations; DO/Invoice `COMING LATER`; admin sees the Admin Dashboard, staff does not. |
+| PO-first entry | Blank editor → manual header + one line (2 × Rp150.000) → Save draft → Drafts search/paste → reopen; values and the Rp300.000 total persisted. |
+| Link a quotation | Available `1595260001` revision 1 selected; the difference review showed Incoterms EXW vs FOB, an extra line and a missing quotation line; resolved with PO entry + acknowledgements; source linked at version 7. |
+| Final save | Incoterms changed to FOB; 0 differences; no-PDF confirmation checked; saved view `MOCK-E2E-501`, SAVED, 3 resolved, Rp300.000; no confirmation number assigned. |
+| Quotation-first occupied | `1594260001` detail shows `View PO`; it opens `MOCK-CUSTOMER-PO-005`’s saved view (no duplicate). |
+| Source missing | `MOCK-CUSTOMER-PO-008` saved view: SOURCE MISSING + `Link Quotation`; the repair selector opens; Cancel returns focus to `Link Quotation`. `MOCK-CUSTOMER-PO-006` never-linked draft: 2 lines, PPN, mixed-scan PDF, `Link a Quotation`. |
+| Staff restrictions | Staff has no Admin Dashboard; no `Link Quotation`/`Repair source link` on finalized records; draft `Link a Quotation` and `Correct purchase order` remain; no `MORE ACTIONS` column. |
+| Keyboard | Saved reconciliation tabs All 3 / Resolved 3; ArrowRight/ArrowLeft change `aria-selected`. |
+| Paste | `Control+V` into the archive search filled `MOCK-CUSTOMER-PO-005` (the headless browser is Linux; `Meta+V` is not the paste key there). |
+| Layout | 360 archive no horizontal overflow; 1024 no overflow; 200% page scale (CDP `setPageScaleFactor: 2`) showed no clipped controls. |
+| Admin context | Single navbar Clients/Team/Company/Backups; Company sub-tabs General/Units/Quotation/Portal. |
+| API selection | Packaged binary contains `https://api.arconpentapersada.co.id`; `apibase_dev.go` enforces a loopback dev URL; a strings scan found no DSN, signing key or private key. |
+| Fixtures | Dev DB `veratest` has 6 quotations / 8 POs; the Mac’s `test-data/` is empty (fixtures live in the DB). |
+
+Screenshots and scripts are local evidence: `/tmp/opencode/e2e-501-*.png` and
+`/tmp/opencode/cdp/e2e-*.js`; they are not committed.
+
+### Not verified
+
+The residual list above is the complete set. The browser pass does not claim the
+real WKWebView, a screen reader’s announcement, the native file picker/PDF
+viewer, the Mac’s own loopback service, or a real macOS 200% display zoom.
