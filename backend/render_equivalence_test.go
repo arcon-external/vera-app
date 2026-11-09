@@ -163,6 +163,90 @@ func TestRenderersAgreeOnRewordedLabels(t *testing.T) {
 	}
 }
 
+// TestRenderersAgreeOnTheNote is the #534 guard: the optional note has to
+// print in both renderers, exactly once, in the items block above the terms.
+//
+// The note is the one field only the seam can carry to the native engine, so
+// an HTML-only change prints in the browser and silently drops out of the
+// native PDF. This fixture adds the note to the same 13-item document the
+// pagination test uses, so a note card measured differently by the two engines
+// shows up as a different page count or a different first item per page.
+func TestRenderersAgreeOnTheNote(t *testing.T) {
+	requireChrome(t)
+	ctx := context.Background()
+	const note = "Please schedule delivery after 09:00.\nInstallation is by the customer."
+	in := equivalenceFixture(t, func(q *Quotation) {
+		q.Data.Note = note
+	})
+
+	browser, err := chromedprender.New().Render(ctx, in)
+	if err != nil {
+		t.Fatalf("browser render: %v", err)
+	}
+	native, err := gpdfrender.New().Render(ctx, in)
+	if err != nil {
+		t.Fatalf("native render: %v", err)
+	}
+
+	bPages, bFirst := pageShape(t, browser)
+	nPages, nFirst := pageShape(t, native)
+	if bPages != nPages {
+		t.Errorf("page count differs with a note: browser %d, native %d", bPages, nPages)
+	}
+	for i := range bFirst {
+		if bFirst[i] != nFirst[i] {
+			t.Errorf("page %d begins at item %d in the browser and %d in the native renderer with a note",
+				i+1, bFirst[i], nFirst[i])
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		pdf  []byte
+	}{
+		{"browser", browser},
+		{"native", native},
+	} {
+		// Two single words from the note, rather than a whole line: pdftotext's
+		// -layout mode pads the gaps between words, so a phrase match would
+		// depend on its spacing decisions.
+		text := pdfText(t, tc.pdf)
+		for _, word := range []string{"09:00", "customer"} {
+			if got := strings.Count(text, word); got != 1 {
+				t.Errorf("%s render prints the note word %q %d times; want once", tc.name, word, got)
+			}
+		}
+
+		pages := extractPages(t, tc.pdf)
+		notePage, noteY, ok := wordAt(pages, "Please")
+		if !ok {
+			t.Errorf("%s render does not print the note", tc.name)
+			continue
+		}
+		termsPage, termsY, ok := wordAt(pages, "Conditions")
+		if !ok {
+			t.Errorf("%s render does not print the terms heading", tc.name)
+			continue
+		}
+		if notePage > termsPage || (notePage == termsPage && noteY >= termsY) {
+			t.Errorf("%s render prints the note below the terms: note page %d y %.2f, terms page %d y %.2f",
+				tc.name, notePage+1, noteY, termsPage+1, termsY)
+		}
+	}
+}
+
+// wordAt locates one extracted word's page and top edge.
+func wordAt(pages [][]pdftotextWord, want string) (int, float64, bool) {
+	for i, words := range pages {
+		for _, w := range words {
+			if w.text == want {
+				return i, w.y, true
+			}
+		}
+	}
+	return -1, 0, false
+}
+
 // TestEquivalenceFixtureCarriesCurrency pins that the hand-built equivalence
 // document carries its currency on both paths to the renderers: the template
 // HTML (the browser's whole input) and the seam's Currency field (what the
@@ -190,10 +274,12 @@ func TestEquivalenceFixtureCarriesCurrency(t *testing.T) {
 const noColumnMaxX = 90.0
 
 // pdftotextWord is one extracted word with the position pdftotext reported.
-// Only x is read: see pageShape.
+// x locates the item-number column (see pageShape); y locates a block's
+// vertical order, which the note test uses to prove it prints above the terms.
 type pdftotextWord struct {
 	text string
 	x    float64
+	y    float64
 }
 
 // pageShape reports the page count and, per page, the lowest item number in the
@@ -271,6 +357,8 @@ func extractPages(t *testing.T, pdf []byte) [][]pdftotextWord {
 					switch a.Name.Local {
 					case "xMin":
 						word.x, _ = strconv.ParseFloat(a.Value, 64)
+					case "yMin":
+						word.y, _ = strconv.ParseFloat(a.Value, 64)
 					}
 				}
 				text.Reset()

@@ -65,6 +65,12 @@ type Input struct {
 	ValidUntil  string
 	Revision    string
 
+	// Note is the optional quotation-level note (#534), printed once under
+	// the last line row and above the terms. Empty prints nothing. The
+	// application has already trimmed its outer whitespace; its internal
+	// line breaks are preserved and wrap like the browser's pre-wrap.
+	Note string
+
 	// Terms is the four terms-and-conditions sentences, substituted by the
 	// application exactly as the seam carries them. The engine prints them and
 	// composes nothing: before #339 it built its own four from its own

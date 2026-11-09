@@ -1491,6 +1491,13 @@ func (q *Quotation) uomLabel(value string) string {
 // corrupt q.Data -- hence the deep copy of every SubItems slice.
 func (q *Quotation) displayData() QuotationData {
 	data := q.Data
+	// The note is normalized here as well as in Prepare: the template is
+	// executed against this copy, and a caller that builds the data bag
+	// directly (the renderer equivalence fixture, the template sample) must
+	// print the same document the native renderer is handed. Trimming is
+	// idempotent, and a whitespace-only note therefore prints nothing in
+	// both renderers rather than an empty card in one of them.
+	data.Note = strings.TrimSpace(q.Data.Note)
 	data.Items = make([]QuotationItem, len(q.Data.Items))
 	for i, item := range q.Data.Items {
 		item.UoM = q.uomLabel(item.UoM)
@@ -1641,6 +1648,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		Currency: q.Data.Currency,
 
 		Subject:          q.Data.Subject,
+		Note:             data.Note,
 		RecipientName:    q.Data.RecipientName,
 		RecipientCompany: q.Data.RecipientCompany,
 		RecipientAddress: q.Data.RecipientAddress,

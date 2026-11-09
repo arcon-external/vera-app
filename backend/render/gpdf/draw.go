@@ -1152,6 +1152,39 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 	e.drawPriceCell(p, m, m.cols.total, top, bodyH, rb.item.Total, e.pal.Ink)
 }
 
+// drawNote paints the optional quotation note (#534): a standalone card under
+// the items table with a 3px left accent and a small label. It is not a table
+// row, it prints once, and it carries none of the table's clip.
+//
+// The card is three paints because the stylesheet's border-left is 3px while
+// its other sides are 1px: a single stroked box would draw all four sides the
+// same width. The accent is clipped to the card's rounded outline, the way the
+// subject strip's label is, so the left corners stay round.
+func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
+	if m.noteH <= 0 {
+		return
+	}
+	x, w, h := m.innerX, m.innerW, m.noteH
+	clip := even(x, top, w, h, px(cardRadiusPx))
+
+	p.add(box{x: x, y: top, w: w, h: h, fill: e.pal.Surface, radius: px(cardRadiusPx)})
+	p.add(box{x: x, y: top, w: px(noteAccentPx), h: h, fill: e.pal.Accent, clip: clip})
+	p.add(box{x: x, y: top, w: w, h: h, stroke: e.pal.Edge, lw: px(noteBorderPx), radius: px(cardRadiusPx)})
+
+	tx := x + px(noteAccentPx) + px(notePadX)
+	ty := top + px(noteBorderPx) + px(notePadY)
+	p.add(run{x: tx, baseline: ty + addrBaselineOffset, size: px(noteLabelPx),
+		text: in.Labels.Note, bold: true, color: e.pal.Accent})
+	ty += px(noteLabelPx)*bodyLH + px(noteLabelGapPx)
+	for _, line := range e.noteLines(in, m) {
+		if line != "" {
+			p.add(run{x: tx, baseline: ty + bodyBaselineOffset, size: px(bodyPx),
+				text: line, color: e.pal.Ink})
+		}
+		ty += px(bodyPx) * bodyLH
+	}
+}
+
 // drawFooterCards paints the terms and totals cards, the first of the three
 // trailer blocks. Each block is placed independently by the page assembler so
 // the trailer can fragment across pages the way the browser's grid does.

@@ -393,6 +393,36 @@
 		}
 
 
+		/* ── Quotation note ─────────────────────────────────────────────────
+		   One optional note for the whole quotation (issue 534), printed once
+		   below the last line row and above the terms. It is a standalone
+		   card rather than a table row, so it never repeats per item and an
+		   empty note leaves the items block exactly as it was. The left
+		   accent is the card's only strong mark: the note is prose the
+		   customer reads, not a priced line. pre-wrap is what makes the
+		   author's line breaks print; break-inside keeps the card atomic
+		   across a page break, matching the native renderer. */
+		.note-card {
+			border: 1px solid var(--edge);
+			border-left: 3px solid var(--accent-blue);
+			border-radius: 10px;
+			padding: 12px 14px;
+			background: var(--surface);
+			break-inside: avoid;
+			page-break-inside: avoid;
+		}
+
+		.note-card .note-label {
+			font-size: 12px;
+			font-weight: 700;
+			color: var(--accent-blue);
+			margin-bottom: 4px;
+		}
+
+		.note-card .note-body {
+			white-space: pre-wrap;
+		}
+
 		.footer {
 			display: grid;
 			grid-template-columns: 1.2fr 0.8fr;
