@@ -67,9 +67,13 @@ func embeddable(data []byte, sh *shaper, runes map[rune]bool) (*font.TrueTypeFon
 type glyphSets struct {
 	regular map[rune]bool
 	bold    map[rune]bool
+	italic  map[rune]bool
 }
 
-func (g glyphSets) forBold(bold bool) map[rune]bool {
+func (g glyphSets) forStyle(bold, italic bool) map[rune]bool {
+	if italic {
+		return g.italic
+	}
 	if bold {
 		return g.bold
 	}
@@ -83,14 +87,18 @@ func (g glyphSets) forBold(bold bool) map[rune]bool {
 // is chosen at registration time, and the set of glyphs to keep follows from the
 // layout, which is the earlier of the two.
 func collectRunes(pages []*page) glyphSets {
-	gs := glyphSets{regular: map[rune]bool{}, bold: map[rune]bool{}}
+	gs := glyphSets{
+		regular: map[rune]bool{},
+		bold:    map[rune]bool{},
+		italic:  map[rune]bool{},
+	}
 	for _, p := range pages {
 		for _, prim := range p.prims {
 			r, ok := prim.(run)
 			if !ok {
 				continue
 			}
-			set := gs.forBold(r.bold)
+			set := gs.forStyle(r.bold, r.italic)
 			for _, c := range r.text {
 				set[c] = true
 			}

@@ -163,8 +163,9 @@ func TestRenderersAgreeOnRewordedLabels(t *testing.T) {
 	}
 }
 
-// TestRenderersAgreeOnTheNote is the #534 guard: the optional note has to
-// print in both renderers, exactly once, in the items block above the terms.
+// TestRenderersAgreeOnTheNote is the #534/#540 guard: the optional formatted
+// note has to print in both renderers, exactly once, in the items block above
+// the terms, with bold, italic, bullets and numbered rows laid out the same.
 //
 // The note is the one field only the seam can carry to the native engine, so
 // an HTML-only change prints in the browser and silently drops out of the
@@ -174,7 +175,11 @@ func TestRenderersAgreeOnRewordedLabels(t *testing.T) {
 func TestRenderersAgreeOnTheNote(t *testing.T) {
 	requireChrome(t)
 	ctx := context.Background()
-	const note = "Please schedule delivery after 09:00.\nInstallation is by the customer."
+	const note = "Please schedule delivery after 09:00.\n" +
+		"- **Confirm** *site* access\n" +
+		"- Keep the **loading bay** *clear*\n" +
+		"1. Notify security\n" +
+		"2. Log the visit"
 	in := equivalenceFixture(t, func(q *Quotation) {
 		q.Data.Note = note
 	})
@@ -207,11 +212,12 @@ func TestRenderersAgreeOnTheNote(t *testing.T) {
 		{"browser", browser},
 		{"native", native},
 	} {
-		// Two single words from the note, rather than a whole line: pdftotext's
+		// Single words from the note, rather than a whole line: pdftotext's
 		// -layout mode pads the gaps between words, so a phrase match would
-		// depend on its spacing decisions.
+		// depend on its spacing decisions. Each word appears exactly once, so
+		// a note printed twice or dropped is visible.
 		text := pdfText(t, tc.pdf)
-		for _, word := range []string{"09:00", "customer"} {
+		for _, word := range []string{"09:00", "site", "loading", "security", "visit"} {
 			if got := strings.Count(text, word); got != 1 {
 				t.Errorf("%s render prints the note word %q %d times; want once", tc.name, word, got)
 			}

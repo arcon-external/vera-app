@@ -184,6 +184,17 @@ func (f *metricFace) Width(s string, sizePt float64) float64 {
 
 // ShapeFor returns the shaper for a weight.
 func (e *Engine) ShapeFor(bold bool) *shaper {
+	return e.shapeFor(bold, false)
+}
+
+// shapeFor returns the shaper for a weight and style. The supported note
+// subset never nests bold inside italic, so a run that somehow carries both
+// uses the italic face rather than inventing a bold-italic face the engine
+// does not embed.
+func (e *Engine) shapeFor(bold, italic bool) *shaper {
+	if italic {
+		return e.italicShape
+	}
 	if bold {
 		return e.boldShape
 	}
@@ -193,7 +204,13 @@ func (e *Engine) ShapeFor(bold bool) *shaper {
 // Width measures s in points as the browser would set it: shaped, so ligatures
 // substitute and pairs kern.
 func (e *Engine) Width(s string, sizePt float64, bold bool) float64 {
-	return e.ShapeFor(bold).ShapeWidth(s, sizePt)
+	return e.widthFor(s, sizePt, bold, false)
+}
+
+// widthFor measures a run in its own face, which the note's bold and italic
+// spans need so wrapping breaks where the browser breaks it.
+func (e *Engine) widthFor(s string, sizePt float64, bold, italic bool) float64 {
+	return e.shapeFor(bold, italic).ShapeWidth(s, sizePt)
 }
 
 // WidthTracked measures s with extra tracking per character, which the eyebrow's

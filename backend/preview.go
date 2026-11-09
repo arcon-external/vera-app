@@ -54,7 +54,8 @@ type CustomerPreview struct {
 	Incoterm string
 	Subject  string
 	// Note is the quotation-level note the customer document prints once under
-	// the line items (#534). Empty means no note.
+	// the line items (#534). It is the restricted Markdown source (#540).
+	// Empty means no note.
 	Note                   string
 	RecipientName          string
 	RecipientCompany       string

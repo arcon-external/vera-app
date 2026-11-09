@@ -46,7 +46,7 @@ func (*lazy) Name() string { return "gpdf" }
 // the parsed fonts and shapers, which are read-only after construction.
 func (l *lazy) Render(_ context.Context, in quotation.Input) ([]byte, error) {
 	l.once.Do(func() {
-		l.eng, l.err = NewEngine(in.Fonts, "assets/inter-medium.ttf", "assets/inter-bold.ttf")
+		l.eng, l.err = NewEngine(in.Fonts, "assets/inter-medium.ttf", "assets/inter-bold.ttf", "assets/inter-italic.ttf")
 	})
 	if l.err != nil {
 		return nil, fmt.Errorf("load render engine: %w", l.err)

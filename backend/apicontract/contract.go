@@ -813,8 +813,11 @@ type QuotationDetail struct {
 	DisplayNett                 string `json:"displayNett"`
 	CustomerName                string `json:"customerName"`
 	Subject                     string `json:"subject"`
-	// Note is the quotation-level note this revision printed and signed. It
-	// is empty for revisions issued before the note existed.
+	// Note is the quotation-level note this revision printed and signed. Its
+	// source is the restricted Markdown subset (**bold**, *italic*, "- "
+	// bullets, "1. " numbered items, paragraphs and line breaks); other markup
+	// prints literally. It is empty for revisions issued before the note
+	// existed.
 	Note                        string             `json:"note"`
 	Currency                    string             `json:"currency"`
 	RecipientName               string             `json:"recipientName"`
