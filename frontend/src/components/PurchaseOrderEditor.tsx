@@ -926,7 +926,7 @@ export function PurchaseOrderEditorView({
       ? `${state.taxType}${state.serviceCategory !== "" ? ` / ${state.serviceCategory}` : ""}`
       : state.taxCategory;
   return (
-    <div className="flex flex-col gap-6">
+    <div className="animate-step-in flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <SectionHeading
@@ -2655,6 +2655,13 @@ export function PurchaseOrderEditorPage({
       setView("confirm");
       return;
     }
+    const progressStarted = Date.now();
+    const waitForProgress = async () => {
+      const remaining = 300 - (Date.now() - progressStarted);
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+    };
     setFinalSaving(true);
     try {
       const saved = await FinalizePurchaseOrder(
@@ -2666,6 +2673,7 @@ export function PurchaseOrderEditorPage({
       );
       const outcome = writeOutcome(saved);
       if (outcome.kind === "saved") {
+        await waitForProgress();
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
         setConflict(null);
         // Round-2 N2: the saved record (and its session) is read-only. Never
@@ -3205,7 +3213,7 @@ export function PurchaseOrderEditorPage({
         </div>
         <aside
           aria-label="Reconciliation"
-          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-176px)] lg:flex-col lg:gap-3 [@media(max-height:719px)]:lg:max-h-none"
+          className="animate-rail-in hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-176px)] lg:flex-col lg:gap-3 [@media(max-height:719px)]:lg:max-h-none"
         >
           <div className="min-h-0 flex-1 overflow-hidden [@media(max-height:719px)]:overflow-visible">
           <ReconciliationPaneContent
@@ -3287,7 +3295,7 @@ export function PurchaseOrderEditorPage({
               closeSheet();
             }
           }}
-          className="fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 lg:hidden"
+          className="animate-sheet-in fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-24 pt-4 lg:hidden"
         >
           <ReconciliationPaneContent
             idPrefix="sheet"

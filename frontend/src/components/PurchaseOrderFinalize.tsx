@@ -210,7 +210,7 @@ export function PurchaseOrderDifferenceReviewView({
   ];
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="animate-step-in flex flex-col gap-5">
       {linking ? null : (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -751,8 +751,12 @@ export function PurchaseOrderFinalConfirmationView({
   const { Order: order, DocumentState: documentState } = review;
   const noDocument = documentState !== "attached";
   const ready = !saving && (!noDocument || documentConfirmed);
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (error !== null) errorRef.current?.focus();
+  }, [error]);
   return (
-    <div className="flex flex-col gap-5">
+    <div className="animate-step-in flex flex-col gap-5">
       <div>
         <SectionHeading title="Final save" hint="One-way: a saved record is read-only" />
         <p className="mt-1 max-w-3xl text-body text-ink-500">
@@ -887,7 +891,34 @@ export function PurchaseOrderFinalConfirmationView({
         </p>
       </Card>
 
-      {error !== null ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
+      {error !== null ? (
+        <div
+          ref={errorRef}
+          tabIndex={-1}
+          data-testid="final-save-error"
+          className="rounded-lg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-500/40"
+        >
+          <StatusBanner tone="danger">{error}</StatusBanner>
+        </div>
+      ) : null}
+
+      {saving ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className="rounded-lg border border-accent-200 bg-accent-50/50 px-4 py-3 text-small text-accent-800"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>Saving purchase order…</span>
+            <span
+              aria-hidden="true"
+              className="relative h-0.5 w-32 overflow-hidden rounded-full bg-accent-100 motion-reduce:bg-accent-500/40"
+            >
+              <span className="absolute inset-y-0 left-0 w-1/2 animate-final-save-sweep rounded-full bg-accent-500 motion-reduce:hidden" />
+            </span>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <Button aria-label="Back to review" onClick={onBack} disabled={saving}>
@@ -1042,7 +1073,16 @@ export function PurchaseOrderSavedView({
   });
   const [sheetOpen, setSheetOpen] = useState(false);
   const savedTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const savedHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const repairActionRef = useRef<HTMLButtonElement | null>(null);
+  // The saved record is the arrival of the Final Save handoff. Focus its
+  // heading so keyboard users land at the top of the new surface. A repair
+  // return has its own focus target; skip the heading there so the repair
+  // flow stays one focus move.
+  const initialRepairReturn = useRef(repairReturn);
+  useEffect(() => {
+    if (initialRepairReturn.current == null) savedHeadingRef.current?.focus();
+  }, []);
   const handledRepairReturn = useRef<RepairReturn | null>(null);
   const actorNameFor = (id: number): string | null =>
     actorId !== undefined &&
@@ -1166,7 +1206,7 @@ export function PurchaseOrderSavedView({
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="animate-step-in flex flex-col gap-5">
       <div className="hidden lg:block">
         <a
           href="#saved-rail-pane-heading"
@@ -1189,7 +1229,11 @@ export function PurchaseOrderSavedView({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <SectionHeading title="Purchase Order" hint={`Saved record ${order.ID}`} />
-              <h1 className="tnum text-display font-semibold text-ink-950">
+              <h1
+                ref={savedHeadingRef}
+                tabIndex={-1}
+                className="tnum text-display font-semibold text-ink-950 focus-visible:outline-hidden"
+              >
                 {order.PONumber}
               </h1>
               <p className="mt-1 text-body text-ink-500">
@@ -1492,7 +1536,7 @@ export function PurchaseOrderSavedView({
         </div>
         <aside
           aria-label="Reconciliation"
-          className="hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-112px)] lg:flex-col"
+          className="animate-rail-in hidden min-h-0 lg:sticky lg:top-[88px] lg:flex lg:max-h-[calc(100dvh-112px)] lg:flex-col"
         >
           <SavedReconciliationPanel
             idPrefix="saved-rail"
@@ -1517,7 +1561,7 @@ export function PurchaseOrderSavedView({
               closeSheet();
             }
           }}
-          className="fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-8 pt-4 lg:hidden"
+          className="animate-sheet-in fixed inset-x-0 bottom-0 top-[var(--shell-header-h,64px)] z-20 flex flex-col gap-3 overflow-y-auto border-t border-rule bg-paper px-5 pb-8 pt-4 lg:hidden"
         >
           <SavedReconciliationPanel
             idPrefix="saved-sheet"

@@ -77,7 +77,13 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+    /* Keep colour, opacity and focus feedback; remove movement. */
+    transition-property: background-color, border-color, color, opacity, box-shadow, fill,
+      stroke !important;
+  }
+
+  *:active {
+    transform: none !important;
   }
 }

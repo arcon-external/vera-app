@@ -266,7 +266,9 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     documentState = "none",
     state = reviewState(),
     stored: PurchaseOrderDTO = order(),
-    assignConfirmation = false
+    assignConfirmation = false,
+    saving = false,
+    error: string | null = null
   ) {
     const evaluation = evaluateReview(state, SOURCE, USD, {}, [], []);
     const payload = buildPurchaseOrderUpdate(evaluation.applied, USD).input!;
@@ -282,8 +284,8 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
         onToggleAssignConfirmation={() => undefined}
         onBack={() => undefined}
         onFinalSave={() => undefined}
-        saving={false}
-        error={null}
+        saving={saving}
+        error={error}
       />
     );
   }
@@ -297,6 +299,14 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     const confirmed = markup(confirmationElement(true));
     expect(confirmed).toMatch(/aria-label="Confirm saving without the customer PDF"[^>]*checked/);
     expect(confirmed).not.toMatch(/aria-label="Final save"[^>]*disabled/);
+  });
+
+  it("shows the Final Save handoff progress while saving", () => {
+    const html = markup(
+      confirmationElement(true, "attached", reviewState(), order(), false, true)
+    );
+    expect(html).toContain("Saving purchase order…");
+    expect(html).toContain("animate-final-save-sweep");
   });
 
   it("does not ask for the confirmation in the attached-PDF branch", () => {

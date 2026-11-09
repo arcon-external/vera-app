@@ -76,6 +76,7 @@ for html in "${html_files[@]}"; do
       -e PATH=/wrapper:/usr/bin:/bin \
       "$image" \
       chrome --headless=new --disable-gpu --hide-scrollbars \
+        --virtual-time-budget=500 \
         --screenshot="$png" \
         --window-size="${width},${height}" \
         "file:///out/$(basename "$html")"

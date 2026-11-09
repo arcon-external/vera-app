@@ -230,6 +230,21 @@ function rail(): HTMLElement {
 }
 
 describe("PurchaseOrderSavedView reconciliation surface (#518)", () => {
+  it("focuses the saved heading on arrival", async () => {
+    await render(
+      saved(
+        <PurchaseOrderSavedView
+          {...baseProps}
+          reconciliationTransport={transportThat(READ)}
+        />
+      )
+    );
+    const heading = container.querySelector("h1");
+    expect(heading).not.toBeNull();
+    expect(heading?.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(heading);
+  });
+
   it("opens the 360 sheet on its heading and returns focus to the trigger on Escape", async () => {
     await render(
       saved(

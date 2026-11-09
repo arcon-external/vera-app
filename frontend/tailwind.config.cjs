@@ -158,11 +158,41 @@ module.exports = {
           from: { opacity: "0", transform: "translateY(-6px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "page-in-a": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "page-in-b": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "step-in": {
+          from: { opacity: "0", transform: "translateY(6px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "rail-in": {
+          from: { opacity: "0", transform: "translateX(6px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "sheet-in": {
+          from: { opacity: "0", transform: "translateY(12px)" },
+          to: { opacity: "1", transform: "none" },
+        },
+        "final-save-sweep": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
       },
       animation: {
         "item-in": "item-in 200ms cubic-bezier(0.25, 1, 0.5, 1) both",
         "status-in": "status-in 180ms cubic-bezier(0.25, 1, 0.5, 1) both",
         "toast-in": "toast-in 180ms cubic-bezier(0.25, 1, 0.5, 1) both",
+        "page-in-a": "page-in-a 200ms cubic-bezier(0.25, 1, 0.5, 1) backwards",
+        "page-in-b": "page-in-b 200ms cubic-bezier(0.25, 1, 0.5, 1) backwards",
+        "step-in": "step-in 200ms cubic-bezier(0.25, 1, 0.5, 1) backwards",
+        "rail-in": "rail-in 200ms cubic-bezier(0.25, 1, 0.5, 1) backwards",
+        "sheet-in": "sheet-in 220ms cubic-bezier(0.25, 1, 0.5, 1) backwards",
+        "final-save-sweep": "final-save-sweep 1.1s ease-in-out 150ms infinite",
       },
     },
   },

@@ -154,6 +154,15 @@ describe("PurchaseOrderHistoryPanel (issue #473)", () => {
     expect(html).toContain("$197.30");
   });
 
+  it("gives the Previous values disclosure a visible focus ring", () => {
+    // Issue #524: the disclosure is keyboard-focusable, so it must show the
+    // same visible ring as every other control in the saved view.
+    const html = markup([CORRECTION]);
+    expect(html).toMatch(
+      /<summary[^>]*focus-visible:ring-2[^>]*>Previous values<\/summary>/
+    );
+  });
+
   it("renders every retained header value, not just the handful it once showed", () => {
     // Wave 2 of #473: a correction that changed only the billing address, the
     // ship-to code, the contact details or a date must be understandable from

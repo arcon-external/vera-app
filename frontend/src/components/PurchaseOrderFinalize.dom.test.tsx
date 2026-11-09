@@ -411,6 +411,12 @@ describe("final save from the editor (issue #471)", () => {
       expect.arrayContaining([{ Key: "line:1:unitPrice", Choice: "po" }])
     );
     expect((payload.Items as Array<{ UnitPriceMinor: number }>)[0].UnitPriceMinor).toBe(10000);
+    // The progress handoff holds for 300 ms; the saved view must not arrive
+    // in the same tick as the response.
+    expect(onSaved).not.toHaveBeenCalled();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    });
     expect(onSaved).toHaveBeenCalledTimes(1);
     expect((onSaved.mock.calls[0][0] as PurchaseOrderDTO).State).toBe("saved");
   });
@@ -448,6 +454,9 @@ describe("final save from the editor (issue #471)", () => {
     expect(finalizeMock).toHaveBeenCalledTimes(1);
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.PONumber).toBe("UNSAVED-NEW");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 320));
+    });
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
 
@@ -487,6 +496,36 @@ describe("final save from the editor (issue #471)", () => {
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.AssignConfirmationNumber).toBe(true);
     expect(payload).not.toHaveProperty("ConfirmationNumber");
+  });
+
+  it("focuses the failure banner when the final save fails", async () => {
+    render();
+    await act(async () => {
+      button("Final Save").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Line 1 unit price").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Payment terms").click();
+    });
+    await act(async () => {
+      button("Continue final save").click();
+    });
+    await act(async () => {
+      checkbox("Confirm saving without the customer PDF").click();
+    });
+    finalizeMock.mockRejectedValueOnce(new Error("The server refused the save."));
+    await act(async () => {
+      button("Final save").click();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.body.textContent).toContain("The server refused the save.");
+    const banner = document.querySelector('[data-testid="final-save-error"]');
+    expect(banner).not.toBeNull();
+    expect(document.activeElement).toBe(banner);
   });
 });
 
