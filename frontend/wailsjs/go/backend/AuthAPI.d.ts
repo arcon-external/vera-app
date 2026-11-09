@@ -4,7 +4,7 @@ import {backend} from '../models';
 
 export function ChangePassword(arg1:string,arg2:string):Promise<void>;
 
-export function CheckSession():Promise<unknown>;
+export function CheckSession():Promise<backend.SessionStatus>;
 
 export function CurrentUser():Promise<backend.AuthUserDTO>;
 
