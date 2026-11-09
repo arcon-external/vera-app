@@ -4,6 +4,14 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.15.1] - 2026-11-10
+
+### Fixed
+
+- **The update notice shows one `v`.** The sign-in notice printed `vv0.15.0`
+  because it added its own prefix to versions that already had one. It now
+  shows `v0.15.0` and `v0.14.5`, matching the in-app banner.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added
