@@ -53,7 +53,7 @@ export const LABEL_GROUPS: {
   {
     id: "document",
     title: "Document",
-    hint: "The title, the headings, the meta strip, the subject and the closing sentence.",
+    hint: "The title, the headings, the meta strip, the subject, the note heading and the closing sentence.",
     keys: [
       "docTitle",
       "recipientHeading",
@@ -63,6 +63,7 @@ export const LABEL_GROUPS: {
       "metaValidUntil",
       "metaRevision",
       "subject",
+      "note",
       "closing",
     ],
   },

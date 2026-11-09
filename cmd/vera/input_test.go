@@ -148,6 +148,52 @@ func TestConversionUsesTheServersFieldNames(t *testing.T) {
 	}
 }
 
+// TestConversionCarriesTheQuotationNote proves the CLI input document accepts
+// `note` and passes it through under the server's field name. Without this a
+// scripted export would silently file a document without the note the caller
+// wrote.
+func TestConversionCarriesTheQuotationNote(t *testing.T) {
+	doc, err := LoadInputDoc(writeInput(t, `{
+	  "customerCode": 2,
+	  "subject": "With a note",
+	  "note": "Delivery is ex-works.\nInstallation by the customer.",
+	  "items": [{"description":"a","uom":"Lot","qty":1,"unitCost":1000000}]
+	}`))
+	if err != nil {
+		t.Fatalf("LoadInputDoc: %v", err)
+	}
+	if doc.Note != "Delivery is ex-works.\nInstallation by the customer." {
+		t.Errorf("InputDoc.Note = %q; want the file's note", doc.Note)
+	}
+	input, err := doc.toQuotationInput()
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	if input.Note != doc.Note {
+		t.Errorf("QuotationInput.Note = %q; want %q", input.Note, doc.Note)
+	}
+}
+
+// TestSchemaDocumentsTheQuotationNote keeps the CLI's own reference honest: a
+// field the loader accepts but `vera schema` never mentions is a field nobody
+// can discover.
+func TestSchemaDocumentsTheQuotationNote(t *testing.T) {
+	var out, errOut strings.Builder
+	if code := Run([]string{"schema"}, &out, &errOut); code != exitOK {
+		t.Fatalf("vera schema exited %d: %s", code, errOut.String())
+	}
+	reference := out.String()
+	if !strings.Contains(reference, `"note"`) {
+		t.Errorf("`vera schema` never shows a note in the example or the reference")
+	}
+	if !strings.Contains(reference, "1000") {
+		t.Errorf("`vera schema` never states the note's 1000-character limit:\n%s", reference)
+	}
+	if !strings.Contains(reference, "Markdown") {
+		t.Errorf("`vera schema` never says the note is restricted Markdown:\n%s", reference)
+	}
+}
+
 func TestConversionAppliesTheEditorsDefaults(t *testing.T) {
 	doc, err := LoadInputDoc(writeInput(t, minimalInput))
 	if err != nil {

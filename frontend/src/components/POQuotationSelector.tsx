@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { KeyboardEvent, RefObject } from "react";
+import { errorMessage } from "../errors";
 import {
   canConfirm,
   canContinue,
@@ -81,11 +82,6 @@ const FOCUSABLE_SELECTOR = [
   "textarea:not([disabled])",
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
-
-function errorText(error: unknown): string {
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  return "The request failed. Try again.";
-}
 
 function validationMessage(reason?: string): string {
   if (reason === "quotation_not_found") {
@@ -598,7 +594,7 @@ export function POQuotationSelector({
           if (!stale) dispatch({ type: "rowsLoaded", page });
         })
         .catch((error: unknown) => {
-          if (!stale) dispatch({ type: "rowsFailed", error: errorText(error) });
+          if (!stale) dispatch({ type: "rowsFailed", error: errorMessage(error, "The request failed. Try again.") });
         });
     }, delay);
     return () => {
@@ -624,7 +620,7 @@ export function POQuotationSelector({
           dispatch({
             type: "revisionsFailed",
             quotationId: selectedID,
-            error: errorText(error),
+            error: errorMessage(error, "The request failed. Try again."),
           });
         }
       });
@@ -650,7 +646,7 @@ export function POQuotationSelector({
       await onConfirm(selection);
     } catch (error) {
       if (token !== confirmToken.current || !openRef.current) return;
-      dispatch({ type: "confirmFailed", error: errorText(error) });
+      dispatch({ type: "confirmFailed", error: errorMessage(error, "The request failed. Try again.") });
     }
   }, [state, onConfirm]);
 

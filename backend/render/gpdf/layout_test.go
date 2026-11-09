@@ -19,7 +19,7 @@ import (
 
 func testEngine(t *testing.T) *Engine {
 	t.Helper()
-	e, err := NewEngine(os.DirFS("../../assets"), "inter-medium.ttf", "inter-bold.ttf")
+	e, err := NewEngine(os.DirFS("../../assets"), "inter-medium.ttf", "inter-bold.ttf", "inter-italic.ttf")
 	if err != nil {
 		t.Fatalf("load engine: %v", err)
 	}

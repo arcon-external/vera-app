@@ -31,14 +31,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "configure API endpoint: %v\n", err)
 		os.Exit(1)
 	}
+	// No "any 401 clears the token" hook: only the typed session check's
+	// session-end path and a manual sign-out may end a session (issue #531).
 	client := apiclient.New(apiBase, backend.SessionToken)
-	client.OnUnauthorized = func() {
-		_ = backend.ClearSessionToken()
-	}
 	backend.ConfigureAPI(client)
 	authAPI := backend.NewAuthAPI()
 	adminAPI := backend.NewAdminAPI()
 	updateAPI := backend.NewUpdateAPI()
+	recoveryAPI := backend.NewRecoveryAPI()
 
 	err = wails.Run(&options.App{
 		Title:            "Vera",
@@ -58,6 +58,7 @@ func main() {
 			authAPI,
 			adminAPI,
 			updateAPI,
+			recoveryAPI,
 		},
 	})
 

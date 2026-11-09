@@ -9,6 +9,11 @@ import (
 // desktop client. Field names are stable API; the desktop code-generates or
 // mirrors these shapes in #80.
 
+// MaxNoteLength is the maximum length of a quotation-level note, in
+// characters. The migration's CHECK, the store's validation and Prepare all
+// enforce this one number, and the editor's counter shows it.
+const MaxNoteLength = 1000
+
 // FormatQuoteNumber renders a plain-digit quotation number: 15 + 2-digit
 // customer code + 2-digit issue year + sequence. The normal width is 10
 // digits (0001-9999); past 9999 the sequence widens to 5 digits instead of
@@ -801,13 +806,19 @@ type QuotationSubItemRow struct {
 // QuotationDetail is one revision: internal economics plus the customer HTML
 // snapshot. Raw PDF bytes are intentionally absent; HasPDF reports attachment.
 type QuotationDetail struct {
-	DisplayMarginalizedSubtotal string             `json:"displayMarginalizedSubtotal"`
-	DisplayMarginalizedDiscount string             `json:"displayMarginalizedDiscount"`
-	UUID                        string             `json:"uuid"`
-	HTMLSnapshot                string             `json:"htmlSnapshot"`
-	DisplayNett                 string             `json:"displayNett"`
-	CustomerName                string             `json:"customerName"`
-	Subject                     string             `json:"subject"`
+	DisplayMarginalizedSubtotal string `json:"displayMarginalizedSubtotal"`
+	DisplayMarginalizedDiscount string `json:"displayMarginalizedDiscount"`
+	UUID                        string `json:"uuid"`
+	HTMLSnapshot                string `json:"htmlSnapshot"`
+	DisplayNett                 string `json:"displayNett"`
+	CustomerName                string `json:"customerName"`
+	Subject                     string `json:"subject"`
+	// Note is the quotation-level note this revision printed and signed. Its
+	// source is the restricted Markdown subset (**bold**, *italic*, "- "
+	// bullets, "1. " numbered items, paragraphs and line breaks); other markup
+	// prints literally. It is empty for revisions issued before the note
+	// existed.
+	Note                        string             `json:"note"`
 	Currency                    string             `json:"currency"`
 	RecipientName               string             `json:"recipientName"`
 	Incoterm                    string             `json:"incoterm"`

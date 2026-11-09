@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { ListPOReconciliationSessions } from "@backend/backend/Quotation";
+import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderHistoryEntry } from "../poCorrection";
 import type { PaneFilter } from "../poReconciliation";
@@ -38,16 +39,6 @@ export interface ReconciliationHistoryTransport {
 export const wailsReconciliationHistoryTransport: ReconciliationHistoryTransport = {
   list: (poID: string) => ListPOReconciliationSessions(poID),
 };
-
-function errorMessage(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The saved reconciliation history could not be loaded.";
-}
 
 /** The state word the trigger and the panel both read. */
 export type SavedReconciliationStatus =
@@ -158,7 +149,7 @@ export function useSavedReconciliation(
       .catch((cause: unknown) => {
         if (cancelled) return;
         setRead(null);
-        setError(errorMessage(cause));
+        setError(errorMessage(cause, "The saved reconciliation history could not be loaded."));
         setStatus("error");
       });
     return () => {

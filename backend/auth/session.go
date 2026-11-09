@@ -9,15 +9,19 @@ import (
 )
 
 const (
-	// SessionLifetimeStandard is how long a session lasts when the user did
-	// not ask to be remembered: one working day, so an unattended machine
-	// signs itself out overnight.
+	// SessionLifetimeStandard is how long a session may idle when the user
+	// did not ask to be remembered: one working day, so an unattended
+	// machine signs itself out overnight. Renewal slides it forward.
 	SessionLifetimeStandard = 8 * time.Hour
-	// SessionLifetimeRemembered is how long a remembered session lasts:
-	// thirty days, fixed. The expiry is stamped once at issuance and never
-	// extended, so "keep me signed in" buys a month without re-login and
-	// nothing beyond it.
+	// SessionAbsoluteStandard is the hard cap on a standard session: seven
+	// days from sign-in, however often it is renewed.
+	SessionAbsoluteStandard = 7 * 24 * time.Hour
+	// SessionLifetimeRemembered is how long a remembered session may idle:
+	// thirty days, renewed by the "Stay signed in" window.
 	SessionLifetimeRemembered = 30 * 24 * time.Hour
+	// SessionAbsoluteRemembered is the hard cap on a remembered session:
+	// ninety days from sign-in, however often it is renewed.
+	SessionAbsoluteRemembered = 90 * 24 * time.Hour
 	tokenBytes                = 32
 )
 

@@ -6,6 +6,10 @@ export function ChangePassword(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['ChangePassword'](arg1, arg2);
 }
 
+export function CheckSession() {
+  return window['go']['backend']['AuthAPI']['CheckSession']();
+}
+
 export function CurrentUser() {
   return window['go']['backend']['AuthAPI']['CurrentUser']();
 }
@@ -36,6 +40,10 @@ export function MyEmailChangeRequests() {
 
 export function RedeemInvite(arg1, arg2) {
   return window['go']['backend']['AuthAPI']['RedeemInvite'](arg1, arg2);
+}
+
+export function RenewSession() {
+  return window['go']['backend']['AuthAPI']['RenewSession']();
 }
 
 export function RequestDeletion(arg1) {

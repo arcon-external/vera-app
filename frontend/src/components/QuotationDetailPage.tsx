@@ -6,6 +6,7 @@ import {
 import { GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import type { ArchivedQuotation } from "../archive";
 import { resolveCurrencyEntry } from "../archive";
+import { errorMessage } from "../errors";
 import {
   decorateMoney,
   formatMoney,
@@ -45,6 +46,7 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
 }
 import { useToast } from "../toast";
 import { copyQuotationToClipboard } from "../quotationClipboard";
+import { NoteCard } from "./NoteCard";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
@@ -81,20 +83,6 @@ export function QuotationCopyButton({
 export interface QuotationDetailPurchaseOrder {
   id: number;
   state: "draft" | "saved";
-}
-
-// A refused create hands the server's message through (the bindings marshal a
-// typed error as {message}); this reads it without letting an object render as
-// "[object Object]". Same shape as App's local helper, kept here because that
-// one is not exported and a component does not import the app shell.
-function purchaseOrderErrorMessage(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return fallback;
 }
 
 interface QuotationDetailPageProps {
@@ -426,10 +414,7 @@ export function QuotationDetailPage({
       } else {
         pushToast(
           "error",
-          purchaseOrderErrorMessage(
-            error,
-            "The purchase order could not be created."
-          )
+          errorMessage(error, "The purchase order could not be created.")
         );
       }
     } finally {
@@ -486,6 +471,10 @@ export function QuotationDetailPage({
           void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
         }
       />
+
+      {/* The note belongs to this revision: it travels with the fetched
+          record, so switching revisions switches the note. */}
+      <NoteCard source={quotation.Note} />
 
       <Card className="border-internal-200 bg-internal-50/40 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">

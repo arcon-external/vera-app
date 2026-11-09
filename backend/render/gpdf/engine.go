@@ -65,6 +65,14 @@ type Input struct {
 	ValidUntil  string
 	Revision    string
 
+	// Note is the optional quotation-level note (#534), printed once under
+	// the last line row and above the terms. Empty prints nothing. The
+	// application has already trimmed its outer whitespace; the source is the
+	// restricted Markdown subset (#540) and this engine parses it with
+	// backend/note, so its line breaks, bold, italic and lists print here
+	// exactly as they print in the browser.
+	Note string
+
 	// Terms is the four terms-and-conditions sentences, substituted by the
 	// application exactly as the seam carries them. The engine prints them and
 	// composes nothing: before #339 it built its own four from its own
@@ -164,23 +172,31 @@ type Part struct {
 type Engine struct {
 	regular      *font.TrueTypeFont
 	bold         *font.TrueTypeFont
+	italic       *font.TrueTypeFont
 	regularShape *shaper
 	boldShape    *shaper
+	italicShape  *shaper
 	// pal is the document's whole colour set, resolved from the brand by
 	// SetTheme. Every paint reads a role from it; no literal remains in
 	// this package (see backend/theme for the derivation).
 	pal         theme.Palette
 	regularData []byte
 	boldData    []byte
+	italicData  []byte
 }
 
 // Theme is the four quotable brand colours. It aliases theme.Theme so the
 // engine and the stylesheet resolve through the same type.
 type Theme = theme.Theme
 
-// NewEngine loads the two faces the engine embeds. They are the same Inter
+// NewEngine loads the three faces the engine embeds. They are the same Inter
 // programs the stylesheet loads for the browser path, so the two renderers agree
 // on the typeface by construction rather than by convention.
+//
+// The italic face is Inter Italic instanced from the Google Fonts variable
+// program at opsz=18/wght=400, matching the Inter 18pt medium/bold faces. It is
+// licensed under the SIL Open Font License 1.1
+// (backend/assets/INTER-OFL.txt), the same licence as the rest of the family.
 //
 // The faces come from an fs.FS, not from paths. Paths are resolved against the
 // process working directory, which a desktop application does not control, and an
@@ -190,7 +206,7 @@ type Theme = theme.Theme
 //
 // It is NewEngine rather than New because this package is also a Renderer, and
 // the renderer's own constructor is the one the engine line names.
-func NewEngine(fonts fs.FS, regularName, boldName string) (*Engine, error) {
+func NewEngine(fonts fs.FS, regularName, boldName, italicName string) (*Engine, error) {
 	rd, err := fs.ReadFile(fonts, regularName)
 	if err != nil {
 		return nil, fmt.Errorf("load regular face %q: %w", regularName, err)
@@ -198,6 +214,10 @@ func NewEngine(fonts fs.FS, regularName, boldName string) (*Engine, error) {
 	bd, err := fs.ReadFile(fonts, boldName)
 	if err != nil {
 		return nil, fmt.Errorf("load bold face %q: %w", boldName, err)
+	}
+	id, err := fs.ReadFile(fonts, italicName)
+	if err != nil {
+		return nil, fmt.Errorf("load italic face %q: %w", italicName, err)
 	}
 	rm, err := font.ParseTrueType(rd)
 	if err != nil {
@@ -207,10 +227,14 @@ func NewEngine(fonts fs.FS, regularName, boldName string) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse bold face: %w", err)
 	}
+	im, err := font.ParseTrueType(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse italic face: %w", err)
+	}
 	e := &Engine{
-		regular: rm, bold: bm,
-		regularData: rd, boldData: bd,
-		regularShape: parseShaper(rd), boldShape: parseShaper(bd),
+		regular: rm, bold: bm, italic: im,
+		regularData: rd, boldData: bd, italicData: id,
+		regularShape: parseShaper(rd), boldShape: parseShaper(bd), italicShape: parseShaper(id),
 		pal: theme.DefaultTheme().Resolve(),
 	}
 	return e, nil
@@ -251,8 +275,13 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("subset bold face: %w", err)
 	}
+	italicFont, err := embeddable(e.italicData, e.italicShape, used.italic)
+	if err != nil {
+		return nil, fmt.Errorf("subset italic face: %w", err)
+	}
 	r.RegisterTTFont("inter", regular, regular.Data())
 	r.RegisterTTFont("interb", boldFont, boldFont.Data())
+	r.RegisterTTFont("interi", italicFont, italicFont.Data())
 
 	meta := document.DocumentMetadata{
 		Title:    "Quotation",
@@ -312,6 +341,9 @@ func (e *Engine) Render(in Input) ([]byte, error) {
 	}
 	if t := e.boldShape.advanceTable(); t != nil {
 		advances["interb"] = t
+	}
+	if t := e.italicShape.advanceTable(); t != nil {
+		advances["interi"] = t
 	}
 	if data, err = fixGlyphWidths(data, advances); err != nil {
 		return nil, fmt.Errorf("glyph widths: %w", err)

@@ -51,7 +51,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "missing --out")
 		os.Exit(2)
 	}
-	eng, err := gpdf.NewEngine(os.DirFS("backend/assets"), "inter-medium.ttf", "inter-bold.ttf")
+	eng, err := gpdf.NewEngine(os.DirFS("backend/assets"), "inter-medium.ttf", "inter-bold.ttf", "inter-italic.ttf")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load engine:", err)
 		os.Exit(1)

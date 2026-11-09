@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -35,7 +36,15 @@ type SignableRevision struct {
 	// byte-identical canonical bytes to one signed before this field
 	// existed, so every printed verification code keeps verifying. Never
 	// bump CanonicalPrefix for this.
-	Currency       string
+	Currency string
+	// Note is the optional quotation-level note. It is emitted only when
+	// non-empty, after currency and before item_count, so a revision without
+	// one produces byte-identical canonical bytes to every revision signed
+	// before this field existed. The note is the restricted-Markdown source
+	// (#540): it is JSON-escaped rather than flattened, so its line breaks,
+	// list markers and inline formatting are part of the signature. Never
+	// bump CanonicalPrefix for this.
+	Note           string
 	Items          []SignableItem
 	Subtotal       int64
 	DiscountAmount int64
@@ -134,6 +143,14 @@ func CanonicalRevision(revision SignableRevision) []byte {
 	writeField(&b, "discount_percent", strconv.Itoa(int(revision.DiscountPercent)))
 	writeField(&b, "issuer", revision.IssuerName)
 	writeField(&b, "currency", currency.Normalize(revision.Currency))
+	// Zero means no note, which is every revision signed before this field
+	// existed. Emitting nothing then is what keeps those signatures
+	// byte-identical. A note is the restricted-Markdown source (#540),
+	// JSON-escaped so its line breaks and markers stay unambiguous inside the
+	// line-framed payload.
+	if note := revision.Note; strings.TrimSpace(note) != "" {
+		writeField(&b, "note", encodeNoteSource(note))
+	}
 	writeField(&b, "item_count", strconv.Itoa(len(revision.Items)))
 	for i, item := range revision.Items {
 		writeField(&b, fmt.Sprintf("item_%d", i+1), strings.Join([]string{
@@ -186,6 +203,22 @@ func writeField(b *strings.Builder, label, value string) {
 	b.WriteString(label)
 	b.WriteString(": ")
 	b.WriteString(value)
+}
+
+// encodeNoteSource turns the restricted-Markdown note into a JSON string
+// literal for the canonical payload. JSON escaping is what makes the source
+// unambiguous inside the line-framed format: a literal newline would look like
+// a new field, while "\n" is one value and stays part of the signature. The
+// marshalled form is deterministic for a string, so the same note always signs
+// the same bytes.
+func encodeNoteSource(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		// json.Marshal cannot fail for a string; keep the source visible
+		// rather than dropping it if that ever changes.
+		return value
+	}
+	return string(encoded)
 }
 
 // CanonicalDigest is the SHA-256 of the canonical bytes, stored beside the

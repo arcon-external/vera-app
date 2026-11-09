@@ -37,7 +37,11 @@ func (s *Server) changePassword(context echo.Context) error {
 	// everyone else must supply the current password.
 	if !stored.MustChangePassword {
 		if err := auth.VerifyPassword(stored.PasswordHash, request.CurrentPassword); err != nil {
-			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+			// A distinct code, not the session vocabulary: a wrong current
+			// password is a refusal, and the desktop must keep the session.
+			return context.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "current password is incorrect", "code": "current_password_incorrect",
+			})
 		}
 	}
 	hash, err := auth.HashPassword(request.NewPassword)
@@ -47,7 +51,9 @@ func (s *Server) changePassword(context echo.Context) error {
 	if err := s.database.UpdatePassword(context.Request().Context(), me.ID, hash); err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "change password"})
 	}
-	if err := s.database.RevokeUserSessions(context.Request().Context(), me.ID); err != nil {
+	// Keep the session that performed the change; sign out every other one.
+	token, _ := bearerToken(context.Request())
+	if err := s.database.RevokeOtherUserSessions(context.Request().Context(), me.ID, auth.HashSessionToken(token)); err != nil {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "revoke sessions"})
 	}
 	_ = s.database.Audit(context.Request().Context(), &me.ID, "password.change", &me.ID, "")

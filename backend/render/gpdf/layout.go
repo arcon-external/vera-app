@@ -3,11 +3,13 @@ package gpdf
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/gpdf-dev/gpdf/document"
 
 	"vera-app/backend/currency"
 	"vera-app/backend/labels"
+	"vera-app/backend/note"
 )
 
 // The display list and page composition.
@@ -45,6 +47,7 @@ type run struct {
 	size     float64
 	tracking float64
 	bold     bool
+	italic   bool
 }
 
 type picture struct {
@@ -133,6 +136,21 @@ const (
 	totalsGap       = 8
 	grandPadTop     = 8
 	verifyGapPx     = 18
+
+	// The quotation note card's stylesheet geometry, in CSS pixels (#534).
+	// The left border is the 3px accent; the other three sides are 1px.
+	noteBorderPx   = 1
+	noteAccentPx   = 3
+	notePadX       = 14
+	notePadY       = 12
+	noteLabelPx    = 12
+	noteLabelGapPx = 4
+	// noteListIndentPx is the list indent the stylesheet gives the note's
+	// ul/ol. The marker sits in that gutter: a 3px disc with a 7px gap, or a
+	// right-aligned number, so the item text starts at the same edge.
+	noteListIndentPx = 18
+	noteBulletSizePx = 3
+	noteBulletGapPx  = 7
 
 	// metaLineBox is one row of the quotation metadata card, in points. 11px at
 	// the inherited 1.45 line height is 15.95px, which the browser rounds to the
@@ -426,8 +444,10 @@ type metrics struct {
 	subjectY    float64
 	// subjectH is the strip's height for this subject. `.subject` is a grid with
 	// no height of its own, so it is as tall as its value wraps to.
-	subjectH   float64
-	tableTop   float64
+	subjectH float64
+	tableTop float64
+	// noteH is the optional note card's height, zero when there is no note.
+	noteH      float64
 	cardBottom float64
 	// pageBottom is the limit content is placed against: the card's bottom edge
 	// when the page overflows. The card itself closes on the last block, which
@@ -528,6 +548,7 @@ func (e *Engine) derive(in Input) metrics {
 	m.subjectY = m.contentTopY + m.infoH + px(contentGapPx)
 	m.subjectH = e.subjectHeight(in, m)
 	m.tableTop = m.subjectY + m.subjectH + px(contentGapPx)
+	m.noteH = e.noteHeight(in, m)
 
 	m.footerTncW = (m.innerW - px(footGapPx)) * 1.2 / 2.0
 	m.footerTotW = (m.innerW - px(footGapPx)) * 0.8 / 2.0
@@ -772,24 +793,39 @@ func (e *Engine) compose(in Input) ([]*page, error) {
 			// the closing keeps its 4px and the verification block its 18px
 			// when either opens a page.
 			ends := tableTop + used
-			if m.footerH > 0 {
-				// The engine's row heights resolve to whole pixels the way the
-				// browser's do, but their remainders accumulate to a point or
-				// two across a page, and Chrome decides these fits with its own
-				// fractional geometry. A block that misses by less than the
-				// accumulated rounding must not flip to the next page, so the
-				// checks carry a tolerance of two pixels' worth.
-				fit := func(top, h float64) bool { return top+h <= bottom+px(2) }
-				contentTop := m.cardY + px(1)
-				newTrailerPage := func() {
-					finish(cur, ends)
-					pages = append(pages, cur)
-					cur = &page{}
-					e.drawContinuationChrome(cur, m)
-					ends = contentTop
-				}
+			// The engine's row heights resolve to whole pixels the way the
+			// browser's do, but their remainders accumulate to a point or
+			// two across a page, and Chrome decides these fits with its own
+			// fractional geometry. A block that misses by less than the
+			// accumulated rounding must not flip to the next page, so the
+			// checks carry a tolerance of two pixels' worth.
+			fit := func(top, h float64) bool { return top+h <= bottom+px(2) }
+			contentTop := m.cardY + px(1)
+			newTrailerPage := func() {
+				finish(cur, ends)
+				pages = append(pages, cur)
+				cur = &page{}
+				e.drawContinuationChrome(cur, m)
+				ends = contentTop
+			}
 
-				// The cards, after the grid gap below the table.
+			// The note (#534): one atomic card after the table, before the
+			// terms. It is never split, so a note that does not fit what the
+			// last table page has left starts a fresh page whole. The grid
+			// gap above it is truncated at that break, exactly as the cards
+			// grid's gap is.
+			if m.noteH > 0 {
+				top := ends + px(contentGapPx)
+				if !fit(top, m.noteH) {
+					newTrailerPage()
+					top = ends
+				}
+				e.drawNote(cur, in, m, top)
+				ends = top + m.noteH
+			}
+
+			if m.footerH > 0 {
+				// The cards, after the grid gap below the note or the table.
 				top := ends + px(contentGapPx)
 				if !fit(top, m.footerCardsH) {
 					newTrailerPage()
@@ -1203,6 +1239,177 @@ func countItems(subs []subLine) int {
 		}
 	}
 	return n
+}
+
+// noteLine is one laid-out line of the note card: its styled spans and, when
+// the line opens a list item, the marker that line draws. A gap line between
+// two blocks carries neither, but still occupies one line box.
+type noteLine struct {
+	spans  []note.Span
+	marker string
+	bullet bool
+}
+
+// noteLines lays out the optional quotation note (#534/#540).
+//
+// The source is the restricted Markdown subset parsed by backend/note. Each
+// paragraph source line is wrapped as its own line; consecutive lines inside a
+// paragraph are line breaks, exactly as <br> prints them. A blank line ends a
+// paragraph, and the gap between blocks is one line box -- the same
+// margin-top: 1.45em the stylesheet gives `.note-body > * + *`. List items
+// indent by noteListIndentPx and their continuation lines align under the item
+// text, matching the browser's outside markers.
+func (e *Engine) noteLines(in Input, m metrics) []noteLine {
+	doc := note.Parse(strings.TrimSpace(in.Note))
+	if len(doc.Blocks) == 0 {
+		return nil
+	}
+	// The card spans the content width; its content box is narrower by the
+	// 3px left accent, the 1px right border and 14px of padding on each side.
+	w := m.innerW - px(noteAccentPx) - px(noteBorderPx) - 2*px(notePadX)
+
+	var lines []noteLine
+	for bi, block := range doc.Blocks {
+		if bi > 0 {
+			lines = append(lines, noteLine{})
+		}
+		switch block.Kind {
+		case note.Paragraph:
+			if len(block.Items) == 0 {
+				continue
+			}
+			for _, sourceLine := range block.Items[0].Lines {
+				for _, spans := range e.wrapNoteSpans(sourceLine, w) {
+					lines = append(lines, noteLine{spans: spans})
+				}
+			}
+		case note.Bullets, note.Numbers:
+			for ii, item := range block.Items {
+				for li, sourceLine := range item.Lines {
+					for wi, spans := range e.wrapNoteSpans(sourceLine, w-px(noteListIndentPx)) {
+						line := noteLine{spans: spans}
+						if li == 0 && wi == 0 {
+							if block.Kind == note.Bullets {
+								line.bullet = true
+							} else {
+								line.marker = fmt.Sprintf("%d.", block.Start+ii)
+							}
+						}
+						lines = append(lines, line)
+					}
+				}
+			}
+		}
+	}
+	return lines
+}
+
+// wrapNoteSpans wraps one source line's styled spans to maxW points, breaking
+// at spaces like the browser does. A single word wider than the column is left
+// overlong rather than broken mid-word. Adjacent spans with the same style are
+// merged so the draw layer emits as few runs as possible.
+func (e *Engine) wrapNoteSpans(spans []note.Span, maxW float64) [][]note.Span {
+	words := noteWords(spans)
+	if len(words) == 0 {
+		return [][]note.Span{{}}
+	}
+	spaceW := e.widthFor(" ", px(bodyPx), false, false)
+	var lines [][]note.Span
+	var cur []note.Span
+	curW := 0.0
+	for _, word := range words {
+		wordW := e.noteWordWidth(word)
+		if len(cur) == 0 {
+			for _, span := range word {
+				cur = appendNoteSpan(cur, span)
+			}
+			curW = wordW
+			continue
+		}
+		if curW+spaceW+wordW <= maxW {
+			cur = appendNoteSpan(cur, note.Span{Text: " "})
+			for _, span := range word {
+				cur = appendNoteSpan(cur, span)
+			}
+			curW += spaceW + wordW
+			continue
+		}
+		lines = append(lines, cur)
+		cur = nil
+		for _, span := range word {
+			cur = appendNoteSpan(cur, span)
+		}
+		curW = wordW
+	}
+	if len(cur) > 0 {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, nil)
+	}
+	return lines
+}
+
+// noteWords splits styled spans into words. A span boundary inside a word
+// ("foo**bar**baz") does not create a space: only source whitespace does.
+func noteWords(spans []note.Span) [][]note.Span {
+	var words [][]note.Span
+	var cur []note.Span
+	flush := func() {
+		if len(cur) > 0 {
+			words = append(words, cur)
+			cur = nil
+		}
+	}
+	for _, span := range spans {
+		parts := strings.Split(span.Text, " ")
+		for i, part := range parts {
+			if i > 0 {
+				flush()
+			}
+			if part != "" {
+				cur = appendNoteSpan(cur, note.Span{Text: part, Bold: span.Bold, Italic: span.Italic})
+			}
+		}
+	}
+	flush()
+	return words
+}
+
+// appendNoteSpan appends a span, merging it into the previous one when the
+// style matches.
+func appendNoteSpan(spans []note.Span, span note.Span) []note.Span {
+	if span.Text == "" {
+		return spans
+	}
+	if n := len(spans); n > 0 && spans[n-1].Bold == span.Bold && spans[n-1].Italic == span.Italic {
+		spans[n-1].Text += span.Text
+		return spans
+	}
+	return append(spans, span)
+}
+
+// noteWordWidth measures one word in the face each of its spans uses.
+func (e *Engine) noteWordWidth(word []note.Span) float64 {
+	total := 0.0
+	for _, span := range word {
+		total += e.widthFor(span.Text, px(bodyPx), span.Bold, span.Italic)
+	}
+	return total
+}
+
+// noteHeight is the note card's height in points: its top and bottom borders,
+// its vertical padding, the label's line box and gap, and one body line box
+// per laid-out line (including the blank line between blocks). It is zero when
+// there is no note, so an empty note adds nothing to the page.
+func (e *Engine) noteHeight(in Input, m metrics) float64 {
+	lines := e.noteLines(in, m)
+	if len(lines) == 0 {
+		return 0
+	}
+	return 2*px(noteBorderPx) + 2*px(notePadY) +
+		px(noteLabelPx)*bodyLH + px(noteLabelGapPx) +
+		float64(len(lines))*px(bodyPx)*bodyLH
 }
 
 // tncHeight is the height of the terms card.

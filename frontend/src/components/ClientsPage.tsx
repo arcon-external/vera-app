@@ -6,14 +6,11 @@ import {
   UpdateClient,
 } from "@backend/backend/AdminAPI";
 import { backend } from "@backend/models";
+import { errorMessage } from "../errors";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 type ManagedClient = backend.ManagedClient;
-
-function errorMessage(err: unknown, fallback: string): string {
-  return typeof err === "string" && err.trim() ? err : fallback;
-}
 
 export function ClientsPage() {
   const [clients, setClients] = useState<ManagedClient[]>([]);

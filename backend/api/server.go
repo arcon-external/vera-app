@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -106,6 +107,9 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.POST("/v1/auth/login", server.login)
 	server.echo.POST("/v1/auth/logout", server.logout, server.requireSession)
 	server.echo.GET("/v1/auth/me", server.me, server.requireSession)
+	// Ticket #536: slide the idle deadline of the calling session without
+	// ever crossing its absolute cap.
+	server.echo.POST("/v1/auth/renew", server.renew, server.requireSession)
 	server.echo.POST("/v1/quotations/prepare", server.prepareEndpoint, server.requireSession)
 	server.echo.POST("/v1/quotations/export", server.exportEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations", server.listEndpoint, server.requireSession)
@@ -319,33 +323,82 @@ func (s *Server) logout(context echo.Context) error {
 
 func (s *Server) me(context echo.Context) error {
 	user, _ := context.Get("user").(store.AuthUser)
+	info, _ := context.Get("session").(store.SessionInfo)
+	return context.JSON(http.StatusOK, sessionBody(user, info, time.Now()))
+}
+
+// renew slides the calling session's idle deadline and answers the same shape
+// as /v1/auth/me. An ended session is the coded 401 the middleware uses; a
+// database failure is a coded 503, because it is not a session end and the
+// desktop must not sign anyone out for it.
+func (s *Server) renew(context echo.Context) error {
+	token, _ := bearerToken(context.Request())
+	user, _ := context.Get("user").(store.AuthUser)
+	info, err := s.service.RenewSession(context.Request().Context(), token)
+	if err != nil {
+		var sessionErr *store.SessionError
+		if errors.As(err, &sessionErr) {
+			return context.JSON(http.StatusUnauthorized, map[string]string{
+				"error": sessionErr.Message, "code": sessionErr.Code,
+			})
+		}
+		return context.JSON(http.StatusServiceUnavailable, map[string]string{
+			"error": "session renewal failed", "code": "session_check_failed",
+		})
+	}
+	return context.JSON(http.StatusOK, sessionBody(user, info, time.Now()))
+}
+
+// sessionBody is the /v1/auth/me and /v1/auth/renew payload: the user plus
+// the live session's expiry state, so one decoder on the desktop covers both.
+func sessionBody(user store.AuthUser, info store.SessionInfo, now time.Time) map[string]any {
 	response := map[string]any{
-		"id":          user.ID,
-		"email":       user.Email,
-		"displayName": user.DisplayName,
-		"role":        user.Role,
+		"id":                user.ID,
+		"email":             user.Email,
+		"displayName":       user.DisplayName,
+		"role":              user.Role,
+		"expiresAt":         info.ExpiresAt.UTC().Format(time.RFC3339),
+		"absoluteExpiresAt": info.AbsoluteExpiresAt.UTC().Format(time.RFC3339),
+		"canRenew":          info.CanRenew(now),
+		"remembered":        info.Remembered,
 	}
 	if url := avatarURL(user); url != "" {
 		response["avatarUrl"] = url
 	}
-	return context.JSON(http.StatusOK, response)
+	return response
 }
 
 // requireSession validates the bearer token and stores the user for handlers.
+//
+// An ended session is a coded 401 so the desktop can tell expired, revoked,
+// inactive and unknown tokens apart. A database failure is a coded 503: it is
+// an operational problem, and the desktop must not sign anyone out for it
+// (issue #531).
 func (s *Server) requireSession(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(context echo.Context) error {
 		token, ok := bearerToken(context.Request())
 		if !ok {
-			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "missing session"})
+			return context.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "missing session", "code": "session_missing",
+			})
 		}
-		user, err := s.service.Validate(context.Request().Context(), token)
+		user, info, err := s.service.ValidateSession(context.Request().Context(), token)
 		if err != nil {
-			return context.JSON(http.StatusUnauthorized, map[string]string{"error": "invalid or expired session"})
+			var sessionErr *store.SessionError
+			if errors.As(err, &sessionErr) {
+				return context.JSON(http.StatusUnauthorized, map[string]string{
+					"error": sessionErr.Message, "code": sessionErr.Code,
+				})
+			}
+			return context.JSON(http.StatusServiceUnavailable, map[string]string{
+				"error": "session check failed", "code": "session_check_failed",
+			})
 		}
 		context.Set("user", user)
+		context.Set("session", info)
 		if user.MustChangePassword {
 			switch context.Path() {
-			case "/v1/auth/password", "/v1/auth/logout", "/v1/auth/logout-everywhere", "/v1/auth/me":
+			case "/v1/auth/password", "/v1/auth/logout", "/v1/auth/logout-everywhere", "/v1/auth/me", "/v1/auth/renew":
 			default:
 				return context.JSON(http.StatusForbidden, map[string]string{
 					"error": "change your password to continue", "code": "must_change_password",

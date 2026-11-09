@@ -204,6 +204,19 @@
 				</table>
 			</section>
 
+			{{/* One quotation-level note (#534), printed once below the last
+			     line row and above the terms. It is its own card, not a table
+			     row, and an empty note prints nothing at all. NoteHTML is the
+			     restricted-Markdown source (#540) rendered by backend/note:
+			     every text span is escaped there and the only tags in the
+			     value are the ones the parser writes. */}}
+			{{if .Note}}
+			<section class="note-card">
+				<h3 class="note-label">{{.Labels.Note}}</h3>
+				<div class="note-body">{{.NoteHTML}}</div>
+			</section>
+			{{end}}
+
 			<section class="footer">
 				<div class="tnc">
 					<h3>{{.Labels.TermsHeading}}</h3>

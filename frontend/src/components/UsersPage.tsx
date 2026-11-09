@@ -13,6 +13,7 @@ import {
   SetUserRole,
 } from "@backend/backend/AdminAPI";
 import { backend } from "@backend/models";
+import { errorMessage } from "../errors";
 import { useToast } from "../toast";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 import { Select } from "./Select";
@@ -27,10 +28,6 @@ interface DeletionRequestRow {
   DisplayName: string;
   Status: string;
   RequestedAt: string;
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  return typeof err === "string" && err.trim() ? err : fallback;
 }
 
 export function UsersPage() {

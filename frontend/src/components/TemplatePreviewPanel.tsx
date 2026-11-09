@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type JSX } from "react";
 import { DownloadTemplateSample, PreviewTemplateHTML } from "@backend/backend/Quotation";
 import { isCompleteHex, type CompanyTheme } from "../company";
 import { serializeCompanyLabels, type CompanyLabelEntry } from "../companyLabels";
+import { errorMessage } from "../errors";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 // The template preview (issue #425, terminal swapped in #432): the real sample
@@ -118,9 +119,7 @@ export function templatePreviewLabelsReady(labels: CompanyLabelEntry[] | null): 
  *  with a generic sentence and nothing to diagnose from. Empty when the
  *  rejection carries nothing readable, so the caller keeps its fallback. */
 export function templatePreviewErrorDetail(err: unknown): string {
-  if (typeof err === "string") return err.trim();
-  if (err instanceof Error) return err.message.trim();
-  return "";
+  return errorMessage(err, "").trim();
 }
 
 type RenderedArgs = [CompanyLabelEntry[], string, string, string, string];

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	texttemplate "text/template"
+	"unicode/utf8"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -17,6 +18,7 @@ import (
 	"vera-app/backend/auth"
 	"vera-app/backend/currency"
 	"vera-app/backend/labels"
+	notepkg "vera-app/backend/note"
 	"vera-app/backend/render"
 	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
@@ -26,9 +28,15 @@ import (
 // QuotationInput is the data contract between the frontend and the backend.
 // The frontend sends this struct via Wails bindings when calling Prepare.
 type QuotationInput struct {
-	Incoterm        string
-	Subject         string
-	RecipientName   string
+	Incoterm      string
+	Subject       string
+	RecipientName string
+	// Note is the optional quotation-level note. Its source is the restricted
+	// Markdown subset defined by backend/note (**bold**, *italic*, "- "
+	// bullets, "1. " numbered items, paragraphs and line breaks); other markup
+	// prints literally. Prepare trims its outer whitespace, preserves internal
+	// line breaks, and refuses more than apicontract.MaxNoteLength characters.
+	Note            string
 	TaxZone         string
 	TaxCategory     string
 	TaxType         string
@@ -224,17 +232,26 @@ type QuotationData struct {
 	// wherever the bases are set (readTemplate at startup, refreshCustomCSS
 	// after Prepare) so the stylesheet always executes against the current
 	// brand. See backend/theme for the derivation.
-	Palette                   theme.Palette
-	RecipientName             string
-	RecipientCompany          string
-	RecipientAddress          string
-	QuoteNumber               string
-	QuoteUUID                 string
-	VerifyURL                 string
-	VerifyQRBase64            string
-	VerifyShortID             string
-	ServiceCategory           string
-	Subject                   string
+	Palette          theme.Palette
+	RecipientName    string
+	RecipientCompany string
+	RecipientAddress string
+	QuoteNumber      string
+	QuoteUUID        string
+	VerifyURL        string
+	VerifyQRBase64   string
+	VerifyShortID    string
+	ServiceCategory  string
+	Subject          string
+	// Note is the optional quotation-level note as entered (outer whitespace
+	// trimmed, internal line breaks preserved). It is printed once under the
+	// line items (#534) and signed only when non-empty. The source is the
+	// restricted Markdown subset defined by backend/note (#540).
+	Note string
+	// NoteHTML is Note rendered to the safe markup the template prints. The
+	// parser escapes every text span and emits only <p>, <br>, <strong>, <em>,
+	// <ul>, <ol> and <li>, so raw HTML in the source is text.
+	NoteHTML                  template.HTML
 	DisplaySubTotal           string
 	TaxType                   string
 	CustomCSS                 template.CSS
@@ -1037,6 +1054,17 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 		return fmt.Errorf("subject is required")
 	}
 
+	// One optional note for the whole quotation. Outer whitespace is trimmed
+	// once here so the printed document, the stored revision and the signed
+	// payload all carry the same text; internal line breaks are presentation
+	// and survive (flattened only for signing). The limit is counted in
+	// characters, matching the migration's CHECK and the editor's counter.
+	note := strings.TrimSpace(input.Note)
+	if utf8.RuneCountInString(note) > apicontract.MaxNoteLength {
+		return fmt.Errorf("note cannot be longer than %d characters", apicontract.MaxNoteLength)
+	}
+	input.Note = note
+
 	if strings.TrimSpace(input.RecipientName) == "" {
 		return fmt.Errorf("recipient name are required")
 	}
@@ -1112,6 +1140,8 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	q.Data.CurrencyPrefix, q.Data.CurrencySuffix = currency.Affixes(q.Data.Currency)
 
 	q.Data.Subject = input.Subject
+	q.Data.Note = input.Note
+	q.Data.NoteHTML = template.HTML(notepkg.HTML(input.Note))
 	q.Data.Validity = input.Validity
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTimeYears = input.LeadTimeYears
@@ -1409,6 +1439,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 		RecipientName:    q.Data.RecipientName,
 		RecipientAddress: q.Data.RecipientAddress,
 		Subject:          q.Data.Subject,
+		Note:             q.Data.Note,
 		Incoterm:         q.Data.Incoterm,
 		ValidityDays:     int16(q.Data.Validity),
 		PaymentTermDays:  int16(q.Data.PaymentTerm),
@@ -1469,6 +1500,14 @@ func (q *Quotation) uomLabel(value string) string {
 // corrupt q.Data -- hence the deep copy of every SubItems slice.
 func (q *Quotation) displayData() QuotationData {
 	data := q.Data
+	// The note is normalized here as well as in Prepare: the template is
+	// executed against this copy, and a caller that builds the data bag
+	// directly (the renderer equivalence fixture, the template sample) must
+	// print the same document the native renderer is handed. Trimming is
+	// idempotent, and a whitespace-only note therefore prints nothing in
+	// both renderers rather than an empty card in one of them.
+	data.Note = strings.TrimSpace(q.Data.Note)
+	data.NoteHTML = template.HTML(notepkg.HTML(data.Note))
 	data.Items = make([]QuotationItem, len(q.Data.Items))
 	for i, item := range q.Data.Items {
 		item.UoM = q.uomLabel(item.UoM)
@@ -1619,6 +1658,7 @@ func (q *Quotation) renderInput() (quotation.Input, error) {
 		Currency: q.Data.Currency,
 
 		Subject:          q.Data.Subject,
+		Note:             data.Note,
 		RecipientName:    q.Data.RecipientName,
 		RecipientCompany: q.Data.RecipientCompany,
 		RecipientAddress: q.Data.RecipientAddress,

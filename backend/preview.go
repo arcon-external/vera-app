@@ -51,8 +51,12 @@ type CustomerPreviewItem struct {
 // cost side. Nothing read them for a month, because a comment describing a
 // boundary is not a boundary. TestCustomerPreviewCarriesNoInternalEconomics is.
 type CustomerPreview struct {
-	Incoterm               string
-	Subject                string
+	Incoterm string
+	Subject  string
+	// Note is the quotation-level note the customer document prints once under
+	// the line items (#534). It is the restricted Markdown source (#540).
+	// Empty means no note.
+	Note                   string
 	RecipientName          string
 	RecipientCompany       string
 	RecipientAddress       string
@@ -250,6 +254,7 @@ func (q *Quotation) GetCustomerPreview() (CustomerPreview, error) {
 	return CustomerPreview{
 		Items:                  items,
 		Subject:                q.Data.Subject,
+		Note:                   q.Data.Note,
 		RecipientName:          q.Data.RecipientName,
 		RecipientCompany:       q.Data.RecipientCompany,
 		RecipientAddress:       q.Data.RecipientAddress,

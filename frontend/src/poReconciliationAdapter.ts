@@ -1,5 +1,6 @@
 import { LoadPOReconciliation, SavePOReconciliation } from "@backend/backend/Quotation";
 import type { backend } from "@backend/models";
+import { errorMessage } from "./errors";
 import {
   normalizeSession,
   type ReconciliationSession,
@@ -32,23 +33,13 @@ export const wailsReconciliationTransport: ReconciliationTransport = {
     ).then((updated) => normalizeSession(updated as ReconciliationSession)),
 };
 
-function errorMessage(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The reconciliation could not be loaded.";
-}
-
 /**
  * The desktop binding surfaces a refusal as a message string, so absence is
  * matched by the server's sentence. Anything else stays an error.
  */
 export function isReconciliationNotFound(error: unknown): boolean {
   if (error === null || error === undefined) return false;
-  return /no reconciliation recorded/i.test(errorMessage(error));
+  return /no reconciliation recorded/i.test(errorMessage(error, "The reconciliation could not be loaded."));
 }
 
 export type LoadSessionResult =
@@ -66,7 +57,7 @@ export async function loadSession(
     return { status: "ready", session: normalizeSession(session) };
   } catch (error: unknown) {
     if (isReconciliationNotFound(error)) return { status: "absent" };
-    return { status: "error", message: errorMessage(error) };
+    return { status: "error", message: errorMessage(error, "The reconciliation could not be loaded.") };
   }
 }
 
@@ -83,6 +74,6 @@ export async function saveSession(
     const updated = await transport.save(poID, session);
     return { status: "saved", session: normalizeSession(updated) };
   } catch (error: unknown) {
-    return { status: "error", message: errorMessage(error) };
+    return { status: "error", message: errorMessage(error, "The reconciliation could not be loaded.") };
   }
 }

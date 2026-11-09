@@ -10,6 +10,7 @@ import {
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import type { CompanyUnitOption } from "../companyUnits";
+import { errorMessage } from "../errors";
 import { formatMoney, type CurrencyInfo } from "../format";
 import {
   conflictNeedsCorrection,
@@ -418,16 +419,6 @@ function withoutSourceBasis(input: PurchaseOrderUpdateInput): Record<string, unk
   void TaxType;
   void ServiceCategory;
   return rest;
-}
-
-function errorText(error: unknown): string {
-  if (typeof error === "string" && error.trim() !== "") return error;
-  if (error instanceof Error && error.message.trim() !== "") return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim() !== "") return message;
-  }
-  return "The purchase order could not be saved. Try again.";
 }
 
 function matchLabel(
@@ -2165,7 +2156,7 @@ export function PurchaseOrderEditorPage({
       setAcknowledgedExtra([]);
       setLinkTaxChoice(loaded.TaxChoiceRequired ? "" : "keep");
     } catch (error) {
-      setLinkError(errorText(error));
+      setLinkError(errorMessage(error, "The purchase order could not be saved. Try again."));
     } finally {
       setLinkLoading(false);
     }
@@ -2265,7 +2256,7 @@ export function PurchaseOrderEditorPage({
       setLinkTaxChoice("");
       onLinked?.(linked.order);
     } catch (error) {
-      setLinkError(errorText(error));
+      setLinkError(errorMessage(error, "The purchase order could not be saved. Try again."));
     } finally {
       setLinking(false);
     }
@@ -2312,7 +2303,7 @@ export function PurchaseOrderEditorPage({
         }
         dispatch({ type: "saveFailed", error: outcome.message });
       } catch (error) {
-        dispatch({ type: "saveFailed", error: errorText(error) });
+        dispatch({ type: "saveFailed", error: errorMessage(error, "The purchase order could not be saved. Try again.") });
       }
       return;
     }
@@ -2376,7 +2367,7 @@ export function PurchaseOrderEditorPage({
         error: "The server answered without a saved record. Try again.",
       });
     } catch (error) {
-      dispatch({ type: "saveFailed", error: errorText(error) });
+      dispatch({ type: "saveFailed", error: errorMessage(error, "The purchase order could not be saved. Try again.") });
     }
   };
 
@@ -2627,7 +2618,7 @@ export function PurchaseOrderEditorPage({
       setAssignConfirmation(initial.assignConfirmation);
       setView("review");
     } catch (error) {
-      dispatch({ type: "saveFailed", error: errorText(error) });
+      dispatch({ type: "saveFailed", error: errorMessage(error, "The purchase order could not be saved. Try again.") });
     } finally {
       setReviewLoading(false);
     }
@@ -2706,7 +2697,7 @@ export function PurchaseOrderEditorPage({
         error: "The server answered without a saved record. Try again.",
       });
     } catch (error) {
-      dispatch({ type: "saveFailed", error: errorText(error) });
+      dispatch({ type: "saveFailed", error: errorMessage(error, "The purchase order could not be saved. Try again.") });
     } finally {
       setFinalSaving(false);
     }

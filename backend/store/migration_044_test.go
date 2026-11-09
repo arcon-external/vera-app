@@ -786,6 +786,8 @@ func TestMigration044Genuine043Upgrade(t *testing.T) {
 		t.Fatalf("pool: %v", err)
 	}
 	schema := database.configSchema()
+	seedRecipientCompanyColumnOnLegacySchema(t, pool, database.config.Schema)
+	seedQuotationNoteColumnOnLegacySchema(t, pool, database.config.Schema)
 	if po518HasColumn(t, pool, database.config.Schema,
 		"purchase_order_reconciliation_sessions", "repair_correction_id") {
 		t.Fatalf("the pre-044 schema already has 044's column")

@@ -36,7 +36,7 @@ import {
   currencyEditBlockMessage,
   normalizeCurrencyCode,
 } from "./drafts";
-import type { DraftSummaryDTO } from "./drafts";
+import type { DraftPayload, DraftSummaryDTO } from "./drafts";
 import { QuotationDetailPage } from "./components/QuotationDetailPage";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
@@ -113,11 +113,29 @@ import {
   type PurchaseOrderSettings,
   type WorkspaceSettings,
 } from "./workspaceSettings";
-import { CurrentUser, GetCompany, Logout, RestoreSession } from "@backend/backend/AuthAPI";
+import { CheckSession, GetCompany, Logout, RenewSession, RestoreSession } from "@backend/backend/AuthAPI";
+import { ClearRecovery, LoadRecovery, SaveRecovery } from "@backend/backend/RecoveryAPI";
 import { GetCompanyUnits, GetCurrencyCatalogue } from "@backend/backend/AdminAPI";
 import { loadBindings, matchShortcut } from "./shortcuts";
 import { ShortcutsHelp } from "./components/ShortcutsHelp";
 import { WhatsNewModal, useWhatsNew } from "./components/WhatsNew";
+import { errorMessage } from "./errors";
+import {
+  isSessionEnd,
+  minutesUntil,
+  renewalDue,
+  sameUser,
+  type SessionStatus,
+} from "./session";
+import { SessionRenewBanner } from "./components/SessionRenewBanner";
+import { RecoveryBanner } from "./components/RecoveryBanner";
+import {
+  RECOVERY_DEBOUNCE_MS,
+  buildRecoverySnapshot,
+  parseRecoverySnapshot,
+  recoveryLabel,
+  type RecoverySnapshot,
+} from "./recovery";
 import { useToast } from "./toast";
 
 interface StatusState {
@@ -204,6 +222,7 @@ const DEFAULT_DETAILS: DetailsState = {
   taxZone: "FTZ",
   taxType: "Goods",
   serviceCategory: "",
+  note: "",
 };
 
 /**
@@ -487,16 +506,6 @@ function buildDescription(description: string, bullets: string[]): string {
   return parts.join("\n");
 }
 
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim()) return error;
-  if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return fallback;
-}
-
 /** Issue #491: the three PO tabs share one workspace. */
 export function isPurchaseOrderPage(page: AppPage): boolean {
   return page === "po" || page === "po-drafts" || page === "po-archive";
@@ -554,7 +563,7 @@ function App() {
     onRefreshError: (error) =>
       pushToast(
         "error",
-        getErrorMessage(
+        errorMessage(
           error,
           "The saved purchase order could not be reloaded, so the archive is shown."
         )
@@ -633,6 +642,9 @@ function App() {
     editingQuote !== null ||
     (subject !== "" && subject !== (pristineSubject ?? "")) ||
     details.recipientName.trim() !== "" ||
+    // The note is quotation content: a note-only edit is unsaved work, so it
+    // must enable Save draft and trip the leave guard like any other field.
+    details.note.trim() !== "" ||
     items.some(
       (item) =>
         item.description.trim() !== "" ||
@@ -776,13 +788,76 @@ function App() {
       } catch (error) {
         pushToast(
           "error",
-          getErrorMessage(error, "The purchase order could not be opened.")
+          errorMessage(error, "The purchase order could not be opened.")
         );
       }
     },
     [poLeave, poWorkspace.open, pushToast]
   );
   const [user, setUser] = useState<SignedInUser | null>(null);
+  // Issue #531: an involuntary session end preserves the workspace and shows
+  // a re-login surface. endedUser is the account whose work is preserved, so
+  // the same account can restore it and a different one starts clean.
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const endedUser = useRef<SignedInUser | null>(null);
+  const userRef = useRef<SignedInUser | null>(null);
+  // Ticket #536: the session's idle deadline as the server last reported it.
+  // The "Stay signed in" banner counts down to it and a successful renewal
+  // replaces it; nothing here is authoritative — the server owns the clock.
+  const [sessionExpiresAt, setSessionExpiresAt] = useState<string | null>(null);
+  const [sessionCanRenew, setSessionCanRenew] = useState(false);
+  const [sessionNow, setSessionNow] = useState(() => Date.now());
+  const [renewingSession, setRenewingSession] = useState(false);
+  const [renewError, setRenewError] = useState<string | null>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+  // Issue #537: the local recovery snapshot offered after a crash or a power
+  // loss. It is device-local, scoped to the signed-in account and the API
+  // endpoint by the Go side, and never replaces work the editor already holds.
+  const [recoveryPending, setRecoveryPending] = useState<{
+    snapshot: RecoverySnapshot;
+    label: string;
+  } | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  // One log line per signed-in session: a debounced save that fails must not
+  // toast on every keystroke, and a plain-browser dev build has no Wails
+  // runtime to save through at all.
+  const recoveryLoggedError = useRef(false);
+  // The pending debounce timer is cancelled by every deliberate clear, so an
+  // export or a saved draft cannot be re-snapshotted by a timer that was
+  // already running when it succeeded.
+  const recoveryTimer = useRef<number | null>(null);
+  // The load runs once per account; this is how it knows whether the editor
+  // already holds newer work than the file on disk.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  const recoveryUserId = user?.ID ?? null;
+
+  // Clears the crash snapshot for one account. Best-effort by design: a clear
+  // that fails leaves the file, and the next launch may offer it again, which
+  // is safer than losing the work. A missing file is success on the Go side.
+  const clearRecoverySnapshot = useCallback((userID: number | null) => {
+    if (recoveryTimer.current !== null) {
+      clearTimeout(recoveryTimer.current);
+      recoveryTimer.current = null;
+    }
+    if (userID === null || userID <= 0) return;
+    try {
+      void ClearRecovery(userID).catch((error: unknown) => {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("clear recovery snapshot failed", error);
+      });
+    } catch (error: unknown) {
+      if (recoveryLoggedError.current) return;
+      recoveryLoggedError.current = true;
+      console.error("clear recovery snapshot failed", error);
+    }
+  }, []);
   // Issue #492: the account's device-local Quotation and PO defaults. They are
   // read when the signed-in account changes and written by the settings pages;
   // signing out resets this copy but never removes the saved records.
@@ -1150,9 +1225,138 @@ function App() {
     setActiveDraftId(0);
     setDraftSavedAt(null);
     void ClearDraftContext().catch(() => undefined);
+    // Issue #537: a deliberate reset discards the editor's work, so the crash
+    // copy of it goes too. On a manual sign-out userRef still names the
+    // account being signed out; after an involuntary end it is already null,
+    // which is exactly why the snapshot survives that path.
+    clearRecoverySnapshot(userRef.current?.ID ?? null);
+    setRecoveryPending(null);
     clearPreview();
     setStatus({ type: "idle", message: "" });
-  }, [clearPreview, customerOptions, canonicalUnit, workspaceSettings.quotation]);
+  }, [clearPreview, clearRecoverySnapshot, customerOptions, canonicalUnit, workspaceSettings.quotation]);
+
+  // Issue #537: offer the crash snapshot when an account becomes signed in,
+  // whether by a fresh sign-in or a restored remembered session. A snapshot
+  // never replaces work already in the editor: after an involuntary session
+  // end the workspace is still here and is newer than anything on disk.
+  useEffect(() => {
+    setRecoveryPending(null);
+    setRecoveryError(null);
+    setRecoveryBusy(false);
+    recoveryLoggedError.current = false;
+    if (recoveryUserId === null) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const raw = await LoadRecovery(recoveryUserId);
+        if (cancelled || userRef.current?.ID !== recoveryUserId) return;
+        const snapshot = parseRecoverySnapshot(raw);
+        if (snapshot === null || dirtyRef.current) return;
+        setRecoveryPending({ snapshot, label: recoveryLabel(snapshot) });
+      } catch (error: unknown) {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("load recovery snapshot failed", error);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [recoveryUserId]);
+
+  // The debounced save. It runs only for signed-in work that is actually
+  // dirty, and it stands still while the banner is waiting for an answer:
+  // snapshotting the blank editor under a pending restore would overwrite the
+  // very file the user is deciding about.
+  useEffect(() => {
+    if (!signedIn || recoveryUserId === null) return;
+    if (!dirty || recoveryPending !== null) return;
+    const timer = window.setTimeout(() => {
+      recoveryTimer.current = null;
+      const payload = JSON.stringify(
+        buildRecoverySnapshot(
+          { items, details, customerId },
+          new Date().toISOString()
+        )
+      );
+      const logFailure = (error: unknown) => {
+        if (recoveryLoggedError.current) return;
+        recoveryLoggedError.current = true;
+        console.error("save recovery snapshot failed", error);
+      };
+      try {
+        void SaveRecovery(recoveryUserId, payload).catch(logFailure);
+      } catch (error: unknown) {
+        logFailure(error);
+      }
+    }, RECOVERY_DEBOUNCE_MS);
+    recoveryTimer.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+      if (recoveryTimer.current === timer) recoveryTimer.current = null;
+    };
+  }, [items, details, customerId, signedIn, recoveryUserId, dirty, recoveryPending]);
+
+  // Applies a restored snapshot exactly like opening a draft: fresh row keys,
+  // the stored details (including the note), and no server draft or revision
+  // context, because the work never reached the server.
+  const applyRecoveryDraft = useCallback(
+    (restored: DraftPayload) => {
+      nextKey.current = restored.items.length;
+      nextSubId.current =
+        restored.items.reduce(
+          (highest, item) =>
+            Math.max(highest, ...item.subItems.map((sub) => sub.id)),
+          0
+        ) + 1;
+      setItems(restored.items);
+      setDetails(restored.details);
+      setPristineSubject(null);
+      setCustomerId(
+        restored.customerId || pickCustomerId(customerOptions, customerId)
+      );
+      setEditingQuote(null);
+      setActiveDraftId(0);
+      setDraftSavedAt(null);
+      void ClearDraftContext().catch(() => undefined);
+      clearPreview();
+      setStatus({ type: "idle", message: "" });
+      setPage("create");
+    },
+    [clearPreview, customerOptions, customerId]
+  );
+
+  const handleRestoreRecovery = useCallback(() => {
+    const pending = recoveryPending;
+    if (pending === null) return;
+    applyRecoveryDraft(pending.snapshot.draft);
+    setRecoveryPending(null);
+    setRecoveryError(null);
+    // Clearing after applying is what stops a second restore from offering the
+    // same work again. If the clear fails the editor already holds it; the next
+    // launch may offer it once more, which is the safer failure.
+    clearRecoverySnapshot(userRef.current?.ID ?? null);
+  }, [applyRecoveryDraft, clearRecoverySnapshot, recoveryPending]);
+
+  const handleDiscardRecovery = useCallback(async () => {
+    if (recoveryPending === null) return;
+    const userID = userRef.current?.ID ?? null;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      if (userID !== null) await ClearRecovery(userID);
+      setRecoveryPending(null);
+    } catch (error: unknown) {
+      // The file may still exist, so the banner stays up with the reason
+      // rather than claiming the work was discarded.
+      setRecoveryError(
+        errorMessage(error, "The unsaved work could not be discarded.")
+      );
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, [recoveryPending]);
 
   // Server-owned client directory: the editor dropdown reads here, and new
   // clients appear without a rebuild. Prepare validates server-side.
@@ -1172,61 +1376,147 @@ function App() {
   }, [signedIn, loadCustomers]);
 
 
+  // The destructive reset shared by a manual sign-out and a different user
+  // signing in. An involuntary session end deliberately does NOT call this:
+  // it preserves the editor, page, history, scroll and PO workspace for the
+  // same user's re-login (issue #531).
+  const clearWorkspace = useCallback(() => {
+    resetForm();
+    setCompanyDirty(false);
+    // Issue #494: the remembered workspace context belongs to the session
+    // that opened it; the next sign-in starts from Home with none.
+    setSettingsOrigin(null);
+    // Ticket 02: unsaved state never survives a destructive reset. The
+    // editor's local working copy, the history stack, the scroll positions and
+    // the shell actions all reset with the session; app close needs nothing
+    // because none of it is persisted.
+    closePurchaseOrder();
+    setPageHistoryStack([]);
+    setPoShellActions(null);
+    scrollPositions.current.clear();
+    setPage("home");
+  }, [closePurchaseOrder, resetForm]);
+
   const handleSignOut = useCallback(async () => {
     try {
       await Logout();
     } catch {
       // Session may already be invalid; sign out locally regardless.
     } finally {
+      endedUser.current = null;
+      setSessionEnded(false);
+      // A manual sign-out is deliberate: the device is left clean, so the
+      // crash copy goes with the workspace (issue #537).
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       setUser(null);
-      resetForm();
-      setCompanyDirty(false);
-      // Issue #494: the remembered workspace context belongs to the session
-      // that opened it; the next sign-in starts from Home with none.
-      setSettingsOrigin(null);
-      // Ticket 02: unsaved state never survives sign-out. The editor's local
-      // working copy, the history stack, the scroll positions and the shell
-      // actions all reset with the session; app close needs nothing because
-      // none of it is persisted.
-      closePurchaseOrder();
-      setPageHistoryStack([]);
-      setPoShellActions(null);
-      scrollPositions.current.clear();
-      setPage("home");
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      setRenewError(null);
+      clearWorkspace();
     }
-  }, [closePurchaseOrder, resetForm]);
+  }, [clearWorkspace, clearRecoverySnapshot]);
 
-  // Revalidate the session while signed in so server-side revocation
-  // (deactivation, approved deletion, password change) signs the device out
-  // within about a minute. Network errors are ignored: an offline laptop
-  // waking up must not be signed out by a failed poll.
+  // Re-login after an involuntary session end. The same account gets its
+  // preserved workspace back; a different account starts clean.
+  const handleSignedIn = useCallback(
+    (next: SignedInUser) => {
+      if (endedUser.current !== null && !sameUser(endedUser.current, next)) {
+        clearWorkspace();
+      }
+      endedUser.current = null;
+      setSessionEnded(false);
+      setRenewError(null);
+      setUser(next);
+    },
+    [clearWorkspace]
+  );
+
+  // Revalidate the session while signed in. Only a real session-end status
+  // signs the user out; transport, 5xx, 429 and malformed responses are
+  // connection states and leave the editor exactly where it was (issue #531).
+  // The same answer carries the idle deadline the "Stay signed in" banner
+  // counts down to (ticket #536), so the poll also records it.
   useEffect(() => {
-    if (!signedIn) return;
+    if (!signedIn) {
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      setRenewError(null);
+      return;
+    }
     const timer = window.setInterval(() => {
-      CurrentUser()
-        .then((restored) => setUser(restored as SignedInUser))
-        .catch((err: unknown) => {
-          const message = typeof err === "string" ? err : "";
-          if (message.startsWith("reach the quotation server")) return;
+      void (async () => {
+        // Advance the countdown even when the check itself fails: a flaky
+        // connection must not freeze the banner's clock.
+        setSessionNow(Date.now());
+        try {
+          // The generated binding carries backend.SessionStatus; the local
+          // shape is the subset this poll acts on.
+          const status = (await CheckSession()) as SessionStatus;
+          if (status.State === "active") {
+            if (status.User) setUser(status.User as SignedInUser);
+            setSessionExpiresAt(status.ExpiresAt || null);
+            setSessionCanRenew(Boolean(status.CanRenew));
+            return;
+          }
+          if (!isSessionEnd(status.State)) return;
+          endedUser.current = userRef.current;
+          setSessionEnded(true);
           setUser(null);
-          resetForm();
-          setCompanyDirty(false);
-          setSettingsOrigin(null);
-          // Ticket 02: a revoked session signs out exactly like a manual one:
-          // no workspace, history, scroll or shell action survives it.
-          closePurchaseOrder();
-          setPageHistoryStack([]);
-          setPoShellActions(null);
-          scrollPositions.current.clear();
-          setPage("home");
+          setSessionExpiresAt(null);
+          setSessionCanRenew(false);
           pushToast(
             "error",
-            "You've been signed out. Contact your administrator if this was unexpected."
+            "Your session ended. Sign in to continue where you left off."
           );
-        });
+        } catch {
+          // A binding rejection is not a session end. Keep the session.
+        }
+      })();
     }, 60000);
     return () => window.clearInterval(timer);
-  }, [signedIn, resetForm, pushToast]);
+  }, [signedIn, pushToast]);
+
+  // "Stay signed in" (ticket #536). A successful renewal moves the idle
+  // deadline; a real session end takes #531's preservation path; anything
+  // operational keeps the session and leaves the banner up with its reason.
+  const handleRenewSession = useCallback(async () => {
+    setRenewingSession(true);
+    setRenewError(null);
+    try {
+      const status = (await RenewSession()) as SessionStatus;
+      setSessionNow(Date.now());
+      if (status.State === "active") {
+        if (status.User) setUser(status.User as SignedInUser);
+        setSessionExpiresAt(status.ExpiresAt || null);
+        setSessionCanRenew(Boolean(status.CanRenew));
+        pushToast("success", "Your session was extended.");
+        return;
+      }
+      if (!isSessionEnd(status.State)) {
+        setRenewError(
+          status.Message ||
+            "The session could not be renewed. Keep working; we will try again."
+        );
+        return;
+      }
+      endedUser.current = userRef.current;
+      setSessionEnded(true);
+      setUser(null);
+      setSessionExpiresAt(null);
+      setSessionCanRenew(false);
+      pushToast(
+        "error",
+        "Your session ended. Sign in to continue where you left off."
+      );
+    } catch {
+      // A binding rejection is not a session end. Keep the session.
+      setRenewError(
+        "The session could not be renewed. Keep working; we will try again."
+      );
+    } finally {
+      setRenewingSession(false);
+    }
+  }, [pushToast]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);
@@ -1294,6 +1584,8 @@ function App() {
       setDraftSavedAt(new Date().toISOString());
       void SetDraftContext(id).catch(() => undefined);
       setDraftCount((count) => (activeDraftId === 0 ? count + 1 : count));
+      // The work is on the server now; the crash copy has nothing left to save.
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       pushToast(
         "success",
         activeDraftId === 0
@@ -1303,12 +1595,12 @@ function App() {
     } catch (error: unknown) {
       pushToast(
         "error",
-        getErrorMessage(error, "We couldn't save this draft. Try again.")
+        errorMessage(error, "We couldn't save this draft. Try again.")
       );
     } finally {
       setSavingDraft(false);
     }
-  }, [items, details, customerId, customerOptions, activeDraftId, pushToast]);
+  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot]);
 
   const handleOpenDraft = useCallback(
     async (id: number) => {
@@ -1946,6 +2238,7 @@ function App() {
       LeadTimeDays: details.leadTimeDays,
       CustomerID: customerId,
       Incoterm: details.incoterm,
+      Note: details.note,
     });
 
     try {
@@ -1962,7 +2255,7 @@ function App() {
       pushToast("success", "Quotation prepared. Review the totals before exporting.");
     } catch (error: unknown) {
       clearPreview();
-      const message = getErrorMessage(
+      const message = errorMessage(
         error,
         "We couldn't prepare the quotation. Check the form and try again."
       );
@@ -2043,10 +2336,13 @@ function App() {
       setActiveDraftId(0);
       setDraftSavedAt(null);
       if (fromDraft) setDraftCount((count) => Math.max(0, count - 1));
+      // The signed revision is stored; the crash copy is no longer the only
+      // place this work exists.
+      clearRecoverySnapshot(userRef.current?.ID ?? null);
       setStatus({ type: "idle", message: "" });
       pushToast("success", "Quotation exported.");
     } catch (error: unknown) {
-      const message = getErrorMessage(
+      const message = errorMessage(
         error,
         "We couldn't export the quotation. Check the save location and try again."
       );
@@ -2059,7 +2355,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [activeDraftId, clearPreview, pushToast, liveEntry]);
+  }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
@@ -2322,7 +2618,7 @@ function App() {
           } catch (error) {
             pushToast(
               "error",
-              getErrorMessage(error, "The purchase order draft could not be opened.")
+              errorMessage(error, "The purchase order draft could not be opened.")
             );
           }
         }}
@@ -2335,9 +2631,26 @@ function App() {
           <div className="h-8 w-48 animate-pulse rounded-md bg-paper-muted" aria-label="Checking session" />
         </div>
       ) : user === null ? (
-        <LoginPage onSignedIn={setUser} />
+        <LoginPage onSignedIn={handleSignedIn} sessionEnded={sessionEnded} />
       ) : (
     <>
+      {recoveryPending !== null ? (
+        <RecoveryBanner
+          label={recoveryPending.label}
+          busy={recoveryBusy}
+          error={recoveryError}
+          onRestore={handleRestoreRecovery}
+          onDiscard={() => void handleDiscardRecovery()}
+        />
+      ) : null}
+      {renewalDue(sessionExpiresAt, sessionNow, sessionCanRenew) ? (
+        <SessionRenewBanner
+          minutesLeft={minutesUntil(sessionExpiresAt, sessionNow)}
+          busy={renewingSession}
+          error={renewError}
+          onRenew={() => void handleRenewSession()}
+        />
+      ) : null}
       {updateState?.UpdateAvailable ? (
         <UpdateBanner state={updateState} onDismiss={dismissUpdate} />
       ) : null}

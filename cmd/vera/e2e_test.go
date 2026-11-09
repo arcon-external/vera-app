@@ -197,6 +197,7 @@ func TestEndToEndThroughTheCLI(t *testing.T) {
 	  "customerCode": 7,
 	  "subject": "E2E acceptance quotation",
 	  "recipientName": "Dr. End To End",
+	  "note": "Delivery is ex-works.\nInstallation by the customer.",
 	  "incoterm": "DAP",
 	  "taxZone": "FTZ",
 	  "taxType": "Goods",
@@ -268,6 +269,17 @@ func TestEndToEndThroughTheCLI(t *testing.T) {
 	// the figures -- otherwise the check below proves nothing.
 	if _, ok := internal["DisplayTax"]; !ok {
 		t.Errorf("the internal breakdown has no tax line: %v", internal)
+	}
+
+	// The note travels with the quotation: the customer preview carries it for
+	// the review screen, and the detail read returns the stored revision's copy.
+	customerView, ok := validated["customer"].(map[string]any)
+	if !ok {
+		t.Fatalf("validate returned no customer preview: %v", validated)
+	}
+	const note = "Delivery is ex-works.\nInstallation by the customer."
+	if got := customerView["Note"]; got != note {
+		t.Errorf("customer preview note = %v; want %q", got, note)
 	}
 
 	// --- the next number, without consuming it ----------------------------
@@ -347,6 +359,9 @@ func TestEndToEndThroughTheCLI(t *testing.T) {
 	detail := decodeJSON(t, mustRun(t, "quotations", "show", fmt.Sprintf("%d", id), "--json"))
 	if detail["quoteNumber"] != quoteNumber {
 		t.Errorf("show returned %v; want %q", detail["quoteNumber"], quoteNumber)
+	}
+	if detail["note"] != note {
+		t.Errorf("show returned note %v; want %q", detail["note"], note)
 	}
 
 	// The stored snapshot is the customer's document exactly as issued, and

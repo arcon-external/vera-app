@@ -4,6 +4,56 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.15.0] - 2026-11-09
+
+### Added
+
+- **One optional note on a quotation.** Add a note to the whole quotation; it
+  prints once beneath the line items and above the terms, carries into each
+  revision, and is part of the signed document. An empty note prints nothing.
+- **A basic rich-text note editor.** The note input has a toolbar for **Bold**,
+  **Italic**, **Bullet list** and **Numbered list**, with live formatting and
+  keyboard shortcuts (`Ctrl/Cmd+B`, `Ctrl/Cmd+I`, `Ctrl/Cmd+Shift+8`,
+  `Ctrl/Cmd+Shift+7`). The supported formatting is deliberately small and
+  print-safe: bold, italic, bullets, numbered lists, paragraphs and line
+  breaks. The note is stored as the same signed text and prints identically in
+  the customer PDF and the in-app preview.
+- **A "Stay signed in" window.** The desktop warns before a session expires and
+  lets you renew it without signing in again.
+- **Recover unsaved quotation work.** If Vera closes unexpectedly, it offers the
+  last unsaved quotation when you return.
+
+### Changed
+
+- **A network blip no longer signs you out.** Vera now tells a real session end
+  apart from a connection or server problem. A real session end keeps your
+  unsaved quotation and lets you sign back in where you left off.
+- **Changing your password keeps this device signed in.** Other devices are
+  signed out.
+- **Session lifetimes are clearer.** Standard sessions last 8 hours idle and 7
+  days absolute; "Keep me signed in" sessions last 30 days idle and 90 days
+  absolute. A renewal slides the idle deadline but never the absolute cap.
+
+### Fixed
+
+- **A wrong current password no longer ends your session.**
+- **Renaming a customer no longer breaks an old verification code.** The
+  customer company name is snapshotted on the revision that printed it.
+- **A quotation note is part of the signed revision**, so a note-bearing
+  document verifies and cannot be altered without detection.
+
+### Security
+
+- **Session checks are typed and fail closed.** An invalid session returns a
+  stable code; a server or database failure no longer signs anyone out or
+  clears the stored token.
+
+### Known limitation
+
+- **Purchase Orders are still being finished.** The PO workspace is usable, but
+  it is not yet considered stable and will continue to change after this
+  release. Quotation workflows are unaffected.
+
 ## [0.14.5] - 2026-10-22
 
 ### Security

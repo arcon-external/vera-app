@@ -3,6 +3,10 @@ package backend
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
+
+	"vera-app/backend/apiclient"
 )
 
 // AuthUserDTO is the user shape exposed to the frontend. It never contains
@@ -26,6 +30,44 @@ type serverUser struct {
 	AvatarURL          string `json:"avatarUrl"`
 	ID                 int64  `json:"id"`
 	MustChangePassword bool   `json:"mustChangePassword"`
+}
+
+// serverMe is the /v1/auth/me and /v1/auth/renew payload: the user plus the
+// live session's expiry state, so the desktop can offer renewal at T-10
+// minutes without a second request.
+type serverMe struct {
+	serverUser
+	ExpiresAt         string `json:"expiresAt"`
+	AbsoluteExpiresAt string `json:"absoluteExpiresAt"`
+	CanRenew          bool   `json:"canRenew"`
+	Remembered        bool   `json:"remembered"`
+}
+
+// Session states returned by CheckSession. Only the first four are a real
+// session end; the rest are connection or server states and must never sign
+// the desktop out.
+const (
+	SessionStateActive       = "active"
+	SessionStateExpired      = "expired"
+	SessionStateRevoked      = "revoked"
+	SessionStateInactive     = "inactive"
+	SessionStateInvalid      = "invalid"
+	SessionStateUnreachable  = "unreachable"
+	SessionStateServerError  = "server_error"
+	SessionStateRateLimited  = "rate_limited"
+	SessionStateIncompatible = "incompatible"
+)
+
+// SessionStatus is the typed answer to "what is my session state?". It is
+// data, not an error: Wails rejects an error as an object the old poll could
+// not read, and every poll failure used to sign the user out (issue #531).
+type SessionStatus struct {
+	State     string
+	User      AuthUserDTO
+	Code      string
+	Message   string
+	ExpiresAt string
+	CanRenew  bool
 }
 
 // AuthAPI exposes authentication to the frontend. It talks to veraserver;
@@ -125,12 +167,151 @@ func (a *AuthAPI) Logout() error {
 	return ClearSessionToken()
 }
 
-// RestoreSession validates the saved session, if any.
+// RestoreSession validates the saved session, if any. It goes through
+// CheckSession so a dead remembered token is cleared at startup, while a
+// transient failure keeps it for the next launch.
 func (a *AuthAPI) RestoreSession() (AuthUserDTO, error) {
 	if SessionToken() == "" {
 		return AuthUserDTO{}, fmt.Errorf("no saved session")
 	}
-	return a.CurrentUser()
+	status := a.CheckSession()
+	if status.State == SessionStateActive {
+		return status.User, nil
+	}
+	if status.Message != "" {
+		return AuthUserDTO{}, fmt.Errorf("%s", status.Message)
+	}
+	return AuthUserDTO{}, fmt.Errorf("no saved session")
+}
+
+// CheckSession asks the server what the current session state is and returns
+// typed data for every expected outcome. It never returns an error, because a
+// Wails rejection is exactly the shape the old poll mishandled: transport,
+// 5xx and 429 outcomes are connection states, not a session end.
+//
+// Only a real session end clears the token; that is the "session-end path"
+// the keychain lifecycle names. A manual Logout clears it too. No other call
+// may.
+func (a *AuthAPI) CheckSession() SessionStatus {
+	if SessionToken() == "" {
+		return SessionStatus{
+			State:   SessionStateInvalid,
+			Code:    "session_missing",
+			Message: "no saved session",
+		}
+	}
+	client, err := api()
+	if err != nil {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_check_unavailable",
+			Message: err.Error(),
+		}
+	}
+
+	var me serverMe
+	if err := client.Get("/v1/auth/me", &me); err != nil {
+		return classifySessionError(err)
+	}
+	if me.ID == 0 || strings.TrimSpace(me.Email) == "" {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_incompatible",
+			Message: "the server's session response was not understood",
+		}
+	}
+	return SessionStatus{
+		State:     SessionStateActive,
+		User:      toAuthUserDTO(me.serverUser),
+		Code:      "session_active",
+		ExpiresAt: me.ExpiresAt,
+		CanRenew:  me.CanRenew,
+	}
+}
+
+// RenewSession asks the server to slide the current session's idle deadline.
+//
+// Like CheckSession it returns typed data for every expected outcome, never an
+// error: the "Stay signed in" button must distinguish "the session really
+// ended" from "the laptop is offline" without parsing prose. A real end is
+// the only outcome that clears the token (issue #531's rule).
+func (a *AuthAPI) RenewSession() SessionStatus {
+	if SessionToken() == "" {
+		return SessionStatus{
+			State:   SessionStateInvalid,
+			Code:    "session_missing",
+			Message: "no saved session",
+		}
+	}
+	client, err := api()
+	if err != nil {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_check_unavailable",
+			Message: err.Error(),
+		}
+	}
+
+	var me serverMe
+	if err := client.Post("/v1/auth/renew", nil, &me); err != nil {
+		return classifySessionError(err)
+	}
+	if me.ID == 0 || strings.TrimSpace(me.Email) == "" {
+		return SessionStatus{
+			State:   SessionStateIncompatible,
+			Code:    "session_incompatible",
+			Message: "the server's session response was not understood",
+		}
+	}
+	return SessionStatus{
+		State:     SessionStateActive,
+		User:      toAuthUserDTO(me.serverUser),
+		Code:      "session_active",
+		ExpiresAt: me.ExpiresAt,
+		CanRenew:  me.CanRenew,
+	}
+}
+
+// classifySessionError turns a failed session request into a typed status. A
+// 401 is a real session end (and is the only branch that clears the token);
+// everything else is a connection or server state.
+func classifySessionError(err error) SessionStatus {
+	status := apiclient.StatusOf(err)
+	code := apiclient.CodeOf(err)
+
+	if status == http.StatusUnauthorized {
+		state := SessionStateInvalid
+		switch code {
+		case "session_expired":
+			state = SessionStateExpired
+		case "session_revoked":
+			state = SessionStateRevoked
+		case "session_inactive":
+			state = SessionStateInactive
+		}
+		if code == "" {
+			code = "session_invalid"
+		}
+		// This is the session-end path: the token is dead, so the keychain
+		// must not keep offering it on the next launch.
+		_ = ClearSessionToken()
+		return SessionStatus{State: state, Code: code, Message: err.Error()}
+	}
+
+	switch {
+	case status == http.StatusTooManyRequests:
+		return SessionStatus{State: SessionStateRateLimited, Code: "rate_limited", Message: err.Error()}
+	case status >= http.StatusInternalServerError:
+		return SessionStatus{State: SessionStateServerError, Code: "session_check_failed", Message: err.Error()}
+	case status == http.StatusNotFound:
+		return SessionStatus{State: SessionStateIncompatible, Code: "session_incompatible", Message: err.Error()}
+	case status == 0 && apiclient.IsTransport(err):
+		return SessionStatus{State: SessionStateUnreachable, Code: "session_unreachable", Message: err.Error()}
+	case status == 0:
+		return SessionStatus{State: SessionStateIncompatible, Code: "session_incompatible", Message: err.Error()}
+	default:
+		return SessionStatus{State: SessionStateServerError, Code: "session_check_failed", Message: err.Error()}
+	}
 }
 
 // CurrentUser returns the signed-in user.

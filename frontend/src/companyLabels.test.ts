@@ -41,6 +41,7 @@ function served(): CompanyLabelEntry[] {
     entry("metaValidUntil", "Valid Until", 20),
     entry("metaRevision", "Revision", 20),
     entry("subject", "Subject", 30),
+    entry("note", "Note", 40),
     entry("columnNo", "No.", 20),
     entry("columnDescription", "Description", 20),
     entry("columnQty", "Qty.", 20),
@@ -76,9 +77,9 @@ describe("groupCompanyLabels", () => {
       "verification",
     ]);
     const flat = groups.flatMap((group) => group.entries.map((entry) => entry.Key));
-    expect(flat).toHaveLength(26);
-    expect(new Set(flat).size).toBe(26);
-    expect(groups.map((group) => group.entries.length)).toEqual([9, 7, 4, 4, 2]);
+    expect(flat).toHaveLength(27);
+    expect(new Set(flat).size).toBe(27);
+    expect(groups.map((group) => group.entries.length)).toEqual([10, 7, 4, 4, 2]);
     // The group a key lands in is a presentation choice (the closing sentence
     // reads with the document but is served after the columns); what must hold
     // is that no group reorders what the server served it.
@@ -95,7 +96,7 @@ describe("groupCompanyLabels", () => {
     const other = groups.find((group) => group.id === "other");
     expect(other).toBeDefined();
     expect(other?.entries.map((entry) => entry.Key)).toEqual(["siteHeading"]);
-    expect(groups.flatMap((group) => group.entries)).toHaveLength(27);
+    expect(groups.flatMap((group) => group.entries)).toHaveLength(28);
   });
 
   it("drops a group with nothing in it rather than printing an empty heading", () => {
@@ -111,7 +112,7 @@ describe("patchCompanyLabel", () => {
     expect(patched.filter((entry) => entry.Key !== "subject")).toEqual(
       served().filter((entry) => entry.Key !== "subject")
     );
-    expect(patched).toHaveLength(26);
+    expect(patched).toHaveLength(27);
   });
 
   it("is a no-op for a key the document does not carry", () => {
@@ -123,7 +124,7 @@ describe("patchCompanyLabel", () => {
 describe("companyLabelPayload", () => {
   it("sends every key with its value, in served order", () => {
     const payload = companyLabelPayload(served());
-    expect(payload).toHaveLength(26);
+    expect(payload).toHaveLength(27);
     expect(payload[0]).toEqual({ Key: "docTitle", Value: "PROPOSAL" });
     expect(payload[1]).toEqual({ Key: "recipientHeading", Value: "Quotation to" });
     expect(payload.map((row) => row.Key)).toEqual(served().map((entry) => entry.Key));

@@ -685,6 +685,32 @@ describe("Quotation back stack (ticket 02)", () => {
   });
 });
 
+describe("Quotation note counts as entered work (#535)", () => {
+  it("a note-only edit marks the editor dirty and enables Save draft", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+
+    // A pristine editor has nothing to save.
+    expect(buttonWithText("Save draft").disabled).toBe(true);
+
+    const note = document.querySelector<HTMLElement>(
+      '[role="textbox"][aria-label="Note"]'
+    );
+    if (note === null) throw new Error("note editor not found");
+    await act(async () => {
+      note.innerHTML = "<p>Call before delivery</p>";
+      note.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    // The note is quotation content: it must enable Save draft, drive the
+    // leave guard and reach the #537 snapshot like any other entered field.
+    expect(buttonWithText("Save draft").disabled).toBe(false);
+  });
+});
+
 describe("sign-out clears the stack (ticket 02)", () => {
   it("no unsaved workspace, history or scroll survives sign-out", async () => {
     await renderApp();

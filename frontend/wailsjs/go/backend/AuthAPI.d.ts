@@ -4,6 +4,8 @@ import {backend} from '../models';
 
 export function ChangePassword(arg1:string,arg2:string):Promise<void>;
 
+export function CheckSession():Promise<backend.SessionStatus>;
+
 export function CurrentUser():Promise<backend.AuthUserDTO>;
 
 export function GetCompany():Promise<backend.CompanyProfile>;
@@ -19,6 +21,8 @@ export function MyDeletionRequests():Promise<Array<backend.OwnDeletionRequest>>;
 export function MyEmailChangeRequests():Promise<Array<backend.EmailChangeRequest>>;
 
 export function RedeemInvite(arg1:string,arg2:string):Promise<string>;
+
+export function RenewSession():Promise<backend.SessionStatus>;
 
 export function RequestDeletion(arg1:boolean):Promise<backend.DeletionRequest>;
 

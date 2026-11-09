@@ -11,11 +11,14 @@ PDF rendering stays local forever.
 | `GET /health`, `GET /healthz` | none | liveness probes (no DB touch; note `/healthz` is swallowed by some edges — probe `/health`) |
 | `POST /v1/auth/login` | no | `{email,password}` → `{token,user}`; generic 401 on failure |
 | `POST /v1/auth/logout` | bearer | revokes the token, `204` |
-| `GET /v1/auth/me` | bearer | current user or `401` |
+| `GET /v1/auth/me` | bearer | current user and the session's idle/absolute expiry, or `401` |
+| `POST /v1/auth/renew` | bearer | slide the idle expiry to `min(now + idle, absolute cap)`; coded `401` when the session ended |
 | `POST /v1/auth/redeem` | no | invite/reset code → password set (single-use, 1h) |
 
-Sessions reuse `backend/auth` exactly: 8h idle expiry, revocation-checked on
-every call, login rate limiting (5 failures → cooldown).
+Sessions reuse `backend/auth` exactly: 8h idle / 7d absolute for a standard
+sign-in, 30d idle / 90d absolute for a remembered one, revocation-checked on
+every call, login rate limiting (5 failures → cooldown). `POST /v1/auth/renew`
+slides the idle deadline and never crosses the absolute cap.
 
 ## Where it runs (Cloud Run, primary)
 

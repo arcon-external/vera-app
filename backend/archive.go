@@ -75,13 +75,16 @@ type ArchivedQuotationSubItem struct {
 }
 
 type ArchivedQuotation struct {
-	DisplayPpn                  string
-	DisplayOriginalGrand        string
-	DisplayOriginalDiscount     string
-	RecipientName               string
-	RecipientAddress            string
-	Incoterm                    string
-	HTMLSnapshot                string
+	DisplayPpn              string
+	DisplayOriginalGrand    string
+	DisplayOriginalDiscount string
+	RecipientName           string
+	RecipientAddress        string
+	Incoterm                string
+	HTMLSnapshot            string
+	// Note is the quotation-level note this revision printed and signed.
+	// Empty for revisions issued before the note existed.
+	Note                        string
 	DisplayNett                 string
 	DisplayProfit               string
 	DisplayMarginalizedAfterTax string
@@ -254,6 +257,7 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		},
 		RecipientName:               detail.RecipientName,
 		RecipientAddress:            detail.RecipientAddress,
+		Note:                        detail.Note,
 		CustomerCode:                detail.CustomerCode,
 		CustomerAddress:             detail.CustomerAddress,
 		ValidityDays:                detail.ValidityDays,

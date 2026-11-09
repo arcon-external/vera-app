@@ -29,9 +29,15 @@ type InputDoc struct {
 	CustomerCode  int    `json:"customerCode"`
 	Subject       string `json:"subject"`
 	RecipientName string `json:"recipientName,omitempty"`
-	Incoterm      string `json:"incoterm,omitempty"`
-	Validity      int    `json:"validityDays,omitempty"`
-	PaymentTerm   int    `json:"paymentTermDays,omitempty"`
+	// Note is the optional quotation-level note. Its source is the restricted
+	// Markdown subset (**bold**, *italic*, "- " bullets, "1. " numbered items,
+	// paragraphs and line breaks); other markup prints literally. It is printed
+	// once under the line items, outer whitespace is trimmed, internal line
+	// breaks survive, and the maximum is 1000 characters.
+	Note        string `json:"note,omitempty"`
+	Incoterm    string `json:"incoterm,omitempty"`
+	Validity    int    `json:"validityDays,omitempty"`
+	PaymentTerm int    `json:"paymentTermDays,omitempty"`
 	// The lead time is four independent units, each 0..255 and each optional:
 	// a quotation may state none of them, which means no lead time at all.
 	// They print as entered, with no conversion between them.
@@ -181,6 +187,7 @@ func (d *InputDoc) toQuotationInput() (backend.QuotationInput, error) {
 		CustomerID:      uint8(d.CustomerCode),
 		Subject:         d.Subject,
 		RecipientName:   d.RecipientName,
+		Note:            d.Note,
 		Incoterm:        defaultString(d.Incoterm, "EXW"),
 		Validity:        uint8(defaultInt(d.Validity, 30)),
 		PaymentTerm:     uint8(defaultInt(d.PaymentTerm, 90)),
