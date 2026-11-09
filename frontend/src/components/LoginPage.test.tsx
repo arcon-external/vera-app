@@ -294,7 +294,7 @@ describe("submitSignIn passes the checkbox state as Login's third argument", () 
     expect(spies.onSignedIn).not.toHaveBeenCalled();
   });
 
-  it("puts a server refusal string on the banner and a generic sentence for anything else", async () => {
+  it("puts the server's refusal string on the banner", async () => {
     mocked.Login.mockRejectedValue("invalid credentials");
     const refused = signInSpies();
     await submitSignIn(
@@ -305,15 +305,37 @@ describe("submitSignIn passes the checkbox state as Login's third argument", () 
     expect(refused.onSignedIn).not.toHaveBeenCalled();
     // The button always comes back: a failed sign-in must not wedge the form.
     expect(refused.setBusy).toHaveBeenLastCalledWith(false);
+  });
 
+  it("shows the message Wails hands back for an Error or a {message} object", async () => {
     mocked.Login.mockRejectedValue(new Error("dial tcp 10.0.0.1:443: connection refused"));
     const broken = signInSpies();
     await submitSignIn(
       { busy: false, email: "staff@example.com", password: "x", remember: false },
       { login: mocked.Login, ...broken }
     );
-    expect(broken.setError).toHaveBeenCalledWith("We couldn't sign you in. Try again.");
+    expect(broken.setError).toHaveBeenCalledWith("dial tcp 10.0.0.1:443: connection refused");
     expect(broken.onSignedIn).not.toHaveBeenCalled();
+
+    mocked.Login.mockRejectedValue({ message: "too many failed attempts; try again later" });
+    const limited = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "x", remember: false },
+      { login: mocked.Login, ...limited }
+    );
+    expect(limited.setError).toHaveBeenCalledWith("too many failed attempts; try again later");
+    expect(limited.onSignedIn).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the generic sentence when the error carries no readable message", async () => {
+    mocked.Login.mockRejectedValue({ code: "unknown" });
+    const unreadable = signInSpies();
+    await submitSignIn(
+      { busy: false, email: "staff@example.com", password: "x", remember: false },
+      { login: mocked.Login, ...unreadable }
+    );
+    expect(unreadable.setError).toHaveBeenCalledWith("We couldn't sign you in. Try again.");
+    expect(unreadable.onSignedIn).not.toHaveBeenCalled();
   });
 });
 
