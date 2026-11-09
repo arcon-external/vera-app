@@ -4,6 +4,7 @@ import { backend } from "@backend/models";
 import { BrowserOpenURL } from "../../wailsjs/runtime";
 import { errorMessage } from "../errors";
 import { useToast } from "../toast";
+import { displayVersion } from "../version";
 import { Button, StatusBanner } from "./ui";
 
 type UpdateState = backend.UpdateInfo & { checked: boolean; offline: boolean };
@@ -113,14 +114,14 @@ export function UpdateBanner({
           <span>
             {state.Required ? (
               <>
-                This Vera ({state.Current || "dev"}) is below the minimum
-                supported version. Please update to {state.Latest} to keep
-                working.
+                This Vera ({displayVersion(state.Current)}) is below the
+                minimum supported version. Please update to{" "}
+                {displayVersion(state.Latest)} to keep working.
               </>
             ) : (
               <>
-                Vera {state.Latest} is available (you have{" "}
-                {state.Current || "dev"}).
+                Vera {displayVersion(state.Latest)} is available (you have{" "}
+                {displayVersion(state.Current)}).
               </>
             )}{" "}
             {state.offline ? "Last checked while offline. " : ""}
