@@ -1,12 +1,12 @@
 package gpdf
 
-// Guards for the native quotation note card (#534).
+// Guards for the native quotation note card (#534/#540).
 //
 // The HTML template prints the note; this engine must print the same note in
 // the same place. The tests below pin the card's measured height, its wrapping
-// and paragraph breaks, the editable label, its position between the items and
-// the terms, its atomicity across a page break, and that it carries no clip
-// from the items table.
+// and paragraph breaks, bold and italic runs, bullet and numbered rows, the
+// editable label, its position between the items and the terms, its atomicity
+// across a page break, and that it carries no clip from the items table.
 
 import (
 	"bytes"
@@ -22,6 +22,20 @@ func noteInput(note string) Input {
 	return in
 }
 
+// noteTexts joins each laid-out note line's spans, so a test can assert the
+// printed text and the line structure without depending on span splitting.
+func noteTexts(lines []noteLine) []string {
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		var b strings.Builder
+		for _, span := range line.spans {
+			b.WriteString(span.Text)
+		}
+		out[i] = b.String()
+	}
+	return out
+}
+
 // findRun returns the page index and baseline of the first run whose text is
 // exactly want.
 func findRun(pages []*page, want string) (int, float64, bool) {
@@ -33,6 +47,18 @@ func findRun(pages []*page, want string) (int, float64, bool) {
 		}
 	}
 	return -1, 0, false
+}
+
+// findStyledRun locates the first run with the given text and style.
+func findStyledRun(pages []*page, want string, bold, italic bool) (run, bool) {
+	for _, pg := range pages {
+		for _, prim := range pg.prims {
+			if r, ok := prim.(run); ok && r.text == want && r.bold == bold && r.italic == italic {
+				return r, true
+			}
+		}
+	}
+	return run{}, false
 }
 
 // TestNoteCardHeightIsTheStylesheetBox pins the card's height for a two-line
@@ -54,16 +80,38 @@ func TestNoteCardHeightIsTheStylesheetBox(t *testing.T) {
 	assertNear(t, "two-line note card height", m.noteH, 59.475, 0.01)
 }
 
+// TestFormattedNoteCardHeightCountsBlocksAndListRows proves the measured
+// height follows the parsed structure: one paragraph line, one line-box gap,
+// two bullet rows, another gap, and two numbered rows -- seven line boxes.
+func TestFormattedNoteCardHeightCountsBlocksAndListRows(t *testing.T) {
+	e := testEngine(t)
+	in := noteInput("Intro **bold** *italic*.\n- First\n- Second\n1. One\n2. Two")
+	m := e.derive(in)
+
+	texts := noteTexts(e.noteLines(in, m))
+	want := []string{"Intro bold italic.", "", "First", "Second", "", "One", "Two"}
+	if len(texts) != len(want) {
+		t.Fatalf("formatted note laid out %q; want %q", texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Errorf("note line %d = %q; want %q", i+1, texts[i], want[i])
+		}
+	}
+	wantH := 2*px(1) + 2*px(12) + px(12)*bodyLH + px(4) + 7*px(11)*bodyLH
+	assertNear(t, "formatted note card height", m.noteH, wantH, 0.001)
+}
+
 // TestNotePreservesParagraphBreaks proves an explicit blank line survives:
-// the line is empty, but it still occupies a line box, exactly as pre-wrap
-// prints it.
+// the line is empty, but it still occupies a line box, exactly as the
+// stylesheet's block gap prints it.
 func TestNotePreservesParagraphBreaks(t *testing.T) {
 	e := testEngine(t)
 	in := noteInput("First paragraph.\n\nSecond paragraph.")
 	m := e.derive(in)
 
 	want := []string{"First paragraph.", "", "Second paragraph."}
-	got := e.noteLines(in, m)
+	got := noteTexts(e.noteLines(in, m))
 	if len(got) != len(want) {
 		t.Fatalf("note wraps into %q; want %q", got, want)
 	}
@@ -86,7 +134,7 @@ func TestNoteWrapsToTheCardWidth(t *testing.T) {
 	in := noteInput(text)
 	m := e.derive(in)
 
-	lines := e.noteLines(in, m)
+	lines := noteTexts(e.noteLines(in, m))
 	if len(lines) < 3 {
 		t.Fatalf("the long note wrapped into %d lines; want at least 3: %q", len(lines), lines)
 	}
@@ -99,6 +147,109 @@ func TestNoteWrapsToTheCardWidth(t *testing.T) {
 	}
 	if got := strings.Join(lines, " "); got != text {
 		t.Errorf("wrapping lost or reordered words:\n got %q\nwant %q", got, text)
+	}
+}
+
+// TestNoteRendersBoldAndItalicRuns proves each inline style reaches the draw
+// layer as its own run with the right face selected.
+func TestNoteRendersBoldAndItalicRuns(t *testing.T) {
+	in := noteInput("Please **confirm** access *before* 09:00.")
+	pages := testEngine(t).layout(in)
+
+	for _, want := range []struct {
+		text   string
+		bold   bool
+		italic bool
+	}{
+		{"confirm", true, false},
+		{"before", false, true},
+	} {
+		if _, ok := findStyledRun(pages, want.text, want.bold, want.italic); !ok {
+			t.Errorf("the note did not draw %q as bold=%v italic=%v", want.text, want.bold, want.italic)
+		}
+	}
+}
+
+// TestNoteRendersBulletRows proves a bullet list prints one disc marker per
+// item inside the note card, indented from the card's text edge.
+func TestNoteRendersBulletRows(t *testing.T) {
+	e := testEngine(t)
+	in := noteInput("- First item\n- Second item")
+	m := e.derive(in)
+	pages := e.layout(in)
+
+	notePage, noteY, ok := findRun(pages, "Note")
+	if !ok {
+		t.Fatal("the engine did not print the note label")
+	}
+	termsPage, termsY, ok := findRun(pages, "Terms and Conditions")
+	if !ok {
+		t.Fatal("the engine did not print the terms heading")
+	}
+
+	discs := 0
+	for _, prim := range pages[notePage].prims {
+		b, isBox := prim.(box)
+		if !isBox || b.path == nil {
+			continue
+		}
+		if b.y > noteY && (termsPage != notePage || b.y < termsY) {
+			discs++
+			if b.x <= m.innerX {
+				t.Errorf("bullet disc sits at x %.2f, not indented past the card edge %.2f", b.x, m.innerX)
+			}
+		}
+	}
+	if discs != 2 {
+		t.Errorf("the note drew %d bullet discs; want 2", discs)
+	}
+}
+
+// TestNoteRendersNumberedRows proves a numbered list prints its numbers in the
+// marker gutter and the item text to the right of them.
+func TestNoteRendersNumberedRows(t *testing.T) {
+	in := noteInput("1. Notify security\n2. Log the visit")
+	pages := testEngine(t).layout(in)
+
+	for _, want := range []struct {
+		marker string
+		text   string
+	}{
+		{"1.", "Notify security"},
+		{"2.", "Log the visit"},
+	} {
+		r, ok := findStyledRun(pages, want.marker, false, false)
+		if !ok {
+			t.Errorf("the note did not draw the number marker %q", want.marker)
+			continue
+		}
+		_, textX, ok := findRun(pages, want.text)
+		if !ok {
+			t.Errorf("the note did not draw the text %q for marker %q", want.text, want.marker)
+			continue
+		}
+		if r.x >= textX {
+			t.Errorf("number marker %q sits at x %.2f, not left of its text at x %.2f", want.marker, r.x, textX)
+		}
+	}
+}
+
+// TestItalicFaceIsLoadedAndUsed proves the new asset is a face the engine can
+// parse, measure with and embed, not just a flag on a run. A regular and an
+// italic measurement of the same word must differ, and a document that uses
+// the italic face must render through the subsetter without error.
+func TestItalicFaceIsLoadedAndUsed(t *testing.T) {
+	e := testEngine(t)
+	if e.italic == nil || e.italicShape == nil || len(e.italicData) == 0 {
+		t.Fatal("the engine did not load the italic face")
+	}
+	regular := e.widthFor("before", px(bodyPx), false, false)
+	italic := e.widthFor("before", px(bodyPx), false, true)
+	if math.Abs(italic-regular) < 0.01 {
+		t.Errorf("italic and regular measure the same (%.4fpt); the italic face is not being used", regular)
+	}
+	if _, err := e.Render(noteInput("Please *confirm* access before 09:00.")); err != nil {
+		t.Fatalf("render a note with italic: %v", err)
 	}
 }
 
@@ -218,6 +369,31 @@ func TestNoteStartsAFreshPageWhenItDoesNotFit(t *testing.T) {
 	for i, line := range lines {
 		if got := countRuns(runTexts(pages), line); got != 1 {
 			t.Errorf("note line %d %q printed %d times; want once", i+1, line, got)
+		}
+	}
+}
+
+// TestFormattedNoteStartsAFreshPageWhenItDoesNotFit extends the atomicity
+// guard to the rich-text layout: many bold bullet rows still move as one card.
+func TestFormattedNoteStartsAFreshPageWhenItDoesNotFit(t *testing.T) {
+	lines := make([]string, 40)
+	for i := range lines {
+		lines[i] = "- **Note** line " + itoa(i+1) + "."
+	}
+	in := noteInput("Intro paragraph.\n" + strings.Join(lines, "\n"))
+	pages := testEngine(t).layout(in)
+
+	notePage, _, ok := findRun(pages, "Note")
+	if !ok {
+		t.Fatal("the engine did not print the note label")
+	}
+	if notePage == 0 {
+		t.Fatalf("the formatted note shared page 1 with the items table; it must start a fresh page when it does not fit")
+	}
+	for i := range lines {
+		want := " line " + itoa(i+1) + "."
+		if got := countRuns(runTexts(pages), want); got != 1 {
+			t.Errorf("formatted note line %d %q printed %d times; want once", i+1, want, got)
 		}
 	}
 }

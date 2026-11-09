@@ -190,6 +190,9 @@ func (e *Engine) drawRun(r *render.PDFRenderer, ru run) error {
 	if ru.bold {
 		family = "interb"
 	}
+	if ru.italic {
+		family = "interi"
+	}
 	col := derefColor(colorOf(ru.color))
 
 	if ru.tracking == 0 {
@@ -204,7 +207,7 @@ func (e *Engine) drawRun(r *render.PDFRenderer, ru run) error {
 
 	// With tracking, glyph i sits one tracking step further right than the
 	// untracked shaping put it.
-	for i, g := range e.ShapeFor(ru.bold).Shape(ru.text, ru.size) {
+	for i, g := range e.shapeFor(ru.bold, ru.italic).Shape(ru.text, ru.size) {
 		if g.text == "" {
 			continue
 		}
@@ -1177,9 +1180,36 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 		text: in.Labels.Note, bold: true, color: e.pal.Accent})
 	ty += px(noteLabelPx)*bodyLH + px(noteLabelGapPx)
 	for _, line := range e.noteLines(in, m) {
-		if line != "" {
-			p.add(run{x: tx, baseline: ty + bodyBaselineOffset, size: px(bodyPx),
-				text: line, color: e.pal.Ink})
+		lineX := tx
+		if line.bullet || line.marker != "" {
+			lineX = tx + px(noteListIndentPx)
+			if line.bullet {
+				markerX := lineX - px(noteBulletGapPx) - px(noteBulletSizePx)
+				p.add(box{
+					x: markerX, y: ty + bodyBaselineOffset - px(2.6),
+					w: px(noteBulletSizePx), h: px(noteBulletSizePx),
+					fill: e.pal.Ink,
+					path: discPath(markerX+px(noteBulletSizePx)/2, ty+bodyBaselineOffset-px(2.6)+px(noteBulletSizePx)/2, px(noteBulletSizePx)),
+				})
+			} else {
+				markerW := e.widthFor(line.marker, px(bodyPx), false, false)
+				p.add(run{
+					x:        lineX - px(noteBulletGapPx) - markerW,
+					baseline: ty + bodyBaselineOffset, size: px(bodyPx),
+					text: line.marker, color: e.pal.Ink,
+				})
+			}
+		}
+		runX := lineX
+		for _, span := range line.spans {
+			if span.Text == "" {
+				continue
+			}
+			p.add(run{
+				x: runX, baseline: ty + bodyBaselineOffset, size: px(bodyPx),
+				text: span.Text, bold: span.Bold, italic: span.Italic, color: e.pal.Ink,
+			})
+			runX += e.widthFor(span.Text, px(bodyPx), span.Bold, span.Italic)
 		}
 		ty += px(bodyPx) * bodyLH
 	}

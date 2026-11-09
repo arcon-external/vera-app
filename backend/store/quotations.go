@@ -94,8 +94,9 @@ type RevisionDraft struct {
 	RecipientAddress string
 	Subject          string
 	// Note is the optional quotation-level note the revision printed and
-	// signed. Empty means no note; it is emitted only then in the canonical
-	// payload, which is what keeps pre-note codes verifying.
+	// signed. Its source is the restricted Markdown subset (#540). Empty means
+	// no note; it is emitted only then in the canonical payload, which is what
+	// keeps pre-note codes verifying.
 	Note       string
 	Incoterm   string
 	IssuerName string

@@ -18,6 +18,7 @@ import (
 	"vera-app/backend/auth"
 	"vera-app/backend/currency"
 	"vera-app/backend/labels"
+	notepkg "vera-app/backend/note"
 	"vera-app/backend/render"
 	"vera-app/backend/render/quotation"
 	"vera-app/backend/store"
@@ -30,9 +31,11 @@ type QuotationInput struct {
 	Incoterm      string
 	Subject       string
 	RecipientName string
-	// Note is the optional quotation-level note. Prepare trims its outer
-	// whitespace, preserves internal line breaks, and refuses more than
-	// apicontract.MaxNoteLength characters.
+	// Note is the optional quotation-level note. Its source is the restricted
+	// Markdown subset defined by backend/note (**bold**, *italic*, "- "
+	// bullets, "1. " numbered items, paragraphs and line breaks); other markup
+	// prints literally. Prepare trims its outer whitespace, preserves internal
+	// line breaks, and refuses more than apicontract.MaxNoteLength characters.
 	Note            string
 	TaxZone         string
 	TaxCategory     string
@@ -242,8 +245,13 @@ type QuotationData struct {
 	Subject          string
 	// Note is the optional quotation-level note as entered (outer whitespace
 	// trimmed, internal line breaks preserved). It is printed once under the
-	// line items (#534) and signed only when non-empty.
-	Note                      string
+	// line items (#534) and signed only when non-empty. The source is the
+	// restricted Markdown subset defined by backend/note (#540).
+	Note string
+	// NoteHTML is Note rendered to the safe markup the template prints. The
+	// parser escapes every text span and emits only <p>, <br>, <strong>, <em>,
+	// <ul>, <ol> and <li>, so raw HTML in the source is text.
+	NoteHTML                  template.HTML
 	DisplaySubTotal           string
 	TaxType                   string
 	CustomCSS                 template.CSS
@@ -1133,6 +1141,7 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 
 	q.Data.Subject = input.Subject
 	q.Data.Note = input.Note
+	q.Data.NoteHTML = template.HTML(notepkg.HTML(input.Note))
 	q.Data.Validity = input.Validity
 	q.Data.PaymentTerm = input.PaymentTerm
 	q.Data.LeadTimeYears = input.LeadTimeYears
@@ -1498,6 +1507,7 @@ func (q *Quotation) displayData() QuotationData {
 	// idempotent, and a whitespace-only note therefore prints nothing in
 	// both renderers rather than an empty card in one of them.
 	data.Note = strings.TrimSpace(q.Data.Note)
+	data.NoteHTML = template.HTML(notepkg.HTML(data.Note))
 	data.Items = make([]QuotationItem, len(q.Data.Items))
 	for i, item := range q.Data.Items {
 		item.UoM = q.uomLabel(item.UoM)

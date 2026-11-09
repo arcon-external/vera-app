@@ -189,6 +189,9 @@ func TestSchemaDocumentsTheQuotationNote(t *testing.T) {
 	if !strings.Contains(reference, "1000") {
 		t.Errorf("`vera schema` never states the note's 1000-character limit:\n%s", reference)
 	}
+	if !strings.Contains(reference, "Markdown") {
+		t.Errorf("`vera schema` never says the note is restricted Markdown:\n%s", reference)
+	}
 }
 
 func TestConversionAppliesTheEditorsDefaults(t *testing.T) {

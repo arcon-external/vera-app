@@ -54,8 +54,10 @@ func TestPreviewPrintsOneNoteCardUnderTheItems(t *testing.T) {
 	if !strings.Contains(html, `<h3 class="note-label">Note</h3>`) {
 		t.Error("the note card does not carry the built-in Note label")
 	}
-	if !strings.Contains(html, note) {
-		t.Errorf("the note's line break was not preserved; the document does not carry %q", note)
+	// A plain note keeps its line break; the rich renderer turns it into <br>
+	// rather than printing the newline as preformatted text.
+	if !strings.Contains(html, `<p>Delivery is ex-works.<br>Installation by the customer.</p>`) {
+		t.Errorf("the note's line break was not preserved as a printed line break")
 	}
 
 	footer := strings.Index(html, `<section class="footer">`)
@@ -72,6 +74,34 @@ func TestPreviewPrintsOneNoteCardUnderTheItems(t *testing.T) {
 	}
 	if noteAt > footer {
 		t.Error("the note card prints after the terms and totals; it belongs in the items block")
+	}
+}
+
+// TestPreviewRendersTheRestrictedMarkdownSubset proves the customer card
+// carries the supported formatting as semantic HTML: bold, italic, bullets,
+// numbered items, paragraphs and line breaks.
+func TestPreviewRendersTheRestrictedMarkdownSubset(t *testing.T) {
+	const note = "Please **confirm** access *before* 09:00.\n" +
+		"- **First** item\n" +
+		"- Access *after* 09:00\n" +
+		"1. Notify security\n" +
+		"2. Log the visit\n\n" +
+		"Second paragraph."
+	q := prepareWithNote(t, note, labels.DefaultLabels())
+
+	html, err := q.GetQuotationPreviewHTML()
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	for _, want := range []string{
+		`<p>Please <strong>confirm</strong> access <em>before</em> 09:00.</p>`,
+		`<ul><li><strong>First</strong> item</li><li>Access <em>after</em> 09:00</li></ul>`,
+		`<ol><li>Notify security</li><li>Log the visit</li></ol>`,
+		`<p>Second paragraph.</p>`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the note card does not contain %q", want)
+		}
 	}
 }
 
@@ -141,11 +171,13 @@ func TestNoteLabelFollowsTheWording(t *testing.T) {
 	}
 }
 
-// TestNoteCardStylesheetPreservesLineBreaksAndBreaks pins the two stylesheet
+// TestNoteCardStylesheetPreservesLineBreaksAndBreaks pins the stylesheet
 // declarations the printed note depends on: pre-wrap so a typed line break
-// prints, and break-inside: avoid so the card is atomic across a page break.
-// The oracle test only runs with a browser, so this guard fails in a plain
-// `go test` when either declaration is removed.
+// prints, break-inside so the card is atomic across a page break, and the
+// rich-text rules that give bold, italic, lists and paragraph gaps the same
+// geometry the native renderer lays out. The oracle test only runs with a
+// browser, so this guard fails in a plain `go test` when a declaration is
+// removed.
 func TestNoteCardStylesheetPreservesLineBreaksAndBreaks(t *testing.T) {
 	raw, err := os.ReadFile("template/css/template-fixed.css")
 	if err != nil {
@@ -172,6 +204,30 @@ func TestNoteCardStylesheetPreservesLineBreaksAndBreaks(t *testing.T) {
 	} {
 		if !strings.Contains(card[1], decl) {
 			t.Errorf("the note card rule is missing %q", decl)
+		}
+	}
+
+	// The block gap is one line box, which is what the native renderer adds
+	// between blocks. A different gap changes the card height and can move a
+	// page break.
+	gap := regexp.MustCompile(`(?s)\.note-card\s+\.note-body\s*>\s*\*\s*\+\s*\*\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if gap == nil {
+		t.Fatal("no `.note-card .note-body > * + * { ... }` rule in the stylesheet")
+	}
+	if !strings.Contains(gap[1], "margin-top: 1.45em") {
+		t.Error("the note's block gap is not one line box; add margin-top: 1.45em")
+	}
+
+	lists := regexp.MustCompile(`(?s)\.note-card\s+\.note-body\s+ul\s*,\s*\.note-card\s+\.note-body\s+ol\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if lists == nil {
+		t.Fatal("no `.note-card .note-body ul, .note-card .note-body ol { ... }` rule in the stylesheet")
+	}
+	if !strings.Contains(lists[1], "padding-left: 18px") {
+		t.Error("the note lists have no 18px indent; the native renderer indents its rows by 18px")
+	}
+	for _, selector := range []string{"strong", "em", "li"} {
+		if !strings.Contains(css, ".note-card .note-body "+selector) {
+			t.Errorf("the stylesheet has no `.note-card .note-body %s` rule", selector)
 		}
 	}
 }
