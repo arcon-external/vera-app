@@ -114,7 +114,8 @@ only**, never in images, repos, or logs.
 | `GET /healthz`, `GET /health` | none | Liveness (no DB touch — safe for monitors; `/health` where edges swallow `/healthz`, e.g. Cloud Run) |
 | `POST /v1/auth/login` | no | `{email,password}` → `{token,user}`; generic 401, rate-limited |
 | `POST /v1/auth/logout` | bearer | revoke token, `204` |
-| `GET /v1/auth/me` | bearer | current user or `401` |
+| `GET /v1/auth/me` | bearer | current user and the session's idle/absolute expiry, or `401` |
+| `POST /v1/auth/renew` | bearer | slide the idle expiry to `min(now + idle, absolute cap)`; coded `401` when the session ended |
 | `POST /v1/auth/redeem` | no | `{token,newPassword≥10}` → activate invite/reset code (single-use, 1h) |
 | `PATCH /v1/auth/profile` | bearer | display name + avatar (≤512KB, ≤1024px) |
 | `PATCH /v1/auth/password` | bearer | password change |
