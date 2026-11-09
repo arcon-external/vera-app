@@ -40,6 +40,7 @@ const (
 	LabelMetaValidUntil    LabelKey = "metaValidUntil"
 	LabelMetaRevision      LabelKey = "metaRevision"
 	LabelSubject           LabelKey = "subject"
+	LabelNote              LabelKey = "note"
 	LabelColumnNo          LabelKey = "columnNo"
 	LabelColumnDescription LabelKey = "columnDescription"
 	LabelColumnQty         LabelKey = "columnQty"
@@ -89,6 +90,7 @@ var declarations = []LabelDefault{
 	{Key: LabelMetaValidUntil, Default: "Valid Until", MaxLen: 20},
 	{Key: LabelMetaRevision, Default: "Revision", MaxLen: 20},
 	{Key: LabelSubject, Default: "Subject", MaxLen: 30},
+	{Key: LabelNote, Default: "Note", MaxLen: 40},
 	{Key: LabelColumnNo, Default: "No.", MaxLen: 20},
 	{Key: LabelColumnDescription, Default: "Description", MaxLen: 20},
 	{Key: LabelColumnQty, Default: "Qty.", MaxLen: 20},
@@ -157,6 +159,7 @@ type DocumentLabels struct {
 	MetaValidUntil    string
 	MetaRevision      string
 	Subject           string
+	Note              string
 	ColumnNo          string
 	ColumnDescription string
 	ColumnQty         string
@@ -208,6 +211,8 @@ func (d DocumentLabels) Get(key LabelKey) string {
 		return d.MetaRevision
 	case LabelSubject:
 		return d.Subject
+	case LabelNote:
+		return d.Note
 	case LabelColumnNo:
 		return d.ColumnNo
 	case LabelColumnDescription:
@@ -268,6 +273,8 @@ func (d *DocumentLabels) Set(key LabelKey, value string) bool {
 		d.MetaRevision = value
 	case LabelSubject:
 		d.Subject = value
+	case LabelNote:
+		d.Note = value
 	case LabelColumnNo:
 		d.ColumnNo = value
 	case LabelColumnDescription:

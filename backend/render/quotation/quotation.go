@@ -83,8 +83,16 @@ type Input struct {
 	// Currency is the normalized company code. The browser renderer never
 	// reads it (the HTML already carries the headers and totals); the native
 	// renderer prints its headers and totals card from it.
-	Currency          string
-	Subject           string
+	Currency string
+	Subject  string
+
+	// Note is the optional quotation-level note, printed once under the last
+	// line row and above the terms (#534). It is plain text with its outer
+	// whitespace trimmed and its internal line breaks preserved; empty means
+	// no block. The template prints it and the native renderer draws its own
+	// card, so the same string travels to both.
+	Note string
+
 	RecipientName     string
 	RecipientCompany  string
 	RecipientAddress  string

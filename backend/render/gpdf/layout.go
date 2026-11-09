@@ -3,6 +3,7 @@ package gpdf
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/gpdf-dev/gpdf/document"
 
@@ -133,6 +134,15 @@ const (
 	totalsGap       = 8
 	grandPadTop     = 8
 	verifyGapPx     = 18
+
+	// The quotation note card's stylesheet geometry, in CSS pixels (#534).
+	// The left border is the 3px accent; the other three sides are 1px.
+	noteBorderPx   = 1
+	noteAccentPx   = 3
+	notePadX       = 14
+	notePadY       = 12
+	noteLabelPx    = 12
+	noteLabelGapPx = 4
 
 	// metaLineBox is one row of the quotation metadata card, in points. 11px at
 	// the inherited 1.45 line height is 15.95px, which the browser rounds to the
@@ -426,8 +436,10 @@ type metrics struct {
 	subjectY    float64
 	// subjectH is the strip's height for this subject. `.subject` is a grid with
 	// no height of its own, so it is as tall as its value wraps to.
-	subjectH   float64
-	tableTop   float64
+	subjectH float64
+	tableTop float64
+	// noteH is the optional note card's height, zero when there is no note.
+	noteH      float64
 	cardBottom float64
 	// pageBottom is the limit content is placed against: the card's bottom edge
 	// when the page overflows. The card itself closes on the last block, which
@@ -528,6 +540,7 @@ func (e *Engine) derive(in Input) metrics {
 	m.subjectY = m.contentTopY + m.infoH + px(contentGapPx)
 	m.subjectH = e.subjectHeight(in, m)
 	m.tableTop = m.subjectY + m.subjectH + px(contentGapPx)
+	m.noteH = e.noteHeight(in, m)
 
 	m.footerTncW = (m.innerW - px(footGapPx)) * 1.2 / 2.0
 	m.footerTotW = (m.innerW - px(footGapPx)) * 0.8 / 2.0
@@ -772,24 +785,39 @@ func (e *Engine) compose(in Input) ([]*page, error) {
 			// the closing keeps its 4px and the verification block its 18px
 			// when either opens a page.
 			ends := tableTop + used
-			if m.footerH > 0 {
-				// The engine's row heights resolve to whole pixels the way the
-				// browser's do, but their remainders accumulate to a point or
-				// two across a page, and Chrome decides these fits with its own
-				// fractional geometry. A block that misses by less than the
-				// accumulated rounding must not flip to the next page, so the
-				// checks carry a tolerance of two pixels' worth.
-				fit := func(top, h float64) bool { return top+h <= bottom+px(2) }
-				contentTop := m.cardY + px(1)
-				newTrailerPage := func() {
-					finish(cur, ends)
-					pages = append(pages, cur)
-					cur = &page{}
-					e.drawContinuationChrome(cur, m)
-					ends = contentTop
-				}
+			// The engine's row heights resolve to whole pixels the way the
+			// browser's do, but their remainders accumulate to a point or
+			// two across a page, and Chrome decides these fits with its own
+			// fractional geometry. A block that misses by less than the
+			// accumulated rounding must not flip to the next page, so the
+			// checks carry a tolerance of two pixels' worth.
+			fit := func(top, h float64) bool { return top+h <= bottom+px(2) }
+			contentTop := m.cardY + px(1)
+			newTrailerPage := func() {
+				finish(cur, ends)
+				pages = append(pages, cur)
+				cur = &page{}
+				e.drawContinuationChrome(cur, m)
+				ends = contentTop
+			}
 
-				// The cards, after the grid gap below the table.
+			// The note (#534): one atomic card after the table, before the
+			// terms. It is never split, so a note that does not fit what the
+			// last table page has left starts a fresh page whole. The grid
+			// gap above it is truncated at that break, exactly as the cards
+			// grid's gap is.
+			if m.noteH > 0 {
+				top := ends + px(contentGapPx)
+				if !fit(top, m.noteH) {
+					newTrailerPage()
+					top = ends
+				}
+				e.drawNote(cur, in, m, top)
+				ends = top + m.noteH
+			}
+
+			if m.footerH > 0 {
+				// The cards, after the grid gap below the note or the table.
 				top := ends + px(contentGapPx)
 				if !fit(top, m.footerCardsH) {
 					newTrailerPage()
@@ -1203,6 +1231,42 @@ func countItems(subs []subLine) int {
 		}
 	}
 	return n
+}
+
+// noteLines wraps the optional quotation note the way `white-space: pre-wrap`
+// prints it: every explicit line break starts a new line, and an empty line is
+// a line of its own. Within one paragraph the browser still preserves runs of
+// spaces, which `Wrap` collapses -- the printed line breaks, which are what a
+// structured note is for, are exact.
+func (e *Engine) noteLines(in Input, m metrics) []string {
+	text := strings.TrimSpace(in.Note)
+	if text == "" {
+		return nil
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	// The card spans the content width; its content box is narrower by the
+	// 3px left accent, the 1px right border and 14px of padding on each side.
+	w := m.innerW - px(noteAccentPx) - px(noteBorderPx) - 2*px(notePadX)
+	var lines []string
+	for _, para := range strings.Split(text, "\n") {
+		lines = append(lines, e.Wrap(para, px(bodyPx), w, false)...)
+	}
+	return lines
+}
+
+// noteHeight is the note card's height in points: its top and bottom borders,
+// its vertical padding, the label's line box and gap, and one body line box
+// per wrapped line. It is zero when there is no note, so an empty note adds
+// nothing to the page.
+func (e *Engine) noteHeight(in Input, m metrics) float64 {
+	lines := e.noteLines(in, m)
+	if len(lines) == 0 {
+		return 0
+	}
+	return 2*px(noteBorderPx) + 2*px(notePadY) +
+		px(noteLabelPx)*bodyLH + px(noteLabelGapPx) +
+		float64(len(lines))*px(bodyPx)*bodyLH
 }
 
 // tncHeight is the height of the terms card.
