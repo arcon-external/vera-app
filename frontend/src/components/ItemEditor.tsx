@@ -264,7 +264,11 @@ export function ItemEditor({
     [items]
   );
   const discountedLines = useMemo(
-    () => items.filter((item) => item.subItems.length === 0 && item.discountEnabled).length,
+    () => items.filter((item) =>
+      item.subItems.length > 0
+        ? item.subItems.some((sub) => sub.discountEnabled)
+        : item.discountEnabled
+    ).length,
     [items]
   );
 
@@ -715,7 +719,7 @@ function ItemRow({
   onPasteItems: (key: number, event: React.ClipboardEvent<HTMLInputElement>) => void;
 }) {
   const purchaseOrder = mode === "purchase-order";
-  const hasSubItems = !purchaseOrder && item.subItems.length > 0;
+  const hasSubItems = item.subItems.length > 0;
   const rollup = hasSubItems ? subItemsRollup(item.subItems) : null;
   const qty = parseIntOrZero(item.qty);
   const unitCost = parseIntOrZero(item.unitPrice);
@@ -735,7 +739,7 @@ function ItemRow({
   // bullets take a narrow left column and the six cells keep their single
   // inline row on the right, with narrower columns. Otherwise the cells
   // take the full-width grid.
-  const showSplit = !purchaseOrder && !hasSubItems && showPanel;
+  const showSplit = !hasSubItems && showPanel;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -753,6 +757,7 @@ function ItemRow({
           —
         </div>
       </Captioned>
+      {purchaseOrder ? null : (
       <Captioned label="Margin">
         <div
           className="flex h-10 items-center"
@@ -767,6 +772,7 @@ function ItemRow({
           )}
         </div>
       </Captioned>
+      )}
       <Captioned label="Discount">
         <div className="flex h-10 items-center text-body text-ink-300">
           —
@@ -989,7 +995,6 @@ function ItemRow({
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-400">
-          {purchaseOrder ? null : (
           <button
             type="button"
             onClick={onTogglePanel}
@@ -1012,8 +1017,7 @@ function ItemRow({
                 ? `${item.bullets.length} description line${item.bullets.length === 1 ? "" : "s"}`
                 : "Description lines"}
           </button>
-          )}
-          {purchaseOrder || hasSubItems ? null : (
+          {hasSubItems ? null : (
             <button
               type="button"
               onClick={() => onEnableSubItems(item.key)}
@@ -1028,7 +1032,7 @@ function ItemRow({
             </button>
           )}
           {purchaseOrder ? (
-            item.discountEnabled ? (
+            hasSubItems ? null : item.discountEnabled ? (
               <span className="tnum text-accent-700">−{discountPercent}% row discount</span>
             ) : (
               <span className="text-ink-400">No row discount</span>
@@ -1079,7 +1083,7 @@ function ItemRow({
               }
             />
           </div>
-          <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]">
+          <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[64px_48px_108px_128px_minmax(0,1fr)]" : "lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]"}`}>
             {controlCells}
           </div>
         </div>
@@ -1142,6 +1146,7 @@ function ItemRow({
                 currency={currency}
                 uomOptions={uomOptions}
                 uomPendingLabel={uomPendingLabel}
+                mode={mode}
                 onPatch={(patch) => onPatchSubRow(item.key, sub.id, patch)}
                 onRemove={() => onRemoveSubRow(item.key, sub.id)}
                 onMove={(direction) => onMoveSubRow(item.key, sub.id, direction)}
@@ -1201,6 +1206,7 @@ function SubRow({
   currency,
   uomOptions,
   uomPendingLabel,
+  mode,
   onPatch,
   onRemove,
   onMove,
@@ -1216,6 +1222,7 @@ function SubRow({
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   uomPendingLabel?: string;
+  mode: "quotation" | "purchase-order";
   onPatch: (patch: Partial<EditorSubItem>) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -1223,6 +1230,7 @@ function SubRow({
   onRemoveBullet: (bulletIndex: number) => void;
   onBulletChange: (bulletIndex: number, value: string) => void;
 }) {
+  const purchaseOrder = mode === "purchase-order";
   const sellUnit = subItemSellUnit(sub);
   const sellTotal = sellUnit * parseIntOrZero(sub.qty);
   const marginPercent = parseIntOrZero(sub.marginPercent);
@@ -1282,7 +1290,7 @@ function SubRow({
         </div>
       </div>
 
-      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[290px_minmax(0,1fr)]">
+      <div className={`mt-2 grid grid-cols-1 gap-3 ${purchaseOrder ? "lg:grid-cols-[240px_minmax(0,1fr)]" : "lg:grid-cols-[290px_minmax(0,1fr)]"}`}>
         <div className="min-w-0">
             <BulletsEditor
               lines={sub.bullets}
@@ -1294,7 +1302,7 @@ function SubRow({
               onChange={onBulletChange}
             />
         </div>
-        <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]">
+        <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[40px_64px_132px_116px_minmax(0,1fr)]" : "lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]"}`}>
         <Captioned label="Qty">
           {/* Counts, not money: digit-strip stays (see the main row). */}
           <input
@@ -1335,6 +1343,7 @@ function SubRow({
           />
         </Captioned>
 
+        {purchaseOrder ? null : (
         <Captioned label="Margin">
           <div className="flex h-9 items-center gap-2">
             <button
@@ -1383,6 +1392,7 @@ function SubRow({
             </div>
           </div>
         </Captioned>
+        )}
 
         <Captioned label="Discount">
           <div className="flex h-9 items-center gap-2">

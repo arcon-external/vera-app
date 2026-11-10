@@ -1,6 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ItemEditor, type EditorItem } from "./components/ItemEditor";
+import {
+  ItemEditor,
+  newSubItem,
+  subItemSellUnit,
+  type EditorItem,
+  type EditorSubItem,
+} from "./components/ItemEditor";
 import { Badge, Button, Card, SectionHeading, fieldClass } from "./components/ui";
 import {
   applyDiscount,
@@ -48,7 +54,7 @@ const initialItems: EditorItem[] = [
   {
     key: 2,
     description: "Phoenix Contact QUINT power supply, 24 VDC / 10 A",
-    bullets: [],
+    bullets: ["With redundancy module and buffer", "DIN-rail mounted"],
     qty: "8",
     uom: "Pc",
     unitPrice: "2817500",
@@ -61,6 +67,35 @@ const initialItems: EditorItem[] = [
   },
   {
     key: 3,
+    description: "LV distribution panel — assembly, wiring and testing",
+    bullets: [],
+    qty: "1",
+    uom: "Lot",
+    unitPrice: "",
+    marginEnabled: false,
+    marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    showSubPrices: true,
+    subItems: [
+      {
+        ...newSubItem(1, "Main distribution panel, 24-way, IP54", "Pc"),
+        qty: "1",
+        unitCost: "18500000",
+        discountEnabled: true,
+        discountPercent: "5",
+        bullets: ["Powder-coated steel enclosure", "Busbar and neutral link included"],
+      },
+      {
+        ...newSubItem(2, "Wiring, termination and labelling", "Lot"),
+        qty: "1",
+        unitCost: "6750000",
+        bullets: ["Two technicians", "Three days on site", "Test report supplied"],
+      },
+    ],
+  },
+  {
+    key: 4,
     description: "Installation, termination and commissioning works",
     bullets: [],
     qty: "1",
@@ -91,6 +126,31 @@ function sellUnit(item: EditorItem): number {
   );
 }
 
+function subListUnit(sub: EditorSubItem): number {
+  return applyMargin(
+    parseIntOrZero(sub.unitCost),
+    parseIntOrZero(sub.marginPercent),
+    sub.marginEnabled
+  );
+}
+
+/** A line's list and sell totals: the sum of its priced sub-items when it is
+ *  split, otherwise its own quantity × unit price. */
+function lineTotals(item: EditorItem): { list: number; sell: number } {
+  if (item.subItems.length > 0) {
+    let list = 0;
+    let sell = 0;
+    for (const sub of item.subItems) {
+      const qty = parseIntOrZero(sub.qty);
+      list += subListUnit(sub) * qty;
+      sell += subItemSellUnit(sub) * qty;
+    }
+    return { list, sell };
+  }
+  const qty = parseIntOrZero(item.qty);
+  return { list: listUnit(item) * qty, sell: sellUnit(item) * qty };
+}
+
 function Field({
   label,
   span = false,
@@ -119,7 +179,8 @@ function SummaryRow({ label, value, muted = false }: { label: string; value: str
 
 function App() {
   const [items, setItems] = useState<EditorItem[]>(initialItems);
-  const [nextKey, setNextKey] = useState(4);
+  const [nextKey, setNextKey] = useState(5);
+  const nextSubId = useRef(3);
 
   const addItem = () => {
     const key = nextKey;
@@ -153,23 +214,123 @@ function App() {
     );
   };
 
+  const patchItems = (key: number, patch: (item: EditorItem) => EditorItem) => {
+    setItems((current) => current.map((item) => (item.key === key ? patch(item) : item)));
+  };
+
+  const enableSubItems = (key: number) => {
+    patchItems(key, (item) => {
+      const converted = item.bullets
+        .filter((line) => line.trim() !== "")
+        .map((line) => newSubItem(nextSubId.current++, line.trim(), "Lot"));
+      return {
+        ...item,
+        bullets: [],
+        qty: "1",
+        uom: "Lot",
+        showSubPrices: false,
+        subItems:
+          converted.length > 0 ? converted : [newSubItem(nextSubId.current++, "", "Lot")],
+      };
+    });
+  };
+
+  const disableSubItems = (key: number) => {
+    patchItems(key, (item) => ({
+      ...item,
+      bullets: item.subItems
+        .map((sub) => sub.description.trim())
+        .filter((line) => line !== ""),
+      subItems: [],
+      showSubPrices: false,
+    }));
+  };
+
+  const addSubRow = (key: number) => {
+    patchItems(key, (item) => ({
+      ...item,
+      subItems: [...item.subItems, newSubItem(nextSubId.current++, "", "Lot")],
+    }));
+  };
+
+  const removeSubRow = (key: number, subId: number) => {
+    patchItems(key, (item) => ({
+      ...item,
+      subItems: item.subItems.filter((sub) => sub.id !== subId),
+    }));
+  };
+
+  const patchSubRow = (key: number, subId: number, patch: Partial<EditorSubItem>) => {
+    patchItems(key, (item) => ({
+      ...item,
+      subItems: item.subItems.map((sub) => (sub.id === subId ? { ...sub, ...patch } : sub)),
+    }));
+  };
+
+  const moveSubRow = (key: number, subId: number, direction: -1 | 1) => {
+    patchItems(key, (item) => {
+      const at = item.subItems.findIndex((sub) => sub.id === subId);
+      const target = at + direction;
+      if (at === -1 || target < 0 || target >= item.subItems.length) return item;
+      const next = [...item.subItems];
+      [next[at], next[target]] = [next[target], next[at]];
+      return { ...item, subItems: next };
+    });
+  };
+
+  const addSubBullet = (key: number, subId: number) => {
+    patchSubRow(key, subId, { bullets: [...(findSub(items, key, subId)?.bullets ?? []), ""] });
+  };
+
+  const removeSubBullet = (key: number, subId: number, bulletIndex: number) => {
+    const sub = findSub(items, key, subId);
+    if (!sub) return;
+    patchSubRow(key, subId, {
+      bullets: sub.bullets.filter((_, index) => index !== bulletIndex),
+    });
+  };
+
+  const subBulletChange = (key: number, subId: number, bulletIndex: number, value: string) => {
+    const sub = findSub(items, key, subId);
+    if (!sub) return;
+    patchSubRow(key, subId, {
+      bullets: sub.bullets.map((line, index) => (index === bulletIndex ? value : line)),
+    });
+  };
+
+  const addBullet = (key: number) => {
+    patchItems(key, (item) => ({ ...item, bullets: [...item.bullets, ""] }));
+  };
+
+  const removeBullet = (key: number, bulletIndex: number) => {
+    patchItems(key, (item) => ({
+      ...item,
+      bullets: item.bullets.filter((_, index) => index !== bulletIndex),
+    }));
+  };
+
+  const bulletChange = (key: number, bulletIndex: number, value: string) => {
+    patchItems(key, (item) => ({
+      ...item,
+      bullets: item.bullets.map((line, index) => (index === bulletIndex ? value : line)),
+    }));
+  };
+
   const noop = () => {};
 
   const totals = useMemo(() => {
-    let lineTotals = 0;
+    let lineTotalsSum = 0;
     let rowDiscounts = 0;
     let subtotal = 0;
     for (const item of items) {
-      const qty = parseIntOrZero(item.qty);
-      const list = listUnit(item) * qty;
-      const sell = sellUnit(item) * qty;
-      lineTotals += list;
-      subtotal += sell;
-      rowDiscounts += list - sell;
+      const line = lineTotals(item);
+      lineTotalsSum += line.list;
+      subtotal += line.sell;
+      rowDiscounts += line.list - line.sell;
     }
     const ppn = Math.round(subtotal * 0.11);
     const grand = subtotal + ppn;
-    return { lineTotals, rowDiscounts, subtotal, ppn, grand };
+    return { lineTotals: lineTotalsSum, rowDiscounts, subtotal, ppn, grand };
   }, [items]);
 
   const reviewItems = [
@@ -193,10 +354,18 @@ function App() {
     {
       kind: "Extra",
       status: "Unresolved",
-      label: "Line 03",
+      label: "Line 04",
       group: "Lines",
       source: "Not in quotation",
       po: "Installation, termination and commissioning works",
+    },
+    {
+      kind: "Changed",
+      status: "Unresolved",
+      label: "Line 03 · sub-item 1",
+      group: "Sub-items",
+      source: "Discount: No discount",
+      po: "Discount: 5%",
     },
     {
       kind: "Missing",
@@ -240,7 +409,7 @@ function App() {
 
       <main className="mx-auto max-w-[1240px] px-4 py-6 sm:px-6">
         <div className="mb-4 rounded-lg border border-accent-200 bg-accent-50 px-3 py-2 text-caption text-accent-800">
-          Prototype — the line items below are the actual <code className="font-mono">ItemEditor</code> imported from the quotation editor, in purchase-order mode.
+          Prototype — the line items below are the actual <code className="font-mono">ItemEditor</code> imported from the quotation editor, in purchase-order mode. Split lines, sub-items and sub-item description lines are the same component and the same behavior.
         </div>
 
         <section className="relative overflow-hidden rounded-[14px] bg-accent-800 px-5 py-5 text-white shadow-card sm:px-6 sm:py-6">
@@ -316,7 +485,7 @@ function App() {
             <section>
               <SectionHeading
                 title="Line items"
-                hint={`${items.length} lines`}
+                hint={`${items.length} lines · ${items.reduce((count, item) => count + item.subItems.length, 0)} sub-items`}
                 action={<Button size="sm" onClick={addItem}>+ Add line</Button>}
               />
               <ItemEditor
@@ -327,19 +496,19 @@ function App() {
                 onAddItem={addItem}
                 onRemoveItem={removeItem}
                 onChange={changeItem}
-                onAddBullet={noop}
-                onRemoveBullet={noop}
-                onBulletChange={noop}
-                onEnableSubItems={noop}
-                onDisableSubItems={noop}
-                onAddSubRow={noop}
-                onRemoveSubRow={noop}
-                onPatchSubRow={noop}
-                onMoveSubRow={noop}
+                onAddBullet={addBullet}
+                onRemoveBullet={removeBullet}
+                onBulletChange={bulletChange}
+                onEnableSubItems={enableSubItems}
+                onDisableSubItems={disableSubItems}
+                onAddSubRow={addSubRow}
+                onRemoveSubRow={removeSubRow}
+                onPatchSubRow={patchSubRow}
+                onMoveSubRow={moveSubRow}
                 onPasteSubRows={noop}
-                onAddSubBullet={noop}
-                onRemoveSubBullet={noop}
-                onSubBulletChange={noop}
+                onAddSubBullet={addSubBullet}
+                onRemoveSubBullet={removeSubBullet}
+                onSubBulletChange={subBulletChange}
                 onPasteItems={noop}
               />
             </section>
@@ -369,7 +538,7 @@ function App() {
             <Card className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-caption uppercase tracking-[0.14em] text-ink-500">Review differences</h2>
-                <Badge tone="internal">4 unresolved</Badge>
+                <Badge tone="internal">5 unresolved</Badge>
               </div>
               <p className="mt-1 text-caption text-ink-500">Compared with quotation <span className="tnum font-medium text-ink-700">1502260002 · rev 00</span></p>
               <div className="mt-3 divide-y divide-rule border-y border-rule">
@@ -401,7 +570,7 @@ function App() {
         <div className="mx-auto flex max-w-[1240px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6">
           <div className="flex flex-wrap items-center gap-2 text-caption text-ink-500">
             <Badge tone="internal">Unsaved</Badge>
-            <span>Draft · not finalized · 4 unresolved</span>
+            <span>Draft · not finalized · 5 unresolved</span>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button variant="ghost">Cancel</Button>
@@ -412,6 +581,10 @@ function App() {
       </div>
     </div>
   );
+}
+
+function findSub(items: EditorItem[], key: number, subId: number): EditorSubItem | undefined {
+  return items.find((item) => item.key === key)?.subItems.find((sub) => sub.id === subId);
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
