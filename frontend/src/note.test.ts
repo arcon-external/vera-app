@@ -9,6 +9,7 @@ import {
   plainTextToMarkdown,
   sanitizePastedHTML,
 } from "./note";
+import { NOTE_DOM_FIXTURES } from "./noteFixtures";
 
 // The frontend mirror of backend/note (#540). What it pins is the same external
 // behaviour the Go parser pins: the rendered HTML, the escaped text, the block
@@ -115,6 +116,15 @@ describe("domToMarkdown", () => {
     return domToMarkdown(root);
   }
 
+  // The four real toolbar shapes, shared with the editor DOM tests. Each
+  // expected source is a literal, so the serializer cannot redefine it.
+  it.each(NOTE_DOM_FIXTURES)(
+    "serializes $name to its note source",
+    ({ html, source }) => {
+      expect(fromHTML(html)).toBe(source);
+    }
+  );
+
   it("serializes bold and italic runs", () => {
     expect(
       fromHTML("<p>Please <strong>confirm</strong> access and <em>arrive early</em>.</p>")
@@ -129,13 +139,13 @@ describe("domToMarkdown", () => {
     expect(fromHTML("<p>Line one<br>Line two</p>")).toBe("Line one\nLine two");
   });
 
-  it("serializes bullet and numbered lists", () => {
-    expect(fromHTML("<ul><li>First</li><li>Second</li></ul>")).toBe(
-      "- First\n- Second"
-    );
+  it("serializes numbered lists, including one nested in a block", () => {
     expect(fromHTML("<ol><li>One</li><li>Two</li></ol>")).toBe("1. One\n2. Two");
     expect(fromHTML('<ol start="3"><li>Third</li><li>Fourth</li></ol>')).toBe(
       "3. Third\n4. Fourth"
+    );
+    expect(fromHTML("<div><ol><li>one</li><li>two</li></ol></div>")).toBe(
+      "1. one\n2. two"
     );
   });
 
@@ -143,26 +153,10 @@ describe("domToMarkdown", () => {
     expect(fromHTML("<div>First</div><div>Second</div>")).toBe("First\n\nSecond");
   });
 
-  it("keeps a list nested in a contenteditable block", () => {
-    // Issue #550: the toolbar wraps its list in a block, so a serializer that
-    // treats every block as one paragraph flattens the items into plain lines.
-    expect(fromHTML("<div><ul><li>one</li><li>two</li></ul></div>")).toBe(
-      "- one\n- two"
-    );
-    expect(fromHTML("<div><ol><li>one</li><li>two</li></ol></div>")).toBe(
-      "1. one\n2. two"
-    );
-  });
-
-  it("keeps text before and after a nested list in order", () => {
-    expect(
-      fromHTML(
-        "<div>Intro<div><ul><li>one</li><li>two</li></ul></div>Tail</div>"
-      )
-    ).toBe("Intro\n\n- one\n- two\n\nTail");
-  });
-
   it("serializes the exact DOM the toolbar creates", () => {
+    // The #550 reproduction: root-level text, then the toolbar's block-wrapped
+    // list. The fixture above covers the general nested shape; this pins the
+    // real DOM that produced the bug, where the text is a root-level node.
     expect(
       fromHTML(
         "TEST, TEST, TEST, and:<div><ul><li>TEST bullet one</li><li>TEST bullet two</li></ul></div>"
