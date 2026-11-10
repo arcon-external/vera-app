@@ -31,6 +31,7 @@ func (a *app) tree() *command {
 			requestsCommands(),
 			backupCommands(),
 		},
+		netCommands(),
 	)
 	linkParents(root, nil)
 	return root
