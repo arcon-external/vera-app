@@ -149,10 +149,15 @@ const (
 	// ul/ol. The marker sits in a fixed noteMarkerW column at the left of that
 	// gutter, followed by noteBulletGapPx, so a bullet disc and a number start
 	// at the same edge and the item text starts at the same edge for both.
-	noteListIndentPx = 18
-	noteMarkerW      = 12
+	noteListIndentPx = 12
+	noteMarkerW      = 9
 	noteBulletSizePx = 3
-	noteBulletGapPx  = 7
+	noteBulletGapPx  = 3
+	// noteBulletCentrePx is how far the disc's centre sits above the text's
+	// baseline. It is the optical centre of the first line's x-height, not the
+	// baseline; the stylesheet puts the disc at margin-top: 0.6em for the same
+	// reason.
+	noteBulletCentrePx = 3.4
 
 	// metaLineBox is one row of the quotation metadata card, in points. 11px at
 	// the inherited 1.45 line height is 15.95px, which the browser rounds to the
@@ -1250,6 +1255,11 @@ type noteLine struct {
 	spans  []note.Span
 	marker string
 	bullet bool
+	// gap is the space before this line, in points. A block separator is a
+	// gap-only line: it has no spans and no line box of its own, so the note
+	// does not spend a full 1.45em line on the space between a paragraph and
+	// its list.
+	gap float64
 }
 
 // noteLines lays out the optional quotation note (#534/#540).
@@ -1257,10 +1267,11 @@ type noteLine struct {
 // The source is the restricted Markdown subset parsed by backend/note. Each
 // paragraph source line is wrapped as its own line; consecutive lines inside a
 // paragraph are line breaks, exactly as <br> prints them. A blank line ends a
-// paragraph, and the gap between blocks is one line box -- the same
-// margin-top: 1.45em the stylesheet gives `.note-body > * + *`. List items
-// indent by noteListIndentPx and their continuation lines align under the item
-// text, matching the browser's outside markers.
+// paragraph; the gap is 0.55em between blocks and 0.4em from a paragraph into
+// its list, matching the stylesheet's `.note-body > * + *` and
+// `.note-body p + ul` rules. List items indent by noteListIndentPx and their
+// continuation lines align under the item text, matching the browser's
+// outside markers.
 func (e *Engine) noteLines(in Input, m metrics) []noteLine {
 	doc := note.Parse(strings.TrimSpace(in.Note))
 	if len(doc.Blocks) == 0 {
@@ -1271,9 +1282,14 @@ func (e *Engine) noteLines(in Input, m metrics) []noteLine {
 	w := m.innerW - px(noteAccentPx) - px(noteBorderPx) - 2*px(notePadX)
 
 	var lines []noteLine
+	var prevKind note.Kind
 	for bi, block := range doc.Blocks {
 		if bi > 0 {
-			lines = append(lines, noteLine{})
+			gap := 0.55 * float64(bodyPx)
+			if prevKind == note.Paragraph && (block.Kind == note.Bullets || block.Kind == note.Numbers) {
+				gap = 0.4 * float64(bodyPx)
+			}
+			lines = append(lines, noteLine{gap: px(gap)})
 		}
 		switch block.Kind {
 		case note.Paragraph:
@@ -1302,6 +1318,7 @@ func (e *Engine) noteLines(in Input, m metrics) []noteLine {
 				}
 			}
 		}
+		prevKind = block.Kind
 	}
 	return lines
 }
@@ -1401,17 +1418,25 @@ func (e *Engine) noteWordWidth(word []note.Span) float64 {
 }
 
 // noteHeight is the note card's height in points: its top and bottom borders,
-// its vertical padding, the label's line box and gap, and one body line box
-// per laid-out line (including the blank line between blocks). It is zero when
+// its vertical padding, the label's line box and gap, one body line box per
+// content line, and the smaller measured gaps between blocks. It is zero when
 // there is no note, so an empty note adds nothing to the page.
 func (e *Engine) noteHeight(in Input, m metrics) float64 {
 	lines := e.noteLines(in, m)
 	if len(lines) == 0 {
 		return 0
 	}
+	var gaps float64
+	content := 0
+	for _, line := range lines {
+		gaps += line.gap
+		if len(line.spans) > 0 || line.marker != "" || line.bullet {
+			content++
+		}
+	}
 	return 2*px(noteBorderPx) + 2*px(notePadY) +
 		px(noteLabelPx)*bodyLH + px(noteLabelGapPx) +
-		float64(len(lines))*px(bodyPx)*bodyLH
+		gaps + float64(content)*px(bodyPx)*bodyLH
 }
 
 // tncHeight is the height of the terms card.

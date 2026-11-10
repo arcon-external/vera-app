@@ -405,7 +405,7 @@
 		.note-card {
 			border: 1px solid var(--edge);
 			border-left: 3px solid var(--accent-blue);
-			border-radius: 10px;
+			border-radius: 0;
 			padding: 12px 14px;
 			background: var(--surface);
 			break-inside: avoid;
@@ -424,25 +424,62 @@
 		}
 
 		/* The restricted-Markdown subset (ticket 540). Paragraphs and lists are
-		   blocks; the gap between two blocks is exactly one line box, which
-		   is what the native renderer inserts, so a blank line keeps the
-		   height it had under pre-wrap. Lists indent 18px, matching the
-		   native renderer's marker gutter. */
+		   blocks. The gap is 0.55em between blocks and 0.4em from a paragraph
+		   into its list, matching the native renderer's measured gaps. The
+		   marker column is 9px with a 3px gap; the bullet is placed at the
+		   first line's optical centre rather than on its baseline. */
 		.note-card .note-body p {
 			margin: 0;
 		}
 
 		.note-card .note-body > * + * {
-			margin-top: 1.45em;
+			margin-top: 0.55em;
+		}
+
+		.note-card .note-body p + ul,
+		.note-card .note-body p + ol {
+			margin-top: 0.4em;
 		}
 
 		.note-card .note-body ul,
 		.note-card .note-body ol {
-			padding-left: 18px;
+			list-style: none;
+			padding: 0;
+			margin: 0;
 		}
 
 		.note-card .note-body li {
+			display: grid;
+			grid-template-columns: 9px 1fr;
+			column-gap: 3px;
 			margin: 0;
+			padding: 0;
+		}
+
+		.note-card .note-body ul li::before {
+			content: "";
+			width: 3px;
+			height: 3px;
+			border-radius: 50%;
+			background: currentColor;
+			justify-self: start;
+			align-self: start;
+			margin-top: 0.6em;
+		}
+
+		.note-card .note-body ol {
+			counter-reset: note-ol;
+		}
+
+		.note-card .note-body ol li {
+			counter-increment: note-ol;
+		}
+
+		.note-card .note-body ol li::before {
+			content: counter(note-ol) ".";
+			text-align: left;
+			font-variant-numeric: tabular-nums;
+			line-height: inherit;
 		}
 
 		.note-card .note-body strong {
@@ -461,7 +498,7 @@
 
 		.tnc {
 			border: 1px solid var(--edge);
-			border-radius: 10px;
+			border-radius: 0 10px 10px 10px;
 			padding: 14px;
 			background: var(--soft-blue);
 		}
@@ -479,7 +516,7 @@
 
 		.totals {
 			border: 1px solid var(--edge);
-			border-radius: 10px;
+			border-radius: 10px 0 10px 10px;
 			padding: 14px;
 			background: var(--surface);
 			display: grid;
