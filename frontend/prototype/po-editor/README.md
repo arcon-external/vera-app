@@ -22,7 +22,9 @@ line, and totals are live. The URL keeps the chosen variant.
 - **A — Quotation language.** The quotation editor's two-column card layout:
   the same `fieldClass` inputs, section headings, per-line discount toggle,
   line-item rows, and a 320px sticky summary rail. The PO's own fields and
-  totals sit in that language, with the live source-vs-PO review pane below.
+  totals sit in that language, with the live source-vs-PO review pane in the
+  right rail and the Save draft / Final Save / Cancel actions in the bottom bar,
+  like the quotation editor.
 - **B — Original.** A procurement sheet: the same teal identity band, a
   supplier / ship-to block, a ruled line table with per-line discounts,
   numbered sections, and an order-control rail with a status timeline and the

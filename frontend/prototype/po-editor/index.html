@@ -797,17 +797,72 @@
       .review-actions { width: 100%; justify-content: flex-end; }
     }
 
-    /* ── Variant bar, state sheet, toast ──────────────────────────────── */
-    .variant-bar {
+
+    /* ── Bottom action bar, quotation-style ───────────────────────────── */
+    .action-bar {
       position: fixed;
-      left: 50%;
-      bottom: calc(12px + env(safe-area-inset-bottom));
-      transform: translateX(-50%);
-      z-index: 50;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 40;
+      border-top: 1px solid var(--rule);
+      background: rgba(251, 250, 248, 0.96);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 -8px 24px rgba(50, 44, 30, 0.06);
+    }
+    .action-bar-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 10px 24px calc(10px + env(safe-area-inset-bottom));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .action-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-500); }
+    .action-buttons { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+    body.has-action-bar .state-sheet,
+    body.has-action-bar .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+    /* ── Review pane in the rail (A) ──────────────────────────────────── */
+    .review-rail { padding: 18px; }
+    .review-rail .rail-head { margin-bottom: 10px; }
+    .review-rail .review-source { font-size: 11px; margin-bottom: 10px; }
+    .review-rail .review-filters { width: 100%; margin-bottom: 8px; }
+    .review-rail .review-filter { flex: 1; justify-content: center; padding: 4px 6px; }
+    .review-rail .review-list { max-height: 40vh; overflow-y: auto; border-top: 1px solid var(--rule); }
+    .review-rail .review-item { flex-direction: column; gap: 8px; padding: 12px 0; }
+    .review-rail .review-actions { width: 100%; justify-content: flex-start; }
+    .review-rail .review-values { font-size: 11px; }
+    .review-rail .review-item-head strong { font-size: 12px; }
+    .review-rail .btn-block { margin-top: 10px; }
+    .review-rail .review-empty { padding: 16px 0; }
+
+    @media (max-width: 760px) {
+      .action-bar-inner { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+      .action-status { font-size: 11px; }
+      .action-buttons { width: 100%; justify-content: flex-end; }
+      .action-buttons .btn { flex: 1; }
+      .action-buttons .btn-ghost { flex: 0 0 auto; }
+      .review-rail .review-list { max-height: none; overflow: visible; }
+    }
+
+    /* ── Variant bar, state sheet, toast ──────────────────────────────── */
+    .prototype-bar-wrap {
+      max-width: 1240px;
+      margin: 12px auto 0;
+      padding: 0 24px;
+      display: flex;
+      justify-content: center;
+    }
+    .variant-bar {
       display: flex;
       align-items: center;
       gap: 4px;
-      max-width: calc(100vw - 20px);
+      width: fit-content;
+      max-width: 100%;
       padding: 5px;
       border-radius: 999px;
       background: var(--ink-950);
@@ -848,7 +903,7 @@
     .state-sheet {
       position: fixed;
       left: 50%;
-      bottom: calc(76px + env(safe-area-inset-bottom));
+      bottom: calc(16px + env(safe-area-inset-bottom));
       transform: translateX(-50%);
       z-index: 45;
       width: min(560px, calc(100vw - 20px));
@@ -877,7 +932,7 @@
     .toast {
       position: fixed;
       left: 50%;
-      bottom: calc(76px + env(safe-area-inset-bottom));
+      bottom: calc(16px + env(safe-area-inset-bottom));
       transform: translateX(-50%);
       z-index: 60;
       max-width: calc(100vw - 32px);
@@ -908,7 +963,7 @@
       .brand-workspace { display: inline; }
       .prototype-chip { display: none; }
       .topbar-right { margin-left: auto; }
-      .page { padding: 16px 14px 112px; }
+      .page { padding: 16px 14px 150px; }
       .page-head { flex-direction: column; gap: 10px; margin-bottom: 16px; }
       .page-title { font-size: 24px; line-height: 30px; }
       .main-col { gap: 18px; }
@@ -949,7 +1004,8 @@
       .po-table td .cell-input, .po-table td .cell-select { font-size: 13.5px; }
       .po-table td.num { text-align: left; }
       .table-footer .right { margin-left: 0; }
-      .variant-bar { width: calc(100vw - 20px); justify-content: space-between; }
+      .prototype-bar-wrap { padding: 0 14px; }
+      .variant-bar { width: 100%; justify-content: space-between; }
       .variant-label { display: none; }
       .variant-btn { flex: 1; justify-content: center; font-size: 10.5px; padding: 8px 6px; }
       .state-btn { font-size: 9.5px; padding: 8px 6px; }
@@ -991,6 +1047,15 @@
     </div>
   </header>
 
+  <div class="prototype-bar-wrap">
+    <div class="variant-bar" role="group" aria-label="Prototype variant">
+      <span class="variant-label">Prototype</span>
+      <button class="variant-btn active" type="button" data-variant="a" aria-pressed="true"><span class="variant-key">A</span> Quotation language</button>
+      <button class="variant-btn" type="button" data-variant="b" aria-pressed="false"><span class="variant-key">B</span> Original</button>
+      <button class="state-btn" type="button" id="state-toggle" aria-expanded="false">State</button>
+    </div>
+  </div>
+
   <main id="page" class="page"></main>
 
   <div class="state-sheet" id="state-sheet" hidden aria-label="Prototype state">
@@ -1003,12 +1068,6 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <div class="variant-bar" role="group" aria-label="Prototype variant">
-    <span class="variant-label">Prototype</span>
-    <button class="variant-btn active" type="button" data-variant="a" aria-pressed="true"><span class="variant-key">A</span> Quotation language</button>
-    <button class="variant-btn" type="button" data-variant="b" aria-pressed="false"><span class="variant-key">B</span> Original</button>
-    <button class="state-btn" type="button" id="state-toggle" aria-expanded="false">State</button>
-  </div>
 
   <script>
     // ── State ────────────────────────────────────────────────────────────
@@ -1257,17 +1316,20 @@
       </section>`;
     }
 
-    function renderSaveA() {
-      return `<section class="card rail-card">
-        <div class="rail-head"><h2>Save</h2><span class="status-chip"><span class="dot"></span>Unsaved</span></div>
-        <p class="status-line"><span class="dot"></span>Draft · not finalized</p>
-        <div class="action-stack">
-          <button class="btn btn-secondary btn-block" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
-          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the full difference review.">Final Save</button>
-          <button class="btn btn-ghost btn-block" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
+    function renderActionBar() {
+      return `<div class="action-bar" role="region" aria-label="Purchase order actions">
+        <div class="action-bar-inner">
+          <div class="action-status">
+            <span class="status-chip"><span class="dot"></span>Unsaved</span>
+            <span>Draft · not finalized · <span data-review-unresolved>${unresolvedCount()}</span> unresolved</span>
+          </div>
+          <div class="action-buttons">
+            <button class="btn btn-ghost" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
+            <button class="btn btn-secondary" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
+            <button class="btn btn-primary" type="button" data-demo="Prototype: Final Save opens the full difference review.">Final Save</button>
+          </div>
         </div>
-        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>. <span data-review-unresolved>${unresolvedCount()}</span> unresolved.</p>
-      </section>`;
+      </div>`;
     }
 
     // ── Hero, shared by A and B ──────────────────────────────────────────
@@ -1383,7 +1445,7 @@
         <div class="review-actions">${reviewActions(item)}</div>
       </article>`;
     }
-    function renderReview() {
+    function reviewData() {
       const items = buildReview();
       const unresolved = items.filter((item) => !item.resolved).length;
       const resolved = items.length - unresolved;
@@ -1393,15 +1455,33 @@
         if (reviewFilter === "resolved") return item.resolved;
         return true;
       });
+      return { items, unresolved, resolved, counts, visible };
+    }
+    function reviewFilterButtons(counts) {
       const filterButton = (id, label) => `<button class="review-filter ${reviewFilter === id ? "active" : ""}" type="button" data-review-filter="${id}">${label}<span>${counts[id]}</span></button>`;
+      return `${filterButton("all", "All")}${filterButton("unresolved", "Unresolved")}${filterButton("resolved", "Resolved")}`;
+    }
+    function reviewItemsHtml(visible) {
+      return visible.length > 0 ? visible.map(reviewItem).join("") : `<div class="review-empty">No differences in this filter.</div>`;
+    }
+    function reviewSourceHtml() {
+      return `<div class="review-source"><span class="source-dot"></span><span>Compared with quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></span></div>`;
+    }
+    function renderReviewRail() {
+      const { unresolved, counts, visible } = reviewData();
+      return `<div class="rail-head"><h2>Review differences</h2><span class="status-chip"><span class="dot"></span>${unresolved} unresolved</span></div>
+        ${reviewSourceHtml()}
+        <div class="review-filters">${reviewFilterButtons(counts)}</div>
+        <div class="review-list">${reviewItemsHtml(visible)}</div>
+        <button class="btn btn-secondary btn-sm btn-block" type="button" data-demo="Prototype: opens the full difference review.">Open full review</button>`;
+    }
+    function renderReviewFull() {
+      const { items, unresolved, counts, visible } = reviewData();
       return `<section class="review-pane" aria-labelledby="review-heading">
         <div class="section-heading"><h2 id="review-heading">Review differences</h2><span class="line"></span><span class="hint">${unresolved > 0 ? `${unresolved} unresolved` : "All differences resolved"} · ${items.length} total</span><button class="btn btn-secondary btn-sm" type="button" data-demo="Prototype: opens the full difference review.">Open full review</button></div>
         <div class="review-card">
-          <div class="review-toolbar">
-            <div class="review-source"><span class="source-dot"></span><span>Compared with quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></span></div>
-            <div class="review-filters">${filterButton("all", "All")}${filterButton("unresolved", "Unresolved")}${filterButton("resolved", "Resolved")}</div>
-          </div>
-          <div class="review-list">${visible.length > 0 ? visible.map(reviewItem).join("") : `<div class="review-empty">No differences in this filter.</div>`}</div>
+          <div class="review-toolbar">${reviewSourceHtml()}<div class="review-filters">${reviewFilterButtons(counts)}</div></div>
+          <div class="review-list">${reviewItemsHtml(visible)}</div>
         </div>
       </section>`;
     }
@@ -1517,10 +1597,10 @@
           </div>
           <aside class="rail">
             ${renderSummaryA(totals)}
-            ${renderSaveA()}
+            <section class="card rail-card review-rail" id="review-pane"></section>
           </aside>
         </div>
-        <div id="review-pane"></div>`;
+        ${renderActionBar()}`;
     }
     function renderB() {
       const totals = compute();
@@ -1538,6 +1618,7 @@
 
     // ── Rendering and state ──────────────────────────────────────────────
     function render() {
+      document.body.classList.toggle("has-action-bar", variant === "a");
       page.innerHTML = variant === "a" ? renderA() : renderB();
       updateDerived();
       updateVariantButtons();
@@ -1566,7 +1647,8 @@
     }
     function updateReviewPane() {
       const host = document.getElementById("review-pane");
-      if (host) host.innerHTML = renderReview();
+      if (!host) return;
+      host.innerHTML = variant === "a" ? renderReviewRail() : renderReviewFull();
     }
     function updateState(totals = compute()) {
       const { lines, ...header } = state;
