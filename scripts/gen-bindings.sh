@@ -34,6 +34,7 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="${VERA_REPO_ROOT:-}"
+root_arg=false
 check=false
 
 usage() {
@@ -50,8 +51,13 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --root) root="${2:-}"; shift 2 ;;
-    --root=*) root="${1#--root=}"; shift ;;
+    --root)
+      if [ $# -lt 2 ]; then
+        echo "gen-bindings.sh: --root needs a directory" >&2
+        exit 2
+      fi
+      root="$2"; root_arg=true; shift 2 ;;
+    --root=*) root="${1#--root=}"; root_arg=true; shift ;;
     --check) check=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -62,6 +68,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "$root_arg" = true ] && [ -z "$root" ]; then
+  echo "gen-bindings.sh: --root needs a directory" >&2
+  exit 2
+fi
 if [ -z "$root" ]; then
   root="$(cd "$script_dir/.." && pwd)"
 fi
