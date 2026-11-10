@@ -1,6 +1,11 @@
 package gpdf
 
-import "testing"
+import (
+	"math"
+	"testing"
+
+	"github.com/gpdf-dev/gpdf/document"
+)
 
 // TestFooterCardsSquareOnlyTheApprovedCorners pins the three-corner rule from
 // the approved layout: the terms card keeps its top-left square, the totals
@@ -49,5 +54,26 @@ func TestFooterCardsSquareOnlyTheApprovedCorners(t *testing.T) {
 	}
 	for i, want := range wantTotals {
 		assertNear(t, "totals corner", gotTotals[i], want, 0.001)
+	}
+
+	// The helper values are not enough: the path itself must put the square
+	// corner at the top-left. A rounded top-left starts at x+r and carries a
+	// curve ending there; a square one starts at x.
+	first := tnc.path.Segments[0]
+	if first.Op != document.PathMoveTo || len(first.Points) != 1 {
+		t.Fatalf("terms path starts with %v, want a MoveTo", first.Op)
+	}
+	if math.Abs(first.Points[0].X-tnc.x) > 0.01 || math.Abs(first.Points[0].Y-tnc.y) > 0.01 {
+		t.Errorf("terms path starts at (%.2f, %.2f), want the square top-left (%.2f, %.2f)",
+			first.Points[0].X, first.Points[0].Y, tnc.x, tnc.y)
+	}
+	if !pathHasCurveEndingAt(*tnc.path, tnc.x, tnc.y+tnc.h-px(cardRadiusPx)) {
+		t.Error("terms bottom-left is not rounded")
+	}
+	if pathHasCurveEndingAt(*totals.path, totals.x+totals.w, totals.y+px(cardRadiusPx)) {
+		t.Error("totals top-right is rounded; want square")
+	}
+	if !pathHasCurveEndingAt(*totals.path, totals.x+totals.w-px(cardRadiusPx), totals.y+totals.h) {
+		t.Error("totals bottom-right is not rounded")
 	}
 }
