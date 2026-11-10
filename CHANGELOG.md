@@ -4,6 +4,16 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.15.2] - 2026-11-10
+
+### Fixed
+
+- **Bullets and numbered lists survive the note editor.** A list created with
+  the note toolbar was wrapped in a block that the editor flattened to plain
+  lines, so the saved, signed and printed note lost its bullets and numbers.
+  Lists now keep their markers through the editor, the draft, the signature and
+  the PDF.
+
 ## [0.15.1] - 2026-11-10
 
 ### Fixed
