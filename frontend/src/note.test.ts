@@ -143,6 +143,33 @@ describe("domToMarkdown", () => {
     expect(fromHTML("<div>First</div><div>Second</div>")).toBe("First\n\nSecond");
   });
 
+  it("keeps a list nested in a contenteditable block", () => {
+    // Issue #550: the toolbar wraps its list in a block, so a serializer that
+    // treats every block as one paragraph flattens the items into plain lines.
+    expect(fromHTML("<div><ul><li>one</li><li>two</li></ul></div>")).toBe(
+      "- one\n- two"
+    );
+    expect(fromHTML("<div><ol><li>one</li><li>two</li></ol></div>")).toBe(
+      "1. one\n2. two"
+    );
+  });
+
+  it("keeps text before and after a nested list in order", () => {
+    expect(
+      fromHTML(
+        "<div>Intro<div><ul><li>one</li><li>two</li></ul></div>Tail</div>"
+      )
+    ).toBe("Intro\n\n- one\n- two\n\nTail");
+  });
+
+  it("serializes the exact DOM the toolbar creates", () => {
+    expect(
+      fromHTML(
+        "TEST, TEST, TEST, and:<div><ul><li>TEST bullet one</li><li>TEST bullet two</li></ul></div>"
+      )
+    ).toBe("TEST, TEST, TEST, and:\n\n- TEST bullet one\n- TEST bullet two");
+  });
+
   it("drops the filler br of an empty editor", () => {
     expect(fromHTML("<div><br></div>")).toBe("");
     expect(fromHTML("<br>")).toBe("");

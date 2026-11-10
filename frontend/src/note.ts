@@ -444,23 +444,38 @@ export function domToMarkdown(root: HTMLElement): string {
     pushParagraph(blocks, collectLines(wrapper, PLAIN));
   };
 
-  for (const child of Array.from(root.childNodes)) {
-    if (child.nodeType === ELEMENT_NODE) {
-      const tag = (child as HTMLElement).tagName.toLowerCase();
-      if (tag === "ul" || tag === "ol") {
-        flushInline();
-        const list = serializeList(child as HTMLElement);
-        if (list !== null) blocks.push(list);
-        continue;
+  // A contenteditable wraps a toolbar-created list in a block:
+  // "<div><ul><li>…</li></ul></div>". A block that contains a list is a
+  // container, not one paragraph; recursing keeps the list structure instead
+  // of flattening its items into plain lines (the #550 bug). Every other
+  // block is still one paragraph, so a plain <div> or <p> is unchanged.
+  const walk = (node: Node): void => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === ELEMENT_NODE) {
+        const element = child as HTMLElement;
+        const tag = element.tagName.toLowerCase();
+        if (tag === "ul" || tag === "ol") {
+          flushInline();
+          const list = serializeList(element);
+          if (list !== null) blocks.push(list);
+          continue;
+        }
+        if (BLOCK_BOUNDARY.has(tag)) {
+          if (element.querySelector("ul, ol") !== null) {
+            flushInline();
+            walk(element);
+            flushInline();
+          } else {
+            flushInline();
+            pushParagraph(blocks, collectLines(element, PLAIN));
+          }
+          continue;
+        }
       }
-      if (BLOCK_BOUNDARY.has(tag)) {
-        flushInline();
-        pushParagraph(blocks, collectLines(child, PLAIN));
-        continue;
-      }
+      inline.push(child);
     }
-    inline.push(child);
-  }
+  };
+  walk(root);
   flushInline();
 
   return blocks
