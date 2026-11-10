@@ -1340,7 +1340,12 @@
       variant = next;
       const url = new URL(window.location.href);
       url.searchParams.set("variant", variant);
-      window.history.replaceState(null, "", url);
+      try {
+        window.history.replaceState(null, "", url);
+      } catch {
+        // A file:// document has an opaque origin and may refuse a URL
+        // rewrite. The variant still renders; only the address bar stays put.
+      }
       closeState();
       render();
     }
