@@ -11,21 +11,25 @@
 # HTML per case), then screenshot every HTML in a docker Chrome twice.
 #
 # Overrides:
-#   UI_SNAPSHOT_DIR  output directory   (default /tmp/opencode/ui-snap)
-#   CHROME_DIR       unpacked Chrome dir (default the pinned linux build)
+#   VERA_AGENT_HOME  persistent agent workspace (default ~/dev/vera-agent)
+#   UI_SNAPSHOT_DIR  output directory   (default $VERA_AGENT_HOME/ui-snap)
+#   CHROME_DIR       unpacked Chrome dir (default the pinned build under
+#                    $VERA_AGENT_HOME/chrome-dl)
+#   UI_SNAPSHOT_WRAPPER_DIR wrapper dir  (default $VERA_AGENT_HOME/chrome-wrapper)
 #   VERA_CHROME_IMAGE docker image       (default vera-chrome-go:latest)
 
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-out_dir="${UI_SNAPSHOT_DIR:-/tmp/opencode/ui-snap}"
-chrome_dir="${CHROME_DIR:-/tmp/opencode/chrome-dl/chrome/linux-155.0.8059.39/chrome-linux64}"
+agent_home="${VERA_AGENT_HOME:-$HOME/dev/vera-agent}"
+out_dir="${UI_SNAPSHOT_DIR:-$agent_home/ui-snap}"
+chrome_dir="${CHROME_DIR:-$agent_home/chrome-dl/chrome/linux-155.0.8059.39/chrome-linux64}"
 image="${VERA_CHROME_IMAGE:-vera-chrome-go:latest}"
-wrapper_dir="${UI_SNAPSHOT_WRAPPER_DIR:-/tmp/opencode/chrome-wrapper}"
+wrapper_dir="${UI_SNAPSHOT_WRAPPER_DIR:-$agent_home/chrome-wrapper}"
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-  sed -n '3,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '3,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   exit 0
 fi
 
