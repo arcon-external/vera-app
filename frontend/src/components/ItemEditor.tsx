@@ -173,6 +173,9 @@ interface ItemEditorProps {
    *  list is loading or failed to load). Kept honest rather than rendering a
    *  stale list or a "(not recognised)" that would look like a stored fault. */
   uomPendingLabel?: string;
+  /** Quotation keeps margin and sub-items; the PO hides them and keeps the
+   *  same container, rows, description input, discounts and footer. */
+  mode?: "quotation" | "purchase-order";
   onAddItem: () => void;
   onRemoveItem: (key: number) => void;
   onChange: (
@@ -219,6 +222,7 @@ export function ItemEditor({
   currency = IDR_ENTRY,
   uomOptions,
   uomPendingLabel,
+  mode = "quotation",
   onAddItem,
   onRemoveItem,
   onChange,
@@ -257,6 +261,10 @@ export function ItemEditor({
 
   const itemizedLines = useMemo(
     () => items.filter((item) => item.subItems.length > 0).length,
+    [items]
+  );
+  const discountedLines = useMemo(
+    () => items.filter((item) => item.subItems.length === 0 && item.discountEnabled).length,
     [items]
   );
 
@@ -358,6 +366,7 @@ export function ItemEditor({
             currency={currency}
             uomOptions={uomOptions}
             uomPendingLabel={uomPendingLabel}
+            mode={mode}
             showPanel={
               expanded[item.key] ??
               (item.subItems.length > 0 || item.bullets.length > 0)
@@ -407,18 +416,29 @@ export function ItemEditor({
         <span className="text-caption text-ink-500">
           <span className="tnum">{filledLines}</span> of{" "}
           <span className="tnum">{items.length}</span> filled
-          {marginedLines > 0 ? (
+          {mode === "purchase-order" ? (
+            discountedLines > 0 ? (
+              <>
+                {" · "}
+                <span className="tnum">{discountedLines}</span> with a row discount
+              </>
+            ) : null
+          ) : (
             <>
-              {" · "}
-              <span className="tnum">{marginedLines}</span> with margin
+              {marginedLines > 0 ? (
+                <>
+                  {" · "}
+                  <span className="tnum">{marginedLines}</span> with margin
+                </>
+              ) : null}
+              {itemizedLines > 0 ? (
+                <>
+                  {" · "}
+                  <span className="tnum">{itemizedLines}</span> with sub-items
+                </>
+              ) : null}
             </>
-          ) : null}
-          {itemizedLines > 0 ? (
-            <>
-              {" · "}
-              <span className="tnum">{itemizedLines}</span> with sub-items
-            </>
-          ) : null}
+          )}
         </span>
         <span className="ml-auto text-caption text-ink-500">
           Totals update in the summary panel
@@ -648,6 +668,7 @@ function ItemRow({
   currency,
   uomOptions,
   uomPendingLabel,
+  mode,
   showPanel,
   onTogglePanel,
   onRemoveItem,
@@ -673,6 +694,7 @@ function ItemRow({
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   uomPendingLabel?: string;
+  mode: "quotation" | "purchase-order";
   showPanel: boolean;
   onTogglePanel: () => void;
   onRemoveItem: (key: number) => void;
@@ -692,7 +714,8 @@ function ItemRow({
   onSubBulletChange: (key: number, subId: number, bulletIndex: number, value: string) => void;
   onPasteItems: (key: number, event: React.ClipboardEvent<HTMLInputElement>) => void;
 }) {
-  const hasSubItems = item.subItems.length > 0;
+  const purchaseOrder = mode === "purchase-order";
+  const hasSubItems = !purchaseOrder && item.subItems.length > 0;
   const rollup = hasSubItems ? subItemsRollup(item.subItems) : null;
   const qty = parseIntOrZero(item.qty);
   const unitCost = parseIntOrZero(item.unitPrice);
@@ -712,7 +735,7 @@ function ItemRow({
   // bullets take a narrow left column and the six cells keep their single
   // inline row on the right, with narrower columns. Otherwise the cells
   // take the full-width grid.
-  const showSplit = !hasSubItems && showPanel;
+  const showSplit = !purchaseOrder && !hasSubItems && showPanel;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -807,6 +830,7 @@ function ItemRow({
         />
       </Captioned>
 
+      {purchaseOrder ? null : (
       <Captioned label="Margin">
         {/* Percents, not money: digit-strip is correct here too --
             parseMoneyInput(USD, "15") is 1500, which would clamp every
@@ -865,6 +889,7 @@ function ItemRow({
           </div>
         </div>
     </Captioned>
+    )}
 
     <Captioned label="Discount">
       <div className="flex items-center gap-2">
@@ -964,6 +989,7 @@ function ItemRow({
         </div>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-caption text-ink-400">
+          {purchaseOrder ? null : (
           <button
             type="button"
             onClick={onTogglePanel}
@@ -986,7 +1012,8 @@ function ItemRow({
                 ? `${item.bullets.length} description line${item.bullets.length === 1 ? "" : "s"}`
                 : "Description lines"}
           </button>
-          {hasSubItems ? null : (
+          )}
+          {purchaseOrder || hasSubItems ? null : (
             <button
               type="button"
               onClick={() => onEnableSubItems(item.key)}
@@ -1000,7 +1027,13 @@ function ItemRow({
               Split into sub-items
             </button>
           )}
-          {hasSubItems ? null : item.discountEnabled ? (
+          {purchaseOrder ? (
+            item.discountEnabled ? (
+              <span className="tnum text-accent-700">−{discountPercent}% row discount</span>
+            ) : (
+              <span className="text-ink-400">No row discount</span>
+            )
+          ) : hasSubItems ? null : item.discountEnabled ? (
             <span className="tnum text-accent-700">
               −{discountPercent}% · {marginAmount >= 0 ? "+" : "−"}
               {formatMoney(currency, Math.abs(marginAmount))}/unit
@@ -1051,7 +1084,7 @@ function ItemRow({
           </div>
         </div>
       ) : (
-        <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
+        <div className={`mt-3 grid grid-cols-2 items-start gap-3 ${purchaseOrder ? "lg:grid-cols-[68px_72px_140px_184px_minmax(0,1fr)]" : "lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]"}`}>
           {controlCells}
         </div>
       )}
