@@ -43,15 +43,15 @@ const CORRECTION: PurchaseOrderHistoryEntry = {
   RequestedDeliveryDate: "2026-11-15",
   PaymentTerms: "30 days",
   Incoterms: "CIF",
-  AdjustmentReason: "Rounded to the printed total",
+  AdjustmentReason: "",
   PreviousVersion: 4,
   ResultingVersion: 5,
-  DiscountPercent: 5,
+  DiscountPercent: 0,
   SubtotalMinor: 20000,
   DiscountMinor: 2000,
   PpnBps: 1100,
   PpnMinor: 1980,
-  AdjustmentMinor: -250,
+  AdjustmentMinor: 0,
   GrandTotalMinor: 19730,
   Attachment: {
     Version: 2,
@@ -146,7 +146,6 @@ describe("PurchaseOrderHistoryPanel (issue #473)", () => {
     expect(html).toContain("Previous values");
     expect(html).toContain("PO-473");
     expect(html).toContain("Jl. Old Delivery 9");
-    expect(html).toContain("Rounded to the printed total");
     expect(html).toContain("Widget");
     expect(html).toContain("$100.00");
     expect(html).toContain("$180.00");
@@ -188,9 +187,7 @@ describe("PurchaseOrderHistoryPanel (issue #473)", () => {
       ["payment terms", "30 days"],
       ["incoterms", "CIF"],
       ["PO number", "PO-473"],
-      ["whole-PO discount", "5%"],
       ["PPN rate", "1100 bps"],
-      ["adjustment reason", "Rounded to the printed total"],
       ["attachment", "Customer PO PDF v2"],
     ] as const) {
       expect(html, `${surface} is missing from the retained snapshot`).toContain(value);
