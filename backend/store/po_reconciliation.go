@@ -97,18 +97,17 @@ type POReconciliationTaxBasis struct {
 
 func poReconciliationCatalogue() map[string]bool {
 	return map[string]bool{
-		"header:paymentTerms":    true,
-		"header:incoterms":       true,
-		"header:discountPercent": true,
-		"line:description":       true,
-		"line:uom":               true,
-		"line:quantity":          true,
-		"line:unitPrice":         true,
-		"line:discount":          true,
-		"line:match":             true,
-		"source:match":           true,
-		"link:taxBasis":          true,
-		"derived:totals":         true,
+		"header:paymentTerms": true,
+		"header:incoterms":    true,
+		"line:description":    true,
+		"line:uom":            true,
+		"line:quantity":       true,
+		"line:unitPrice":      true,
+		"line:discount":       true,
+		"line:match":          true,
+		"source:match":        true,
+		"link:taxBasis":       true,
+		"derived:totals":      true,
 	}
 }
 
@@ -246,31 +245,10 @@ func validateReconciliationHeaderValue(item POReconciliationItem) error {
 			}
 		}
 	case "header:discountPercent":
-		for _, raw := range []json.RawMessage{item.POValue, item.SourceValue} {
-			if len(raw) == 0 || string(raw) == "null" {
-				continue
-			}
-			var generic any
-			decoder := json.NewDecoder(bytes.NewReader(raw))
-			decoder.UseNumber()
-			if err := decoder.Decode(&generic); err != nil {
-				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
-			}
-			number, ok := generic.(json.Number)
-			if !ok {
-				// A quoted number ("10") or a bool/object is not a percent.
-				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
-			}
-			text := number.String()
-			if strings.ContainsAny(text, ".eE") {
-				return fmt.Errorf("%w: item %q must carry an integer percent", ErrPurchaseOrderInvalid, item.Key)
-			}
-			percent, err := strconv.ParseInt(text, 10, 16)
-			if err != nil || percent < 0 || percent > 100 {
-				return fmt.Errorf("%w: item %q must carry a percent between 0 and 100",
-					ErrPurchaseOrderInvalid, item.Key)
-			}
-		}
+		// Retired in #573: no new item may carry this field. The case remains
+		// so an old stored session is refused by name rather than silently
+		// accepted into a catalogue that no longer compares it.
+		return fmt.Errorf("%w: item %q names a retired field", ErrPurchaseOrderInvalid, item.Key)
 	}
 	return nil
 }
@@ -891,12 +869,6 @@ func reconciliationSubmittedValue(item POReconciliationItem, entered PurchaseOrd
 		return raw, true
 	case "header:incoterms":
 		raw, err := json.Marshal(strings.TrimSpace(entered.Incoterms))
-		if err != nil {
-			return nil, false
-		}
-		return raw, true
-	case "header:discountPercent":
-		raw, err := json.Marshal(entered.DiscountPercent)
 		if err != nil {
 			return nil, false
 		}

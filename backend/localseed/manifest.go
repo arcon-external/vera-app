@@ -95,7 +95,6 @@ type POSpec struct {
 	ExpectedState string // draft, saved
 	Document      string // none, text, mixed
 	Differences   bool
-	Adjustment    bool
 	Correction    bool
 	Confirmation  bool
 }
@@ -477,13 +476,12 @@ func MockManifest() Manifest {
 			},
 			{
 				Key:           "po-finalized-differences-adjustment",
-				Label:         "Finalized with accepted differences and a reasoned adjustment",
+				Label:         "Finalized with accepted differences",
 				SourceKey:     "nonftz-goods-finalized-differences",
 				SourceState:   sourceLive,
 				ExpectedState: stateSaved,
 				Document:      documentNone,
 				Differences:   true,
-				Adjustment:    true,
 			},
 			{
 				Key:           "po-finalized-no-pdf-confirmation-correction",

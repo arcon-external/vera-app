@@ -84,12 +84,6 @@
       "Mode": "commit"
     },
     {
-      "ID": "header:discountPercent",
-      "KeyPattern": "header:discountPercent",
-      "Label": "Whole-PO discount",
-      "Mode": "commit"
-    },
-    {
       "ID": "line:description",
       "KeyPattern": "line:{lineKey}:description",
       "Label": "Line {lineNumber} description",
@@ -970,7 +964,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -990,7 +983,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1035,7 +1027,6 @@
       "Entered": {
         "PaymentTerms": " \t45 days\n",
         "Incoterms": " CIF ",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1055,7 +1046,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1100,7 +1090,6 @@
       "Entered": {
         "PaymentTerms": "45  days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1133,7 +1122,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1178,7 +1166,6 @@
       "Entered": {
         "PaymentTerms": "30 days",
         "Incoterms": "FOB",
-        "DiscountPercent": 10,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1206,12 +1193,6 @@
             "Label": "Incoterms",
             "POValue": "FOB",
             "SourceValue": "CIF"
-          },
-          {
-            "Key": "header:discountPercent",
-            "Label": "Whole-PO discount",
-            "POValue": "10%",
-            "SourceValue": "5%"
           },
           {
             "Key": "line:1:description",
@@ -1247,7 +1228,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1297,7 +1277,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1324,7 +1303,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1379,7 +1357,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1432,7 +1409,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1494,7 +1470,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1525,7 +1500,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1575,7 +1549,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1595,7 +1568,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1640,7 +1612,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1667,7 +1638,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1712,7 +1682,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1739,7 +1708,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1789,7 +1757,6 @@
       "Entered": {
         "PaymentTerms": "45 days",
         "Incoterms": "CIF",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1809,7 +1776,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1854,7 +1820,6 @@
       "Entered": {
         "PaymentTerms": "",
         "Incoterms": "",
-        "DiscountPercent": 5,
         "Lines": [
           {
             "LineNumber": 1,
@@ -1874,7 +1839,6 @@
         "ComparableKeys": [
           "header:paymentTerms",
           "header:incoterms",
-          "header:discountPercent",
           "line:1:description",
           "line:1:uom",
           "line:1:quantity",
@@ -1900,10 +1864,7 @@
             "DiscountPercent": 0
           }
         ],
-        "DiscountPercent": 0,
-        "PpnBps": 1100,
-        "AdjustmentMinor": 0,
-        "AdjustmentReason": ""
+        "PpnBps": 1100
       },
       "PrintedGrandTotalMinor": 1110,
       "ReasonFields": [],
@@ -1930,10 +1891,7 @@
             "DiscountPercent": 0
           }
         ],
-        "DiscountPercent": 0,
-        "PpnBps": 1100,
-        "AdjustmentMinor": 0,
-        "AdjustmentReason": ""
+        "PpnBps": 1100
       },
       "PrintedGrandTotalMinor": 1110,
       "ReasonFields": [
@@ -1952,7 +1910,7 @@
       }
     },
     {
-      "Name": "same-rounding-discount-ppn-and-signed-adjustment-pipeline",
+      "Name": "same-rounding-row-discount-and-ppn-pipeline",
       "Input": {
         "Lines": [
           {
@@ -1962,28 +1920,23 @@
             "DiscountPercent": 5
           }
         ],
-        "DiscountPercent": 10,
-        "PpnBps": 1100,
-        "AdjustmentMinor": -5,
-        "AdjustmentReason": "Customer PO rounding"
+        "PpnBps": 1100
       },
       "PrintedGrandTotalMinor": 155,
       "ReasonFields": [
         "line:quantity",
-        "line:discount",
-        "header:discountPercent",
-        "po:adjustment"
+        "line:discount"
       ],
       "Want": {
         "grossMinor": 152,
         "rowDiscountMinor": 7,
         "subtotalMinor": 145,
-        "discountMinor": 14,
-        "afterDiscountMinor": 131,
-        "ppnMinor": 14,
-        "adjustmentMinor": -5,
-        "grandTotalMinor": 140,
-        "printedDifferenceMinor": 15
+        "discountMinor": 0,
+        "afterDiscountMinor": 145,
+        "ppnMinor": 15,
+        "adjustmentMinor": 0,
+        "grandTotalMinor": 160,
+        "printedDifferenceMinor": -5
       }
     }
   ],

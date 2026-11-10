@@ -108,7 +108,7 @@ function options(
     sourceRevision: 0,
     poVersion: 1,
     readOnly: false,
-    source: { paymentTerms: "", incoterms: "", discountPercent: 0 },
+    source: { paymentTerms: "", incoterms: "" },
     sourceLines: [SOURCE],
     lines: [
       {

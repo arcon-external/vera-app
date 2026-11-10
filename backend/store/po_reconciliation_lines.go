@@ -381,8 +381,10 @@ func valueOrEmpty(value *string) string {
 // enforced on the write path, where the stored set is available.
 func validateReconciliationLineItemShape(item POReconciliationItem) error {
 	switch item.Field {
-	case "header:paymentTerms", "header:incoterms", "header:discountPercent":
+	case "header:paymentTerms", "header:incoterms":
 		return nil
+	case "header:discountPercent":
+		return fmt.Errorf("%w: item %q names a retired field", ErrPurchaseOrderInvalid, item.Key)
 	case "derived:totals":
 		return nil
 	}

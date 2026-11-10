@@ -379,6 +379,9 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
       {
         ID: null,
         ClientKey: expect.any(String),
+        GroupKey: "",
+        ParentDescription: "",
+        DescriptionLines: [],
         QuotationItemNo: 2,
         QuotationSubNo: null,
         Description: "Revised widget",

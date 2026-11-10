@@ -26,11 +26,10 @@ const TOTALS: PurchaseOrderTotalsValue = {
   grossMinor: 354625,
   rowDiscountMinor: 31262,
   subtotalMinor: 323363,
-  discountMinor: 16168,
-  afterDiscountMinor: 307195,
+  discountMinor: 0,
+  afterDiscountMinor: 323363,
   ppnMinor: 33791,
-  adjustmentMinor: -250,
-  grandTotalMinor: 340736,
+  grandTotalMinor: 357154,
 };
 
 const PRINTED = {
@@ -45,9 +44,7 @@ function render(overrides: Partial<Parameters<typeof PurchaseOrderTotals>[0]> = 
     <PurchaseOrderTotals
       totals={TOTALS}
       currency={USD}
-      discountPercent={5}
       ppnBps={1100}
-      adjustmentReason="Round to the printed total"
       printedTotals={PRINTED}
       sourceRevision={2}
       {...overrides}
@@ -64,23 +61,17 @@ describe("PurchaseOrderTotals (issue #470)", () => {
     expect(html).toContain("$-312.62");
     expect(html).toContain("Subtotal");
     expect(html).toContain("$3,233.63");
-    expect(html).toContain("Whole-PO discount (5%)");
-    expect(html).toContain("$-161.68");
-    expect(html).toContain("Net after discount");
-    expect(html).toContain("$3,071.95");
+    // The whole-PO discount and the signed adjustment are retired (#573).
+    expect(html).not.toContain("Whole-PO discount");
+    expect(html).not.toContain("Net after discount");
+    expect(html).not.toContain("Adjustment");
     expect(html).toContain("PPN (11%)");
     expect(html).toContain("$337.91");
-    expect(html).toContain("Adjustment");
-    expect(html).toContain("$-2.50");
     expect(html).toContain("Grand total");
-    expect(html).toContain("$3,407.36");
+    expect(html).toContain("$3,571.54");
   });
 
-  it("shows the adjustment's reason beside its amount", () => {
-    expect(render()).toContain("Round to the printed total");
-  });
-
-  it("hides PPN, discounts and the adjustment when they do not apply", () => {
+  it("hides PPN and row discounts when they do not apply", () => {
     const html = render({
       totals: {
         grossMinor: 1000,
@@ -89,12 +80,9 @@ describe("PurchaseOrderTotals (issue #470)", () => {
         discountMinor: 0,
         afterDiscountMinor: 1000,
         ppnMinor: 0,
-        adjustmentMinor: 0,
         grandTotalMinor: 1000,
       },
-      discountPercent: 0,
       ppnBps: 0,
-      adjustmentReason: "",
     });
     expect(html).not.toContain("PPN (0%)");
     expect(html).not.toContain("Charged on top");
@@ -157,6 +145,6 @@ describe("PurchaseOrderTotals (issue #470)", () => {
     expect(html).toContain("Above the exact display range");
     expect(html).not.toContain("$0.00");
     expect(html).toContain("$3,233.63");
-    expect(html).toContain("$3,407.36");
+    expect(html).toContain("$3,571.54");
   });
 });

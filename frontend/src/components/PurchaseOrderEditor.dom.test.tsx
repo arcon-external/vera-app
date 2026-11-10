@@ -422,7 +422,7 @@ describe("PO editor opens on manual entry (issue #505)", () => {
     expect(inputValue("Customer PO number")).toBe("PO-1");
     expect(inputValue("Payment terms")).toBe("45 days");
     expect(inputValue("Ship-to code")).toBe("SHIP-1");
-    expect(inputValue("Line 1 description")).toBe("Widget");
+    expect(inputValue("Description for line 1")).toBe("Widget");
 
     // The customer PO PDF panel is still there, without an extraction action.
     expect(document.body.textContent).toContain("Customer PO.pdf");

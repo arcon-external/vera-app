@@ -49,7 +49,6 @@ type reconciliationFieldContract struct {
 var reconciliationFieldsContract = []reconciliationFieldContract{
 	{"header:paymentTerms", "header:paymentTerms", "Payment terms", "commit"},
 	{"header:incoterms", "header:incoterms", "Incoterms", "commit"},
-	{"header:discountPercent", "header:discountPercent", "Whole-PO discount", "commit"},
 	{"line:description", "line:{lineKey}:description", "Line {lineNumber} description", "commit"},
 	{"line:uom", "line:{lineKey}:uom", "Line {lineNumber} unit of measure", "commit"},
 	{"line:quantity", "line:{lineKey}:quantity", "Line {lineNumber} quantity", "commit"},

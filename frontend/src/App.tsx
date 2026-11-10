@@ -2804,6 +2804,17 @@ function App() {
             </div>
             <div className="ml-auto flex items-center gap-2.5">
               <Button
+                variant="ghost"
+                aria-label={
+                  poShellActions.mode === "correction"
+                    ? "Cancel correction"
+                    : "Cancel draft"
+                }
+                onClick={() => poShellActions?.onCancel()}
+              >
+                Cancel
+              </Button>
+              <Button
                 variant="secondary"
                 aria-label={
                   poShellActions.mode === "correction"

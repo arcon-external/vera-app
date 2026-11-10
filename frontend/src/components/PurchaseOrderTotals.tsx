@@ -7,11 +7,13 @@ import { formatMoney } from "../format";
 import { Card, SectionHeading } from "./ui";
 
 // Issue #470: the explained calculation, shown as stages rather than a single
-// number. Every figure is customer-facing: line gross, row discounts, the
-// whole-PO discount, the PPN that will be printed on top, a signed adjustment
-// with its reason, and the grand total. The source quotation's printed figures
-// sit in their own group, because Vera's arithmetic must never replace the
-// evidence it is checked against (parent story 45).
+// number. Every figure is customer-facing: line gross, row discounts, the PPN
+// that will be printed on top, and the grand total. The source quotation's
+// printed figures sit in their own group, because Vera's arithmetic must never
+// replace the evidence it is checked against (parent story 45).
+//
+// The whole-PO discount and the signed adjustment were retired in #573; they
+// appear nowhere in this panel.
 //
 // Internal cost, margin, PPH22 and profit are absent by construction: the
 // calculation that feeds this component carries no such field.
@@ -20,10 +22,7 @@ export interface PurchaseOrderTotalsProps {
   /** `null` while any input cannot be parsed; the panel then says pending. */
   totals: PurchaseOrderTotalsValue | null;
   currency: CurrencyInfo;
-  /** `null` while the whole-PO discount field cannot be parsed. */
-  discountPercent: number | null;
   ppnBps: number;
-  adjustmentReason: string;
   printedTotals: PurchaseOrderPrintedTotals;
   sourceRevision: number;
   /** False for a never-linked draft: there is no printed source document yet. */
@@ -94,9 +93,7 @@ function Row({
 export function PurchaseOrderTotals({
   totals,
   currency,
-  discountPercent,
   ppnBps,
-  adjustmentReason,
   printedTotals,
   sourceRevision,
   printedTotalsKnown = true,
@@ -104,9 +101,7 @@ export function PurchaseOrderTotals({
   const showRowDiscounts =
     totals !== null &&
     (totals.rowDiscountMinor === null || totals.rowDiscountMinor > 0);
-  const showWholeDiscount = totals !== null && totals.discountMinor > 0;
   const showPpn = ppnBps > 0;
-  const showAdjustment = totals !== null && totals.adjustmentMinor !== 0;
   const printedAvailable = printedTotalsAvailable(printedTotals);
   return (
     <Card className="p-4">
@@ -129,35 +124,12 @@ export function PurchaseOrderTotals({
             />
           ) : null}
           <Row label="Subtotal" value={formatMoney(currency, totals.subtotalMinor)} />
-          {showWholeDiscount ? (
-            <Row
-              label={
-                discountPercent === null
-                  ? "Whole-PO discount"
-                  : `Whole-PO discount (${discountPercent}%)`
-              }
-              muted
-              value={formatMoney(currency, -totals.discountMinor)}
-            />
-          ) : null}
-          <Row
-            label="Net after discount"
-            value={formatMoney(currency, totals.afterDiscountMinor)}
-          />
           {showPpn ? (
             <Row
               label={`PPN (${formatBps(ppnBps)})`}
               muted
               note="Charged on top"
               value={formatMoney(currency, totals.ppnMinor)}
-            />
-          ) : null}
-          {showAdjustment ? (
-            <Row
-              label="Adjustment"
-              muted
-              note={adjustmentReason}
-              value={formatMoney(currency, totals.adjustmentMinor)}
             />
           ) : null}
           <Row

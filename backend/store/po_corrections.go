@@ -104,18 +104,21 @@ type PurchaseOrderCorrectionAttachment struct {
 // PurchaseOrderCorrectionItem is one line of a retained snapshot. The fields
 // mirror PurchaseOrderItem: this is what the record said, not a recalculation.
 type PurchaseOrderCorrectionItem struct {
-	QuotationItemNo *int
-	QuotationSubNo  *int
-	LineNumber      int
-	Description     string
-	QuantityScaled  int64
-	UoM             string
-	UnitPriceMinor  int64
-	DiscountEnabled bool
-	DiscountPercent int16
-	GrossMinor      int64
-	DiscountMinor   int64
-	NetMinor        int64
+	QuotationItemNo   *int
+	QuotationSubNo    *int
+	LineNumber        int
+	Description       string
+	QuantityScaled    int64
+	UoM               string
+	UnitPriceMinor    int64
+	DiscountEnabled   bool
+	DiscountPercent   int16
+	GrossMinor        int64
+	DiscountMinor     int64
+	NetMinor          int64
+	GroupKey          string
+	ParentDescription string
+	DescriptionLines  []string
 }
 
 // PurchaseOrderCorrection is one immutable snapshot plus who replaced it, when
@@ -392,6 +395,23 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		if item.ClientKey != "" && !isPurchaseOrderClientKey(item.ClientKey) {
 			return fmt.Errorf("%w: line %d carries an invalid client key (want `client:<id>`)", ErrPurchaseOrderInvalid, index+1)
 		}
+		if utf8.RuneCountInString(item.GroupKey) > 120 {
+			return fmt.Errorf("%w: line %d group key must be at most 120 characters", ErrPurchaseOrderInvalid, index+1)
+		}
+		if utf8.RuneCountInString(item.ParentDescription) > maxParentDescriptionLength {
+			return fmt.Errorf("%w: line %d parent description must be at most %d characters",
+				ErrPurchaseOrderInvalid, index+1, maxParentDescriptionLength)
+		}
+		if len(item.DescriptionLines) > maxDescriptionLines {
+			return fmt.Errorf("%w: line %d has more than %d description lines",
+				ErrPurchaseOrderInvalid, index+1, maxDescriptionLines)
+		}
+		for _, descriptionLine := range item.DescriptionLines {
+			if utf8.RuneCountInString(descriptionLine) > maxDescriptionLineLength {
+				return fmt.Errorf("%w: line %d description lines must be at most %d characters",
+					ErrPurchaseOrderInvalid, index+1, maxDescriptionLineLength)
+			}
+		}
 	}
 	seenClientKeys := map[string]int{}
 	for index, item := range input.Items {
@@ -484,9 +504,9 @@ func updatePurchaseOrderEditable(
 		nilIfEmptyString(input.PONumber), numberKey, dateOrNil(input.PODate),
 		dateOrNil(input.ReceivedDate), dateOrNil(input.RequestedDeliveryDate),
 		input.PaymentTerms, input.Incoterms, input.UpdatedBy,
-		input.DiscountPercent, calculation.SubtotalMinor,
+		int16(0), calculation.SubtotalMinor,
 		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
-		calculation.AdjustmentMinor, calculation.AdjustmentReason,
+		int64(0), "",
 		calculation.GrandTotalMinor, basis.Currency, basis.TaxZone,
 		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
 	)
@@ -577,9 +597,9 @@ func insertPurchaseOrderCorrection(
 		order.ShipToCode, order.ContactEmail, order.ContactPhone,
 		nilIfEmptyString(order.PONumber), dateOrNil(order.PODate),
 		order.ReceivedDate, dateOrNil(order.RequestedDeliveryDate),
-		order.PaymentTerms, order.Incoterms, order.DiscountPercent,
+		order.PaymentTerms, order.Incoterms, int16(0),
 		order.SubtotalMinor, order.DiscountMinor, order.PpnBps, order.PpnMinor,
-		order.AdjustmentMinor, order.AdjustmentReason, order.GrandTotalMinor,
+		int64(0), "", order.GrandTotalMinor,
 		attachmentVersion, attachmentSHA, attachmentFilename,
 	).Scan(&correctionID)
 	if err != nil {
@@ -595,12 +615,14 @@ func insertPurchaseOrderCorrection(
 				correction_id, line_number, description, quotation_item_no,
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor, discount_minor,
-				net_minor
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, schema),
+				net_minor, group_key, parent_description, description_lines
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, schema),
 			correctionID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM,
 			item.UnitPriceMinor, item.DiscountEnabled, item.DiscountPercent,
 			item.GrossMinor, item.DiscountMinor, item.NetMinor,
+			item.GroupKey, item.ParentDescription,
+			encodeDescriptionLines(item.DescriptionLines),
 		); err != nil {
 			return 0, fmt.Errorf("store purchase order correction line %d: %w", lineNumber, err)
 		}
@@ -737,7 +759,7 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		SELECT correction_id, line_number, description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 		       discount_enabled, discount_percent, gross_minor, discount_minor,
-		       net_minor
+		       net_minor, group_key, parent_description, description_lines
 		FROM %s.purchase_order_correction_items
 		WHERE correction_id = ANY($1)
 		ORDER BY correction_id, line_number`, schema), ids)
@@ -750,12 +772,15 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		var correctionID int64
 		var item PurchaseOrderCorrectionItem
 		var itemNo, subNo pgtype.Int4
+		var descriptionLines []byte
 		if err := itemRows.Scan(&correctionID, &item.LineNumber, &item.Description,
 			&itemNo, &subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
-			&item.DiscountMinor, &item.NetMinor); err != nil {
+			&item.DiscountMinor, &item.NetMinor, &item.GroupKey,
+			&item.ParentDescription, &descriptionLines); err != nil {
 			return nil, fmt.Errorf("scan purchase order %d correction line: %w", id, err)
 		}
+		item.DescriptionLines = decodeDescriptionLines(descriptionLines)
 		if itemNo.Valid {
 			value := int(itemNo.Int32)
 			item.QuotationItemNo = &value

@@ -162,3 +162,86 @@ describe("ItemEditor UoM chevron (#430)", () => {
     }
   });
 });
+
+// Issue #573: the PO reuses this component in purchase-order mode. Margin is a
+// quotation concept and is absent; sub-items and their sub-sub lines stay,
+// because a PO line can be a priced package exactly as a quotation line can.
+describe("ItemEditor purchase-order mode (#573)", () => {
+  const USD = {
+    code: "USD",
+    exponent: 2,
+    symbol: "$",
+    position: "before" as const,
+    groupSep: ",",
+    decimalSep: ".",
+    symbolSpaced: false,
+  };
+
+  const split: EditorItem = {
+    key: 1,
+    description: "LV distribution panel",
+    bullets: [],
+    qty: "1",
+    uom: "Lot",
+    unitPrice: "",
+    marginEnabled: false,
+    marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    showSubPrices: true,
+    subItems: [
+      {
+        id: 11,
+        description: "Panel",
+        qty: "1",
+        uom: "Pc",
+        unitCost: "1850000",
+        marginEnabled: false,
+        marginPercent: "0",
+        discountEnabled: true,
+        discountPercent: "5",
+        bullets: ["IP54 enclosure"],
+      },
+      {
+        id: 12,
+        description: "Wiring",
+        qty: "2",
+        uom: "Lot",
+        unitCost: "675000",
+        marginEnabled: false,
+        marginPercent: "0",
+        discountEnabled: false,
+        discountPercent: "0",
+        bullets: ["Two technicians", "Three days"],
+      },
+    ],
+  };
+
+  it("hides margin but keeps sub-items and sub-sub lines", () => {
+    const html = render({ items: [split], mode: "purchase-order", currency: USD });
+    expect(html).not.toContain(">Margin<");
+    expect(html).toContain("Sub-items — priced individually; the line totals their sum");
+    expect(html).toContain("Add sub-sub-item");
+    expect(html).toContain("IP54 enclosure");
+    expect(html).toContain("Two technicians");
+    expect(html).toContain("Enable a discount for sub-item 1 of line 1");
+    expect(html).toContain("Discount percentage for sub-item 1 of line 1");
+  });
+
+  it("keeps margin in quotation mode", () => {
+    const html = render({ items: [{ ...ITEM, unitPrice: "1000" }] });
+    expect(html).toContain(">Margin<");
+    expect(html).toContain("Enable profit margin for line 1");
+  });
+
+  it("multiplies a decimal PO quantity exactly", () => {
+    const html = render({
+      items: [{ ...ITEM, qty: "2.5", unitPrice: "1000" }],
+      mode: "purchase-order",
+      currency: USD,
+    });
+    // 2.5 × $10.00 = $25.00, not the truncated 2 × $10.00.
+    expect(html).toContain("$25.00");
+    expect(html).not.toContain("$20.00");
+  });
+});

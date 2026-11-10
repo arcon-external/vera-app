@@ -22,7 +22,6 @@ import {
   confirmationNumberOf,
   initialPurchaseOrderEditorState,
   MAX_EXACT_MINOR,
-  parseDiscountPercent,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
@@ -588,9 +587,7 @@ export function PurchaseOrderDifferenceReviewView({
       <PurchaseOrderTotals
         totals={evaluation.totals}
         currency={currency}
-        discountPercent={parseDiscountPercent(evaluation.applied.header.discountPercent)}
         ppnBps={ppnBpsOverride ?? state.ppnBps}
-        adjustmentReason={evaluation.applied.header.adjustmentReason.trim()}
         printedTotals={{
           subtotalMinor: source.PrintedSubtotalMinor,
           discountMinor: source.PrintedDiscountMinor,
@@ -1160,10 +1157,9 @@ export function PurchaseOrderSavedView({
     grossMinor: safe(gross),
     rowDiscountMinor: safe(rowDiscount),
     subtotalMinor: order.SubtotalMinor,
-    discountMinor: order.DiscountMinor,
-    afterDiscountMinor: order.SubtotalMinor - order.DiscountMinor,
+    discountMinor: 0,
+    afterDiscountMinor: order.SubtotalMinor,
     ppnMinor: order.PpnMinor,
-    adjustmentMinor: order.AdjustmentMinor,
     grandTotalMinor: order.GrandTotalMinor,
   };
 
@@ -1497,9 +1493,7 @@ export function PurchaseOrderSavedView({
           <PurchaseOrderTotals
             totals={totals}
             currency={currency}
-            discountPercent={order.DiscountPercent}
             ppnBps={order.PpnBps}
-            adjustmentReason={order.AdjustmentReason.trim()}
             printedTotals={state.printedTotals}
             sourceRevision={order.SourceRevision}
           />

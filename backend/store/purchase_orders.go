@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,6 +48,15 @@ const QuantityScale int64 = 10000
 // the editor. Long enough for a real commercial sentence, short enough that a
 // paste cannot store a page of text in a header field.
 const maxPaymentTermsLength = 500
+
+// The grouped line's free text is bounded the same way: a title and up to
+// fifty description lines of five hundred Unicode characters each. These match
+// the editor's own limits (#573); the database CHECKs are the backstop.
+const (
+	maxParentDescriptionLength = 500
+	maxDescriptionLines        = 50
+	maxDescriptionLineLength   = 500
+)
 
 var (
 	// ErrPurchaseOrderNotFound also answers a PO owned by another
@@ -142,6 +152,16 @@ type PurchaseOrderItem struct {
 	// purchase order. It travels in the editor DTO; the review session keys
 	// its items off it for the lifetime of the session.
 	ClientKey string
+	// GroupKey is empty for a plain line and shared by every row of one
+	// split line (#573). The parent is a presentation of these rows; there is
+	// no parent row to join to.
+	GroupKey string
+	// ParentDescription is the split line's title, copied to every row of the
+	// group so a read never needs a second query.
+	ParentDescription string
+	// DescriptionLines are the plain line's description bullets or the
+	// sub-item's sub-sub lines. Empty when the row has none.
+	DescriptionLines []string
 }
 
 // PurchaseOrder is a draft or finalized header plus its lines and the explained
@@ -403,7 +423,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		source.CustomerID, source.CustomerName, source.BillingAddress,
 		source.BillingAddress, received, source.PaymentTerms,
 		source.Incoterms, source.Currency, source.TaxZone, source.TaxCategory,
-		source.DiscountPercent, calculation.SubtotalMinor,
+		0, calculation.SubtotalMinor,
 		calculation.DiscountMinor, calculation.PpnBps, calculation.PpnMinor,
 		calculation.AdjustmentMinor, calculation.AdjustmentReason,
 		calculation.GrandTotalMinor, source.PrintedSubtotalMinor,
@@ -1029,6 +1049,7 @@ type purchaseOrderSourceSub struct {
 	SubNo           int
 	DiscountPercent int16
 	DiscountEnabled bool
+	Details         []string
 }
 
 // loadPurchaseOrderSourceLines turns the customer-facing composition of one
@@ -1106,6 +1127,42 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 		return nil, fmt.Errorf("iterate purchase order source sub-items: %w", err)
 	}
 
+	detailRows, err := q.Query(ctx, fmt.Sprintf(`
+		SELECT i.item_no, s.sub_no, ss.description
+		FROM %s.quotation_revision_sub_sub_items ss
+		JOIN %s.quotation_revision_sub_items s ON s.id = ss.revision_sub_item_id
+		JOIN %s.quotation_revision_items i ON i.id = s.revision_item_id
+		WHERE i.revision_id = $1
+		ORDER BY i.item_no, s.sub_no, ss.sub_sub_no`, schema, schema, schema), revisionID)
+	if err != nil {
+		return nil, fmt.Errorf("load purchase order source sub-sub items: %w", err)
+	}
+	defer detailRows.Close()
+	details := map[[2]int][]string{}
+	for detailRows.Next() {
+		var itemNo, subNo int
+		var description string
+		if err := detailRows.Scan(&itemNo, &subNo, &description); err != nil {
+			return nil, fmt.Errorf("scan purchase order source sub-sub item: %w", err)
+		}
+		key := [2]int{itemNo, subNo}
+		details[key] = append(details[key], description)
+	}
+	if err := detailRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate purchase order source sub-sub items: %w", err)
+	}
+	itemNoByID := make(map[int64]int, len(items))
+	for _, item := range items {
+		itemNoByID[item.ID] = item.ItemNo
+	}
+	for itemID, itemSubs := range subs {
+		itemNo := itemNoByID[itemID]
+		for index := range itemSubs {
+			itemSubs[index].Details = details[[2]int{itemNo, itemSubs[index].SubNo}]
+		}
+		subs[itemID] = itemSubs
+	}
+
 	lines := make([]PurchaseOrderSourceLine, 0, len(items))
 	for _, item := range items {
 		if item.ShowSubPrices && len(subs[item.ID]) > 0 {
@@ -1115,15 +1172,19 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 					return nil, err
 				}
 				subNo := sub.SubNo
+				parentDescription, _ := splitPurchaseOrderDescription(item.Description)
 				lines = append(lines, PurchaseOrderSourceLine{
-					QuotationItemNo: item.ItemNo,
-					QuotationSubNo:  &subNo,
-					Description:     sub.Description,
-					QuantityScaled:  quantity,
-					UoM:             sub.UoM,
-					UnitPriceMinor:  sub.UnitPriceMinor,
-					DiscountEnabled: sub.DiscountEnabled,
-					DiscountPercent: sub.DiscountPercent,
+					QuotationItemNo:   item.ItemNo,
+					QuotationSubNo:    &subNo,
+					Description:       sub.Description,
+					QuantityScaled:    quantity,
+					UoM:               sub.UoM,
+					UnitPriceMinor:    sub.UnitPriceMinor,
+					DiscountEnabled:   sub.DiscountEnabled,
+					DiscountPercent:   sub.DiscountPercent,
+					ParentDescription: parentDescription,
+					GroupKey:          fmt.Sprintf("q:%d", item.ItemNo),
+					DescriptionLines:  append([]string(nil), sub.Details...),
 				})
 			}
 			continue
@@ -1132,14 +1193,16 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 		if err != nil {
 			return nil, err
 		}
+		description, descriptionLines := splitPurchaseOrderDescription(item.Description)
 		lines = append(lines, PurchaseOrderSourceLine{
-			QuotationItemNo: item.ItemNo,
-			Description:     item.Description,
-			QuantityScaled:  quantity,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:  item.ItemNo,
+			Description:      description,
+			QuantityScaled:   quantity,
+			UoM:              item.UoM,
+			UnitPriceMinor:   item.UnitPriceMinor,
+			DiscountEnabled:  item.DiscountEnabled,
+			DiscountPercent:  item.DiscountPercent,
+			DescriptionLines: descriptionLines,
 		})
 	}
 	return lines, nil
@@ -1165,13 +1228,16 @@ func loadPurchaseOrderSourceDetail(ctx context.Context, q purchaseOrderQuerier, 
 func (line PurchaseOrderSourceLine) PurchaseOrderItem() PurchaseOrderItem {
 	itemNo := line.QuotationItemNo
 	item := PurchaseOrderItem{
-		QuotationItemNo: &itemNo,
-		Description:     line.Description,
-		QuantityScaled:  line.QuantityScaled,
-		UoM:             line.UoM,
-		UnitPriceMinor:  line.UnitPriceMinor,
-		DiscountEnabled: line.DiscountEnabled,
-		DiscountPercent: line.DiscountPercent,
+		QuotationItemNo:   &itemNo,
+		Description:       line.Description,
+		QuantityScaled:    line.QuantityScaled,
+		UoM:               line.UoM,
+		UnitPriceMinor:    line.UnitPriceMinor,
+		DiscountEnabled:   line.DiscountEnabled,
+		DiscountPercent:   line.DiscountPercent,
+		GroupKey:          line.GroupKey,
+		ParentDescription: line.ParentDescription,
+		DescriptionLines:  append([]string(nil), line.DescriptionLines...),
 	}
 	if line.QuotationSubNo != nil {
 		subNo := *line.QuotationSubNo
@@ -1267,13 +1333,10 @@ func validatePurchaseOrderReferences(ctx context.Context, q purchaseOrderQuerier
 // alongside the header totals. The inputs are mutated in place-ish (a new slice
 // is returned) so the caller can persist exactly what was calculated; nothing
 // here recalculates on read.
-func calculatePurchaseOrderLines(items []PurchaseOrderItem, discountPercent int16, adjustment int64, reason string, ppnBps int16) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
+func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ string, ppnBps int16) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
 	input := PurchaseOrderCalcInput{
-		Lines:            make([]PurchaseOrderCalcLine, len(items)),
-		DiscountPercent:  discountPercent,
-		PpnBps:           ppnBps,
-		AdjustmentMinor:  adjustment,
-		AdjustmentReason: reason,
+		Lines:  make([]PurchaseOrderCalcLine, len(items)),
+		PpnBps: ppnBps,
 	}
 	for index, item := range items {
 		input.Lines[index] = PurchaseOrderCalcLine{
@@ -1351,7 +1414,8 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT id, COALESCE(client_key, ''), description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
-		       discount_enabled, discount_percent
+		       discount_enabled, discount_percent, group_key,
+		       parent_description, description_lines
 		FROM %s.purchase_order_items
 		WHERE purchase_order_id = $1
 		ORDER BY line_number`, schema), orderID)
@@ -1362,13 +1426,16 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 	for rows.Next() {
 		var line storedLine
 		var itemNo, subNo pgtype.Int4
+		var descriptionLines []byte
 		if err := rows.Scan(&line.item.ID, &line.clientKey, &line.item.Description,
 			&itemNo, &subNo, &line.item.QuantityScaled, &line.item.UoM,
 			&line.item.UnitPriceMinor, &line.item.DiscountEnabled,
-			&line.item.DiscountPercent); err != nil {
+			&line.item.DiscountPercent, &line.item.GroupKey,
+			&line.item.ParentDescription, &descriptionLines); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan purchase order line: %w", err)
 		}
+		line.item.DescriptionLines = decodeDescriptionLines(descriptionLines)
 		if itemNo.Valid {
 			value := int(itemNo.Int32)
 			line.item.QuotationItemNo = &value
@@ -1535,12 +1602,16 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 					quotation_sub_no = $5, quantity_scaled = $6, uom = $7,
 					unit_price_minor = $8, discount_enabled = $9,
 					discount_percent = $10, gross_minor = $11,
-					discount_minor = $12, net_minor = $13, client_key = $14
+					discount_minor = $12, net_minor = $13, client_key = $14,
+					group_key = $15, parent_description = $16,
+					description_lines = $17
 				WHERE id = $1`, schema),
 				row.item.ID, lineNumber, item.Description, item.QuotationItemNo,
 				item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
 				item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
 				item.DiscountMinor, item.NetMinor, nilIfEmptyString(clientKey),
+				item.GroupKey, item.ParentDescription,
+				encodeDescriptionLines(item.DescriptionLines),
 			); err != nil {
 				return nil, nil, fmt.Errorf("update purchase order line %d: %w", lineNumber, err)
 			}
@@ -1555,13 +1626,16 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 				purchase_order_id, line_number, description, quotation_item_no,
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor,
-				discount_minor, net_minor, client_key
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+				discount_minor, net_minor, client_key, group_key,
+				parent_description, description_lines
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id`, schema),
 			orderID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
 			item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
 			item.DiscountMinor, item.NetMinor, nilIfEmptyString(item.ClientKey),
+			item.GroupKey, item.ParentDescription,
+			encodeDescriptionLines(item.DescriptionLines),
 		).Scan(&id); err != nil {
 			return nil, nil, fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
 		}
@@ -1842,7 +1916,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	rows, err := q.Query(ctx, fmt.Sprintf(`
 		SELECT id, line_number, description, quotation_item_no, quotation_sub_no,
 		       quantity_scaled, uom, unit_price_minor, discount_enabled,
-		       discount_percent, gross_minor, discount_minor, net_minor, client_key
+		       discount_percent, gross_minor, discount_minor, net_minor, client_key,
+		       group_key, parent_description, description_lines
 		FROM %s.purchase_order_items
 		WHERE purchase_order_id = $1
 		ORDER BY line_number`, schema), id)
@@ -1855,12 +1930,15 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		var item PurchaseOrderItem
 		var itemNo, subNo pgtype.Int4
 		var clientKey pgtype.Text
+		var descriptionLines []byte
 		if err := rows.Scan(&item.ID, &item.LineNumber, &item.Description, &itemNo,
 			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
-			&item.DiscountMinor, &item.NetMinor, &clientKey); err != nil {
+			&item.DiscountMinor, &item.NetMinor, &clientKey, &item.GroupKey,
+			&item.ParentDescription, &descriptionLines); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
 		}
+		item.DescriptionLines = decodeDescriptionLines(descriptionLines)
 		if clientKey.Valid {
 			item.ClientKey = clientKey.String
 		}
@@ -1892,6 +1970,59 @@ func normalizeDate(value *time.Time) time.Time {
 
 // dateOrNil passes NULL rather than Go's zero time when a caller omits an
 // optional DATE; the zero value would store year 1.
+// encodeDescriptionLines writes the array as JSONB. An empty list is stored as
+// an empty array, never SQL NULL, so a reader always has a list to iterate.
+func encodeDescriptionLines(lines []string) []byte {
+	if len(lines) == 0 {
+		return []byte("[]")
+	}
+	raw, err := json.Marshal(lines)
+	if err != nil {
+		// A []string cannot fail to marshal; keep the reader safe anyway.
+		return []byte("[]")
+	}
+	return raw
+}
+
+// decodeDescriptionLines reads the array back. A malformed value is treated as
+// no lines rather than failing a whole PO read: the column's CHECK already
+// refuses a non-array, and an empty list is the honest fallback.
+func decodeDescriptionLines(value []byte) []string {
+	if len(value) == 0 {
+		return nil
+	}
+	var lines []string
+	if err := json.Unmarshal(value, &lines); err != nil {
+		return nil
+	}
+	return lines
+}
+
+// splitPurchaseOrderDescription separates a frozen source description's "- "
+// bullet lines from its main sentence. It mirrors backend/format.go's
+// splitDescriptionLines, which the store cannot import without a cycle; the
+// rule is deliberately small and the source format is frozen at issue time.
+func splitPurchaseOrderDescription(raw string) (string, []string) {
+	clean := strings.ReplaceAll(raw, "\r\n", "\n")
+	mainParts := make([]string, 0)
+	bullets := make([]string, 0)
+	for _, line := range strings.Split(clean, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") {
+			item := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+			if item != "" {
+				bullets = append(bullets, item)
+			}
+			continue
+		}
+		mainParts = append(mainParts, trimmed)
+	}
+	return strings.Join(mainParts, " "), bullets
+}
+
 func dateOrNil(value *time.Time) any {
 	if value == nil {
 		return nil

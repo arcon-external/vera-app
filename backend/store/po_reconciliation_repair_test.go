@@ -510,7 +510,6 @@ func TestRepairChoicesSeedTheFullItemSet(t *testing.T) {
 		"line:" + key + ":description",
 		"line:" + key + ":uom",
 		"line:" + key + ":discount",
-		"header:discountPercent",
 		"header:incoterms",
 	} {
 		for _, item := range current.Session.Items {
