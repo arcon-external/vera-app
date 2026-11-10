@@ -261,21 +261,9 @@ export function PurchaseOrderHistoryPanel({
                   <HistoryGroup title="Totals">
                     <dl className="grid gap-1 text-small text-ink-700">
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <dt>Whole-PO discount</dt>
-                        <dd className="tnum whitespace-nowrap text-ink-900">
-                          {entry.DiscountPercent}%
-                        </dd>
-                      </div>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
                         <dt>Subtotal</dt>
                         <dd className="tnum whitespace-nowrap text-ink-900">
                           {formatMoney(currency, entry.SubtotalMinor)}
-                        </dd>
-                      </div>
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <dt>Discount</dt>
-                        <dd className="tnum whitespace-nowrap text-ink-900">
-                          {formatMoney(currency, -entry.DiscountMinor)}
                         </dd>
                       </div>
                       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -284,19 +272,6 @@ export function PurchaseOrderHistoryPanel({
                           {formatMoney(currency, entry.PpnMinor)}
                         </dd>
                       </div>
-                      {entry.AdjustmentMinor !== 0 ? (
-                        <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <dt>
-                            Adjustment
-                            {entry.AdjustmentReason === ""
-                              ? ""
-                              : ` · ${entry.AdjustmentReason}`}
-                          </dt>
-                          <dd className="tnum whitespace-nowrap text-ink-900">
-                            {formatMoney(currency, entry.AdjustmentMinor)}
-                          </dd>
-                        </div>
-                      ) : null}
                       <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-rule pt-1 font-medium text-ink-900">
                         <dt>Grand total</dt>
                         <dd className="tnum whitespace-nowrap">
