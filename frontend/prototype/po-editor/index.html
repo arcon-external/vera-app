@@ -389,7 +389,7 @@
     .line-desc .textarea { min-height: 54px; }
     .line-controls {
       display: grid;
-      grid-template-columns: 78px 76px 128px 84px minmax(120px, 1fr);
+      grid-template-columns: 78px 76px 128px minmax(150px, 1fr) minmax(120px, 1fr);
       gap: 10px;
       align-items: end;
       margin-top: 10px;
@@ -671,6 +671,132 @@
     .total-card .grand { margin: 6px 0 2px; font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 600; color: var(--ink-950); }
     .total-card .hint { margin: 0 0 14px; font-size: 11px; color: var(--ink-500); }
 
+
+    /* ── Per-line discount and live review pane ─────────────────────── */
+    .discount-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 38px;
+      padding: 4px 8px;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: #fff;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .discount-control:focus-within {
+      border-color: var(--accent-400);
+      box-shadow: 0 0 0 2px rgba(60, 130, 128, 0.2);
+    }
+    .discount-control .input {
+      width: 54px;
+      min-height: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      background: transparent;
+      text-align: right;
+    }
+    .discount-control .input:disabled { color: var(--ink-300); }
+    .discount-control .suffix { font-size: 11.5px; color: var(--ink-400); }
+    .switch {
+      width: 34px;
+      height: 20px;
+      padding: 2px;
+      border: 1px solid var(--ink-200);
+      border-radius: 999px;
+      background: var(--paper-muted);
+      display: inline-flex;
+      align-items: center;
+      flex: 0 0 auto;
+      transition: background-color 0.15s, border-color 0.15s;
+    }
+    .switch span {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(60, 52, 34, 0.25);
+      transition: transform 0.15s ease;
+    }
+    .switch.on { background: var(--accent-600); border-color: var(--accent-600); }
+    .switch.on span { transform: translateX(14px); }
+    .switch-sm { width: 28px; height: 16px; padding: 1px; }
+    .switch-sm span { width: 12px; height: 12px; }
+    .switch-sm.on span { transform: translateX(12px); }
+    .cell-discount { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+    .cell-discount .cell-input { width: 38px; }
+    .cell-discount .cell-input:disabled { color: var(--ink-300); }
+
+    .review-pane { margin-top: 24px; }
+    .review-card {
+      background: #fff;
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+    .review-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--rule);
+      background: var(--paper-subtle);
+    }
+    .review-source { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink-500); }
+    .review-filters { display: flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--rule); border-radius: 8px; background: #fff; }
+    .review-filter {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ink-500);
+      font-size: 11px;
+      line-height: 16px;
+      padding: 5px 8px;
+    }
+    .review-filter span { font-size: 9.5px; line-height: 14px; padding: 1px 5px; border-radius: 999px; background: var(--paper-muted); }
+    .review-filter:hover { color: var(--ink-900); }
+    .review-filter.active { background: var(--ink-900); color: #fff; }
+    .review-filter.active span { background: rgba(255, 255, 255, 0.16); color: #fff; }
+    .review-list { display: flex; flex-direction: column; }
+    .review-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 18px; border-bottom: 1px solid var(--rule); }
+    .review-item:last-child { border-bottom: 0; }
+    .review-item-main { flex: 1; min-width: 0; }
+    .review-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .review-item-head strong { font-size: 12.5px; line-height: 18px; font-weight: 500; color: var(--ink-900); }
+    .review-group { font-size: 9.5px; line-height: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-400); }
+    .review-kind { border-radius: 4px; padding: 1px 5px; font-size: 9.5px; line-height: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+    .review-kind.changed { border: 1px solid var(--internal-200); background: var(--internal-50); color: var(--internal-700); }
+    .review-kind.missing { border: 1px solid var(--danger-200); background: var(--danger-50); color: var(--danger-600); }
+    .review-kind.extra { border: 1px solid var(--rule); background: var(--paper-muted); color: var(--ink-600); }
+    .review-status { font-size: 9.5px; line-height: 14px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-400); }
+    .review-status.unresolved { color: var(--internal-700); }
+    .review-status.resolved { color: var(--success-700); }
+    .review-values { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; margin-top: 6px; font-size: 11.5px; line-height: 17px; }
+    .review-value { border-radius: 4px; padding: 2px 6px; }
+    .review-value.source { background: var(--paper-subtle); color: var(--ink-600); }
+    .review-value.po { background: var(--accent-50); color: var(--accent-800); }
+    .review-arrow { color: var(--ink-300); }
+    .review-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto; }
+    .resolution-chip { border: 1px solid var(--success-200); border-radius: 999px; background: var(--success-50); color: var(--success-700); font-size: 10px; line-height: 14px; padding: 2px 8px; white-space: nowrap; }
+    .review-empty { padding: 24px 18px; text-align: center; font-size: 12px; color: var(--ink-500); }
+
+    @media (max-width: 760px) {
+      .review-pane { margin-top: 18px; }
+      .review-toolbar { align-items: flex-start; }
+      .review-filters { width: 100%; overflow-x: auto; }
+      .review-filter { flex: 1; justify-content: center; }
+      .review-item { flex-direction: column; gap: 10px; }
+      .review-actions { width: 100%; justify-content: flex-end; }
+    }
+
     /* ── Variant bar, state sheet, toast ──────────────────────────────── */
     .variant-bar {
       position: fixed;
@@ -906,21 +1032,41 @@
       currency: "IDR",
       taxZone: "Non-FTZ",
       taxType: "Goods",
-      discountPercent: "2",
-      adjustment: "-250000",
-      adjustmentReason: "Rounding agreed with the customer",
       lines: [
-        { description: "Schneider Acti9 iC60N MCB, 2P, 16A, 6kA, C-curve", qty: "12", uom: "Pc", unitPrice: "454300", discountPercent: "5" },
-        { description: "Phoenix Contact QUINT power supply, 24 VDC / 10 A", qty: "8", uom: "Pc", unitPrice: "2817500", discountPercent: "0" },
-        { description: "Installation, termination and commissioning works", qty: "1", uom: "Lot", unitPrice: "22570000", discountPercent: "0" }
+        { description: "Schneider Acti9 iC60N MCB, 2P, 16A, 6kA, C-curve", qty: "12", uom: "Pc", unitPrice: "454300", discountEnabled: true, discountPercent: "5" },
+        { description: "Phoenix Contact QUINT power supply, 24 VDC / 10 A", qty: "8", uom: "Pc", unitPrice: "2817500", discountEnabled: false, discountPercent: "0" },
+        { description: "Installation, termination and commissioning works", qty: "1", uom: "Lot", unitPrice: "22570000", discountEnabled: false, discountPercent: "0" }
+      ]
+    };
+
+    // The source revision the PO is reconciled against. The prototype uses a
+    // deliberately imperfect source so every diff state is visible.
+    const source = {
+      poNumber: "PO-2026-0142",
+      poDate: "2026-11-10",
+      paymentTerms: "30 days after delivery",
+      incoterms: "DDP",
+      printedGrand: 54200000,
+      lines: [
+        { description: "Schneider Acti9 iC60N MCB, 2P, 16A, 6kA, C-curve", qty: "12", uom: "Pc", unitPrice: "454300", discountEnabled: false, discountPercent: "0" },
+        { description: "Phoenix Contact QUINT power supply, 24 VDC / 10 A", qty: "8", uom: "Pc", unitPrice: "2817500", discountEnabled: false, discountPercent: "0" },
+        { description: "Freight and insurance", qty: "1", uom: "Lot", unitPrice: "1250000", discountEnabled: false, discountPercent: "0" }
       ]
     };
 
     const UOMS = ["Pc", "Set", "Lot", "m", "m2", "m3", "kg", "Unit"];
     const INCOTERMS = ["DDP", "FOB", "CIF", "EXW"];
+    const RESOLUTIONS = {
+      kept_po: "Kept PO",
+      acknowledged_missing: "Acknowledged missing",
+      acknowledged_extra: "Acknowledged extra",
+      used_quotation: "Used quotation"
+    };
 
     let state = JSON.parse(JSON.stringify(initial));
     let variant = new URLSearchParams(window.location.search).get("variant") === "b" ? "b" : "a";
+    let reviewFilter = "all";
+    let reviewDecisions = { "line:0:fields": "kept_po" };
     let toastTimer = null;
 
     const page = document.getElementById("page");
@@ -936,40 +1082,41 @@
     function money(n) {
       return "Rp" + new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(Math.abs(Math.round(n)));
     }
-    function signedMoney(n) {
-      const v = Math.round(n);
-      return v < 0 ? "−" + money(v) : v > 0 ? "+" + money(v) : money(0);
-    }
     function dateLabel(iso) {
       if (!iso) return "—";
       const date = new Date(iso + "T00:00:00");
       if (Number.isNaN(date.getTime())) return iso;
       return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(date);
     }
-    function lineGross(line) { return parseNum(line.qty) * parseNum(line.unitPrice); }
-    function lineDiscount(line) { return lineGross(line) * parseNum(line.discountPercent) / 100; }
-    function lineTotal(line) { return lineGross(line) - lineDiscount(line); }
-    function lineCount() { return state.lines.length + (state.lines.length === 1 ? " line" : " lines"); }
+    function pad(n) {
+      return String(n).padStart(2, "0");
+    }
+    function lineGross(line) {
+      return parseNum(line.qty) * parseNum(line.unitPrice);
+    }
+    function lineDiscount(line) {
+      return line.discountEnabled ? lineGross(line) * parseNum(line.discountPercent) / 100 : 0;
+    }
+    function lineTotal(line) {
+      return lineGross(line) - lineDiscount(line);
+    }
+    function lineCount() {
+      return state.lines.length + (state.lines.length === 1 ? " line" : " lines");
+    }
     function discountedCount() {
-      return state.lines.filter((line) => parseNum(line.discountPercent) > 0).length;
+      return state.lines.filter((line) => line.discountEnabled && parseNum(line.discountPercent) > 0).length;
     }
     function compute() {
       const lineTotals = state.lines.reduce((sum, line) => sum + lineGross(line), 0);
       const rowDiscounts = state.lines.reduce((sum, line) => sum + lineDiscount(line), 0);
       const subtotal = lineTotals - rowDiscounts;
-      const wholeDiscount = subtotal * parseNum(state.discountPercent) / 100;
-      const net = subtotal - wholeDiscount;
-      const ppn = Math.round(net * 0.11);
-      const adjustment = parseNum(state.adjustment);
-      const grand = Math.round(net + ppn + adjustment);
+      const ppn = Math.round(subtotal * 0.11);
+      const grand = Math.round(subtotal + ppn);
       return {
         lineTotals: Math.round(lineTotals),
         rowDiscounts: Math.round(rowDiscounts),
         subtotal: Math.round(subtotal),
-        wholeDiscount: Math.round(wholeDiscount),
-        net: Math.round(net),
         ppn,
-        adjustment: Math.round(adjustment),
         grand
       };
     }
@@ -977,14 +1124,11 @@
       lineTotals: money,
       rowDiscounts: (n) => n ? "−" + money(n) : money(0),
       subtotal: money,
-      wholeDiscount: (n) => n ? "−" + money(n) : money(0),
-      net: money,
       ppn: money,
-      adjustment: signedMoney,
       grand: money
     };
 
-    // ── Small render helpers ─────────────────────────────────────────────
+    // ── Render helpers ───────────────────────────────────────────────────
     function esc(value) {
       return String(value ?? "").replace(/[&<>"']/g, (char) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -1016,12 +1160,30 @@
     function summaryRow(label, key, totals, opts = {}) {
       return `<div class="summary-row${opts.muted ? " muted" : ""}"><span>${esc(label)}</span><span class="tnum" data-total="${key}">${TOTAL_FORMAT[key](totals[key])}</span></div>`;
     }
+    function discountControlA(line, index) {
+      const enabled = Boolean(line.discountEnabled);
+      return `<div class="field discount-field">
+        <span class="field-label">Discount</span>
+        <div class="discount-control">
+          <button class="switch ${enabled ? "on" : ""}" type="button" role="switch" aria-checked="${enabled}" aria-label="Discount line ${index + 1}" data-action="toggle-discount" data-index="${index}"><span></span></button>
+          <input class="input tnum" data-line="${index}" data-line-field="discountPercent" value="${esc(line.discountPercent)}" inputmode="decimal" ${enabled ? "" : "disabled"} aria-label="Discount percent line ${index + 1}">
+          <span class="suffix">%</span>
+        </div>
+      </div>`;
+    }
+    function discountCellB(line, index) {
+      const enabled = Boolean(line.discountEnabled);
+      return `<div class="cell-discount">
+        <button class="switch switch-sm ${enabled ? "on" : ""}" type="button" role="switch" aria-checked="${enabled}" aria-label="Discount line ${index + 1}" data-action="toggle-discount" data-index="${index}"><span></span></button>
+        <input class="cell-input num" data-line="${index}" data-line-field="discountPercent" value="${esc(line.discountPercent)}" inputmode="decimal" ${enabled ? "" : "disabled"} aria-label="Discount percent line ${index + 1}">
+      </div>`;
+    }
 
     // ── Variant A ────────────────────────────────────────────────────────
     function lineItemA(line, index) {
       return `<div class="line-item" data-line-index="${index}">
         <div class="line-item-top">
-          <span class="line-no tnum">${String(index + 1).padStart(2, "0")}</span>
+          <span class="line-no tnum">${pad(index + 1)}</span>
           <label class="field line-desc"><span class="field-label">Description</span><textarea class="textarea" data-line="${index}" data-line-field="description" aria-label="Description line ${index + 1}">${esc(line.description)}</textarea></label>
           <button class="icon-btn danger" type="button" data-action="remove-line" data-index="${index}" aria-label="Remove line ${index + 1}" ${state.lines.length === 1 ? "disabled" : ""}>${trashIcon}</button>
         </div>
@@ -1029,7 +1191,7 @@
           ${lineFieldA(index, "Qty", "qty", line.qty, "decimal")}
           ${lineSelectA(index, "UoM", "uom", line.uom)}
           ${lineFieldA(index, "Unit price", "unitPrice", line.unitPrice, "numeric")}
-          ${lineFieldA(index, "Disc. %", "discountPercent", line.discountPercent, "decimal")}
+          ${discountControlA(line, index)}
           <div class="field line-total-box"><span class="field-label">Line total</span><span class="line-total tnum" data-line-total="${index}">${money(lineTotal(line))}</span></div>
         </div>
       </div>`;
@@ -1072,33 +1234,9 @@
           <div class="line-footer">
             <button class="btn btn-ghost btn-sm" type="button" data-action="add-line">+ Add line</button>
             <span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span>
-            <span class="right">Totals update in the summary</span>
+            <span class="right">Per-line discounts update the summary</span>
           </div>
         </div>
-      </section>`;
-    }
-
-    function renderDiscountsA() {
-      return `<section class="card">
-        <div class="section-heading"><h2>Discounts and adjustment</h2><span class="line"></span><span class="hint">Explained separately from the line prices</span></div>
-        <div class="field-grid">
-          ${fieldA("Whole-PO discount (%)", "discountPercent")}
-          ${fieldA("Adjustment (IDR)", "adjustment")}
-          ${fieldA("Adjustment reason", "adjustmentReason", { span: true })}
-        </div>
-        <p class="hint-block">Row discounts come off each line first, then the whole-PO discount. PPN is charged on the discounted subtotal and printed separately.</p>
-      </section>`;
-    }
-
-    function renderReviewA() {
-      return `<section class="card review-card">
-        <div class="section-heading"><h2>Before final save</h2><span class="line"></span><span class="hint">3 checks</span></div>
-        <div class="check-list">
-          <div class="check done"><span class="check-dot">✓</span><div><strong>Source quotation linked</strong><span class="tnum">${esc(state.sourceQuote)} · revision ${esc(state.sourceRevision)}</span></div></div>
-          <div class="check done"><span class="check-dot">✓</span><div><strong>Lines complete</strong><span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span></div></div>
-          <div class="check"><span class="check-dot">○</span><div><strong>Final save review</strong><span>Every difference is shown before the record is finalized.</span></div></div>
-        </div>
-        <button class="btn btn-secondary btn-sm" type="button" data-demo="Prototype: opens the difference review against the source revision.">Review differences</button>
       </section>`;
     }
 
@@ -1109,10 +1247,7 @@
           ${summaryRow("Line totals", "lineTotals", totals)}
           ${summaryRow("Row discounts", "rowDiscounts", totals, { muted: true })}
           ${summaryRow("Subtotal", "subtotal", totals)}
-          ${summaryRow("Whole-PO discount", "wholeDiscount", totals, { muted: true })}
-          ${summaryRow("Net after discount", "net", totals)}
           ${summaryRow("PPN 11%", "ppn", totals)}
-          ${summaryRow("Adjustment", "adjustment", totals, { muted: true })}
           <div class="summary-grand"><span>Grand total</span><span class="tnum" data-total="grand">${TOTAL_FORMAT.grand(totals.grand)}</span></div>
         </div>
         <div class="printed-box">
@@ -1128,35 +1263,147 @@
         <p class="status-line"><span class="dot"></span>Draft · not finalized</p>
         <div class="action-stack">
           <button class="btn btn-secondary btn-block" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
-          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the difference review.">Final Save</button>
+          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the full difference review.">Final Save</button>
           <button class="btn btn-ghost btn-block" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
         </div>
-        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>.</p>
+        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>. <span data-review-unresolved>${unresolvedCount()}</span> unresolved.</p>
       </section>`;
     }
 
-    function renderA() {
+    // ── Hero, shared by A and B ──────────────────────────────────────────
+    function renderHero() {
+      return `<section class="po-hero">
+        <div class="po-hero-top"><span class="hero-eyebrow">Purchase order</span><span class="hero-badge">Draft</span></div>
+        <div class="po-hero-main">
+          <div><h1 class="tnum">${esc(state.poNumber)}</h1><p>${esc(state.customer)}<span class="hero-sep">·</span>${esc(state.customerAddress.split(",")[0])}</p></div>
+          <div class="hero-source"><span>Source quotation</span><strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></div>
+        </div>
+        <div class="po-hero-meta">
+          <span><span class="meta-label">Issued</span>${dateLabel(state.poDate)}</span>
+          <span><span class="meta-label">Delivery</span>${dateLabel(state.requestedDelivery)}</span>
+          <span><span class="meta-label">Terms</span>${esc(state.incoterms)} · ${esc(state.currency)}</span>
+          <span><span class="meta-label">Tax</span>${esc(state.taxZone)} / ${esc(state.taxType)}</span>
+        </div>
+      </section>`;
+    }
+
+    // ── Review pane: live source-vs-PO differences ──────────────────────
+    function buildReview() {
+      const items = [];
+      const add = (key, kind, group, label, sourceValue, poValue) => {
+        const decision = reviewDecisions[key];
+        items.push({
+          key, kind, group, label, sourceValue, poValue,
+          resolved: Boolean(decision),
+          resolution: decision ? RESOLUTIONS[decision] : ""
+        });
+      };
+      const header = [
+        ["header:paymentTerms", "Payment terms", source.paymentTerms, state.paymentTerms],
+        ["header:poNumber", "Customer PO number", source.poNumber, state.poNumber],
+        ["header:poDate", "PO date", dateLabel(source.poDate), dateLabel(state.poDate)],
+        ["header:incoterms", "Incoterms", source.incoterms, state.incoterms]
+      ];
+      for (const [key, label, sourceValue, poValue] of header) {
+        if (sourceValue !== poValue) add(key, "changed", "Header", label, sourceValue, poValue);
+      }
+      // Match by description: a changed description is a missing source line
+      // plus an extra PO line, not one changed line. This is what makes the
+      // missing/extra states visible alongside a changed discount.
+      const sourceByDescription = new Map(source.lines.map((line) => [line.description, line]));
+      const matchedSource = new Set();
+      state.lines.forEach((p, i) => {
+        const s = sourceByDescription.get(p.description);
+        if (!s) {
+          add(`line:${i}:extra`, "extra", "Lines", `Line ${pad(i + 1)}`, "Not in quotation", p.description);
+          return;
+        }
+        matchedSource.add(s.description);
+        const diffs = [];
+        if (s.qty !== p.qty) diffs.push(["Qty", s.qty, p.qty]);
+        if (s.unitPrice !== p.unitPrice) diffs.push(["Unit price", money(parseNum(s.unitPrice)), money(parseNum(p.unitPrice))]);
+        const sourceDiscount = s.discountEnabled ? `${s.discountPercent}%` : "No discount";
+        const poDiscount = p.discountEnabled ? `${p.discountPercent}%` : "No discount";
+        if (sourceDiscount !== poDiscount) diffs.push(["Discount", sourceDiscount, poDiscount]);
+        if (diffs.length > 0) {
+          add(
+            `line:${i}:fields`,
+            "changed",
+            "Lines",
+            `Line ${pad(i + 1)}`,
+            diffs.map((d) => `${d[0]}: ${d[1]}`).join(" · "),
+            diffs.map((d) => `${d[0]}: ${d[2]}`).join(" · ")
+          );
+        }
+      });
+      source.lines.forEach((s, i) => {
+        if (!matchedSource.has(s.description)) {
+          add(`source:${i}:missing`, "missing", "Lines", `Source line ${pad(i + 1)}`, s.description, "Not in purchase order");
+        }
+      });
       const totals = compute();
-      return `<div class="page-head">
-        <div>
-          <div class="eyebrow">Purchase order</div>
-          <h1 class="page-title tnum">${esc(state.poNumber)}</h1>
-          <p class="page-subtitle">${esc(state.customer)}<span class="dot">·</span>Quotation <span class="tnum">${esc(state.sourceQuote)} rev ${esc(state.sourceRevision)}</span><span class="dot">·</span>${esc(state.currency)}</p>
+      if (totals.grand !== source.printedGrand) {
+        add("totals:grand", "changed", "Totals", "Printed grand total", money(source.printedGrand), money(totals.grand));
+      }
+      return items;
+    }
+    function unresolvedCount() {
+      return buildReview().filter((item) => !item.resolved).length;
+    }
+    function reviewActions(item) {
+      if (item.resolved) return `<span class="resolution-chip">${esc(item.resolution)}</span>`;
+      if (item.kind === "extra") {
+        return `<button class="btn btn-secondary btn-sm" type="button" data-review-action="ack-extra" data-review-key="${item.key}">Acknowledge extra</button>`;
+      }
+      if (item.kind === "missing") {
+        return `<button class="btn btn-secondary btn-sm" type="button" data-review-action="ack-missing" data-review-key="${item.key}">Acknowledge missing</button>`;
+      }
+      const use = item.key.startsWith("header:") || item.key.startsWith("line:")
+        ? `<button class="btn btn-secondary btn-sm" type="button" data-review-action="use-source" data-review-key="${item.key}">Use quotation</button>`
+        : "";
+      return `${use}<button class="btn btn-ghost btn-sm" type="button" data-review-action="keep-po" data-review-key="${item.key}">Keep PO</button>`;
+    }
+    function reviewItem(item) {
+      const kindLabel = item.kind === "changed" ? "Changed" : item.kind === "missing" ? "Missing" : "Extra";
+      const status = item.resolved ? "Resolved" : "Unresolved";
+      return `<article class="review-item" data-review-status="${item.resolved ? "resolved" : "unresolved"}">
+        <div class="review-item-main">
+          <div class="review-item-head">
+            <span class="review-kind ${item.kind}">${kindLabel}</span>
+            <span class="review-status ${item.resolved ? "resolved" : "unresolved"}">${status}</span>
+            <strong>${esc(item.label)}</strong>
+            <span class="review-group">${esc(item.group)}</span>
+          </div>
+          <div class="review-values">
+            <span class="review-value source">${esc(item.sourceValue)}</span>
+            <span class="review-arrow">→</span>
+            <span class="review-value po">${esc(item.poValue)}</span>
+          </div>
         </div>
-        <div class="page-badges"><span class="badge badge-accent">Draft</span><span class="badge badge-neutral">Linked</span></div>
-      </div>
-      <div class="layout">
-        <div class="main-col">
-          ${renderDetailsA()}
-          ${renderLinesA()}
-          ${renderDiscountsA()}
-          ${renderReviewA()}
+        <div class="review-actions">${reviewActions(item)}</div>
+      </article>`;
+    }
+    function renderReview() {
+      const items = buildReview();
+      const unresolved = items.filter((item) => !item.resolved).length;
+      const resolved = items.length - unresolved;
+      const counts = { all: items.length, unresolved, resolved };
+      const visible = items.filter((item) => {
+        if (reviewFilter === "unresolved") return !item.resolved;
+        if (reviewFilter === "resolved") return item.resolved;
+        return true;
+      });
+      const filterButton = (id, label) => `<button class="review-filter ${reviewFilter === id ? "active" : ""}" type="button" data-review-filter="${id}">${label}<span>${counts[id]}</span></button>`;
+      return `<section class="review-pane" aria-labelledby="review-heading">
+        <div class="section-heading"><h2 id="review-heading">Review differences</h2><span class="line"></span><span class="hint">${unresolved > 0 ? `${unresolved} unresolved` : "All differences resolved"} · ${items.length} total</span><button class="btn btn-secondary btn-sm" type="button" data-demo="Prototype: opens the full difference review.">Open full review</button></div>
+        <div class="review-card">
+          <div class="review-toolbar">
+            <div class="review-source"><span class="source-dot"></span><span>Compared with quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></span></div>
+            <div class="review-filters">${filterButton("all", "All")}${filterButton("unresolved", "Unresolved")}${filterButton("resolved", "Resolved")}</div>
+          </div>
+          <div class="review-list">${visible.length > 0 ? visible.map(reviewItem).join("") : `<div class="review-empty">No differences in this filter.</div>`}</div>
         </div>
-        <aside class="rail">
-          ${renderSummaryA(totals)}
-          ${renderSaveA()}
-        </aside>
-      </div>`;
+      </section>`;
     }
 
     // ── Variant B ────────────────────────────────────────────────────────
@@ -1179,12 +1426,12 @@
     }
     function rowB(line, index) {
       return `<tr data-line-index="${index}">
-        <td data-label="#" class="col-no tnum">${String(index + 1).padStart(2, "0")}</td>
+        <td data-label="#" class="col-no tnum">${pad(index + 1)}</td>
         <td data-label="Description"><textarea class="cell-input cell-textarea" rows="2" data-line="${index}" data-line-field="description" aria-label="Description line ${index + 1}">${esc(line.description)}</textarea></td>
         <td data-label="Qty" class="num"><input class="cell-input num" data-line="${index}" data-line-field="qty" value="${esc(line.qty)}" inputmode="decimal" aria-label="Qty line ${index + 1}"></td>
         <td data-label="UoM"><select class="cell-select" data-line="${index}" data-line-field="uom" aria-label="UoM line ${index + 1}">${UOMS.map((uom) => `<option ${uom === line.uom ? "selected" : ""}>${esc(uom)}</option>`).join("")}</select></td>
         <td data-label="Unit price" class="num"><input class="cell-input num" data-line="${index}" data-line-field="unitPrice" value="${esc(line.unitPrice)}" inputmode="numeric" aria-label="Unit price line ${index + 1}"></td>
-        <td data-label="Disc." class="num"><input class="cell-input num" data-line="${index}" data-line-field="discountPercent" value="${esc(line.discountPercent)}" inputmode="decimal" aria-label="Discount line ${index + 1}"></td>
+        <td data-label="Disc." class="num">${discountCellB(line, index)}</td>
         <td data-label="Total" class="num"><span class="tnum" data-line-total="${index}">${money(lineTotal(line))}</span></td>
         <td class="row-action"><button class="icon-btn danger" type="button" data-action="remove-line" data-index="${index}" aria-label="Remove line ${index + 1}" ${state.lines.length === 1 ? "disabled" : ""}>${trashIcon}</button></td>
       </tr>`;
@@ -1194,21 +1441,6 @@
         <thead><tr><th class="col-no">#</th><th>Description</th><th class="num">Qty</th><th>UoM</th><th class="num">Unit price</th><th class="num">Disc.</th><th class="num">Total</th><th></th></tr></thead>
         <tbody>${state.lines.map((line, index) => rowB(line, index)).join("")}</tbody>
       </table>`;
-    }
-    function renderHeroB() {
-      return `<section class="po-hero">
-        <div class="po-hero-top"><span class="hero-eyebrow">Purchase order</span><span class="hero-badge">Draft</span></div>
-        <div class="po-hero-main">
-          <div><h1 class="tnum">${esc(state.poNumber)}</h1><p>${esc(state.customer)}<span class="hero-sep">·</span>${esc(state.customerAddress.split(",")[0])}</p></div>
-          <div class="hero-source"><span>Source quotation</span><strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></div>
-        </div>
-        <div class="po-hero-meta">
-          <span><span class="meta-label">Issued</span>${dateLabel(state.poDate)}</span>
-          <span><span class="meta-label">Delivery</span>${dateLabel(state.requestedDelivery)}</span>
-          <span><span class="meta-label">Terms</span>${esc(state.incoterms)} · ${esc(state.currency)}</span>
-          <span><span class="meta-label">Tax</span>${esc(state.taxZone)} / ${esc(state.taxType)}</span>
-        </div>
-      </section>`;
     }
     function renderSheetB() {
       return `<section class="sheet">
@@ -1233,17 +1465,8 @@
           <div class="table-footer">
             <button class="btn btn-ghost btn-sm" type="button" data-action="add-line">+ Add line</button>
             <span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span>
-            <span class="right">Totals update in the order control</span>
+            <span class="right">Per-line discounts update the order control</span>
           </div>
-        </div>
-        <div class="sheet-section">
-          ${sheetHeading("03", "Terms", "Discounts and adjustment")}
-          <div class="fact-grid">
-            ${factField("Whole-PO discount (%)", "discountPercent")}
-            ${factField("Adjustment (IDR)", "adjustment")}
-            ${factField("Adjustment reason", "adjustmentReason", { span: true })}
-          </div>
-          <p class="hint-block">Row discounts come off each line first, then the whole-PO discount. PPN is charged on the discounted subtotal and printed separately.</p>
         </div>
       </section>`;
     }
@@ -1267,10 +1490,7 @@
           ${summaryRow("Line totals", "lineTotals", totals)}
           ${summaryRow("Row discounts", "rowDiscounts", totals, { muted: true })}
           ${summaryRow("Subtotal", "subtotal", totals)}
-          ${summaryRow("Whole-PO discount", "wholeDiscount", totals, { muted: true })}
-          ${summaryRow("Net after discount", "net", totals)}
           ${summaryRow("PPN 11%", "ppn", totals)}
-          ${summaryRow("Adjustment", "adjustment", totals, { muted: true })}
         </div>
       </section>`;
     }
@@ -1279,16 +1499,32 @@
         <div class="rail-head"><h2>Actions</h2><span class="status-chip"><span class="dot"></span>Unsaved</span></div>
         <p class="status-line"><span class="dot"></span>Draft · not finalized</p>
         <div class="action-stack">
-          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the difference review.">Final Save</button>
+          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the full difference review.">Final Save</button>
           <button class="btn btn-secondary btn-block" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
           <button class="btn btn-ghost btn-block" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
         </div>
-        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>.</p>
+        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>. <span data-review-unresolved>${unresolvedCount()}</span> unresolved.</p>
       </section>`;
+    }
+
+    function renderA() {
+      const totals = compute();
+      return `${renderHero()}
+        <div class="layout">
+          <div class="main-col">
+            ${renderDetailsA()}
+            ${renderLinesA()}
+          </div>
+          <aside class="rail">
+            ${renderSummaryA(totals)}
+            ${renderSaveA()}
+          </aside>
+        </div>
+        <div id="review-pane"></div>`;
     }
     function renderB() {
       const totals = compute();
-      return `${renderHeroB()}
+      return `${renderHero()}
         <div class="layout">
           <div class="main-col">${renderSheetB()}</div>
           <aside class="rail">
@@ -1296,7 +1532,8 @@
             ${renderTotalB(totals)}
             ${renderActionsB()}
           </aside>
-        </div>`;
+        </div>
+        <div id="review-pane"></div>`;
     }
 
     // ── Rendering and state ──────────────────────────────────────────────
@@ -1321,12 +1558,31 @@
       document.querySelectorAll("[data-discount-count]").forEach((element) => {
         element.textContent = String(discountedCount());
       });
+      document.querySelectorAll("[data-review-unresolved]").forEach((element) => {
+        element.textContent = String(unresolvedCount());
+      });
+      updateReviewPane();
       updateState(totals);
+    }
+    function updateReviewPane() {
+      const host = document.getElementById("review-pane");
+      if (host) host.innerHTML = renderReview();
     }
     function updateState(totals = compute()) {
       const { lines, ...header } = state;
       const target = document.getElementById("state-json");
-      if (target) target.textContent = JSON.stringify({ variant, header, lines, totals }, null, 2);
+      if (!target) return;
+      target.textContent = JSON.stringify({
+        variant,
+        header,
+        lines,
+        totals,
+        review: {
+          filter: reviewFilter,
+          decisions: reviewDecisions,
+          items: buildReview()
+        }
+      }, null, 2);
     }
     function updateVariantButtons() {
       document.querySelectorAll("[data-variant]").forEach((button) => {
@@ -1343,8 +1599,7 @@
       try {
         window.history.replaceState(null, "", url);
       } catch {
-        // A file:// document has an opaque origin and may refuse a URL
-        // rewrite. The variant still renders; only the address bar stays put.
+        // A file:// document may refuse a URL rewrite; the variant still renders.
       }
       closeState();
       render();
@@ -1366,7 +1621,7 @@
       toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), 2400);
     }
     function addLine() {
-      state.lines.push({ description: "", qty: "1", uom: "Pc", unitPrice: "0", discountPercent: "0" });
+      state.lines.push({ description: "", qty: "1", uom: "Pc", unitPrice: "0", discountEnabled: false, discountPercent: "0" });
       render();
       window.requestAnimationFrame(() => {
         const input = document.querySelector(`[data-line="${state.lines.length - 1}"][data-line-field="description"]`);
@@ -1381,11 +1636,70 @@
       state.lines.splice(index, 1);
       render();
     }
+    function toggleDiscount(index) {
+      const line = state.lines[index];
+      if (!line) return;
+      line.discountEnabled = !line.discountEnabled;
+      if (line.discountEnabled && parseNum(line.discountPercent) === 0) line.discountPercent = "5";
+      delete reviewDecisions[`line:${index}:fields`];
+      render();
+    }
+    function reviewKeyForElement(element) {
+      if (element.matches("[data-field]")) {
+        const field = element.dataset.field;
+        if (field === "paymentTerms") return "header:paymentTerms";
+        if (field === "poNumber") return "header:poNumber";
+        if (field === "poDate") return "header:poDate";
+        if (field === "incoterms") return "header:incoterms";
+        return null;
+      }
+      if (element.matches("[data-line]")) {
+        const index = Number(element.dataset.line);
+        const field = element.dataset.lineField;
+        if (["description", "qty", "unitPrice", "discountPercent"].includes(field)) return `line:${index}:fields`;
+      }
+      return null;
+    }
+    function clearReviewDecision(element) {
+      const key = reviewKeyForElement(element);
+      if (key && reviewDecisions[key]) delete reviewDecisions[key];
+    }
+    function applyReviewAction(action, key) {
+      if (action === "use-source") {
+        if (key === "header:paymentTerms") state.paymentTerms = source.paymentTerms;
+        else if (key === "header:poNumber") state.poNumber = source.poNumber;
+        else if (key === "header:poDate") state.poDate = source.poDate;
+        else if (key === "header:incoterms") state.incoterms = source.incoterms;
+        else if (key.startsWith("line:")) {
+          const index = Number(key.split(":")[1]);
+          const current = state.lines[index];
+          const line = current ? source.lines.find((item) => item.description === current.description) : undefined;
+          if (line && current) {
+            current.qty = line.qty;
+            current.uom = line.uom;
+            current.unitPrice = line.unitPrice;
+            current.discountEnabled = line.discountEnabled;
+            current.discountPercent = line.discountPercent;
+          }
+        }
+        delete reviewDecisions[key];
+      } else if (action === "keep-po") {
+        reviewDecisions[key] = "kept_po";
+      } else if (action === "ack-missing") {
+        reviewDecisions[key] = "acknowledged_missing";
+      } else if (action === "ack-extra") {
+        reviewDecisions[key] = "acknowledged_extra";
+      }
+      render();
+    }
+    function setReviewFilter(filter) {
+      reviewFilter = filter;
+      updateReviewPane();
+      updateState();
+    }
 
     // ── Events ───────────────────────────────────────────────────────────
-    page.addEventListener("input", (event) => {
-      const element = event.target;
-      if (!(element instanceof HTMLElement)) return;
+    function applyField(element) {
       if (element.matches("[data-line]")) {
         const index = Number(element.dataset.line);
         const field = element.dataset.lineField;
@@ -1393,22 +1707,17 @@
       } else if (element.matches("[data-field]")) {
         state[element.dataset.field] = element.value;
       } else {
-        return;
+        return false;
       }
+      clearReviewDecision(element);
       updateDerived();
+      return true;
+    }
+    page.addEventListener("input", (event) => {
+      if (event.target instanceof HTMLElement) applyField(event.target);
     });
     page.addEventListener("change", (event) => {
-      const element = event.target;
-      if (!(element instanceof HTMLElement)) return;
-      if (!element.matches("[data-line], [data-field]")) return;
-      if (element.matches("[data-line]")) {
-        const index = Number(element.dataset.line);
-        const field = element.dataset.lineField;
-        if (state.lines[index] && field) state.lines[index][field] = element.value;
-      } else {
-        state[element.dataset.field] = element.value;
-      }
-      updateDerived();
+      if (event.target instanceof HTMLElement) applyField(event.target);
     });
     document.addEventListener("click", (event) => {
       const target = event.target;
@@ -1426,10 +1735,21 @@
         closeState();
         return;
       }
+      const reviewFilterButton = target.closest("[data-review-filter]");
+      if (reviewFilterButton) {
+        setReviewFilter(reviewFilterButton.dataset.reviewFilter);
+        return;
+      }
+      const reviewAction = target.closest("[data-review-action]");
+      if (reviewAction) {
+        applyReviewAction(reviewAction.dataset.reviewAction, reviewAction.dataset.reviewKey);
+        return;
+      }
       const action = target.closest("[data-action]");
       if (action) {
         if (action.dataset.action === "add-line") addLine();
         if (action.dataset.action === "remove-line") removeLine(Number(action.dataset.index));
+        if (action.dataset.action === "toggle-discount") toggleDiscount(Number(action.dataset.index));
         return;
       }
       const demo = target.closest("[data-demo]");
@@ -1438,6 +1758,7 @@
 
     render();
     updateState();
+
   </script>
 </body>
 </html>

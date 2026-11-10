@@ -20,11 +20,13 @@ line, and totals are live. The URL keeps the chosen variant.
 ## The two directions
 
 - **A — Quotation language.** The quotation editor's two-column card layout:
-  the same `fieldClass` inputs, section headings, line-item rows, and a 320px
-  sticky summary rail. The PO's own fields and totals sit in that language.
-- **B — Original.** A procurement sheet: a teal identity band, a supplier /
-  ship-to block, a ruled line table with inline inputs, numbered sections, and
-  an order-control rail with a status timeline and the grand total.
+  the same `fieldClass` inputs, section headings, per-line discount toggle,
+  line-item rows, and a 320px sticky summary rail. The PO's own fields and
+  totals sit in that language, with the live source-vs-PO review pane below.
+- **B — Original.** A procurement sheet: the same teal identity band, a
+  supplier / ship-to block, a ruled line table with per-line discounts,
+  numbered sections, and an order-control rail with a status timeline and the
+  grand total.
 
 This is a prototype, not production. Fold the chosen direction into
 `PurchaseOrderEditor.tsx` and delete this directory afterwards.
