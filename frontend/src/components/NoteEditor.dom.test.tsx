@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LIST_INSIDE_BLOCK } from "../noteFixtures";
 import { NoteEditor, type NoteEditorProps } from "./NoteEditor";
 
 // The rich-text note editor (#535). The tests pin the external behaviour the
@@ -195,6 +196,14 @@ describe("NoteEditor source sync", () => {
     const { editor, onChange } = mount({ value: "" });
     typeInto(editor, "<p>Hello <strong>world</strong></p>");
     expect(onChange).toHaveBeenLastCalledWith("Hello **world**");
+  });
+
+  it("serializes a list nested in a toolbar block to the Markdown source", () => {
+    // The same fixture the serializer tests use: the toolbar wraps its list in
+    // a block, and the editor must report the list source, not flattened text.
+    const { editor, onChange } = mount({ value: "" });
+    typeInto(editor, LIST_INSIDE_BLOCK.html);
+    expect(onChange).toHaveBeenLastCalledWith(LIST_INSIDE_BLOCK.source);
   });
 
   it("renders the external value into the editor on mount", () => {

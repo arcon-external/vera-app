@@ -31,7 +31,7 @@ import { CompanyPortalTab } from "./components/CompanyPortalTab";
 import { CompanyQuotationTab } from "./components/CompanyQuotationTab";
 import { CompanyTemplatePanel } from "./components/CompanyTemplatePanel";
 import { CompanyUnitsPanel } from "./components/CompanyUnitsPanel";
-import { LoginPage, LoginUpdateNotice } from "./components/LoginPage";
+import { LoginPage, LoginUpdateNotice, loginUpdateNotice } from "./components/LoginPage";
 import { SessionRenewBanner } from "./components/SessionRenewBanner";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
@@ -107,6 +107,7 @@ import {
 import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
+import { UPDATE_NEWER, UPDATE_REQUIRED } from "./updateFixture";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
 // the harness behaves the same however it is invoked.
@@ -1608,21 +1609,14 @@ const CASES: SnapshotCase[] = [
   },
   {
     // The sign-in page's update notice (issue #436): the only surface a staff
-    // member locked out by a rollout has to find the fix. Fixed props in the
-    // shape CheckForUpdates answers — 0.12.1 running, 0.13.1 available, the
-    // windows installer resolved by the Go side — so the 360 render shows the
+    // member locked out by a rollout has to find the fix. The props come from
+    // the shared fixture through loginUpdateNotice (#558), so the render is
+    // the live v-prefixed shape — v0.12.1 running, v0.13.1 available, the
+    // windows installer resolved by the Go side — and the 360 render shows the
     // copy wrapping beside the Download button inside the narrowest column it
     // ever sits in. Pure markup: no effect runs, which is the point.
     name: "LoginUpdateNotice",
-    element: (
-      <LoginUpdateNotice
-        current="0.12.1"
-        latest="0.13.1"
-        downloadURL="https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe"
-        notesURL="https://api.arconpentapersada.co.id/v1/app/changelog"
-        required={false}
-      />
-    ),
+    element: <LoginUpdateNotice {...loginUpdateNotice(UPDATE_NEWER)!} />,
   },
   {
     // The state the login page exists for (#436's follow-up): the build is
@@ -1631,15 +1625,7 @@ const CASES: SnapshotCase[] = [
     // available" copy. That sentence is the longer of the two, so the 360
     // render here is the more informative one.
     name: "LoginUpdateNoticeRequired",
-    element: (
-      <LoginUpdateNotice
-        current="0.12.1"
-        latest="0.13.1"
-        downloadURL="https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe"
-        notesURL="https://api.arconpentapersada.co.id/v1/app/changelog"
-        required
-      />
-    ),
+    element: <LoginUpdateNotice {...loginUpdateNotice(UPDATE_REQUIRED)!} />,
   },
   {
     // The assembled sign-in page (issue #434): the logo, the form, and the

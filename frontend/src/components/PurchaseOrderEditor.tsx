@@ -640,7 +640,7 @@ export function PurchaseOrderLineRow({
             >
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
-            <span className="max-@min-[560px]:hidden [@min-[560px]]:inline">Remove</span>
+            <span className="hidden @min-[560px]:inline">Remove</span>
           </Button>
         </span>
       </div>
