@@ -1099,20 +1099,23 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 	dto.Items = make([]PurchaseOrderItemDTO, 0, len(row.Items))
 	for _, item := range row.Items {
 		dto.Items = append(dto.Items, PurchaseOrderItemDTO{
-			LineNumber:      item.LineNumber,
-			Description:     item.Description,
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-			GrossMinor:      item.GrossMinor,
-			DiscountMinor:   item.DiscountMinor,
-			NetMinor:        item.NetMinor,
+			LineNumber:        item.LineNumber,
+			Description:       item.Description,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GrossMinor:        item.GrossMinor,
+			DiscountMinor:     item.DiscountMinor,
+			NetMinor:          item.NetMinor,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return dto

@@ -844,21 +844,6 @@ export function PurchaseOrderFinalConfirmationView({
             <dd className="tnum font-medium text-ink-900">{payload.Items.length}</dd>
           </div>
           <div>
-            <dt className="text-caption text-ink-500">Whole-PO discount</dt>
-            <dd className="tnum font-medium text-ink-900">
-              {payload.DiscountPercent > 0 ? `${payload.DiscountPercent}%` : "None"}
-            </dd>
-          </div>
-          {payload.AdjustmentMinor !== 0 ? (
-            <div>
-              <dt className="text-caption text-ink-500">Adjustment</dt>
-              <dd className="tnum font-medium text-ink-900">
-                {formatMoney(currency, payload.AdjustmentMinor)} ·{" "}
-                {payload.AdjustmentReason}
-              </dd>
-            </div>
-          ) : null}
-          <div>
             <dt className="text-caption text-ink-500">Total</dt>
             <dd className="tnum font-medium text-ink-900">
               {evaluation.totals === null
