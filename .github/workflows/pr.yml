@@ -283,6 +283,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Check Wails package md5
+        # frontend/package.json.md5 is tracked, and `wails build` rewrites it
+        # as a side effect, so a manifest edit can leave it stale until someone
+        # runs a desktop build locally. The check is cheap and needs no Node:
+        # it compares the two files and prints the `--fix` command when they
+        # disagree.
+        run: scripts/check-wails-md5.sh
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
@@ -319,8 +327,19 @@ jobs:
         # the summary on green, not just the tick: green means "no
         # critical/high alerts" or "the query failed and this check saw
         # nothing".
+        #
+        # GH_TOKEN prefers DEPENDABOT_TOKEN, an optional repository secret
+        # holding a token that can read Dependabot alerts (fine-grained
+        # `dependabot: read`, or a classic PAT with `security_events`).
+        # GITHUB_TOKEN has returned HTTP 403 on this endpoint even with broad
+        # grants (github.com/orgs/community/discussions/60612), so without
+        # DEPENDABOT_TOKEN this step still runs, still fails open, and the
+        # summary still says the query failed -- the fallback keeps today's
+        # behaviour rather than turning a missing secret into a red PR. That
+        # green is not proof of an empty list: the manual Dependabot read in
+        # the release checklist (AGENTS.md section 11) is mandatory either way.
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           # GitHub runs this step under `bash -e` (errexit): any failing
           # command would abort the script before its own fail-open handling
