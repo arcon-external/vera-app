@@ -200,7 +200,7 @@ func TestNoteCardStylesheetPreservesLineBreaksAndBreaks(t *testing.T) {
 	for _, decl := range []string{
 		"break-inside: avoid",
 		"page-break-inside: avoid",
-		"border-left: 3px solid var(--accent-blue)",
+		"border-left: 3px solid var(--deep-blue)",
 		"border-radius: 0",
 	} {
 		if !strings.Contains(card[1], decl) {

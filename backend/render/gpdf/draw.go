@@ -243,8 +243,9 @@ func drawPicture(r *render.PDFRenderer, im picture) error {
 //
 // The corners use the same control-point offset a browser does, k = 0.5523r,
 // because these corners have to agree with the ones Chrome draws. Radii are
-// per-corner so a shape can be round at the top and square at the bottom, which
-// is what a shape clipped by `border-radius: 10px 10px 0 0` looks like.
+// per-corner, in top-left, top-right, bottom-right, bottom-left order, so a
+// shape can be square at the top-left and round at the bottom-left, which is
+// what `border-radius: 0 10px 10px 10px` looks like.
 func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 	r := [4]float64{tl, tr, br, bl}
 	for i := range r {
@@ -268,7 +269,7 @@ func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 		return seg(op, c1, c2, end)
 	}
 
-	segs := []document.PathSegment{seg(document.PathMoveTo, pt(left+r[3], top))}
+	segs := []document.PathSegment{seg(document.PathMoveTo, pt(left+r[0], top))}
 	segs = append(segs, seg(document.PathLineTo, pt(right-r[1], top)))
 	if r[1] > 0 {
 		segs = append(segs, corner(document.PathCurveTo,
@@ -279,15 +280,15 @@ func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 		segs = append(segs, corner(document.PathCurveTo,
 			pt(right, bot-r[2]+k(r[2])), pt(right-r[2]+k(r[2]), bot), pt(right-r[2], bot)))
 	}
-	segs = append(segs, seg(document.PathLineTo, pt(left+r[0], bot)))
-	if r[0] > 0 {
-		segs = append(segs, corner(document.PathCurveTo,
-			pt(left+r[0]-k(r[0]), bot), pt(left, bot-r[0]+k(r[0])), pt(left, bot-r[0])))
-	}
-	segs = append(segs, seg(document.PathLineTo, pt(left, top+r[3])))
+	segs = append(segs, seg(document.PathLineTo, pt(left+r[3], bot)))
 	if r[3] > 0 {
 		segs = append(segs, corner(document.PathCurveTo,
-			pt(left, top+r[3]-k(r[3])), pt(left+r[3]-k(r[3]), top), pt(left+r[3], top)))
+			pt(left+r[3]-k(r[3]), bot), pt(left, bot-r[3]+k(r[3])), pt(left, bot-r[3])))
+	}
+	segs = append(segs, seg(document.PathLineTo, pt(left, top+r[0])))
+	if r[0] > 0 {
+		segs = append(segs, corner(document.PathCurveTo,
+			pt(left, top+r[0]-k(r[0])), pt(left+r[0]-k(r[0]), top), pt(left+r[0], top)))
 	}
 	segs = append(segs, seg(document.PathClose))
 	return document.Path{Segments: segs}
@@ -1170,7 +1171,9 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 	x, w, h := m.innerX, m.innerW, m.noteH
 
 	p.add(box{x: x, y: top, w: w, h: h, fill: e.pal.Surface})
-	p.add(box{x: x, y: top, w: px(noteAccentPx), h: h, fill: e.pal.Accent})
+	// The ribbon uses the table-header deep blue, not the accent blue: the
+	// two strong marks in the document then agree.
+	p.add(box{x: x, y: top, w: px(noteAccentPx), h: h, fill: e.pal.Deep})
 	p.add(box{x: x, y: top, w: w, h: h, stroke: e.pal.Edge, lw: px(noteBorderPx)})
 
 	tx := x + px(noteAccentPx) + px(notePadX)

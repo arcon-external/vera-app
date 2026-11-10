@@ -378,6 +378,9 @@ func TestNoteCardIsSquareAndUnclipped(t *testing.T) {
 			if b.radius != 0 {
 				t.Errorf("the note accent has radius %.2f; want square", b.radius)
 			}
+			if b.fill != e.pal.Deep {
+				t.Errorf("note accent fill = %q; want the table-header deep blue %q", b.fill, e.pal.Deep)
+			}
 		}
 	}
 	if cardBoxes < 2 {

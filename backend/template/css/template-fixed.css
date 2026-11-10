@@ -404,7 +404,7 @@
 		   across a page break, matching the native renderer. */
 		.note-card {
 			border: 1px solid var(--edge);
-			border-left: 3px solid var(--accent-blue);
+			border-left: 3px solid var(--deep-blue);
 			border-radius: 0;
 			padding: 12px 14px;
 			background: var(--surface);
