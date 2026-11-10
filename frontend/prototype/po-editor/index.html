@@ -1,0 +1,1438 @@
+<!doctype html>
+<!--
+  PROTOTYPE — Purchase Order editor layout exploration.
+  Throwaway: two visual directions, one shared state, no persistence.
+  A: the quotation editor's language (two-column cards + sticky 320px rail).
+  B: an original procurement sheet (teal identity band + ruled sheet + order control).
+  Not production code. Delete or fold into the real component once a direction is chosen.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vera · PO editor prototype</title>
+  <style>
+    :root {
+      --paper: #fbfaf8;
+      --paper-subtle: #f6f4f0;
+      --paper-muted: #efede7;
+      --paper-sunk: #e8e5de;
+      --ink-950: #1c1b19;
+      --ink-900: #2b2a27;
+      --ink-800: #3d3c37;
+      --ink-700: #514f49;
+      --ink-600: #67655d;
+      --ink-500: #6f6d64;
+      --ink-400: #767469;
+      --ink-350: #8a887e;
+      --ink-300: #9d9a90;
+      --ink-200: #c9c6bd;
+      --ink-100: #e4e1db;
+      --rule: #e6e3dc;
+      --rule-strong: #d5d1c8;
+      --accent-50: #eef7f6;
+      --accent-100: #d5ecea;
+      --accent-200: #aed9d6;
+      --accent-300: #7fbfbc;
+      --accent-400: #529e9c;
+      --accent-500: #3c8280;
+      --accent-600: #2e6866;
+      --accent-700: #295453;
+      --accent-800: #244443;
+      --accent-900: #1f3a39;
+      --success-50: #eef6f1;
+      --success-200: #aed3bf;
+      --success-700: #244f39;
+      --internal-50: #fbf5e9;
+      --internal-200: #e6d0a1;
+      --internal-700: #644926;
+      --danger-50: #fbf0ef;
+      --danger-200: #ecb8b3;
+      --danger-600: #8d3730;
+      --shadow-card: 0 1px 2px rgba(60, 52, 34, 0.04), 0 0 0 1px rgba(230, 227, 220, 0.9);
+      --shadow-pop: 0 12px 32px rgba(50, 44, 30, 0.14), 0 2px 8px rgba(50, 44, 30, 0.06);
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--paper);
+      color: var(--ink-800);
+      font-family: var(--font-sans);
+      font-size: 13.5px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      font-variant-numeric: tabular-nums;
+    }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .tnum { font-variant-numeric: tabular-nums; }
+    .micro {
+      display: block;
+      font-size: 10.5px;
+      line-height: 14px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--ink-500);
+    }
+    .muted { color: var(--ink-500); }
+    .right { margin-left: auto; }
+
+    /* ── Shell ─────────────────────────────────────────────────────────── */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgba(251, 250, 248, 0.94);
+      border-bottom: 1px solid var(--rule);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .topbar-inner {
+      max-width: 1240px;
+      margin: 0 auto;
+      height: 60px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink-500);
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .icon-btn:hover { background: var(--paper-muted); color: var(--ink-900); }
+    .icon-btn.danger { color: var(--ink-300); }
+    .icon-btn.danger:hover { background: var(--danger-50); color: var(--danger-600); }
+    .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .brand { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+    .brand-mark {
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: var(--accent-700);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .brand-name { font-weight: 600; color: var(--ink-950); }
+    .brand-sep { color: var(--ink-300); }
+    .brand-workspace { color: var(--ink-600); white-space: nowrap; }
+    .workspace-tabs { display: flex; align-items: center; gap: 2px; margin-left: 8px; }
+    .tab {
+      border: 0;
+      background: transparent;
+      color: var(--ink-500);
+      font-size: 12px;
+      padding: 7px 10px;
+      border-radius: 7px;
+      white-space: nowrap;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .tab:hover { color: var(--ink-900); background: var(--paper-subtle); }
+    .tab.active { color: var(--ink-900); background: var(--paper-muted); font-weight: 500; }
+    .tab-count {
+      display: inline-grid;
+      place-items: center;
+      min-width: 16px;
+      height: 16px;
+      margin-left: 5px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: var(--paper-sunk);
+      color: var(--ink-600);
+      font-size: 9.5px;
+      line-height: 1;
+    }
+    .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .prototype-chip {
+      font-size: 9px;
+      line-height: 1;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-400);
+      border: 1px solid var(--rule);
+      border-radius: 999px;
+      padding: 4px 7px;
+      white-space: nowrap;
+    }
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent-100);
+      color: var(--accent-800);
+      display: grid;
+      place-items: center;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    /* ── Page ──────────────────────────────────────────────────────────── */
+    .page {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px 24px 112px;
+    }
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .eyebrow {
+      font-size: 10.5px;
+      line-height: 14px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-500);
+      margin-bottom: 4px;
+    }
+    .page-title {
+      margin: 0;
+      font-size: 26px;
+      line-height: 32px;
+      letter-spacing: -0.03em;
+      font-weight: 600;
+      color: var(--ink-950);
+    }
+    .page-subtitle { margin: 4px 0 0; font-size: 12.5px; color: var(--ink-500); }
+    .page-subtitle .dot { color: var(--ink-300); padding: 0 4px; }
+    .page-badges { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 2px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 10.5px;
+      line-height: 14px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--ink-500);
+      background: var(--paper-subtle);
+      white-space: nowrap;
+    }
+    .badge-accent { border-color: var(--accent-200); background: var(--accent-50); color: var(--accent-700); }
+    .badge-success { border-color: var(--success-200); background: var(--success-50); color: var(--success-700); }
+    .badge-neutral { border-color: var(--rule); background: #fff; color: var(--ink-500); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 24px;
+      align-items: start;
+    }
+    .main-col { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+    .rail { position: sticky; top: 80px; display: flex; flex-direction: column; gap: 16px; }
+
+    /* ── Cards and shared controls ─────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      box-shadow: var(--shadow-card);
+      padding: 20px;
+      min-width: 0;
+    }
+    .section-heading {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+      margin-bottom: 14px;
+    }
+    .section-heading h2 {
+      margin: 0;
+      font-size: 10.5px;
+      line-height: 14px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-500);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .section-heading .line { flex: 1; min-width: 12px; height: 1px; background: var(--rule); }
+    .section-heading .hint { font-size: 11.5px; color: var(--ink-500); }
+    .section-heading .btn { margin-left: auto; }
+
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .field-grid .span-2 { grid-column: span 2; }
+    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .field-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11.5px;
+      line-height: 16px;
+      font-weight: 500;
+      color: var(--ink-600);
+    }
+    .field-meta { display: inline-flex; align-items: center; gap: 4px; font-weight: 400; color: var(--ink-400); white-space: nowrap; }
+    .field-lock { display: inline-flex; color: var(--ink-300); }
+
+    .input, .select, .textarea {
+      width: 100%;
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px 12px;
+      font-size: 13.5px;
+      line-height: 21px;
+      color: var(--ink-900);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+    }
+    .input::placeholder, .textarea::placeholder { color: var(--ink-300); }
+    .input:hover, .select:hover, .textarea:hover { border-color: var(--ink-300); }
+    .input:focus, .select:focus, .textarea:focus {
+      border-color: var(--accent-400);
+      box-shadow: 0 0 0 2px rgba(60, 130, 128, 0.2);
+    }
+    .input[readonly], .textarea[readonly] {
+      background: var(--paper-subtle);
+      color: var(--ink-600);
+      border-color: var(--rule);
+    }
+    .select {
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none' stroke='%236f6d64' stroke-width='1.5'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 34px;
+    }
+    .textarea { min-height: 76px; resize: vertical; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      font-size: 12.5px;
+      line-height: 18px;
+      font-weight: 500;
+      white-space: nowrap;
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent-700); color: #fff; }
+    .btn-primary:hover { background: var(--accent-600); }
+    .btn-dark { background: var(--ink-900); color: #fff; }
+    .btn-dark:hover { background: var(--ink-800); }
+    .btn-secondary { background: #fff; border-color: var(--rule-strong); color: var(--ink-700); }
+    .btn-secondary:hover { border-color: var(--ink-300); color: var(--ink-900); }
+    .btn-ghost { background: transparent; color: var(--ink-500); }
+    .btn-ghost:hover { background: var(--paper-muted); color: var(--ink-900); }
+    .btn-sm { min-height: 32px; padding: 6px 12px; font-size: 11.5px; }
+    .btn-block { width: 100%; }
+    .link-btn {
+      border: 0;
+      background: transparent;
+      color: var(--accent-700);
+      font-size: 11.5px;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .link-btn:hover { color: var(--accent-600); }
+
+    /* ── Variant A: quotation language ─────────────────────────────────── */
+    .source-strip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--rule);
+      font-size: 11.5px;
+      color: var(--ink-500);
+    }
+    .source-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success-500); flex: 0 0 auto; }
+    .source-strip .link-btn { margin-left: auto; }
+
+    .line-table {
+      background: #fff;
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+    .line-item { padding: 14px 16px; border-bottom: 1px solid var(--rule); }
+    .line-item:last-of-type { border-bottom: 0; }
+    .line-item-top { display: flex; align-items: flex-start; gap: 12px; }
+    .line-no { width: 22px; padding-top: 24px; font-size: 11px; color: var(--ink-400); flex: 0 0 auto; }
+    .line-desc { flex: 1; min-width: 0; }
+    .line-desc .textarea { min-height: 54px; }
+    .line-controls {
+      display: grid;
+      grid-template-columns: 78px 76px 128px 84px minmax(120px, 1fr);
+      gap: 10px;
+      align-items: end;
+      margin-top: 10px;
+      padding-left: 34px;
+    }
+    .line-total-box { text-align: right; }
+    .line-total { display: block; padding-top: 7px; font-size: 13.5px; font-weight: 600; color: var(--ink-950); }
+    .line-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px 14px;
+      flex-wrap: wrap;
+      padding: 10px 16px;
+      background: var(--paper-subtle);
+      border-top: 1px solid var(--rule);
+      font-size: 11.5px;
+      color: var(--ink-500);
+    }
+    .line-footer .btn { margin-left: -4px; }
+    .line-footer .right { margin-left: auto; }
+
+    .hint-block { margin: 12px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-500); }
+
+    .review-card .check-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+    .check { display: flex; align-items: flex-start; gap: 10px; }
+    .check-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      margin-top: 1px;
+      background: var(--paper-muted);
+      color: var(--ink-400);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .check.done .check-dot { background: var(--success-50); color: var(--success-700); }
+    .check strong { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-900); }
+    .check > div > span { display: block; font-size: 11.5px; color: var(--ink-500); }
+
+    .rail-card { padding: 18px; }
+    .rail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .rail-head h2 {
+      margin: 0;
+      font-size: 10.5px;
+      line-height: 14px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-500);
+      font-weight: 500;
+    }
+    .summary-rows { display: flex; flex-direction: column; gap: 8px; }
+    .summary-row { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; font-size: 12.5px; color: var(--ink-800); }
+    .summary-row.muted { color: var(--ink-500); }
+    .summary-row .tnum { white-space: nowrap; }
+    .summary-grand {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      border-top: 1px solid var(--rule);
+      padding-top: 12px;
+      margin-top: 4px;
+    }
+    .summary-grand span:first-child { font-size: 12.5px; font-weight: 500; color: var(--ink-800); }
+    .summary-grand .tnum { font-size: 15px; font-weight: 600; color: var(--ink-950); white-space: nowrap; }
+    .printed-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--rule);
+      font-size: 11px;
+      color: var(--ink-500);
+    }
+    .printed-box .link-btn { margin-left: auto; }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--internal-200);
+      background: var(--internal-50);
+      color: var(--internal-700);
+      font-size: 10.5px;
+      line-height: 14px;
+      white-space: nowrap;
+    }
+    .status-chip .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .status-line { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; font-size: 11.5px; color: var(--ink-500); }
+    .status-line .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--internal-500); }
+    .action-stack { display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Variant B: original procurement sheet ─────────────────────────── */
+    .po-hero {
+      position: relative;
+      overflow: hidden;
+      background: var(--accent-800);
+      color: #fff;
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: var(--shadow-card);
+      margin-bottom: 20px;
+    }
+    .po-hero::after {
+      content: "PO";
+      position: absolute;
+      right: 16px;
+      bottom: -30px;
+      font-size: 122px;
+      line-height: 1;
+      font-weight: 700;
+      letter-spacing: -0.08em;
+      color: rgba(255, 255, 255, 0.055);
+      pointer-events: none;
+    }
+    .po-hero-top { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .hero-eyebrow { font-size: 10px; line-height: 14px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-200); }
+    .hero-badge {
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      border-radius: 6px;
+      padding: 2px 8px;
+      font-size: 10px;
+      line-height: 14px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+    .po-hero-main { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-top: 18px; }
+    .po-hero h1 { margin: 0; font-size: 34px; line-height: 1.08; letter-spacing: -0.035em; font-weight: 600; }
+    .po-hero-main p { margin: 6px 0 0; font-size: 13px; color: var(--accent-100); }
+    .hero-sep { color: var(--accent-300); padding: 0 4px; }
+    .hero-source { text-align: right; font-size: 10px; line-height: 14px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-300); white-space: nowrap; }
+    .hero-source strong { display: block; margin-top: 3px; color: #fff; font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+    .po-hero-meta {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px 28px;
+      margin-top: 20px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255, 255, 255, 0.16);
+      font-size: 12px;
+      color: var(--accent-100);
+    }
+    .meta-label { display: block; margin-bottom: 2px; font-size: 9px; line-height: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-300); }
+
+    .sheet {
+      background: #fff;
+      border: 1px solid var(--rule);
+      border-radius: 14px;
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+    .sheet-section { padding: 22px 24px; border-bottom: 1px solid var(--rule); }
+    .sheet-section:last-child { border-bottom: 0; }
+    .sheet-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin-bottom: 18px; }
+    .section-no { font-size: 10.5px; line-height: 14px; letter-spacing: 0.12em; color: var(--accent-600); font-weight: 600; }
+    .sheet-heading h2 { margin: 0; font-size: 11px; line-height: 16px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-500); font-weight: 500; white-space: nowrap; }
+    .sheet-heading .line { flex: 1; min-width: 12px; height: 1px; background: var(--rule); }
+    .sheet-heading .hint { font-size: 11.5px; color: var(--ink-500); }
+    .sheet-heading .btn { margin-left: auto; }
+
+    .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-bottom: 18px; border-bottom: 1px solid var(--rule); }
+    .party .micro { margin-bottom: 4px; }
+    .party strong { display: block; font-size: 14px; line-height: 20px; font-weight: 600; color: var(--ink-950); }
+    .party p { margin: 6px 0 0; max-width: 40ch; font-size: 12.5px; line-height: 19px; color: var(--ink-600); }
+    .party-contact { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; font-size: 11.5px; line-height: 17px; color: var(--ink-500); }
+
+    .fact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; padding-top: 18px; }
+    .fact-grid .span-2 { grid-column: span 2; }
+    .fact { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .fact .micro { font-size: 9.5px; line-height: 13px; letter-spacing: 0.1em; color: var(--ink-400); }
+    .inline-input {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid var(--rule);
+      border-radius: 0;
+      background: transparent;
+      padding: 4px 0;
+      font-size: 13px;
+      line-height: 20px;
+      color: var(--ink-900);
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .inline-input:hover { border-bottom-color: var(--ink-300); }
+    .inline-input:focus { border-bottom-color: var(--accent-500); box-shadow: 0 1px 0 var(--accent-500); }
+    .inline-input[readonly] { color: var(--ink-600); border-bottom-color: transparent; }
+
+    .table-wrap { overflow-x: auto; }
+    .po-table { width: 100%; border-collapse: collapse; }
+    .po-table th {
+      padding: 0 8px 8px;
+      border-bottom: 1px solid var(--rule-strong);
+      font-size: 9.5px;
+      line-height: 14px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 500;
+      color: var(--ink-500);
+      text-align: left;
+      white-space: nowrap;
+    }
+    .po-table th.num, .po-table td.num { text-align: right; }
+    .po-table td { padding: 10px 8px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+    .po-table tbody tr:last-child td { border-bottom: 0; }
+    .po-table .col-no { width: 34px; font-size: 11px; color: var(--ink-400); }
+    .po-table .row-action { width: 30px; text-align: right; }
+    .cell-input {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid transparent;
+      border-radius: 0;
+      background: transparent;
+      padding: 3px 0;
+      font-size: 13px;
+      line-height: 20px;
+      color: var(--ink-900);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .cell-input:hover { border-bottom-color: var(--rule-strong); }
+    .cell-input:focus { border-bottom-color: var(--accent-500); }
+    .cell-input.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .cell-textarea { min-height: 40px; resize: vertical; line-height: 18px; padding-top: 4px; }
+    .cell-select {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid transparent;
+      border-radius: 0;
+      background: transparent;
+      padding: 3px 0;
+      font-size: 12.5px;
+      line-height: 20px;
+      color: var(--ink-700);
+      outline: none;
+    }
+    .cell-select:focus { border-bottom-color: var(--accent-500); }
+    .table-footer {
+      display: flex;
+      align-items: center;
+      gap: 10px 14px;
+      flex-wrap: wrap;
+      padding-top: 12px;
+      font-size: 11.5px;
+      color: var(--ink-500);
+    }
+    .table-footer .btn { margin-left: -4px; }
+    .table-footer .right { margin-left: auto; }
+
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li { position: relative; display: flex; gap: 12px; padding-bottom: 18px; }
+    .timeline li:last-child { padding-bottom: 0; }
+    .timeline li::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: 0; width: 1px; background: var(--rule); }
+    .timeline li:last-child::before { display: none; }
+    .timeline-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      border: 1px solid var(--ink-200);
+      background: #fff;
+      flex: 0 0 auto;
+      margin-top: 2px;
+      z-index: 1;
+    }
+    .timeline li.done .timeline-dot { background: var(--accent-600); border-color: var(--accent-600); }
+    .timeline li.active .timeline-dot { border: 2px solid var(--accent-600); background: #fff; }
+    .timeline strong { display: block; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-900); }
+    .timeline li > div > span { display: block; margin-top: 1px; font-size: 11px; line-height: 16px; color: var(--ink-500); }
+    .total-card .grand { margin: 6px 0 2px; font-size: 28px; line-height: 1.1; letter-spacing: -0.035em; font-weight: 600; color: var(--ink-950); }
+    .total-card .hint { margin: 0 0 14px; font-size: 11px; color: var(--ink-500); }
+
+    /* ── Variant bar, state sheet, toast ──────────────────────────────── */
+    .variant-bar {
+      position: fixed;
+      left: 50%;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      max-width: calc(100vw - 20px);
+      padding: 5px;
+      border-radius: 999px;
+      background: var(--ink-950);
+      color: #fff;
+      box-shadow: 0 12px 32px rgba(50, 44, 30, 0.22), 0 2px 8px rgba(50, 44, 30, 0.12);
+    }
+    .variant-label { padding-left: 8px; font-size: 9px; line-height: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-300); white-space: nowrap; }
+    .variant-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink-300);
+      padding: 7px 10px;
+      font-size: 11px;
+      line-height: 16px;
+      white-space: nowrap;
+      transition: background-color 0.15s, color 0.15s;
+    }
+    .variant-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+    .variant-btn.active { background: var(--accent-600); color: #fff; }
+    .variant-key { font-size: 9px; line-height: 1; opacity: 0.7; }
+    .state-btn {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--ink-300);
+      padding: 7px 9px;
+      font-size: 10px;
+      line-height: 16px;
+      white-space: nowrap;
+    }
+    .state-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+    .state-btn[aria-expanded="true"] { color: #fff; background: rgba(255, 255, 255, 0.12); }
+
+    .state-sheet {
+      position: fixed;
+      left: 50%;
+      bottom: calc(76px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 45;
+      width: min(560px, calc(100vw - 20px));
+      max-height: 55vh;
+      overflow: auto;
+      padding: 14px;
+      border: 1px solid var(--rule);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: var(--shadow-pop);
+    }
+    .state-sheet[hidden] { display: none; }
+    .state-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .state-head strong { font-size: 12px; font-weight: 500; color: var(--ink-900); }
+    .state-head button { border: 0; background: transparent; color: var(--ink-500); font-size: 11px; padding: 4px 6px; border-radius: 6px; }
+    .state-head button:hover { background: var(--paper-muted); color: var(--ink-900); }
+    .state-sheet pre {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      line-height: 1.55;
+      color: var(--ink-700);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(76px + env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      z-index: 60;
+      max-width: calc(100vw - 32px);
+      padding: 9px 14px;
+      border-radius: 999px;
+      background: var(--ink-950);
+      color: #fff;
+      font-size: 11.5px;
+      line-height: 16px;
+      text-align: center;
+      box-shadow: var(--shadow-pop);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .toast.show { opacity: 1; }
+
+    /* ── Responsive ────────────────────────────────────────────────────── */
+    @media (max-width: 1080px) {
+      .layout { grid-template-columns: 1fr; }
+      .rail { position: static; }
+    }
+    @media (max-width: 760px) {
+      .topbar-inner { height: auto; padding: 10px 14px 0; flex-wrap: wrap; gap: 8px; }
+      .workspace-tabs { order: 3; width: 100%; margin-left: 0; overflow-x: auto; padding-bottom: 8px; }
+      .brand-name { display: none; }
+      .brand-sep { display: none; }
+      .brand-workspace { display: inline; }
+      .prototype-chip { display: none; }
+      .topbar-right { margin-left: auto; }
+      .page { padding: 16px 14px 112px; }
+      .page-head { flex-direction: column; gap: 10px; margin-bottom: 16px; }
+      .page-title { font-size: 24px; line-height: 30px; }
+      .main-col { gap: 18px; }
+      .card { padding: 16px; }
+      .field-grid { grid-template-columns: 1fr; gap: 14px; }
+      .field-grid .span-2 { grid-column: auto; }
+      .line-item { padding: 12px; }
+      .line-controls { grid-template-columns: 1fr 1fr; padding-left: 0; gap: 10px; }
+      .line-total-box { grid-column: span 2; text-align: left; }
+      .line-total { text-align: left; }
+      .line-footer .right { margin-left: 0; }
+      .po-hero { padding: 18px; border-radius: 12px; margin-bottom: 16px; }
+      .po-hero h1 { font-size: 28px; }
+      .po-hero-main { flex-direction: column; align-items: flex-start; gap: 14px; }
+      .hero-source { text-align: left; white-space: normal; }
+      .po-hero-meta { gap: 12px 18px; margin-top: 16px; padding-top: 12px; }
+      .sheet-section { padding: 18px 16px; }
+      .party-grid { grid-template-columns: 1fr; gap: 18px; padding-bottom: 16px; }
+      .fact-grid { grid-template-columns: 1fr; gap: 14px; padding-top: 16px; }
+      .fact-grid .span-2 { grid-column: auto; }
+      .sheet-heading .btn { margin-left: 0; }
+      .po-table thead { display: none; }
+      .po-table, .po-table tbody, .po-table tr, .po-table td { display: block; width: 100%; }
+      .po-table tr {
+        margin-bottom: 10px;
+        padding: 12px;
+        border: 1px solid var(--rule);
+        border-radius: 10px;
+        background: #fff;
+      }
+      .po-table tr:last-child { margin-bottom: 0; }
+      .po-table td { display: grid; grid-template-columns: 92px 1fr; gap: 10px; align-items: center; padding: 5px 0; border: 0; }
+      .po-table td::before { content: attr(data-label); font-size: 9.5px; line-height: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-400); }
+      .po-table td.col-no { display: flex; justify-content: space-between; }
+      .po-table td.col-no::before { content: "Line"; }
+      .po-table td.row-action { display: flex; justify-content: flex-end; }
+      .po-table td.row-action::before { content: ""; }
+      .po-table td .cell-input, .po-table td .cell-select { font-size: 13.5px; }
+      .po-table td.num { text-align: left; }
+      .table-footer .right { margin-left: 0; }
+      .variant-bar { width: calc(100vw - 20px); justify-content: space-between; }
+      .variant-label { display: none; }
+      .variant-btn { flex: 1; justify-content: center; font-size: 10.5px; padding: 8px 6px; }
+      .state-btn { font-size: 9.5px; padding: 8px 6px; }
+    }
+    @media (max-width: 420px) {
+      .line-controls { grid-template-columns: 1fr 1fr; }
+      .field-label { font-size: 11px; }
+      .summary-row { font-size: 12px; }
+      .total-card .grand { font-size: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-left">
+        <button class="icon-btn" aria-label="Back to purchase orders" data-demo="Prototype: back to the purchase order list.">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>
+        </button>
+        <div class="brand">
+          <span class="brand-mark">V</span>
+          <span class="brand-name">Vera</span>
+          <span class="brand-sep">/</span>
+          <span class="brand-workspace">Purchase Orders</span>
+        </div>
+      </div>
+        <nav class="workspace-tabs" aria-label="Purchase order workspace">
+          <button class="tab active" aria-current="page">Editor</button>
+          <button class="tab" data-demo="Prototype: the Drafts list is out of scope.">Drafts <span class="tab-count">2</span></button>
+          <button class="tab" data-demo="Prototype: the Archive is out of scope.">Archive</button>
+        </nav>
+      <div class="topbar-right">
+        <span class="prototype-chip">Prototype</span>
+        <button class="icon-btn" aria-label="Notifications" data-demo="Prototype: notifications are out of scope.">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M4 6.5a4 4 0 0 1 8 0c0 3 1 4 1 4H3s1-1 1-4Z"/><path d="M6.5 12.5a1.5 1.5 0 0 0 3 0"/></svg>
+        </button>
+        <div class="avatar" title="Hendra Wijaya">HW</div>
+      </div>
+    </div>
+  </header>
+
+  <main id="page" class="page"></main>
+
+  <div class="state-sheet" id="state-sheet" hidden aria-label="Prototype state">
+    <div class="state-head">
+      <strong>Prototype state</strong>
+      <button id="state-close" type="button">Close</button>
+    </div>
+    <pre id="state-json"></pre>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <div class="variant-bar" role="group" aria-label="Prototype variant">
+    <span class="variant-label">Prototype</span>
+    <button class="variant-btn active" type="button" data-variant="a" aria-pressed="true"><span class="variant-key">A</span> Quotation language</button>
+    <button class="variant-btn" type="button" data-variant="b" aria-pressed="false"><span class="variant-key">B</span> Original</button>
+    <button class="state-btn" type="button" id="state-toggle" aria-expanded="false">State</button>
+  </div>
+
+  <script>
+    // ── State ────────────────────────────────────────────────────────────
+    const initial = {
+      poNumber: "PO-2026-0142",
+      sourceQuote: "1502260002",
+      sourceRevision: "00",
+      customer: "PT. Infineon Technologies Batam",
+      customerAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+      billingAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+      deliveryAddress: "Batamindo Industrial Park, Lot 317, Mukakuning, Kota Batam, Kepulauan Riau, Indonesia",
+      shipToCode: "BAT-INF-01",
+      contactName: "Hendra Wijaya",
+      contactEmail: "hendra.wijaya@infineon.com",
+      contactPhone: "+62 811 7700 142",
+      poDate: "2026-11-10",
+      receivedDate: "2026-11-10",
+      requestedDelivery: "2026-11-24",
+      paymentTerms: "50% advance, balance 30 days after delivery",
+      incoterms: "DDP",
+      currency: "IDR",
+      taxZone: "Non-FTZ",
+      taxType: "Goods",
+      discountPercent: "2",
+      adjustment: "-250000",
+      adjustmentReason: "Rounding agreed with the customer",
+      lines: [
+        { description: "Schneider Acti9 iC60N MCB, 2P, 16A, 6kA, C-curve", qty: "12", uom: "Pc", unitPrice: "454300", discountPercent: "5" },
+        { description: "Phoenix Contact QUINT power supply, 24 VDC / 10 A", qty: "8", uom: "Pc", unitPrice: "2817500", discountPercent: "0" },
+        { description: "Installation, termination and commissioning works", qty: "1", uom: "Lot", unitPrice: "22570000", discountPercent: "0" }
+      ]
+    };
+
+    const UOMS = ["Pc", "Set", "Lot", "m", "m2", "m3", "kg", "Unit"];
+    const INCOTERMS = ["DDP", "FOB", "CIF", "EXW"];
+
+    let state = JSON.parse(JSON.stringify(initial));
+    let variant = new URLSearchParams(window.location.search).get("variant") === "b" ? "b" : "a";
+    let toastTimer = null;
+
+    const page = document.getElementById("page");
+    const stateSheet = document.getElementById("state-sheet");
+    const stateToggle = document.getElementById("state-toggle");
+    const toastEl = document.getElementById("toast");
+
+    // ── Numbers and formatting ───────────────────────────────────────────
+    function parseNum(value) {
+      const n = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
+      return Number.isFinite(n) ? n : 0;
+    }
+    function money(n) {
+      return "Rp" + new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 }).format(Math.abs(Math.round(n)));
+    }
+    function signedMoney(n) {
+      const v = Math.round(n);
+      return v < 0 ? "−" + money(v) : v > 0 ? "+" + money(v) : money(0);
+    }
+    function dateLabel(iso) {
+      if (!iso) return "—";
+      const date = new Date(iso + "T00:00:00");
+      if (Number.isNaN(date.getTime())) return iso;
+      return new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+    }
+    function lineGross(line) { return parseNum(line.qty) * parseNum(line.unitPrice); }
+    function lineDiscount(line) { return lineGross(line) * parseNum(line.discountPercent) / 100; }
+    function lineTotal(line) { return lineGross(line) - lineDiscount(line); }
+    function lineCount() { return state.lines.length + (state.lines.length === 1 ? " line" : " lines"); }
+    function discountedCount() {
+      return state.lines.filter((line) => parseNum(line.discountPercent) > 0).length;
+    }
+    function compute() {
+      const lineTotals = state.lines.reduce((sum, line) => sum + lineGross(line), 0);
+      const rowDiscounts = state.lines.reduce((sum, line) => sum + lineDiscount(line), 0);
+      const subtotal = lineTotals - rowDiscounts;
+      const wholeDiscount = subtotal * parseNum(state.discountPercent) / 100;
+      const net = subtotal - wholeDiscount;
+      const ppn = Math.round(net * 0.11);
+      const adjustment = parseNum(state.adjustment);
+      const grand = Math.round(net + ppn + adjustment);
+      return {
+        lineTotals: Math.round(lineTotals),
+        rowDiscounts: Math.round(rowDiscounts),
+        subtotal: Math.round(subtotal),
+        wholeDiscount: Math.round(wholeDiscount),
+        net: Math.round(net),
+        ppn,
+        adjustment: Math.round(adjustment),
+        grand
+      };
+    }
+    const TOTAL_FORMAT = {
+      lineTotals: money,
+      rowDiscounts: (n) => n ? "−" + money(n) : money(0),
+      subtotal: money,
+      wholeDiscount: (n) => n ? "−" + money(n) : money(0),
+      net: money,
+      ppn: money,
+      adjustment: signedMoney,
+      grand: money
+    };
+
+    // ── Small render helpers ─────────────────────────────────────────────
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[char]));
+    }
+    const lockIcon = `<span class="field-lock" title="Snapshot from the linked quotation" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg></span>`;
+    const trashIcon = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 4.5h10M6 4.5V3h4v1.5M5 4.5l.5 8h5l.5-8"/></svg>`;
+
+    function fieldA(label, key, opts = {}) {
+      const { type = "text", span = false, readonly = false, hint = "", options = null } = opts;
+      const cls = "field" + (span ? " span-2" : "");
+      const meta = (hint || readonly) ? `<span class="field-meta">${hint ? esc(hint) : ""}${readonly ? lockIcon : ""}</span>` : "";
+      let control;
+      if (type === "textarea") {
+        control = `<textarea class="textarea" data-field="${key}" ${readonly ? "readonly" : ""} aria-label="${esc(label)}">${esc(state[key])}</textarea>`;
+      } else if (type === "select") {
+        control = `<select class="select" data-field="${key}" aria-label="${esc(label)}">${options.map((option) => `<option ${option === state[key] ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>`;
+      } else {
+        control = `<input class="input" type="${type}" data-field="${key}" value="${esc(state[key])}" ${readonly ? "readonly" : ""} aria-label="${esc(label)}">`;
+      }
+      return `<label class="${cls}"><span class="field-label"><span>${esc(label)}</span>${meta}</span>${control}</label>`;
+    }
+    function lineFieldA(index, label, field, value, inputmode = "text") {
+      return `<label class="field"><span class="field-label">${esc(label)}</span><input class="input tnum" data-line="${index}" data-line-field="${field}" value="${esc(value)}" inputmode="${inputmode}" aria-label="${esc(label)} line ${index + 1}"></label>`;
+    }
+    function lineSelectA(index, label, field, value) {
+      return `<label class="field"><span class="field-label">${esc(label)}</span><select class="select" data-line="${index}" data-line-field="${field}" aria-label="${esc(label)} line ${index + 1}">${UOMS.map((uom) => `<option ${uom === value ? "selected" : ""}>${esc(uom)}</option>`).join("")}</select></label>`;
+    }
+    function summaryRow(label, key, totals, opts = {}) {
+      return `<div class="summary-row${opts.muted ? " muted" : ""}"><span>${esc(label)}</span><span class="tnum" data-total="${key}">${TOTAL_FORMAT[key](totals[key])}</span></div>`;
+    }
+
+    // ── Variant A ────────────────────────────────────────────────────────
+    function lineItemA(line, index) {
+      return `<div class="line-item" data-line-index="${index}">
+        <div class="line-item-top">
+          <span class="line-no tnum">${String(index + 1).padStart(2, "0")}</span>
+          <label class="field line-desc"><span class="field-label">Description</span><textarea class="textarea" data-line="${index}" data-line-field="description" aria-label="Description line ${index + 1}">${esc(line.description)}</textarea></label>
+          <button class="icon-btn danger" type="button" data-action="remove-line" data-index="${index}" aria-label="Remove line ${index + 1}" ${state.lines.length === 1 ? "disabled" : ""}>${trashIcon}</button>
+        </div>
+        <div class="line-controls">
+          ${lineFieldA(index, "Qty", "qty", line.qty, "decimal")}
+          ${lineSelectA(index, "UoM", "uom", line.uom)}
+          ${lineFieldA(index, "Unit price", "unitPrice", line.unitPrice, "numeric")}
+          ${lineFieldA(index, "Disc. %", "discountPercent", line.discountPercent, "decimal")}
+          <div class="field line-total-box"><span class="field-label">Line total</span><span class="line-total tnum" data-line-total="${index}">${money(lineTotal(line))}</span></div>
+        </div>
+      </div>`;
+    }
+
+    function renderDetailsA() {
+      return `<section class="card">
+        <div class="section-heading"><h2>Purchase order details</h2><span class="line"></span><span class="hint">Snapshot from the linked quotation</span></div>
+        <div class="field-grid">
+          ${fieldA("Customer", "customer", { readonly: true, span: true })}
+          ${fieldA("Customer PO number", "poNumber")}
+          ${fieldA("PO date", "poDate", { type: "date" })}
+          ${fieldA("Received date", "receivedDate", { type: "date" })}
+          ${fieldA("Requested delivery", "requestedDelivery", { type: "date" })}
+          ${fieldA("Payment terms", "paymentTerms", { span: true })}
+          ${fieldA("Incoterms", "incoterms", { type: "select", options: INCOTERMS })}
+          ${fieldA("Ship-to code", "shipToCode")}
+          ${fieldA("Contact email", "contactEmail", { type: "email" })}
+          ${fieldA("Contact phone", "contactPhone")}
+          ${fieldA("Billing address", "billingAddress", { type: "textarea", span: true })}
+          ${fieldA("Delivery address", "deliveryAddress", { type: "textarea", span: true })}
+          ${fieldA("Currency", "currency", { readonly: true, hint: "from source" })}
+          ${fieldA("Tax zone", "taxZone", { readonly: true })}
+          ${fieldA("Tax type", "taxType", { readonly: true })}
+          ${fieldA("Source quotation", "sourceQuote", { readonly: true, hint: "rev " + state.sourceRevision })}
+        </div>
+        <div class="source-strip">
+          <span class="source-dot"></span>
+          <span>Customer, currency and tax are snapshots of quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>.</span>
+          <button class="link-btn" type="button" data-demo="Prototype: opens the source quotation.">View source</button>
+        </div>
+      </section>`;
+    }
+
+    function renderLinesA() {
+      return `<section>
+        <div class="section-heading"><h2>Line items</h2><span class="line"></span><span class="hint" data-line-count>${lineCount()}</span><button class="btn btn-secondary btn-sm" type="button" data-action="add-line">+ Add line</button></div>
+        <div class="line-table">
+          ${state.lines.map((line, index) => lineItemA(line, index)).join("")}
+          <div class="line-footer">
+            <button class="btn btn-ghost btn-sm" type="button" data-action="add-line">+ Add line</button>
+            <span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span>
+            <span class="right">Totals update in the summary</span>
+          </div>
+        </div>
+      </section>`;
+    }
+
+    function renderDiscountsA() {
+      return `<section class="card">
+        <div class="section-heading"><h2>Discounts and adjustment</h2><span class="line"></span><span class="hint">Explained separately from the line prices</span></div>
+        <div class="field-grid">
+          ${fieldA("Whole-PO discount (%)", "discountPercent")}
+          ${fieldA("Adjustment (IDR)", "adjustment")}
+          ${fieldA("Adjustment reason", "adjustmentReason", { span: true })}
+        </div>
+        <p class="hint-block">Row discounts come off each line first, then the whole-PO discount. PPN is charged on the discounted subtotal and printed separately.</p>
+      </section>`;
+    }
+
+    function renderReviewA() {
+      return `<section class="card review-card">
+        <div class="section-heading"><h2>Before final save</h2><span class="line"></span><span class="hint">3 checks</span></div>
+        <div class="check-list">
+          <div class="check done"><span class="check-dot">✓</span><div><strong>Source quotation linked</strong><span class="tnum">${esc(state.sourceQuote)} · revision ${esc(state.sourceRevision)}</span></div></div>
+          <div class="check done"><span class="check-dot">✓</span><div><strong>Lines complete</strong><span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span></div></div>
+          <div class="check"><span class="check-dot">○</span><div><strong>Final save review</strong><span>Every difference is shown before the record is finalized.</span></div></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" data-demo="Prototype: opens the difference review against the source revision.">Review differences</button>
+      </section>`;
+    }
+
+    function renderSummaryA(totals) {
+      return `<section class="card rail-card">
+        <div class="rail-head"><h2>Summary</h2><span class="hint" data-line-count>${lineCount()}</span></div>
+        <div class="summary-rows">
+          ${summaryRow("Line totals", "lineTotals", totals)}
+          ${summaryRow("Row discounts", "rowDiscounts", totals, { muted: true })}
+          ${summaryRow("Subtotal", "subtotal", totals)}
+          ${summaryRow("Whole-PO discount", "wholeDiscount", totals, { muted: true })}
+          ${summaryRow("Net after discount", "net", totals)}
+          ${summaryRow("PPN 11%", "ppn", totals)}
+          ${summaryRow("Adjustment", "adjustment", totals, { muted: true })}
+          <div class="summary-grand"><span>Grand total</span><span class="tnum" data-total="grand">${TOTAL_FORMAT.grand(totals.grand)}</span></div>
+        </div>
+        <div class="printed-box">
+          <span>Compared with quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></span>
+          <button class="link-btn" type="button" data-demo="Prototype: opens the source quotation.">View</button>
+        </div>
+      </section>`;
+    }
+
+    function renderSaveA() {
+      return `<section class="card rail-card">
+        <div class="rail-head"><h2>Save</h2><span class="status-chip"><span class="dot"></span>Unsaved</span></div>
+        <p class="status-line"><span class="dot"></span>Draft · not finalized</p>
+        <div class="action-stack">
+          <button class="btn btn-secondary btn-block" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
+          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the difference review.">Final Save</button>
+          <button class="btn btn-ghost btn-block" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
+        </div>
+        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>.</p>
+      </section>`;
+    }
+
+    function renderA() {
+      const totals = compute();
+      return `<div class="page-head">
+        <div>
+          <div class="eyebrow">Purchase order</div>
+          <h1 class="page-title tnum">${esc(state.poNumber)}</h1>
+          <p class="page-subtitle">${esc(state.customer)}<span class="dot">·</span>Quotation <span class="tnum">${esc(state.sourceQuote)} rev ${esc(state.sourceRevision)}</span><span class="dot">·</span>${esc(state.currency)}</p>
+        </div>
+        <div class="page-badges"><span class="badge badge-accent">Draft</span><span class="badge badge-neutral">Linked</span></div>
+      </div>
+      <div class="layout">
+        <div class="main-col">
+          ${renderDetailsA()}
+          ${renderLinesA()}
+          ${renderDiscountsA()}
+          ${renderReviewA()}
+        </div>
+        <aside class="rail">
+          ${renderSummaryA(totals)}
+          ${renderSaveA()}
+        </aside>
+      </div>`;
+    }
+
+    // ── Variant B ────────────────────────────────────────────────────────
+    function sheetHeading(number, title, hint, withAdd = false) {
+      return `<div class="sheet-heading"><span class="section-no">${number}</span><h2>${esc(title)}</h2><span class="line"></span><span class="hint">${hint}</span>${withAdd ? `<button class="btn btn-secondary btn-sm" type="button" data-action="add-line">+ Add line</button>` : ""}</div>`;
+    }
+    function partyBlock(label, title, body, meta) {
+      return `<div class="party"><span class="micro">${esc(label)}</span><strong>${esc(title)}</strong><p>${esc(body)}</p><div class="party-contact">${meta.filter(Boolean).map((item) => `<span>${esc(item)}</span>`).join("")}</div></div>`;
+    }
+    function factField(label, key, opts = {}) {
+      const { type = "text", span = false, options = null } = opts;
+      const cls = "fact" + (span ? " span-2" : "");
+      let control;
+      if (type === "select") {
+        control = `<select class="inline-input" data-field="${key}" aria-label="${esc(label)}">${options.map((option) => `<option ${option === state[key] ? "selected" : ""}>${esc(option)}</option>`).join("")}</select>`;
+      } else {
+        control = `<input class="inline-input" type="${type}" data-field="${key}" value="${esc(state[key])}" aria-label="${esc(label)}">`;
+      }
+      return `<label class="${cls}"><span class="micro">${esc(label)}</span>${control}</label>`;
+    }
+    function rowB(line, index) {
+      return `<tr data-line-index="${index}">
+        <td data-label="#" class="col-no tnum">${String(index + 1).padStart(2, "0")}</td>
+        <td data-label="Description"><textarea class="cell-input cell-textarea" rows="2" data-line="${index}" data-line-field="description" aria-label="Description line ${index + 1}">${esc(line.description)}</textarea></td>
+        <td data-label="Qty" class="num"><input class="cell-input num" data-line="${index}" data-line-field="qty" value="${esc(line.qty)}" inputmode="decimal" aria-label="Qty line ${index + 1}"></td>
+        <td data-label="UoM"><select class="cell-select" data-line="${index}" data-line-field="uom" aria-label="UoM line ${index + 1}">${UOMS.map((uom) => `<option ${uom === line.uom ? "selected" : ""}>${esc(uom)}</option>`).join("")}</select></td>
+        <td data-label="Unit price" class="num"><input class="cell-input num" data-line="${index}" data-line-field="unitPrice" value="${esc(line.unitPrice)}" inputmode="numeric" aria-label="Unit price line ${index + 1}"></td>
+        <td data-label="Disc." class="num"><input class="cell-input num" data-line="${index}" data-line-field="discountPercent" value="${esc(line.discountPercent)}" inputmode="decimal" aria-label="Discount line ${index + 1}"></td>
+        <td data-label="Total" class="num"><span class="tnum" data-line-total="${index}">${money(lineTotal(line))}</span></td>
+        <td class="row-action"><button class="icon-btn danger" type="button" data-action="remove-line" data-index="${index}" aria-label="Remove line ${index + 1}" ${state.lines.length === 1 ? "disabled" : ""}>${trashIcon}</button></td>
+      </tr>`;
+    }
+    function renderTableB() {
+      return `<table class="po-table">
+        <thead><tr><th class="col-no">#</th><th>Description</th><th class="num">Qty</th><th>UoM</th><th class="num">Unit price</th><th class="num">Disc.</th><th class="num">Total</th><th></th></tr></thead>
+        <tbody>${state.lines.map((line, index) => rowB(line, index)).join("")}</tbody>
+      </table>`;
+    }
+    function renderHeroB() {
+      return `<section class="po-hero">
+        <div class="po-hero-top"><span class="hero-eyebrow">Purchase order</span><span class="hero-badge">Draft</span></div>
+        <div class="po-hero-main">
+          <div><h1 class="tnum">${esc(state.poNumber)}</h1><p>${esc(state.customer)}<span class="hero-sep">·</span>${esc(state.customerAddress.split(",")[0])}</p></div>
+          <div class="hero-source"><span>Source quotation</span><strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong></div>
+        </div>
+        <div class="po-hero-meta">
+          <span><span class="meta-label">Issued</span>${dateLabel(state.poDate)}</span>
+          <span><span class="meta-label">Delivery</span>${dateLabel(state.requestedDelivery)}</span>
+          <span><span class="meta-label">Terms</span>${esc(state.incoterms)} · ${esc(state.currency)}</span>
+          <span><span class="meta-label">Tax</span>${esc(state.taxZone)} / ${esc(state.taxType)}</span>
+        </div>
+      </section>`;
+    }
+    function renderSheetB() {
+      return `<section class="sheet">
+        <div class="sheet-section">
+          ${sheetHeading("01", "Order", "Snapshot and delivery")}
+          <div class="party-grid">
+            ${partyBlock("Supplier", state.customer, state.customerAddress, [state.contactName, state.contactEmail, state.contactPhone])}
+            ${partyBlock("Ship to", state.shipToCode, state.deliveryAddress, ["Requested " + dateLabel(state.requestedDelivery)])}
+          </div>
+          <div class="fact-grid">
+            ${factField("Customer PO", "poNumber")}
+            ${factField("PO date", "poDate", { type: "date" })}
+            ${factField("Received", "receivedDate", { type: "date" })}
+            ${factField("Requested delivery", "requestedDelivery", { type: "date" })}
+            ${factField("Payment terms", "paymentTerms", { span: true })}
+            ${factField("Incoterms", "incoterms", { type: "select", options: INCOTERMS })}
+          </div>
+        </div>
+        <div class="sheet-section">
+          ${sheetHeading("02", "Lines", `<span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> discounted`, true)}
+          <div class="table-wrap">${renderTableB()}</div>
+          <div class="table-footer">
+            <button class="btn btn-ghost btn-sm" type="button" data-action="add-line">+ Add line</button>
+            <span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> with a row discount</span>
+            <span class="right">Totals update in the order control</span>
+          </div>
+        </div>
+        <div class="sheet-section">
+          ${sheetHeading("03", "Terms", "Discounts and adjustment")}
+          <div class="fact-grid">
+            ${factField("Whole-PO discount (%)", "discountPercent")}
+            ${factField("Adjustment (IDR)", "adjustment")}
+            ${factField("Adjustment reason", "adjustmentReason", { span: true })}
+          </div>
+          <p class="hint-block">Row discounts come off each line first, then the whole-PO discount. PPN is charged on the discounted subtotal and printed separately.</p>
+        </div>
+      </section>`;
+    }
+    function renderControlB() {
+      return `<section class="card rail-card control-card">
+        <div class="rail-head"><h2>Order control</h2><span class="badge badge-accent">Draft</span></div>
+        <ol class="timeline">
+          <li class="done"><span class="timeline-dot"></span><div><strong>Source linked</strong><span class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</span></div></li>
+          <li class="done"><span class="timeline-dot"></span><div><strong>Details</strong><span>Customer and delivery captured</span></div></li>
+          <li class="active"><span class="timeline-dot"></span><div><strong>Lines</strong><span><span data-line-count>${lineCount()}</span> · <span data-discount-count>${discountedCount()}</span> discounted</span></div></li>
+          <li><span class="timeline-dot"></span><div><strong>Final save</strong><span>Review differences next</span></div></li>
+        </ol>
+      </section>`;
+    }
+    function renderTotalB(totals) {
+      return `<section class="card rail-card total-card">
+        <span class="micro">Grand total</span>
+        <div class="grand tnum" data-total="grand">${TOTAL_FORMAT.grand(totals.grand)}</div>
+        <p class="hint">Customer-facing, including PPN 11%</p>
+        <div class="summary-rows">
+          ${summaryRow("Line totals", "lineTotals", totals)}
+          ${summaryRow("Row discounts", "rowDiscounts", totals, { muted: true })}
+          ${summaryRow("Subtotal", "subtotal", totals)}
+          ${summaryRow("Whole-PO discount", "wholeDiscount", totals, { muted: true })}
+          ${summaryRow("Net after discount", "net", totals)}
+          ${summaryRow("PPN 11%", "ppn", totals)}
+          ${summaryRow("Adjustment", "adjustment", totals, { muted: true })}
+        </div>
+      </section>`;
+    }
+    function renderActionsB() {
+      return `<section class="card rail-card">
+        <div class="rail-head"><h2>Actions</h2><span class="status-chip"><span class="dot"></span>Unsaved</span></div>
+        <p class="status-line"><span class="dot"></span>Draft · not finalized</p>
+        <div class="action-stack">
+          <button class="btn btn-primary btn-block" type="button" data-demo="Prototype: Final Save opens the difference review.">Final Save</button>
+          <button class="btn btn-secondary btn-block" type="button" data-demo="Prototype: Save draft would store this purchase order.">Save draft</button>
+          <button class="btn btn-ghost btn-block" type="button" data-demo="Prototype: Cancel returns to the purchase order list.">Cancel</button>
+        </div>
+        <p class="hint-block">Final Save reviews every difference against quotation <strong class="tnum">${esc(state.sourceQuote)} · rev ${esc(state.sourceRevision)}</strong>.</p>
+      </section>`;
+    }
+    function renderB() {
+      const totals = compute();
+      return `${renderHeroB()}
+        <div class="layout">
+          <div class="main-col">${renderSheetB()}</div>
+          <aside class="rail">
+            ${renderControlB()}
+            ${renderTotalB(totals)}
+            ${renderActionsB()}
+          </aside>
+        </div>`;
+    }
+
+    // ── Rendering and state ──────────────────────────────────────────────
+    function render() {
+      page.innerHTML = variant === "a" ? renderA() : renderB();
+      updateDerived();
+      updateVariantButtons();
+    }
+    function updateDerived() {
+      const totals = compute();
+      document.querySelectorAll("[data-total]").forEach((element) => {
+        const key = element.dataset.total;
+        if (TOTAL_FORMAT[key]) element.textContent = TOTAL_FORMAT[key](totals[key]);
+      });
+      document.querySelectorAll("[data-line-total]").forEach((element) => {
+        const index = Number(element.dataset.lineTotal);
+        if (state.lines[index]) element.textContent = money(lineTotal(state.lines[index]));
+      });
+      document.querySelectorAll("[data-line-count]").forEach((element) => {
+        element.textContent = lineCount();
+      });
+      document.querySelectorAll("[data-discount-count]").forEach((element) => {
+        element.textContent = String(discountedCount());
+      });
+      updateState(totals);
+    }
+    function updateState(totals = compute()) {
+      const { lines, ...header } = state;
+      const target = document.getElementById("state-json");
+      if (target) target.textContent = JSON.stringify({ variant, header, lines, totals }, null, 2);
+    }
+    function updateVariantButtons() {
+      document.querySelectorAll("[data-variant]").forEach((button) => {
+        const active = button.dataset.variant === variant;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    }
+    function setVariant(next) {
+      if (next !== "a" && next !== "b") return;
+      variant = next;
+      const url = new URL(window.location.href);
+      url.searchParams.set("variant", variant);
+      window.history.replaceState(null, "", url);
+      closeState();
+      render();
+    }
+    function toggleState() {
+      const open = stateSheet.hidden;
+      stateSheet.hidden = !open;
+      stateToggle.setAttribute("aria-expanded", String(open));
+      if (open) updateState();
+    }
+    function closeState() {
+      stateSheet.hidden = true;
+      stateToggle.setAttribute("aria-expanded", "false");
+    }
+    function toast(message) {
+      toastEl.textContent = message;
+      toastEl.classList.add("show");
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toastEl.classList.remove("show"), 2400);
+    }
+    function addLine() {
+      state.lines.push({ description: "", qty: "1", uom: "Pc", unitPrice: "0", discountPercent: "0" });
+      render();
+      window.requestAnimationFrame(() => {
+        const input = document.querySelector(`[data-line="${state.lines.length - 1}"][data-line-field="description"]`);
+        if (input) input.focus();
+      });
+    }
+    function removeLine(index) {
+      if (state.lines.length === 1) {
+        toast("A purchase order needs at least one line.");
+        return;
+      }
+      state.lines.splice(index, 1);
+      render();
+    }
+
+    // ── Events ───────────────────────────────────────────────────────────
+    page.addEventListener("input", (event) => {
+      const element = event.target;
+      if (!(element instanceof HTMLElement)) return;
+      if (element.matches("[data-line]")) {
+        const index = Number(element.dataset.line);
+        const field = element.dataset.lineField;
+        if (state.lines[index] && field) state.lines[index][field] = element.value;
+      } else if (element.matches("[data-field]")) {
+        state[element.dataset.field] = element.value;
+      } else {
+        return;
+      }
+      updateDerived();
+    });
+    page.addEventListener("change", (event) => {
+      const element = event.target;
+      if (!(element instanceof HTMLElement)) return;
+      if (!element.matches("[data-line], [data-field]")) return;
+      if (element.matches("[data-line]")) {
+        const index = Number(element.dataset.line);
+        const field = element.dataset.lineField;
+        if (state.lines[index] && field) state.lines[index][field] = element.value;
+      } else {
+        state[element.dataset.field] = element.value;
+      }
+      updateDerived();
+    });
+    document.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const variantButton = target.closest("[data-variant]");
+      if (variantButton) {
+        setVariant(variantButton.dataset.variant);
+        return;
+      }
+      if (target.closest("#state-toggle")) {
+        toggleState();
+        return;
+      }
+      if (target.closest("#state-close")) {
+        closeState();
+        return;
+      }
+      const action = target.closest("[data-action]");
+      if (action) {
+        if (action.dataset.action === "add-line") addLine();
+        if (action.dataset.action === "remove-line") removeLine(Number(action.dataset.index));
+        return;
+      }
+      const demo = target.closest("[data-demo]");
+      if (demo) toast(demo.dataset.demo);
+    });
+
+    render();
+    updateState();
+  </script>
+</body>
+</html>
