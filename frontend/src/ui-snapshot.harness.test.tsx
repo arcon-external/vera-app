@@ -51,7 +51,6 @@ import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
   PurchaseOrderEditorView,
-  PurchaseOrderLineRow,
 } from "./components/PurchaseOrderEditor";
 import {
   PurchaseOrderDifferenceReviewView,
@@ -260,7 +259,7 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   Currency: "USD",
   TaxZone: "NonFTZ",
   TaxCategory: "SupplyOnly",
-  AdjustmentReason: "Round to the printed total",
+  AdjustmentReason: "",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",
   Items: [
@@ -291,6 +290,26 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
       GrossMinor: 42000,
       DiscountMinor: 0,
       NetMinor: 42000,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Cable tray", "Terminations"],
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 2,
+      LineNumber: 3,
+      Description: "Cable termination and labelling",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 30000,
+      DiscountEnabled: true,
+      DiscountPercent: 5,
+      GrossMinor: 30000,
+      DiscountMinor: 1500,
+      NetMinor: 28500,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Two technicians"],
     },
   ],
   ID: 7,
@@ -298,12 +317,12 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   SourceRevision: 2,
   CustomerID: 2,
   PaymentTerms: "45 days",
-  DiscountPercent: 5,
+  DiscountPercent: 0,
   PpnBps: 1100,
   SubtotalMinor: 323363,
   DiscountMinor: 16168,
   PpnMinor: 33791,
-  AdjustmentMinor: -250,
+  AdjustmentMinor: 0,
   GrandTotalMinor: 340736,
   PrintedSubtotalMinor: 325000,
   PrintedDiscountMinor: 0,
@@ -2039,7 +2058,6 @@ const CASES: SnapshotCase[] = [
             subtotalMinor: 20000,
             discountMinor: 400,
             ppnMinor: 1960,
-            adjustmentMinor: 0,
             grandTotalMinor: 21560,
           }}
           printed={{
@@ -2691,44 +2709,17 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // One PO line with its row discount (issue #470). The editor page pushes
-    // the lines below the fold at 360, so this is the case that shows whether
-    // the discount controls and the line total reflow at the narrow width.
-    name: "PurchaseOrderLineDiscount",
-    element: (
-      <div className="grid gap-3">
-        <PurchaseOrderLineRow
-          line={PO_EDITOR_INITIAL.lines[0]}
-          index={0}
-          currency={PO_EDITOR_USD}
-          uomOptions={PO_EDITOR_UOM_OPTIONS}
-          calculation={PO_EDITOR_CALCULATION.lines[0] ?? null}
-          dispatch={() => undefined}
-        />
-        <PurchaseOrderLineRow
-          line={PO_EDITOR_INITIAL.lines[1]}
-          index={1}
-          currency={PO_EDITOR_USD}
-          uomOptions={PO_EDITOR_UOM_OPTIONS}
-          calculation={PO_EDITOR_CALCULATION.lines[1] ?? null}
-          dispatch={() => undefined}
-        />
-      </div>
-    ),
-  },
-  {
     // The explained calculation (issue #470): every stage from line totals to
-    // the grand total, the PPN printed separately, the signed adjustment with
-    // its reason, and the source document's printed figures in their own
-    // group. Rendered alone because the editor page pushes it below the fold.
+    // the grand total, with PPN printed separately and the source document's
+    // printed figures in their own group. The whole-PO discount and the signed
+    // adjustment are retired (#573). Rendered alone because the editor page
+    // pushes it below the fold.
     name: "PurchaseOrderTotals",
     element: (
       <PurchaseOrderTotals
         totals={PO_EDITOR_CALCULATION.totals}
         currency={PO_EDITOR_USD}
-        discountPercent={5}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />
@@ -2748,9 +2739,7 @@ const CASES: SnapshotCase[] = [
           rowDiscountMinor: null,
         }}
         currency={PO_EDITOR_USD}
-        discountPercent={5}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />
@@ -2765,9 +2754,7 @@ const CASES: SnapshotCase[] = [
       <PurchaseOrderTotals
         totals={null}
         currency={PO_EDITOR_USD}
-        discountPercent={null}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason=""
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />

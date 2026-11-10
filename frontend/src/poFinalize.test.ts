@@ -292,6 +292,9 @@ describe("purchase order matching", () => {
         discountPercent: "0",
         quotationItemNo: null,
         quotationSubNo: null,
+        groupKey: "",
+        parentDescription: "",
+        descriptionLines: [],
       },
       [candidate],
       USD
@@ -310,6 +313,9 @@ describe("purchase order matching", () => {
         discountPercent: "0",
         quotationItemNo: null,
         quotationSubNo: null,
+        groupKey: "",
+        parentDescription: "",
+        descriptionLines: [],
       },
       [candidate],
       USD
@@ -328,6 +334,9 @@ describe("purchase order matching", () => {
         discountPercent: "0",
         quotationItemNo: null,
         quotationSubNo: null,
+        groupKey: "",
+        parentDescription: "",
+        descriptionLines: [],
       },
       [candidate],
       USD
@@ -379,7 +388,6 @@ describe("purchase order matching", () => {
       order({
         PaymentTerms: "30 days",
         Incoterms: "FOB",
-        DiscountPercent: 5,
         Items: [
           {
             ...base.Items[0],
@@ -397,7 +405,6 @@ describe("purchase order matching", () => {
     expect(keys).toEqual([
       "header:paymentTerms",
       "header:incoterms",
-      "header:discountPercent",
       "line:1:description",
       "line:1:uom",
       "line:1:quantity",
@@ -420,7 +427,6 @@ describe("difference choices", () => {
     const state = stateFrom(
       order({
         PaymentTerms: "30 days",
-        DiscountPercent: 5,
         Items: [
           {
             ...base.Items[0],
@@ -434,20 +440,17 @@ describe("difference choices", () => {
     const comparison = comparePurchaseOrder(state, SOURCE, USD);
     expect(comparison.differences.map((difference) => difference.key)).toEqual([
       "header:paymentTerms",
-      "header:discountPercent",
       "line:1:quantity",
       "line:1:unitPrice",
     ]);
 
     const decisions: POReviewDecisions = {
       "header:paymentTerms": "quotation",
-      "header:discountPercent": "quotation",
       "line:1:quantity": "quotation",
       "line:1:unitPrice": "po",
     };
     const applied = applyReviewChoices(state, SOURCE, comparison, decisions, USD);
     expect(applied.header.paymentTerms).toBe("45 days");
-    expect(applied.header.discountPercent).toBe("0");
     expect(applied.lines[0].quantity).toBe("2");
     // The unit price kept its explicit PO choice, so it stays at 110.
     expect(applied.lines[0].unitPrice).toBe("$110.00");
@@ -500,13 +503,13 @@ describe("difference choices", () => {
     expect(unacknowledged.canContinue).toBe(false);
     expect(unacknowledged.blockers.join("\n")).toContain("Line 2 has no quotation match");
 
-    // The judge's case: printed 200, an acknowledged extra line of 50, no
-    // adjustment. The save proceeds and the purchase order's total is 250.
+    // The judge's case: printed 200, an acknowledged extra line of 50, and no
+    // whole-order stage to reverse. The save proceeds and the purchase order's
+    // total is 250.
     const evaluation = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
     expect(evaluation.blockers).toEqual([]);
     expect(evaluation.canContinue).toBe(true);
     expect(evaluation.totals?.grandTotalMinor).toBe(250);
-    expect(evaluation.totals?.adjustmentMinor).toBe(0);
     expect(evaluation.printedDifferenceMinor).toBe(-50);
     const result = buildFinalizeInput(
       state,
@@ -521,27 +524,6 @@ describe("difference choices", () => {
     expect(result.error).toBeNull();
     expect(result.input?.AdjustmentMinor).toBe(0);
     expect(result.input?.AcknowledgedExtra).toEqual([2]);
-  });
-
-  it("accepts a reasoned adjustment as document reconciliation, not as a target", () => {
-    const state = stateFrom(orderPrinted200());
-    // The lines calculate 250 and the customer's PO document printed 260. The
-    // +10 is an explained document difference, not a reversal forced by the
-    // quotation (which printed 200).
-    state.header.adjustment = "0.10";
-    state.header.adjustmentReason = "Customer PO document printed 260";
-    const evaluation = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
-    expect(evaluation.blockers).toEqual([]);
-    expect(evaluation.canContinue).toBe(true);
-    expect(evaluation.totals?.grandTotalMinor).toBe(260);
-    expect(evaluation.totals?.adjustmentMinor).toBe(10);
-    expect(evaluation.printedDifferenceMinor).toBe(-60);
-
-    // The adjustment is optional, not unguarded: it still needs its reason.
-    state.header.adjustmentReason = "   ";
-    const unexplained = evaluateReview(state, SOURCE_PRINTED_200, USD, {}, [], [2]);
-    expect(unexplained.canContinue).toBe(false);
-    expect(unexplained.blockers.join("\n")).toContain("An adjustment requires a reason");
   });
 
   it("refuses to compare amounts across currencies", () => {

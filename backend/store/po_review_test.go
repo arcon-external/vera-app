@@ -103,7 +103,6 @@ func TestComparePurchaseOrderNamesEveryDifferingValue(t *testing.T) {
 	state.Lines[0].UnitPriceMinor = 700
 	state.Lines[0].DiscountEnabled = false
 	state.Lines[0].DiscountPercent = 0
-	state.DiscountPercent = 5
 
 	comparison := ComparePurchaseOrder(reviewSource(), state)
 	keys := map[string]bool{}
@@ -116,7 +115,6 @@ func TestComparePurchaseOrderNamesEveryDifferingValue(t *testing.T) {
 	for _, want := range []string{
 		"header:paymentTerms",
 		"header:incoterms",
-		"header:discountPercent",
 		"line:1:description",
 		"line:1:quantity",
 		"line:1:uom",
@@ -127,8 +125,8 @@ func TestComparePurchaseOrderNamesEveryDifferingValue(t *testing.T) {
 			t.Errorf("missing difference key %q; got %v", want, keys)
 		}
 	}
-	if len(comparison.Differences) != 8 {
-		t.Errorf("differences = %d; want 8", len(comparison.Differences))
+	if len(comparison.Differences) != 7 {
+		t.Errorf("differences = %d; want 7", len(comparison.Differences))
 	}
 	if keys["line:2:description"] {
 		t.Error("an equal line produced a difference")

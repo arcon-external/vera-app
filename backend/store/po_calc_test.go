@@ -76,20 +76,6 @@ func TestPurchaseOrderDiscountsTruncateLikeTheQuotation(t *testing.T) {
 			calculation.SubtotalMinor, calculation.DiscountMinor, calculation.GrandTotalMinor)
 	}
 
-	// The whole-PO discount follows the same rule on the summed subtotal.
-	whole, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-		Lines:           []PurchaseOrderCalcLine{line(10000, 101)},
-		DiscountPercent: 50,
-	})
-	if err != nil {
-		t.Fatalf("calculate whole discount: %v", err)
-	}
-	if whole.SubtotalMinor != 101 || whole.DiscountMinor != 50 ||
-		whole.AfterDiscountMinor != 51 || whole.GrandTotalMinor != 51 {
-		t.Errorf("whole discount = subtotal %d / discount %d / after %d / grand %d; want 101/50/51/51",
-			whole.SubtotalMinor, whole.DiscountMinor, whole.AfterDiscountMinor, whole.GrandTotalMinor)
-	}
-
 	// A disabled row discount is not applied even if a percentage is present.
 	disabled := discountedLine(10000, 101, 50)
 	disabled.DiscountEnabled = false
@@ -105,12 +91,11 @@ func TestPurchaseOrderDiscountsTruncateLikeTheQuotation(t *testing.T) {
 }
 
 func TestPurchaseOrderTaxIsOnTheDiscountedSubtotalAndStaysSeparate(t *testing.T) {
-	// 1000, 10% whole discount -> 900. PPN 11% of 900 is 99.00 exactly, and
+	// 1000, 10% row discount -> 900. PPN 11% of 900 is 99.00 exactly, and
 	// the customer pays 999. Taxing before the discount would give 1010.
 	calculation, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-		Lines:           []PurchaseOrderCalcLine{line(10000, 1000)},
-		DiscountPercent: 10,
-		PpnBps:          1100,
+		Lines:  []PurchaseOrderCalcLine{discountedLine(10000, 1000, 10)},
+		PpnBps: 1100,
 	})
 	if err != nil {
 		t.Fatalf("calculate: %v", err)
@@ -152,96 +137,39 @@ func TestPurchaseOrderTaxIsOnTheDiscountedSubtotalAndStaysSeparate(t *testing.T)
 	}
 }
 
-func TestPurchaseOrderAdjustmentIsSignedAndRequiresAReason(t *testing.T) {
+func TestPurchaseOrderAdjustmentIsRetired(t *testing.T) {
+	// #573: the signed adjustment is gone. A stored or older caller's value is
+	// ignored rather than applied, and no reason rule survives.
 	base := PurchaseOrderCalcInput{
 		Lines:  []PurchaseOrderCalcLine{line(10000, 1000)},
 		PpnBps: 1100,
 	}
-
-	negative := base
-	negative.AdjustmentMinor = -10
-	negative.AdjustmentReason = "Round the printed total down"
-	calculation, err := CalculatePurchaseOrder(negative)
+	withAdjustment := base
+	withAdjustment.AdjustmentMinor = -10
+	withAdjustment.AdjustmentReason = "Round the printed total down"
+	calculation, err := CalculatePurchaseOrder(withAdjustment)
 	if err != nil {
-		t.Fatalf("negative adjustment: %v", err)
+		t.Fatalf("retired adjustment: %v", err)
 	}
-	if calculation.GrandTotalMinor != 1100 { // 1000 + 110 - 10
-		t.Errorf("negative adjustment grand = %d; want 1100", calculation.GrandTotalMinor)
+	if calculation.GrandTotalMinor != 1110 {
+		t.Errorf("retired adjustment grand = %d; want 1110", calculation.GrandTotalMinor)
 	}
-	if calculation.AdjustmentMinor != -10 ||
-		calculation.AdjustmentReason != "Round the printed total down" {
-		t.Errorf("stored adjustment = %d %q; want -10 with its reason",
+	if calculation.AdjustmentMinor != 0 || calculation.AdjustmentReason != "" {
+		t.Errorf("retired adjustment was stored: %d %q",
 			calculation.AdjustmentMinor, calculation.AdjustmentReason)
 	}
-
-	positive := base
-	positive.AdjustmentMinor = 25
-	positive.AdjustmentReason = "Freight printed separately"
-	calculation, err = CalculatePurchaseOrder(positive)
-	if err != nil {
-		t.Fatalf("positive adjustment: %v", err)
-	}
-	if calculation.GrandTotalMinor != 1135 {
-		t.Errorf("positive adjustment grand = %d; want 1135", calculation.GrandTotalMinor)
-	}
-
-	// The adjustment never changes row prices or the tax base.
-	if calculation.Lines[0].GrossMinor != 1000 ||
-		calculation.Lines[0].NetMinor != 1000 ||
-		calculation.SubtotalMinor != 1000 || calculation.AfterDiscountMinor != 1000 ||
+	if calculation.SubtotalMinor != 1000 || calculation.AfterDiscountMinor != 1000 ||
 		calculation.PpnMinor != 110 {
-		t.Errorf("adjustment moved the calculation: %+v", calculation)
+		t.Errorf("retired adjustment moved the calculation: %+v", calculation)
 	}
 
-	for _, reason := range []string{"", "   ", "\t\n", "\v\f\r", " \t\n\r\f\v "} {
+	for _, reason := range []string{"", "   ", "\t\n", strings.Repeat("界", 201)} {
 		missing := base
 		missing.AdjustmentMinor = -10
 		missing.AdjustmentReason = reason
-		if _, err := CalculatePurchaseOrder(missing); !errors.Is(err, ErrPurchaseOrderInvalid) {
-			t.Errorf("adjustment with reason %q error = %v; want ErrPurchaseOrderInvalid", reason, err)
+		if _, err := CalculatePurchaseOrder(missing); err != nil {
+			t.Errorf("reason %q was refused after retirement: %v", reason, err)
 		}
-	}
-
-	// A reason without an amount is not an adjustment: it is dropped rather
-	// than stored as an unexplained zero.
-	empty := base
-	empty.AdjustmentReason = "typed before the amount"
-	calculation, err = CalculatePurchaseOrder(empty)
-	if err != nil {
-		t.Fatalf("zero adjustment with a reason: %v", err)
-	}
-	if calculation.AdjustmentMinor != 0 || calculation.AdjustmentReason != "" {
-		t.Errorf("zero adjustment kept %d %q; want 0 with no reason",
-			calculation.AdjustmentMinor, calculation.AdjustmentReason)
-	}
-
-	// An adjustment may zero the grand total but may not make it negative.
-	exact := base
-	exact.AdjustmentMinor = -1110
-	exact.AdjustmentReason = "Goodwill"
-	if _, err := CalculatePurchaseOrder(exact); err != nil {
-		t.Fatalf("adjustment to exactly zero: %v", err)
-	}
-	over := base
-	over.AdjustmentMinor = -1111
-	over.AdjustmentReason = "Too much"
-	if _, err := CalculatePurchaseOrder(over); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("negative grand total error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-
-	// The reason is bounded in Unicode characters, the unit the schema's
-	// char_length uses.
-	long := base
-	long.AdjustmentMinor = -1
-	long.AdjustmentReason = strings.Repeat("界", MaxAdjustmentReasonLength+1)
-	if _, err := CalculatePurchaseOrder(long); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("over-long reason error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-	atLimit := base
-	atLimit.AdjustmentMinor = -1
-	atLimit.AdjustmentReason = strings.Repeat("界", MaxAdjustmentReasonLength)
-	if _, err := CalculatePurchaseOrder(atLimit); err != nil {
-		t.Errorf("reason at the %d-character limit: %v", MaxAdjustmentReasonLength, err)
 	}
 }
 
@@ -259,12 +187,6 @@ func TestPurchaseOrderCalculationRejectsInvalidRowsAndPercents(t *testing.T) {
 		{"row discount below 0", PurchaseOrderCalcInput{Lines: []PurchaseOrderCalcLine{
 			discountedLine(10000, 100, -1),
 		}}},
-		{"whole discount above 100", PurchaseOrderCalcInput{
-			Lines: []PurchaseOrderCalcLine{line(10000, 100)}, DiscountPercent: 101,
-		}},
-		{"whole discount below 0", PurchaseOrderCalcInput{
-			Lines: []PurchaseOrderCalcLine{line(10000, 100)}, DiscountPercent: -1,
-		}},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -304,12 +226,12 @@ func TestPurchaseOrderCalculationRejectsOverflowInsteadOfWrapping(t *testing.T) 
 			stage: "subtotal",
 		},
 		{
-			// The adjustment is added after tax, so it is checked there too.
+			// The line is at the bound; PPN on top pushes the grand total past
+			// it, so the final stage is the one that refuses.
 			name: "grand total",
 			input: PurchaseOrderCalcInput{
-				Lines:            []PurchaseOrderCalcLine{line(10000, MaxExactMinor)},
-				AdjustmentMinor:  MaxExactMinor,
-				AdjustmentReason: "Overflow",
+				Lines:  []PurchaseOrderCalcLine{line(10000, MaxExactMinor)},
+				PpnBps: 1100,
 			},
 			stage: "grand total",
 		},
@@ -364,24 +286,6 @@ func TestPurchaseOrderCalculationRefusesAmountsBeyondExactTransportRange(t *test
 				line(MaxExactMinor+1, 1),
 			}},
 			stage: "line 1 quantity",
-		},
-		{
-			name: "adjustment above the bound",
-			input: PurchaseOrderCalcInput{
-				Lines:            []PurchaseOrderCalcLine{line(10000, 100)},
-				AdjustmentMinor:  MaxExactMinor + 1,
-				AdjustmentReason: "Too large",
-			},
-			stage: "adjustment",
-		},
-		{
-			name: "adjustment below the bound",
-			input: PurchaseOrderCalcInput{
-				Lines:            []PurchaseOrderCalcLine{line(10000, 100)},
-				AdjustmentMinor:  -MaxExactMinor - 1,
-				AdjustmentReason: "Too large",
-			},
-			stage: "adjustment",
 		},
 	}
 	for _, testCase := range cases {

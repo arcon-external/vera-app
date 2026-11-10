@@ -227,12 +227,6 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
-function checkbox(label: string): HTMLInputElement {
-  const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
-  if (found === null || found.type !== "checkbox") throw new Error(`no checkbox labelled ${label}`);
-  return found;
-}
-
 function typeInto(element: HTMLInputElement, value: string): void {
   act(() => {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -456,29 +450,21 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     const transport = fakeTransport(null);
     await renderEditor(transport, orderWithLine);
 
-    // Invalidate four text fields. All four must be named; nothing is
-    // silently sliced after the third.
-    typeInto(input("Line 1 quantity"), "");
+    // Invalidate the line fields. Both must be named; nothing is silently
+    // sliced after the first.
+    typeInto(input("Quantity for line 1"), "");
     await act(async () => {
-      input("Line 1 quantity").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      input("Quantity for line 1").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     });
-    typeInto(input("Line 1 unit price"), "abc");
+    typeInto(input("Unit price for line 1"), "abc");
     await act(async () => {
-      input("Line 1 unit price").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
-    typeInto(input("Whole-PO discount"), "999");
-    await act(async () => {
-      input("Whole-PO discount").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    });
-    typeInto(input("Adjustment"), "abc");
-    await act(async () => {
-      input("Adjustment").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      input("Unit price for line 1").dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     });
     await flush();
 
     if (shellActions === null) throw new Error("no shell actions reported");
-    expect(shellActions.unresolvedCount).toBeGreaterThan(3);
-    for (const label of ["Line 1 quantity", "Line 1 unit price", "Whole-PO discount", "Adjustment"]) {
+    expect(shellActions.unresolvedCount).toBeGreaterThan(1);
+    for (const label of ["Line 1 quantity", "Line 1 unit price"]) {
       expect(shellActions.blockedMessage).toContain(label);
     }
 
@@ -487,7 +473,7 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     });
     await flush();
     // The first invalid field is focused so its error becomes visible.
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
     const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map(
       (node) => node.textContent
     );
@@ -520,7 +506,7 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
 
     // Focus the quantity, make it invalid, and invoke Final Save without
     // blurring first. Readiness must commit the pending value and block.
-    const field = input("Line 1 quantity");
+    const field = input("Quantity for line 1");
     await act(async () => {
       field.focus();
     });
@@ -533,7 +519,7 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
   });
 });
 
@@ -662,7 +648,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(
       document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
     ).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
   });
 
@@ -743,7 +729,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(
       document.querySelector('button[aria-label="Use Quotation for Line 1 quantity"]')
     ).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
   });
 
@@ -820,14 +806,14 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     ).toBeNull();
     // A usable live target receives focus: the enabled percent input keeps
     // the entered 0 reviewable by blur-commit without changing any value.
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Discount percentage for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
   });
 
-  it("a disabled-zero row discount commits on blur without toggling and Keeps through retry", async () => {
-    // Root current-value requirement: the unchecked checkbox commits its
-    // shown disabled 0% on blur — no toggle on/off needed to expose the
-    // unresolved difference for Keep resolution.
+  it("a disabled-zero row discount commits through the switch and Keeps through retry", async () => {
+    // The discount switch commits its new state explicitly. Toggling on and
+    // back off records the shown disabled 0% for Keep resolution without
+    // leaving the row enabled.
     const plain = lineItem({ QuantityScaled: 20000 });
     reviewMock.mockResolvedValue({
       Source: {
@@ -868,24 +854,29 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount enabled");
-    const box = checkbox("Line 1 discount enabled");
-    expect(box.checked).toBe(false);
-    expect(box.disabled).toBe(false);
-    expect(input("Line 1 discount percent").disabled).toBe(true);
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Enable a discount for line 1");
+    const toggle = button("Enable a discount for line 1");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.hasAttribute("disabled")).toBe(false);
+    expect(input("Discount percentage for line 1").disabled).toBe(true);
 
-    // Blur commits the current disabled value without changing it.
+    // The switch commits explicitly; on then back off records the disabled 0.
     await act(async () => {
-      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      toggle.click();
     });
     await flush();
-    expect(box.checked).toBe(false);
+    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("true");
+    await act(async () => {
+      button("Enable a discount for line 1").click();
+    });
+    await flush();
+    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("false");
     button("Keep PO entry for Line 1 discount").click();
     await flush();
     button("Yes, keep PO entry for Line 1 discount").click();
     await flush();
-    expect(checkbox("Line 1 discount enabled").checked).toBe(false);
-    expect(input("Line 1 discount percent").value).toBe("0");
+    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("false");
+    expect(input("Discount percentage for line 1").value).toBe("0");
 
     await act(async () => {
       shellActions?.onFinalSave();
@@ -899,10 +890,9 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(document.body.textContent).toContain("PO entry kept in the reconciliation pane.");
   });
 
-  it("toggling the discount checkbox on then blurring does not duplicate or reopen anything", async () => {
-    // onChange commits the toggled value; the following blur recommits the
-    // same value and must be a no-op: no duplicate item, no reopened choice,
-    // no appended history.
+  it("toggling the discount switch on commits once and does not duplicate or reopen anything", async () => {
+    // The switch click commits the toggled value; a following focus event
+    // must be a no-op: no duplicate item, no reopened choice, no history.
     const plain = lineItem({ QuantityScaled: 20000 });
     reviewMock.mockResolvedValue({
       Source: {
@@ -936,26 +926,29 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     const transport = fakeTransport(savedSession([]));
     await renderEditor(transport, linkedOrder({ Items: [plain] }));
 
-    const box = checkbox("Line 1 discount enabled");
+    const toggle = button("Enable a discount for line 1");
     await act(async () => {
-      box.click();
+      toggle.click();
     });
     await flush();
-    expect(box.checked).toBe(true);
-    expect(document.body.textContent).toContain("Matches the Quotation");
-    // Blur with the toggled value still current: still matched, still no item.
+    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("true");
+    expect(document.body.textContent).toContain("Line 1 discount: matches the Quotation");
+    // A later focus event with the toggled value still current: still
+    // matched, still no item.
     await act(async () => {
-      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      button("Enable a discount for line 1").dispatchEvent(
+        new FocusEvent("focusout", { bubbles: true })
+      );
     });
     await flush();
-    expect(box.checked).toBe(true);
-    expect(document.body.textContent).toContain("Matches the Quotation");
+    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("true");
+    expect(document.body.textContent).toContain("Line 1 discount: matches the Quotation");
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
     ).toBeNull();
   });
 
-  it("re-blurring a kept discount does not reopen the choice or duplicate history", async () => {
+  it("a kept discount is not reopened by a later switch focus event", async () => {
     const plain = lineItem({ QuantityScaled: 20000 });
     reviewMock.mockResolvedValue({
       Source: {
@@ -989,10 +982,13 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     const transport = fakeTransport(savedSession([]));
     await renderEditor(transport, linkedOrder({ Items: [plain] }));
 
-    // Blur the unchecked box: commits disabled 0, exposes Keep.
-    const box = checkbox("Line 1 discount enabled");
+    // Toggle on then off: the switch commits the disabled 0, exposing Keep.
     await act(async () => {
-      box.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      button("Enable a discount for line 1").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Enable a discount for line 1").click();
     });
     await flush();
     button("Keep PO entry for Line 1 discount").click();
@@ -1001,9 +997,10 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     expect(document.body.textContent).toContain("Kept PO");
 
-    // Re-blur the kept value: the resolved choice stays, history untouched.
+    // A later focus event on the kept switch: the resolved choice stays,
+    // history untouched.
     await act(async () => {
-      checkbox("Line 1 discount enabled").dispatchEvent(
+      button("Enable a discount for line 1").dispatchEvent(
         new FocusEvent("focusout", { bubbles: true })
       );
     });
@@ -1017,10 +1014,10 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     ).toBeNull();
   });
 
-  it("a disabled-zero row discount against an enabled source focuses the checkbox", async () => {
+  it("a disabled-zero row discount against an enabled source focuses the switch", async () => {
     // Reverse direction: PO disabled 0% vs source enabled 10%. The percent
-    // input is disabled, so the checkbox is the usable target; toggling it
-    // on commits for Keep/Use review.
+    // input is disabled, so the switch is the usable target; toggling it on
+    // commits for Keep/Use review.
     const plain = lineItem({ QuantityScaled: 20000 });
     reviewMock.mockResolvedValue({
       Source: {
@@ -1061,7 +1058,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount enabled");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Enable a discount for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
   });
 
@@ -1106,7 +1103,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Discount percentage for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 discount");
   });
 
@@ -1151,11 +1148,11 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 discount percent");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Discount percentage for line 1");
 
     // Blur commits the shown 0 unchanged, Keep preserves enabled 0, and the
     // retry opens the read-only receipt with kept provenance.
-    const percent = input("Line 1 discount percent");
+    const percent = input("Discount percentage for line 1");
     await act(async () => {
       percent.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     });
@@ -1217,7 +1214,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 description");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Description for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 description");
   });
 
@@ -1262,7 +1259,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 unit of measure");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Unit of measure for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 unit of measure");
   });
 
@@ -1307,7 +1304,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     await flush();
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 unit price");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Unit price for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 unit price");
   });
 
@@ -1359,54 +1356,6 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Incoterms");
   });
 
-  it("an unreviewed whole-PO discount blocks entry and focuses its field", async () => {
-    reviewMock.mockResolvedValue({
-      Source: {
-        QuotationID: 12,
-        RevisionNumber: 1,
-        QuoteNumber: "1502260052",
-        CustomerID: 2,
-        CustomerName: "PT. Buyer",
-        Currency: "IDR",
-        PaymentTerms: "45 days",
-        Incoterms: "EXW",
-        DiscountPercent: 0,
-        PrintedSubtotalMinor: 20000,
-        PrintedDiscountMinor: 0,
-        PrintedPpnMinor: 0,
-        PrintedGrandTotalMinor: 20000,
-        Lines: [{ ...lineSource, QuantityScaled: 20000 }],
-      },
-      DocumentState: "none",
-      Order: linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], DiscountPercent: 1 }),
-    });
-    updateMock.mockImplementation(async (input: unknown) => {
-      const fields = input as Record<string, unknown>;
-      return {
-        Order: linkedOrder({
-          Items: [lineItem({ QuantityScaled: 20000 })],
-          DiscountPercent: Number(fields.DiscountPercent ?? 0),
-          Version: Number(fields.ExpectedVersion ?? 4),
-        }),
-      };
-    });
-    const transport = fakeTransport(savedSession([]));
-    await renderEditor(
-      transport,
-      linkedOrder({ Items: [lineItem({ QuantityScaled: 20000 })], DiscountPercent: 1 })
-    );
-
-    if (shellActions === null) throw new Error("no shell actions reported");
-    await act(async () => {
-      shellActions?.onFinalSave();
-    });
-    await flush();
-    await flush();
-    expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Whole-PO discount");
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Whole-PO discount");
-  });
-
   it("a persisted empty session with an unreviewed line difference blocks entry and focuses the live field", async () => {    reviewMock.mockResolvedValue({
       Source: {
         QuotationID: 12,
@@ -1455,7 +1404,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     expect(
       document.querySelector('button[aria-label="Use PO entry for Line 1 quantity"]')
     ).toBeNull();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
     expect(document.querySelector('[role="alert"]')?.textContent).toContain("Line 1 quantity");
   });
 
@@ -1501,7 +1450,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
 
     // Commit and resolve the quantity in the pane; the header divergence
     // stays uncommitted with no pane item.
-    const quantity = input("Line 1 quantity");
+    const quantity = input("Quantity for line 1");
     typeInto(quantity, "3");
     await act(async () => {
       quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
@@ -1590,11 +1539,11 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     await flush();
     // Entry blocks first: no review, live quantity focused.
     expect(document.body.textContent).not.toContain("Review differences before saving");
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 1 quantity");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Quantity for line 1");
 
     // Commit on blur, Keep in the pane, then retry: the recorded choice
     // opens the read-only receipt.
-    const quantity = input("Line 1 quantity");
+    const quantity = input("Quantity for line 1");
     typeInto(quantity, "3");
     await act(async () => {
       quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
@@ -1724,7 +1673,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
 
     // Commit the quantity difference, then resolve it in the pane so the
     // review has recorded provenance to render.
-    const quantity = input("Line 1 quantity");
+    const quantity = input("Quantity for line 1");
     typeInto(quantity, "3");
     await act(async () => {
       quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
@@ -1792,7 +1741,7 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
 
     button("Add line from Quotation 2").click();
     await flush();
-    expect(document.activeElement?.getAttribute("aria-label")).toBe("Line 2 description");
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Description for line 2");
     expect(document.body.textContent).toContain("Line 2 added.");
   });
 

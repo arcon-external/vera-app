@@ -16,7 +16,6 @@ import {
   isPurchaseOrderDirty,
   listValidationBlockers,
   MAX_PAYMENT_TERMS_LENGTH,
-  parseAdjustmentMinor,
   parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
@@ -24,7 +23,6 @@ import {
   purchaseOrderEditorReducer,
   purchaseOrderPpnBps,
   sourceStateOf,
-  MAX_ADJUSTMENT_REASON_LENGTH,
   MAX_EXACT_MINOR,
   validDateField,
   type PurchaseOrderDTO,
@@ -147,8 +145,6 @@ interface SharedCalculationCase {
   }>;
   discountPercent: number;
   ppnBps: number;
-  adjustmentMinor: number;
-  adjustmentReason: string;
   want: Record<string, number>;
 }
 
@@ -163,24 +159,6 @@ const calculationFixture = JSON.parse(
     "utf8"
   )
 ) as { cases: SharedCalculationCase[] };
-
-interface SharedCodePoint {
-  codePoint: number;
-  name: string;
-  why?: string;
-}
-
-const whitespaceFixture = JSON.parse(
-  readFileSync(
-    fileURLToPath(
-      new URL(
-        "../../backend/testdata/po_adjustment_whitespace.json",
-        import.meta.url
-      )
-    ),
-    "utf8"
-  )
-) as { blank: SharedCodePoint[]; content: SharedCodePoint[] };
 
 describe("PO quantity parsing (issue #468)", () => {
   it("parses up to four decimal places into the exact 10^4 scale", () => {
@@ -245,23 +223,15 @@ describe("PO unit-price parsing (issue #468)", () => {
     expect(parseUnitPriceMinor(USD, "1.234")).toBeNull();
   });
 
-  it("refuses a unit price or adjustment beyond the exact transport range", () => {
+  it("refuses a unit price beyond the exact transport range", () => {
     expect(parseUnitPriceMinor(USD, "90,071,992,547,409.91")).toBe(
       MAX_EXACT_MINOR
     );
     expect(parseUnitPriceMinor(USD, "90,071,992,547,409.92")).toBeNull();
-    expect(parseAdjustmentMinor(USD, "-90,071,992,547,409.91")).toBe(
-      -MAX_EXACT_MINOR
-    );
-    expect(parseAdjustmentMinor(USD, "-90,071,992,547,409.92")).toBeNull();
-    expect(parseAdjustmentMinor(USD, "90,071,992,547,409.92")).toBeNull();
   });
 
   it("treats redundant decimal formatting as the same amount", () => {
     expect(parseUnitPriceMinor(USD, "1.0")).toBe(parseUnitPriceMinor(USD, "1.00"));
-    expect(parseAdjustmentMinor(USD, "-1.0")).toBe(
-      parseAdjustmentMinor(USD, "-1.00")
-    );
   });
 
   it("formats a stored amount back into its money input", () => {
@@ -571,7 +541,7 @@ describe("PO draft update payload (issue #468)", () => {
 // Issue #470: the exact calculation, mirrored from the Go pipeline. Expectations
 // are worked literals, never a second call of the same formula.
 
-describe("PO discount and adjustment parsing (issue #470)", () => {
+describe("PO discount parsing (issue #470)", () => {
   it("accepts whole percentages from 0 to 100 and nothing else", () => {
     expect(parseDiscountPercent("0")).toBe(0);
     expect(parseDiscountPercent("10")).toBe(10);
@@ -584,16 +554,6 @@ describe("PO discount and adjustment parsing (issue #470)", () => {
     for (const raw of ["10.5", "-5", "101", "abc", "1e2", "1,5"]) {
       expect(parseDiscountPercent(raw), raw).toBeNull();
     }
-  });
-
-  it("reads the signed adjustment in the PO currency and keeps empty as none", () => {
-    expect(parseAdjustmentMinor(USD, "")).toBe(0);
-    expect(parseAdjustmentMinor(USD, "0.00")).toBe(0);
-    expect(parseAdjustmentMinor(USD, "-2.50")).toBe(-250);
-    expect(parseAdjustmentMinor(USD, "$-2.50")).toBe(-250);
-    expect(parseAdjustmentMinor(USD, "2.50")).toBe(250);
-    expect(parseAdjustmentMinor(IDR, "-1.500")).toBe(-1500);
-    expect(parseAdjustmentMinor(USD, "abc")).toBeNull();
   });
 });
 
@@ -614,9 +574,6 @@ describe("PO explained calculation (issue #470)", () => {
       ppnBps,
       header: {
         ...base.header,
-        discountPercent: "0",
-        adjustment: "",
-        adjustmentReason: "",
         ...header,
       },
       lines: lines.map((line, index) => ({
@@ -630,6 +587,9 @@ describe("PO explained calculation (issue #470)", () => {
         discountPercent: line.discountPercent ?? "0",
         quotationItemNo: null,
         quotationSubNo: null,
+        groupKey: "",
+        parentDescription: "",
+        descriptionLines: [],
       })),
     };
   }
@@ -655,24 +615,21 @@ describe("PO explained calculation (issue #470)", () => {
 
     // 2.5 x 650 = 1625; 10% is 162.5 and truncates to 162.
     const discounted = calculatePurchaseOrder(
-      stateWith(
-        [
-          {
-            quantity: "2.5",
-            unitPrice: "6.50",
-            discountEnabled: true,
-            discountPercent: "10",
-          },
-          { quantity: "2", unitPrice: "4.20" },
-          {
-            quantity: "1",
-            unitPrice: "4.50",
-            discountEnabled: true,
-            discountPercent: "50",
-          },
-        ],
-        { discountPercent: "10" },
-      ),
+      stateWith([
+        {
+          quantity: "2.5",
+          unitPrice: "6.50",
+          discountEnabled: true,
+          discountPercent: "10",
+        },
+        { quantity: "2", unitPrice: "4.20" },
+        {
+          quantity: "1",
+          unitPrice: "4.50",
+          discountEnabled: true,
+          discountPercent: "50",
+        },
+      ]),
       USD,
     );
     expect(discounted.lines).toEqual([
@@ -680,94 +637,32 @@ describe("PO explained calculation (issue #470)", () => {
       { grossMinor: 840, discountMinor: 0, netMinor: 840 },
       { grossMinor: 450, discountMinor: 225, netMinor: 225 },
     ]);
-    // Subtotal 2528; 10% whole discount is 252.8 -> 252; no PPN.
+    // Subtotal 2528; the whole-PO discount is retired, so the subtotal is the
+    // base PPN is charged on and no stage sits between them.
     expect(discounted.totals).toMatchObject({
       grossMinor: 2915,
       rowDiscountMinor: 387,
       subtotalMinor: 2528,
-      discountMinor: 252,
-      afterDiscountMinor: 2276,
+      discountMinor: 0,
+      afterDiscountMinor: 2528,
       ppnMinor: 0,
-      adjustmentMinor: 0,
-      grandTotalMinor: 2276,
+      grandTotalMinor: 2528,
     });
     expect(discounted.error).toBeNull();
   });
 
-  it("takes tax on the discounted subtotal and adds it separately", () => {
+  it("takes tax on the subtotal and adds it separately", () => {
     const calculation = calculatePurchaseOrder(
-      stateWith(
-        [{ quantity: "1", unitPrice: "10.00" }],
-        { discountPercent: "10" },
-        1100,
-      ),
+      stateWith([{ quantity: "1", unitPrice: "10.00" }], {}, 1100),
       USD,
     );
     expect(calculation.totals).toMatchObject({
       subtotalMinor: 1000,
-      discountMinor: 100,
-      afterDiscountMinor: 900,
-      ppnMinor: 99,
-      grandTotalMinor: 999,
-    });
-  });
-
-  it("adds the signed adjustment last, without touching rows or tax", () => {
-    const calculation = calculatePurchaseOrder(
-      stateWith(
-        [{ quantity: "1", unitPrice: "10.00" }],
-        {
-          adjustment: "-0.10",
-          adjustmentReason: "Printed total",
-        },
-        1100,
-      ),
-      USD,
-    );
-    expect(calculation.totals).not.toBeNull();
-    expect(calculation.totals!.ppnMinor).toBe(110);
-    expect(calculation.totals!.adjustmentMinor).toBe(-10);
-    expect(calculation.totals!.grandTotalMinor).toBe(1100);
-    expect(calculation.lines[0]).toEqual({
-      grossMinor: 1000,
       discountMinor: 0,
-      netMinor: 1000,
+      afterDiscountMinor: 1000,
+      ppnMinor: 110,
+      grandTotalMinor: 1110,
     });
-
-    const positive = calculatePurchaseOrder(
-      stateWith(
-        [{ quantity: "1", unitPrice: "10.00" }],
-        {
-          adjustment: "0.25",
-          adjustmentReason: "Freight",
-        },
-        1100,
-      ),
-      USD,
-    );
-    expect(positive.totals).not.toBeNull();
-    expect(positive.totals!.grandTotalMinor).toBe(1135);
-  });
-
-  it("marks an unexplained adjustment and a negative total as errors", () => {
-    const unexplained = calculatePurchaseOrder(
-      stateWith([{ quantity: "1", unitPrice: "10.00" }], { adjustment: "-0.10" }),
-      USD,
-    );
-    expect(unexplained.error).toContain("reason");
-
-    const negative = calculatePurchaseOrder(
-      stateWith(
-        [{ quantity: "1", unitPrice: "1.00" }],
-        {
-          adjustment: "-1.12",
-          adjustmentReason: "Too far",
-        },
-        1100,
-      ),
-      USD,
-    );
-    expect(negative.error).toContain("negative");
   });
 
   it("publishes no totals while a line cannot be parsed", () => {
@@ -830,26 +725,6 @@ describe("PO explained calculation (issue #470)", () => {
     expect(calculation.error).toContain("range");
     expect(calculation.totals).toBeNull();
   });
-
-  it("publishes no totals while a header field cannot be parsed", () => {
-    const badAdjustment = calculatePurchaseOrder(
-      stateWith([{ quantity: "1", unitPrice: "10.00" }], {
-        adjustment: "not money",
-      }),
-      USD,
-    );
-    expect(badAdjustment.totals).toBeNull();
-    expect(badAdjustment.error).toBe("Adjustment must be a signed USD amount.");
-
-    const badDiscount = calculatePurchaseOrder(
-      stateWith([{ quantity: "1", unitPrice: "10.00" }], {
-        discountPercent: "10.5",
-      }),
-      USD,
-    );
-    expect(badDiscount.totals).toBeNull();
-    expect(badDiscount.error).toBe("Whole-PO discount must be between 0 and 100.");
-  });
 });
 
 describe("PO calculation agreement with the backend (issue #470 wave 3)", () => {
@@ -859,10 +734,7 @@ describe("PO calculation agreement with the backend (issue #470 wave 3)", () => 
   // calculate it and build the save payload for it.
   function fixtureOrder(testCase: SharedCalculationCase): PurchaseOrderDTO {
     return order({
-      DiscountPercent: testCase.discountPercent,
       PpnBps: testCase.ppnBps,
-      AdjustmentMinor: testCase.adjustmentMinor,
-      AdjustmentReason: testCase.adjustmentReason,
       Items: testCase.lines.map((line, index) => ({
         QuotationItemNo: null,
         QuotationSubNo: null,
@@ -908,9 +780,6 @@ describe("PO calculation agreement with the backend (issue #470 wave 3)", () => 
         testCase.want.afterDiscountMinor
       );
       expect(calculation.totals!.ppnMinor).toBe(testCase.want.ppnMinor);
-      expect(calculation.totals!.adjustmentMinor).toBe(
-        testCase.want.adjustmentMinor
-      );
       expect(calculation.totals!.grandTotalMinor).toBe(
         testCase.want.grandTotalMinor
       );
@@ -932,128 +801,35 @@ describe("PO calculation agreement with the backend (issue #470 wave 3)", () => 
         expect(input.DiscountEnabled).toBe(line.discountEnabled);
         expect(input.DiscountPercent).toBe(line.discountPercent);
       }
-      expect(payload.input!.DiscountPercent).toBe(testCase.discountPercent);
-      expect(payload.input!.AdjustmentMinor).toBe(testCase.adjustmentMinor);
-      expect(payload.input!.AdjustmentReason).toBe(testCase.adjustmentReason);
+      expect(payload.input!.DiscountPercent).toBe(0);
+      expect(payload.input!.AdjustmentMinor).toBe(0);
+      expect(payload.input!.AdjustmentReason).toBe("");
     }
-  });
-});
-
-describe("PO adjustment reason agreement (issue #470 wave 2)", () => {
-  function reasonState(reason: string, adjustment = "-0.10") {
-    const base = initial();
-    return purchaseOrderEditorReducer(base, {
-      type: "headerChanged",
-      patch: { adjustment, adjustmentReason: reason },
-    });
-  }
-
-  it("bounds the reason by Unicode code points, not UTF-16 units", () => {
-    expect(MAX_ADJUSTMENT_REASON_LENGTH).toBe(200);
-
-    const ideographs = "界".repeat(MAX_ADJUSTMENT_REASON_LENGTH);
-    const accepted = buildPurchaseOrderUpdate(reasonState(ideographs), USD);
-    expect(accepted.error).toBeNull();
-    expect(accepted.input?.AdjustmentReason).toBe(ideographs);
-
-    const over = buildPurchaseOrderUpdate(
-      reasonState(ideographs + "界"),
-      USD,
-    );
-    expect(over.input).toBeNull();
-    expect(over.error).toBe("Adjustment reason must be 200 characters or fewer.");
-
-    // Astral text: each emoji is two UTF-16 units but one code point, so 200
-    // must fit where `.length` would count 400.
-    const emoji = "😀".repeat(MAX_ADJUSTMENT_REASON_LENGTH);
-    expect(Array.from(emoji)).toHaveLength(MAX_ADJUSTMENT_REASON_LENGTH);
-    expect(buildPurchaseOrderUpdate(reasonState(emoji), USD).input).not.toBeNull();
-    expect(
-      buildPurchaseOrderUpdate(reasonState(emoji + "😀"), USD).error,
-    ).toBe("Adjustment reason must be 200 characters or fewer.");
-  });
-
-  it("requires a reason that is not whitespace-only", () => {
-    // The set is the shared fixture's: the same code points the store's
-    // strings.TrimSpace removes and the schema's CHECK refuses. String.trim()
-    // is deliberately not used -- it strips a BOM that Go and the database keep,
-    // and misses NEL (U+0085), which both of them remove.
-    expect(whitespaceFixture.blank.length).toBeGreaterThan(0);
-    for (const point of whitespaceFixture.blank) {
-      const reason = String.fromCodePoint(point.codePoint);
-      const result = buildPurchaseOrderUpdate(reasonState(reason), USD);
-      expect(result.input, `${point.name} (U+${point.codePoint.toString(16)})`).toBeNull();
-      expect(result.error, point.name).toBe("An adjustment requires a reason.");
-    }
-    const joined = whitespaceFixture.blank
-      .map((point) => String.fromCodePoint(point.codePoint))
-      .join("");
-    expect(buildPurchaseOrderUpdate(reasonState(joined), USD).error).toBe(
-      "An adjustment requires a reason."
-    );
-
-    // Content the editor must keep verbatim, even when it is invisible.
-    for (const point of whitespaceFixture.content) {
-      const reason = String.fromCodePoint(point.codePoint);
-      const result = buildPurchaseOrderUpdate(reasonState(reason), USD);
-      expect(result.error, `${point.name} is content`).toBeNull();
-      expect(result.input?.AdjustmentReason, point.name).toBe(reason);
-    }
-  });
-
-  it("trims the stored reason and drops it when the adjustment is zero", () => {
-    const trimmed = buildPurchaseOrderUpdate(
-      reasonState("  Match the printed total  "),
-      USD,
-    );
-    expect(trimmed.input?.AdjustmentReason).toBe("Match the printed total");
-
-    const noAmount = buildPurchaseOrderUpdate(
-      reasonState("typed before the amount", ""),
-      USD,
-    );
-    expect(noAmount.error).toBeNull();
-    expect(noAmount.input?.AdjustmentReason).toBe("");
-
-    // A too-long reason is refused even with no amount, exactly as the Go
-    // store checks length before it drops an empty adjustment's reason.
-    const noAmountTooLong = buildPurchaseOrderUpdate(
-      reasonState("x".repeat(MAX_ADJUSTMENT_REASON_LENGTH + 1), ""),
-      USD,
-    );
-    expect(noAmountTooLong.error).toBe(
-      "Adjustment reason must be 200 characters or fewer.",
-    );
   });
 });
 
 describe("PO calculation in the saved payload (issue #470)", () => {
-  it("sends the row and whole-order discounts and the signed adjustment", () => {
+  it("sends the row discounts and pins the retired whole-order stages to zero", () => {
     const state = purchaseOrderEditorReducer(initial(), {
-      type: "headerChanged",
-      patch: {
-        discountPercent: "10",
-        adjustment: "-0.26",
-        adjustmentReason: "Match the printed total",
-      },
-    });
-    const withRow = purchaseOrderEditorReducer(state, {
       type: "lineChanged",
       key: 0,
       patch: { discountEnabled: true, discountPercent: "10" },
     });
-    const result = buildPurchaseOrderUpdate(withRow, USD);
+    const result = buildPurchaseOrderUpdate(state, USD);
     expect(result.error).toBeNull();
     const input = result.input!;
-    expect(input.DiscountPercent).toBe(10);
-    expect(input.AdjustmentMinor).toBe(-26);
-    expect(input.AdjustmentReason).toBe("Match the printed total");
+    // The whole-PO discount and the signed adjustment are retired (#573); the
+    // payload keeps their columns dormant rather than letting a stale value
+    // survive a save.
+    expect(input.DiscountPercent).toBe(0);
+    expect(input.AdjustmentMinor).toBe(0);
+    expect(input.AdjustmentReason).toBe("");
     expect(input.Items[0].DiscountEnabled).toBe(true);
     expect(input.Items[0].DiscountPercent).toBe(10);
     expect(input.Items[1].DiscountEnabled).toBe(false);
   });
 
-  it("names the bad percentage, the missing reason and the negative total", () => {
+  it("names the bad row percentage", () => {
     const badRow = purchaseOrderEditorReducer(initial(), {
       type: "lineChanged",
       key: 1,
@@ -1063,35 +839,11 @@ describe("PO calculation in the saved payload (issue #470)", () => {
       input: null,
       error: "Line 2: discount must be between 0 and 100.",
     });
-
-    const missingReason = purchaseOrderEditorReducer(initial(), {
-      type: "headerChanged",
-      patch: { adjustment: "-0.10", adjustmentReason: "" },
-    });
-    expect(buildPurchaseOrderUpdate(missingReason, USD).error).toBe(
-      "An adjustment requires a reason.",
-    );
-
-    const negative = purchaseOrderEditorReducer(initial(), {
-      type: "headerChanged",
-      patch: {
-        discountPercent: "100",
-        adjustment: "-0.01",
-        adjustmentReason: "Too far",
-      },
-    });
-    expect(buildPurchaseOrderUpdate(negative, USD).error).toContain("negative");
   });
 
-  it("tracks the calculation fields as unsaved changes", () => {
+  it("tracks a row discount as an unsaved change", () => {
     const base = initial();
     expect(isPurchaseOrderDirty(base)).toBe(false);
-
-    const discount = purchaseOrderEditorReducer(base, {
-      type: "headerChanged",
-      patch: { discountPercent: "6" },
-    });
-    expect(isPurchaseOrderDirty(discount)).toBe(true);
 
     const row = purchaseOrderEditorReducer(base, {
       type: "lineChanged",
@@ -1099,18 +851,11 @@ describe("PO calculation in the saved payload (issue #470)", () => {
       patch: { discountPercent: "15" },
     });
     expect(isPurchaseOrderDirty(row)).toBe(true);
-
-    const adjustment = purchaseOrderEditorReducer(base, {
-      type: "headerChanged",
-      patch: { adjustmentReason: "Changed" },
-    });
-    expect(isPurchaseOrderDirty(adjustment)).toBe(true);
   });
 
-  it("restores the stored discounts and the tax rate from a saved order", () => {
+  it("restores the stored row discounts and the tax rate from a saved order", () => {
     const state = initial();
     expect(state.ppnBps).toBe(1100);
-    expect(state.header.discountPercent).toBe("5");
     expect(state.lines[0].discountEnabled).toBe(true);
     expect(state.lines[0].discountPercent).toBe("10");
     expect(state.lines[1].discountEnabled).toBe(false);
@@ -1455,12 +1200,12 @@ describe("validation blockers for the readiness gate (U8)", () => {
     ]);
     expect(blockers[0]).toMatchObject({
       label: "Line 1 quantity",
-      fieldLabel: "Line 1 quantity",
+      fieldLabel: "Quantity for line 1",
     });
     expect(blockers[0]?.message).toContain("quantity must be positive");
   });
 
-  it("names invalid header fields and an invalid whole-PO discount", () => {
+  it("names invalid header fields", () => {
     const state = initial({
       PaymentTerms: "x".repeat(600),
       Items: [],
@@ -1470,13 +1215,11 @@ describe("validation blockers for the readiness gate (U8)", () => {
       header: {
         ...state.header,
         poDate: "not-a-date",
-        discountPercent: "101",
       },
       lines: [],
     };
     const blockers = listValidationBlockers(edited, USD);
     expect(blockers.map((entry) => entry.key)).toContain("header:poDate");
-    expect(blockers.map((entry) => entry.key)).toContain("header:discountPercent");
     expect(blockers.map((entry) => entry.key)).toContain("header:paymentTerms");
   });
 
@@ -1487,5 +1230,62 @@ describe("validation blockers for the readiness gate (U8)", () => {
     });
     expect(buildPurchaseOrderUpdate(state, USD).error).toBeNull();
     expect(listValidationBlockers(state, USD)).toEqual([]);
+  });
+});
+
+// Issue #573: the split-line fields travel with the replace-lines payload and
+// are bounded on the client before the server has to refuse them.
+describe("PO split-line payload (#573)", () => {
+  it("sends the group key, parent title and description lines", () => {
+    const state = initial();
+    state.lines[0] = {
+      ...state.lines[0],
+      groupKey: "g:test-panel",
+      parentDescription: "LV distribution panel",
+      descriptionLines: ["IP54 enclosure", "Busbar included"],
+    };
+    const payload = buildPurchaseOrderUpdate(state, USD);
+    expect(payload.error).toBeNull();
+    expect(payload.input!.Items[0]).toMatchObject({
+      GroupKey: "g:test-panel",
+      ParentDescription: "LV distribution panel",
+      DescriptionLines: ["IP54 enclosure", "Busbar included"],
+    });
+  });
+
+  it("refuses an over-long parent title and too many description lines", () => {
+    const longTitle = initial();
+    longTitle.lines[0] = {
+      ...longTitle.lines[0],
+      groupKey: "g:test-panel",
+      parentDescription: "x".repeat(501),
+    };
+    expect(buildPurchaseOrderUpdate(longTitle, USD).error).toContain(
+      "split-line title must be 500 characters or fewer"
+    );
+
+    const manyLines = initial();
+    manyLines.lines[0] = {
+      ...manyLines.lines[0],
+      groupKey: "g:test-panel",
+      parentDescription: "Panel",
+      descriptionLines: Array.from({ length: 51 }, () => "line"),
+    };
+    expect(buildPurchaseOrderUpdate(manyLines, USD).error).toContain(
+      "at most 50 description lines"
+    );
+  });
+
+  it("refuses an over-long description line", () => {
+    const state = initial();
+    state.lines[0] = {
+      ...state.lines[0],
+      groupKey: "g:test-panel",
+      parentDescription: "Panel",
+      descriptionLines: ["x".repeat(501)],
+    };
+    expect(buildPurchaseOrderUpdate(state, USD).error).toContain(
+      "each description line must be 500 characters or fewer"
+    );
   });
 });

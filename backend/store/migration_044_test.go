@@ -720,6 +720,47 @@ func po518ApplyThrough(t *testing.T, database *Store, maxVersion int) {
 	}
 }
 
+// po518ApplyOnly applies one production migration without applying the ones
+// before it. The 044 upgrade test needs 045's additive columns for the current
+// store read path while 044 itself remains the migration under test.
+func po518ApplyOnly(t *testing.T, database *Store, version int) {
+	t.Helper()
+	ctx := context.Background()
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+	migrations, err := loadMigrations(database.config.Schema)
+	if err != nil {
+		t.Fatalf("load migrations: %v", err)
+	}
+	for _, migration := range migrations {
+		if migration.version != version {
+			continue
+		}
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin migration %d: %v", version, err)
+		}
+		if _, err := tx.Exec(ctx, migration.sql); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("apply migration %d: %v", version, err)
+		}
+		if _, err := tx.Exec(ctx, fmt.Sprintf(
+			`INSERT INTO %s.schema_migrations (version, name) VALUES ($1, $2)`, schema),
+			migration.version, migration.name); err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatalf("record migration %d: %v", version, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit migration %d: %v", version, err)
+		}
+		return
+	}
+	t.Fatalf("migration %d not found", version)
+}
+
 // po518RetainedJSON captures the complete retained history content for one PO,
 // excluding only the columns 044 adds, so a pre/post upgrade comparison proves
 // 044 rewrote nothing.
@@ -779,6 +820,12 @@ func po518RetainedJSON(t *testing.T, ctx context.Context, database *Store, poID 
 func TestMigration044Genuine043Upgrade(t *testing.T) {
 	database := po518Unmigrated(t, "vera_po_518_upgrade")
 	po518ApplyThrough(t, database, 43)
+	// The current store read path uses the additive columns from 045-048.
+	// Apply those four without 044 so 044 remains the migration this test
+	// exercises.
+	for _, version := range []int{45, 46, 47, 48} {
+		po518ApplyOnly(t, database, version)
+	}
 	ctx := poContext(t, database)
 
 	pool, err := database.poolOrError()

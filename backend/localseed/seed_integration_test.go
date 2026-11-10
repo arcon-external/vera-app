@@ -342,8 +342,8 @@ func TestSeedFreshLocalDatabaseHasTheApprovedFixtureMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the adjusted PO: %v", err)
 	}
-	if adjusted.AdjustmentMinor <= 0 || strings.TrimSpace(adjusted.AdjustmentReason) == "" {
-		t.Errorf("adjusted PO = %d/%q; want a positive adjustment and a reason",
+	if adjusted.AdjustmentMinor != 0 || strings.TrimSpace(adjusted.AdjustmentReason) != "" {
+		t.Errorf("adjusted PO = %d/%q; want the retired adjustment absent",
 			adjusted.AdjustmentMinor, adjusted.AdjustmentReason)
 	}
 

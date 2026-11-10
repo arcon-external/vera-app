@@ -121,8 +121,7 @@ export function normalizeSession(
 
 export type HeaderFieldKey =
   | "header:paymentTerms"
-  | "header:incoterms"
-  | "header:discountPercent";
+  | "header:incoterms";
 
 export interface HeaderFieldDef {
   key: HeaderFieldKey;
@@ -148,12 +147,6 @@ export const HEADER_FIELDS: Record<HeaderFieldKey, HeaderFieldDef> = {
     label: "Incoterms",
     required: false,
     kind: "text",
-  },
-  "header:discountPercent": {
-    key: "header:discountPercent",
-    label: "Whole-PO discount",
-    required: false,
-    kind: "percent",
   },
 };
 
@@ -384,11 +377,7 @@ export function applyUseResolution(
 
 /** Header items gate Final Save: lines, tax and totals are ticket 05. */
 export function isHeaderItem(item: ReconciliationItem): boolean {
-  return (
-    item.Field === "header:paymentTerms" ||
-    item.Field === "header:incoterms" ||
-    item.Field === "header:discountPercent"
-  );
+  return item.Field === "header:paymentTerms" || item.Field === "header:incoterms";
 }
 
 export function countUnresolvedHeaderItems(items: ReconciliationItem[]): number {
@@ -410,7 +399,6 @@ export interface LatestNotice {
 export interface ReconciliationSourceValues {
   paymentTerms: string;
   incoterms: string;
-  discountPercent: number;
 }
 
 function updatedAtOf(item: ReconciliationItem): string {
@@ -450,13 +438,11 @@ export function paneFilterCounts(items: ReconciliationItem[]): {
 export interface HeaderSourceValues {
   PaymentTerms: string;
   Incoterms: string;
-  DiscountPercent: number;
 }
 
 export interface HeaderCurrentValues {
   paymentTerms: string;
   incoterms: string;
-  discountPercent: string;
 }
 
 /**
@@ -475,19 +461,13 @@ export function prefillDecisionsFromSession(
   const currentByKey: Record<HeaderFieldKey, string | number> = {
     "header:paymentTerms": canonicalText(current.paymentTerms),
     "header:incoterms": canonicalText(current.incoterms),
-    "header:discountPercent": canonicalPercent(current.discountPercent) ?? NaN,
   };
   const sourceByKey: Record<HeaderFieldKey, string | number> = {
     "header:paymentTerms": canonicalText(source.PaymentTerms),
     "header:incoterms": canonicalText(source.Incoterms),
-    "header:discountPercent": source.DiscountPercent,
   };
   for (const item of items) {
-    if (
-      item.Field !== "header:paymentTerms" &&
-      item.Field !== "header:incoterms" &&
-      item.Field !== "header:discountPercent"
-    ) {
+    if (item.Field !== "header:paymentTerms" && item.Field !== "header:incoterms") {
       continue;
     }
     if (item.Status !== "resolved") continue;

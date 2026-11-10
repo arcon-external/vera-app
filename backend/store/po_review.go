@@ -51,6 +51,15 @@ type PurchaseOrderSourceLine struct {
 	UnitPriceMinor  int64
 	DiscountEnabled bool
 	DiscountPercent int16
+	// ParentDescription is the split item's title, used to seed the PO's
+	// grouped rows (#573). Empty for a line that is not a priced part.
+	ParentDescription string
+	// GroupKey is the persisted grouping key the seed writes: `q:<itemNo>`
+	// for a priced part, empty for a plain line.
+	GroupKey string
+	// DescriptionLines are the part's sub-sub lines, seeded from the frozen
+	// revision. Empty when the part has none.
+	DescriptionLines []string
 }
 
 // Label renders the source line as the customer document numbers it: "3" for
@@ -191,8 +200,6 @@ func ComparePurchaseOrder(source PurchaseOrderSource, entered PurchaseOrderRevie
 		entered.PaymentTerms, source.PaymentTerms)
 	comparison.addTextDifference("header:incoterms", "Incoterms",
 		entered.Incoterms, source.Incoterms)
-	comparison.addValueDifference("header:discountPercent", "Whole-PO discount",
-		fmt.Sprintf("%d%%", entered.DiscountPercent), fmt.Sprintf("%d%%", source.DiscountPercent))
 
 	for _, pair := range pairs {
 		sourceLine := source.Lines[pair.sourceIndex]

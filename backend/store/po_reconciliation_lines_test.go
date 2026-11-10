@@ -421,7 +421,6 @@ func TestPOReconciliationTaxItemSeededAtLinkWithKeepChoice(t *testing.T) {
 		[]PurchaseOrderDecision{
 			{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
 			{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
-			{Key: "header:discountPercent", Choice: PurchaseOrderChoicePO},
 		}, []string{"1", "3"}, []int{1}, PurchaseOrderDraftLinkTaxKeep))
 	if err != nil {
 		t.Fatalf("link with keep choice: %v", err)
