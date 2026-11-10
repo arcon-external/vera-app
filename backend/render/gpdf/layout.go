@@ -146,9 +146,11 @@ const (
 	noteLabelPx    = 12
 	noteLabelGapPx = 4
 	// noteListIndentPx is the list indent the stylesheet gives the note's
-	// ul/ol. The marker sits in that gutter: a 3px disc with a 7px gap, or a
-	// right-aligned number, so the item text starts at the same edge.
+	// ul/ol. The marker sits in a fixed noteMarkerW column at the left of that
+	// gutter, followed by noteBulletGapPx, so a bullet disc and a number start
+	// at the same edge and the item text starts at the same edge for both.
 	noteListIndentPx = 18
+	noteMarkerW      = 12
 	noteBulletSizePx = 3
 	noteBulletGapPx  = 7
 

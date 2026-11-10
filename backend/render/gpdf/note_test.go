@@ -234,6 +234,44 @@ func TestNoteRendersNumberedRows(t *testing.T) {
 	}
 }
 
+// TestNoteListMarkersShareOneColumn proves a bullet disc and a numbered marker
+// start at the same x, so the two list types do not look differently indented.
+func TestNoteListMarkersShareOneColumn(t *testing.T) {
+	e := testEngine(t)
+	in := noteInput("- Bullet item\n1. Number item")
+	pages := e.layout(in)
+
+	notePage, noteY, ok := findRun(pages, "Note")
+	if !ok {
+		t.Fatal("the engine did not print the note label")
+	}
+	termsPage, termsY, ok := findRun(pages, "Terms and Conditions")
+	if !ok {
+		t.Fatal("the engine did not print the terms heading")
+	}
+
+	var bulletX float64
+	haveBullet := false
+	for _, prim := range pages[notePage].prims {
+		b, isBox := prim.(box)
+		if !isBox || b.path == nil || b.w != px(noteBulletSizePx) {
+			continue
+		}
+		if b.y > noteY && (termsPage != notePage || b.y < termsY) {
+			bulletX = b.x
+			haveBullet = true
+		}
+	}
+	if !haveBullet {
+		t.Fatal("the engine did not print the bullet disc")
+	}
+	number, ok := findStyledRun(pages, "1.", false, false)
+	if !ok {
+		t.Fatal("the engine did not print the number marker")
+	}
+	assertNear(t, "bullet marker x", bulletX, number.x, 0.01)
+}
+
 // TestItalicFaceIsLoadedAndUsed proves the new asset is a face the engine can
 // parse, measure with and embed, not just a flag on a run. A regular and an
 // italic measurement of the same word must differ, and a document that uses

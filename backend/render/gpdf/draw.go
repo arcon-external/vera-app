@@ -1183,8 +1183,12 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 		lineX := tx
 		if line.bullet || line.marker != "" {
 			lineX = tx + px(noteListIndentPx)
+			// Both list types share one marker column. Left-aligning the
+			// marker (rather than right-aligning it at its own width) is what
+			// makes a bullet disc and a one-digit number start at the same
+			// edge; the item text still starts at lineX for both.
+			markerX := lineX - px(noteBulletGapPx) - px(noteMarkerW)
 			if line.bullet {
-				markerX := lineX - px(noteBulletGapPx) - px(noteBulletSizePx)
 				p.add(box{
 					x: markerX, y: ty + bodyBaselineOffset - px(2.6),
 					w: px(noteBulletSizePx), h: px(noteBulletSizePx),
@@ -1192,9 +1196,8 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 					path: discPath(markerX+px(noteBulletSizePx)/2, ty+bodyBaselineOffset-px(2.6)+px(noteBulletSizePx)/2, px(noteBulletSizePx)),
 				})
 			} else {
-				markerW := e.widthFor(line.marker, px(bodyPx), false, false)
 				p.add(run{
-					x:        lineX - px(noteBulletGapPx) - markerW,
+					x:        markerX,
 					baseline: ty + bodyBaselineOffset, size: px(bodyPx),
 					text: line.marker, color: e.pal.Ink,
 				})
