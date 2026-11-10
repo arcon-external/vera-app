@@ -201,34 +201,59 @@ func TestNoteCardStylesheetPreservesLineBreaksAndBreaks(t *testing.T) {
 		"break-inside: avoid",
 		"page-break-inside: avoid",
 		"border-left: 3px solid var(--accent-blue)",
+		"border-radius: 0",
 	} {
 		if !strings.Contains(card[1], decl) {
 			t.Errorf("the note card rule is missing %q", decl)
 		}
 	}
 
-	// The block gap is one line box, which is what the native renderer adds
-	// between blocks. A different gap changes the card height and can move a
-	// page break.
+	// The block gap is 0.55em between blocks and 0.4em from a paragraph into
+	// its list, which is what the native renderer measures. A different gap
+	// changes the card height and can move a page break.
 	gap := regexp.MustCompile(`(?s)\.note-card\s+\.note-body\s*>\s*\*\s*\+\s*\*\s*\{([^}]*)\}`).FindStringSubmatch(css)
 	if gap == nil {
 		t.Fatal("no `.note-card .note-body > * + * { ... }` rule in the stylesheet")
 	}
-	if !strings.Contains(gap[1], "margin-top: 1.45em") {
-		t.Error("the note's block gap is not one line box; add margin-top: 1.45em")
+	if !strings.Contains(gap[1], "margin-top: 0.55em") {
+		t.Error("the note's block gap is not 0.55em; add margin-top: 0.55em")
+	}
+	paraList := regexp.MustCompile(`(?s)\.note-card\s+\.note-body\s+p\s*\+\s*ul\s*,\s*\.note-card\s+\.note-body\s+p\s*\+\s*ol\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if paraList == nil {
+		t.Fatal("no `.note-card .note-body p + ul, .note-card .note-body p + ol { ... }` rule in the stylesheet")
+	}
+	if !strings.Contains(paraList[1], "margin-top: 0.4em") {
+		t.Error("the paragraph-to-list gap is not 0.4em; add margin-top: 0.4em")
 	}
 
 	lists := regexp.MustCompile(`(?s)\.note-card\s+\.note-body\s+ul\s*,\s*\.note-card\s+\.note-body\s+ol\s*\{([^}]*)\}`).FindStringSubmatch(css)
 	if lists == nil {
 		t.Fatal("no `.note-card .note-body ul, .note-card .note-body ol { ... }` rule in the stylesheet")
 	}
-	if !strings.Contains(lists[1], "padding-left: 18px") {
-		t.Error("the note lists have no 18px indent; the native renderer indents its rows by 18px")
+	for _, decl := range []string{"list-style: none", "padding: 0"} {
+		if !strings.Contains(lists[1], decl) {
+			t.Errorf("the note list rule is missing %q", decl)
+		}
 	}
-	for _, selector := range []string{"strong", "em", "li"} {
+	for _, selector := range []string{"strong", "em", "li", "ul li::before", "ol li::before"} {
 		if !strings.Contains(css, ".note-card .note-body "+selector) {
 			t.Errorf("the stylesheet has no `.note-card .note-body %s` rule", selector)
 		}
+	}
+
+	tnc := regexp.MustCompile(`(?s)\.tnc\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if tnc == nil {
+		t.Fatal("no `.tnc { ... }` rule in the stylesheet")
+	}
+	if !strings.Contains(tnc[1], "border-radius: 0 10px 10px 10px") {
+		t.Error("the terms card does not square only its top-left corner")
+	}
+	totals := regexp.MustCompile(`(?s)\.totals\s*\{([^}]*)\}`).FindStringSubmatch(css)
+	if totals == nil {
+		t.Fatal("no `.totals { ... }` rule in the stylesheet")
+	}
+	if !strings.Contains(totals[1], "border-radius: 10px 0 10px 10px") {
+		t.Error("the totals card does not square only its top-right corner")
 	}
 }
 

@@ -188,14 +188,15 @@ func TestSyntheticThirtyBoundary(t *testing.T) {
 			case run:
 				thirtyTexts = append(thirtyTexts, v.text)
 			case box:
-				if v.path != nil {
+				if v.path != nil && v.w == bulletSize && v.h == bulletSize {
 					discs++
 				}
 			}
 		}
 	}
-	// discPath is drawn only by the bullet list, so every path box is one
-	// item marker; cards draw through the radius field, not a path.
+	// The item-table disc is the only 3pt path box; the footer cards may also
+	// use a path for their per-corner radii, so width and height identify the
+	// marker.
 	if discs != 30 {
 		t.Errorf("laid out %d bullet discs, the data has 30 items", discs)
 	}

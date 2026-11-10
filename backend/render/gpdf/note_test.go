@@ -81,8 +81,10 @@ func TestNoteCardHeightIsTheStylesheetBox(t *testing.T) {
 }
 
 // TestFormattedNoteCardHeightCountsBlocksAndListRows proves the measured
-// height follows the parsed structure: one paragraph line, one line-box gap,
-// two bullet rows, another gap, and two numbered rows -- seven line boxes.
+// height follows the parsed structure: one paragraph line, a measured gap, two
+// bullet rows, another measured gap, and two numbered rows. The gaps are
+// 0.4em from the paragraph into the list and 0.55em between the lists; they
+// are not full line boxes.
 func TestFormattedNoteCardHeightCountsBlocksAndListRows(t *testing.T) {
 	e := testEngine(t)
 	in := noteInput("Intro **bold** *italic*.\n- First\n- Second\n1. One\n2. Two")
@@ -98,7 +100,8 @@ func TestFormattedNoteCardHeightCountsBlocksAndListRows(t *testing.T) {
 			t.Errorf("note line %d = %q; want %q", i+1, texts[i], want[i])
 		}
 	}
-	wantH := 2*px(1) + 2*px(12) + px(12)*bodyLH + px(4) + 7*px(11)*bodyLH
+	wantH := 2*px(1) + 2*px(12) + px(12)*bodyLH + px(4) +
+		5*px(11)*bodyLH + px(0.4*11) + px(0.55*11)
 	assertNear(t, "formatted note card height", m.noteH, wantH, 0.001)
 }
 
@@ -120,7 +123,8 @@ func TestNotePreservesParagraphBreaks(t *testing.T) {
 			t.Errorf("note line %d = %q; want %q", i+1, got[i], want[i])
 		}
 	}
-	wantH := 2*px(1) + 2*px(12) + px(12)*bodyLH + px(4) + 3*px(11)*bodyLH
+	wantH := 2*px(1) + 2*px(12) + px(12)*bodyLH + px(4) +
+		2*px(11)*bodyLH + px(0.55*11)
 	assertNear(t, "paragraph-break note card height", m.noteH, wantH, 0.001)
 }
 
@@ -190,7 +194,7 @@ func TestNoteRendersBulletRows(t *testing.T) {
 	discs := 0
 	for _, prim := range pages[notePage].prims {
 		b, isBox := prim.(box)
-		if !isBox || b.path == nil {
+		if !isBox || b.path == nil || b.w != px(noteBulletSizePx) {
 			continue
 		}
 		if b.y > noteY && (termsPage != notePage || b.y < termsY) {
@@ -335,11 +339,11 @@ func TestNotePrintsBetweenTheItemsAndTheTerms(t *testing.T) {
 	}
 }
 
-// TestNoteCardIsNotClippedByTheItemsTable guards the drawing seam: the note's
-// card boxes must not carry the items table's clip, or the card would be cut
-// off where the table's outline ends. Its accent is clipped to the card's own
-// rounded outline, which is a different region.
-func TestNoteCardIsNotClippedByTheItemsTable(t *testing.T) {
+// TestNoteCardIsSquareAndUnclipped guards both the drawing seam and the
+// approved corner rule: the note's fill, border and accent must not inherit
+// the items table's clip, and all four corners are square. The accent is a
+// plain 3px rectangle, not a shape clipped to a rounded outline.
+func TestNoteCardIsSquareAndUnclipped(t *testing.T) {
 	e := testEngine(t)
 	in := noteInput("Delivery is ex-works.\nInstallation by the customer.")
 	m := e.derive(in)
@@ -362,12 +366,17 @@ func TestNoteCardIsNotClippedByTheItemsTable(t *testing.T) {
 				t.Errorf("a note card box is clipped (x %.2f y %.2f w %.2f h %.2f); "+
 					"the note must not inherit the items table's clip", b.x, b.y, b.w, b.h)
 			}
+			if b.radius != 0 {
+				t.Errorf("note card box has radius %.2f; want all four corners square", b.radius)
+			}
 		}
-		if b.w == px(3) && b.clip != nil {
+		if b.w == px(noteAccentPx) && b.y <= noteY && noteY <= b.y+b.h {
 			accents++
-			if math.Abs(b.clip.h-m.noteH) > 0.01 {
-				t.Errorf("the note accent clip is %.2fpt tall, want the note card's %.2fpt",
-					b.clip.h, m.noteH)
+			if b.clip != nil {
+				t.Errorf("the note accent is clipped; the square card needs no clip")
+			}
+			if b.radius != 0 {
+				t.Errorf("the note accent has radius %.2f; want square", b.radius)
 			}
 		}
 	}
@@ -375,8 +384,86 @@ func TestNoteCardIsNotClippedByTheItemsTable(t *testing.T) {
 		t.Errorf("found %d unclipped note card boxes; want the fill and the border", cardBoxes)
 	}
 	if accents != 1 {
-		t.Errorf("found %d clipped note accents; want exactly one", accents)
+		t.Errorf("found %d note accents; want exactly one", accents)
 	}
+}
+
+// TestNoteMarkersSitTwelvePixelsFromTheText pins the tighter gutter: the
+// marker starts at the card text edge and the item text starts 12px in, for
+// both bullets and numbers.
+func TestNoteMarkersSitTwelvePixelsFromTheText(t *testing.T) {
+	e := testEngine(t)
+	in := noteInput("- Bullet item\n1. Number item")
+	pages := e.layout(in)
+
+	notePage, noteY, ok := findRun(pages, "Note")
+	if !ok {
+		t.Fatal("the engine did not print the note label")
+	}
+	termsPage, termsY, ok := findRun(pages, "Terms and Conditions")
+	if !ok {
+		t.Fatal("the engine did not print the terms heading")
+	}
+
+	var bulletX float64
+	haveBullet := false
+	for _, prim := range pages[notePage].prims {
+		b, isBox := prim.(box)
+		if !isBox || b.path == nil || b.w != px(noteBulletSizePx) {
+			continue
+		}
+		if b.y > noteY && (termsPage != notePage || b.y < termsY) {
+			bulletX = b.x
+			haveBullet = true
+		}
+	}
+	if !haveBullet {
+		t.Fatal("the engine did not print the bullet disc")
+	}
+	bulletText, ok := findStyledRun(pages, "Bullet item", false, false)
+	if !ok {
+		t.Fatal("the engine did not print the bullet item text")
+	}
+	assertNear(t, "bullet gutter", bulletText.x-bulletX, px(noteListIndentPx), 0.01)
+
+	number, ok := findStyledRun(pages, "1.", false, false)
+	if !ok {
+		t.Fatal("the engine did not print the number marker")
+	}
+	numberText, ok := findStyledRun(pages, "Number item", false, false)
+	if !ok {
+		t.Fatal("the engine did not print the numbered item text")
+	}
+	assertNear(t, "number gutter", numberText.x-number.x, px(noteListIndentPx), 0.01)
+}
+
+// TestNoteBulletSitsOnTheFirstLineCentre proves the disc is lifted to the
+// optical centre of the first line rather than left on the text baseline.
+func TestNoteBulletSitsOnTheFirstLineCentre(t *testing.T) {
+	e := testEngine(t)
+	in := noteInput("- First item\n- Second item")
+	pages := e.layout(in)
+
+	notePage, noteY, ok := findRun(pages, "Note")
+	if !ok {
+		t.Fatal("the engine did not print the note label")
+	}
+	_, textY, ok := findRun(pages, "First item")
+	if !ok {
+		t.Fatal("the engine did not print the first item")
+	}
+
+	for _, prim := range pages[notePage].prims {
+		b, isBox := prim.(box)
+		if !isBox || b.path == nil || b.w != px(noteBulletSizePx) {
+			continue
+		}
+		if b.y > noteY {
+			assertNear(t, "bullet centre above the first line", textY-(b.y+b.h/2), px(noteBulletCentrePx), 0.01)
+			return
+		}
+	}
+	t.Fatal("the engine did not print the first bullet disc")
 }
 
 // TestNoteStartsAFreshPageWhenItDoesNotFit proves the card is atomic: a note
