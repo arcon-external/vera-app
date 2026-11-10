@@ -4,6 +4,19 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.15.3] - 2026-11-10
+
+### Fixed
+
+- **The quotation note's bullets and numbers line up.** Bullet markers are
+  centred on the first line and sit closer to the text, numbered rows share the
+  same gutter, and the gap between a paragraph and its list is tighter. The
+  preview and the exported PDF use the same layout.
+- **The note and footer corners follow the approved layout.** The note card is
+  square on all four corners, the terms card squares its top-left, and the
+  totals card squares its top-right. The note ribbon now uses the same deep blue
+  as the table headers.
+
 ## [0.15.2] - 2026-11-10
 
 ### Fixed
