@@ -115,8 +115,8 @@ import {
 // commercial details stay editable; the lines are the customer's order, with
 // quantity as a 4-decimal string and money in the PO's own currency.
 //
-// The calculation (#470) is shown beside the entry: row and whole-PO discounts,
-// customer-facing PPN, one explained adjustment, and the grand total. The source
+// The calculation (#470) is shown beside the entry: row discounts,
+// customer-facing PPN, and the grand total. The source
 // quotation's printed figures stay in their own group. Differences, PDF and
 // confirmation number belong to #471/#472/#474. A draft is deliberately
 // unfinished, so Save draft only stores what was entered.
