@@ -436,8 +436,8 @@ describe("line reconciliation in the editor (ticket 05)", () => {
       document.querySelector('button[aria-label="Keep PO entry for Line 1 quantity"]')
     ).not.toBeNull();
 
-    // ItemEditor keeps at least one row: add a second so the first can be
-    // removed. The removal is what this test is about.
+    // Add a second line so the matched one can be removed and its items can
+    // be inspected as history while a line remains.
     button("Add line").click();
     await flush();
     button("Remove line 1").click();
@@ -681,5 +681,221 @@ describe("split lines in the PO editor (#573)", () => {
     );
     expect(addSubSub).toHaveLength(2);
     expect(document.body.textContent).toContain("1 line · 2 sub-items");
+  });
+});
+
+// Issue #580: the workspace is PO-centric -- the hero names the customer's PO
+// number, the PO-owned details sit directly under it, and the quotation
+// identity stays in the Source quotation block. The same issue lets the last
+// line or split group be removed and saves a zero-line draft.
+describe("PO workspace header and line controls (#580)", () => {
+  function heroText(): string {
+    return document.querySelector("section")?.textContent ?? "";
+  }
+
+  function detailsCard(): HTMLElement {
+    const heading = Array.from(document.querySelectorAll("h2")).find(
+      (node) => node.textContent === "Purchase order details"
+    );
+    if (heading === undefined) throw new Error("no Purchase order details card");
+    const card = heading.parentElement?.parentElement;
+    if (!card) throw new Error("no card around the details heading");
+    return card as HTMLElement;
+  }
+
+  it("shows the customer PO number in the hero and the quotation in the source block", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null), linkedOrder({ PONumber: "PO-580-HERO" }));
+
+    expect(document.querySelector("h1")?.textContent).toBe("PO-580-HERO");
+    expect(document.querySelector("h1")?.textContent).not.toContain("1502260052");
+    expect(heroText()).toContain("Source quotation");
+    expect(heroText()).toContain("1502260052");
+    expect(heroText()).toContain("rev 01");
+  });
+
+  it("falls back to New purchase order when the customer PO number is empty", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null), linkedOrder({ PONumber: "" }));
+
+    expect(document.querySelector("h1")?.textContent).toBe("New purchase order");
+    // The source quotation block still says which revision this follows.
+    expect(heroText()).toContain("1502260052");
+    expect(heroText()).toContain("rev 01");
+  });
+
+  it("owns every editable PO detail in the card under the hero and updates the hero live", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null));
+
+    const hero = document.querySelector("section");
+    const card = detailsCard();
+    expect(hero?.nextElementSibling).toBe(card);
+
+    for (const label of [
+      "Customer PO number",
+      "PO date",
+      "Received date",
+      "Requested delivery date",
+      "Payment terms",
+      "Incoterms",
+    ]) {
+      expect(card.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+      // One control per value: the fields moved here, they were not copied.
+      expect(document.querySelectorAll(`[aria-label="${label}"]`)).toHaveLength(1);
+    }
+
+    // Customer and quotation identity remain read-only snapshots.
+    expect(document.querySelector('[aria-label="Customer name"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Quote number"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Revision"]')).toBeNull();
+
+    typeInto(input("Customer PO number"), "PO-580-LIVE");
+    expect(document.querySelector("h1")?.textContent).toBe("PO-580-LIVE");
+
+    typeInto(input("PO date"), "2026-11-01");
+    typeInto(input("Requested delivery date"), "2026-12-15");
+    expect(heroText()).toContain("1 Nov 2026");
+    expect(heroText()).toContain("15 Dec 2026");
+
+    button("Incoterms").click();
+    await flush();
+    const cif = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    ).find((el) => el.textContent === "CIF");
+    if (cif === undefined) throw new Error("no CIF option");
+    cif.click();
+    await flush();
+    expect(heroText()).toContain("CIF");
+  });
+
+  it("removes the last line, shows the empty state and saves a zero-line draft", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null));
+
+    const remove = button("Remove line 1");
+    // A visible, enabled control: the last line is no longer protected.
+    expect(remove.disabled).toBe(false);
+    act(() => remove.click());
+    await flush();
+
+    expect(document.body.textContent).toContain(
+      "No lines yet. Add the customer's first line."
+    );
+    expect(document.querySelector('input[aria-label="Description for line 1"]')).toBeNull();
+
+    // Zero lines is a valid draft: the save sends an empty Items list.
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    await flush();
+    const sent = updateMock.mock.calls[0]?.[0] as { Items?: unknown[] };
+    expect(sent.Items).toEqual([]);
+
+    // Reopen the stored zero-line draft: the empty state is what loads.
+    act(() => root.unmount());
+    root = createRoot(container);
+    await renderEditor(fakeTransport(null), linkedOrder({ Items: [] }));
+    expect(document.body.textContent).toContain(
+      "No lines yet. Add the customer's first line."
+    );
+  });
+
+  it("refuses a zero-line final save before any review opens", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null), linkedOrder({ Items: [] }));
+
+    // The live-source load reads the review once on mount; Final Save must not
+    // ask for another one after the zero-line blocker refuses it.
+    reviewMock.mockClear();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+
+    expect(reviewMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "Add at least one line before Final Save."
+    );
+  });
+
+  it("removes the last split group with a labelled control for the whole line", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null));
+
+    const split = Array.from(document.querySelectorAll("button")).find((candidate) =>
+      candidate.textContent?.includes("Split into sub-items")
+    );
+    if (split === undefined) throw new Error("no split control");
+    act(() => split.click());
+    await flush();
+
+    const remove = button("Remove split line 1");
+    expect(remove.disabled).toBe(false);
+    // The sub-item controls stay distinct and visible.
+    expect(
+      document.querySelector('button[aria-label="Remove sub-item 1 of line 1"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Remove sub-item 2 of line 1"]')
+    ).not.toBeNull();
+
+    act(() => remove.click());
+    await flush();
+
+    // The parent takes its sub-items with it: no orphan rows remain.
+    expect(document.querySelector('input[aria-label="Description for line 1"]')).toBeNull();
+    expect(
+      document.querySelector('input[aria-label="Description for sub-item 1 of line 1"]')
+    ).toBeNull();
+    expect(document.body.textContent).toContain(
+      "No lines yet. Add the customer's first line."
+    );
+  });
+
+  it("removing the last sub-item returns the editor to the empty state", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null));
+
+    const split = Array.from(document.querySelectorAll("button")).find((candidate) =>
+      candidate.textContent?.includes("Split into sub-items")
+    );
+    if (split === undefined) throw new Error("no split control");
+    act(() => split.click());
+    await flush();
+
+    act(() => button("Remove sub-item 2 of line 1").click());
+    await flush();
+    expect(document.body.textContent).toContain("1 sub-item");
+
+    act(() => button("Remove sub-item 1 of line 1").click());
+    await flush();
+    expect(document.body.textContent).toContain(
+      "No lines yet. Add the customer's first line."
+    );
   });
 });

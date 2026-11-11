@@ -1165,7 +1165,9 @@ export interface ValidationBlocker {
  * Mirrors buildPurchaseOrderUpdate's checks one for one (same messages, same
  * order) so the gate can name blockers the payload builder would only report
  * as the first failure. No new requiredness is introduced: empty fields are
- * only blockers where the payload already refuses them.
+ * only blockers where the payload already refuses them. The saved-record
+ * minimum (at least one line, #580) is checked by Final Save itself, so a
+ * blank draft does not open with a blocker chip.
  */
 export function listValidationBlockers(
   state: PurchaseOrderEditorState,

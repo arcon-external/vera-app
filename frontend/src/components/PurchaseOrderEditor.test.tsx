@@ -138,6 +138,11 @@ function buttonTagFor(html: string, label: string): string {
 describe("PurchaseOrderEditorView header (issue #468)", () => {
   it("shows the quotation identity, read-only customer snapshot and editable terms", () => {
     const html = render();
+    // #580: the hero is the customer's PO number; the quotation identity stays
+    // in the Source quotation block.
+    expect(html).toContain(">PO-9001</h1>");
+    expect(html).toContain("Source quotation");
+    expect(html).toContain("rev 01");
     expect(html).toContain("1502260012");
     expect(html).toContain("PT. Infineon Technologies Batam");
     expect(html).toContain("revision 1");
@@ -145,6 +150,8 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain("Services / NonConstruction");
     expect(html).toContain("Draft");
 
+    // #580: the PO-owned details have their own card under the hero.
+    expect(html).toContain("Purchase order details");
     expect(html).toContain('aria-label="Billing address"');
     expect(html).toContain('aria-label="Delivery address"');
     expect(html).toContain('aria-label="Ship-to code"');
@@ -158,10 +165,25 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain('value="45 days"');
     expect(html).toContain('aria-label="Incoterms"');
 
+    // One control per value: moving the fields must not duplicate them.
+    expect(html.match(/aria-label="Customer PO number"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="PO date"/g)).toHaveLength(1);
+
     // The snapshot is displayed, never offered as an editable customer field.
     expect(html).not.toContain('aria-label="Customer name"');
     expect(html).not.toContain('aria-label="Currency"');
     expect(html).toContain("cannot be edited here");
+  });
+
+  it("uses a clear fallback in the hero when the customer PO number is empty (#580)", () => {
+    const blank = initialPurchaseOrderEditorState(
+      { ...ORDER, PONumber: "" },
+      USD
+    );
+    const html = render(blank);
+    expect(html).toContain(">New purchase order</h1>");
+    expect(html).toContain("Source quotation");
+    expect(html).toContain("1502260012");
   });
 
   it("renders the exact copied lines with quantity and money re-formatted", () => {
