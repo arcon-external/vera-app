@@ -1157,6 +1157,29 @@ export function PurchaseOrderEditorView({
             />
           </div>
         </div>
+        {correcting ? null : (
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-rule bg-paper-subtle p-3 text-small text-ink-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-accent-700"
+              aria-label="Generate a confirmation number when this purchase order is saved"
+              checked={state.header.confirmationRequested}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { confirmationRequested: event.target.checked },
+                })
+              }
+            />
+            <span>
+              <span className="font-medium">
+                Generate a confirmation number when this purchase order is saved.
+              </span>{" "}
+              Optional. The number is issued at Final Save and cannot be edited
+              afterwards; saving a draft consumes no number.
+            </span>
+          </label>
+        )}
         <p className="mt-4 text-caption text-ink-500">
           {state.sourceState === "never"
             ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis below are editable until then."
@@ -2545,7 +2568,7 @@ export function PurchaseOrderEditorPage({
         incoterms: loaded.Source.Incoterms,
       });
       setCompareLines(loaded.Source.Lines);
-      const initial = initialFinalizeReviewState();
+      const initial = initialFinalizeReviewState(state.header.confirmationRequested);
       setReview(loaded);
       // U2: the finalize review is a receipt of the recorded session, not a
       // second workbench. Kept/used choices pre-fill from unchanged session

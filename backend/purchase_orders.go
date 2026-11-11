@@ -103,6 +103,9 @@ type PurchaseOrderDTO struct {
 	ConfirmationNumber     *string
 	ConfirmationAssignedAt *string
 	ConfirmationWarn       bool
+	// ConfirmationRequested is the draft's request for a confirmation number
+	// (#581). It allocates nothing and survives save draft/reopen.
+	ConfirmationRequested bool
 	// Version is the optimistic-concurrency revision (#473): the editor sends
 	// the version it loaded, and every write moves it forward.
 	Version int64
@@ -279,6 +282,9 @@ type PurchaseOrderFinalizeInput struct {
 	ExpectedVersion       int64
 	Overwrite             bool
 	DocumentConfirmed     bool
+	// ConfirmationRequested is the draft preference (#581). The final checkbox
+	// is AssignConfirmationNumber; this field only records the request.
+	ConfirmationRequested bool
 	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
 	// the record unassigned and consumes no sequence.
 	AssignConfirmationNumber bool
@@ -341,6 +347,8 @@ type PurchaseOrderUpdateInput struct {
 	Incoterms             string
 	PaymentTerms          string
 	AdjustmentReason      string
+	// ConfirmationRequested is the draft's confirmation-number request (#581).
+	ConfirmationRequested bool
 	Items                 []PurchaseOrderItemInput
 	DiscountPercent       int16
 	AdjustmentMinor       int64
@@ -656,6 +664,7 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			DiscountPercent:       input.DiscountPercent,
 			AdjustmentMinor:       input.AdjustmentMinor,
 			AdjustmentReason:      input.AdjustmentReason,
+			ConfirmationRequested: input.ConfirmationRequested,
 			ExpectedVersion:       input.ExpectedVersion,
 			Overwrite:             input.Overwrite,
 		}, &response); err != nil {
@@ -1093,6 +1102,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		ConfirmationNumber:     row.ConfirmationNumber,
 		ConfirmationAssignedAt: row.ConfirmationAssignedAt,
 		ConfirmationWarn:       row.ConfirmationWarn,
+		ConfirmationRequested:  row.ConfirmationRequested,
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}
@@ -1192,6 +1202,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
 				AdjustmentReason:      input.AdjustmentReason,
+				ConfirmationRequested: input.ConfirmationRequested,
 				ExpectedVersion:       input.ExpectedVersion,
 				Overwrite:             input.Overwrite,
 			},

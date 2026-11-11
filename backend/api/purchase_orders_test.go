@@ -76,6 +76,7 @@ type purchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	ConfirmationRequested  bool    `json:"confirmationRequested"`
 	Version                int64   `json:"version"`
 	SourceMissing          bool    `json:"sourceMissing"`
 	SourceState            string  `json:"sourceState"`
@@ -272,6 +273,85 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 		updated.Items[0].QuotationItemNo == nil || *updated.Items[0].QuotationItemNo != 1 ||
 		updated.Items[1].QuotationItemNo != nil {
 		t.Errorf("updated lines = %+v", updated.Items)
+	}
+}
+
+// Issue #581: the confirmation-number request is a draft preference. It
+// defaults off, survives save draft and reload, and a final save allocates a
+// number only when the final checkbox asks for one.
+func TestPurchaseOrderConfirmationRequestRoundTripsOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_confirmation_request")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	if draft.ConfirmationRequested {
+		t.Errorf("a new draft requested a confirmation number; want off by default")
+	}
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	update := finalizeBody(draft, "PO-REQ-1")
+	update["confirmationRequested"] = true
+	code, body = doJSON(t, server, http.MethodPut, path, token, update)
+	if code != http.StatusOK {
+		t.Fatalf("draft save = %d (%v)", code, body)
+	}
+	updated := decodePurchaseOrder(t, body)
+	if !updated.ConfirmationRequested {
+		t.Errorf("draft save dropped confirmationRequested: %+v", updated)
+	}
+	if updated.ConfirmationNumber != nil {
+		t.Errorf("a draft save allocated confirmation number %v", *updated.ConfirmationNumber)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload = %d (%v)", code, body)
+	}
+	reloaded := decodePurchaseOrder(t, body)
+	if !reloaded.ConfirmationRequested {
+		t.Errorf("reload lost confirmationRequested: %+v", reloaded)
+	}
+
+	finalize := finalizeBody(reloaded, "PO-REQ-1")
+	finalize["confirmationRequested"] = true
+	finalize["assignConfirmationNumber"] = true
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalize)
+	if code != http.StatusOK {
+		t.Fatalf("finalize with request = %d (%v)", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if !saved.ConfirmationRequested {
+		t.Errorf("final save dropped confirmationRequested: %+v", saved)
+	}
+	if saved.ConfirmationNumber == nil {
+		t.Errorf("a requested final save left the confirmation number unassigned")
+	}
+
+	// A second, default-off record proves the flag and the allocation stay off
+	// unless the request is on.
+	plainQuotation, _ := exportForSelector(t, server, token, quotationInput())
+	code, body = createPODraft(t, server, token, plainQuotation, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("plain create = %d (%v)", code, body)
+	}
+	plain := decodePurchaseOrder(t, body)
+	if plain.ConfirmationRequested {
+		t.Errorf("plain draft requested a confirmation number; want off")
+	}
+	plainFinalize := finalizeBody(plain, "PO-REQ-2")
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(plain.ID, 10)+"/finalize", token, plainFinalize)
+	if code != http.StatusOK {
+		t.Fatalf("plain finalize = %d (%v)", code, body)
+	}
+	savedPlain := decodePurchaseOrder(t, body)
+	if savedPlain.ConfirmationRequested || savedPlain.ConfirmationNumber != nil {
+		t.Errorf("an unrequested final save changed the request/number: requested %v number %v",
+			savedPlain.ConfirmationRequested, savedPlain.ConfirmationNumber)
 	}
 }
 

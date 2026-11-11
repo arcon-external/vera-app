@@ -228,6 +228,7 @@ beforeEach(() => {
     return {
       Order: linkedOrder({
         PaymentTerms: String(fields.PaymentTerms ?? "45 days"),
+        ConfirmationRequested: Boolean(fields.ConfirmationRequested),
         Version: Number(fields.ExpectedVersion ?? 4),
       }),
     };
@@ -253,6 +254,14 @@ async function flush(): Promise<void> {
 function input(label: string): HTMLInputElement {
   const found = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
   if (found === null) throw new Error(`no input labelled ${label}`);
+  return found;
+}
+
+function checkbox(label: string): HTMLInputElement {
+  const found = document.querySelector<HTMLInputElement>(
+    `input[type="checkbox"][aria-label="${label}"]`
+  );
+  if (found === null) throw new Error(`no checkbox labelled ${label}`);
   return found;
 }
 
@@ -897,5 +906,45 @@ describe("PO workspace header and line controls (#580)", () => {
     expect(document.body.textContent).toContain(
       "No lines yet. Add the customer's first line."
     );
+  });
+});
+
+// Issue #581: the confirmation-number request is a draft preference. It starts
+// off, travels with Save draft, survives reopen, and seeds (but does not bind)
+// the final confirmation checkbox.
+describe("confirmation-number request (#581)", () => {
+  it("starts off, saves with the draft and survives reopen", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    await renderEditor(fakeTransport(null));
+
+    const label = "Generate a confirmation number when this purchase order is saved";
+    const toggle = checkbox(label);
+    expect(toggle.checked).toBe(false);
+    expect(document.body.textContent).toContain("issued at Final Save");
+    expect(document.body.textContent).toContain("cannot be edited afterwards");
+
+    act(() => toggle.click());
+    await flush();
+    expect(checkbox(label).checked).toBe(true);
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    await flush();
+
+    const sent = updateMock.mock.calls[0]?.[0] as { ConfirmationRequested?: boolean };
+    expect(sent.ConfirmationRequested).toBe(true);
+    // The save round-trip returns the persisted request; the toggle stays on.
+    expect(checkbox(label).checked).toBe(true);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await renderEditor(fakeTransport(null), linkedOrder({ ConfirmationRequested: true }));
+    expect(checkbox(label).checked).toBe(true);
   });
 });

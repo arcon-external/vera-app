@@ -497,6 +497,7 @@ func updatePurchaseOrderEditable(
 			tax_type = $26,
 			service_category = $27,
 			tax_category = $28,
+			confirmation_requested = $29,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
 		input.ID, orgID, input.BillingAddress, input.DeliveryAddress,
@@ -509,6 +510,7 @@ func updatePurchaseOrderEditable(
 		int64(0), "",
 		calculation.GrandTotalMinor, basis.Currency, basis.TaxZone,
 		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
+		input.ConfirmationRequested,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {

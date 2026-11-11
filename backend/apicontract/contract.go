@@ -282,6 +282,9 @@ type PurchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	// ConfirmationRequested is the draft's request for a confirmation number
+	// (#581). It allocates nothing and is independent of any assigned number.
+	ConfirmationRequested bool `json:"confirmationRequested"`
 	// Version is the optimistic-concurrency revision (#473). It starts at 1
 	// and moves forward on every write; a save must state the version it
 	// loaded.
@@ -453,17 +456,20 @@ type PurchaseOrderItemInput struct {
 // their own rules (#474, #475) and are not reachable here.
 type PurchaseOrderUpdateRequest struct {
 	PurchaseOrderProtectedFieldsRequest
-	PODate                string                   `json:"poDate,omitempty"`
-	RequestedDeliveryDate string                   `json:"requestedDeliveryDate,omitempty"`
-	BillingAddress        string                   `json:"billingAddress"`
-	DeliveryAddress       string                   `json:"deliveryAddress"`
-	ShipToCode            string                   `json:"shipToCode"`
-	ContactEmail          string                   `json:"contactEmail"`
-	ContactPhone          string                   `json:"contactPhone"`
-	PONumber              string                   `json:"poNumber"`
-	ReceivedDate          string                   `json:"receivedDate,omitempty"`
-	Incoterms             string                   `json:"incoterms"`
-	AdjustmentReason      string                   `json:"adjustmentReason"`
+	PODate                string `json:"poDate,omitempty"`
+	RequestedDeliveryDate string `json:"requestedDeliveryDate,omitempty"`
+	BillingAddress        string `json:"billingAddress"`
+	DeliveryAddress       string `json:"deliveryAddress"`
+	ShipToCode            string `json:"shipToCode"`
+	ContactEmail          string `json:"contactEmail"`
+	ContactPhone          string `json:"contactPhone"`
+	PONumber              string `json:"poNumber"`
+	ReceivedDate          string `json:"receivedDate,omitempty"`
+	Incoterms             string `json:"incoterms"`
+	AdjustmentReason      string `json:"adjustmentReason"`
+	// ConfirmationRequested remembers the editor's draft choice (#581). It
+	// allocates nothing; AssignConfirmationNumber on the finalize request does.
+	ConfirmationRequested bool                     `json:"confirmationRequested"`
 	Items                 []PurchaseOrderItemInput `json:"items"`
 	PaymentTerms          string                   `json:"paymentTerms"`
 	DiscountPercent       int16                    `json:"discountPercent"`

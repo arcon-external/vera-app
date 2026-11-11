@@ -422,6 +422,13 @@ describe("difference choices", () => {
     expect(initialFinalizeReviewState().assignConfirmation).toBe(false);
   });
 
+  // Issue #581: the draft's request seeds the checkbox; the checkbox remains
+  // the final authority and can still be cleared.
+  it("seeds the confirmation checkbox from the draft request", () => {
+    expect(initialFinalizeReviewState(true).assignConfirmation).toBe(true);
+    expect(initialFinalizeReviewState(false).assignConfirmation).toBe(false);
+  });
+
   it("applies only Use Quotation choices", () => {
     const base = order();
     const state = stateFrom(
@@ -653,6 +660,22 @@ describe("final-save payload", () => {
       true
     );
     expect(on.input?.AssignConfirmationNumber).toBe(true);
+  });
+
+  // Issue #581: the draft preference travels with the finalize payload too, so
+  // the saved record keeps the request it was finalized from.
+  it("carries the draft confirmation request into the finalize payload", () => {
+    const result = buildFinalizeInput(
+      stateFrom(order({ ConfirmationRequested: true })),
+      SOURCE,
+      USD,
+      "attached",
+      {},
+      [],
+      [],
+      false
+    );
+    expect(result.input?.ConfirmationRequested).toBe(true);
   });
 
   it("refuses to build a payload with unresolved differences", () => {

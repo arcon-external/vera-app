@@ -2291,6 +2291,7 @@ export namespace backend {
 	    ConfirmationNumber?: string;
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
+	    ConfirmationRequested: boolean;
 	    Version: number;
 
 	    static createFrom(source: any = {}) {
@@ -2347,6 +2348,7 @@ export namespace backend {
 	        this.ConfirmationNumber = source["ConfirmationNumber"];
 	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Version = source["Version"];
 	    }
 
@@ -2710,6 +2712,7 @@ export namespace backend {
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
 	    DocumentConfirmed: boolean;
+	    ConfirmationRequested: boolean;
 	    AssignConfirmationNumber: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -2740,6 +2743,7 @@ export namespace backend {
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	        this.DocumentConfirmed = source["DocumentConfirmed"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.AssignConfirmationNumber = source["AssignConfirmationNumber"];
 	    }
 
@@ -3028,6 +3032,7 @@ export namespace backend {
 	    TaxType: string;
 	    ServiceCategory: string;
 	    ExpectedVersion: number;
+	    ConfirmationRequested: boolean;
 	    Overwrite: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -3057,6 +3062,7 @@ export namespace backend {
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Overwrite = source["Overwrite"];
 	    }
 

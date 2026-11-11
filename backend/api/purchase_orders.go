@@ -618,6 +618,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		SavedBy:                order.SavedBy,
 		ConfirmationNumber:     order.ConfirmationNumber,
 		ConfirmationWarn:       order.ConfirmationWarn,
+		ConfirmationRequested:  order.ConfirmationRequested,
 		CreatedAt:              order.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:              order.UpdatedAt.Format(time.RFC3339),
 	}
@@ -732,6 +733,7 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 		DiscountPercent:       request.DiscountPercent,
 		AdjustmentMinor:       request.AdjustmentMinor,
 		AdjustmentReason:      request.AdjustmentReason,
+		ConfirmationRequested: request.ConfirmationRequested,
 		ExpectedVersion:       request.ExpectedVersion,
 		Overwrite:             request.Overwrite,
 	}, nil
