@@ -60,6 +60,16 @@ go test ./backend/api -run TestChangelogCopyMatchesRoot
 
 The copy must match byte-for-byte; the test enforces it.
 
+Then prove the notes name every `fix:`/`feat:` commit in the range — end each
+bullet with its issue or PR number (`(#NNN)`) so the check can match it:
+
+```bash
+scripts/release-check.sh --range "$(git describe --tags --abbrev=0)..HEAD"
+```
+
+It prints the matched/missing counts, names every missing `#NNN` (or subject),
+and exits non-zero on a gap; `--json` is the same read as one document.
+
 ### 4. Bump the version
 
 Set `wails.json` `info.productVersion` to the release version **without** the
