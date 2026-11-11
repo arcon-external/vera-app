@@ -4,6 +4,44 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.17.0] - 2026-11-11
+
+### Added
+
+- **The purchase order page is identified by the customer's number.** The large
+  heading is now the Customer PO number, and the quotation number and revision
+  stay visible in the Source quotation block. Editing the number updates the
+  heading immediately.
+- **Purchase order details sit directly under the heading.** Customer PO number,
+  PO date, received date, requested delivery date, payment terms and incoterms
+  are edited in one card, so the header and the fields agree at a glance.
+- **A confirmation number can be requested while drafting.** A toggle on the
+  editor remembers the choice through Save draft and reopen. The number itself
+  is still issued only at Final Save, and the confirmation step on the final
+  save can still change the choice.
+- **The difference review shows both sides.** Each difference now places the PO
+  entry beside the quotation value with a status chip, an `(empty)` placeholder
+  when a side has no value, and a clear mark on the side that will be used. The
+  tax basis and the line matches use the same layout.
+
+### Changed
+
+- **The last purchase order line can be removed.** A draft can be cleared to
+  zero lines and saved; Final Save still requires at least one line. The remove
+  control names whether it removes a line, a split line or one sub-item.
+- **The difference review is a ledger, not a form.** Line matches are listed as
+  Matched, Missing or Extra with their actions on the row, and a summary at the
+  top reports the number of differences, missing lines and extra lines.
+
+### Fixed
+
+- **Correcting a saved purchase order no longer clears its confirmation
+  request.** The correction form does not own that choice, so it now leaves the
+  stored value untouched.
+- **The stored confirmation request follows the final-save checkbox.** The
+  saved record now records what was chosen on the confirmation step, not what
+  the editor toggle said earlier.
+
 ## [0.16.0] - 2026-11-11
 
 ### Added
