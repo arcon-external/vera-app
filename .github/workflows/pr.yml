@@ -291,6 +291,11 @@ jobs:
         # disagree.
         run: scripts/check-wails-md5.sh
 
+      - name: Check agent docs pointers
+        # AGENTS.md names the docs/agents files it depends on; this fails when
+        # a pointer is renamed or removed, so the disclosure cannot drift.
+        run: scripts/check-agent-docs.sh
+
       - name: Set up Node
         uses: actions/setup-node@v7
         with:
