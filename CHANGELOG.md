@@ -4,6 +4,33 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.18.0] - 2026-11-11
+
+### Added
+
+- **One-click choices in the quotation link review.** "Use all quotation
+  values" applies the quotation side to every difference; "Keep all PO values"
+  keeps every value already entered. Both also settle the tax basis and the
+  remaining line acknowledgements, so the link can be confirmed immediately.
+
+### Changed
+
+- **The quotation's lines are added when a purchase order is linked.** A
+  quotation line that is not on the order is added in the review, so it is no
+  longer shown as missing. Back or Cancel leaves the draft untouched;
+  confirming the link saves the added lines.
+- **Choosing a side is consistent.** Click the side card you want. The chosen
+  side shows "Will be used" and no action button; the other side says "Use this
+  value" (or "Use this basis"). Tax basis and value differences now work the
+  same way.
+
+### Fixed
+
+- **A line matched during linking no longer leaves a difference that cannot be
+  resolved.** The link review now hands its matches to the reconciliation
+  panel, so a price difference it creates can be kept or replaced instead of
+  blocking Final Save.
+
 ## [0.17.1] - 2026-11-11
 
 ### Fixed
