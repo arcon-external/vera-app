@@ -308,8 +308,6 @@ func finalizeWithDifferences(
 			input.Items[0].QuantityScaled += store.QuantityScale
 		}
 		input.Items = append(input.Items, extraLine("Mock weekend installation surcharge (MOCK)", 1, 2_250_000))
-		input.AdjustmentMinor = 250_000
-		input.AdjustmentReason = "Mock adjustment: customer requested additional packing and labels."
 	}, false)
 }
 

@@ -22,20 +22,23 @@ import (
 // money fields are the row's stored calculation, returned rather than
 // recomputed.
 type PurchaseOrderItemDTO struct {
-	QuotationItemNo *int
-	QuotationSubNo  *int
-	ID              int64
-	ClientKey       *string
-	LineNumber      int
-	Description     string
-	QuantityScaled  int64
-	UoM             string
-	UnitPriceMinor  int64
-	DiscountEnabled bool
-	DiscountPercent int16
-	GrossMinor      int64
-	DiscountMinor   int64
-	NetMinor        int64
+	QuotationItemNo   *int
+	QuotationSubNo    *int
+	ID                int64
+	ClientKey         *string
+	LineNumber        int
+	Description       string
+	QuantityScaled    int64
+	UoM               string
+	UnitPriceMinor    int64
+	DiscountEnabled   bool
+	DiscountPercent   int16
+	GrossMinor        int64
+	DiscountMinor     int64
+	NetMinor          int64
+	GroupKey          string
+	ParentDescription string
+	DescriptionLines  []string
 }
 
 // PurchaseOrderDTO is a draft or saved PO with its editable header, its
@@ -100,6 +103,9 @@ type PurchaseOrderDTO struct {
 	ConfirmationNumber     *string
 	ConfirmationAssignedAt *string
 	ConfirmationWarn       bool
+	// ConfirmationRequested is the draft's request for a confirmation number
+	// (#581). It allocates nothing and survives save draft/reopen.
+	ConfirmationRequested bool
 	// Version is the optimistic-concurrency revision (#473): the editor sends
 	// the version it loaded, and every write moves it forward.
 	Version int64
@@ -108,15 +114,17 @@ type PurchaseOrderDTO struct {
 // PurchaseOrderSourceLineDTO is one customer-facing line of the exact source
 // revision. LineLabel is the customer document's number: "3" or "3.1".
 type PurchaseOrderSourceLineDTO struct {
-	QuotationItemNo int
-	QuotationSubNo  *int
-	LineLabel       string
-	Description     string
-	UoM             string
-	QuantityScaled  int64
-	UnitPriceMinor  int64
-	DiscountEnabled bool
-	DiscountPercent int16
+	QuotationItemNo   int
+	QuotationSubNo    *int
+	LineLabel         string
+	Description       string
+	UoM               string
+	QuantityScaled    int64
+	UnitPriceMinor    int64
+	DiscountEnabled   bool
+	DiscountPercent   int16
+	ParentDescription string
+	DescriptionLines  []string
 }
 
 // PurchaseOrderSourceDTO is the exact revision the final-save review compares
@@ -275,7 +283,8 @@ type PurchaseOrderFinalizeInput struct {
 	Overwrite             bool
 	DocumentConfirmed     bool
 	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
-	// the record unassigned and consumes no sequence.
+	// the record unassigned and consumes no sequence. The stored draft request
+	// is derived from this one answer (#579), never carried beside it.
 	AssignConfirmationNumber bool
 }
 
@@ -301,16 +310,19 @@ type PurchaseOrderBlankCreateInput struct {
 // array order; a row discount is a flag plus a 0-100 percentage, mirroring the
 // quotation.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo *int
-	QuotationSubNo  *int
-	ID              *int64
-	ClientKey       *string
-	Description     string
-	QuantityScaled  int64
-	UoM             string
-	UnitPriceMinor  int64
-	DiscountEnabled bool
-	DiscountPercent int16
+	QuotationItemNo   *int
+	QuotationSubNo    *int
+	ID                *int64
+	ClientKey         *string
+	Description       string
+	QuantityScaled    int64
+	UoM               string
+	UnitPriceMinor    int64
+	DiscountEnabled   bool
+	DiscountPercent   int16
+	GroupKey          string
+	ParentDescription string
+	DescriptionLines  []string
 }
 
 // PurchaseOrderUpdateInput replaces the editable draft header, the
@@ -333,6 +345,8 @@ type PurchaseOrderUpdateInput struct {
 	Incoterms             string
 	PaymentTerms          string
 	AdjustmentReason      string
+	// ConfirmationRequested is the draft's confirmation-number request (#581).
+	ConfirmationRequested bool
 	Items                 []PurchaseOrderItemInput
 	DiscountPercent       int16
 	AdjustmentMinor       int64
@@ -467,18 +481,21 @@ type PurchaseOrderCorrectionAttachmentDTO struct {
 
 // PurchaseOrderCorrectionItemDTO is one line of a retained snapshot.
 type PurchaseOrderCorrectionItemDTO struct {
-	QuotationItemNo *int
-	QuotationSubNo  *int
-	LineNumber      int
-	Description     string
-	QuantityScaled  int64
-	UoM             string
-	UnitPriceMinor  int64
-	DiscountEnabled bool
-	DiscountPercent int16
-	GrossMinor      int64
-	DiscountMinor   int64
-	NetMinor        int64
+	QuotationItemNo   *int
+	QuotationSubNo    *int
+	LineNumber        int
+	Description       string
+	QuantityScaled    int64
+	UoM               string
+	UnitPriceMinor    int64
+	DiscountEnabled   bool
+	DiscountPercent   int16
+	GrossMinor        int64
+	DiscountMinor     int64
+	NetMinor          int64
+	GroupKey          string
+	ParentDescription string
+	DescriptionLines  []string
 }
 
 // PurchaseOrderCorrectionDTO is one immutable snapshot: the values a
@@ -606,44 +623,50 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, apicontract.PurchaseOrderItemInput{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	var response apicontract.PurchaseOrderRow
 	if err := client.Put("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10),
 		apicontract.PurchaseOrderUpdateRequest{
-			PurchaseOrderProtectedFieldsRequest: apicontract.PurchaseOrderProtectedFieldsRequest{
-				Currency:        stringPointer(input.Currency),
-				TaxZone:         stringPointer(input.TaxZone),
-				TaxType:         stringPointer(input.TaxType),
-				ServiceCategory: stringPointer(input.ServiceCategory),
+			PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+				PurchaseOrderProtectedFieldsRequest: apicontract.PurchaseOrderProtectedFieldsRequest{
+					Currency:        stringPointer(input.Currency),
+					TaxZone:         stringPointer(input.TaxZone),
+					TaxType:         stringPointer(input.TaxType),
+					ServiceCategory: stringPointer(input.ServiceCategory),
+				},
+				BillingAddress:        input.BillingAddress,
+				DeliveryAddress:       input.DeliveryAddress,
+				ShipToCode:            input.ShipToCode,
+				ContactEmail:          input.ContactEmail,
+				ContactPhone:          input.ContactPhone,
+				PONumber:              input.PONumber,
+				PODate:                input.PODate,
+				ReceivedDate:          input.ReceivedDate,
+				RequestedDeliveryDate: input.RequestedDeliveryDate,
+				PaymentTerms:          input.PaymentTerms,
+				Incoterms:             input.Incoterms,
+				Items:                 items,
+				DiscountPercent:       input.DiscountPercent,
+				AdjustmentMinor:       input.AdjustmentMinor,
+				AdjustmentReason:      input.AdjustmentReason,
+				ExpectedVersion:       input.ExpectedVersion,
+				Overwrite:             input.Overwrite,
 			},
-			BillingAddress:        input.BillingAddress,
-			DeliveryAddress:       input.DeliveryAddress,
-			ShipToCode:            input.ShipToCode,
-			ContactEmail:          input.ContactEmail,
-			ContactPhone:          input.ContactPhone,
-			PONumber:              input.PONumber,
-			PODate:                input.PODate,
-			ReceivedDate:          input.ReceivedDate,
-			RequestedDeliveryDate: input.RequestedDeliveryDate,
-			PaymentTerms:          input.PaymentTerms,
-			Incoterms:             input.Incoterms,
-			Items:                 items,
-			DiscountPercent:       input.DiscountPercent,
-			AdjustmentMinor:       input.AdjustmentMinor,
-			AdjustmentReason:      input.AdjustmentReason,
-			ExpectedVersion:       input.ExpectedVersion,
-			Overwrite:             input.Overwrite,
+			ConfirmationRequested: input.ConfirmationRequested,
 		}, &response); err != nil {
 		return purchaseOrderWriteFailure(err)
 	}
@@ -671,39 +694,44 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, apicontract.PurchaseOrderItemInput{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/correction",
 		apicontract.PurchaseOrderCorrectionRequest{
 			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
-				BillingAddress:        input.BillingAddress,
-				DeliveryAddress:       input.DeliveryAddress,
-				ShipToCode:            input.ShipToCode,
-				ContactEmail:          input.ContactEmail,
-				ContactPhone:          input.ContactPhone,
-				PONumber:              input.PONumber,
-				PODate:                input.PODate,
-				ReceivedDate:          input.ReceivedDate,
-				RequestedDeliveryDate: input.RequestedDeliveryDate,
-				PaymentTerms:          input.PaymentTerms,
-				Incoterms:             input.Incoterms,
-				Items:                 items,
-				DiscountPercent:       input.DiscountPercent,
-				AdjustmentMinor:       input.AdjustmentMinor,
-				AdjustmentReason:      input.AdjustmentReason,
-				ExpectedVersion:       input.ExpectedVersion,
-				Overwrite:             input.Overwrite,
+				PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+					BillingAddress:        input.BillingAddress,
+					DeliveryAddress:       input.DeliveryAddress,
+					ShipToCode:            input.ShipToCode,
+					ContactEmail:          input.ContactEmail,
+					ContactPhone:          input.ContactPhone,
+					PONumber:              input.PONumber,
+					PODate:                input.PODate,
+					ReceivedDate:          input.ReceivedDate,
+					RequestedDeliveryDate: input.RequestedDeliveryDate,
+					PaymentTerms:          input.PaymentTerms,
+					Incoterms:             input.Incoterms,
+					Items:                 items,
+					DiscountPercent:       input.DiscountPercent,
+					AdjustmentMinor:       input.AdjustmentMinor,
+					AdjustmentReason:      input.AdjustmentReason,
+					ExpectedVersion:       input.ExpectedVersion,
+					Overwrite:             input.Overwrite,
+				},
 			},
 			Reason: input.Reason,
 		}, &response); err != nil {
@@ -749,16 +777,19 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, apicontract.PurchaseOrderItemInput{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
@@ -773,22 +804,24 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/source-repair",
 		apicontract.PurchaseOrderSourceRepairRequest{
 			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
-				BillingAddress:        input.BillingAddress,
-				DeliveryAddress:       input.DeliveryAddress,
-				ShipToCode:            input.ShipToCode,
-				ContactEmail:          input.ContactEmail,
-				ContactPhone:          input.ContactPhone,
-				PONumber:              input.PONumber,
-				PODate:                input.PODate,
-				ReceivedDate:          input.ReceivedDate,
-				RequestedDeliveryDate: input.RequestedDeliveryDate,
-				PaymentTerms:          input.PaymentTerms,
-				Incoterms:             input.Incoterms,
-				Items:                 items,
-				DiscountPercent:       input.DiscountPercent,
-				AdjustmentMinor:       input.AdjustmentMinor,
-				AdjustmentReason:      input.AdjustmentReason,
-				ExpectedVersion:       input.ExpectedVersion,
+				PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+					BillingAddress:        input.BillingAddress,
+					DeliveryAddress:       input.DeliveryAddress,
+					ShipToCode:            input.ShipToCode,
+					ContactEmail:          input.ContactEmail,
+					ContactPhone:          input.ContactPhone,
+					PONumber:              input.PONumber,
+					PODate:                input.PODate,
+					ReceivedDate:          input.ReceivedDate,
+					RequestedDeliveryDate: input.RequestedDeliveryDate,
+					PaymentTerms:          input.PaymentTerms,
+					Incoterms:             input.Incoterms,
+					Items:                 items,
+					DiscountPercent:       input.DiscountPercent,
+					AdjustmentMinor:       input.AdjustmentMinor,
+					AdjustmentReason:      input.AdjustmentReason,
+					ExpectedVersion:       input.ExpectedVersion,
+				},
 			},
 			TargetQuotationID:    input.TargetQuotationID,
 			TargetRevisionNumber: &revision,
@@ -987,18 +1020,21 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 	}
 	for _, item := range row.Items {
 		entry.Items = append(entry.Items, PurchaseOrderCorrectionItemDTO{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			LineNumber:      item.LineNumber,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-			GrossMinor:      item.GrossMinor,
-			DiscountMinor:   item.DiscountMinor,
-			NetMinor:        item.NetMinor,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			LineNumber:        item.LineNumber,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GrossMinor:        item.GrossMinor,
+			DiscountMinor:     item.DiscountMinor,
+			NetMinor:          item.NetMinor,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return entry
@@ -1070,26 +1106,30 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		ConfirmationNumber:     row.ConfirmationNumber,
 		ConfirmationAssignedAt: row.ConfirmationAssignedAt,
 		ConfirmationWarn:       row.ConfirmationWarn,
+		ConfirmationRequested:  row.ConfirmationRequested,
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}
 	dto.Items = make([]PurchaseOrderItemDTO, 0, len(row.Items))
 	for _, item := range row.Items {
 		dto.Items = append(dto.Items, PurchaseOrderItemDTO{
-			LineNumber:      item.LineNumber,
-			Description:     item.Description,
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-			GrossMinor:      item.GrossMinor,
-			DiscountMinor:   item.DiscountMinor,
-			NetMinor:        item.NetMinor,
+			LineNumber:        item.LineNumber,
+			Description:       item.Description,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GrossMinor:        item.GrossMinor,
+			DiscountMinor:     item.DiscountMinor,
+			NetMinor:          item.NetMinor,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return dto
@@ -1125,16 +1165,19 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 	items := make([]apicontract.PurchaseOrderItemInput, 0, len(input.Items))
 	for _, item := range input.Items {
 		items = append(items, apicontract.PurchaseOrderItemInput{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       item.ClientKey,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         item.ClientKey,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
@@ -1147,7 +1190,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/finalize",
 		apicontract.PurchaseOrderFinalizeRequest{
-			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
+			PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
 				BillingAddress:        input.BillingAddress,
 				DeliveryAddress:       input.DeliveryAddress,
 				ShipToCode:            input.ShipToCode,
@@ -1396,15 +1439,17 @@ func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseO
 	}
 	for _, line := range row.Source.Lines {
 		review.Source.Lines = append(review.Source.Lines, PurchaseOrderSourceLineDTO{
-			QuotationItemNo: line.QuotationItemNo,
-			QuotationSubNo:  line.QuotationSubNo,
-			LineLabel:       line.LineLabel,
-			Description:     line.Description,
-			UoM:             line.UoM,
-			QuantityScaled:  line.QuantityScaled,
-			UnitPriceMinor:  line.UnitPriceMinor,
-			DiscountEnabled: line.DiscountEnabled,
-			DiscountPercent: line.DiscountPercent,
+			QuotationItemNo:   line.QuotationItemNo,
+			QuotationSubNo:    line.QuotationSubNo,
+			LineLabel:         line.LineLabel,
+			Description:       line.Description,
+			UoM:               line.UoM,
+			QuantityScaled:    line.QuantityScaled,
+			UnitPriceMinor:    line.UnitPriceMinor,
+			DiscountEnabled:   line.DiscountEnabled,
+			DiscountPercent:   line.DiscountPercent,
+			ParentDescription: line.ParentDescription,
+			DescriptionLines:  line.DescriptionLines,
 		})
 	}
 	return review

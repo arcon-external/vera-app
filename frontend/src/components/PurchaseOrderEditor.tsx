@@ -34,12 +34,12 @@ import {
   listValidationBlockers,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
-  parseDiscountPercent,
+  newPurchaseOrderLineKey,
   purchaseOrderEditorReducer,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
-  type PurchaseOrderLineCalculation,
+  type PurchaseOrderLine,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import {
@@ -59,6 +59,23 @@ import {
   PurchaseOrderSourceLinkPanel,
 } from "./PurchaseOrderSourceLinkPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
+import {
+  ItemEditor,
+  type EditorItem,
+  type EditorLineField,
+  type EditorSubItem,
+} from "./ItemEditor";
+import {
+  addSubLine,
+  editorItemsFromGroups,
+  groupPurchaseOrderLines,
+  moveSubLine,
+  patchGroupParentDescription,
+  patchLine,
+  patchSubLine,
+  removeGroup,
+  splitPlainLine,
+} from "../purchaseOrderLines";
 import { ReconciliationTotalsStrip } from "./ReconciliationTotalsStrip";
 import { Select } from "./Select";
 import {
@@ -78,7 +95,6 @@ import {
 } from "../poReconciliation";
 import {
   explainTotalsDifference,
-  headerDiscountDifference,
   lineMoneyDifferences,
   sourceLineRef,
   type LineField,
@@ -99,8 +115,8 @@ import {
 // commercial details stay editable; the lines are the customer's order, with
 // quantity as a 4-decimal string and money in the PO's own currency.
 //
-// The calculation (#470) is shown beside the entry: row and whole-PO discounts,
-// customer-facing PPN, one explained adjustment, and the grand total. The source
+// The calculation (#470) is shown beside the entry: row discounts,
+// customer-facing PPN, and the grand total. The source
 // quotation's printed figures stay in their own group. Differences, PDF and
 // confirmation number belong to #471/#472/#474. A draft is deliberately
 // unfinished, so Save draft only stores what was entered.
@@ -259,6 +275,7 @@ export interface POEditorShellActions {
   blockedMessage: string | null;
   onSave: () => void;
   onFinalSave: () => void;
+  onCancel: () => void;
   onBlockedActivate: () => void;
 }
 
@@ -486,321 +503,60 @@ function TextAreaField({
   );
 }
 
+/** A YYYY-MM-DD field reads as "10 Nov 2026" in the hero; the form keeps the
+ *  ISO value because that is what the date input and the payload use. */
+function displayPurchaseOrderDate(raw: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (match === null) return raw.trim() === "" ? "—" : raw;
+  const date = new Date(
+    Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+  );
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** One empty editor line, with the stable alias every write submits. */
+function newEditorLine(key: number, uom: string): PurchaseOrderLine {
+  return {
+    key,
+    clientKey: newPurchaseOrderLineKey(),
+    persistedId: undefined,
+    persistedClientKey: null,
+    description: "",
+    quantity: "1",
+    uom,
+    unitPrice: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    quotationItemNo: null,
+    quotationSubNo: null,
+    groupKey: "",
+    parentDescription: "",
+    descriptionLines: [],
+  };
+}
+
+/** A split-line identity. Source groups use `q:<itemNo>`; an extra group
+ *  needs a value no other group can claim, so it gets a UUID. */
+function newGroupKey(): string {
+  const cryptoObject = globalThis.crypto;
+  const uuid =
+    cryptoObject !== undefined && typeof cryptoObject.randomUUID === "function"
+      ? cryptoObject.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `g:${uuid}`;
+}
+
 /**
  * One line's entry controls: the customer's description, quantity, UoM and
  * unit price, then the row's own discount and the exact line total it
  * produces. Exported so the snapshot harness can show this row at 360/1280 --
  * the full editor page pushes it below the fold.
  */
-export function PurchaseOrderLineRow({
-  line,
-  index,
-  currency,
-  uomOptions,
-  calculation,
-  dispatch,
-  matchOptions,
-  onMatchChange,
-  sessionKey,
-  onCommitLine,
-  onFocusLine,
-  lineNotices,
-  lineErrors,
-  unresolvedByLineField,
-  onShowItem,
-  matchOpen = false,
-  onToggleMatch,
-  onRemoveLine,
-}: {
-  line: PurchaseOrderEditorState["lines"][number];
-  index: number;
-  currency: CurrencyInfo;
-  uomOptions: CompanyUnitOption[];
-  calculation: PurchaseOrderLineCalculation | null;
-  dispatch: (action: PurchaseOrderEditorAction) => void;
-  /** Quotation match choices; absent when no source is linked. */
-  matchOptions?: { value: string; label: string }[];
-  onMatchChange?: (quotationItemNo: number | null, quotationSubNo: number | null) => void;
-  /**
-   * F2: the stable session key for this row's feedback and item lookups,
-   * resolved by the editor from the session identities (first-seen wins).
-   */
-  sessionKey?: string;
-  /**
-   * Blur-commit of one line field; absent when reconciliation is off.
-   * Selects and checkboxes pass their NEW value explicitly (F3) instead of
-   * reading React's previous render.
-   */
-  onCommitLine?: (
-    field: LineField,
-    explicitRaw?: string | { enabled: boolean; percent: string | number }
-  ) => void;
-  /** U8: tracks the focused line field so Final Save can commit it first. */
-  onFocusLine?: (field: LineField) => void;
-  lineNotices?: Record<string, CommitNotice | null>;
-  lineErrors?: Record<string, string | null>;
-  unresolvedByLineField?: Record<string, ReconciliationItem | null>;
-  onShowItem?: (key: string) => void;
-  /** U1: whether this row's match select is expanded (only one at a time). */
-  matchOpen?: boolean;
-  onToggleMatch?: () => void;
-  /** U1: removal that also moves focus and announces; falls back to plain dispatch. */
-  onRemoveLine?: (lineKey: string) => void;
-}) {
-  const feedbackKey = (field: LineField) => `${sessionKey ?? line.clientKey}:${field}`;
-  const feedback = (field: LineField, label: string) => (
-    <HeaderFieldFeedback
-      fieldKey={feedbackKey(field)}
-      label={label}
-      notice={lineNotices?.[feedbackKey(field)] ?? null}
-      validationError={lineErrors?.[feedbackKey(field)] ?? null}
-      unresolvedItem={unresolvedByLineField?.[feedbackKey(field)] ?? null}
-      onShowItem={onShowItem}
-    />
-  );
-  const commit = (field: LineField) => () => onCommitLine?.(field);
-  const focus = (field: LineField) => () => onFocusLine?.(field);
-  const commitValue = (
-    field: LineField,
-    explicitRaw: string | { enabled: boolean; percent: string | number }
-  ) => onCommitLine?.(field, explicitRaw);
-  const matchRef =
-    line.quotationItemNo === null
-      ? null
-      : line.quotationSubNo === null
-        ? String(line.quotationItemNo)
-        : `${line.quotationItemNo}.${line.quotationSubNo}`;
-  const matchValue =
-    line.quotationItemNo === null
-      ? ""
-      : line.quotationSubNo === null
-        ? String(line.quotationItemNo)
-        : `${line.quotationItemNo}.${line.quotationSubNo}`;
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  // U1: focusing the revealed match select is part of opening it. The pane's
-  // Fix match and the header Change button share this path.
-  const wasOpen = useRef(matchOpen);
-  useEffect(() => {
-    if (matchOpen && !wasOpen.current) {
-      rowRef.current
-        ?.querySelector<HTMLElement>(`[aria-label="Line ${index + 1} quotation match"]`)
-        ?.focus();
-    }
-    wasOpen.current = matchOpen;
-  }, [matchOpen, index]);
-  return (
-    <div
-      ref={rowRef}
-      className="grid gap-3 rounded-lg border border-rule bg-white p-3"
-      data-po-line={index + 1}
-    >
-      <div className="flex items-center gap-2">
-        <span className="text-small font-medium text-ink-900">
-          Line {index + 1}
-        </span>
-        {matchOptions !== undefined && onMatchChange !== undefined && onToggleMatch !== undefined ? (
-          <>
-            <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
-              {matchRef === null ? "Extra line" : `Quotation ${matchRef}`}
-            </span>
-            <button
-              type="button"
-              aria-label={`Change quotation match for line ${index + 1}`}
-              aria-expanded={matchOpen}
-              onClick={onToggleMatch}
-              className="cursor-pointer rounded-md px-2 py-1 text-small font-medium text-accent-700 underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
-            >
-              Change
-            </button>
-          </>
-        ) : (
-          <span className="text-caption text-ink-400">
-            {matchLabel(line.quotationItemNo, line.quotationSubNo)}
-          </span>
-        )}
-        <span className="ml-auto">
-          <Button
-            size="sm"
-            aria-label={`Remove line ${index + 1}`}
-            onClick={() => {
-              if (onRemoveLine !== undefined) onRemoveLine(line.clientKey);
-              else dispatch({ type: "lineRemoved", key: line.key });
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              aria-hidden="true"
-              className="@min-[560px]:hidden"
-            >
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-            <span className="hidden @min-[560px]:inline">Remove</span>
-          </Button>
-        </span>
-      </div>
-      {matchOptions !== undefined && onMatchChange !== undefined && matchOpen ? (
-        <div className="grid gap-1.5">
-          <span className="text-small font-medium text-ink-700" id={`line-${index + 1}-match-heading`}>
-            Quotation match
-          </span>
-          <Select
-            ariaLabel={`Line ${index + 1} quotation match`}
-            value={matchValue}
-            options={matchOptions}
-            onChange={(value) => {
-              const text = String(value);
-              if (text === "") {
-                onMatchChange(null, null);
-                return;
-              }
-              const [head, tail] = text.split(".");
-              const itemNo = Number(head);
-              if (!Number.isInteger(itemNo) || itemNo < 1) return;
-              onMatchChange(itemNo, tail === undefined ? null : Number(tail));
-            }}
-          />
-        </div>
-      ) : null}
-      <div className="grid gap-3 @min-[560px]:grid-cols-[1fr_1fr_1.2fr] @min-[700px]:grid-cols-[minmax(0,1fr)_104px_120px_150px]">
-        <label className="grid gap-1.5 @min-[560px]:col-span-full @min-[700px]:col-span-1">
-          <span className="text-small font-medium text-ink-700">
-            Description
-          </span>
-          <input
-            aria-label={`Line ${index + 1} description`}
-            className={fieldClass}
-            value={line.description}
-            onChange={(event) =>
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { description: event.target.value },
-              })
-            }
-            onBlur={commit("description")}
-          onFocus={focus("description")}
-          />
-          {feedback("description", `Line ${index + 1} description`)}
-        </label>
-        <label className="grid gap-1.5">
-          <span className="text-small font-medium text-ink-700">Quantity</span>
-          <input
-            inputMode="decimal"
-            aria-label={`Line ${index + 1} quantity`}
-            className={fieldClass}
-            value={line.quantity}
-            onChange={(event) =>
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { quantity: event.target.value },
-              })
-            }
-            onBlur={commit("quantity")}
-          onFocus={focus("quantity")}
-          />
-          {feedback("quantity", `Line ${index + 1} quantity`)}
-        </label>
-        <div className="grid gap-1.5">
-          <span className="text-small font-medium text-ink-700">UoM</span>
-          <Select
-            ariaLabel={`Line ${index + 1} unit of measure`}
-            value={line.uom}
-            options={uomOptions.length > 0 ? uomOptions : [{ value: line.uom, label: line.uom || "—" }]}
-            onChange={(value) => {
-              const next = String(value);
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { uom: next },
-              });
-              commitValue("uom", next);
-            }}
-          />
-          {feedback("uom", `Line ${index + 1} unit of measure`)}
-        </div>
-        <label className="grid gap-1.5 @min-[560px]:col-span-full @min-[700px]:col-span-1">
-          <span className="text-small font-medium text-ink-700">
-            Unit price ({currency.code})
-          </span>
-          <input
-            inputMode="decimal"
-            aria-label={`Line ${index + 1} unit price`}
-            className={fieldClass}
-            value={line.unitPrice}
-            onChange={(event) =>
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { unitPrice: event.target.value },
-              })
-            }
-            onBlur={commit("unitPrice")}
-          onFocus={focus("unitPrice")}
-          />
-          {feedback("unitPrice", `Line ${index + 1} unit price`)}
-        </label>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-2">
-        <label className="flex items-center gap-2 text-small text-ink-700">
-          <input
-            type="checkbox"
-            aria-label={`Line ${index + 1} discount enabled`}
-            checked={line.discountEnabled}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { discountEnabled: enabled },
-              });
-              commitValue("discount", { enabled, percent: line.discountPercent });
-            }}
-            onBlur={commit("discount")}
-            onFocus={focus("discount")}
-          />
-          Row discount
-        </label>
-        <div className="flex items-center gap-1">
-          <input
-            inputMode="decimal"
-            aria-label={`Line ${index + 1} discount percent`}
-            className={`${fieldClass} w-20`}
-            value={line.discountPercent}
-            disabled={!line.discountEnabled}
-            onChange={(event) =>
-              dispatch({
-                type: "lineChanged",
-                key: line.key,
-                patch: { discountPercent: event.target.value },
-              })
-            }
-            onBlur={commit("discount")}
-            onFocus={focus("discount")}
-          />
-          <span className="text-small text-ink-500">%</span>
-        </div>
-        {feedback("discount", `Line ${index + 1} discount`)}
-        <span className="ml-auto tnum whitespace-nowrap text-small text-ink-700">
-          {calculation === null
-            ? "Line total —"
-            : `Line total ${formatMoney(currency, calculation.netMinor)}`}
-        </span>
-        {calculation !== null && calculation.discountMinor > 0 ? (
-          <span className="tnum whitespace-nowrap text-caption text-ink-500">
-            Discount {formatMoney(currency, -calculation.discountMinor)}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  );
-}
 /**
  * Ticket 04: the inline feedback under a committed header field. A notice is
  * inline feedback and never a review item; the pane owns decisions. An
@@ -908,7 +664,344 @@ export function PurchaseOrderEditorView({
   // The panel and the save guard read the same pure calculation, so the number
   // on screen is the number the payload will carry.
   const calculation = calculatePurchaseOrder(state, activeCurrency);
-  const wholeDiscountPercent = parseDiscountPercent(state.header.discountPercent);
+
+  // #573: the flat rows are grouped for the quotation line-item component.
+  // Every edit maps back onto the rows that own the value; the parent row of a
+  // split line is a presentation, never a row of its own.
+  const groups = useMemo(() => groupPurchaseOrderLines(state.lines), [state.lines]);
+  const plainGroupCount = groups.filter((group) => group.groupKey === "").length;
+  const subItemCount = state.lines.length - plainGroupCount;
+  const editorItems = useMemo(
+    () => editorItemsFromGroups(groups, activeCurrency),
+    [groups, activeCurrency]
+  );
+  const replaceLines = (lines: PurchaseOrderLine[]) =>
+    dispatch({ type: "linesReplaced", lines });
+  const groupForItem = (key: number) =>
+    groups.find((group) => group.key === key);
+  const lineForKey = (key: number) =>
+    state.lines.find((line) => line.key === key);
+  const flatIndexOf = (key: number) =>
+    state.lines.findIndex((line) => line.key === key);
+
+  const addLine = () => {
+    if (onAddLine !== undefined) onAddLine();
+    else dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
+  };
+
+  const changeEditorItem = (
+    key: number,
+    field: keyof EditorItem,
+    value: string | string[] | boolean
+  ) => {
+    const group = groupForItem(key);
+    if (group === undefined) return;
+    if (group.groupKey === "") {
+      replaceLines(patchLine(state.lines, key, field, value, activeCurrency));
+      return;
+    }
+    if (field === "description" && typeof value === "string") {
+      replaceLines(
+        patchGroupParentDescription(state.lines, group.groupKey, value)
+      );
+    }
+  };
+
+  const removeEditorItem = (key: number) => {
+    const group = groupForItem(key);
+    if (group === undefined) return;
+    if (group.groupKey === "" && onRemoveLine !== undefined) {
+      onRemoveLine(group.lines[0].clientKey);
+      return;
+    }
+    replaceLines(removeGroup(state.lines, group.groupKey, key));
+  };
+
+  const addBullet = (key: number) => {
+    const line = lineForKey(key);
+    if (line === undefined) return;
+    replaceLines(
+      patchLine(
+        state.lines,
+        key,
+        "bullets",
+        [...line.descriptionLines, ""],
+        activeCurrency
+      )
+    );
+  };
+  const removeBullet = (key: number, bulletIndex: number) => {
+    const line = lineForKey(key);
+    if (line === undefined) return;
+    replaceLines(
+      patchLine(
+        state.lines,
+        key,
+        "bullets",
+        line.descriptionLines.filter((_, index) => index !== bulletIndex),
+        activeCurrency
+      )
+    );
+  };
+  const changeBullet = (key: number, bulletIndex: number, value: string) => {
+    const line = lineForKey(key);
+    if (line === undefined) return;
+    replaceLines(
+      patchLine(
+        state.lines,
+        key,
+        "bullets",
+        line.descriptionLines.map((lineText, index) =>
+          index === bulletIndex ? value : lineText
+        ),
+        activeCurrency
+      )
+    );
+  };
+
+  const enableSubItems = (key: number) => {
+    const line = lineForKey(key);
+    if (line === undefined) return;
+    // A line matched to a source item keeps that item's group key, so the
+    // split stays tied to the quotation line it came from. A line with no
+    // match (or one whose group already exists) gets its own identity.
+    const sourceKey =
+      line.quotationItemNo !== null ? `q:${line.quotationItemNo}` : "";
+    const groupKey =
+      sourceKey !== "" && !groups.some((group) => group.groupKey === sourceKey)
+        ? sourceKey
+        : newGroupKey();
+    replaceLines(
+      splitPlainLine(
+        state.lines,
+        key,
+        groupKey,
+        newEditorLine(state.nextKey, line.uom || uomOptions[0]?.value || "")
+      )
+    );
+  };
+
+  const focusEditorLineField = (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => {
+    // A split line's parent title is a PO-only presentation, not a source
+    // line; committing it would overwrite the first sub-item's description.
+    const group = groupForItem(itemKey);
+    if (subId === undefined && group?.groupKey !== "" && field === "description") {
+      return;
+    }
+    const line = subId !== undefined ? lineForKey(subId) : lineForKey(itemKey);
+    if (line !== undefined) onFocusLine?.(line.clientKey, field);
+  };
+
+  const commitEditorLineField = (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => {
+    const group = groupForItem(itemKey);
+    if (subId === undefined && group?.groupKey !== "" && field === "description") {
+      return;
+    }
+    const line = subId !== undefined ? lineForKey(subId) : lineForKey(itemKey);
+    if (line !== undefined) onCommitLine?.(line.clientKey, field);
+  };
+
+  const commitEditorSelect = (
+    itemKey: number,
+    field: EditorLineField,
+    value: string,
+    subId?: number
+  ) => {
+    const line = subId !== undefined ? lineForKey(subId) : lineForKey(itemKey);
+    if (line !== undefined) onCommitLine?.(line.clientKey, field, value);
+  };
+
+  const commitEditorDiscount = (
+    itemKey: number,
+    enabled: boolean,
+    percent: string,
+    subId?: number
+  ) => {
+    const line = subId !== undefined ? lineForKey(subId) : lineForKey(itemKey);
+    if (line !== undefined) {
+      onCommitLine?.(line.clientKey, "discount", { enabled, percent });
+    }
+  };
+
+  const addSubRow = (key: number) => {
+    const group = groupForItem(key);
+    if (group === undefined || group.groupKey === "") return;
+    replaceLines(
+      addSubLine(
+        state.lines,
+        group.groupKey,
+        newEditorLine(state.nextKey, group.lines[0]?.uom ?? "")
+      )
+    );
+  };
+
+  const removeSubRow = (_key: number, subId: number) => {
+    replaceLines(state.lines.filter((line) => line.key !== subId));
+  };
+
+  const patchSubRow = (
+    _key: number,
+    subId: number,
+    patch: Partial<EditorSubItem>
+  ) => {
+    replaceLines(patchSubLine(state.lines, subId, patch, activeCurrency));
+  };
+
+  const moveSubRow = (key: number, subId: number, direction: -1 | 1) => {
+    const group = groupForItem(key);
+    if (group === undefined) return;
+    replaceLines(moveSubLine(state.lines, group.groupKey, subId, direction));
+  };
+
+  const addSubBullet = (_key: number, subId: number) => {
+    const line = lineForKey(subId);
+    if (line === undefined) return;
+    replaceLines(
+      patchSubLine(
+        state.lines,
+        subId,
+        {
+          bullets: [...line.descriptionLines, ""],
+        },
+        activeCurrency
+      )
+    );
+  };
+  const removeSubBullet = (
+    _key: number,
+    subId: number,
+    bulletIndex: number
+  ) => {
+    const line = lineForKey(subId);
+    if (line === undefined) return;
+    replaceLines(
+      patchSubLine(
+        state.lines,
+        subId,
+        {
+          bullets: line.descriptionLines.filter((_, index) => index !== bulletIndex),
+        },
+        activeCurrency
+      )
+    );
+  };
+  const changeSubBullet = (
+    _key: number,
+    subId: number,
+    bulletIndex: number,
+    value: string
+  ) => {
+    const line = lineForKey(subId);
+    if (line === undefined) return;
+    replaceLines(
+      patchSubLine(
+        state.lines,
+        subId,
+        {
+          bullets: line.descriptionLines.map((lineText, index) =>
+            index === bulletIndex ? value : lineText
+          ),
+        },
+        activeCurrency
+      )
+    );
+  };
+
+  const matchMetaFor = (line: PurchaseOrderLine, label: string) => {
+    if (
+      matchOptions === undefined ||
+      onMatchChange === undefined ||
+      onToggleMatch === undefined
+    ) {
+      return (
+        <span className="text-caption text-ink-400">
+          {matchLabel(line.quotationItemNo, line.quotationSubNo)}
+        </span>
+      );
+    }
+    const reference =
+      line.quotationItemNo === null
+        ? null
+        : line.quotationSubNo === null
+          ? String(line.quotationItemNo)
+          : `${line.quotationItemNo}.${line.quotationSubNo}`;
+    const open = openMatchLineKey === line.clientKey;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border border-rule bg-paper-subtle px-2 py-0.5 text-micro font-medium uppercase text-ink-500">
+          {reference === null ? "Extra line" : `Quotation ${reference}`}
+        </span>
+        <button
+          type="button"
+          aria-label={`Change quotation match for ${label}`}
+          aria-expanded={open}
+          onClick={() => onToggleMatch(line.clientKey)}
+          className="cursor-pointer rounded-md px-2 py-1 text-small font-medium text-accent-700 underline-offset-2 hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
+        >
+          Change
+        </button>
+        {open ? (
+          <Select
+            ariaLabel={`Line ${flatIndexOf(line.key) + 1} quotation match`}
+            value={reference ?? ""}
+            options={matchOptions}
+            onChange={(value) => {
+              const text = String(value);
+              if (text === "") {
+                onMatchChange(line.clientKey, null, null);
+                return;
+              }
+              const [head, tail] = text.split(".");
+              const itemNo = Number(head);
+              if (!Number.isInteger(itemNo) || itemNo < 1) return;
+              onMatchChange(
+                line.clientKey,
+                itemNo,
+                tail === undefined ? null : Number(tail)
+              );
+            }}
+          />
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderItemMeta = (item: EditorItem, index: number) => {
+    const group = groupForItem(item.key);
+    if (group === undefined) return null;
+    if (group.groupKey === "") {
+      return matchMetaFor(group.lines[0], `Line ${index + 1}`);
+    }
+    const first = group.lines[0];
+    return (
+      <span className="text-caption text-ink-500">
+        {first?.quotationItemNo != null
+          ? `Quotation item ${first.quotationItemNo}`
+          : "Split line"}{" "}
+        · {group.lines.length} sub-item{group.lines.length === 1 ? "" : "s"}
+      </span>
+    );
+  };
+
+  const renderSubItemMeta = (
+    _item: EditorItem,
+    sub: EditorSubItem,
+    index: number,
+    subIndex: number
+  ) => {
+    const line = lineForKey(sub.id);
+    if (line === undefined) return null;
+    return matchMetaFor(line, `Sub-item ${subIndex + 1} of line ${index + 1}`);
+  };
+
   const neverLinked = state.sourceState === "never";
   const sourceLess = state.sourceState !== "live";
   const transient = state.orderId === 0;
@@ -918,58 +1011,183 @@ export function PurchaseOrderEditorView({
       : state.taxCategory;
   return (
     <div className="animate-step-in flex flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <SectionHeading
-            title="Purchase Order"
-            hint={
-              correcting
-                ? `Saved record ${state.orderId} · correction`
-                : transient
-                  ? "New purchase order"
-                  : `Draft ${state.orderId}`
+      <section className="relative overflow-hidden rounded-[14px] bg-accent-800 px-5 py-5 text-white shadow-card sm:px-6 sm:py-6">
+        <div className="pointer-events-none absolute -bottom-8 right-4 select-none text-[122px] font-bold leading-none tracking-[-0.08em] text-white/5">
+          PO
+        </div>
+        <div className="relative z-10 flex items-center justify-between gap-3">
+          <span className="text-micro uppercase tracking-[0.18em] text-accent-200">
+            Purchase order
+          </span>
+          <span className="rounded-md border border-white/25 bg-white/10 px-2 py-0.5 text-micro uppercase tracking-wide">
+            {correcting ? "Correction" : "Draft"}
+          </span>
+        </div>
+        <div className="relative z-10 mt-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0">
+            <h1 className="tnum text-[30px] font-semibold leading-none tracking-[-0.035em] sm:text-[34px]">
+              {state.header.poNumber.trim() !== ""
+                ? state.header.poNumber
+                : "New purchase order"}
+            </h1>
+            <p className="mt-2 truncate text-small text-accent-100">
+              {neverLinked ? "No customer yet" : state.customerName}
+              {state.header.billingAddress !== "" ? ` · ${state.header.billingAddress}` : ""}
+            </p>
+          </div>
+          <div className="shrink-0 text-micro uppercase tracking-[0.1em] text-accent-300 sm:text-right">
+            <span>Source quotation</span>
+            <strong className="mt-1 block text-small normal-case tracking-normal text-white">
+              {neverLinked
+                ? "Not linked"
+                : `${state.quoteNumber} · rev ${String(state.sourceRevision).padStart(2, "0")}`}
+            </strong>
+          </div>
+        </div>
+        <div className="relative z-10 mt-5 flex flex-wrap gap-x-7 gap-y-3 border-t border-white/15 pt-3 text-small text-accent-100">
+          <span>
+            <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Issued</span>
+            {displayPurchaseOrderDate(state.header.poDate)}
+          </span>
+          <span>
+            <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Delivery</span>
+            {displayPurchaseOrderDate(state.header.requestedDeliveryDate)}
+          </span>
+          <span>
+            <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Terms</span>
+            {state.header.incoterms || "—"} · {state.currency.toUpperCase()}
+          </span>
+          <span>
+            <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Tax</span>
+            {basisLabel || "—"}
+          </span>
+        </div>
+        <p className="relative z-10 mt-3 text-caption text-accent-200">
+          {correcting
+            ? `Editing version ${state.version}. The previous values are kept in the correction history.`
+            : transient
+              ? "Not saved yet. Save draft stores it so you can continue later."
+              : `Loaded at version ${state.version}.`}
+          {sourceLess ? " · Source missing" : ""}
+        </p>
+      </section>
+
+      {/* #580: the PO-owned details sit directly under the hero, which reads
+          the same state and updates as they change. The customer, quotation
+          identity, currency and tax basis are source snapshots, not controls
+          here. */}
+      <Card className="p-4">
+        <SectionHeading
+          title="Purchase order details"
+          hint="Editable on this purchase order"
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Customer PO number"
+            value={state.header.poNumber}
+            placeholder="Optional"
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { poNumber: value } })
             }
           />
-          <h1 className="tnum text-display font-semibold text-ink-950">
-            {neverLinked ? "New purchase order" : state.quoteNumber}
-          </h1>
-          <p className="mt-1 text-body text-ink-500">
-            {neverLinked ? (
-              <>
-                Source missing · {state.currency.toUpperCase()}
-                {state.taxZone !== "" ? ` · ${state.taxZone}` : ""}
-                {basisLabel !== "" ? ` / ${basisLabel}` : ""}
-              </>
-            ) : (
-              <>
-                {state.customerName} ·{" "}
-                {state.sourceState === "former"
-                  ? `former quotation revision ${state.sourceRevision}`
-                  : `revision ${state.sourceRevision}`}{" "}
-                · {state.currency.toUpperCase()}
-                {state.taxZone !== ""
-                  ? ` · ${state.taxZone}${
-                      state.taxCategory !== ""
-                        ? ` / ${state.taxCategory}`
-                        : ""
-                    }`
-                  : ""}
-              </>
-            )}
-          </p>
-          <p className="mt-1 text-caption text-ink-500">
-            {correcting
-              ? `Editing version ${state.version}. The previous values are kept in the correction history.`
-              : transient
-                ? "Not saved yet. Save draft stores it so you can continue later."
-                : `Loaded at version ${state.version}.`}
-          </p>
+          <Field
+            label="PO date"
+            type="date"
+            value={state.header.poDate}
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { poDate: value } })
+            }
+          />
+          <Field
+            label="Received date"
+            type="date"
+            value={state.header.receivedDate}
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { receivedDate: value } })
+            }
+          />
+          <Field
+            label="Requested delivery date"
+            type="date"
+            value={state.header.requestedDeliveryDate}
+            onChange={(value) =>
+              dispatch({
+                type: "headerChanged",
+                patch: { requestedDeliveryDate: value },
+              })
+            }
+          />
+          <Field
+            label="Payment terms"
+            value={state.header.paymentTerms}
+            placeholder="e.g. 50% advance, balance 30 days after delivery"
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
+            }
+            onBlur={() => onCommitField?.("header:paymentTerms")}
+            onFocus={() => onFocusField?.("header:paymentTerms")}
+          />
+          <HeaderFieldFeedback
+            fieldKey="header:paymentTerms"
+            label={HEADER_FIELDS["header:paymentTerms"].label}
+            notice={notices?.["header:paymentTerms"]}
+            validationError={validationErrors?.["header:paymentTerms"]}
+            unresolvedItem={unresolvedByField?.["header:paymentTerms"]}
+            onShowItem={onShowItem}
+          />
+          <div className="grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">Incoterms</span>
+            <Select
+              ariaLabel="Incoterms"
+              value={state.header.incoterms}
+              options={incotermOptions}
+              onChange={(value) => {
+                const next = String(value);
+                dispatch({ type: "headerChanged", patch: { incoterms: next } });
+                onCommitField?.("header:incoterms", next);
+              }}
+            />
+            <HeaderFieldFeedback
+              fieldKey="header:incoterms"
+              label={HEADER_FIELDS["header:incoterms"].label}
+              notice={notices?.["header:incoterms"]}
+              validationError={validationErrors?.["header:incoterms"]}
+              unresolvedItem={unresolvedByField?.["header:incoterms"]}
+              onShowItem={onShowItem}
+            />
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {sourceLess ? <Badge tone="danger">Source missing</Badge> : null}
-          <Badge tone="accent">{correcting ? "Correction" : "Draft"}</Badge>
-        </div>
-      </div>
+        {correcting ? null : (
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-rule bg-paper-subtle p-3 text-small text-ink-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-accent-700"
+              aria-label="Generate a confirmation number when this purchase order is saved"
+              checked={state.header.confirmationRequested}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { confirmationRequested: event.target.checked },
+                })
+              }
+            />
+            <span>
+              <span className="font-medium">
+                Generate a confirmation number when this purchase order is saved.
+              </span>{" "}
+              Optional. The number is issued at Final Save and cannot be edited
+              afterwards; saving a draft consumes no number.
+            </span>
+          </label>
+        )}
+        <p className="mt-4 text-caption text-ink-500">
+          {state.sourceState === "never"
+            ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis below are editable until then."
+            : state.sourceState === "former"
+              ? "The former quotation remains the reference for the printed totals and lines. Currency and tax basis below are editable until a new link."
+              : "The customer, quotation number and revision, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
+        </p>
+      </Card>
 
       {!correcting ? (
         <PurchaseOrderSourceLinkPanel
@@ -1124,6 +1342,10 @@ export function PurchaseOrderEditorView({
       ) : null}
 
       <Card className="p-4">
+        <SectionHeading
+          title="Addresses and contacts"
+          hint="Commercial contact details for this order"
+        />
         <div className="grid gap-4 sm:grid-cols-2">
           <TextAreaField
             label="Billing address"
@@ -1161,234 +1383,61 @@ export function PurchaseOrderEditorView({
               dispatch({ type: "headerChanged", patch: { contactPhone: value } })
             }
           />
-          <Field
-            label="Customer PO number"
-            value={state.header.poNumber}
-            placeholder="Optional"
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { poNumber: value } })
-            }
-          />
-          <Field
-            label="PO date"
-            type="date"
-            value={state.header.poDate}
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { poDate: value } })
-            }
-          />
-          <Field
-            label="Received date"
-            type="date"
-            value={state.header.receivedDate}
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { receivedDate: value } })
-            }
-          />
-          <Field
-            label="Requested delivery date"
-            type="date"
-            value={state.header.requestedDeliveryDate}
-            onChange={(value) =>
-              dispatch({
-                type: "headerChanged",
-                patch: { requestedDeliveryDate: value },
-              })
-            }
-          />
-          <Field
-            label="Payment terms"
-            value={state.header.paymentTerms}
-            placeholder="e.g. 50% advance, balance 30 days after delivery"
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
-            }
-            onBlur={() => onCommitField?.("header:paymentTerms")}
-            onFocus={() => onFocusField?.("header:paymentTerms")}
-          />
-          <HeaderFieldFeedback
-            fieldKey="header:paymentTerms"
-            label={HEADER_FIELDS["header:paymentTerms"].label}
-            notice={notices?.["header:paymentTerms"]}
-            validationError={validationErrors?.["header:paymentTerms"]}
-            unresolvedItem={unresolvedByField?.["header:paymentTerms"]}
-            onShowItem={onShowItem}
-          />
-          <div className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">Incoterms</span>
-            <Select
-              ariaLabel="Incoterms"
-              value={state.header.incoterms}
-              options={incotermOptions}
-              onChange={(value) => {
-                const next = String(value);
-                dispatch({ type: "headerChanged", patch: { incoterms: next } });
-                onCommitField?.("header:incoterms", next);
-              }}
-            />
-            <HeaderFieldFeedback
-              fieldKey="header:incoterms"
-              label={HEADER_FIELDS["header:incoterms"].label}
-              notice={notices?.["header:incoterms"]}
-              validationError={validationErrors?.["header:incoterms"]}
-              unresolvedItem={unresolvedByField?.["header:incoterms"]}
-              onShowItem={onShowItem}
-            />
-          </div>
         </div>
-        <p className="mt-4 text-caption text-ink-500">
-          {state.sourceState === "never"
-            ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis above are editable until then."
-            : state.sourceState === "former"
-              ? "The former quotation remains the reference for the printed totals and lines. Currency and tax basis above are editable until a new link."
-              : "Customer, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
-        </p>
       </Card>
 
       <div>
         <SectionHeading
-          title="Lines"
-          hint={`${state.lines.length} ${state.lines.length === 1 ? "line" : "lines"}`}
+          title="Line items"
+          hint={`${groups.length} ${groups.length === 1 ? "line" : "lines"}${
+            subItemCount > 0
+              ? ` · ${subItemCount} sub-item${subItemCount === 1 ? "" : "s"}`
+              : ""
+          }`}
           action={
-            <Button
-              size="sm"
-              aria-label="Add line"
-              onClick={() => {
-                if (onAddLine !== undefined) onAddLine();
-                else dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
-              }}
-            >
+            <Button size="sm" aria-label="Add line" onClick={addLine}>
               Add line
             </Button>
           }
         />
-        <div className="grid gap-3">
-          {state.lines.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-rule px-4 py-8 text-center text-small text-ink-500">
-              No lines yet. Add the customer's first line.
-            </p>
-          ) : (
-            state.lines.map((line, index) => (
-              <PurchaseOrderLineRow
-                key={line.key}
-                line={line}
-                index={index}
-                currency={activeCurrency}
-                uomOptions={uomOptions}
-                calculation={calculation.lines[index] ?? null}
-                dispatch={dispatch}
-                matchOpen={openMatchLineKey !== undefined && openMatchLineKey === line.clientKey}
-                onToggleMatch={
-                  onToggleMatch === undefined
-                    ? undefined
-                    : () => onToggleMatch(line.clientKey)
-                }
-                onRemoveLine={onRemoveLine}
-                matchOptions={matchOptions}
-                onMatchChange={
-                  onMatchChange === undefined
-                    ? undefined
-                    : (quotationItemNo, quotationSubNo) =>
-                        onMatchChange(line.clientKey, quotationItemNo, quotationSubNo)
-                }
-                sessionKey={sessionKeyFor?.(line.clientKey)}
-                onCommitLine={
-                  onCommitLine === undefined
-                    ? undefined
-                    : (field, explicitRaw) =>
-                        onCommitLine(line.clientKey, field, explicitRaw)
-                }
-                onFocusLine={
-                  onFocusLine === undefined
-                    ? undefined
-                    : (field) => onFocusLine(line.clientKey, field)
-                }
-                lineNotices={lineNotices}
-                lineErrors={lineErrors}
-                unresolvedByLineField={unresolvedByLineField}
-                onShowItem={onShowItem}
-              />
-            ))
-          )}
-        </div>
+        {state.lines.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-rule px-4 py-8 text-center text-small text-ink-500">
+            No lines yet. Add the customer's first line.
+          </p>
+        ) : (
+          <ItemEditor
+            items={editorItems}
+            currency={activeCurrency}
+            uomOptions={uomOptions}
+            mode="purchase-order"
+            allowMergeSubItems={false}
+            allowEmpty
+            renderItemMeta={renderItemMeta}
+            renderSubItemMeta={renderSubItemMeta}
+            onLineFieldFocus={focusEditorLineField}
+            onLineFieldBlur={commitEditorLineField}
+            onLineDiscountCommit={commitEditorDiscount}
+            onLineSelectCommit={commitEditorSelect}
+            onAddItem={addLine}
+            onRemoveItem={removeEditorItem}
+            onChange={changeEditorItem}
+            onAddBullet={addBullet}
+            onRemoveBullet={removeBullet}
+            onBulletChange={changeBullet}
+            onEnableSubItems={enableSubItems}
+            onDisableSubItems={() => undefined}
+            onAddSubRow={addSubRow}
+            onRemoveSubRow={removeSubRow}
+            onPatchSubRow={patchSubRow}
+            onMoveSubRow={moveSubRow}
+            onPasteSubRows={() => undefined}
+            onAddSubBullet={addSubBullet}
+            onRemoveSubBullet={removeSubBullet}
+            onSubBulletChange={changeSubBullet}
+            onPasteItems={() => undefined}
+          />
+        )}
       </div>
-
-      <Card className="p-4">
-        <SectionHeading
-          title="Discounts and adjustment"
-          hint="Explained separately from the line prices"
-        />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Whole-PO discount (%)
-            </span>
-            <input
-              inputMode="decimal"
-              aria-label="Whole-PO discount"
-              className={fieldClass}
-              value={state.header.discountPercent}
-              onChange={(event) =>
-                dispatch({
-                  type: "headerChanged",
-                  patch: { discountPercent: event.target.value },
-                })
-              }
-              onBlur={() => onCommitField?.("header:discountPercent")}
-              onFocus={() => onFocusField?.("header:discountPercent")}
-            />
-            <HeaderFieldFeedback
-              fieldKey="header:discountPercent"
-              label={HEADER_FIELDS["header:discountPercent"].label}
-              notice={notices?.["header:discountPercent"]}
-              validationError={validationErrors?.["header:discountPercent"]}
-              unresolvedItem={unresolvedByField?.["header:discountPercent"]}
-              onShowItem={onShowItem}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Adjustment ({activeCurrency.code})
-            </span>
-            <input
-              inputMode="decimal"
-              aria-label="Adjustment"
-              className={fieldClass}
-              placeholder="Signed, e.g. -12.50"
-              value={state.header.adjustment}
-              onChange={(event) =>
-                dispatch({
-                  type: "headerChanged",
-                  patch: { adjustment: event.target.value },
-                })
-              }
-            />
-          </label>
-          <label className="grid gap-1.5 sm:col-span-2">
-            <span className="text-small font-medium text-ink-700">
-              Adjustment reason
-            </span>
-            <input
-              aria-label="Adjustment reason"
-              className={fieldClass}
-              placeholder="Required when the adjustment is not zero"
-              value={state.header.adjustmentReason}
-              onChange={(event) =>
-                dispatch({
-                  type: "headerChanged",
-                  patch: { adjustmentReason: event.target.value },
-                })
-              }
-            />
-          </label>
-        </div>
-        <p className="mt-3 text-caption text-ink-500">
-          Row discounts come off each line first, then the whole-PO discount.
-          PPN is charged on the discounted subtotal and printed separately. The
-          signed adjustment is added last and never changes a row price or
-          disguises a discount or tax entry.
-        </p>
-      </Card>
 
       {calculation.error !== null ? (
         <StatusBanner tone="danger">{calculation.error}</StatusBanner>
@@ -1397,9 +1446,7 @@ export function PurchaseOrderEditorView({
       <PurchaseOrderTotals
         totals={calculation.totals}
         currency={activeCurrency}
-        discountPercent={wholeDiscountPercent}
         ppnBps={state.ppnBps}
-        adjustmentReason={state.header.adjustmentReason.trim()}
         printedTotals={state.printedTotals}
         sourceRevision={state.sourceRevision}
         printedTotalsKnown={state.printedTotalsKnown}
@@ -1409,6 +1456,7 @@ export function PurchaseOrderEditorView({
         <StatusBanner tone="danger">{state.error}</StatusBanner>
       ) : null}
 
+      {actionsInShell ? null : (
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <span className="text-caption text-ink-500">
           {dirty ? "Unsaved changes" : "All changes saved"} ·{" "}
@@ -1419,11 +1467,11 @@ export function PurchaseOrderEditorView({
               : "Final Save reviews every difference against the exact quotation revision."}
         </span>
         <div className="flex flex-wrap items-center gap-2">
-          <Button aria-label={correcting ? "Cancel correction" : "Cancel draft"} onClick={onCancel}>
-            Cancel
-          </Button>
           {actionsInShell ? null : (
             <>
+              <Button aria-label={correcting ? "Cancel correction" : "Cancel draft"} onClick={onCancel}>
+                Cancel
+              </Button>
               <Button
                 aria-label={correcting ? "Save correction" : "Save draft"}
                 disabled={state.saving || finalSaving}
@@ -1463,6 +1511,7 @@ export function PurchaseOrderEditorView({
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -1483,13 +1532,32 @@ function gateFocusCandidates(
   lines: { discountEnabled: boolean }[]
 ): string[] {
   const line = /^line:(\d+):(.+)$/.exec(key);
-  if (line !== null && line[2] === "discount") {
+  if (line !== null) {
     const row = lines[Number(line[1]) - 1];
-    const name = `Line ${line[1]}`;
-    if (row !== undefined && row.discountEnabled) {
-      return [`${name} discount percent`, `${name} discount enabled`];
+    const name = `line ${line[1]}`;
+    switch (line[2]) {
+      case "description":
+        return [`Description for ${name}`];
+      case "uom":
+        return [`Unit of measure for ${name}`];
+      case "quantity":
+        return [`Quantity for ${name}`];
+      case "unitPrice":
+        return [`Unit price for ${name}`];
+      case "discount":
+        if (row !== undefined && row.discountEnabled) {
+          return [
+            `Discount percentage for ${name}`,
+            `Enable a discount for ${name}`,
+          ];
+        }
+        return [
+          `Enable a discount for ${name}`,
+          `Discount percentage for ${name}`,
+        ];
+      default:
+        return [label];
     }
-    return [`${name} discount enabled`, `${name} discount percent`];
   }
   return [label];
 }
@@ -1609,7 +1677,7 @@ export function PurchaseOrderEditorPage({
     const at = state.lines.length + 1;
     dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
     setOpenMatchLineKey(null);
-    setPendingFocus(`Line ${at} description`);
+    setPendingFocus(`Description for line ${at}`);
     reconciliation.announce(`Line ${at} added.`);
   };
   useEffect(() => {
@@ -1685,14 +1753,12 @@ export function PurchaseOrderEditorPage({
         ? editorStateRef.current.header.paymentTerms
         : field === "header:incoterms"
           ? editorStateRef.current.header.incoterms
-          : editorStateRef.current.header.discountPercent,
+          : "",
     applyFieldValue: (field, value) => {
       if (field === "header:paymentTerms") {
         dispatch({ type: "headerChanged", patch: { paymentTerms: value } });
       } else if (field === "header:incoterms") {
         dispatch({ type: "headerChanged", patch: { incoterms: String(value) } });
-      } else {
-        dispatch({ type: "headerChanged", patch: { discountPercent: String(value) } });
       }
     },
     applyLineFieldValue: (lineKey, field, value) => {
@@ -1736,7 +1802,6 @@ export function PurchaseOrderEditorPage({
         setCompareSource({
           paymentTerms: loaded.Source.PaymentTerms,
           incoterms: loaded.Source.Incoterms,
-          discountPercent: loaded.Source.DiscountPercent,
         });
         setCompareLines(loaded.Source.Lines);
       } catch {
@@ -1974,6 +2039,7 @@ export function PurchaseOrderEditorPage({
           : null,
       onSave: () => void callbacks.save(version, false),
       onFinalSave: () => void callbacks.startReview(),
+      onCancel,
       onBlockedActivate: () => callbacks.blockedActivate(),
     });
   }, [
@@ -2372,6 +2438,17 @@ export function PurchaseOrderEditorPage({
   };
 
   const startReview = async () => {
+    // #580: a draft may be saved with zero lines, but a saved record may not
+    // be finalized empty. Refuse before persisting or loading the review, so a
+    // zero-line order never opens a review it cannot complete.
+    if (state.lines.length === 0) {
+      const message = "Add at least one line before Final Save.";
+      dispatch({ type: "saveFailed", error: message });
+      reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}.`);
+      const addLine = document.querySelector<HTMLElement>('[aria-label="Add line"]');
+      if (addLine !== null) addLine.focus();
+      return;
+    }
     // Contract section 7: commit the focused input first, before readiness.
     // The commit result is the readiness truth: a focused field that still
     // fails validation blocks with its message and focus.
@@ -2489,10 +2566,9 @@ export function PurchaseOrderEditorPage({
       setCompareSource({
         paymentTerms: loaded.Source.PaymentTerms,
         incoterms: loaded.Source.Incoterms,
-        discountPercent: loaded.Source.DiscountPercent,
       });
       setCompareLines(loaded.Source.Lines);
-      const initial = initialFinalizeReviewState();
+      const initial = initialFinalizeReviewState(state.header.confirmationRequested);
       setReview(loaded);
       // U2: the finalize review is a receipt of the recorded session, not a
       // second workbench. Kept/used choices pre-fill from unchanged session
@@ -2503,12 +2579,10 @@ export function PurchaseOrderEditorPage({
         {
           paymentTerms: state.header.paymentTerms,
           incoterms: state.header.incoterms,
-          discountPercent: state.header.discountPercent,
         },
         {
           PaymentTerms: loaded.Source.PaymentTerms,
           Incoterms: loaded.Source.Incoterms,
-          DiscountPercent: loaded.Source.DiscountPercent,
         }
       );
       const prefilledLines = reconciliation.prefillLines();
@@ -2750,7 +2824,7 @@ export function PurchaseOrderEditorPage({
       setOpenMatchLineKey(line.clientKey);
       setPendingFocus(`Line ${lineNumber} quotation match`);
     } else {
-      setPendingFocus(`Line ${lineNumber} description`);
+      setPendingFocus(`Description for line ${lineNumber}`);
     }
   };
   if (linkReview !== null) {
@@ -2908,14 +2982,11 @@ export function PurchaseOrderEditorPage({
   const unresolvedHeaderItems: Record<HeaderFieldKey, ReconciliationItem | null> = {
     "header:paymentTerms": null,
     "header:incoterms": null,
-    "header:discountPercent": null,
   };
   for (const item of reconciliation.items) {
     if (
       item.Status === "unresolved" &&
-      (item.Field === "header:paymentTerms" ||
-        item.Field === "header:incoterms" ||
-        item.Field === "header:discountPercent")
+      (item.Field === "header:paymentTerms" || item.Field === "header:incoterms")
     ) {
       unresolvedHeaderItems[item.Field as HeaderFieldKey] = item;
     }
@@ -2957,7 +3028,9 @@ export function PurchaseOrderEditorPage({
     setOpenMatchLineKey(null);
     if (target !== undefined) {
       const nextAt = state.lines.findIndex((line) => line.clientKey === target.clientKey);
-      setPendingFocus(`Line ${nextAt === -1 ? at + 1 : nextAt + 1} description`);
+      setPendingFocus(
+        `Description for line ${nextAt === -1 ? at + 1 : nextAt + 1}`
+      );
     } else {
       setPendingFocus("Add line");
     }
@@ -2978,15 +3051,13 @@ export function PurchaseOrderEditorPage({
       quotationSubNo: tail === undefined ? null : Number(tail),
     });
     setOpenMatchLineKey(null);
-    setPendingFocus(`Line ${at} description`);
+    setPendingFocus(`Description for line ${at}`);
     reconciliation.announce(`Line ${at} added.`);
   };
-  // U6/R-09: the reason follows the visible comparable-input order. The
-  // form renders the Lines section before Discounts and adjustment, so
-  // matched lines come first in display order (quantity, unit price, row
-  // discount per line) and the whole-PO discount last. No duplicate discount
-  // input, no pricing change; the helper itself is order-agnostic and the
-  // R-09 unit test covers first-differs-wins.
+  // U6/R-09: the reason follows the visible comparable-input order. Matched
+  // lines come first (quantity, unit price, row discount per line); the
+  // retired whole-PO discount and adjustment are not comparable inputs any
+  // more (#573), so the printed-total difference is explained by the rows.
   const totalsStripReason: string | null =
     compareSource === null || compareLines === null
       ? null
@@ -3013,7 +3084,6 @@ export function PurchaseOrderEditorPage({
             })),
             activeCurrency
           ),
-          headerDiscountDifference(state.header.discountPercent, compareSource.discountPercent),
         ]);
   const calculatedTotals = calculatePurchaseOrder(state, activeCurrency).totals;
   const totalsStrip =
@@ -3026,7 +3096,6 @@ export function PurchaseOrderEditorPage({
                 subtotalMinor: calculatedTotals.subtotalMinor,
                 discountMinor: calculatedTotals.discountMinor,
                 ppnMinor: calculatedTotals.ppnMinor,
-                adjustmentMinor: calculatedTotals.adjustmentMinor,
                 grandTotalMinor: calculatedTotals.grandTotalMinor,
               }
         }

@@ -192,20 +192,23 @@ type POSourceOccupancyResponse struct {
 // own calculation. They are returned, not recomputed, so a reopened order shows
 // the arithmetic it was saved with.
 type PurchaseOrderItemRow struct {
-	QuotationItemNo *int    `json:"quotationItemNo"`
-	QuotationSubNo  *int    `json:"quotationSubNo"`
-	ID              int64   `json:"id"`
-	ClientKey       *string `json:"clientKey"`
-	LineNumber      int     `json:"lineNumber"`
-	Description     string  `json:"description"`
-	QuantityScaled  int64   `json:"quantityScaled"`
-	UoM             string  `json:"uom"`
-	UnitPriceMinor  int64   `json:"unitPriceMinor"`
-	DiscountEnabled bool    `json:"discountEnabled"`
-	DiscountPercent int16   `json:"discountPercent"`
-	GrossMinor      int64   `json:"grossMinor"`
-	DiscountMinor   int64   `json:"discountMinor"`
-	NetMinor        int64   `json:"netMinor"`
+	QuotationItemNo   *int     `json:"quotationItemNo"`
+	QuotationSubNo    *int     `json:"quotationSubNo"`
+	ID                int64    `json:"id"`
+	ClientKey         *string  `json:"clientKey"`
+	LineNumber        int      `json:"lineNumber"`
+	Description       string   `json:"description"`
+	QuantityScaled    int64    `json:"quantityScaled"`
+	UoM               string   `json:"uom"`
+	UnitPriceMinor    int64    `json:"unitPriceMinor"`
+	DiscountEnabled   bool     `json:"discountEnabled"`
+	DiscountPercent   int16    `json:"discountPercent"`
+	GrossMinor        int64    `json:"grossMinor"`
+	DiscountMinor     int64    `json:"discountMinor"`
+	NetMinor          int64    `json:"netMinor"`
+	GroupKey          string   `json:"groupKey"`
+	ParentDescription string   `json:"parentDescription"`
+	DescriptionLines  []string `json:"descriptionLines"`
 }
 
 // PurchaseOrderRow is one PO draft or saved record. Dates are plain
@@ -279,6 +282,9 @@ type PurchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	// ConfirmationRequested is the draft's request for a confirmation number
+	// (#581). It allocates nothing and is independent of any assigned number.
+	ConfirmationRequested bool `json:"confirmationRequested"`
 	// Version is the optimistic-concurrency revision (#473). It starts at 1
 	// and moves forward on every write; a save must state the version it
 	// loaded.
@@ -289,15 +295,17 @@ type PurchaseOrderRow struct {
 // revision. LineLabel is how the customer document numbers it: "3" for an
 // item, "3.1" for a priced part of a package.
 type PurchaseOrderSourceLineRow struct {
-	QuotationItemNo int    `json:"quotationItemNo"`
-	QuotationSubNo  *int   `json:"quotationSubNo"`
-	LineLabel       string `json:"lineLabel"`
-	Description     string `json:"description"`
-	UoM             string `json:"uom"`
-	QuantityScaled  int64  `json:"quantityScaled"`
-	UnitPriceMinor  int64  `json:"unitPriceMinor"`
-	DiscountEnabled bool   `json:"discountEnabled"`
-	DiscountPercent int16  `json:"discountPercent"`
+	QuotationItemNo   int      `json:"quotationItemNo"`
+	QuotationSubNo    *int     `json:"quotationSubNo"`
+	LineLabel         string   `json:"lineLabel"`
+	Description       string   `json:"description"`
+	UoM               string   `json:"uom"`
+	QuantityScaled    int64    `json:"quantityScaled"`
+	UnitPriceMinor    int64    `json:"unitPriceMinor"`
+	DiscountEnabled   bool     `json:"discountEnabled"`
+	DiscountPercent   int16    `json:"discountPercent"`
+	ParentDescription string   `json:"parentDescription"`
+	DescriptionLines  []string `json:"descriptionLines"`
 }
 
 // PurchaseOrderSourceRow is the exact source revision the review compares
@@ -383,7 +391,7 @@ type PurchaseOrderDecisionRequest struct {
 // save does, and adds the difference-review decisions, the explicit
 // missing/extra acknowledgements, and the document confirmation.
 type PurchaseOrderFinalizeRequest struct {
-	PurchaseOrderUpdateRequest
+	PurchaseOrderEditableRequest
 	Decisions           []PurchaseOrderDecisionRequest `json:"decisions"`
 	AcknowledgedMissing []string                       `json:"acknowledgedMissing"`
 	AcknowledgedExtra   []int                          `json:"acknowledgedExtra"`
@@ -391,7 +399,8 @@ type PurchaseOrderFinalizeRequest struct {
 	// AssignConfirmationNumber asks the server to allocate the optional
 	// customer-system reference inside the same transaction as the save. The
 	// client never sends the number itself: only the server allocates, and an
-	// already-assigned value is never regenerated (#474).
+	// already-assigned value is never regenerated (#474). It is also the one
+	// source of the stored confirmation request (#579).
 	AssignConfirmationNumber bool `json:"assignConfirmationNumber"`
 }
 
@@ -420,30 +429,26 @@ type PurchaseOrderCreateRequest struct {
 // the server from array order, so drafts always carry 1..n without gaps. A row
 // discount mirrors the quotation's: a flag plus a 0-100 percentage.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo *int    `json:"quotationItemNo"`
-	QuotationSubNo  *int    `json:"quotationSubNo"`
-	ID              *int64  `json:"id"`
-	ClientKey       *string `json:"clientKey"`
-	Description     string  `json:"description"`
-	QuantityScaled  int64   `json:"quantityScaled"`
-	UoM             string  `json:"uom"`
-	UnitPriceMinor  int64   `json:"unitPriceMinor"`
-	DiscountEnabled bool    `json:"discountEnabled"`
-	DiscountPercent int16   `json:"discountPercent"`
+	QuotationItemNo   *int     `json:"quotationItemNo"`
+	QuotationSubNo    *int     `json:"quotationSubNo"`
+	ID                *int64   `json:"id"`
+	ClientKey         *string  `json:"clientKey"`
+	Description       string   `json:"description"`
+	QuantityScaled    int64    `json:"quantityScaled"`
+	UoM               string   `json:"uom"`
+	UnitPriceMinor    int64    `json:"unitPriceMinor"`
+	DiscountEnabled   bool     `json:"discountEnabled"`
+	DiscountPercent   int16    `json:"discountPercent"`
+	GroupKey          string   `json:"groupKey"`
+	ParentDescription string   `json:"parentDescription"`
+	DescriptionLines  []string `json:"descriptionLines"`
 }
 
-// PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
-// customer snapshots, currency and tax basis are not writable.
-//
-// ExpectedVersion is the version the editor loaded (#473); the server refuses a
-// stale save by name. Overwrite records that the caller deliberately replaced a
-// version it was warned about, so the replaced values are kept.
-//
-// The embedded protected names exist only so a client that submits one can be
-// refused explicitly. None of them is ever written by an update or correction;
-// the confirmation number, source link, customer, currency and identity have
-// their own rules (#474, #475) and are not reachable here.
-type PurchaseOrderUpdateRequest struct {
+// PurchaseOrderEditableRequest is the editable payload every replace-style
+// purchase order request shares. ConfirmationRequested is deliberately absent:
+// a draft save owns that preference (#581), while the final save derives the
+// stored request from its own checkbox (#579).
+type PurchaseOrderEditableRequest struct {
 	PurchaseOrderProtectedFieldsRequest
 	PODate                string                   `json:"poDate,omitempty"`
 	RequestedDeliveryDate string                   `json:"requestedDeliveryDate,omitempty"`
@@ -462,6 +467,25 @@ type PurchaseOrderUpdateRequest struct {
 	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
 	ExpectedVersion       int64                    `json:"expectedVersion"`
 	Overwrite             bool                     `json:"overwrite"`
+}
+
+// PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
+// customer snapshots, currency and tax basis are not writable.
+//
+// ExpectedVersion is the version the editor loaded (#473); the server refuses a
+// stale save by name. Overwrite records that the caller deliberately replaced a
+// version it was warned about, so the replaced values are kept.
+//
+// The embedded protected names exist only so a client that submits one can be
+// refused explicitly. None of them is ever written by an update or correction;
+// the confirmation number, source link, customer, currency and identity have
+// their own rules (#474, #475) and are not reachable here.
+type PurchaseOrderUpdateRequest struct {
+	PurchaseOrderEditableRequest
+	// ConfirmationRequested remembers the editor's draft choice (#581). It
+	// allocates nothing; an update writes it, and the final save does not
+	// accept it at all (#579).
+	ConfirmationRequested bool `json:"confirmationRequested"`
 }
 
 // PurchaseOrderProtectedFieldsRequest names the values that are protected from
@@ -681,18 +705,21 @@ type PurchaseOrderCorrectionAttachmentRow struct {
 
 // PurchaseOrderCorrectionItemRow is one line of a retained snapshot.
 type PurchaseOrderCorrectionItemRow struct {
-	QuotationItemNo *int   `json:"quotationItemNo"`
-	QuotationSubNo  *int   `json:"quotationSubNo"`
-	LineNumber      int    `json:"lineNumber"`
-	Description     string `json:"description"`
-	QuantityScaled  int64  `json:"quantityScaled"`
-	UoM             string `json:"uom"`
-	UnitPriceMinor  int64  `json:"unitPriceMinor"`
-	DiscountEnabled bool   `json:"discountEnabled"`
-	DiscountPercent int16  `json:"discountPercent"`
-	GrossMinor      int64  `json:"grossMinor"`
-	DiscountMinor   int64  `json:"discountMinor"`
-	NetMinor        int64  `json:"netMinor"`
+	QuotationItemNo   *int     `json:"quotationItemNo"`
+	QuotationSubNo    *int     `json:"quotationSubNo"`
+	LineNumber        int      `json:"lineNumber"`
+	Description       string   `json:"description"`
+	QuantityScaled    int64    `json:"quantityScaled"`
+	UoM               string   `json:"uom"`
+	UnitPriceMinor    int64    `json:"unitPriceMinor"`
+	DiscountEnabled   bool     `json:"discountEnabled"`
+	DiscountPercent   int16    `json:"discountPercent"`
+	GrossMinor        int64    `json:"grossMinor"`
+	DiscountMinor     int64    `json:"discountMinor"`
+	NetMinor          int64    `json:"netMinor"`
+	GroupKey          string   `json:"groupKey"`
+	ParentDescription string   `json:"parentDescription"`
+	DescriptionLines  []string `json:"descriptionLines"`
 }
 
 // PurchaseOrderCorrectionRow is one immutable snapshot in a record's history:

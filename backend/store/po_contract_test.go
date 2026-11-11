@@ -2,10 +2,8 @@ package store
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -34,14 +32,11 @@ type poCalcFixtureWant struct {
 }
 
 type poCalcFixtureCase struct {
-	Name             string              `json:"name"`
-	Why              string              `json:"why"`
-	Lines            []poCalcFixtureLine `json:"lines"`
-	DiscountPercent  int16               `json:"discountPercent"`
-	PpnBps           int16               `json:"ppnBps"`
-	AdjustmentMinor  int64               `json:"adjustmentMinor"`
-	AdjustmentReason string              `json:"adjustmentReason"`
-	Want             poCalcFixtureWant   `json:"want"`
+	Name   string              `json:"name"`
+	Why    string              `json:"why"`
+	Lines  []poCalcFixtureLine `json:"lines"`
+	PpnBps int16               `json:"ppnBps"`
+	Want   poCalcFixtureWant   `json:"want"`
 }
 
 func readPOFixture(t *testing.T, name string, target any) {
@@ -106,11 +101,8 @@ func TestPurchaseOrderCalculationMatchesTheSharedFixture(t *testing.T) {
 				})
 			}
 			calculation, err := CalculatePurchaseOrder(PurchaseOrderCalcInput{
-				Lines:            lines,
-				DiscountPercent:  testCase.DiscountPercent,
-				PpnBps:           testCase.PpnBps,
-				AdjustmentMinor:  testCase.AdjustmentMinor,
-				AdjustmentReason: testCase.AdjustmentReason,
+				Lines:  lines,
+				PpnBps: testCase.PpnBps,
 			})
 			if err != nil {
 				t.Fatalf("%s: calculate: %v", testCase.Why, err)
@@ -145,52 +137,5 @@ func TestPurchaseOrderCalculationMatchesTheSharedFixture(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestPurchaseOrderAdjustmentReasonWhitespaceMatchesTheSharedFixture pins the
-// set all three layers treat as blank. NBSP was the Judge's probe; NEL (U+0085)
-// and the ogham space mark are the same defect one code point over, and a BOM
-// is deliberately content because neither Go nor the SQL backstop removes it.
-func TestPurchaseOrderAdjustmentReasonWhitespaceMatchesTheSharedFixture(t *testing.T) {
-	fixture := poWhitespaceFixture(t)
-
-	base := PurchaseOrderCalcInput{
-		Lines:           []PurchaseOrderCalcLine{line(10000, 1000)},
-		AdjustmentMinor: -1,
-	}
-
-	for _, point := range fixture.Blank {
-		reason := string(rune(point.CodePoint))
-		input := base
-		input.AdjustmentReason = reason
-		if _, err := CalculatePurchaseOrder(input); !errors.Is(err, ErrPurchaseOrderInvalid) {
-			t.Errorf("%s (%U) only: error = %v; want ErrPurchaseOrderInvalid", point.Name, point.CodePoint, err)
-		}
-	}
-
-	joined := strings.Builder{}
-	for _, point := range fixture.Blank {
-		joined.WriteRune(rune(point.CodePoint))
-	}
-	input := base
-	input.AdjustmentReason = joined.String()
-	if _, err := CalculatePurchaseOrder(input); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("every blank code point together: error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-
-	for _, point := range fixture.Content {
-		reason := string(rune(point.CodePoint))
-		input := base
-		input.AdjustmentReason = reason
-		calculation, err := CalculatePurchaseOrder(input)
-		if err != nil {
-			t.Errorf("%s (%U) is content, but it was refused: %v", point.Name, point.CodePoint, err)
-			continue
-		}
-		if calculation.AdjustmentReason != reason {
-			t.Errorf("%s (%U) stored as %U; content must be kept verbatim",
-				point.Name, point.CodePoint, []rune(calculation.AdjustmentReason))
-		}
 	}
 }

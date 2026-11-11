@@ -153,8 +153,13 @@ func TestStaffLinksANeverLinkedDraftOverHTTP(t *testing.T) {
 	}
 	if linked.PONumber != "PO-497-HTTP" || linked.PaymentTerms != "30 days" ||
 		linked.Incoterms != "EXW" || linked.DeliveryAddress != "Jl. Delivery SENTINEL" ||
-		linked.ContactEmail != "sentinel@example.com" || linked.DiscountPercent != 10 {
+		linked.ContactEmail != "sentinel@example.com" {
 		t.Errorf("PO-owned values moved: %+v", linked)
+	}
+	// The whole-PO discount is retired (#573): the saved 10% is not stored and
+	// cannot survive the link because it was never persisted.
+	if linked.DiscountPercent != 0 {
+		t.Errorf("retired whole discount = %d; want 0", linked.DiscountPercent)
 	}
 	// The billing address is PO-owned: the typed value survives the first link
 	// even though the source customer differs (a never-linked draft has none).

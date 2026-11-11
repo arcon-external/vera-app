@@ -111,6 +111,8 @@ func seedNeverLinkableDraft(t *testing.T, database *Store, user AuthUser, ctx co
 		update.RequestedDeliveryDate = datePointer(time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC))
 		update.PaymentTerms = "50% advance SENTINEL"
 		update.Incoterms = "FOB"
+		// The whole-PO discount and adjustment are retired (#573). They are
+		// still sent so the link test can prove they are ignored.
 		update.DiscountPercent = 5
 		update.AdjustmentMinor = -100
 		update.AdjustmentReason = "printed discount SENTINEL"
@@ -196,7 +198,6 @@ func TestStaffLinksANeverLinkedDraftAndSourceOwnsIdentity(t *testing.T) {
 	decisions := []PurchaseOrderDecision{
 		{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
 		{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
-		{Key: "header:discountPercent", Choice: PurchaseOrderChoicePO},
 	}
 	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
 		draft, quotation, user, decisions, []string{"1", "3"}, []int{1}, ""))
@@ -246,9 +247,11 @@ func TestStaffLinksANeverLinkedDraftAndSourceOwnsIdentity(t *testing.T) {
 		linked.RequestedDeliveryDate.Format("2006-01-02") != "2026-10-10" {
 		t.Errorf("PO dates moved: poDate=%v requested=%v", linked.PODate, linked.RequestedDeliveryDate)
 	}
-	if linked.DiscountPercent != 5 || linked.AdjustmentMinor != -100 ||
-		linked.AdjustmentReason != "printed discount SENTINEL" {
-		t.Errorf("PO-owned discount/adjustment = %d / %d %q",
+	// The whole-PO discount and signed adjustment are retired (#573): the
+	// sentinels entered above are ignored rather than carried across the link.
+	if linked.DiscountPercent != 0 || linked.AdjustmentMinor != 0 ||
+		linked.AdjustmentReason != "" {
+		t.Errorf("retired whole discount/adjustment = %d / %d %q; want none",
 			linked.DiscountPercent, linked.AdjustmentMinor, linked.AdjustmentReason)
 	}
 	if len(linked.Items) != 1 || linked.Items[0].Description != "SENTINEL manual line" ||

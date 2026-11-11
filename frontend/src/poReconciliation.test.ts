@@ -19,7 +19,6 @@ import {
 
 const PAYMENT_TERMS = HEADER_FIELDS["header:paymentTerms"];
 const INCOTERMS = HEADER_FIELDS["header:incoterms"];
-const DISCOUNT = HEADER_FIELDS["header:discountPercent"];
 
 function item(overrides: Partial<ReconciliationItem> = {}): ReconciliationItem {
   return {
@@ -233,52 +232,6 @@ describe("commitHeaderField", () => {
     expect(matched.item?.Resolution).toBe("values_now_match");
     expect(matched.itemChanged).toBe(true);
   });
-
-  it("the whole-PO discount compares as an integer percent, empty means 0", () => {
-    // Empty input is 0%, so empty against a 0% source is a match.
-    const emptyBoth = commitHeaderField({
-      field: DISCOUNT,
-      poValue: "",
-      sourceValue: 0,
-      existingItem: null,
-      actorId: 7,
-      now: "2026-10-28T00:00:00Z",
-    });
-    expect(emptyBoth.notice).toBe("matched");
-    expect(emptyBoth.item).toBeNull();
-
-    const differ = commitHeaderField({
-      field: DISCOUNT,
-      poValue: "2",
-      sourceValue: 0,
-      existingItem: null,
-      actorId: 7,
-      now: "2026-10-28T00:00:00Z",
-    });
-    expect(differ.item).toMatchObject({
-      Key: "header:discountPercent",
-      Label: "Whole-PO discount",
-      POValue: 2,
-      SourceValue: 0,
-      Status: "unresolved",
-    });
-  });
-
-  it("an invalid discount is a validation error, never an item", () => {
-    const invalid = commitHeaderField({
-      field: DISCOUNT,
-      poValue: "ten",
-      sourceValue: 0,
-      existingItem: null,
-      actorId: 7,
-      now: "2026-10-28T00:00:00Z",
-    });
-    expect(invalid.validationError).toBe(
-      "Whole-PO discount must be between 0 and 100."
-    );
-    expect(invalid.item).toBeNull();
-    expect(invalid.notice).toBeNull();
-  });
 });
 
 describe("keep and use resolutions", () => {
@@ -315,9 +268,9 @@ describe("pane view model", () => {
     UpdatedAt: "2026-10-28T00:00:03Z",
   });
   const resolvedRow = item({
-    Key: "header:discountPercent",
-    Field: "header:discountPercent",
-    Label: "Whole-PO discount",
+    Key: "line:1:quantity",
+    Field: "line:quantity",
+    Label: "Line 1 quantity",
     Status: "resolved",
     Resolution: "kept_po",
     UpdatedAt: "2026-10-28T00:00:02Z",
@@ -328,7 +281,7 @@ describe("pane view model", () => {
     expect(ordered.map((entry) => entry.Key)).toEqual([
       "header:incoterms",
       "header:paymentTerms",
-      "header:discountPercent",
+      "line:1:quantity",
     ]);
   });
 
@@ -349,8 +302,8 @@ describe("pane view model", () => {
 });
 
 describe("prefillDecisionsFromSession", () => {
-  const source = { PaymentTerms: "30 days", Incoterms: "CIF", DiscountPercent: 0 };
-  const current = { paymentTerms: "50% advance", incoterms: "CIF", discountPercent: "0" };
+  const source = { PaymentTerms: "30 days", Incoterms: "CIF" };
+  const current = { paymentTerms: "50% advance", incoterms: "CIF" };
 
   it("pre-fills keep for a kept value that still differs", () => {
     const decisions = prefillDecisionsFromSession(
@@ -474,8 +427,8 @@ describe("prefill used_quotation decisions", () => {
     };
     const decisions = prefillDecisionsFromSession(
       [used],
-      { paymentTerms: "50% advance", incoterms: "CIF", discountPercent: "0" },
-      { PaymentTerms: "30 days", Incoterms: "CIF", DiscountPercent: 0 }
+      { paymentTerms: "50% advance", incoterms: "CIF" },
+      { PaymentTerms: "30 days", Incoterms: "CIF" }
     );
     expect(decisions).toEqual({ "header:paymentTerms": "quotation" });
   });
@@ -498,8 +451,8 @@ describe("prefill used_quotation decisions", () => {
     };
     const decisions = prefillDecisionsFromSession(
       [used],
-      { paymentTerms: "50% advance", incoterms: "CIF", discountPercent: "0" },
-      { PaymentTerms: "30 days", Incoterms: "CIF", DiscountPercent: 0 }
+      { paymentTerms: "50% advance", incoterms: "CIF" },
+      { PaymentTerms: "30 days", Incoterms: "CIF" }
     );
     expect(decisions).toEqual({});
   });

@@ -228,13 +228,17 @@ func TestFinalizePurchaseOrderRequiresTheFinalSaveMinimum(t *testing.T) {
 		t.Fatalf("zero lines error = %v; want ErrPurchaseOrderIncomplete", err)
 	}
 
-	// The record is still a draft: neither refusal wrote anything.
+	// The record is still a draft: neither refusal wrote anything, and the
+	// zero-line draft reads back exactly as it was saved (#580).
 	reloaded, err := database.GetPurchaseOrder(ctx, draft.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 	if reloaded.State != PurchaseOrderStateDraft || reloaded.SavedAt != nil {
 		t.Errorf("a refused final save changed the record: %+v", reloaded)
+	}
+	if len(reloaded.Items) != 0 {
+		t.Errorf("zero-line draft reopened with %d lines; want 0", len(reloaded.Items))
 	}
 }
 
@@ -479,11 +483,12 @@ func TestFinalizePurchaseOrderKeepsThePurchaseOrdersOwnTotal(t *testing.T) {
 	}
 }
 
-// TestFinalizePurchaseOrderAcceptsAReasonedDocumentAdjustment pins the other
-// half of the rule: an adjustment exists to reconcile what the customer's PO
-// document actually printed. The order calculates 250 while the document says
-// 260, so staff record +10 with a reason and the saved grand total is 260.
-func TestFinalizePurchaseOrderAcceptsAReasonedDocumentAdjustment(t *testing.T) {
+// TestFinalizePurchaseOrderIgnoresARetiredDocumentAdjustment pins the
+// retirement of the signed adjustment (#573): a caller may still send one, but
+// it is ignored rather than applied. The order calculates 250 from its lines;
+// the submitted +10 with a reason changes neither the total nor the stored
+// adjustment.
+func TestFinalizePurchaseOrderIgnoresARetiredDocumentAdjustment(t *testing.T) {
 	database := openTestSchema(t, "vera_po_finalize_document_adjustment")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Document adjustment")
 	user := poTestUser(t, database)
@@ -503,14 +508,14 @@ func TestFinalizePurchaseOrderAcceptsAReasonedDocumentAdjustment(t *testing.T) {
 	input.AdjustmentReason = "Customer PO document printed 260.00"
 	saved, err := database.FinalizePurchaseOrder(ctx, input)
 	if err != nil {
-		t.Fatalf("finalize with a document adjustment: %v", err)
+		t.Fatalf("finalize with a retired adjustment: %v", err)
 	}
-	if saved.GrandTotalMinor != 260 || saved.AdjustmentMinor != 10 {
-		t.Errorf("saved total = %d adjustment = %d; want 260 / 10",
+	if saved.GrandTotalMinor != 250 || saved.AdjustmentMinor != 0 {
+		t.Errorf("saved total = %d adjustment = %d; want the order's own 250 and no adjustment",
 			saved.GrandTotalMinor, saved.AdjustmentMinor)
 	}
-	if saved.AdjustmentReason != "Customer PO document printed 260.00" {
-		t.Errorf("saved reason = %q", saved.AdjustmentReason)
+	if saved.AdjustmentReason != "" {
+		t.Errorf("saved reason = %q; want it discarded", saved.AdjustmentReason)
 	}
 }
 
@@ -684,7 +689,11 @@ func TestFinalizePurchaseOrderRefusesACorruptedSourceLink(t *testing.T) {
 	}
 }
 
-func TestPurchaseOrderDraftCopiesTheSourceRowAndWholeDiscounts(t *testing.T) {
+// TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount pins
+// the #573 split: the row discount is copied because it is printed per line,
+// while the source's whole-PO discount is retired and must not be carried into
+// the draft. The printed source totals remain evidence of what was issued.
+func TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount(t *testing.T) {
 	database := openTestSchema(t, "vera_po_finalize_seed")
 	record, err := database.SaveRevision(context.Background(), RevisionDraft{
 		CustomerCode:     2,
@@ -734,8 +743,22 @@ func TestPurchaseOrderDraftCopiesTheSourceRowAndWholeDiscounts(t *testing.T) {
 	ctx := poContext(t, database)
 	draft := createFinalizeDraft(t, database, ctx, user, record)
 
-	if draft.DiscountPercent != 10 {
-		t.Errorf("whole-PO discount = %d; want the source's 10", draft.DiscountPercent)
+	if draft.DiscountPercent != 0 || draft.DiscountMinor != 0 {
+		t.Errorf("whole-PO discount = %d (%d minor); want the retired 10%% not copied",
+			draft.DiscountPercent, draft.DiscountMinor)
+	}
+	// 2 x 120 = 240, less the copied 5% row discount of 12 = 228. FTZ goods
+	// carry no PPN.
+	if draft.SubtotalMinor != 228 || draft.GrandTotalMinor != 228 {
+		t.Errorf("PO totals = subtotal %d / grand %d; want 228/228",
+			draft.SubtotalMinor, draft.GrandTotalMinor)
+	}
+	// The source's printed figures still record its own whole discount.
+	if draft.PrintedSubtotalMinor != 240 || draft.PrintedDiscountMinor != 24 ||
+		draft.PrintedGrandTotalMinor != 216 {
+		t.Errorf("printed snapshot = %d/%d/%d; want 240/24/216",
+			draft.PrintedSubtotalMinor, draft.PrintedDiscountMinor,
+			draft.PrintedGrandTotalMinor)
 	}
 	if len(draft.Items) != 1 {
 		t.Fatalf("lines = %d; want 1", len(draft.Items))

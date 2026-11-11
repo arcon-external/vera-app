@@ -83,3 +83,41 @@ func TestNewNeverLinkedPayloadStillDecodesIntoAnOldRow(t *testing.T) {
 		t.Errorf("old reader saw = %+v; want numeric zeros and the Source-missing flag", old)
 	}
 }
+
+// Issue #581: the request is a separate desktop mapping from the HTTP row. If
+// the mapper drops it, the editor toggle silently resets on every reopen.
+func TestPurchaseOrderDTOKeepsConfirmationRequest(t *testing.T) {
+	row := apicontract.PurchaseOrderRow{ID: 11, UUID: "u11", State: "draft",
+		ConfirmationRequested: true}
+	dto := mapPurchaseOrderDTO(row)
+	if !dto.ConfirmationRequested {
+		t.Errorf("confirmation_requested lost in the desktop DTO: %+v", dto)
+	}
+}
+
+// Issue #575: the desktop DTO is a separate mapping from the HTTP row. A split
+// line's grouping fields must survive it, or the editor flattens immediately
+// after a save even though the store kept them.
+func TestPurchaseOrderDTOKeepsSplitLineFields(t *testing.T) {
+	row := apicontract.PurchaseOrderRow{
+		ID: 10, UUID: "u10", State: "draft",
+		Items: []apicontract.PurchaseOrderItemRow{{
+			LineNumber:        1,
+			Description:       "Mounting and cable termination",
+			GroupKey:          "g:panel",
+			ParentDescription: "Mounting package",
+			DescriptionLines:  []string{"Cable tray", "Terminations"},
+		}},
+	}
+	dto := mapPurchaseOrderDTO(row)
+	if len(dto.Items) != 1 {
+		t.Fatalf("items = %d; want 1", len(dto.Items))
+	}
+	item := dto.Items[0]
+	if item.GroupKey != "g:panel" ||
+		item.ParentDescription != "Mounting package" ||
+		len(item.DescriptionLines) != 2 ||
+		item.DescriptionLines[0] != "Cable tray" {
+		t.Errorf("split-line fields lost in the desktop DTO: %+v", item)
+	}
+}

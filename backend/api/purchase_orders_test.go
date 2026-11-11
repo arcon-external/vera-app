@@ -76,6 +76,7 @@ type purchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	ConfirmationRequested  bool    `json:"confirmationRequested"`
 	Version                int64   `json:"version"`
 	SourceMissing          bool    `json:"sourceMissing"`
 	SourceState            string  `json:"sourceState"`
@@ -275,6 +276,143 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	}
 }
 
+// Issue #581/#579: the confirmation-number request is a draft preference. It
+// defaults off, survives save draft and reload, and the final checkbox is the
+// only authority for what a saved record stores — the draft toggle that
+// prefilled it never travels with the final save.
+func TestPurchaseOrderConfirmationRequestRoundTripsOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_confirmation_request")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	if draft.ConfirmationRequested {
+		t.Errorf("a new draft requested a confirmation number; want off by default")
+	}
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	update := finalizeBody(draft, "PO-REQ-1")
+	update["confirmationRequested"] = true
+	code, body = doJSON(t, server, http.MethodPut, path, token, update)
+	if code != http.StatusOK {
+		t.Fatalf("draft save = %d (%v)", code, body)
+	}
+	updated := decodePurchaseOrder(t, body)
+	if !updated.ConfirmationRequested {
+		t.Errorf("draft save dropped confirmationRequested: %+v", updated)
+	}
+	if updated.ConfirmationNumber != nil {
+		t.Errorf("a draft save allocated confirmation number %v", *updated.ConfirmationNumber)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload = %d (%v)", code, body)
+	}
+	reloaded := decodePurchaseOrder(t, body)
+	if !reloaded.ConfirmationRequested {
+		t.Errorf("reload lost confirmationRequested: %+v", reloaded)
+	}
+
+	// The draft asked for a number, but the final checkbox is unchecked: the
+	// saved record must store false and allocate nothing. Sending the old draft
+	// request cannot override the box.
+	finalize := finalizeBody(reloaded, "PO-REQ-1")
+	finalize["confirmationRequested"] = true
+	finalize["assignConfirmationNumber"] = false
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalize)
+	if code != http.StatusOK {
+		t.Fatalf("finalize with an unchecked box = %d (%v)", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if saved.ConfirmationRequested {
+		t.Errorf("stored request followed the draft instead of the unchecked box: %+v", saved)
+	}
+	if saved.ConfirmationNumber != nil {
+		t.Errorf("an unchecked final save assigned confirmation number %v", *saved.ConfirmationNumber)
+	}
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload finalized = %d (%v)", code, body)
+	}
+	if persisted := decodePurchaseOrder(t, body); persisted.ConfirmationRequested {
+		t.Errorf("the reloaded saved record kept a request the box did not ask for: %+v", persisted)
+	}
+
+	// The other direction: a draft that never asked is finalized with the box
+	// checked, so the stored request follows the box and the number is issued.
+	plainQuotation, _ := exportForSelector(t, server, token, quotationInput())
+	code, body = createPODraft(t, server, token, plainQuotation, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("plain create = %d (%v)", code, body)
+	}
+	plain := decodePurchaseOrder(t, body)
+	if plain.ConfirmationRequested {
+		t.Errorf("plain draft requested a confirmation number; want off")
+	}
+	plainFinalize := finalizeBody(plain, "PO-REQ-2")
+	plainFinalize["confirmationRequested"] = false
+	plainFinalize["assignConfirmationNumber"] = true
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(plain.ID, 10)+"/finalize", token, plainFinalize)
+	if code != http.StatusOK {
+		t.Fatalf("checked finalize = %d (%v)", code, body)
+	}
+	savedPlain := decodePurchaseOrder(t, body)
+	if !savedPlain.ConfirmationRequested || savedPlain.ConfirmationNumber == nil {
+		t.Errorf("a checked final save stored request %v / number %v; want true and assigned",
+			savedPlain.ConfirmationRequested, savedPlain.ConfirmationNumber)
+	}
+}
+
+// Issue #580: a draft may carry zero lines over the API, while the final save
+// still requires at least one. The store rule already exists; this pins the
+// HTTP seam the spec names.
+func TestPurchaseOrderZeroLineDraftRoundTripsAndCannotFinalize(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_zero_lines")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": draft.Version,
+		"paymentTerms":    "30 days",
+		"items":           []any{},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("zero-line draft save = %d (%v); want 200", code, body)
+	}
+	empty := decodePurchaseOrder(t, body)
+	if len(empty.Items) != 0 {
+		t.Fatalf("zero-line draft save returned %d lines; want 0", len(empty.Items))
+	}
+	if empty.Version != draft.Version+1 {
+		t.Errorf("zero-line save version = %d; want %d", empty.Version, draft.Version+1)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("zero-line reload = %d (%v)", code, body)
+	}
+	if reloaded := decodePurchaseOrder(t, body); len(reloaded.Items) != 0 {
+		t.Errorf("zero-line draft reloaded with %d lines; want 0", len(reloaded.Items))
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token,
+		finalizeBody(empty, "PO-EMPTY-API"))
+	if code != http.StatusUnprocessableEntity || body["code"] != "po_incomplete" {
+		t.Fatalf("zero-line finalize = %d %v; want 422 po_incomplete", code, body)
+	}
+}
+
 func TestPurchaseOrderDraftRequiresAnExplicitRevisionAndIssuedSource(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_source")
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
@@ -431,16 +569,17 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_calc")
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 
-	// The source revision printed 290000 before its own 10% discount and 261000
-	// after it (FTZ, no PPN). Creation copies the customer-facing list prices
-	// and the source's own discounts (#471), so the draft already reproduces the
-	// printed total instead of starting 29000 above it.
+	// The source revision printed 290000 before its own 10% whole discount and
+	// 261000 after it (FTZ, no PPN). The whole discount is retired (#573), so
+	// creation copies the customer-facing list prices and row discounts only:
+	// this fixture has no row discount, so the draft total is 290000. The
+	// printed 261000 survives as evidence of what the source document said.
 	_, body := createPODraft(t, server, token, quotationID, 0, nil)
 	draft := decodePurchaseOrder(t, body)
-	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 261000 ||
-		draft.DiscountMinor != 29000 || draft.DiscountPercent != 10 ||
+	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 290000 ||
+		draft.DiscountMinor != 0 || draft.DiscountPercent != 0 ||
 		draft.PpnBps != 0 || draft.PpnMinor != 0 {
-		t.Fatalf("created calculation = %+v; want subtotal 290000, 10%% discount, grand 261000", draft)
+		t.Fatalf("created calculation = %+v; want subtotal 290000, no whole discount, grand 290000", draft)
 	}
 	if draft.PrintedSubtotalMinor != 290000 || draft.PrintedDiscountMinor != 29000 ||
 		draft.PrintedPpnMinor != 0 || draft.PrintedGrandTotalMinor != 261000 {
@@ -474,7 +613,8 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 	updated := decodePurchaseOrder(t, body)
 
 	// 2 x 120000 = 240000, 10% is 24000 -> net 216000. 1 x 50000 = 50000.
-	// Subtotal 266000; 5% whole is 13300 -> 252700; adjustment -700 -> 252000.
+	// Subtotal 266000. The submitted 5% whole discount and -700 adjustment are
+	// retired (#573) and move nothing, so the grand stays 266000.
 	if len(updated.Items) != 2 {
 		t.Fatalf("lines = %d; want 2", len(updated.Items))
 	}
@@ -486,11 +626,11 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 	if second.GrossMinor != 50000 || second.DiscountMinor != 0 || second.NetMinor != 50000 {
 		t.Errorf("line 2 calculation = %+v; want 50000/0/50000", second)
 	}
-	if updated.SubtotalMinor != 266000 || updated.DiscountPercent != 5 ||
-		updated.DiscountMinor != 13300 || updated.AdjustmentMinor != -700 ||
-		updated.AdjustmentReason != "Match the printed total" ||
-		updated.GrandTotalMinor != 252000 {
-		t.Errorf("updated totals = %+v; want 266000/5/13300/-700/252000", updated)
+	if updated.SubtotalMinor != 266000 || updated.DiscountPercent != 0 ||
+		updated.DiscountMinor != 0 || updated.AdjustmentMinor != 0 ||
+		updated.AdjustmentReason != "" ||
+		updated.GrandTotalMinor != 266000 {
+		t.Errorf("updated totals = %+v; want 266000 with no whole discount or adjustment", updated)
 	}
 
 	// GET returns the stored calculation, not a fresh one.
@@ -548,24 +688,12 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 	_, body := createPODraft(t, server, token, quotationID, 0, nil)
 	draft := decodePurchaseOrder(t, body)
 	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
-	validItem := map[string]any{
-		"description": "Widget", "quantityScaled": 10000,
-		"uom": "Pc", "unitPriceMinor": 100000,
-	}
 
 	cases := []struct {
 		name  string
 		body  map[string]any
 		field string
 	}{
-		{
-			name: "whole discount above 100",
-			body: map[string]any{
-				"paymentTerms": "45 days", "discountPercent": 101,
-				"items": []map[string]any{validItem},
-			},
-			field: "discount",
-		},
 		{
 			name: "row discount above 100",
 			body: map[string]any{
@@ -576,23 +704,6 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 				}},
 			},
 			field: "discount",
-		},
-		{
-			name: "unexplained adjustment",
-			body: map[string]any{
-				"paymentTerms": "45 days", "adjustmentMinor": -1,
-				"items": []map[string]any{validItem},
-			},
-			field: "reason",
-		},
-		{
-			name: "adjustment below zero total",
-			body: map[string]any{
-				"paymentTerms": "45 days", "adjustmentMinor": -100001,
-				"adjustmentReason": "Too far",
-				"items":            []map[string]any{validItem},
-			},
-			field: "negative",
 		},
 		{
 			name: "overflowing line",
@@ -629,33 +740,6 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 				}},
 			},
 			field: "range",
-		},
-		{
-			name: "adjustment reason over 200 characters",
-			body: map[string]any{
-				"paymentTerms": "45 days", "adjustmentMinor": -1,
-				"adjustmentReason": strings.Repeat("界", 201),
-				"items":            []map[string]any{validItem},
-			},
-			field: "200",
-		},
-		{
-			name: "adjustment above the exact range",
-			body: map[string]any{
-				"paymentTerms": "45 days", "adjustmentMinor": int64(9007199254740992),
-				"adjustmentReason": "Too large",
-				"items":            []map[string]any{validItem},
-			},
-			field: "adjustment",
-		},
-		{
-			name: "whitespace-only adjustment reason",
-			body: map[string]any{
-				"paymentTerms": "45 days", "adjustmentMinor": -1,
-				"adjustmentReason": " \t\n\r\f\v ",
-				"items":            []map[string]any{validItem},
-			},
-			field: "reason",
 		},
 	}
 	for _, testCase := range cases {
@@ -1006,13 +1090,16 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 		saved.SavedAt == nil || saved.SavedBy == nil || !saved.PdfAbsentConfirmed {
 		t.Errorf("saved = %+v; want a trimmed number and recorded identity", saved)
 	}
-	// This fixture entered no difference, so the order's own arithmetic happens
-	// to reproduce the printed total. The equality is arithmetic, not a rule:
-	// the store's TestFinalizePurchaseOrderKeepsThePurchaseOrdersOwnTotal covers
-	// a total that deliberately differs from the quotation.
-	if saved.GrandTotalMinor != review.Source.PrintedGrandTotalMinor {
-		t.Errorf("saved grand = %d; want the printed %d",
-			saved.GrandTotalMinor, review.Source.PrintedGrandTotalMinor)
+	// The saved total belongs to the purchase order, not the quotation. This
+	// fixture's source carried a 10% whole discount, which is retired (#573):
+	// the order totals 290000 while the source printed 261000. The printed
+	// figure stays as evidence and does not set the saved total.
+	if saved.GrandTotalMinor != 290000 {
+		t.Errorf("saved grand = %d; want the purchase order's own 290000", saved.GrandTotalMinor)
+	}
+	if review.Source.PrintedGrandTotalMinor != 261000 {
+		t.Errorf("printed source grand = %d; want the source's 261000",
+			review.Source.PrintedGrandTotalMinor)
 	}
 	if saved.QuoteNumber != quoteNumber {
 		t.Errorf("quote number = %q; want %q", saved.QuoteNumber, quoteNumber)

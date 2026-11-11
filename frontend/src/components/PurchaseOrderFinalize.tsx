@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   AssignPurchaseOrderConfirmationNumber,
@@ -6,6 +6,10 @@ import {
 } from "@backend/backend/Quotation";
 import { errorMessage } from "../errors";
 import { formatMoney, type CurrencyInfo } from "../format";
+import {
+  effectiveParentDescription,
+  groupPurchaseOrderLines,
+} from "../purchaseOrderLines";
 import type { PurchaseOrderHistoryEntry } from "../poCorrection";
 import {
   evaluateReview,
@@ -22,7 +26,6 @@ import {
   confirmationNumberOf,
   initialPurchaseOrderEditorState,
   MAX_EXACT_MINOR,
-  parseDiscountPercent,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
@@ -34,6 +37,16 @@ import type {
 } from "../purchaseOrderDocument";
 import { sourceReferenceLabel, sourceRepairActionLabel } from "../poRepair";
 import type { ReconciliationHistoryInput } from "../poReconciliationHistory";
+import {
+  AcknowledgedChip,
+  DiffChoice,
+  DiffDivider,
+  DiffStatusChip,
+  DiffSummary,
+  DiffValue,
+  EmptyValue,
+  LineMatchRow,
+} from "./PODiff";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
 import {
@@ -66,8 +79,77 @@ import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 // The saved totals are the purchase order's own. The quotation revision's
 // printed figures are shown as document evidence and never as a target: an
 // accepted price difference or an extra line is explained by the review's
-// explicit choices and acknowledgements, and the optional signed adjustment
-// exists to reconcile what the customer's PO document actually printed.
+// explicit choices and acknowledgements. The whole-order discount and signed
+// adjustment are retired (#573); the PO never invents a figure to force the
+// printed total.
+
+// #579: only the unit-price row carries formatted money. Its values keep the
+// receipt row's old no-wrap guarantee, while free text (terms, addresses,
+// descriptions) is allowed to wrap.
+const isMoneyDifference = (key: string): boolean => key.endsWith(":unitPrice");
+
+// #582: acknowledgement is a row action, not a separate prose list. The
+// receipt branch shows recorded provenance (and the ACKNOWLEDGED chip), while
+// the workbench keeps the exact checkbox names the review always used.
+function ExtraAcknowledgement({
+  lineNumber,
+  acknowledged,
+  receipt,
+  onToggle,
+}: {
+  lineNumber: number;
+  acknowledged: boolean;
+  receipt: boolean;
+  onToggle: () => void;
+}) {
+  if (receipt) {
+    return (
+      <p className="mr-auto text-caption text-ink-600">
+        {acknowledged
+          ? "acknowledged as extra in the pane."
+          : "needs acknowledgement in the reconciliation pane. Return to entry and resolve it there."}
+      </p>
+    );
+  }
+  return (
+    <label className="flex items-center gap-2 text-small text-ink-700">
+      <input
+        type="checkbox"
+        className="h-4 w-4 accent-accent-700"
+        aria-label={`Acknowledge line ${lineNumber} as extra`}
+        checked={acknowledged}
+        onChange={onToggle}
+      />
+      <span>Acknowledge as extra</span>
+    </label>
+  );
+}
+
+function MissingAcknowledgement({
+  lineLabel,
+  acknowledged,
+  receipt,
+  onToggle,
+}: {
+  lineLabel: string;
+  acknowledged: boolean;
+  receipt: boolean;
+  onToggle: () => void;
+}) {
+  if (receipt) return null;
+  return (
+    <label className="flex items-center gap-2 text-small text-ink-700">
+      <input
+        type="checkbox"
+        className="h-4 w-4 accent-accent-700"
+        aria-label={`Acknowledge omission of quotation line ${lineLabel}`}
+        checked={acknowledged}
+        onChange={onToggle}
+      />
+      <span>Acknowledge omission</span>
+    </label>
+  );
+}
 
 export interface PurchaseOrderDifferenceReviewViewProps {
   state: PurchaseOrderEditorState;
@@ -126,10 +208,6 @@ export interface PurchaseOrderDifferenceReviewViewProps {
   /** U2: Change links return focus to the relevant form or pane field. */
   onEditDifference?: (key: string, label: string) => void;
   onEditLine?: (lineNumber: number) => void;
-}
-
-function differenceValue(value: string): string {
-  return value === "" ? "(empty)" : value;
 }
 
 export function PurchaseOrderDifferenceReviewView({
@@ -198,6 +276,149 @@ export function PurchaseOrderDifferenceReviewView({
       label: sourceLineLabel(line),
     })),
   ];
+  const reviewGroups = groupPurchaseOrderLines(state.lines);
+
+  // #582: every row carries a status, the two sides and its action. The
+  // accessible names and callbacks are the #471 ones; only the surface is new.
+  const acknowledgedExtraRow = (lineNumber: number) =>
+    showReceipt
+      ? ackedExtraSet.has(lineNumber)
+      : acknowledgedExtra.includes(lineNumber);
+
+  // #575: one split line renders one parent heading with its sub-item match
+  // rows beneath it. The visible number is `2.1`; every action still uses the
+  // flat line number the comparison and the payload already carry.
+  const renderLineMatch = (line: PurchaseOrderLine, displayNumber: string) => {
+    const lineNumber =
+      state.lines.findIndex((candidate) => candidate.key === line.key) + 1;
+    const current = matchedByLineKey.get(line.key);
+    const suggestion = comparison.suggestions.find(
+      (candidate) => candidate.lineNumber === lineNumber
+    );
+    const extra = current === undefined;
+    const acked = extra ? acknowledgedExtraRow(lineNumber) : false;
+    const action = showReceipt ? (
+      // U2: in receipt mode the match is recorded evidence, not an editor.
+      // Change returns to the entry line's match control.
+      <Button
+        size="sm"
+        aria-label={`Change match for line ${lineNumber}`}
+        onClick={() => onEditLine?.(lineNumber)}
+      >
+        Change
+      </Button>
+    ) : (
+      <div className="grid w-full min-w-0 gap-1.5">
+        <span className="min-w-0 text-caption font-medium text-ink-700">
+          Quotation match
+        </span>
+        <Select
+          ariaLabel={`Line ${lineNumber} quotation match`}
+          className="min-w-0"
+          value={current?.LineLabel ?? ""}
+          options={sourceOptions}
+          onChange={(value) => {
+            const label = String(value);
+            const chosen =
+              source.Lines.find((candidate) => candidate.LineLabel === label) ?? null;
+            onMatchChange(line.key, chosen);
+          }}
+        />
+      </div>
+    );
+
+    return (
+      <div key={line.key} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+        <LineMatchRow
+          status={extra ? "extra" : "matched"}
+          title={`Line ${displayNumber} — ${line.description || "(no description)"}`}
+          detail={
+            extra
+              ? showReceipt
+                ? "Currently extra (no quotation match) · recorded in the pane."
+                : "Currently extra (no quotation match)"
+              : showReceipt
+                ? `Currently quotation line ${current.LineLabel} · recorded in the pane.`
+                : `Currently quotation line ${current.LineLabel}`
+          }
+          po={
+            <span className="tnum">
+              Line {displayNumber} · {line.uom}
+            </span>
+          }
+          quotation={
+            extra ? <EmptyValue /> : <span className="tnum">Quotation line {current.LineLabel}</span>
+          }
+          note={acked ? <AcknowledgedChip /> : undefined}
+          actions={
+            <>
+              {suggestion !== undefined && !showReceipt ? (
+                <p className="mr-auto text-caption text-ink-500">
+                  Suggested: quotation line {suggestion.source.LineLabel}.{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-accent-700 underline"
+                    aria-label={`Use suggested match for line ${lineNumber}`}
+                    onClick={() => onMatchChange(line.key, suggestion.source)}
+                  >
+                    Use suggestion
+                  </button>
+                </p>
+              ) : null}
+              {extra ? (
+                <ExtraAcknowledgement
+                  lineNumber={lineNumber}
+                  acknowledged={acked}
+                  receipt={showReceipt}
+                  onToggle={() => onToggleExtra(lineNumber)}
+                />
+              ) : null}
+              {action}
+            </>
+          }
+        />
+      </div>
+    );
+  };
+
+  const renderMissingLine = (line: PurchaseOrderSourceLineDTO) => {
+    const acked = showReceipt
+      ? ackedMissingSet.has(line.LineLabel)
+      : acknowledgedMissing.includes(line.LineLabel);
+    return (
+      <LineMatchRow
+        key={line.LineLabel}
+        status="missing"
+        title={`Quotation line ${line.LineLabel} — ${line.Description || "(no description)"}`}
+        detail="On the quotation, not on this purchase order"
+        po={<EmptyValue />}
+        quotation={
+          <span className="tnum">
+            Quotation line {line.LineLabel} · {line.UoM}
+          </span>
+        }
+        note={acked ? <AcknowledgedChip /> : undefined}
+        actions={
+          <>
+            {showReceipt ? (
+              <p className="mr-auto text-caption text-ink-600">
+                {acked
+                  ? "omission acknowledged in the pane."
+                  : "needs acknowledgement in the reconciliation pane. Return to entry and resolve it there."}
+              </p>
+            ) : null}
+            <MissingAcknowledgement
+              lineLabel={line.LineLabel}
+              acknowledged={acked}
+              receipt={showReceipt}
+              onToggle={() => onToggleMissing(line.LineLabel)}
+            />
+          </>
+        }
+      />
+    );
+  };
+
 
   return (
     <div className="animate-step-in flex flex-col gap-5">
@@ -242,6 +463,12 @@ export function PurchaseOrderDifferenceReviewView({
         </StatusBanner>
       )}
 
+      <DiffSummary
+        differences={comparison.differences.length}
+        missing={comparison.missing.length}
+        extra={comparison.extraLineNumbers.length}
+      />
+
       {beforeDifferences}
 
       <Card className="p-4">
@@ -259,6 +486,8 @@ export function PurchaseOrderDifferenceReviewView({
           <div className="mt-2 grid gap-3">
             {comparison.differences.map((difference) => {
               const choice = decisions[difference.key];
+              const chosen =
+                choice === "po" || choice === "quotation" ? choice : undefined;
               // U2/R2-U2: in receipt mode EVERY difference is read-only, not
               // a second decision workbench. A recorded choice shows its
               // provenance; an unreviewed one shows needs-review provenance
@@ -266,39 +495,47 @@ export function PurchaseOrderDifferenceReviewView({
               // are no Use buttons; readiness stays blocked for undecided
               // rows through the evaluation blockers.
               if (showReceipt) {
-                const recorded =
-                  resolvedSet.has(difference.key) &&
-                  (choice === "po" || choice === "quotation");
+                const recorded = resolvedSet.has(difference.key) && chosen !== undefined;
                 return (
                   <div
                     key={difference.key}
                     role="group"
                     aria-label={difference.label}
-                    className="grid gap-3 rounded-lg border border-rule bg-paper-subtle/40 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                    className="grid gap-2 rounded-lg border border-rule bg-white p-3"
                   >
-                    <div className="grid gap-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-small font-medium text-ink-900">
                         {difference.label}
                       </p>
-                      <p className="text-caption text-ink-600">
-                        PO entry:{" "}
-                        <span className="tnum whitespace-nowrap font-medium text-ink-900">
-                          {differenceValue(difference.poValue)}
-                        </span>{" "}
-                        · Quotation:{" "}
-                        <span className="tnum whitespace-nowrap font-medium text-ink-900">
-                          {differenceValue(difference.sourceValue)}
-                        </span>
-                      </p>
+                      <DiffStatusChip status="changed" />
+                    </div>
+                    <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-stretch">
+                      <DiffValue
+                        side="po"
+                        value={difference.poValue}
+                        empty={difference.poValue === ""}
+                        nowrap={isMoneyDifference(difference.key)}
+                        selected={recorded && chosen === "po"}
+                        muted={recorded && chosen === "quotation"}
+                      />
+                      <DiffDivider />
+                      <DiffValue
+                        side="quotation"
+                        value={difference.sourceValue}
+                        empty={difference.sourceValue === ""}
+                        nowrap={isMoneyDifference(difference.key)}
+                        selected={recorded && chosen === "quotation"}
+                        muted={recorded && chosen === "po"}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="text-caption text-ink-500">
                         {recorded
-                          ? choice === "po"
+                          ? chosen === "po"
                             ? "PO entry kept in the reconciliation pane."
                             : "Quotation value used from the reconciliation pane."
                           : "Needs review in the reconciliation pane."}
                       </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
                         aria-label={`Change ${difference.label}`}
@@ -311,28 +548,14 @@ export function PurchaseOrderDifferenceReviewView({
                 );
               }
               return (
-                <div
+                <DiffChoice
                   key={difference.key}
-                  role="group"
-                  aria-label={difference.label}
-                  className="grid gap-3 rounded-lg border border-rule bg-paper-subtle/40 p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                >
-                  <div className="grid gap-1">
-                    <p className="text-small font-medium text-ink-900">
-                      {difference.label}
-                    </p>
-                    <p className="text-caption text-ink-600">
-                      PO entry:{" "}
-                      <span className="tnum whitespace-nowrap font-medium text-ink-900">
-                        {differenceValue(difference.poValue)}
-                      </span>{" "}
-                      · Quotation:{" "}
-                      <span className="tnum whitespace-nowrap font-medium text-ink-900">
-                        {differenceValue(difference.sourceValue)}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+                  label={difference.label}
+                  poValue={difference.poValue}
+                  quotationValue={difference.sourceValue}
+                  choice={chosen}
+                  money={isMoneyDifference(difference.key)}
+                  poAction={
                     <Button
                       size="sm"
                       variant={choice === "po" ? "primary" : "secondary"}
@@ -342,6 +565,8 @@ export function PurchaseOrderDifferenceReviewView({
                     >
                       Use PO entry
                     </Button>
+                  }
+                  quotationAction={
                     <Button
                       size="sm"
                       variant={choice === "quotation" ? "primary" : "secondary"}
@@ -351,8 +576,8 @@ export function PurchaseOrderDifferenceReviewView({
                     >
                       Use Quotation
                     </Button>
-                  </div>
-                </div>
+                  }
+                />
               );
             })}
           </div>
@@ -396,86 +621,35 @@ export function PurchaseOrderDifferenceReviewView({
             ? "Matches are recorded in the reconciliation pane; Change returns to the entry line."
             : "Every line keeps its customer line number. Correct any match that follows a different quotation line; a corrected match is saved on the purchase order line."}
         </p>
-        <div className="mt-3 grid gap-2">
-          {state.lines.map((line, index) => {
-            const lineNumber = index + 1;
-            const current = matchedByLineKey.get(line.key);
-            const suggestion = comparison.suggestions.find(
-              (candidate) => candidate.lineNumber === lineNumber
-            );
-            // U2: in receipt mode the match is recorded evidence, not an
-            // editor. Change returns to the entry line's match control.
-            if (showReceipt) {
-              return (
-                <div
-                  key={line.key}
-                  className="grid gap-2 rounded-lg border border-rule p-3 sm:grid-cols-2 sm:items-end"
-                >
-                  <div className="grid gap-1">
-                    <p className="text-small font-medium text-ink-900">
-                      Line {lineNumber} — {line.description || "(no description)"}
-                    </p>
-                    <p className="text-caption text-ink-500">
-                      {current === undefined
-                        ? "Currently extra (no quotation match) · recorded in the pane."
-                        : `Currently quotation line ${current.LineLabel} · recorded in the pane.`}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-end justify-end gap-2">
-                    <Button
-                      size="sm"
-                      aria-label={`Change match for line ${lineNumber}`}
-                      onClick={() => onEditLine?.(lineNumber)}
-                    >
-                      Change
-                    </Button>
-                  </div>
-                </div>
-              );
+        <div className="mt-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
+          {reviewGroups.map((group, groupIndex) => {
+            if (group.groupKey === "") {
+              const line = group.lines[0];
+              if (line === undefined) return null;
+              return renderLineMatch(line, `${groupIndex + 1}`);
             }
             return (
               <div
-                key={line.key}
-                className="grid gap-2 rounded-lg border border-rule p-3 sm:grid-cols-2 sm:items-end"
+                key={group.key}
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 rounded-lg border border-rule bg-paper-subtle/40 p-3"
               >
-                <div className="grid gap-1">
-                  <p className="text-small font-medium text-ink-900">
-                    Line {lineNumber} — {line.description || "(no description)"}
+                <div className="grid gap-0.5">
+                  <p className="text-small font-semibold text-ink-900">
+                    {effectiveParentDescription(group)}
                   </p>
                   <p className="text-caption text-ink-500">
-                    {current === undefined
-                      ? "Currently extra (no quotation match)"
-                      : `Currently quotation line ${current.LineLabel}`}
+                    Line {groupIndex + 1} · {group.lines.length} sub-item
+                    {group.lines.length === 1 ? "" : "s"}. Each sub-item keeps
+                    its own match.
                   </p>
-                  {suggestion !== undefined ? (
-                    <p className="text-caption text-ink-500">
-                      Suggested: quotation line {suggestion.source.LineLabel}.{" "}
-                      <button
-                        type="button"
-                        className="font-medium text-accent-700 underline"
-                        aria-label={`Use suggested match for line ${lineNumber}`}
-                        onClick={() => onMatchChange(line.key, suggestion.source)}
-                      >
-                        Use suggestion
-                      </button>
-                    </p>
-                  ) : null}
                 </div>
-                <div className="grid gap-1.5">
-                  <span className="text-small font-medium text-ink-700">
-                    Quotation match
-                  </span>
-                  <Select
-                    ariaLabel={`Line ${lineNumber} quotation match`}
-                    value={current?.LineLabel ?? ""}
-                    options={sourceOptions}
-                    onChange={(value) => {
-                      const label = String(value);
-                      const chosen =
-                        source.Lines.find((candidate) => candidate.LineLabel === label) ?? null;
-                      onMatchChange(line.key, chosen);
-                    }}
-                  />
+                <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 pl-3">
+                  {group.lines.map((line, subIndex) =>
+                    renderLineMatch(
+                      line,
+                      `${groupIndex + 1}.${subIndex + 1}`
+                    )
+                  )}
                 </div>
               </div>
             );
@@ -483,98 +657,12 @@ export function PurchaseOrderDifferenceReviewView({
         </div>
 
         {comparison.missing.length > 0 ? (
-          <fieldset className="mt-4 grid gap-2 border-t border-rule pt-3">
-            <legend className="text-small font-medium text-ink-700">
+          <div className="mt-4 grid gap-2 border-t border-rule pt-3">
+            <p className="text-small font-medium text-ink-700">
               On the quotation, not on this purchase order
-            </legend>
-            {comparison.missing.map((line) => {
-              const acked = showReceipt && ackedMissingSet.has(line.LineLabel);
-              if (acked) {
-                return (
-                  <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
-                    <span aria-hidden="true" className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded border border-rule bg-paper-subtle text-caption text-ink-500">✓</span>
-                    <span>
-                      Quotation line {line.LineLabel} — {line.Description || "(no description)"} · omission acknowledged in the pane.
-                    </span>
-                  </p>
-                );
-              }
-              if (showReceipt) {
-                return (
-                  <p key={line.LineLabel} className="flex items-start gap-2 text-small text-ink-700">
-                    <span>
-                      Quotation line {line.LineLabel} — {line.Description || "(no description)"} · needs acknowledgement in the reconciliation pane. Return to entry and resolve it there.
-                    </span>
-                  </p>
-                );
-              }
-              return (
-                <label
-                  key={line.LineLabel}
-                  className="flex items-start gap-2 text-small text-ink-700"
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-accent-700"
-                    aria-label={`Acknowledge omission of quotation line ${line.LineLabel}`}
-                    checked={acknowledgedMissing.includes(line.LineLabel)}
-                    onChange={() => onToggleMissing(line.LineLabel)}
-                  />
-                  <span>
-                    Quotation line {line.LineLabel} — {line.Description || "(no description)"}
-                  </span>
-                </label>
-              );
-            })}
-          </fieldset>
-        ) : null}
-
-        {comparison.extraLineNumbers.length > 0 ? (
-          <fieldset className="mt-4 grid gap-2 border-t border-rule pt-3">
-            <legend className="text-small font-medium text-ink-700">
-              On this purchase order, not on the quotation
-            </legend>
-            {comparison.extraLineNumbers.map((lineNumber) => {
-              const line = state.lines[lineNumber - 1];
-              const acked = showReceipt && ackedExtraSet.has(lineNumber);
-              if (acked) {
-                return (
-                  <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
-                    <span aria-hidden="true" className="mt-0.5 inline-flex h-4 w-4 items-center justify-center rounded border border-rule bg-paper-subtle text-caption text-ink-500">✓</span>
-                    <span>
-                      Line {lineNumber} — {line.description || "(no description)"} · acknowledged as extra in the pane.
-                    </span>
-                  </p>
-                );
-              }
-              if (showReceipt) {
-                return (
-                  <p key={lineNumber} className="flex items-start gap-2 text-small text-ink-700">
-                    <span>
-                      Line {lineNumber} — {line.description || "(no description)"} · needs acknowledgement in the reconciliation pane. Return to entry and resolve it there.
-                    </span>
-                  </p>
-                );
-              }
-              return (
-                <label
-                  key={lineNumber}
-                  className="flex items-start gap-2 text-small text-ink-700"
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-accent-700"
-                    aria-label={`Acknowledge line ${lineNumber} as extra`}
-                    checked={acknowledgedExtra.includes(lineNumber)}
-                    onChange={() => onToggleExtra(lineNumber)}
-                  />
-                  <span>
-                    Line {lineNumber} — {line.description || "(no description)"}
-                  </span>
-                </label>
-              );
-            })}
-          </fieldset>
+            </p>
+            {comparison.missing.map((line) => renderMissingLine(line))}
+          </div>
         ) : null}
       </Card>
 
@@ -588,9 +676,7 @@ export function PurchaseOrderDifferenceReviewView({
       <PurchaseOrderTotals
         totals={evaluation.totals}
         currency={currency}
-        discountPercent={parseDiscountPercent(evaluation.applied.header.discountPercent)}
         ppnBps={ppnBpsOverride ?? state.ppnBps}
-        adjustmentReason={evaluation.applied.header.adjustmentReason.trim()}
         printedTotals={{
           subtotalMinor: source.PrintedSubtotalMinor,
           discountMinor: source.PrintedDiscountMinor,
@@ -628,12 +714,11 @@ export function PurchaseOrderDifferenceReviewView({
         </div>
         <p className="mt-2 text-caption text-ink-500">
           The saved total is calculated from this purchase order's own lines,
-          row and whole-order discounts, PPN and optional adjustment. The
-          quotation's printed total stays here as document evidence, not as a
-          target: an accepted price difference or an extra line is explained by
-          the choices above and the acknowledgements, and never needs an
-          adjustment to reverse it. Record a signed adjustment with a reason
-          only to reconcile what the customer's PO document actually printed.
+          row discounts and PPN. The quotation's printed total stays here as
+          document evidence, not as a target: an accepted price difference or
+          an extra line is explained by the choices above and the
+          acknowledgements. The whole-order discount and signed adjustment are
+          retired, so the PO never invents a figure to force the printed total.
         </p>
         {repairing || linking ? null : documentState === "attached" ? (
           <p className="mt-1 text-caption text-ink-500">
@@ -804,21 +889,6 @@ export function PurchaseOrderFinalConfirmationView({
             <dt className="text-caption text-ink-500">Lines</dt>
             <dd className="tnum font-medium text-ink-900">{payload.Items.length}</dd>
           </div>
-          <div>
-            <dt className="text-caption text-ink-500">Whole-PO discount</dt>
-            <dd className="tnum font-medium text-ink-900">
-              {payload.DiscountPercent > 0 ? `${payload.DiscountPercent}%` : "None"}
-            </dd>
-          </div>
-          {payload.AdjustmentMinor !== 0 ? (
-            <div>
-              <dt className="text-caption text-ink-500">Adjustment</dt>
-              <dd className="tnum font-medium text-ink-900">
-                {formatMoney(currency, payload.AdjustmentMinor)} ·{" "}
-                {payload.AdjustmentReason}
-              </dd>
-            </div>
-          ) : null}
           <div>
             <dt className="text-caption text-ink-500">Total</dt>
             <dd className="tnum font-medium text-ink-900">
@@ -1004,6 +1074,21 @@ export type RepairReturn =
  * shows the stored values, the exact source link, the calculated totals and the
  * printed document figures side by side.
  */
+/** Description bullets under a saved line or sub-item. */
+function SavedDescriptionLines({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-caption text-ink-500">
+      {lines.map((line, index) => (
+        <li key={index} className="flex gap-1.5">
+          <span aria-hidden="true" className="text-ink-300">—</span>
+          <span>{line || "—"}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function PurchaseOrderSavedView({
   order,
   currency,
@@ -1051,6 +1136,18 @@ export function PurchaseOrderSavedView({
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
   const state = initialPurchaseOrderEditorState(order, currency);
+  // #575: the saved record keeps the split-line structure the editor entered.
+  const savedGroups = groupPurchaseOrderLines(state.lines);
+  const savedNetByKey = new Map<number, number>();
+  state.lines.forEach((line, index) => {
+    savedNetByKey.set(line.key, current.Items[index]?.NetMinor ?? 0);
+  });
+  const savedMatch = (line: PurchaseOrderLine): string =>
+    line.quotationItemNo === null
+      ? "Extra line"
+      : `Quotation ${line.quotationItemNo}${
+          line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
+        }`;
   // #518: one read feeds the >=1024 rail, the <1024 trigger and the sheet, so
   // the three cannot disagree about the current generation or the filter.
   const reconciliation = useSavedReconciliation({
@@ -1160,10 +1257,9 @@ export function PurchaseOrderSavedView({
     grossMinor: safe(gross),
     rowDiscountMinor: safe(rowDiscount),
     subtotalMinor: order.SubtotalMinor,
-    discountMinor: order.DiscountMinor,
-    afterDiscountMinor: order.SubtotalMinor - order.DiscountMinor,
+    discountMinor: 0,
+    afterDiscountMinor: order.SubtotalMinor,
     ppnMinor: order.PpnMinor,
-    adjustmentMinor: order.AdjustmentMinor,
     grandTotalMinor: order.GrandTotalMinor,
   };
 
@@ -1403,47 +1499,115 @@ export function PurchaseOrderSavedView({
             stacked list; at 720 or wider the table returns. The query is on
             the record's main column (container), not the viewport, so the 1024
             rail never forces a sideways scroll.
+
+            #575: a split line is one parent heading with its sub-items
+            beneath it, in both layouts. The numbers are visual (`2`, `2.1`);
+            the stored line identities and totals are untouched.
           */}
           <Card className="overflow-hidden">
             <ul className="divide-y divide-rule @min-[720px]:hidden">
-              {state.lines.map((line: PurchaseOrderLine, index) => (
-                <li key={line.key} className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-small font-medium text-ink-900">
-                        {line.description || "—"}
-                      </p>
-                      <p className="mt-0.5 text-caption text-ink-500">
-                        Line {index + 1} ·{" "}
-                        {line.quotationItemNo === null
-                          ? "Extra line"
-                          : `Quotation ${line.quotationItemNo}${
-                              line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
-                            }`}
-                      </p>
+              {savedGroups.map((group, groupIndex) => {
+                const groupNet = group.lines.reduce(
+                  (sum, line) => sum + (savedNetByKey.get(line.key) ?? 0),
+                  0
+                );
+                if (group.groupKey === "") {
+                  const line = group.lines[0];
+                  if (line === undefined) return null;
+                  return (
+                    <li key={group.key} className="px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-small font-medium text-ink-900">
+                            {line.description || "—"}
+                          </p>
+                          <p className="mt-0.5 text-caption text-ink-500">
+                            Line {groupIndex + 1} · {savedMatch(line)}
+                          </p>
+                          <SavedDescriptionLines lines={line.descriptionLines} />
+                        </div>
+                        <span className="tnum shrink-0 text-small font-medium text-ink-900">
+                          {formatMoney(currency, groupNet)}
+                        </span>
+                      </div>
+                      <dl className="mt-2 grid grid-cols-3 gap-2 text-caption">
+                        <div className="min-w-0">
+                          <dt className="text-ink-500">Quantity</dt>
+                          <dd className="tnum truncate text-ink-700">{line.quantity}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-ink-500">Unit price</dt>
+                          <dd className="tnum truncate text-ink-700">{line.unitPrice}</dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-ink-500">Discount</dt>
+                          <dd className="tnum truncate text-ink-700">
+                            {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </li>
+                  );
+                }
+                return (
+                  <li key={group.key} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-small font-semibold text-ink-900">
+                          {effectiveParentDescription(group)}
+                        </p>
+                        <p className="mt-0.5 text-caption text-ink-500">
+                          Line {groupIndex + 1} ·{" "}
+                          {group.lines.length} sub-item
+                          {group.lines.length === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                      <span className="tnum shrink-0 text-small font-semibold text-ink-900">
+                        {formatMoney(currency, groupNet)}
+                      </span>
                     </div>
-                    <span className="tnum shrink-0 text-small font-medium text-ink-900">
-                      {formatMoney(currency, order.Items[index]?.NetMinor ?? 0)}
-                    </span>
-                  </div>
-                  <dl className="mt-2 grid grid-cols-3 gap-2 text-caption">
-                    <div className="min-w-0">
-                      <dt className="text-ink-500">Quantity</dt>
-                      <dd className="tnum truncate text-ink-700">{line.quantity}</dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-ink-500">Unit price</dt>
-                      <dd className="tnum truncate text-ink-700">{line.unitPrice}</dd>
-                    </div>
-                    <div className="min-w-0">
-                      <dt className="text-ink-500">Discount</dt>
-                      <dd className="tnum truncate text-ink-700">
-                        {line.discountEnabled ? `${line.discountPercent}%` : "—"}
-                      </dd>
-                    </div>
-                  </dl>
-                </li>
-              ))}
+                    <ul className="mt-2 space-y-2 border-l border-rule pl-3">
+                      {group.lines.map((line, subIndex) => (
+                        <li key={line.key}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-small text-ink-900">
+                                <span className="tnum mr-1 text-caption text-ink-400">
+                                  {groupIndex + 1}.{subIndex + 1}
+                                </span>
+                                {line.description || "—"}
+                              </p>
+                              <p className="mt-0.5 text-caption text-ink-500">
+                                {savedMatch(line)}
+                              </p>
+                              <SavedDescriptionLines lines={line.descriptionLines} />
+                            </div>
+                            <span className="tnum shrink-0 text-small font-medium text-ink-900">
+                              {formatMoney(currency, savedNetByKey.get(line.key) ?? 0)}
+                            </span>
+                          </div>
+                          <dl className="mt-2 grid grid-cols-3 gap-2 text-caption">
+                            <div className="min-w-0">
+                              <dt className="text-ink-500">Quantity</dt>
+                              <dd className="tnum truncate text-ink-700">{line.quantity}</dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="text-ink-500">Unit price</dt>
+                              <dd className="tnum truncate text-ink-700">{line.unitPrice}</dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="text-ink-500">Discount</dt>
+                              <dd className="tnum truncate text-ink-700">
+                                {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                              </dd>
+                            </div>
+                          </dl>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                );
+              })}
             </ul>
             <div className="hidden @min-[720px]:block">
               <table className="w-full text-left text-body">
@@ -1460,35 +1624,97 @@ export function PurchaseOrderSavedView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-rule">
-                  {state.lines.map((line: PurchaseOrderLine, index) => (
-                    <tr key={line.key}>
-                      <td className="tnum px-4 py-3 align-middle text-ink-700">
-                        {index + 1}
-                      </td>
-                      <td className="px-4 py-3 align-middle text-ink-900">
-                        {line.description || "—"}
-                      </td>
-                      <td className="px-4 py-3 align-middle text-ink-700">
-                        {line.quotationItemNo === null
-                          ? "Extra line"
-                          : `Quotation ${line.quotationItemNo}${
-                              line.quotationSubNo === null ? "" : `.${line.quotationSubNo}`
-                            }`}
-                      </td>
-                      <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                        {line.quantity}
-                      </td>
-                      <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-700">
-                        {line.unitPrice}
-                      </td>
-                      <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                        {line.discountEnabled ? `${line.discountPercent}%` : "—"}
-                      </td>
-                      <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
-                        {formatMoney(currency, order.Items[index]?.NetMinor ?? 0)}
-                      </td>
-                    </tr>
-                  ))}
+                  {savedGroups.map((group, groupIndex) => {
+                    const groupNet = group.lines.reduce(
+                      (sum, line) => sum + (savedNetByKey.get(line.key) ?? 0),
+                      0
+                    );
+                    if (group.groupKey === "") {
+                      const line = group.lines[0];
+                      if (line === undefined) return null;
+                      return (
+                        <tr key={group.key}>
+                          <td className="tnum px-4 py-3 align-middle text-ink-700">
+                            {groupIndex + 1}
+                          </td>
+                          <td className="px-4 py-3 align-middle text-ink-900">
+                            {line.description || "—"}
+                            <SavedDescriptionLines lines={line.descriptionLines} />
+                          </td>
+                          <td className="px-4 py-3 align-middle text-ink-700">
+                            {savedMatch(line)}
+                          </td>
+                          <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                            {line.quantity}
+                          </td>
+                          <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-700">
+                            {line.unitPrice}
+                          </td>
+                          <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                            {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                          </td>
+                          <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
+                            {formatMoney(currency, groupNet)}
+                          </td>
+                        </tr>
+                      );
+                    }
+                    return (
+                      <Fragment key={group.key}>
+                        <tr className="bg-paper-subtle/40">
+                          <td className="tnum px-4 py-3 align-middle font-medium text-ink-800">
+                            {groupIndex + 1}
+                          </td>
+                          <td className="px-4 py-3 align-middle text-ink-950">
+                            <span className="text-small font-semibold">
+                              {effectiveParentDescription(group)}
+                            </span>
+                            <span className="ml-2 text-caption text-ink-500">
+                              {group.lines.length} sub-item
+                              {group.lines.length === 1 ? "" : "s"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 align-middle text-ink-600">
+                            {group.lines[0]?.quotationItemNo != null
+                              ? `Quotation ${group.lines[0].quotationItemNo}`
+                              : "Split line"}
+                          </td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
+                          <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle font-semibold text-ink-900">
+                            {formatMoney(currency, groupNet)}
+                          </td>
+                        </tr>
+                        {group.lines.map((line, subIndex) => (
+                          <tr key={line.key}>
+                            <td className="tnum px-4 py-3 pl-8 align-middle text-ink-600">
+                              {groupIndex + 1}.{subIndex + 1}
+                            </td>
+                            <td className="px-4 py-3 align-middle text-ink-900">
+                              {line.description || "—"}
+                              <SavedDescriptionLines lines={line.descriptionLines} />
+                            </td>
+                            <td className="px-4 py-3 align-middle text-ink-700">
+                              {savedMatch(line)}
+                            </td>
+                            <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                              {line.quantity}
+                            </td>
+                            <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-700">
+                              {line.unitPrice}
+                            </td>
+                            <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
+                              {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                            </td>
+                            <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
+                              {formatMoney(currency, savedNetByKey.get(line.key) ?? 0)}
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1497,9 +1723,7 @@ export function PurchaseOrderSavedView({
           <PurchaseOrderTotals
             totals={totals}
             currency={currency}
-            discountPercent={order.DiscountPercent}
             ppnBps={order.PpnBps}
-            adjustmentReason={order.AdjustmentReason.trim()}
             printedTotals={state.printedTotals}
             sourceRevision={order.SourceRevision}
           />

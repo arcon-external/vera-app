@@ -63,7 +63,6 @@ const shapes = {
 const fields = [
   { ID: "header:paymentTerms", KeyPattern: "header:paymentTerms", Label: "Payment terms", Mode: "commit" },
   { ID: "header:incoterms", KeyPattern: "header:incoterms", Label: "Incoterms", Mode: "commit" },
-  { ID: "header:discountPercent", KeyPattern: "header:discountPercent", Label: "Whole-PO discount", Mode: "commit" },
   { ID: "line:description", KeyPattern: "line:{lineKey}:description", Label: "Line {lineNumber} description", Mode: "commit" },
   { ID: "line:uom", KeyPattern: "line:{lineKey}:uom", Label: "Line {lineNumber} unit of measure", Mode: "commit" },
   { ID: "line:quantity", KeyPattern: "line:{lineKey}:quantity", Label: "Line {lineNumber} quantity", Mode: "commit" },
@@ -84,10 +83,20 @@ const USD: CurrencyInfo = {
   groupSep: ",", decimalSep: ".", symbolSpaced: false,
 };
 
+/**
+ * The whole-PO discount is retired (#573): the shared fixture still carries the
+ * key for the Go contract, while this frontend no longer has a comparable
+ * field for it. Filtering it here keeps every surviving field pinned without
+ * pretending the retired one exists.
+ */
+const RETIRED_HEADER_DISCOUNT = "header:discountPercent";
+
 describe("PO reconciliation shared contract (ticket 01)", () => {
   it("pins every field and every wire key, including nested specimens", () => {
     expect(fixture.Version).toBe(1);
-    expect(fields).toEqual(fixture.Fields);
+    expect(fields).toEqual(
+      fixture.Fields.filter((field) => field.ID !== RETIRED_HEADER_DISCOUNT)
+    );
     expect(fixture.Enums).toEqual({
       ItemKind: ["difference", "missing_line", "extra_line", "duplicate_match", "tax_basis"],
       ItemStatus: ["unresolved", "resolved"],
@@ -141,7 +150,6 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
       }), USD);
       state.header.paymentTerms = tc.Entered.PaymentTerms;
       state.header.incoterms = tc.Entered.Incoterms;
-      state.header.discountPercent = String(tc.Entered.DiscountPercent);
       state.lines = tc.Entered.Lines.map((line, index) => ({
         key: index + 100,
         clientKey: `client:contract-${index}`,
@@ -153,17 +161,22 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
         discountPercent: String(line.DiscountPercent),
         quotationItemNo: line.QuotationItemNo,
         quotationSubNo: line.QuotationSubNo,
+        groupKey: "",
+        parentDescription: "",
+        descriptionLines: [],
       }));
       const got = comparePurchaseOrder(state, source, USD);
-      const want = tc.Want.Differences.map((difference) => {
-        const priceValues = Object.entries(tc.FrontendPriceValues)
-          .find(([key]) => key === difference.Key)?.[1];
-        return {
-          key: difference.Key, label: difference.Label,
-          poValue: priceValues?.[0] ?? difference.POValue,
-          sourceValue: priceValues?.[1] ?? difference.SourceValue,
-        };
-      });
+      const want = tc.Want.Differences
+        .filter((difference) => difference.Key !== RETIRED_HEADER_DISCOUNT)
+        .map((difference) => {
+          const priceValues = Object.entries(tc.FrontendPriceValues)
+            .find(([key]) => key === difference.Key)?.[1];
+          return {
+            key: difference.Key, label: difference.Label,
+            poValue: priceValues?.[0] ?? difference.POValue,
+            sourceValue: priceValues?.[1] ?? difference.SourceValue,
+          };
+        });
       expect(got.differences).toEqual(want);
       expect(got.missing.map(sourceLabel)).toEqual(tc.Want.Missing);
       expect(got.extraLineNumbers).toEqual(tc.Want.ExtraLineNumbers);
@@ -173,33 +186,43 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
       // all-fields-differ case below pins its whole observable field set.
       if (tc.Name === "every-current-comparable-field-differs") {
         expect(got.differences.map((difference) => difference.key).sort())
-          .toEqual([...tc.Want.ComparableKeys].sort());
+          .toEqual(
+            [...tc.Want.ComparableKeys]
+              .filter((key) => key !== RETIRED_HEADER_DISCOUNT)
+              .sort()
+          );
       }
     });
   }
 
-  for (const tc of fixture.TotalsCases) {
+  // Every totals case now describes the post-#573 pipeline: row discounts, PPN
+  // on the discounted subtotal, and no whole-PO discount or adjustment. The
+  // filter keeps a future case that reintroduces a retired stage from being
+  // silently compared against a calculation that cannot produce it.
+  for (const tc of fixture.TotalsCases.filter(
+    (testCase) => testCase.Want.discountMinor === 0 && testCase.Want.adjustmentMinor === 0
+  )) {
     it(`derives totals without forcing printed evidence: ${tc.Name}`, () => {
       const state = initialPurchaseOrderEditorState(blankPurchaseOrderDraft({
         currency: "USD", taxZone: "FTZ", taxType: "Goods", serviceCategory: "",
         receivedDate: "2026-10-28",
       }), USD);
       state.ppnBps = tc.Input.PpnBps;
-      state.header.discountPercent = String(tc.Input.DiscountPercent);
-      state.header.adjustment = formatUnitPriceMinor(USD, tc.Input.AdjustmentMinor);
-      state.header.adjustmentReason = tc.Input.AdjustmentReason;
       state.lines = tc.Input.Lines.map((line, index) => ({
         key: index, clientKey: `client:candidate-${index}`, description: "Widget", uom: "Pc",
         quotationItemNo: 1, quotationSubNo: null,
         quantity: formatQuantityScaled(line.QuantityScaled),
         unitPrice: formatUnitPriceMinor(USD, line.UnitPriceMinor),
         discountEnabled: line.DiscountEnabled, discountPercent: String(line.DiscountPercent),
+        groupKey: "", parentDescription: "", descriptionLines: [],
       }));
       const got = calculatePurchaseOrder(state, USD);
       expect(got.error).toBeNull();
       expect(got.totals).not.toBeNull();
+      const want: Partial<typeof tc.Want> = { ...tc.Want };
+      delete want.adjustmentMinor;
       expect({ ...got.totals, printedDifferenceMinor: tc.PrintedGrandTotalMinor - got.totals!.grandTotalMinor })
-        .toEqual(tc.Want);
+        .toEqual(want);
     });
   }
 

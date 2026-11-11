@@ -4,6 +4,49 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.16.0] - 2026-11-11
+
+### Added
+
+- **The Purchase Order editor now uses the quotation line items.** A PO line
+  can be split into priced sub-items, and each sub-item can carry its own
+  description lines, quantity, unit price and discount. The page has the same
+  teal header, the bottom Cancel / Save draft / Final Save bar, and the
+  reconciliation panel beside the form.
+- **Saved purchase orders keep the split structure.** The read-only record and
+  the final-save review show one parent heading with its sub-items (`2.1`,
+  `2.2`) and their description lines, instead of flattening them into
+  independent rows.
+
+### Changed
+
+- **The whole-PO discount and adjustment are gone.** Discounts are entered per
+  line, matching the quotation. The totals are the sum of the discounted lines
+  plus PPN; a quotation's printed whole-order discount stays visible as
+  evidence but is no longer reproduced.
+- **The final-save confirmation is shorter.** It no longer lists the retired
+  whole-order discount or adjustment.
+
+### Fixed
+
+- **A split PO line stays split after Save draft.** The desktop record mapping
+  dropped the split-line fields, so the editor flattened the line immediately
+  after saving even though the database kept it. The structure now survives the
+  save and reopen.
+
+## [0.15.3] - 2026-11-10
+
+### Fixed
+
+- **The quotation note's bullets and numbers line up.** Bullet markers are
+  centred on the first line and sit closer to the text, numbered rows share the
+  same gutter, and the gap between a paragraph and its list is tighter. The
+  preview and the exported PDF use the same layout.
+- **The note and footer corners follow the approved layout.** The note card is
+  square on all four corners, the terms card squares its top-left, and the
+  totals card squares its top-right. The note ribbon now uses the same deep blue
+  as the table headers.
+
 ## [0.15.2] - 2026-11-10
 
 ### Fixed

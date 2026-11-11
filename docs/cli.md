@@ -360,6 +360,51 @@ pricing document is a quotation for a number nobody chose.
 
 Run `vera` for the list, or `vera help <command>` for one.
 
+## Network diagnosis
+
+### `vera net diagnose`
+
+```bash
+vera net diagnose
+vera net diagnose --api https://api.arconpentapersada.co.id
+vera net diagnose --json
+```
+
+Makes one unauthenticated request to `/health` and times each stage: the DNS
+lookup, every TCP connect attempt (IPv4 and IPv6), the TLS handshake, the wait
+for the first response byte, and the total. A second request checks whether the
+connection was reused.
+
+The command needs no session. It exits `0` when the diagnosis completes, even
+when the connection failed: read `ok` and `errorStage` in `--json`, or the final
+`FAILED at ...` line, for the result. `errorStage` is one of `dns`, `connect`,
+`tls`, `header` or `request`.
+
+The dial and TLS stages have a 5-second limit and the response-header wait has a
+10-second limit. `--timeout` bounds the whole diagnosis (default `60s`).
+`--requests 1` skips the reuse probe; the default is `2`.
+
+A successful run prints a table:
+
+```text
+API:           https://api.arconpentapersada.co.id/health
+STAGE    TIME       DETAIL
+dns      12.3 ms    2001:...
+connect  45.6 ms    tcp6 ...
+tls      120.0 ms
+ttfb     180.0 ms
+total    210.0 ms
+Status:        200 HTTP/2.0
+Remote:        ...
+Reuse:         reused in 8.2 ms
+
+OK: reached the API in 210.0 ms
+```
+
+`--json` emits the same values as one document, including `url`, `ok`, `status`,
+`httpVersion`, `remoteAddr`, `reused`, `dnsMs`, `connectMs`, `tlsMs`, `ttfbMs`,
+`totalMs`, `stages`, and, on failure, `errorStage` and `error`.
+
 ## Sessions
 
 ### `vera login`

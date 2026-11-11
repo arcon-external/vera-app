@@ -836,7 +836,9 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 			draft.PrintedPpnMinor, draft.PrintedGrandTotalMinor)
 	}
 
-	// Now enter a row discount, a whole-PO discount and a signed adjustment.
+	// Now enter a row discount, plus a whole-PO discount and a signed
+	// adjustment. The latter two are retired (#573): they are still sent so
+	// this test can prove the write ignores them.
 	itemNo1, itemNo2 := 1, 2
 	subNo1, subNo2 := 1, 2
 	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
@@ -869,17 +871,17 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 
 	// 2.5 x 650 = 1625, 10% is 162.5 and truncates to 162 -> net 1463.
 	// 2 x 420 = 840. 1 x 450 = 450, 50% = 225 -> net 225.
-	// Subtotal 2528; 10% whole discount is 252.8 -> 252; after 2276.
-	// SupplyInstall carries no PPN, so the adjustment is the only signed part.
+	// Subtotal 2528; the whole discount and the adjustment are retired, so
+	// they move nothing. SupplyInstall carries no PPN.
 	wantLines := [][3]int64{{1625, 162, 1463}, {840, 0, 840}, {450, 225, 225}}
 	if got := poCalculationLines(updated.Items); !reflect.DeepEqual(got, wantLines) {
 		t.Errorf("updated lines = %v; want %v", got, wantLines)
 	}
-	if updated.SubtotalMinor != 2528 || updated.DiscountMinor != 252 ||
+	if updated.SubtotalMinor != 2528 || updated.DiscountMinor != 0 ||
 		updated.PpnBps != 0 || updated.PpnMinor != 0 ||
-		updated.AdjustmentMinor != -26 || updated.AdjustmentReason != "Match the printed total" ||
-		updated.GrandTotalMinor != 2250 {
-		t.Errorf("updated totals = %+v; want 2528/252/0/0/-26/2250", updated)
+		updated.AdjustmentMinor != 0 || updated.AdjustmentReason != "" ||
+		updated.GrandTotalMinor != 2528 {
+		t.Errorf("updated totals = %+v; want 2528/0/0/0/\"\"/2528", updated)
 	}
 	// The printed source figures did not move with the PO's own numbers.
 	if updated.PrintedSubtotalMinor != 3050 || updated.PrintedGrandTotalMinor != 3111 {
@@ -894,8 +896,8 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	if !reflect.DeepEqual(poCalculationLines(reopened.Items), wantLines) ||
-		reopened.SubtotalMinor != 2528 || reopened.DiscountMinor != 252 ||
-		reopened.AdjustmentMinor != -26 || reopened.GrandTotalMinor != 2250 {
+		reopened.SubtotalMinor != 2528 || reopened.DiscountMinor != 0 ||
+		reopened.AdjustmentMinor != 0 || reopened.GrandTotalMinor != 2528 {
 		t.Errorf("reopened calculation = %+v; want the stored figures", reopened)
 	}
 }
@@ -921,69 +923,25 @@ func TestPurchaseOrderPPNIsStoredForNonFTZGoodsOnly(t *testing.T) {
 		t.Errorf("PPN totals = %+v; want 1100 bps / 110 / subtotal 1000 / grand 1110", draft)
 	}
 
-	// A whole discount is taken before PPN: 1000 - 10% = 900, PPN 99, 999.
+	// A row discount is taken before PPN: 1000 - 10% = 900, PPN 99, 999.
+	// The whole-PO discount is retired (#573), so only the row can discount.
+	discounted := make([]PurchaseOrderItem, len(draft.Items))
+	copy(discounted, draft.Items)
+	discounted[0].DiscountEnabled = true
+	discounted[0].DiscountPercent = 10
 	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
-		ID:              draft.ID,
-		UpdatedBy:       user.ID,
-		PaymentTerms:    "45 days",
-		DiscountPercent: 10,
-		Items:           draft.Items,
+		ID:           draft.ID,
+		UpdatedBy:    user.ID,
+		PaymentTerms: "45 days",
+		Items:        discounted,
 	})
 	if err != nil {
-		t.Fatalf("update discount: %v", err)
+		t.Fatalf("update row discount: %v", err)
 	}
-	if updated.DiscountMinor != 100 || updated.PpnMinor != 99 ||
-		updated.GrandTotalMinor != 999 {
-		t.Errorf("discounted PPN totals = %+v; want discount 100 / PPN 99 / grand 999", updated)
-	}
-}
-
-func TestPurchaseOrderUpdateRefusesUnexplainedAdjustmentsAndInvalidTotals(t *testing.T) {
-	database := openTestSchema(t, "vera_po_calc_guard")
-	quotation := seedPOQuotationTax(t, database, "NonFTZ", "SupplyOnly", 1100)
-	user := poTestUser(t, database)
-	ctx := poContext(t, database)
-
-	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
-		QuotationID:    quotation.ID,
-		RevisionNumber: quotation.RevisionNumber,
-		CreatedBy:      user.ID,
-	})
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-
-	update := func(patch PurchaseOrderUpdate) (PurchaseOrder, error) {
-		patch.ID = draft.ID
-		patch.UpdatedBy = user.ID
-		patch.PaymentTerms = "45 days"
-		patch.Items = draft.Items
-		return updateDraft(t, database, ctx, patch)
-	}
-
-	if _, err := update(PurchaseOrderUpdate{AdjustmentMinor: -1}); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("unexplained adjustment error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-	if _, err := update(PurchaseOrderUpdate{
-		AdjustmentMinor: -1111, AdjustmentReason: "Too far",
-	}); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("negative grand total error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-	if _, err := update(PurchaseOrderUpdate{DiscountPercent: 101}); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("discount above 100 error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-	if _, err := update(PurchaseOrderUpdate{DiscountPercent: -1}); !errors.Is(err, ErrPurchaseOrderInvalid) {
-		t.Errorf("negative discount error = %v; want ErrPurchaseOrderInvalid", err)
-	}
-
-	// Nothing refused above may have been persisted.
-	reopened, err := database.GetPurchaseOrder(ctx, draft.ID)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	if reopened.DiscountMinor != 0 || reopened.AdjustmentMinor != 0 ||
-		reopened.GrandTotalMinor != 1110 {
-		t.Errorf("a refused update changed the stored PO: %+v", reopened)
+	if updated.DiscountMinor != 0 || updated.Items[0].DiscountMinor != 100 ||
+		updated.PpnMinor != 99 || updated.GrandTotalMinor != 999 {
+		t.Errorf("discounted PPN totals = %+v; want row discount 100 / no whole discount / PPN 99 / grand 999",
+			updated)
 	}
 }
 
@@ -1332,14 +1290,16 @@ func TestPurchaseOrderMigration031EnforcesExactRangesAndTrimmedReasons(t *testin
 		t.Fatalf("reset the adjustment: %v", err)
 	}
 
-	// The bound is Unicode characters, the same unit Go's rune count and the
-	// editor's code-point count use.
+	// The dormant column keeps its 200-character CHECK even though the editor
+	// no longer writes it (#573). The bound is Unicode characters, the same
+	// unit the schema's char_length uses.
+	const maxAdjustmentReasonLength = 200
 	_, err = pool.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders
 		SET adjustment_minor = 1,
 		    adjustment_reason = $1,
 		    grand_total_minor = subtotal_minor - discount_minor + ppn_minor + 1
-		WHERE id = $2`, schema), strings.Repeat("界", MaxAdjustmentReasonLength+1), draft.ID)
+		WHERE id = $2`, schema), strings.Repeat("界", maxAdjustmentReasonLength+1), draft.ID)
 	if err == nil {
 		t.Fatal("a 201-character reason was stored")
 	}
@@ -1914,17 +1874,23 @@ func TestPurchaseOrderPPNResolvesTheCurrentTaxModel(t *testing.T) {
 	}
 
 	// An update keeps the stored rate: it is a snapshot of the source's basis,
-	// not a fresh resolution.
+	// not a fresh resolution. A 10% row discount makes the taxed subtotal 900,
+	// so the retained 11% rate charges 99 and the grand is 999.
+	discounted := make([]PurchaseOrderItem, len(draft.Items))
+	copy(discounted, draft.Items)
+	discounted[0].DiscountEnabled = true
+	discounted[0].DiscountPercent = 10
 	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{
 		ID: draft.ID, UpdatedBy: user.ID, PaymentTerms: "45 days",
-		DiscountPercent: 10, Items: draft.Items,
+		Items: discounted,
 	})
 	if err != nil {
 		t.Fatalf("update modern goods PO: %v", err)
 	}
 	if updated.PpnBps != 1100 || updated.PpnMinor != 99 ||
-		updated.GrandTotalMinor != 999 {
-		t.Errorf("updated goods PPN = %+v; want 1100 bps / 99 / grand 999", updated)
+		updated.DiscountMinor != 0 || updated.GrandTotalMinor != 999 {
+		t.Errorf("updated goods PPN = %+v; want 1100 bps / 99 / no whole discount / grand 999",
+			updated)
 	}
 
 	services := seedPOQuotationModernTax(t, database, "NonFTZ", "Services", "NonConstruction")

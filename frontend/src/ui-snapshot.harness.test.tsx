@@ -13,7 +13,9 @@
 //
 // What it cannot see, stated here so it is not assumed: no effects, no
 // interactions (keyboard, paste, focus), no real OS font, no animation end
-// states, and no pixel diff against a baseline.
+// states, and no pixel diff against a baseline. A case may crop its screenshot
+// to a named heading so a below-the-fold state is visible; that shifts the
+// viewport, never the rendered page.
 
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -51,7 +53,6 @@ import { POQuotationSelectorView } from "./components/POQuotationSelector";
 import {
   PurchaseOrderDiscardPrompt,
   PurchaseOrderEditorView,
-  PurchaseOrderLineRow,
 } from "./components/PurchaseOrderEditor";
 import {
   PurchaseOrderDifferenceReviewView,
@@ -151,6 +152,12 @@ const DETAILS: DetailsState = {
 interface SnapshotCase {
   name: string;
   element: ReactElement;
+  /**
+   * Shifts the rendered page up so this heading sits at the top of the
+   * screenshot. Used when the state under review is below the 900px fold; it
+   * changes the screenshot's viewport position only, never the rendered page.
+   */
+  cropToHeading?: string;
 }
 
 // The PO source selector fixture (issue #467): two available Quotations and
@@ -261,7 +268,7 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   Currency: "USD",
   TaxZone: "NonFTZ",
   TaxCategory: "SupplyOnly",
-  AdjustmentReason: "Round to the printed total",
+  AdjustmentReason: "",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",
   Items: [
@@ -292,6 +299,26 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
       GrossMinor: 42000,
       DiscountMinor: 0,
       NetMinor: 42000,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Cable tray", "Terminations"],
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 2,
+      LineNumber: 3,
+      Description: "Cable termination and labelling",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 30000,
+      DiscountEnabled: true,
+      DiscountPercent: 5,
+      GrossMinor: 30000,
+      DiscountMinor: 1500,
+      NetMinor: 28500,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Two technicians"],
     },
   ],
   ID: 7,
@@ -299,13 +326,13 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   SourceRevision: 2,
   CustomerID: 2,
   PaymentTerms: "45 days",
-  DiscountPercent: 5,
+  DiscountPercent: 0,
   PpnBps: 1100,
-  SubtotalMinor: 323363,
-  DiscountMinor: 16168,
-  PpnMinor: 33791,
-  AdjustmentMinor: -250,
-  GrandTotalMinor: 340736,
+  SubtotalMinor: 351863,
+  DiscountMinor: 0,
+  PpnMinor: 38704,
+  AdjustmentMinor: 0,
+  GrandTotalMinor: 390567,
   PrintedSubtotalMinor: 325000,
   PrintedDiscountMinor: 0,
   PrintedPpnMinor: 35750,
@@ -2025,7 +2052,6 @@ const CASES: SnapshotCase[] = [
             subtotalMinor: 20000,
             discountMinor: 400,
             ppnMinor: 1960,
-            adjustmentMinor: 0,
             grandTotalMinor: 21560,
           }}
           printed={{
@@ -2111,10 +2137,12 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The manual PO draft editor (issue #468/#470): header snapshot, copied
-    // lines in the PO's own USD currency, each line's own discount controls,
-    // and the calculation inputs. At 360 this is the case that says whether
-    // the five-field line grid reflows instead of overflowing.
+    // The manual PO draft editor (issue #468/#470, header from #580): the hero
+    // names the customer's PO number with the quotation identity in the Source
+    // quotation block; the Purchase order details card sits under it. Lines are
+    // in the PO's own USD currency with per-row discount controls, and the split
+    // line carries its own "Remove split line" control. At 360 this is the case
+    // that says whether the five-field line grid reflows instead of overflowing.
     //
     // The totals panel sits below the 900px viewport, so it has its own case
     // (PurchaseOrderTotals) rather than being cropped out of this one.
@@ -2125,6 +2153,31 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderEditorView
         state={PO_EDITOR_INITIAL}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // #580: a linked draft that has had its last line removed. The hero keeps
+    // the customer PO number, the Source quotation block keeps the quotation
+    // identity, and the line section shows the empty state with Add line. The
+    // zero-line draft is saveable; only Final Save refuses it. The empty state
+    // sits below the 900px fold, so the viewport starts at the line section.
+    name: "PurchaseOrderEmptyLines580",
+    cropToHeading: "Line items",
+    element: (
+      <PurchaseOrderEditorView
+        state={initialPurchaseOrderEditorState(
+          { ...PO_EDITOR_ORDER, Items: [] },
+          PO_EDITOR_USD
+        )}
         dispatch={() => undefined}
         currency={PO_EDITOR_USD}
         uomOptions={PO_EDITOR_UOM_OPTIONS}
@@ -2173,9 +2226,9 @@ const CASES: SnapshotCase[] = [
   },
   {
     // Issue #497: the Staff draft-link review with a required tax choice. The
-    // tax cards, the reused difference review and the blocked Link source action
-    // are the whole slice's user-visible surface. At 360 the two basis cards
-    // stack and the line-match grid reflows; at 1280 they sit side by side.
+    // tax basis is a two-sided diff (#582), the difference review is reused and
+    // the Link source action is blocked. At 360 the two basis sides stack under
+    // `↓`; at 1280 they sit either side of the `≠` divider.
     //
     // What this case cannot show: choosing a basis, matching a line, the link
     // request, and the post-link "Linked source" state stay hand-driven (the DOM
@@ -2292,11 +2345,12 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // The final-save difference review (issue #471): every differing value
-    // with both choices unpressed, the fixed currency statement, one omitted
-    // source line, two extra PO lines (one with a suggestion), the corrected
-    // match picker and the recalculated totals. At 360 this is the case that
-    // says whether the two-choice row stacks instead of overflowing.
+    // The final-save difference review (issue #471, redesigned by #582): every
+    // differing value as a two-sided diff with both choices unpressed, the
+    // fixed currency statement, the summary strip, one omitted source line,
+    // two extra PO lines (one with a suggestion), the corrected match picker
+    // and the recalculated totals. At 360 the sides stack under `↓` instead of
+    // overflowing.
     name: "PurchaseOrderDifferenceReview",
     element: (
       <PurchaseOrderDifferenceReviewView
@@ -2308,6 +2362,34 @@ const CASES: SnapshotCase[] = [
         decisions={{}}
         acknowledgedMissing={[]}
         acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    ),
+  },
+  {
+    // #582: the same review after decisions. One value chose the quotation and
+    // one kept the PO entry, so the selected side says "Will be used" and the
+    // other is muted; the missing and extra lines are acknowledged, so their
+    // rows show the ACKNOWLEDGED chip instead of the action.
+    name: "PurchaseOrderDifferenceReviewDecided",
+    element: (
+      <PurchaseOrderDifferenceReviewView
+        state={PO_REVIEW_STATE}
+        source={PO_REVIEW_SOURCE}
+        currency={PO_EDITOR_USD}
+        quoteNumber="1502260012"
+        documentState="none"
+        decisions={{
+          "header:paymentTerms": "quotation",
+          "line:1:unitPrice": "po",
+        }}
+        acknowledgedMissing={["3"]}
+        acknowledgedExtra={[3]}
         onDecision={() => undefined}
         onToggleMissing={() => undefined}
         onToggleExtra={() => undefined}
@@ -2677,44 +2759,17 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // One PO line with its row discount (issue #470). The editor page pushes
-    // the lines below the fold at 360, so this is the case that shows whether
-    // the discount controls and the line total reflow at the narrow width.
-    name: "PurchaseOrderLineDiscount",
-    element: (
-      <div className="grid gap-3">
-        <PurchaseOrderLineRow
-          line={PO_EDITOR_INITIAL.lines[0]}
-          index={0}
-          currency={PO_EDITOR_USD}
-          uomOptions={PO_EDITOR_UOM_OPTIONS}
-          calculation={PO_EDITOR_CALCULATION.lines[0] ?? null}
-          dispatch={() => undefined}
-        />
-        <PurchaseOrderLineRow
-          line={PO_EDITOR_INITIAL.lines[1]}
-          index={1}
-          currency={PO_EDITOR_USD}
-          uomOptions={PO_EDITOR_UOM_OPTIONS}
-          calculation={PO_EDITOR_CALCULATION.lines[1] ?? null}
-          dispatch={() => undefined}
-        />
-      </div>
-    ),
-  },
-  {
     // The explained calculation (issue #470): every stage from line totals to
-    // the grand total, the PPN printed separately, the signed adjustment with
-    // its reason, and the source document's printed figures in their own
-    // group. Rendered alone because the editor page pushes it below the fold.
+    // the grand total, with PPN printed separately and the source document's
+    // printed figures in their own group. The whole-PO discount and the signed
+    // adjustment are retired (#573). Rendered alone because the editor page
+    // pushes it below the fold.
     name: "PurchaseOrderTotals",
     element: (
       <PurchaseOrderTotals
         totals={PO_EDITOR_CALCULATION.totals}
         currency={PO_EDITOR_USD}
-        discountPercent={5}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />
@@ -2734,9 +2789,7 @@ const CASES: SnapshotCase[] = [
           rowDiscountMinor: null,
         }}
         currency={PO_EDITOR_USD}
-        discountPercent={5}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason={PO_EDITOR_INITIAL.header.adjustmentReason}
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />
@@ -2751,9 +2804,7 @@ const CASES: SnapshotCase[] = [
       <PurchaseOrderTotals
         totals={null}
         currency={PO_EDITOR_USD}
-        discountPercent={null}
         ppnBps={PO_EDITOR_INITIAL.ppnBps}
-        adjustmentReason=""
         printedTotals={PO_EDITOR_INITIAL.printedTotals}
         sourceRevision={2}
       />
@@ -3046,7 +3097,11 @@ function fontFace(): string {
 // buildPage assembles one self-contained page: the built CSS, then the Inter
 // face, then a body font-family that puts Inter first over the app's system
 // stack. The last rule wins over Tailwind preflight's html font-family.
-function buildPage(name: string, markup: string): string {
+function buildPage(
+  name: string,
+  markup: string,
+  cropToHeading?: string
+): string {
   const css = newestBuiltCss();
   const shell = [
     '<div id="root">',
@@ -3054,7 +3109,7 @@ function buildPage(name: string, markup: string): string {
     '    <main class="flex-1">',
     '      <div class="mx-auto w-full max-w-[1560px] px-5 pt-7 pb-10 lg:px-8 lg:pt-9">',
     '        <div class="flex flex-col gap-6">',
-    `          ${markup}`,
+    cropToHeading === undefined ? markup : `<div id="snapshot-crop">${markup}</div>`,
     "        </div>",
     "      </div>",
     "    </main>",
@@ -3085,6 +3140,19 @@ function buildPage(name: string, markup: string): string {
     "</head>",
     "<body>",
     shell,
+    ...(cropToHeading === undefined
+      ? []
+      : [
+          "<script>",
+          'window.addEventListener("load", () => {',
+          `  const heading = Array.from(document.querySelectorAll("h2")).find((node) => node.textContent === ${JSON.stringify(cropToHeading)});`,
+          '  const crop = document.getElementById("snapshot-crop");',
+          "  if (heading !== undefined && crop !== null) {",
+          "    crop.style.marginTop = `-${Math.max(0, heading.getBoundingClientRect().top - 16)}px`;",
+          "  }",
+          "});",
+          "</script>",
+        ]),
     "</body>",
     "</html>",
     "",
@@ -3098,7 +3166,11 @@ describe.skipIf(!ENABLED)("UI snapshot harness", () => {
   for (const snapshotCase of CASES) {
     it(`writes ${snapshotCase.name}.html`, () => {
       const markup = renderToString(snapshotCase.element);
-      const page = buildPage(snapshotCase.name, markup);
+      const page = buildPage(
+        snapshotCase.name,
+        markup,
+        snapshotCase.cropToHeading
+      );
 
       mkdirSync(OUT_DIR, { recursive: true });
       const file = path.join(OUT_DIR, `${snapshotCase.name}.html`);

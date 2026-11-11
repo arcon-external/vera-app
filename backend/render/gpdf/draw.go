@@ -243,8 +243,9 @@ func drawPicture(r *render.PDFRenderer, im picture) error {
 //
 // The corners use the same control-point offset a browser does, k = 0.5523r,
 // because these corners have to agree with the ones Chrome draws. Radii are
-// per-corner so a shape can be round at the top and square at the bottom, which
-// is what a shape clipped by `border-radius: 10px 10px 0 0` looks like.
+// per-corner, in top-left, top-right, bottom-right, bottom-left order, so a
+// shape can be square at the top-left and round at the bottom-left, which is
+// what `border-radius: 0 10px 10px 10px` looks like.
 func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 	r := [4]float64{tl, tr, br, bl}
 	for i := range r {
@@ -268,7 +269,7 @@ func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 		return seg(op, c1, c2, end)
 	}
 
-	segs := []document.PathSegment{seg(document.PathMoveTo, pt(left+r[3], top))}
+	segs := []document.PathSegment{seg(document.PathMoveTo, pt(left+r[0], top))}
 	segs = append(segs, seg(document.PathLineTo, pt(right-r[1], top)))
 	if r[1] > 0 {
 		segs = append(segs, corner(document.PathCurveTo,
@@ -279,15 +280,15 @@ func roundedPath(x, y, w, h float64, tl, tr, br, bl float64) document.Path {
 		segs = append(segs, corner(document.PathCurveTo,
 			pt(right, bot-r[2]+k(r[2])), pt(right-r[2]+k(r[2]), bot), pt(right-r[2], bot)))
 	}
-	segs = append(segs, seg(document.PathLineTo, pt(left+r[0], bot)))
-	if r[0] > 0 {
-		segs = append(segs, corner(document.PathCurveTo,
-			pt(left+r[0]-k(r[0]), bot), pt(left, bot-r[0]+k(r[0])), pt(left, bot-r[0])))
-	}
-	segs = append(segs, seg(document.PathLineTo, pt(left, top+r[3])))
+	segs = append(segs, seg(document.PathLineTo, pt(left+r[3], bot)))
 	if r[3] > 0 {
 		segs = append(segs, corner(document.PathCurveTo,
-			pt(left, top+r[3]-k(r[3])), pt(left+r[3]-k(r[3]), top), pt(left+r[3], top)))
+			pt(left+r[3]-k(r[3]), bot), pt(left, bot-r[3]+k(r[3])), pt(left, bot-r[3])))
+	}
+	segs = append(segs, seg(document.PathLineTo, pt(left, top+r[0])))
+	if r[0] > 0 {
+		segs = append(segs, corner(document.PathCurveTo,
+			pt(left, top+r[0]-k(r[0])), pt(left+r[0]-k(r[0]), top), pt(left+r[0], top)))
 	}
 	segs = append(segs, seg(document.PathClose))
 	return document.Path{Segments: segs}
@@ -1161,18 +1162,19 @@ func (e *Engine) drawMainRow(p *page, m metrics, clip *clipRegion, top float64, 
 //
 // The card is three paints because the stylesheet's border-left is 3px while
 // its other sides are 1px: a single stroked box would draw all four sides the
-// same width. The accent is clipped to the card's rounded outline, the way the
-// subject strip's label is, so the left corners stay round.
+// same width. The note card is square, so the accent is a plain rectangle
+// rather than a shape clipped to a rounded outline.
 func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 	if m.noteH <= 0 {
 		return
 	}
 	x, w, h := m.innerX, m.innerW, m.noteH
-	clip := even(x, top, w, h, px(cardRadiusPx))
 
-	p.add(box{x: x, y: top, w: w, h: h, fill: e.pal.Surface, radius: px(cardRadiusPx)})
-	p.add(box{x: x, y: top, w: px(noteAccentPx), h: h, fill: e.pal.Accent, clip: clip})
-	p.add(box{x: x, y: top, w: w, h: h, stroke: e.pal.Edge, lw: px(noteBorderPx), radius: px(cardRadiusPx)})
+	p.add(box{x: x, y: top, w: w, h: h, fill: e.pal.Surface})
+	// The ribbon uses the table-header deep blue, not the accent blue: the
+	// two strong marks in the document then agree.
+	p.add(box{x: x, y: top, w: px(noteAccentPx), h: h, fill: e.pal.Deep})
+	p.add(box{x: x, y: top, w: w, h: h, stroke: e.pal.Edge, lw: px(noteBorderPx)})
 
 	tx := x + px(noteAccentPx) + px(notePadX)
 	ty := top + px(noteBorderPx) + px(notePadY)
@@ -1180,6 +1182,10 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 		text: in.Labels.Note, bold: true, color: e.pal.Accent})
 	ty += px(noteLabelPx)*bodyLH + px(noteLabelGapPx)
 	for _, line := range e.noteLines(in, m) {
+		ty += line.gap
+		if len(line.spans) == 0 && line.marker == "" && !line.bullet {
+			continue
+		}
 		lineX := tx
 		if line.bullet || line.marker != "" {
 			lineX = tx + px(noteListIndentPx)
@@ -1189,11 +1195,12 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 			// edge; the item text still starts at lineX for both.
 			markerX := lineX - px(noteBulletGapPx) - px(noteMarkerW)
 			if line.bullet {
+				bulletTop := ty + bodyBaselineOffset - px(noteBulletCentrePx) - px(noteBulletSizePx)/2
 				p.add(box{
-					x: markerX, y: ty + bodyBaselineOffset - px(2.6),
+					x: markerX, y: bulletTop,
 					w: px(noteBulletSizePx), h: px(noteBulletSizePx),
 					fill: e.pal.Ink,
-					path: discPath(markerX+px(noteBulletSizePx)/2, ty+bodyBaselineOffset-px(2.6)+px(noteBulletSizePx)/2, px(noteBulletSizePx)),
+					path: discPath(markerX+px(noteBulletSizePx)/2, bulletTop+px(noteBulletSizePx)/2, px(noteBulletSizePx)),
 				})
 			} else {
 				p.add(run{
@@ -1218,6 +1225,14 @@ func (e *Engine) drawNote(p *page, in Input, m metrics, top float64) {
 	}
 }
 
+// termsCardCorners returns the four radii for the terms card: the approved
+// layout squares only its top-left corner.
+func termsCardCorners(r float64) (tl, tr, br, bl float64) { return 0, r, r, r }
+
+// totalsCardCorners returns the four radii for the totals card: the approved
+// layout squares only its top-right corner.
+func totalsCardCorners(r float64) (tl, tr, br, bl float64) { return r, 0, r, r }
+
 // drawFooterCards paints the terms and totals cards, the first of the three
 // trailer blocks. Each block is placed independently by the page assembler so
 // the trailer can fragment across pages the way the browser's grid does.
@@ -1227,10 +1242,13 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	totX := m.innerX + tncW + px(footGapPx)
 	rows := e.totalsRows(in)
 
-	// Terms and conditions.
+	// Terms and conditions. Its top-left corner is square; the other three
+	// keep the card radius.
+	tl, tr, br, bl := termsCardCorners(px(cardRadiusPx))
+	termsPath := roundedPath(m.innerX, top, tncW, m.footerTncH, tl, tr, br, bl)
 	p.add(box{
 		x: m.innerX, y: top, w: tncW, h: m.footerTncH,
-		fill: e.pal.Soft, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Soft, stroke: e.pal.Edge, lw: px(1), path: &termsPath,
 	})
 	tnx := m.innerX + px(1) + px(footPadPx)
 	ty := top + px(1) + px(footPadPx)
@@ -1253,9 +1271,11 @@ func (e *Engine) drawFooterCards(p *page, in Input, m metrics, top float64) {
 	// row with the surplus shared across the rows (`align-content: stretch`),
 	// which spread two rows across a four-row-tall card whenever no PPN row
 	// printed; the stack's decoration takes the leftover now instead.
+	tl, tr, br, bl = totalsCardCorners(px(cardRadiusPx))
+	totalsPath := roundedPath(totX, top, totW, m.footerTotalsH, tl, tr, br, bl)
 	p.add(box{
 		x: totX, y: top, w: totW, h: m.footerTotalsH,
-		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), radius: px(cardRadiusPx),
+		fill: e.pal.Surface, stroke: e.pal.Edge, lw: px(1), path: &totalsPath,
 	})
 	ry := top + px(1) + px(footPadPx)
 	labelX := totX + px(1) + px(footPadPx)

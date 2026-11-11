@@ -4,15 +4,15 @@ import { formatMoney } from "../format";
 
 // U6: derived totals check. Read-only evidence, never a decision item and
 // never a target. Compares every applicable stage (subtotal, discount, PPN,
-// grand total) so offsetting stage differences cannot read Matched; the
-// PO-only adjustment shows without a printed counterpart. Differences are
-// evidence in neutral ink, never danger red, and never block Final Save.
+// grand total) so offsetting stage differences cannot read Matched. The
+// whole-PO discount is retired (#573), so the PO side is always zero and a
+// printed discount still shows as a difference. Differences are evidence in
+// neutral ink, never danger red, and never block Final Save.
 
 export interface TotalsStageFigures {
   subtotalMinor: number;
   discountMinor: number;
   ppnMinor: number;
-  adjustmentMinor: number;
   grandTotalMinor: number;
 }
 
@@ -75,7 +75,6 @@ export function ReconciliationTotalsStrip(props: TotalsStripProps) {
     { key: "subtotal", label: "Subtotal", po: calculated?.subtotalMinor ?? null, printed: printed?.subtotalMinor ?? null },
     { key: "discount", label: "Discount", po: calculated?.discountMinor ?? null, printed: printed?.discountMinor ?? null },
     { key: "ppn", label: "PPN", po: calculated?.ppnMinor ?? null, printed: printed?.ppnMinor ?? null },
-    { key: "adjustment", label: "Adjustment", po: calculated?.adjustmentMinor ?? null, printed: null },
     { key: "grand", label: "Grand total", po: calculated?.grandTotalMinor ?? null, printed: printed?.grandTotalMinor ?? null, strong: true },
   ].filter((row) => row.key === "grand" || row.po !== 0 || row.printed !== 0 || (row.po ?? 0) !== (row.printed ?? 0));
   return (

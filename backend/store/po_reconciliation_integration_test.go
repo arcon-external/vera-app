@@ -234,7 +234,6 @@ func TestPOReconciliationLinkCreatesSession(t *testing.T) {
 	decisions := []PurchaseOrderDecision{
 		{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
 		{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
-		{Key: "header:discountPercent", Choice: PurchaseOrderChoicePO},
 	}
 	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
 		saved, quotation, user, decisions, []string{"1", "3"}, []int{1}, ""))

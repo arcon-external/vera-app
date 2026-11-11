@@ -100,10 +100,12 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 	if protected := request.NamedExceptSourceBasis(); protected != "" {
 		return purchaseOrderProtectedField(context, protected)
 	}
-	update, err := purchaseOrderUpdateFromRequest(request, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
+	// #581: only a draft save carries the confirmation-number request.
+	update.ConfirmationRequested = request.ConfirmationRequested
 	update.ID = id
 	requestContext, err := s.organizationContext(context.Request().Context())
 	if err != nil {
@@ -131,7 +133,7 @@ func (s *Server) correctPurchaseOrder(context echo.Context) error {
 	if protected := request.Named(); protected != "" {
 		return purchaseOrderProtectedField(context, protected)
 	}
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -197,7 +199,7 @@ func (s *Server) repairPurchaseOrderSource(context echo.Context) error {
 	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
 	}
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -358,7 +360,7 @@ func (s *Server) finalizePurchaseOrder(context echo.Context) error {
 		return purchaseOrderProtectedField(context, protected)
 	}
 	user := requestUser(context)
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, user.ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, user.ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -618,6 +620,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		SavedBy:                order.SavedBy,
 		ConfirmationNumber:     order.ConfirmationNumber,
 		ConfirmationWarn:       order.ConfirmationWarn,
+		ConfirmationRequested:  order.ConfirmationRequested,
 		CreatedAt:              order.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:              order.UpdatedAt.Format(time.RFC3339),
 	}
@@ -632,20 +635,23 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 	row.Items = make([]apicontract.PurchaseOrderItemRow, 0, len(order.Items))
 	for _, item := range order.Items {
 		row.Items = append(row.Items, apicontract.PurchaseOrderItemRow{
-			LineNumber:      item.LineNumber,
-			Description:     item.Description,
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              item.ID,
-			ClientKey:       nilIfEmpty(item.ClientKey),
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-			GrossMinor:      item.GrossMinor,
-			DiscountMinor:   item.DiscountMinor,
-			NetMinor:        item.NetMinor,
+			LineNumber:        item.LineNumber,
+			Description:       item.Description,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                item.ID,
+			ClientKey:         nilIfEmpty(item.ClientKey),
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GrossMinor:        item.GrossMinor,
+			DiscountMinor:     item.DiscountMinor,
+			NetMinor:          item.NetMinor,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return row
@@ -676,7 +682,7 @@ func purchaseOrderProtectedField(context echo.Context, field string) error {
 // purchaseOrderUpdateFromRequest converts the shared editable payload. It only
 // fails on a malformed date; every other rule belongs to the store so the API
 // and the desktop cannot disagree.
-func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateRequest, updatedBy int64) (store.PurchaseOrderUpdate, error) {
+func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableRequest, updatedBy int64) (store.PurchaseOrderUpdate, error) {
 	poDate, err := parsePurchaseOrderDate(request.PODate, "poDate")
 	if err != nil {
 		return store.PurchaseOrderUpdate{}, err
@@ -692,16 +698,19 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateReque
 	items := make([]store.PurchaseOrderItem, 0, len(request.Items))
 	for _, item := range request.Items {
 		items = append(items, store.PurchaseOrderItem{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			ID:              valueOrZero(item.ID),
-			ClientKey:       stringOrEmpty(item.ClientKey),
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			ID:                valueOrZero(item.ID),
+			ClientKey:         stringOrEmpty(item.ClientKey),
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return store.PurchaseOrderUpdate{
@@ -827,18 +836,21 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 	}
 	for _, item := range entry.Items {
 		row.Items = append(row.Items, apicontract.PurchaseOrderCorrectionItemRow{
-			QuotationItemNo: item.QuotationItemNo,
-			QuotationSubNo:  item.QuotationSubNo,
-			LineNumber:      item.LineNumber,
-			Description:     item.Description,
-			QuantityScaled:  item.QuantityScaled,
-			UoM:             item.UoM,
-			UnitPriceMinor:  item.UnitPriceMinor,
-			DiscountEnabled: item.DiscountEnabled,
-			DiscountPercent: item.DiscountPercent,
-			GrossMinor:      item.GrossMinor,
-			DiscountMinor:   item.DiscountMinor,
-			NetMinor:        item.NetMinor,
+			QuotationItemNo:   item.QuotationItemNo,
+			QuotationSubNo:    item.QuotationSubNo,
+			LineNumber:        item.LineNumber,
+			Description:       item.Description,
+			QuantityScaled:    item.QuantityScaled,
+			UoM:               item.UoM,
+			UnitPriceMinor:    item.UnitPriceMinor,
+			DiscountEnabled:   item.DiscountEnabled,
+			DiscountPercent:   item.DiscountPercent,
+			GrossMinor:        item.GrossMinor,
+			DiscountMinor:     item.DiscountMinor,
+			NetMinor:          item.NetMinor,
+			GroupKey:          item.GroupKey,
+			ParentDescription: item.ParentDescription,
+			DescriptionLines:  item.DescriptionLines,
 		})
 	}
 	return row
@@ -908,15 +920,17 @@ func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.Purcha
 	}
 	for _, line := range source.Lines {
 		row.Source.Lines = append(row.Source.Lines, apicontract.PurchaseOrderSourceLineRow{
-			QuotationItemNo: line.QuotationItemNo,
-			QuotationSubNo:  line.QuotationSubNo,
-			LineLabel:       line.Label(),
-			Description:     line.Description,
-			UoM:             line.UoM,
-			QuantityScaled:  line.QuantityScaled,
-			UnitPriceMinor:  line.UnitPriceMinor,
-			DiscountEnabled: line.DiscountEnabled,
-			DiscountPercent: line.DiscountPercent,
+			QuotationItemNo:   line.QuotationItemNo,
+			QuotationSubNo:    line.QuotationSubNo,
+			LineLabel:         line.Label(),
+			Description:       line.Description,
+			UoM:               line.UoM,
+			QuantityScaled:    line.QuantityScaled,
+			UnitPriceMinor:    line.UnitPriceMinor,
+			DiscountEnabled:   line.DiscountEnabled,
+			DiscountPercent:   line.DiscountPercent,
+			ParentDescription: line.ParentDescription,
+			DescriptionLines:  line.DescriptionLines,
 		})
 	}
 	return row

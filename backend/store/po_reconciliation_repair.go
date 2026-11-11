@@ -593,8 +593,6 @@ func canonicalHeaderValue(field string, headers repairHeaders) (json.RawMessage,
 		return json.Marshal(strings.TrimSpace(headers.PaymentTerms))
 	case "header:incoterms":
 		return json.Marshal(strings.TrimSpace(headers.Incoterms))
-	case "header:discountPercent":
-		return json.Marshal(headers.DiscountPercent)
 	}
 	return nil, fmt.Errorf("no canonical header value for %q", field)
 }

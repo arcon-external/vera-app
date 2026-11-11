@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
-	"unicode/utf8"
 )
 
 // Issue #470: the exact customer-facing calculation of a Purchase Order.
@@ -29,10 +27,12 @@ import (
 //  1. line gross    = round-half-away-from-zero(qty_scaled * unit_price / 10^4)
 //  2. row discount  = truncate(gross * row_percent / 100); net = gross - discount
 //  3. subtotal      = exact sum of row nets
-//  4. PO discount   = truncate(subtotal * po_percent / 100); after = subtotal - discount
-//  5. PPN           = truncate(after * ppn_bps / 10000), added on top
-//  6. adjustment    = signed integer, reason required, added last
-//  7. grand total   = after + PPN + adjustment, never negative
+//  4. PPN           = truncate(subtotal * ppn_bps / 10000), added on top
+//  5. grand total   = subtotal + PPN
+//
+// The whole-PO discount and the signed adjustment are retired (#573). Their
+// input fields remain on the struct so stored rows and older callers still
+// decode, but they are ignored: no new total can move because of them.
 //
 // Stage 1 is the only half-up stage, because it is the only one that turns a
 // fractional quantity into money: 0.5 unit at 1 minor unit rounds to 1. Stages
@@ -48,10 +48,6 @@ const (
 	// a free line; above it is a price rather than a discount. It mirrors the
 	// quotation's MaxDiscountPercent.
 	MaxDiscountPercent = 100
-
-	// MaxAdjustmentReasonLength bounds the free-text reason in Unicode
-	// characters, the unit the schema's char_length CHECK uses.
-	MaxAdjustmentReasonLength = 200
 
 	// MaxExactMinor is the largest minor-unit amount this feature accepts,
 	// stores or emits: 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER.
@@ -122,16 +118,6 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 		return PurchaseOrderCalc{}, fmt.Errorf(
 			"%w: PPN rate must be between 0 and 10000 basis points", ErrPurchaseOrderInvalid)
 	}
-	if input.DiscountPercent < 0 || input.DiscountPercent > MaxDiscountPercent {
-		return PurchaseOrderCalc{}, fmt.Errorf(
-			"%w: whole purchase order discount must be between 0 and %d percent",
-			ErrPurchaseOrderInvalid, MaxDiscountPercent)
-	}
-	adjustment, reason, err := normalizePurchaseOrderAdjustment(input.AdjustmentMinor, input.AdjustmentReason)
-	if err != nil {
-		return PurchaseOrderCalc{}, err
-	}
-
 	lines := make([]PurchaseOrderCalcLine, len(input.Lines))
 	subtotal := new(big.Int)
 	for index, item := range input.Lines {
@@ -187,23 +173,13 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 	if err != nil {
 		return PurchaseOrderCalc{}, err
 	}
-	discountMinor, err := poMulDiv(subtotalMinor, int64(input.DiscountPercent), 100, false)
-	if err != nil {
-		return PurchaseOrderCalc{}, fmt.Errorf("whole purchase order discount: %w", err)
-	}
-	afterDiscount := subtotalMinor - discountMinor
-	ppnMinor, err := poMulDiv(afterDiscount, int64(input.PpnBps), 10000, false)
+	ppnMinor, err := poMulDiv(subtotalMinor, int64(input.PpnBps), 10000, false)
 	if err != nil {
 		return PurchaseOrderCalc{}, fmt.Errorf("PPN: %w", err)
 	}
 
-	grand := new(big.Int).SetInt64(afterDiscount)
+	grand := new(big.Int).SetInt64(subtotalMinor)
 	grand.Add(grand, big.NewInt(ppnMinor))
-	grand.Add(grand, big.NewInt(adjustment))
-	if grand.Sign() < 0 {
-		return PurchaseOrderCalc{}, fmt.Errorf(
-			"%w: the adjustment would make the purchase order total negative", ErrPurchaseOrderInvalid)
-	}
 	grandTotal, err := poCheckedInt64(grand, "grand total")
 	if err != nil {
 		return PurchaseOrderCalc{}, err
@@ -212,12 +188,12 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 	return PurchaseOrderCalc{
 		Lines:              lines,
 		SubtotalMinor:      subtotalMinor,
-		DiscountMinor:      discountMinor,
-		AfterDiscountMinor: afterDiscount,
+		DiscountMinor:      0,
+		AfterDiscountMinor: subtotalMinor,
 		PpnBps:             input.PpnBps,
 		PpnMinor:           ppnMinor,
-		AdjustmentMinor:    adjustment,
-		AdjustmentReason:   reason,
+		AdjustmentMinor:    0,
+		AdjustmentReason:   "",
 		GrandTotalMinor:    grandTotal,
 	}, nil
 }
@@ -292,32 +268,6 @@ func legacyPOToTaxType(category string) (taxType, serviceCategory string, ok boo
 	default:
 		return "", "", false
 	}
-}
-
-// normalizePurchaseOrderAdjustment enforces the one rule a signed adjustment
-// has: it is visible, and it is explained. A zero adjustment carries no
-// reason, so a half-typed explanation cannot outlive the amount it explained.
-//
-// The blank set is Go's strings.TrimSpace (unicode.IsSpace); the schema's CHECK
-// and the editor's trimAdjustmentReason mirror it, and
-// backend/testdata/po_adjustment_whitespace.json pins the set for all three.
-func normalizePurchaseOrderAdjustment(amount int64, reason string) (int64, string, error) {
-	reason = strings.TrimSpace(reason)
-	if utf8.RuneCountInString(reason) > MaxAdjustmentReasonLength {
-		return 0, "", fmt.Errorf("%w: adjustment reason must be at most %d characters",
-			ErrPurchaseOrderInvalid, MaxAdjustmentReasonLength)
-	}
-	if amount > MaxExactMinor || amount < -MaxExactMinor {
-		return 0, "", fmt.Errorf("%w: adjustment exceeds the supported amount range",
-			ErrPurchaseOrderInvalid)
-	}
-	if amount == 0 {
-		return 0, "", nil
-	}
-	if reason == "" {
-		return 0, "", fmt.Errorf("%w: an adjustment requires a reason", ErrPurchaseOrderInvalid)
-	}
-	return amount, reason, nil
 }
 
 // poMulDiv multiplies two int64 values exactly and divides by a positive

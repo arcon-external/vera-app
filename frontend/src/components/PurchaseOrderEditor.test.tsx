@@ -138,13 +138,20 @@ function buttonTagFor(html: string, label: string): string {
 describe("PurchaseOrderEditorView header (issue #468)", () => {
   it("shows the quotation identity, read-only customer snapshot and editable terms", () => {
     const html = render();
+    // #580: the hero is the customer's PO number; the quotation identity stays
+    // in the Source quotation block.
+    expect(html).toContain(">PO-9001</h1>");
+    expect(html).toContain("Source quotation");
+    expect(html).toContain("rev 01");
     expect(html).toContain("1502260012");
     expect(html).toContain("PT. Infineon Technologies Batam");
     expect(html).toContain("revision 1");
     expect(html).toContain("USD");
-    expect(html).toContain("NonFTZ / SupplyInstall");
+    expect(html).toContain("Services / NonConstruction");
     expect(html).toContain("Draft");
 
+    // #580: the PO-owned details have their own card under the hero.
+    expect(html).toContain("Purchase order details");
     expect(html).toContain('aria-label="Billing address"');
     expect(html).toContain('aria-label="Delivery address"');
     expect(html).toContain('aria-label="Ship-to code"');
@@ -158,15 +165,32 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain('value="45 days"');
     expect(html).toContain('aria-label="Incoterms"');
 
+    // One control per value: moving the fields must not duplicate them.
+    expect(html.match(/aria-label="Customer PO number"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="PO date"/g)).toHaveLength(1);
+
     // The snapshot is displayed, never offered as an editable customer field.
     expect(html).not.toContain('aria-label="Customer name"');
     expect(html).not.toContain('aria-label="Currency"');
     expect(html).toContain("cannot be edited here");
   });
 
+  it("uses a clear fallback in the hero when the customer PO number is empty (#580)", () => {
+    const blank = initialPurchaseOrderEditorState(
+      { ...ORDER, PONumber: "" },
+      USD
+    );
+    const html = render(blank);
+    expect(html).toContain(">New purchase order</h1>");
+    expect(html).toContain("Source quotation");
+    expect(html).toContain("1502260012");
+  });
+
   it("renders the exact copied lines with quantity and money re-formatted", () => {
     const html = render();
-    expect(html).toContain('aria-label="Line 1 description"');
+    expect(html).toContain('aria-label="Description for line 1"');
+    expect(html).toContain('aria-label="Quantity for line 1"');
+    expect(html).toContain('aria-label="Unit price for line 1"');
     expect(html).toContain("Quotation item 1");
     expect(html).toContain("Quotation item 2.1");
     expect(html).toContain('value="2.5"');
@@ -184,38 +208,43 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     // draft must not pretend they exist.
     expect(html).toContain("Grand total");
     expect(html).toContain("Subtotal");
-    expect(html).toContain("$3,069.45");
+    expect(html).toContain("$3,233.63");
     expect(html).not.toContain("Upload PDF");
     expect(html).not.toContain("Confirm and save");
   });
 
-  it("shows the row discount controls and the whole-PO calculation inputs", () => {
+  it("shows the row discount controls and the line's own figures", () => {
     const html = render();
-    expect(html).toContain('aria-label="Line 1 discount enabled"');
-    expect(html).toContain('aria-label="Line 1 discount percent"');
-    expect(html).toContain('aria-label="Line 2 discount percent"');
-    expect(html).toContain('aria-label="Whole-PO discount"');
-    expect(html).toContain('aria-label="Adjustment"');
-    expect(html).toContain('aria-label="Adjustment reason"');
-    expect(html).toContain("Whole-PO discount (5%)");
-    expect(html).toContain("Round to the printed total");
+    expect(html).toContain('aria-label="Enable a discount for line 1"');
+    expect(html).toContain('aria-label="Discount percentage for line 1"');
+    // Line 2 is a quotation sub-item, so its discount lives on the sub-item row.
+    expect(html).toContain(
+      'aria-label="Discount percentage for sub-item 1 of line 2"'
+    );
+    // The whole-PO discount and the signed adjustment are retired (#573).
+    expect(html).not.toContain('aria-label="Whole-PO discount"');
+    expect(html).not.toContain('aria-label="Adjustment"');
+    expect(html).not.toContain('aria-label="Adjustment reason"');
+    expect(html).toContain("−10% row discount");
     // The line's own figures are visible beside its inputs.
-    expect(html).toContain("Line total $2,813.63");
-    expect(html).toContain("Discount $-312.62");
+    expect(html).toContain("Sells for");
   });
 
   it("replaces the totals with a pending state while an input cannot be parsed", () => {
     const bad = purchaseOrderEditorReducer(
       initialPurchaseOrderEditorState(ORDER, USD),
-      { type: "headerChanged", patch: { adjustment: "not money" } }
+      { type: "lineChanged", key: 0, patch: { quantity: "1.23456" } }
     );
     const html = render(bad);
     expect(html).toContain("Calculation pending");
-    expect(html).toContain("Adjustment must be a signed USD amount.");
-    // The old grand total must not survive beside the parse error, and zero
-    // must never stand in for a calculation that did not happen.
-    expect(html).not.toContain("$3,069.45");
-    expect(html).not.toContain("$0.00");
+    expect(html).toContain(
+      "Line 1: quantity must be positive with up to 4 decimal places and within the supported range."
+    );
+    // The old grand total must not survive beside the parse error, and the
+    // pending panel must never fabricate a zero for the calculation.
+    expect(html).not.toContain("$3,233.63");
+    const totalsPanel = html.slice(html.indexOf("Calculation pending"));
+    expect(totalsPanel).not.toContain("$0.00");
   });
 
   it("prints PPN separately only when the frozen basis charges it", () => {
@@ -231,7 +260,7 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).toContain("PPN (11%)");
     expect(html).toContain("Charged on top");
     // The customer-facing grand total includes PPN on top of the price.
-    expect(html).toContain("$3,407.36");
+    expect(html).toContain("$3,589.32");
     expect(html).toContain("Printed on quotation revision 1");
   });
 });

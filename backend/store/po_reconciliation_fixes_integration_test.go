@@ -193,7 +193,6 @@ func TestPOReconciliationRelinkStartsNewGeneration(t *testing.T) {
 		[]PurchaseOrderDecision{
 			{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
 			{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
-			{Key: "header:discountPercent", Choice: PurchaseOrderChoicePO},
 		}, []string{"1", "3"}, []int{1}, ""))
 	if err != nil {
 		t.Fatalf("first link: %v", err)
@@ -229,7 +228,6 @@ func TestPOReconciliationRelinkStartsNewGeneration(t *testing.T) {
 		[]PurchaseOrderDecision{
 			{Key: "header:paymentTerms", Choice: PurchaseOrderChoicePO},
 			{Key: "header:incoterms", Choice: PurchaseOrderChoicePO},
-			{Key: "header:discountPercent", Choice: PurchaseOrderChoicePO},
 		}, []string{"1", "3"}, []int{1}, ""))
 	if err != nil {
 		t.Fatalf("relink after source loss: %v", err)
@@ -302,7 +300,6 @@ func TestPOReconciliationRejectsMalformedHeaderValues(t *testing.T) {
 	}
 	cases := map[string]string{
 		"bool":           `true`,
-		"text":           `"ten"`,
 		"object":         `{"unexpected":1}`,
 		"over-range":     `101`,
 		"negative":       `-1`,
@@ -316,9 +313,9 @@ func TestPOReconciliationRejectsMalformedHeaderValues(t *testing.T) {
 				t.Fatalf("load session: %v", err)
 			}
 			loaded.Items = []POReconciliationItem{{
-				Key: "header:discountPercent", Field: "header:discountPercent",
-				Kind: POReconciliationKindDifference, Label: "Whole-PO discount",
-				POValue: []byte(raw), SourceValue: []byte(`0`),
+				Key: "header:paymentTerms", Field: "header:paymentTerms",
+				Kind: POReconciliationKindDifference, Label: "Payment terms",
+				POValue: []byte(raw), SourceValue: []byte(`"0"`),
 				Status: POReconciliationStatusUnresolved,
 			}}
 			if _, err := database.SavePOReconciliation(ctx, loaded, user.ID); err == nil {
@@ -510,7 +507,7 @@ func mustLoadSession(t *testing.T, database *Store, ctx context.Context, poID in
 	return loaded
 }
 
-func TestPOReconciliationRejectsQuotedPercentAndScientificInteger(t *testing.T) {
+func TestPOReconciliationRejectsNonIntegerLineValues(t *testing.T) {
 	database := openTestSchema(t, "vera_po_recon_numeric")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Recon numeric")
 	user := poTestUser(t, database)
@@ -528,7 +525,6 @@ func TestPOReconciliationRejectsQuotedPercentAndScientificInteger(t *testing.T) 
 		field string
 		value string
 	}{
-		{name: "quoted percent", field: "header:discountPercent", value: `"10"`},
 		{name: "scientific unsafe integer", field: "line:quantity", value: `9007199254740993e0`},
 		{name: "decimal integer", field: "line:quantity", value: `1.0`},
 	}

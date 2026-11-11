@@ -1878,6 +1878,9 @@ export namespace backend {
 	    GrossMinor: number;
 	    DiscountMinor: number;
 	    NetMinor: number;
+	    GroupKey: string;
+	    ParentDescription: string;
+	    DescriptionLines: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionItemDTO(source);
@@ -1897,6 +1900,9 @@ export namespace backend {
 	        this.GrossMinor = source["GrossMinor"];
 	        this.DiscountMinor = source["DiscountMinor"];
 	        this.NetMinor = source["NetMinor"];
+	        this.GroupKey = source["GroupKey"];
+	        this.ParentDescription = source["ParentDescription"];
+	        this.DescriptionLines = source["DescriptionLines"];
 	    }
 	}
 	export class PurchaseOrderSourceRepairDecisionDTO {
@@ -2084,6 +2090,9 @@ export namespace backend {
 	    UnitPriceMinor: number;
 	    DiscountEnabled: boolean;
 	    DiscountPercent: number;
+	    GroupKey: string;
+	    ParentDescription: string;
+	    DescriptionLines: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemInput(source);
@@ -2101,6 +2110,9 @@ export namespace backend {
 	        this.UnitPriceMinor = source["UnitPriceMinor"];
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.DiscountPercent = source["DiscountPercent"];
+	        this.GroupKey = source["GroupKey"];
+	        this.ParentDescription = source["ParentDescription"];
+	        this.DescriptionLines = source["DescriptionLines"];
 	    }
 	}
 	export class PurchaseOrderCorrectionInput {
@@ -2201,6 +2213,9 @@ export namespace backend {
 	    GrossMinor: number;
 	    DiscountMinor: number;
 	    NetMinor: number;
+	    GroupKey: string;
+	    ParentDescription: string;
+	    DescriptionLines: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemDTO(source);
@@ -2222,6 +2237,9 @@ export namespace backend {
 	        this.GrossMinor = source["GrossMinor"];
 	        this.DiscountMinor = source["DiscountMinor"];
 	        this.NetMinor = source["NetMinor"];
+	        this.GroupKey = source["GroupKey"];
+	        this.ParentDescription = source["ParentDescription"];
+	        this.DescriptionLines = source["DescriptionLines"];
 	    }
 	}
 	export class PurchaseOrderDTO {
@@ -2273,6 +2291,7 @@ export namespace backend {
 	    ConfirmationNumber?: string;
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
+	    ConfirmationRequested: boolean;
 	    Version: number;
 
 	    static createFrom(source: any = {}) {
@@ -2329,6 +2348,7 @@ export namespace backend {
 	        this.ConfirmationNumber = source["ConfirmationNumber"];
 	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Version = source["Version"];
 	    }
 
@@ -2544,6 +2564,8 @@ export namespace backend {
 	    UnitPriceMinor: number;
 	    DiscountEnabled: boolean;
 	    DiscountPercent: number;
+	    ParentDescription: string;
+	    DescriptionLines: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceLineDTO(source);
@@ -2560,6 +2582,8 @@ export namespace backend {
 	        this.UnitPriceMinor = source["UnitPriceMinor"];
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.DiscountPercent = source["DiscountPercent"];
+	        this.ParentDescription = source["ParentDescription"];
+	        this.DescriptionLines = source["DescriptionLines"];
 	    }
 	}
 	export class PurchaseOrderSourceDTO {
@@ -2998,6 +3022,7 @@ export namespace backend {
 	    Incoterms: string;
 	    PaymentTerms: string;
 	    AdjustmentReason: string;
+	    ConfirmationRequested: boolean;
 	    Items: PurchaseOrderItemInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
@@ -3027,6 +3052,7 @@ export namespace backend {
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];

@@ -546,3 +546,266 @@ describe("PurchaseOrderSavedView source missing (issue #481)", () => {
     expect(admin).toContain('aria-label="Link Quotation"');
   });
 });
+
+// Issue #575: a saved split line keeps the editor's structure. The record
+// shows one parent heading with the sub-items beneath it and their sub-sub
+// description lines, while a plain line stays a single row.
+describe("PurchaseOrderSavedView split lines (#575)", () => {
+  it("groups a split line and keeps its sub-sub lines", () => {
+    const split = order({
+      State: "saved",
+      Items: [
+        {
+          QuotationItemNo: 2,
+          QuotationSubNo: 1,
+          LineNumber: 1,
+          Description: "Mounting and cable termination",
+          QuantityScaled: 10000,
+          UoM: "Unit",
+          UnitPriceMinor: 42000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+          GrossMinor: 42000,
+          DiscountMinor: 0,
+          NetMinor: 42000,
+          GroupKey: "q:2",
+          ParentDescription: "Mounting package",
+          DescriptionLines: ["Cable tray"],
+        },
+        {
+          QuotationItemNo: 2,
+          QuotationSubNo: 2,
+          LineNumber: 2,
+          Description: "Cable termination and labelling",
+          QuantityScaled: 10000,
+          UoM: "Unit",
+          UnitPriceMinor: 30000,
+          DiscountEnabled: true,
+          DiscountPercent: 5,
+          GrossMinor: 30000,
+          DiscountMinor: 1500,
+          NetMinor: 28500,
+          GroupKey: "q:2",
+          ParentDescription: "Mounting package",
+          DescriptionLines: ["Two technicians"],
+        },
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineNumber: 3,
+          Description: "Widget",
+          QuantityScaled: 10000,
+          UoM: "Pc",
+          UnitPriceMinor: 10000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+          GrossMinor: 10000,
+          DiscountMinor: 0,
+          NetMinor: 10000,
+        },
+      ],
+    });
+    const html = markup(
+      <PurchaseOrderSavedView order={split} currency={USD} onBack={() => undefined} />
+    );
+    expect(html).toContain("Mounting package");
+    expect(html).toContain("2 sub-items");
+    expect(html).toContain("1.1");
+    expect(html).toContain("1.2");
+    expect(html).toContain("Cable tray");
+    expect(html).toContain("Two technicians");
+    expect(html).toContain("Widget");
+    // The parent heading is a presentation, not a third priced row.
+    expect(html).not.toContain("Line 1 · Quotation 2");
+  });
+});
+
+// Issue #575: the finalize review keeps the editor's split-line grouping in
+// the line-match card, while every action still targets the flat line number
+// the comparison and payload carry.
+const SPLIT_REVIEW_ORDER = order({
+  Items: [
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 1,
+      LineNumber: 1,
+      Description: "Mounting and cable termination",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 42000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 42000,
+      DiscountMinor: 0,
+      NetMinor: 42000,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Cable tray"],
+    },
+    {
+      QuotationItemNo: 2,
+      QuotationSubNo: 2,
+      LineNumber: 2,
+      Description: "Cable termination and labelling",
+      QuantityScaled: 10000,
+      UoM: "Unit",
+      UnitPriceMinor: 30000,
+      DiscountEnabled: true,
+      DiscountPercent: 5,
+      GrossMinor: 30000,
+      DiscountMinor: 1500,
+      NetMinor: 28500,
+      GroupKey: "q:2",
+      ParentDescription: "Mounting package",
+      DescriptionLines: ["Two technicians"],
+    },
+  ],
+});
+
+describe("PurchaseOrderDifferenceReviewView split lines (#575)", () => {
+  it("groups the match cards under one parent heading", () => {
+    const state = initialPurchaseOrderEditorState(SPLIT_REVIEW_ORDER, USD);
+    const html = markup(reviewElement(state));
+    expect(html).toContain("Mounting package");
+    expect(html).toContain("2 sub-items");
+    expect(html).toContain("Line 1.1 — Mounting and cable termination");
+    expect(html).toContain("Line 1.2 — Cable termination and labelling");
+  });
+
+  it("keeps the flat line number in the receipt action labels", () => {
+    const state = initialPurchaseOrderEditorState(SPLIT_REVIEW_ORDER, USD);
+    const html = markup(
+      <PurchaseOrderDifferenceReviewView
+        state={state}
+        source={SOURCE}
+        currency={USD}
+        quoteNumber="1502260042"
+        documentState="none"
+        decisions={{}}
+        acknowledgedMissing={[]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+        hasSession
+        onEditLine={() => undefined}
+      />
+    );
+    expect(html).toContain("Line 1.1");
+    expect(html).toContain("Line 1.2");
+    expect(html).toContain('aria-label="Change match for line 1"');
+    expect(html).toContain('aria-label="Change match for line 2"');
+  });
+});
+
+// Issue #582: the review is a two-sided diff, not inline prose. These
+// assertions pin the user-visible surface the redesign promises: labelled
+// surfaces either side of a divider, a summary strip that sizes the review
+// before scrolling, status chips, a dashed (empty) placeholder, and the
+// chosen side marked "Will be used". The callbacks themselves are exercised by
+// the DOM suite; this suite proves the markup carries the new language.
+function reviewWithMissingAndExtra() {
+  const base = order();
+  return reviewState({
+    PaymentTerms: "30 days",
+    Items: [
+      base.Items[0],
+      {
+        ...base.Items[1],
+        LineNumber: 3,
+        QuotationItemNo: null,
+        QuotationSubNo: null,
+        Description: "Freight",
+        UnitPriceMinor: 0,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+    ],
+  });
+}
+
+describe("PurchaseOrderDifferenceReviewView two-sided diff (#582)", () => {
+  it("labels the two sides and divides them", () => {
+    const html = markup(reviewElement());
+    expect(html).toContain("PO ENTRY");
+    expect(html).toContain("QUOTATION");
+    expect(html).toContain("≠");
+    // Narrow layouts stack the sides with a downward divider instead.
+    expect(html).toContain("↓");
+    expect(html).toContain('data-side="po"');
+    expect(html).toContain('data-side="quotation"');
+  });
+
+  it("summarizes differences, missing and extra lines above the rows", () => {
+    const html = markup(reviewElement(reviewWithMissingAndExtra()));
+    const summary =
+      html.match(
+        /<section[^>]*data-testid="po-diff-summary"[^]*?<\/section>/
+      )?.[0] ?? "";
+    expect(summary).toContain('data-differences="1"');
+    expect(summary).toContain('data-missing="1"');
+    expect(summary).toContain('data-extra="1"');
+    expect(summary).toContain(">1</span> difference");
+    expect(summary).toContain(">1</span> missing line");
+    expect(summary).toContain(">1</span> extra line");
+    // The legend names both sides with the same labels the rows use.
+    expect(summary).toContain("PO entry");
+    expect(summary).toContain("Quotation");
+  });
+
+  it("chips a changed value and marks an empty side with a dashed placeholder", () => {
+    const html = markup(reviewElement(reviewState({ PaymentTerms: "" })));
+    expect(html).toContain("Changed");
+    expect(html).toContain("(empty)");
+    expect(html).toContain('data-empty="true"');
+  });
+
+  it("marks only the chosen side as the one that will be used", () => {
+    const html = markup(
+      reviewElement(undefined, { "header:paymentTerms": "quotation" })
+    );
+    expect(html.match(/Will be used/g)).toHaveLength(1);
+    expect(html).toContain('data-selected="true"');
+    expect(html).toContain('data-selected="false"');
+  });
+
+  it("shows matched, missing and extra rows in the line ledger", () => {
+    const html = markup(reviewElement(reviewWithMissingAndExtra()));
+    expect(html).toContain("Matched");
+    expect(html).toContain("Missing");
+    expect(html).toContain("Extra");
+    expect(html).toContain("Acknowledge omission of quotation line 3");
+    expect(html).toContain("Acknowledge line 2 as extra");
+  });
+
+  it("shows an ACKNOWLEDGED chip on a recorded acknowledgement", () => {
+    const base = order();
+    const state = reviewState({
+      PaymentTerms: "30 days",
+      Items: [base.Items[0]],
+    });
+    const html = markup(
+      <PurchaseOrderDifferenceReviewView
+        state={state}
+        source={SOURCE}
+        currency={USD}
+        quoteNumber="1502260042"
+        documentState="none"
+        decisions={{ "header:paymentTerms": "po" }}
+        acknowledgedMissing={["3"]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    );
+    expect(html).toContain("ACKNOWLEDGED");
+    expect(html).toContain("Quotation line 3 — Spare");
+  });
+});

@@ -131,14 +131,12 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
   const [notices, setNotices] = useState<Record<HeaderFieldKey, CommitNotice>>({
     "header:paymentTerms": null,
     "header:incoterms": null,
-    "header:discountPercent": null,
   });
   const [validationErrors, setValidationErrors] = useState<
     Record<HeaderFieldKey, string | null>
   >({
     "header:paymentTerms": null,
     "header:incoterms": null,
-    "header:discountPercent": null,
   });
   // Ticket 05: line commit feedback, keyed `clientKey:field`.
   const [lineNotices, setLineNotices] = useState<Record<string, CommitNotice>>({});
@@ -322,11 +320,9 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       // F3: selects commit the NEW value, not React's previous render.
       const poValue = explicitValue ?? getFieldValueRef.current(field);
       const sourceValue =
-        field === "header:discountPercent"
-          ? currentSource.discountPercent
-          : field === "header:paymentTerms"
-            ? currentSource.paymentTerms
-            : currentSource.incoterms;
+        field === "header:paymentTerms"
+          ? currentSource.paymentTerms
+          : currentSource.incoterms;
       const result = commitHeaderField({
         field: def,
         poValue,

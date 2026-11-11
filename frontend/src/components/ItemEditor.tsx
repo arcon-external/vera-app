@@ -135,6 +135,38 @@ export function subItemSellUnit(sub: EditorSubItem): number {
   );
 }
 
+/**
+ * A PO quantity is a decimal with up to four places; a quotation quantity is a
+ * whole count. Scaling first and dividing once keeps the line total on the
+ * same arithmetic the store uses, including its half-away-from-zero rounding.
+ */
+function scaledQuantity(raw: string): number {
+  const value = Number(raw.replace(",", "."));
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.round(value * 10000);
+}
+
+function quantityTimes(unitMinor: number, rawQty: string): number {
+  const scaled = scaledQuantity(rawQty);
+  const product = BigInt(scaled) * BigInt(unitMinor);
+  const divisor = 10000n;
+  const quotient = product / divisor;
+  const remainder = product % divisor;
+  const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
+  return Number(rounded);
+}
+
+/** Keeps digits and at most one decimal point, with four places. */
+function sanitizeQuantityInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d.]/g, "");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  return `${cleaned.slice(0, dot)}.${cleaned
+    .slice(dot + 1)
+    .replace(/\./g, "")
+    .slice(0, 4)}`;
+}
+
 /** The line rollup: cost, sell, and the blended margin between them. */
 export function subItemsRollup(subItems: EditorSubItem[]): {
   cost: number;
@@ -144,9 +176,8 @@ export function subItemsRollup(subItems: EditorSubItem[]): {
   let cost = 0;
   let sell = 0;
   for (const sub of subItems) {
-    const qty = parseIntOrZero(sub.qty);
-    cost += parseIntOrZero(sub.unitCost) * qty;
-    sell += subItemSellUnit(sub) * qty;
+    cost += quantityTimes(parseIntOrZero(sub.unitCost), sub.qty);
+    sell += quantityTimes(subItemSellUnit(sub), sub.qty);
   }
   return { cost, sell, margin: blendedMargin(cost, sell) };
 }
@@ -163,6 +194,14 @@ export function blendedMarginLabel(margin: {
   return `${margin.approx ? "≈" : ""}${margin.percent}% overall margin`;
 }
 
+/** The line fields a PO commits to its reconciliation session on blur. */
+export type EditorLineField =
+  | "description"
+  | "uom"
+  | "quantity"
+  | "unitPrice"
+  | "discount";
+
 interface ItemEditorProps {
   items: EditorItem[];
   /** The live profile currency: money inputs display and parse in it. Qty
@@ -173,6 +212,55 @@ interface ItemEditorProps {
    *  list is loading or failed to load). Kept honest rather than rendering a
    *  stale list or a "(not recognised)" that would look like a stored fault. */
   uomPendingLabel?: string;
+  /** Quotation keeps margin and sub-items; the PO hides them and keeps the
+   *  same container, rows, description input, discounts and footer. */
+  mode?: "quotation" | "purchase-order";
+  /** Optional row metadata (a source-match badge and its control). Rendered
+   *  under the description line so ItemEditor stays unaware of POs. */
+  renderItemMeta?: (item: EditorItem, index: number) => React.ReactNode;
+  /** Optional sub-item metadata, rendered under the sub-item description. */
+  renderSubItemMeta?: (
+    item: EditorItem,
+    sub: EditorSubItem,
+    index: number,
+    subIndex: number
+  ) => React.ReactNode;
+  /** The quotation can convert a split line back to a plain one. The PO
+   *  hides it because the sub-items are matched customer lines; merging them
+   *  would discard prices the customer's order carries. */
+  allowMergeSubItems?: boolean;
+  /**
+   * #580: a PO draft may be emptied, so the last line is removable there.
+   * Quotation mode keeps its at-least-one-line guard by leaving this false.
+   */
+  allowEmpty?: boolean;
+  /** Optional reconciliation hooks. The quotation leaves them absent; the PO
+   *  commits one line field on blur and records focus for Final Save. */
+  onLineFieldFocus?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  onLineFieldBlur?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  /** The discount switch does not blur, so its new state commits explicitly. */
+  onLineDiscountCommit?: (
+    itemKey: number,
+    enabled: boolean,
+    percent: string,
+    subId?: number
+  ) => void;
+  /** A select commits its NEW value immediately; blur would read the previous
+   *  render because React has not applied the change yet. */
+  onLineSelectCommit?: (
+    itemKey: number,
+    field: EditorLineField,
+    value: string,
+    subId?: number
+  ) => void;
   onAddItem: () => void;
   onRemoveItem: (key: number) => void;
   onChange: (
@@ -219,6 +307,15 @@ export function ItemEditor({
   currency = IDR_ENTRY,
   uomOptions,
   uomPendingLabel,
+  mode = "quotation",
+  renderItemMeta,
+  renderSubItemMeta,
+  allowMergeSubItems = true,
+  allowEmpty = false,
+  onLineFieldFocus,
+  onLineFieldBlur,
+  onLineDiscountCommit,
+  onLineSelectCommit,
   onAddItem,
   onRemoveItem,
   onChange,
@@ -257,6 +354,14 @@ export function ItemEditor({
 
   const itemizedLines = useMemo(
     () => items.filter((item) => item.subItems.length > 0).length,
+    [items]
+  );
+  const discountedLines = useMemo(
+    () => items.filter((item) =>
+      item.subItems.length > 0
+        ? item.subItems.some((sub) => sub.discountEnabled)
+        : item.discountEnabled
+    ).length,
     [items]
   );
 
@@ -354,10 +459,18 @@ export function ItemEditor({
             key={item.key}
             item={item}
             index={index}
-            canRemove={items.length > 1}
+            canRemove={allowEmpty || items.length > 1}
             currency={currency}
             uomOptions={uomOptions}
             uomPendingLabel={uomPendingLabel}
+            mode={mode}
+            meta={renderItemMeta?.(item, index)}
+            renderSubItemMeta={renderSubItemMeta}
+            allowMergeSubItems={allowMergeSubItems}
+            onLineFieldFocus={onLineFieldFocus}
+            onLineFieldBlur={onLineFieldBlur}
+            onLineDiscountCommit={onLineDiscountCommit}
+            onLineSelectCommit={onLineSelectCommit}
             showPanel={
               expanded[item.key] ??
               (item.subItems.length > 0 || item.bullets.length > 0)
@@ -407,18 +520,29 @@ export function ItemEditor({
         <span className="text-caption text-ink-500">
           <span className="tnum">{filledLines}</span> of{" "}
           <span className="tnum">{items.length}</span> filled
-          {marginedLines > 0 ? (
+          {mode === "purchase-order" ? (
+            discountedLines > 0 ? (
+              <>
+                {" · "}
+                <span className="tnum">{discountedLines}</span> with a row discount
+              </>
+            ) : null
+          ) : (
             <>
-              {" · "}
-              <span className="tnum">{marginedLines}</span> with margin
+              {marginedLines > 0 ? (
+                <>
+                  {" · "}
+                  <span className="tnum">{marginedLines}</span> with margin
+                </>
+              ) : null}
+              {itemizedLines > 0 ? (
+                <>
+                  {" · "}
+                  <span className="tnum">{itemizedLines}</span> with sub-items
+                </>
+              ) : null}
             </>
-          ) : null}
-          {itemizedLines > 0 ? (
-            <>
-              {" · "}
-              <span className="tnum">{itemizedLines}</span> with sub-items
-            </>
-          ) : null}
+          )}
         </span>
         <span className="ml-auto text-caption text-ink-500">
           Totals update in the summary panel
@@ -592,6 +716,8 @@ function UoMSelect({
   options,
   onChange,
   ariaLabel,
+  onFocus,
+  onBlur,
   disabled,
   dense,
   dataAttrs,
@@ -601,6 +727,8 @@ function UoMSelect({
   options: readonly { value: string; label: string }[];
   onChange: (value: string) => void;
   ariaLabel: string;
+  onFocus?: () => void;
+  onBlur?: () => void;
   disabled?: boolean;
   dense?: boolean;
   dataAttrs?: Record<string, string | number>;
@@ -621,6 +749,8 @@ function UoMSelect({
       aria-label={ariaLabel}
       value={loading ? "" : value}
       disabled={disabled || loading}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onChange={(event) => onChange(event.target.value)}
       className={`${dense ? subCellClass : cellClass} cursor-pointer appearance-none bg-[length:10px] bg-[right_0.6rem_center] bg-no-repeat pr-7`}
       style={uomChevronStyle}
@@ -648,6 +778,14 @@ function ItemRow({
   currency,
   uomOptions,
   uomPendingLabel,
+  mode,
+  meta,
+  renderSubItemMeta,
+  allowMergeSubItems,
+  onLineFieldFocus,
+  onLineFieldBlur,
+  onLineDiscountCommit,
+  onLineSelectCommit,
   showPanel,
   onTogglePanel,
   onRemoveItem,
@@ -673,6 +811,37 @@ function ItemRow({
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   uomPendingLabel?: string;
+  mode: "quotation" | "purchase-order";
+  meta?: React.ReactNode;
+  renderSubItemMeta?: (
+    item: EditorItem,
+    sub: EditorSubItem,
+    index: number,
+    subIndex: number
+  ) => React.ReactNode;
+  allowMergeSubItems: boolean;
+  onLineFieldFocus?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  onLineFieldBlur?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  onLineDiscountCommit?: (
+    itemKey: number,
+    enabled: boolean,
+    percent: string,
+    subId?: number
+  ) => void;
+  onLineSelectCommit?: (
+    itemKey: number,
+    field: EditorLineField,
+    value: string,
+    subId?: number
+  ) => void;
   showPanel: boolean;
   onTogglePanel: () => void;
   onRemoveItem: (key: number) => void;
@@ -692,16 +861,16 @@ function ItemRow({
   onSubBulletChange: (key: number, subId: number, bulletIndex: number, value: string) => void;
   onPasteItems: (key: number, event: React.ClipboardEvent<HTMLInputElement>) => void;
 }) {
+  const purchaseOrder = mode === "purchase-order";
   const hasSubItems = item.subItems.length > 0;
   const rollup = hasSubItems ? subItemsRollup(item.subItems) : null;
-  const qty = parseIntOrZero(item.qty);
   const unitCost = parseIntOrZero(item.unitPrice);
   const marginPercent = parseIntOrZero(item.marginPercent);
   // Margin first, then the row's own discount, matching backend/builder.go.
   const listUnit = applyMargin(unitCost, marginPercent, item.marginEnabled);
   const discountPercent = parseIntOrZero(item.discountPercent);
   const sellUnit = applyDiscount(listUnit, discountPercent, item.discountEnabled);
-  const sellTotal = sellUnit * qty;
+  const sellTotal = quantityTimes(sellUnit, item.qty);
   // Signed: a discount below cost is a loss, and hiding that is worse than
   // showing an ugly number.
   const marginAmount = sellUnit - unitCost;
@@ -713,6 +882,14 @@ function ItemRow({
   // inline row on the right, with narrower columns. Otherwise the cells
   // take the full-width grid.
   const showSplit = !hasSubItems && showPanel;
+  // #580: the parent control removes the whole split line, so its name says
+  // so; a sub-item has its own distinct control further down.
+  const removeLineLabel = hasSubItems
+    ? `Remove split line ${index + 1}`
+    : `Remove line ${index + 1}`;
+  const removeLineTitle = hasSubItems
+    ? `Remove split line ${index + 1} and all its sub-items`
+    : `Remove line ${index + 1}`;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -730,6 +907,7 @@ function ItemRow({
           —
         </div>
       </Captioned>
+      {purchaseOrder ? null : (
       <Captioned label="Margin">
         <div
           className="flex h-10 items-center"
@@ -744,6 +922,7 @@ function ItemRow({
           )}
         </div>
       </Captioned>
+      )}
       <Captioned label="Discount">
         <div className="flex h-10 items-center text-body text-ink-300">
           —
@@ -766,7 +945,12 @@ function ItemRow({
           options={uomOptions}
           pendingLabel={uomPendingLabel}
           ariaLabel={`Unit of measure for line ${index + 1}`}
-          onChange={(value) => onChange(item.key, "uom", value)}
+          onChange={(value) => {
+            onChange(item.key, "uom", value);
+            onLineSelectCommit?.(item.key, "uom", value);
+          }}
+          onFocus={() => onLineFieldFocus?.(item.key, "uom")}
+          onBlur={() => onLineFieldBlur?.(item.key, "uom")}
           dataAttrs={{ "data-grid-cell": "", "data-grid-row": index, "data-grid-col": 1 }}
         />
       </Captioned>
@@ -779,13 +963,21 @@ function ItemRow({
           data-grid-cell=""
           data-grid-row={index}
           data-grid-col={2}
-          inputMode="numeric"
+          inputMode={purchaseOrder ? "decimal" : "numeric"}
           aria-label={`Quantity for line ${index + 1}`}
           placeholder="1"
           value={item.qty}
           onChange={(event) =>
-            onChange(item.key, "qty", event.target.value.replace(/\D/g, ""))
+            onChange(
+              item.key,
+              "qty",
+              purchaseOrder
+                ? sanitizeQuantityInput(event.target.value)
+                : event.target.value.replace(/\D/g, "")
+            )
           }
+          onFocus={() => onLineFieldFocus?.(item.key, "quantity")}
+          onBlur={() => onLineFieldBlur?.(item.key, "quantity")}
           className={`${cellClass} text-right tnum`}
         />
       </Captioned>
@@ -803,10 +995,13 @@ function ItemRow({
           onChange={(event) =>
             onChange(item.key, "unitPrice", parseMoneyKeystroke(currency, event.target.value))
           }
+          onFocus={() => onLineFieldFocus?.(item.key, "unitPrice")}
+          onBlur={() => onLineFieldBlur?.(item.key, "unitPrice")}
           className={`${cellClass} text-right tnum`}
         />
       </Captioned>
 
+      {purchaseOrder ? null : (
       <Captioned label="Margin">
         {/* Percents, not money: digit-strip is correct here too --
             parseMoneyInput(USD, "15") is 1500, which would clamp every
@@ -865,6 +1060,7 @@ function ItemRow({
           </div>
         </div>
     </Captioned>
+    )}
 
     <Captioned label="Discount">
       <div className="flex items-center gap-2">
@@ -873,9 +1069,11 @@ function ItemRow({
           role="switch"
           aria-checked={item.discountEnabled}
           aria-label={`Enable a discount for line ${index + 1}`}
-          onClick={() =>
-            onChange(item.key, "discountEnabled", !item.discountEnabled)
-          }
+          onClick={() => {
+            const enabled = !item.discountEnabled;
+            onChange(item.key, "discountEnabled", enabled);
+            onLineDiscountCommit?.(item.key, enabled, item.discountPercent);
+          }}
           className={`relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
             item.discountEnabled
               ? "border-accent-700 bg-accent-600"
@@ -905,6 +1103,8 @@ function ItemRow({
             aria-label={`Discount percentage for line ${index + 1}`}
             value={item.discountPercent}
             disabled={!item.discountEnabled}
+            onFocus={() => onLineFieldFocus?.(item.key, "discount")}
+            onBlur={() => onLineFieldBlur?.(item.key, "discount")}
             onChange={(event) =>
               onChange(
                 item.key,
@@ -932,7 +1132,8 @@ function ItemRow({
       </div>
       {item.discountEnabled ? (
         <div className="tnum text-caption text-accent-700">
-          was {formatMoney(currency, listUnit)} · −{formatMoney(currency, listUnit * qty - sellTotal)}
+          was {formatMoney(currency, quantityTimes(listUnit, item.qty))} · −
+          {formatMoney(currency, quantityTimes(listUnit, item.qty) - sellTotal)}
         </div>
       ) : null}
     </Captioned>
@@ -959,6 +1160,8 @@ function ItemRow({
               onChange(item.key, "description", event.target.value)
             }
             onPaste={(event) => onPasteItems(item.key, event)}
+            onFocus={() => onLineFieldFocus?.(item.key, "description")}
+            onBlur={() => onLineFieldBlur?.(item.key, "description")}
             className={`${cellClass} pl-9`}
           />
         </div>
@@ -1000,7 +1203,13 @@ function ItemRow({
               Split into sub-items
             </button>
           )}
-          {hasSubItems ? null : item.discountEnabled ? (
+          {purchaseOrder ? (
+            hasSubItems ? null : item.discountEnabled ? (
+              <span className="tnum text-accent-700">−{discountPercent}% row discount</span>
+            ) : (
+              <span className="text-ink-400">No row discount</span>
+            )
+          ) : hasSubItems ? null : item.discountEnabled ? (
             <span className="tnum text-accent-700">
               −{discountPercent}% · {marginAmount >= 0 ? "+" : "−"}
               {formatMoney(currency, Math.abs(marginAmount))}/unit
@@ -1013,12 +1222,14 @@ function ItemRow({
             <span className="text-ink-400">No margin</span>
           )}
         </div>
+        {meta === undefined ? null : <div className="mt-1.5">{meta}</div>}
 
       </div>
 
         <button
           type="button"
-          aria-label={`Remove line ${index + 1}`}
+          aria-label={removeLineLabel}
+          title={removeLineTitle}
           onClick={() => onRemoveItem(item.key)}
           disabled={!canRemove}
           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
@@ -1046,12 +1257,12 @@ function ItemRow({
               }
             />
           </div>
-          <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]">
+          <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[64px_48px_108px_128px_minmax(0,1fr)]" : "lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]"}`}>
             {controlCells}
           </div>
         </div>
       ) : (
-        <div className="mt-3 grid grid-cols-2 items-start gap-3 lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]">
+        <div className={`mt-3 grid grid-cols-2 items-start gap-3 ${purchaseOrder ? "lg:grid-cols-[68px_72px_140px_184px_minmax(0,1fr)]" : "lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]"}`}>
           {controlCells}
         </div>
       )}
@@ -1062,6 +1273,7 @@ function ItemRow({
             <span className="text-micro font-semibold uppercase tracking-[0.1em] text-ink-600">
               Sub-items — priced individually; the line totals their sum
             </span>
+            {mode === "quotation" ? (
             <div
               className="flex items-center gap-2"
               title={
@@ -1095,12 +1307,14 @@ function ItemRow({
                 Show sub-item prices to the customer
               </span>
             </div>
+            ) : null}
           </div>
 
           <div className="space-y-2">
             {item.subItems.map((sub, subIndex) => (
               <SubRow
                 key={sub.id}
+                itemKey={item.key}
                 sub={sub}
                 subIndex={subIndex}
                 index={index}
@@ -1109,6 +1323,12 @@ function ItemRow({
                 currency={currency}
                 uomOptions={uomOptions}
                 uomPendingLabel={uomPendingLabel}
+                mode={mode}
+                meta={renderSubItemMeta?.(item, sub, index, subIndex)}
+                onFieldFocus={onLineFieldFocus}
+                onFieldBlur={onLineFieldBlur}
+                onDiscountCommit={onLineDiscountCommit}
+                onSelectCommit={onLineSelectCommit}
                 onPatch={(patch) => onPatchSubRow(item.key, sub.id, patch)}
                 onRemove={() => onRemoveSubRow(item.key, sub.id)}
                 onMove={(direction) => onMoveSubRow(item.key, sub.id, direction)}
@@ -1134,14 +1354,16 @@ function ItemRow({
               </svg>
               Add sub-item
             </button>
-            <button
-              type="button"
-              onClick={() => onDisableSubItems(item.key)}
-              title="The sub-item descriptions return as description lines; quantities, costs and margins are discarded."
-              className={`${miniButtonClass} text-caption text-ink-400 hover:text-danger-500`}
-            >
-              Convert back to a plain line
-            </button>
+            {allowMergeSubItems ? (
+              <button
+                type="button"
+                onClick={() => onDisableSubItems(item.key)}
+                title="The sub-item descriptions return as description lines; quantities, costs and margins are discarded."
+                className={`${miniButtonClass} text-caption text-ink-400 hover:text-danger-500`}
+              >
+                Convert back to a plain line
+              </button>
+            ) : null}
           </div>
 
           <textarea
@@ -1160,6 +1382,7 @@ function ItemRow({
 }
 
 function SubRow({
+  itemKey,
   sub,
   subIndex,
   index,
@@ -1168,6 +1391,12 @@ function SubRow({
   currency,
   uomOptions,
   uomPendingLabel,
+  mode,
+  meta,
+  onFieldFocus,
+  onFieldBlur,
+  onDiscountCommit,
+  onSelectCommit,
   onPatch,
   onRemove,
   onMove,
@@ -1175,6 +1404,7 @@ function SubRow({
   onRemoveBullet,
   onBulletChange,
 }: {
+  itemKey: number;
   sub: EditorSubItem;
   subIndex: number;
   index: number;
@@ -1183,6 +1413,30 @@ function SubRow({
   currency: CurrencyInfo;
   uomOptions: readonly { value: string; label: string }[];
   uomPendingLabel?: string;
+  mode: "quotation" | "purchase-order";
+  meta?: React.ReactNode;
+  onFieldFocus?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  onFieldBlur?: (
+    itemKey: number,
+    field: EditorLineField,
+    subId?: number
+  ) => void;
+  onDiscountCommit?: (
+    itemKey: number,
+    enabled: boolean,
+    percent: string,
+    subId?: number
+  ) => void;
+  onSelectCommit?: (
+    itemKey: number,
+    field: EditorLineField,
+    value: string,
+    subId?: number
+  ) => void;
   onPatch: (patch: Partial<EditorSubItem>) => void;
   onRemove: () => void;
   onMove: (direction: -1 | 1) => void;
@@ -1190,8 +1444,9 @@ function SubRow({
   onRemoveBullet: (bulletIndex: number) => void;
   onBulletChange: (bulletIndex: number, value: string) => void;
 }) {
+  const purchaseOrder = mode === "purchase-order";
   const sellUnit = subItemSellUnit(sub);
-  const sellTotal = sellUnit * parseIntOrZero(sub.qty);
+  const sellTotal = quantityTimes(sellUnit, sub.qty);
   const marginPercent = parseIntOrZero(sub.marginPercent);
   const listUnit = applyMargin(
     parseIntOrZero(sub.unitCost),
@@ -1210,6 +1465,8 @@ function SubRow({
             placeholder="Sub-item description"
             value={sub.description}
             onChange={(event) => onPatch({ description: event.target.value })}
+            onFocus={() => onFieldFocus?.(itemKey, "description", sub.id)}
+            onBlur={() => onFieldBlur?.(itemKey, "description", sub.id)}
             className={subCellClass}
           />
         </div>
@@ -1239,6 +1496,7 @@ function SubRow({
           <button
             type="button"
             aria-label={`Remove ${label}`}
+            title={`Remove ${label}`}
             onClick={onRemove}
             className="flex h-9 w-7 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
           >
@@ -1248,8 +1506,9 @@ function SubRow({
           </button>
         </div>
       </div>
+      {meta === undefined ? null : <div className="mt-1">{meta}</div>}
 
-      <div className="mt-2 grid grid-cols-1 gap-3 lg:grid-cols-[290px_minmax(0,1fr)]">
+      <div className={`mt-2 grid grid-cols-1 gap-3 ${purchaseOrder ? "lg:grid-cols-[240px_minmax(0,1fr)]" : "lg:grid-cols-[290px_minmax(0,1fr)]"}`}>
         <div className="min-w-0">
             <BulletsEditor
               lines={sub.bullets}
@@ -1261,18 +1520,24 @@ function SubRow({
               onChange={onBulletChange}
             />
         </div>
-        <div className="grid grid-cols-2 items-start gap-2.5 lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]">
+        <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[40px_64px_132px_116px_minmax(0,1fr)]" : "lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]"}`}>
         <Captioned label="Qty">
           {/* Counts, not money: digit-strip stays (see the main row). */}
           <input
             type="text"
-            inputMode="numeric"
+            inputMode={purchaseOrder ? "decimal" : "numeric"}
             aria-label={`Quantity for ${label}`}
             placeholder="1"
             value={sub.qty}
             onChange={(event) =>
-              onPatch({ qty: event.target.value.replace(/\D/g, "") })
+              onPatch({
+                qty: purchaseOrder
+                  ? sanitizeQuantityInput(event.target.value)
+                  : event.target.value.replace(/\D/g, ""),
+              })
             }
+            onFocus={() => onFieldFocus?.(itemKey, "quantity", sub.id)}
+            onBlur={() => onFieldBlur?.(itemKey, "quantity", sub.id)}
             className={`${subCellClass} text-right tnum`}
           />
         </Captioned>
@@ -1284,7 +1549,12 @@ function SubRow({
             options={uomOptions}
             pendingLabel={uomPendingLabel}
             ariaLabel={`Unit of measure for ${label}`}
-            onChange={(value) => onPatch({ uom: value })}
+            onChange={(value) => {
+              onPatch({ uom: value });
+              onSelectCommit?.(itemKey, "uom", value, sub.id);
+            }}
+            onFocus={() => onFieldFocus?.(itemKey, "uom", sub.id)}
+            onBlur={() => onFieldBlur?.(itemKey, "uom", sub.id)}
           />
         </Captioned>
 
@@ -1298,10 +1568,13 @@ function SubRow({
             onChange={(event) =>
               onPatch({ unitCost: parseMoneyKeystroke(currency, event.target.value) })
             }
+            onFocus={() => onFieldFocus?.(itemKey, "unitPrice", sub.id)}
+            onBlur={() => onFieldBlur?.(itemKey, "unitPrice", sub.id)}
             className={`${subCellClass} text-right tnum`}
           />
         </Captioned>
 
+        {purchaseOrder ? null : (
         <Captioned label="Margin">
           <div className="flex h-9 items-center gap-2">
             <button
@@ -1350,6 +1623,7 @@ function SubRow({
             </div>
           </div>
         </Captioned>
+        )}
 
         <Captioned label="Discount">
           <div className="flex h-9 items-center gap-2">
@@ -1358,7 +1632,16 @@ function SubRow({
               role="switch"
               aria-checked={sub.discountEnabled}
               aria-label={`Enable a discount for ${label}`}
-              onClick={() => onPatch({ discountEnabled: !sub.discountEnabled })}
+              onClick={() => {
+                const enabled = !sub.discountEnabled;
+                onPatch({ discountEnabled: enabled });
+                onDiscountCommit?.(
+                  itemKey,
+                  enabled,
+                  sub.discountPercent,
+                  sub.id
+                );
+              }}
               className={`relative inline-flex h-[22px] w-[40px] shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-200 ease-out-quart focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50 ${
                 sub.discountEnabled
                   ? "border-accent-700 bg-accent-600"
@@ -1385,6 +1668,8 @@ function SubRow({
                 aria-label={`Discount percentage for ${label}`}
                 value={sub.discountPercent}
                 disabled={!sub.discountEnabled}
+                onFocus={() => onFieldFocus?.(itemKey, "discount", sub.id)}
+                onBlur={() => onFieldBlur?.(itemKey, "discount", sub.id)}
                 onChange={(event) =>
                   onPatch({
                     discountPercent: Math.min(
