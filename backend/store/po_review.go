@@ -652,6 +652,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 			saved_by = $24,
 			pdf_absent_confirmed_at = CASE WHEN $25::boolean THEN NOW() ELSE NULL::timestamptz END,
 			pdf_absent_confirmed_by = CASE WHEN $25::boolean THEN $26::bigint ELSE NULL::bigint END,
+			confirmation_requested = $27,
 			updated_by = $24,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2 AND state = 'draft'`, schema),
@@ -662,7 +663,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.DiscountPercent, calculation.SubtotalMinor, calculation.DiscountMinor,
 		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
 		calculation.AdjustmentReason, calculation.GrandTotalMinor, input.UpdatedBy,
-		recordAbsence, input.UpdatedBy,
+		recordAbsence, input.UpdatedBy, input.ConfirmationRequested,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {

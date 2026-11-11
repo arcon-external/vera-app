@@ -232,6 +232,8 @@ beforeEach(() => {
         PaymentTerms: fields.PaymentTerms ?? ORDER.PaymentTerms,
         Incoterms: fields.Incoterms ?? ORDER.Incoterms,
         DiscountPercent: fields.DiscountPercent ?? ORDER.DiscountPercent,
+        ConfirmationRequested:
+          fields.ConfirmationRequested ?? ORDER.ConfirmationRequested,
         Items: items,
         Version: Number(fields.ExpectedVersion ?? ORDER.Version),
       },
@@ -302,11 +304,11 @@ function type(label: string, value: string) {
   found.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function render(onSaved = vi.fn()) {
+function render(onSaved = vi.fn(), order: PurchaseOrderDTO = ORDER) {
   act(() =>
     root.render(
       <PurchaseOrderEditorPage
-        order={ORDER}
+        order={order}
         currency={USD}
         uomOptions={[{ value: "Pc", label: "Pc" }]}
         incotermOptions={[{ value: "CIF", label: "CIF" }]}
@@ -496,6 +498,42 @@ describe("final save from the editor (issue #471)", () => {
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.AssignConfirmationNumber).toBe(true);
     expect(payload).not.toHaveProperty("ConfirmationNumber");
+  });
+
+  // Issue #581: a saved draft's request pre-fills the final checkbox, and the
+  // checkbox remains the final authority.
+  it("prefills the confirmation checkbox from the draft request and still allows a change", async () => {
+    render(vi.fn(), { ...ORDER, ConfirmationRequested: true });
+    await act(async () => {
+      button("Final Save").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Line 1 unit price").click();
+    });
+    await act(async () => {
+      button("Use Quotation for Payment terms").click();
+    });
+    await act(async () => {
+      button("Continue final save").click();
+    });
+
+    expect(checkbox("Assign confirmation number").checked).toBe(true);
+
+    await act(async () => {
+      checkbox("Assign confirmation number").click();
+    });
+    expect(checkbox("Assign confirmation number").checked).toBe(false);
+
+    await act(async () => {
+      checkbox("Confirm saving without the customer PDF").click();
+    });
+    await act(async () => {
+      button("Final save").click();
+    });
+    expect(finalizeMock).toHaveBeenCalledTimes(1);
+    const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.AssignConfirmationNumber).toBe(false);
+    expect(payload.ConfirmationRequested).toBe(true);
   });
 
   it("focuses the failure banner when the final save fails", async () => {

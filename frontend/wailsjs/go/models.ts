@@ -2291,6 +2291,7 @@ export namespace backend {
 	    ConfirmationNumber?: string;
 	    ConfirmationAssignedAt?: string;
 	    ConfirmationWarn: boolean;
+	    ConfirmationRequested: boolean;
 	    Version: number;
 
 	    static createFrom(source: any = {}) {
@@ -2347,6 +2348,7 @@ export namespace backend {
 	        this.ConfirmationNumber = source["ConfirmationNumber"];
 	        this.ConfirmationAssignedAt = source["ConfirmationAssignedAt"];
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Version = source["Version"];
 	    }
 
@@ -2710,6 +2712,7 @@ export namespace backend {
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
 	    DocumentConfirmed: boolean;
+	    ConfirmationRequested: boolean;
 	    AssignConfirmationNumber: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -2740,6 +2743,7 @@ export namespace backend {
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	        this.DocumentConfirmed = source["DocumentConfirmed"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.AssignConfirmationNumber = source["AssignConfirmationNumber"];
 	    }
 
@@ -3020,6 +3024,7 @@ export namespace backend {
 	    Incoterms: string;
 	    PaymentTerms: string;
 	    AdjustmentReason: string;
+	    ConfirmationRequested: boolean;
 	    Items: PurchaseOrderItemInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
@@ -3049,6 +3054,7 @@ export namespace backend {
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];

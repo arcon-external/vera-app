@@ -349,6 +349,40 @@ describe("PO editor dirty-cancel guard (issue #468)", () => {
   });
 });
 
+describe("confirmation-number request (#581)", () => {
+  it("defaults off for a new draft and maps a stored request", () => {
+    expect(initial().header.confirmationRequested).toBe(false);
+    expect(
+      initial({ ConfirmationRequested: true }).header.confirmationRequested
+    ).toBe(true);
+  });
+
+  it("is part of the dirty snapshot", () => {
+    const on = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { confirmationRequested: true },
+    });
+    expect(isPurchaseOrderDirty(on)).toBe(true);
+
+    const off = purchaseOrderEditorReducer(on, {
+      type: "headerChanged",
+      patch: { confirmationRequested: false },
+    });
+    expect(isPurchaseOrderDirty(off)).toBe(false);
+  });
+
+  it("travels in the draft save payload", () => {
+    const on = purchaseOrderEditorReducer(initial(), {
+      type: "headerChanged",
+      patch: { confirmationRequested: true },
+    });
+    expect(buildPurchaseOrderUpdate(on, USD).input?.ConfirmationRequested).toBe(true);
+    expect(buildPurchaseOrderUpdate(initial(), USD).input?.ConfirmationRequested).toBe(
+      false
+    );
+  });
+});
+
 describe("PO draft update payload (issue #468)", () => {
   it("builds the full replace-lines payload with exact values and references", () => {
     const state = initial();
