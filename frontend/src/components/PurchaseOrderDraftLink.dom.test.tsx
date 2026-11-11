@@ -450,11 +450,9 @@ describe("draft source link (issue #497)", () => {
 
     expect(document.body.textContent).toContain("Link this draft to a quotation");
     expect(document.body.textContent).toContain("Source link");
-    // The single source line is missing from the manual draft.
-    act(() =>
-      input("Acknowledge omission of quotation line 1").click()
-    );
-    await flush();
+    // The missing quotation line is added to the review copy as a matched
+    // line, so the link needs no omission acknowledgement (#587).
+    expect(document.body.textContent).toContain("Source line 1");
     act(() => button("Link source").click());
     await flush();
     await flush();
@@ -465,15 +463,20 @@ describe("draft source link (issue #497)", () => {
     expect(linkInput.ExpectedVersion).toBe(3);
     expect(linkInput.TargetQuotationID).toBe(12);
     expect(linkInput.TargetRevisionNumber).toBe(0);
-    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
     expect(linkInput.AcknowledgedExtra).toEqual([]);
     expect(linkInput.TaxChoice).toBe("keep");
 
     // The applied review values were saved before the link, carrying the typed
-    // PO number untouched.
+    // PO number untouched and the added quotation line.
     const appliedSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
     expect(appliedSave.PONumber).toBe("KEEP-497");
     expect(appliedSave.ExpectedVersion).toBe(2);
+    expect(appliedSave.Items).toHaveLength(1);
+    expect(appliedSave.Items[0]).toMatchObject({
+      QuotationItemNo: 1,
+      Description: "Source line 1",
+    });
 
     expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
       "1502260001:0"
@@ -599,9 +602,8 @@ describe("draft source link (issue #497)", () => {
     await flush();
     await flush();
 
-    expect(button("Link source").disabled).toBe(true);
-    act(() => input("Acknowledge omission of quotation line 1").click());
-    await flush();
+    // The added quotation line is already matched, and the currency now
+    // agrees, so the link is confirmable without an acknowledgement (#587).
     expect(button("Link source").disabled).toBe(false);
     act(() => button("Link source").click());
     await flush();
@@ -637,8 +639,8 @@ describe("draft source link (issue #497)", () => {
     );
     await openReview();
     expect(previewMock).toHaveBeenCalledWith(7, 12, 0);
-    act(() => input("Acknowledge omission of quotation line 1").click());
-    await flush();
+    // The missing source line is added to the review copy (#587).
+    expect(document.body.textContent).toContain("Source line 1");
     act(() => button("Link source").click());
     await flush();
     await flush();
@@ -647,6 +649,7 @@ describe("draft source link (issue #497)", () => {
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.ID).toBe(7);
     expect(linkInput.TargetQuotationID).toBe(12);
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
     expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
       "1502260001:0"
     );
@@ -694,8 +697,9 @@ describe("draft source link (issue #497)", () => {
     await flush();
     await flush();
 
-    act(() => input("Acknowledge omission of quotation line 1").click());
-    await flush();
+    // The added source line is matched and the currency agrees, so no
+    // acknowledgement is needed (#587).
+    expect(button("Link source").disabled).toBe(false);
     act(() => button("Link source").click());
     await flush();
     await flush();
@@ -728,7 +732,7 @@ describe("draft source link (issue #497)", () => {
     expect(document.body.textContent).toContain("Received date must be YYYY-MM-DD.");
   });
 
-  it("matches ten manual lines one by one and links them explicitly", async () => {
+  it("adds ten missing quotation lines beside ten filled manual lines (#587)", async () => {
     const items = Array.from({ length: 10 }, (_, index) => ({
       QuotationItemNo: null,
       QuotationSubNo: null,
@@ -748,29 +752,250 @@ describe("draft source link (issue #497)", () => {
     await render(blank({ Items: items }));
     await openReview();
 
+    // All ten quotation lines are added to the review copy as matched lines;
+    // the ten filled manual lines stay and are acknowledged as extras.
+    const summary = document.querySelector<HTMLElement>(
+      '[data-testid="po-diff-summary"]'
+    );
+    expect(summary?.getAttribute("data-missing")).toBe("0");
+    expect(summary?.getAttribute("data-extra")).toBe("10");
     expect(document.body.textContent).toContain("Resolve before linking");
     expect(button("Link source").disabled).toBe(true);
-    for (let index = 1; index <= 10; index += 1) {
-      chooseSelect(
-        `Line ${index} quotation match`,
-        `${index} — Source line ${index}`
-      );
-      await flush();
-    }
+    act(() => button("Keep all PO values").click());
+    await flush();
     expect(button("Link source").disabled).toBe(false);
     act(() => button("Link source").click());
     await flush();
     await flush();
 
-    const appliedSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.Items.map((item) => item.QuotationItemNo)).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-    ]);
+    const appliedSave = updateMock.mock.calls[
+      updateMock.mock.calls.length - 1
+    ][0] as PurchaseOrderUpdateInput;
+    expect(appliedSave.Items).toHaveLength(20);
+    expect(
+      appliedSave.Items.slice(10).map((item) => item.QuotationItemNo)
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.AcknowledgedMissing).toEqual([]);
-    expect(linkInput.AcknowledgedExtra).toEqual([]);
+    expect(linkInput.AcknowledgedExtra).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+    ]);
     expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
       "1502260001:0"
     );
+  });
+
+  it("adds a missing quotation line to the review copy and saves it only on link (#587)", async () => {
+    reviewForTest = review();
+    await render();
+    type("Customer PO number", "AUTO-587");
+    await flush();
+    await openReview();
+
+    // The review compares the order that would be saved: the missing source
+    // line is already a matched line, so nothing is missing or extra.
+    const summary = document.querySelector<HTMLElement>(
+      '[data-testid="po-diff-summary"]'
+    );
+    expect(summary?.getAttribute("data-missing")).toBe("0");
+    expect(summary?.getAttribute("data-extra")).toBe("0");
+    expect(summary?.getAttribute("data-differences")).toBe("0");
+    expect(document.body.textContent).toContain("Source line 1");
+    expect(
+      document.querySelector(
+        'input[aria-label="Acknowledge omission of quotation line 1"]'
+      )
+    ).toBeNull();
+    expect(button("Link source").disabled).toBe(false);
+
+    // Back leaves the working draft without the added line.
+    act(() => button("Back without linking").click());
+    await flush();
+    expect(
+      document.querySelector('[aria-label="Description for line 1"]')
+    ).toBeNull();
+
+    // Confirming the link saves the added line with the rest of the applied
+    // review.
+    await openReview();
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    const appliedSave = updateMock.mock.calls[
+      updateMock.mock.calls.length - 1
+    ][0] as PurchaseOrderUpdateInput;
+    expect(appliedSave.Items).toHaveLength(1);
+    expect(appliedSave.Items[0]).toMatchObject({
+      QuotationItemNo: 1,
+      Description: "Source line 1",
+      UoM: "Pc",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 100,
+    });
+    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
+      "1502260001:0"
+    );
+  });
+
+  it("Use all quotation values resolves every difference, the tax basis and extras (#587)", async () => {
+    reviewForTest = review({
+      Source: source({ PaymentTerms: "45 days", Lines: [sourceLine(1)] }),
+      SourceTax: {
+        TaxZone: "NonFTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+        TaxCategory: "",
+        PpnBps: 1100,
+      },
+      TaxChoiceRequired: true,
+    });
+    await render(
+      blank({
+        Items: [
+          {
+            QuotationItemNo: 1,
+            QuotationSubNo: null,
+            LineNumber: 1,
+            Description: "Source line 1",
+            QuantityScaled: 10000,
+            UoM: "Pc",
+            UnitPriceMinor: 500,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+            GrossMinor: 0,
+            DiscountMinor: 0,
+            NetMinor: 0,
+          },
+          {
+            QuotationItemNo: null,
+            QuotationSubNo: null,
+            LineNumber: 2,
+            Description: "Freight",
+            QuantityScaled: 10000,
+            UoM: "Pc",
+            UnitPriceMinor: 0,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+            GrossMinor: 0,
+            DiscountMinor: 0,
+            NetMinor: 0,
+          },
+        ],
+      })
+    );
+    await openReview();
+
+    expect(button("Link source").disabled).toBe(true);
+    const group = document.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Bulk choices"]'
+    );
+    expect(group).not.toBeNull();
+    expect(group?.textContent).toContain("Use all quotation values");
+    const blocker = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="alert"]')
+    ).find((node) => node.textContent?.includes("Resolve before linking"));
+    if (blocker === undefined || group === null) {
+      throw new Error("blocker or bulk choices missing");
+    }
+    expect(
+      blocker.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    act(() => button("Use all quotation values").click());
+    await flush();
+    expect(button("Link source").disabled).toBe(false);
+
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    const appliedSave = updateMock.mock.calls[
+      updateMock.mock.calls.length - 1
+    ][0] as PurchaseOrderUpdateInput;
+    expect(appliedSave.PaymentTerms).toBe("45 days");
+    expect(appliedSave.Items[0].UnitPriceMinor).toBe(100);
+    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
+    expect(linkInput.Decisions).toEqual([
+      { Key: "header:paymentTerms", Choice: "quotation" },
+      { Key: "line:1:unitPrice", Choice: "quotation" },
+    ]);
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    expect(linkInput.AcknowledgedExtra).toEqual([2]);
+    expect(linkInput.TaxChoice).toBe("source");
+  });
+
+  it("Keep all PO values keeps every value and the tax basis and acknowledges extras (#587)", async () => {
+    reviewForTest = review({
+      Source: source({ PaymentTerms: "45 days", Lines: [sourceLine(1)] }),
+      SourceTax: {
+        TaxZone: "NonFTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+        TaxCategory: "",
+        PpnBps: 1100,
+      },
+      TaxChoiceRequired: true,
+    });
+    await render(
+      blank({
+        Items: [
+          {
+            QuotationItemNo: 1,
+            QuotationSubNo: null,
+            LineNumber: 1,
+            Description: "Source line 1",
+            QuantityScaled: 10000,
+            UoM: "Pc",
+            UnitPriceMinor: 500,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+            GrossMinor: 0,
+            DiscountMinor: 0,
+            NetMinor: 0,
+          },
+          {
+            QuotationItemNo: null,
+            QuotationSubNo: null,
+            LineNumber: 2,
+            Description: "Freight",
+            QuantityScaled: 10000,
+            UoM: "Pc",
+            UnitPriceMinor: 0,
+            DiscountEnabled: false,
+            DiscountPercent: 0,
+            GrossMinor: 0,
+            DiscountMinor: 0,
+            NetMinor: 0,
+          },
+        ],
+      })
+    );
+    await openReview();
+
+    expect(button("Link source").disabled).toBe(true);
+    act(() => button("Keep all PO values").click());
+    await flush();
+    expect(button("Link source").disabled).toBe(false);
+
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+
+    const appliedSave = updateMock.mock.calls[
+      updateMock.mock.calls.length - 1
+    ][0] as PurchaseOrderUpdateInput;
+    expect(appliedSave.PaymentTerms).toBe("50% advance");
+    expect(appliedSave.Items[0].UnitPriceMinor).toBe(500);
+    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
+    expect(linkInput.Decisions).toEqual([
+      { Key: "header:paymentTerms", Choice: "po" },
+      { Key: "line:1:unitPrice", Choice: "po" },
+    ]);
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    expect(linkInput.AcknowledgedExtra).toEqual([2]);
+    expect(linkInput.TaxChoice).toBe("keep");
   });
 });

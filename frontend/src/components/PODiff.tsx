@@ -200,16 +200,21 @@ export interface DiffChoiceProps {
   choice?: DiffSide;
   /** Both values are formatted money and must never wrap. */
   money?: boolean;
-  poAction?: ReactNode;
-  quotationAction?: ReactNode;
+  /**
+   * #587: both sides are whole-card selection targets, exactly like the
+   * tax-basis card. The accessible names stay the review's names; the selected
+   * side shows "Will be used" and no action hint.
+   */
+  onChoose: (side: DiffSide) => void;
   /** Extra content under the two sides, such as provenance copy. */
   children?: ReactNode;
 }
 
 /**
- * One differing value as two labelled sides. The buttons are passed in so the
- * caller keeps the exact accessible names and callbacks the review already
- * used.
+ * One differing value as two labelled sides. The whole card is the selection
+ * target: a selected side keeps its ring and "Will be used" and offers no
+ * action, while the other side says "Use this value". Both remain clickable so
+ * a choice can be switched.
  */
 export function DiffChoice({
   label,
@@ -217,10 +222,12 @@ export function DiffChoice({
   quotationValue,
   choice,
   money = false,
-  poAction,
-  quotationAction,
+  onChoose,
   children,
 }: DiffChoiceProps) {
+  const hint = (
+    <span className="text-small font-medium text-accent-700">Use this value</span>
+  );
   return (
     <div
       role="group"
@@ -239,8 +246,11 @@ export function DiffChoice({
           nowrap={money}
           selected={choice === "po"}
           muted={choice === "quotation"}
+          onSelect={() => onChoose("po")}
+          ariaLabel={`Use PO entry for ${label}`}
+          ariaPressed={choice === "po"}
         >
-          {poAction}
+          {choice === "po" ? null : hint}
         </DiffValue>
         <DiffDivider />
         <DiffValue
@@ -250,8 +260,11 @@ export function DiffChoice({
           nowrap={money}
           selected={choice === "quotation"}
           muted={choice === "po"}
+          onSelect={() => onChoose("quotation")}
+          ariaLabel={`Use Quotation for ${label}`}
+          ariaPressed={choice === "quotation"}
         >
-          {quotationAction}
+          {choice === "quotation" ? null : hint}
         </DiffValue>
       </div>
       {children}

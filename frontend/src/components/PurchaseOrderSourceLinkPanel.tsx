@@ -7,10 +7,12 @@
 // currency remedy in front of it; no second comparison or review page exists.
 
 import type { CurrencyInfo } from "../format";
-import type {
-  POReviewChoice,
-  POReviewDecisions,
-  PurchaseOrderSourceLineDTO,
+import {
+  comparePurchaseOrder,
+  sourceLabel,
+  type POReviewChoice,
+  type POReviewDecisions,
+  type PurchaseOrderSourceLineDTO,
 } from "../poFinalize";
 import type {
   PurchaseOrderEditorState,
@@ -148,6 +150,48 @@ export function PurchaseOrderDraftLinkReviewPanel({
     review.Source.Currency
   );
 
+  // #587: one click for the common cases. The comparison is recomputed from
+  // the review copy at click time, never from the last render, so a bulk
+  // choice applies to what the panel currently shows.
+  const chooseAll = (side: POReviewChoice) => {
+    const current = comparePurchaseOrder(state, review.Source, currency);
+    for (const difference of current.differences) {
+      onDecision(difference.key, side);
+    }
+    for (const line of current.missing) {
+      const label = sourceLabel(line);
+      if (!acknowledgedMissing.includes(label)) onToggleMissing(label);
+    }
+    for (const lineNumber of current.extraLineNumbers) {
+      if (!acknowledgedExtra.includes(lineNumber)) onToggleExtra(lineNumber);
+    }
+    onTaxChoice(side === "quotation" ? "source" : "keep");
+  };
+  const bulkChoices = (
+    <div
+      role="group"
+      aria-label="Bulk choices"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rule bg-white px-4 py-3"
+    >
+      <div className="grid gap-0.5">
+        <p className="text-small font-medium text-ink-900">
+          Choose one side for everything
+        </p>
+        <p className="text-caption text-ink-500">
+          Every difference, the tax basis and every missing or extra line.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button aria-label="Use all quotation values" onClick={() => chooseAll("quotation")}>
+          Use all quotation values
+        </Button>
+        <Button aria-label="Keep all PO values" onClick={() => chooseAll("po")}>
+          Keep all PO values
+        </Button>
+      </div>
+    </div>
+  );
+
   // #582: the tax basis is a two-sided diff like the value rows. The whole
   // side is the selection target, so the old inner button is now the card
   // itself and keeps the same accessible name and pressed state.
@@ -176,9 +220,9 @@ export function PurchaseOrderDraftLinkReviewPanel({
           ariaLabel="Keep the draft tax basis"
           ariaPressed={taxChoice === "keep"}
         >
-          {review.TaxChoiceRequired ? (
+          {review.TaxChoiceRequired && taxChoice !== "keep" ? (
             <span className="text-small font-medium text-accent-700">
-              Keep this basis
+              Use this basis
             </span>
           ) : null}
         </DiffValue>
@@ -193,9 +237,9 @@ export function PurchaseOrderDraftLinkReviewPanel({
           ariaLabel="Use the quotation tax basis"
           ariaPressed={taxChoice === "source"}
         >
-          {review.TaxChoiceRequired ? (
+          {review.TaxChoiceRequired && taxChoice !== "source" ? (
             <span className="text-small font-medium text-accent-700">
-              Use the quotation&apos;s
+              Use this basis
             </span>
           ) : null}
         </DiffValue>
@@ -250,6 +294,7 @@ export function PurchaseOrderDraftLinkReviewPanel({
         busy={linking}
         blocked={taxUnresolved}
         beforeDifferences={taxCard}
+        afterBlockers={bulkChoices}
       />
     </div>
   );

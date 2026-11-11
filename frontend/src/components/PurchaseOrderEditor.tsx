@@ -46,6 +46,7 @@ import {
 import {
   draftLinkConflictWarning,
   planDraftLink,
+  withMissingSourceLines,
   type PurchaseOrderDraftLinkReviewDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "../poDraftLink";
@@ -1659,6 +1660,16 @@ export function PurchaseOrderEditorPage({
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkTaxChoice, setLinkTaxChoice] = useState<PurchaseOrderDraftTaxChoice>("");
   const [linking, setLinking] = useState(false);
+  // #587: the review compares a copy of the draft with every missing quotation
+  // line already appended. It is never dispatched by opening the review:
+  // confirming the link saves it and Back leaves the working draft untouched.
+  const linkState = useMemo(
+    () =>
+      linkReview === null
+        ? state
+        : withMissingSourceLines(state, linkReview.Source.Lines, activeCurrency),
+    [state, linkReview, activeCurrency]
+  );
 
   // The async save and upload paths must see the editor as it is now, not as
   // it was when the request was scheduled.
@@ -2278,7 +2289,7 @@ export function PurchaseOrderEditorPage({
   const commitDraftLink = async () => {
     if (linkReview === null || linking) return;
     const plan = planDraftLink(
-      state,
+      linkState,
       linkReview,
       activeCurrency,
       decisions,
@@ -2347,6 +2358,19 @@ export function PurchaseOrderEditorPage({
       // A successful link advances the row; the retained version must follow
       // so a Final Save right after the link does not pre-save at the stale one.
       retainPersistedVersion(linked.order);
+      // #586/#587: the link's matches and added lines become the session's
+      // line identities. Adopt the linked source and reload the session so a
+      // review-time match has source lines to compare and its price difference
+      // becomes a resolvable pane item instead of a Final Save dead end.
+      setCompareSource({
+        paymentTerms: linkReview.Source.PaymentTerms,
+        incoterms: linkReview.Source.Incoterms,
+      });
+      setCompareLines(linkReview.Source.Lines);
+      // The link review's source is the exact revision just linked, so the
+      // loaded-source effect does not need to fetch it again.
+      loadedSourceForRef.current = linked.order.ID;
+      reconciliation.reload();
       setLinkReview(null);
       setDecisions({});
       setAcknowledgedMissing([]);
@@ -2864,7 +2888,7 @@ export function PurchaseOrderEditorPage({
   if (linkReview !== null) {
     return (
       <PurchaseOrderDraftLinkReviewPanel
-        state={state}
+        state={linkState}
         review={linkReview}
         currency={activeCurrency}
         decisions={decisions}
