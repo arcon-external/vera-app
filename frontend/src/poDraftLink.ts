@@ -73,8 +73,13 @@ export function draftTaxBasisLabel(basis: PurchaseOrderDraftTaxBasisDTO): string
   const parts = [basis.TaxZone, basis.TaxType, basis.ServiceCategory]
     .map((part) => part.trim())
     .filter((part) => part !== "");
-  const ppn = basis.PpnBps > 0 ? `${formatPpnBps(basis.PpnBps)} PPN` : "no PPN";
+  const ppn = ppnLabel(basis);
   return parts.length === 0 ? ppn : `${parts.join(" / ")} · ${ppn}`;
+}
+
+/** The PPN side of a tax basis: "11% PPN" or "no PPN". */
+export function ppnLabel(basis: PurchaseOrderDraftTaxBasisDTO): string {
+  return basis.PpnBps > 0 ? `${formatPpnBps(basis.PpnBps)} PPN` : "no PPN";
 }
 
 /**

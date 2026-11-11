@@ -269,6 +269,10 @@ const (
 // PurchaseOrderFinalize is the final-save request: the same replaced values a
 // draft save carries, plus the difference-review decisions, the explicit
 // missing/extra acknowledgements, and the document confirmation.
+//
+// The embedded update shape is shared with draft saves, but the final save
+// never reads its ConfirmationRequested: that preference is draft-only (#581)
+// and the stored request is derived from AssignConfirmationNumber (#579).
 type PurchaseOrderFinalize struct {
 	PurchaseOrderUpdate
 	Decisions           []PurchaseOrderDecision
@@ -923,7 +927,8 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	// A draft keeps its number free while staff prepare it: the key is cleared,
 	// so two people may still compete for one order. Only the final save writes
 	// it.
-	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis, nil); err != nil {
+	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis,
+		&input.ConfirmationRequested, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
 	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)

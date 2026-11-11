@@ -391,7 +391,7 @@ type PurchaseOrderDecisionRequest struct {
 // save does, and adds the difference-review decisions, the explicit
 // missing/extra acknowledgements, and the document confirmation.
 type PurchaseOrderFinalizeRequest struct {
-	PurchaseOrderUpdateRequest
+	PurchaseOrderEditableRequest
 	Decisions           []PurchaseOrderDecisionRequest `json:"decisions"`
 	AcknowledgedMissing []string                       `json:"acknowledgedMissing"`
 	AcknowledgedExtra   []int                          `json:"acknowledgedExtra"`
@@ -399,7 +399,8 @@ type PurchaseOrderFinalizeRequest struct {
 	// AssignConfirmationNumber asks the server to allocate the optional
 	// customer-system reference inside the same transaction as the save. The
 	// client never sends the number itself: only the server allocates, and an
-	// already-assigned value is never regenerated (#474).
+	// already-assigned value is never regenerated (#474). It is also the one
+	// source of the stored confirmation request (#579).
 	AssignConfirmationNumber bool `json:"assignConfirmationNumber"`
 }
 
@@ -443,6 +444,31 @@ type PurchaseOrderItemInput struct {
 	DescriptionLines  []string `json:"descriptionLines"`
 }
 
+// PurchaseOrderEditableRequest is the editable payload every replace-style
+// purchase order request shares. ConfirmationRequested is deliberately absent:
+// a draft save owns that preference (#581), while the final save derives the
+// stored request from its own checkbox (#579).
+type PurchaseOrderEditableRequest struct {
+	PurchaseOrderProtectedFieldsRequest
+	PODate                string                   `json:"poDate,omitempty"`
+	RequestedDeliveryDate string                   `json:"requestedDeliveryDate,omitempty"`
+	BillingAddress        string                   `json:"billingAddress"`
+	DeliveryAddress       string                   `json:"deliveryAddress"`
+	ShipToCode            string                   `json:"shipToCode"`
+	ContactEmail          string                   `json:"contactEmail"`
+	ContactPhone          string                   `json:"contactPhone"`
+	PONumber              string                   `json:"poNumber"`
+	ReceivedDate          string                   `json:"receivedDate,omitempty"`
+	Incoterms             string                   `json:"incoterms"`
+	AdjustmentReason      string                   `json:"adjustmentReason"`
+	Items                 []PurchaseOrderItemInput `json:"items"`
+	PaymentTerms          string                   `json:"paymentTerms"`
+	DiscountPercent       int16                    `json:"discountPercent"`
+	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
+	ExpectedVersion       int64                    `json:"expectedVersion"`
+	Overwrite             bool                     `json:"overwrite"`
+}
+
 // PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
 // customer snapshots, currency and tax basis are not writable.
 //
@@ -455,27 +481,11 @@ type PurchaseOrderItemInput struct {
 // the confirmation number, source link, customer, currency and identity have
 // their own rules (#474, #475) and are not reachable here.
 type PurchaseOrderUpdateRequest struct {
-	PurchaseOrderProtectedFieldsRequest
-	PODate                string `json:"poDate,omitempty"`
-	RequestedDeliveryDate string `json:"requestedDeliveryDate,omitempty"`
-	BillingAddress        string `json:"billingAddress"`
-	DeliveryAddress       string `json:"deliveryAddress"`
-	ShipToCode            string `json:"shipToCode"`
-	ContactEmail          string `json:"contactEmail"`
-	ContactPhone          string `json:"contactPhone"`
-	PONumber              string `json:"poNumber"`
-	ReceivedDate          string `json:"receivedDate,omitempty"`
-	Incoterms             string `json:"incoterms"`
-	AdjustmentReason      string `json:"adjustmentReason"`
+	PurchaseOrderEditableRequest
 	// ConfirmationRequested remembers the editor's draft choice (#581). It
-	// allocates nothing; AssignConfirmationNumber on the finalize request does.
-	ConfirmationRequested bool                     `json:"confirmationRequested"`
-	Items                 []PurchaseOrderItemInput `json:"items"`
-	PaymentTerms          string                   `json:"paymentTerms"`
-	DiscountPercent       int16                    `json:"discountPercent"`
-	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
-	ExpectedVersion       int64                    `json:"expectedVersion"`
-	Overwrite             bool                     `json:"overwrite"`
+	// allocates nothing; an update writes it, and the final save does not
+	// accept it at all (#579).
+	ConfirmationRequested bool `json:"confirmationRequested"`
 }
 
 // PurchaseOrderProtectedFieldsRequest names the values that are protected from

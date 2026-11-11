@@ -19,13 +19,12 @@ import type {
 import {
   draftLinkCurrencyRemedy,
   draftTaxBasisLabel,
-  formatPpnBps,
+  ppnLabel,
   type PurchaseOrderDraftLinkReviewDTO,
-  type PurchaseOrderDraftTaxBasisDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "../poDraftLink";
+import { DiffDivider, DiffValue } from "./PODiff";
 import { PurchaseOrderDifferenceReviewView } from "./PurchaseOrderFinalize";
-import { DiffDivider, DiffValue } from "./podiff";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 export interface PurchaseOrderSourceLinkPanelProps {
@@ -148,8 +147,6 @@ export function PurchaseOrderDraftLinkReviewPanel({
     state.currency,
     review.Source.Currency
   );
-  const ppnLabel = (basis: PurchaseOrderDraftTaxBasisDTO): string =>
-    basis.PpnBps > 0 ? `${formatPpnBps(basis.PpnBps)} PPN` : "no PPN";
 
   // #582: the tax basis is a two-sided diff like the value rows. The whole
   // side is the selection target, so the old inner button is now the card

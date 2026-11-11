@@ -37,6 +37,16 @@ import type {
 } from "../purchaseOrderDocument";
 import { sourceReferenceLabel, sourceRepairActionLabel } from "../poRepair";
 import type { ReconciliationHistoryInput } from "../poReconciliationHistory";
+import {
+  AcknowledgedChip,
+  DiffChoice,
+  DiffDivider,
+  DiffStatusChip,
+  DiffSummary,
+  DiffValue,
+  EmptyValue,
+  LineMatchRow,
+} from "./PODiff";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
 import {
@@ -49,16 +59,6 @@ import {
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
-import {
-  AcknowledgedChip,
-  DiffChoice,
-  DiffDivider,
-  DiffStatusChip,
-  DiffSummary,
-  DiffValue,
-  EmptyValue,
-  LineMatchRow,
-} from "./podiff";
 
 // Issue #471: the final-save review. Three assembled views live here:
 //
@@ -82,6 +82,11 @@ import {
 // explicit choices and acknowledgements. The whole-order discount and signed
 // adjustment are retired (#573); the PO never invents a figure to force the
 // printed total.
+
+// #579: only the unit-price row carries formatted money. Its values keep the
+// receipt row's old no-wrap guarantee, while free text (terms, addresses,
+// descriptions) is allowed to wrap.
+const isMoneyDifference = (key: string): boolean => key.endsWith(":unitPrice");
 
 // #582: acknowledgement is a row action, not a separate prose list. The
 // receipt branch shows recorded provenance (and the ACKNOWLEDGED chip), while
@@ -509,6 +514,7 @@ export function PurchaseOrderDifferenceReviewView({
                         side="po"
                         value={difference.poValue}
                         empty={difference.poValue === ""}
+                        nowrap={isMoneyDifference(difference.key)}
                         selected={recorded && chosen === "po"}
                         muted={recorded && chosen === "quotation"}
                       />
@@ -517,6 +523,7 @@ export function PurchaseOrderDifferenceReviewView({
                         side="quotation"
                         value={difference.sourceValue}
                         empty={difference.sourceValue === ""}
+                        nowrap={isMoneyDifference(difference.key)}
                         selected={recorded && chosen === "quotation"}
                         muted={recorded && chosen === "po"}
                       />
@@ -547,6 +554,7 @@ export function PurchaseOrderDifferenceReviewView({
                   poValue={difference.poValue}
                   quotationValue={difference.sourceValue}
                   choice={chosen}
+                  money={isMoneyDifference(difference.key)}
                   poAction={
                     <Button
                       size="sm"

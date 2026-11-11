@@ -662,9 +662,10 @@ describe("final-save payload", () => {
     expect(on.input?.AssignConfirmationNumber).toBe(true);
   });
 
-  // Issue #581: the draft preference travels with the finalize payload too, so
-  // the saved record keeps the request it was finalized from.
-  it("carries the draft confirmation request into the finalize payload", () => {
+  // Issue #581/#579: the draft preference only pre-fills the final checkbox.
+  // The finalize payload carries the checkbox answer alone, because the server
+  // derives the stored request from it.
+  it("does not carry the draft confirmation request into the finalize payload", () => {
     const result = buildFinalizeInput(
       stateFrom(order({ ConfirmationRequested: true })),
       SOURCE,
@@ -673,9 +674,12 @@ describe("final-save payload", () => {
       {},
       [],
       [],
+      false,
       false
     );
-    expect(result.input?.ConfirmationRequested).toBe(true);
+    expect(result.input).not.toBeNull();
+    expect(result.input).not.toHaveProperty("ConfirmationRequested");
+    expect(result.input?.AssignConfirmationNumber).toBe(false);
   });
 
   it("refuses to build a payload with unresolved differences", () => {

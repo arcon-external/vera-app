@@ -624,6 +624,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		return PurchaseOrder{}, fmt.Errorf("freeze reconciliation session: %w", err)
 	}
 
+	// #579: the stored request is the final checkbox itself, never the draft
+	// preference that pre-filled it. One answer, one source of truth.
+	confirmationRequested := input.AssignConfirmationNumber
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`
 		UPDATE %s.purchase_orders SET
@@ -663,7 +666,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.DiscountPercent, calculation.SubtotalMinor, calculation.DiscountMinor,
 		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
 		calculation.AdjustmentReason, calculation.GrandTotalMinor, input.UpdatedBy,
-		recordAbsence, input.UpdatedBy, input.ConfirmationRequested,
+		recordAbsence, input.UpdatedBy, confirmationRequested,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {

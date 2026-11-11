@@ -354,7 +354,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	}
 	numberKey := PurchaseOrderNumberKey(input.PONumber)
 	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID,
-		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), numberKey); err != nil {
+		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), nil, numberKey); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
@@ -457,9 +457,11 @@ func validateSavedPurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 }
 
 // updatePurchaseOrderEditable writes the header fields every replace operation
-// owns. The record's identity, state and confirmation columns are absent by
-// design; the version trigger bumps the row. numberKey is nil for a draft and
-// the saved comparison key for a correction.
+// owns. The record's identity, state and assigned confirmation columns are
+// absent by design; confirmationRequested is written only when the caller owns
+// it (a draft save), so a correction preserves the stored request (#579). The
+// version trigger bumps the row. numberKey is nil for a draft and the saved
+// comparison key for a correction.
 func updatePurchaseOrderEditable(
 	ctx context.Context,
 	q purchaseOrderQuerier,
@@ -467,6 +469,7 @@ func updatePurchaseOrderEditable(
 	input PurchaseOrderUpdate,
 	calculation PurchaseOrderCalc,
 	basis purchaseOrderBasis,
+	confirmationRequested *bool,
 	numberKey any,
 ) error {
 	_, err := q.Exec(ctx, fmt.Sprintf(`
@@ -497,7 +500,7 @@ func updatePurchaseOrderEditable(
 			tax_type = $26,
 			service_category = $27,
 			tax_category = $28,
-			confirmation_requested = $29,
+			confirmation_requested = COALESCE($29::boolean, confirmation_requested),
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
 		input.ID, orgID, input.BillingAddress, input.DeliveryAddress,
@@ -510,7 +513,7 @@ func updatePurchaseOrderEditable(
 		int64(0), "",
 		calculation.GrandTotalMinor, basis.Currency, basis.TaxZone,
 		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
-		input.ConfirmationRequested,
+		confirmationRequested,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {
