@@ -700,3 +700,112 @@ describe("PurchaseOrderDifferenceReviewView split lines (#575)", () => {
     expect(html).toContain('aria-label="Change match for line 2"');
   });
 });
+
+// Issue #582: the review is a two-sided diff, not inline prose. These
+// assertions pin the user-visible surface the redesign promises: labelled
+// surfaces either side of a divider, a summary strip that sizes the review
+// before scrolling, status chips, a dashed (empty) placeholder, and the
+// chosen side marked "Will be used". The callbacks themselves are exercised by
+// the DOM suite; this suite proves the markup carries the new language.
+function reviewWithMissingAndExtra() {
+  const base = order();
+  return reviewState({
+    PaymentTerms: "30 days",
+    Items: [
+      base.Items[0],
+      {
+        ...base.Items[1],
+        LineNumber: 3,
+        QuotationItemNo: null,
+        QuotationSubNo: null,
+        Description: "Freight",
+        UnitPriceMinor: 0,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+      },
+    ],
+  });
+}
+
+describe("PurchaseOrderDifferenceReviewView two-sided diff (#582)", () => {
+  it("labels the two sides and divides them", () => {
+    const html = markup(reviewElement());
+    expect(html).toContain("PO ENTRY");
+    expect(html).toContain("QUOTATION");
+    expect(html).toContain("≠");
+    // Narrow layouts stack the sides with a downward divider instead.
+    expect(html).toContain("↓");
+    expect(html).toContain('data-side="po"');
+    expect(html).toContain('data-side="quotation"');
+  });
+
+  it("summarizes differences, missing and extra lines above the rows", () => {
+    const html = markup(reviewElement(reviewWithMissingAndExtra()));
+    const summary =
+      html.match(
+        /<section[^>]*data-testid="po-diff-summary"[^]*?<\/section>/
+      )?.[0] ?? "";
+    expect(summary).toContain('data-differences="1"');
+    expect(summary).toContain('data-missing="1"');
+    expect(summary).toContain('data-extra="1"');
+    expect(summary).toContain(">1</span> difference");
+    expect(summary).toContain(">1</span> missing line");
+    expect(summary).toContain(">1</span> extra line");
+    // The legend names both sides with the same labels the rows use.
+    expect(summary).toContain("PO entry");
+    expect(summary).toContain("Quotation");
+  });
+
+  it("chips a changed value and marks an empty side with a dashed placeholder", () => {
+    const html = markup(reviewElement(reviewState({ PaymentTerms: "" })));
+    expect(html).toContain("Changed");
+    expect(html).toContain("(empty)");
+    expect(html).toContain('data-empty="true"');
+  });
+
+  it("marks only the chosen side as the one that will be used", () => {
+    const html = markup(
+      reviewElement(undefined, { "header:paymentTerms": "quotation" })
+    );
+    expect(html.match(/Will be used/g)).toHaveLength(1);
+    expect(html).toContain('data-selected="true"');
+    expect(html).toContain('data-selected="false"');
+  });
+
+  it("shows matched, missing and extra rows in the line ledger", () => {
+    const html = markup(reviewElement(reviewWithMissingAndExtra()));
+    expect(html).toContain("Matched");
+    expect(html).toContain("Missing");
+    expect(html).toContain("Extra");
+    expect(html).toContain("Acknowledge omission of quotation line 3");
+    expect(html).toContain("Acknowledge line 2 as extra");
+  });
+
+  it("shows an ACKNOWLEDGED chip on a recorded acknowledgement", () => {
+    const base = order();
+    const state = reviewState({
+      PaymentTerms: "30 days",
+      Items: [base.Items[0]],
+    });
+    const html = markup(
+      <PurchaseOrderDifferenceReviewView
+        state={state}
+        source={SOURCE}
+        currency={USD}
+        quoteNumber="1502260042"
+        documentState="none"
+        decisions={{ "header:paymentTerms": "po" }}
+        acknowledgedMissing={["3"]}
+        acknowledgedExtra={[]}
+        onDecision={() => undefined}
+        onToggleMissing={() => undefined}
+        onToggleExtra={() => undefined}
+        onMatchChange={() => undefined}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />
+    );
+    expect(html).toContain("ACKNOWLEDGED");
+    expect(html).toContain("Quotation line 3 — Spare");
+  });
+});
