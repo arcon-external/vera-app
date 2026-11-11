@@ -1,6 +1,5 @@
 import { renderToStaticMarkup, renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { backend } from "@backend/models";
 import { Login } from "@backend/backend/AuthAPI";
 import {
   LoginPage,
@@ -12,6 +11,7 @@ import {
   updateLinkTarget,
 } from "./LoginPage";
 import type { SignedInUser } from "./LoginPage";
+import { UPDATE_NEWER, UPDATE_REQUIRED } from "../updateFixture";
 
 // Issues #436 and #434: the sign-in page's update notice, and the
 // keep-me-signed-in checkbox. The suite runs in node with no DOM (the house
@@ -27,30 +27,17 @@ import type { SignedInUser } from "./LoginPage";
 // click that hands the URL to the browser (updateLinkTarget pins which URL
 // that click uses, and BrowserOpenURL is the same call UpdateBanner makes).
 
-// The shape GET /v1/app/latest answers for a newer build. The Go side has
-// already resolved this platform's installer and decided availability
-// (backend/update.go): the frontend consumes that decision, it never repeats it.
-const NEWER: backend.UpdateInfo = {
-  Current: "0.12.1",
-  Latest: "0.13.1",
-  NotesURL: "https://api.arconpentapersada.co.id/v1/app/changelog",
-  DownloadURL:
-    "https://vera-downloads-508411.storage.googleapis.com/Vera-v0.13.1-windows-amd64-installer.exe",
-  UpdateAvailable: true,
-  Required: false,
-};
-
+// The served check lives in ../updateFixture.ts, in the live `v`-prefixed
+// shape (#558): the login notice, the in-app banner and the snapshot harness
+// all read it, so a fixture that stops looking like the contract is caught
+// rather than silently passing a `vv` regression.
 const UPDATED = {
-  current: "0.12.1",
-  latest: "0.13.1",
-  downloadURL: NEWER.DownloadURL,
-  notesURL: NEWER.NotesURL,
+  current: "v0.12.1",
+  latest: "v0.13.1",
+  downloadURL: UPDATE_NEWER.DownloadURL,
+  notesURL: UPDATE_NEWER.NotesURL,
   required: false,
 };
-
-// The same served check with the build below the server's minimum supported
-// version (backend/update.go: Required is the Go side's verdict).
-const REQUIRED: backend.UpdateInfo = { ...NEWER, Required: true };
 
 // The bindings, mocked: LoginPage imports CheckForUpdates for the mount
 // effect and Login/RedeemInvite for the sign-in submit, and a test that
@@ -84,12 +71,16 @@ function renderNotice(props: {
 
 describe("loginUpdateNotice resolves the served check", () => {
   it("turns a newer build into the notice's props", () => {
-    expect(loginUpdateNotice(NEWER)).toEqual(UPDATED);
+    expect(loginUpdateNotice(UPDATE_NEWER)).toEqual(UPDATED);
   });
 
   it("is null when the running build is up to date", () => {
     expect(
-      loginUpdateNotice({ ...NEWER, Latest: "0.12.1", UpdateAvailable: false })
+      loginUpdateNotice({
+        ...UPDATE_NEWER,
+        Latest: "v0.12.1",
+        UpdateAvailable: false,
+      })
     ).toBeNull();
   });
 
@@ -98,22 +89,30 @@ describe("loginUpdateNotice resolves the served check", () => {
     // installer URL. A frontend that compared them again would disagree the
     // moment the server's rule changed (prereleases, minimum-supported).
     expect(
-      loginUpdateNotice({ ...NEWER, Current: "0.13.1", UpdateAvailable: true })
-    ).toEqual({ ...UPDATED, current: "0.13.1" });
+      loginUpdateNotice({
+        ...UPDATE_NEWER,
+        Current: "v0.13.1",
+        UpdateAvailable: true,
+      })
+    ).toEqual({ ...UPDATED, current: "v0.13.1" });
     expect(
-      loginUpdateNotice({ ...NEWER, Current: "0.13.1", UpdateAvailable: false })
+      loginUpdateNotice({
+        ...UPDATE_NEWER,
+        Current: "v0.13.1",
+        UpdateAvailable: false,
+      })
     ).toBeNull();
   });
 });
 
 describe("fetchLoginUpdateNotice is the silent mount check", () => {
   it("resolves the notice when the check answers", async () => {
-    await expect(fetchLoginUpdateNotice(async () => NEWER)).resolves.toEqual(UPDATED);
+    await expect(fetchLoginUpdateNotice(async () => UPDATE_NEWER)).resolves.toEqual(UPDATED);
   });
 
   it("resolves null when the check resolves without an update", async () => {
     await expect(
-      fetchLoginUpdateNotice(async () => ({ ...NEWER, UpdateAvailable: false }))
+      fetchLoginUpdateNotice(async () => ({ ...UPDATE_NEWER, UpdateAvailable: false }))
     ).resolves.toBeNull();
   });
 
@@ -130,7 +129,7 @@ describe("fetchLoginUpdateNotice is the silent mount check", () => {
 
 describe("LoginUpdateNotice markup", () => {
   it("prints both versions and a Download update button beside the copy", () => {
-    const html = renderNotice(loginUpdateNotice(NEWER)!);
+    const html = renderNotice(loginUpdateNotice(UPDATE_NEWER)!);
     expect(html).toContain(
       "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
     );
@@ -138,15 +137,33 @@ describe("LoginUpdateNotice markup", () => {
     expect(html).toContain('role="status"');
   });
 
-  it("never prints a doubled v when the served versions already carry the prefix", () => {
-    // Issue #546: the live contract serves "v0.15.0" and the Go build stamps
-    // "v0.14.5", so the old literal "v" in the JSX rendered "vv0.15.0". The
-    // notice must accept either shape and still print exactly one v.
+  it("prints exactly one v for both versions", () => {
+    // Ticket #558: the fixture is the live v-prefixed shape, so this is the
+    // sentence a staff member reads. A doubled v anywhere in the markup is
+    // the #546 regression ("Vera vv0.15.0") and fails here.
+    const html = renderNotice(loginUpdateNotice(UPDATE_NEWER)!);
+    expect(html).toContain(
+      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
+    );
+    expect(html).not.toContain("vv");
+  });
+
+  it("prints one v in the required-build sentence", () => {
+    const html = renderNotice(loginUpdateNotice(UPDATE_REQUIRED)!);
+    expect(html).toContain(
+      "This Vera (v0.12.1) is below the minimum supported version. Please update to v0.13.1 to keep working."
+    );
+    expect(html).not.toContain("vv");
+  });
+
+  it("normalises a doubled v instead of printing it", () => {
+    // The contract carries one v; a response that carries two must still read
+    // as one. This is the normaliser behind the fixture's shape.
     const html = renderNotice(
       loginUpdateNotice({
-        ...NEWER,
-        Current: "v0.12.1",
-        Latest: "v0.13.1",
+        ...UPDATE_NEWER,
+        Current: "vv0.12.1",
+        Latest: "vv0.13.1",
       })!
     );
     expect(html).toContain(
@@ -156,9 +173,9 @@ describe("LoginUpdateNotice markup", () => {
 
     const requiredHTML = renderNotice(
       loginUpdateNotice({
-        ...REQUIRED,
-        Current: "v0.12.1",
-        Latest: "v0.13.1",
+        ...UPDATE_REQUIRED,
+        Current: "vv0.12.1",
+        Latest: "vv0.13.1",
       })!
     );
     expect(requiredHTML).toContain(
@@ -176,7 +193,7 @@ describe("LoginUpdateNotice markup", () => {
     //
     // Rendered through loginUpdateNotice, not hand-written props: the plumbing
     // (Required → required) is what makes this red if it is dropped again.
-    const html = renderNotice(loginUpdateNotice(REQUIRED)!);
+    const html = renderNotice(loginUpdateNotice(UPDATE_REQUIRED)!);
     expect(html).toContain('role="alert"');
     expect(html).toContain("bg-danger-50 text-danger-700");
     expect(html).toContain(
@@ -189,20 +206,22 @@ describe("LoginUpdateNotice markup", () => {
     // An unknown platform gets no DownloadURL: the button reads as what it
     // does and aims at the notes URL.
     const html = renderNotice({
-      current: "0.12.1",
-      latest: "0.13.1",
+      current: UPDATE_NEWER.Current,
+      latest: UPDATE_NEWER.Latest,
       downloadURL: "",
-      notesURL: NEWER.NotesURL,
+      notesURL: UPDATE_NEWER.NotesURL,
       required: false,
     });
     expect(html).toContain(">See what&#x27;s new</button>");
-    expect(updateLinkTarget("", NEWER.NotesURL)).toBe(NEWER.NotesURL);
-    expect(updateLinkTarget(NEWER.DownloadURL, NEWER.NotesURL)).toBe(NEWER.DownloadURL);
+    expect(updateLinkTarget("", UPDATE_NEWER.NotesURL)).toBe(UPDATE_NEWER.NotesURL);
+    expect(updateLinkTarget(UPDATE_NEWER.DownloadURL, UPDATE_NEWER.NotesURL)).toBe(
+      UPDATE_NEWER.DownloadURL
+    );
   });
 
   it("keeps the copy and the button on one wrapped row, never a wide fixed line", () => {
     // The 360px login column: the copy must wrap, so the row is flex-wrap.
-    const html = renderNotice(loginUpdateNotice(NEWER)!);
+    const html = renderNotice(loginUpdateNotice(UPDATE_NEWER)!);
     expect(html).toContain("flex flex-wrap items-center gap-x-3 gap-y-2");
   });
 });
