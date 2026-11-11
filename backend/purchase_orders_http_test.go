@@ -238,7 +238,8 @@ func TestAssignPurchaseOrderConfirmationNumberPostsAndMapsTheNumber(t *testing.T
 
 // TestFinalizePurchaseOrderSendsTheAssignmentRequest proves the checkbox
 // travels as a request field and that the returned identifier is mapped. The
-// desktop never sends the number itself.
+// desktop never sends the number itself, and (#579) never sends the draft's
+// confirmation request beside the checkbox.
 func TestFinalizePurchaseOrderSendsTheAssignmentRequest(t *testing.T) {
 	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost ||
@@ -252,6 +253,9 @@ func TestFinalizePurchaseOrderSendsTheAssignmentRequest(t *testing.T) {
 		}
 		if body["assignConfirmationNumber"] != true {
 			t.Errorf("assignConfirmationNumber = %v; want true", body["assignConfirmationNumber"])
+		}
+		if _, sent := body["confirmationRequested"]; sent {
+			t.Error("the finalize payload carried the draft confirmation request; only the checkbox may travel")
 		}
 		if _, sent := body["confirmationNumber"]; sent {
 			t.Error("the client sent a confirmation number; only the server may allocate one")

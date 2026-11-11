@@ -504,8 +504,6 @@ export interface PurchaseOrderFinalizeInput {
   Incoterms: string;
   PaymentTerms: string;
   AdjustmentReason: string;
-  /** The draft's confirmation-number request (#581). */
-  ConfirmationRequested: boolean;
   Items: PurchaseOrderItemInput[];
   Decisions: Array<{ Key: string; Choice: POReviewChoice }>;
   AcknowledgedMissing: string[];
@@ -569,9 +567,13 @@ export function buildFinalizeInput(
   if (update.input === null) {
     return { input: null, error: update.error ?? "The purchase order is incomplete." };
   }
+  // #579: the draft preference only pre-filled the final checkbox. The final
+  // save carries the checkbox answer and lets the server derive the stored
+  // request from it, so the draft field never travels with this payload.
+  const { ConfirmationRequested: _draftConfirmationRequest, ...finalizeFields } = update.input;
   return {
     input: {
-      ...update.input,
+      ...finalizeFields,
       Decisions: evaluation.comparison.differences.map((difference) => ({
         Key: difference.key,
         Choice: decisions[difference.key]!,

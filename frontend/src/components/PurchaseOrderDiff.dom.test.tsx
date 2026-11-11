@@ -211,6 +211,35 @@ describe("two-sided difference review (#582)", () => {
     expect(side("po").textContent).toContain("30 days");
   });
 
+  it("keeps a formatted money value on one line and gives the changed side the accent", () => {
+    const base = order();
+    render({ items: [{ ...base.Items[0], UnitPriceMinor: 12000 }] });
+    const row = document.querySelector<HTMLElement>(
+      '[role="group"][aria-label="Line 1 unit price"]'
+    );
+    const poValue = row?.querySelector<HTMLElement>('[data-side="po"] [data-value]');
+    const quotationValue = row?.querySelector<HTMLElement>(
+      '[data-side="quotation"] [data-value]'
+    );
+    expect(poValue).not.toBeNull();
+    expect(quotationValue).not.toBeNull();
+    // Money never wraps; free text is covered by the next test.
+    expect(poValue?.className).toContain("whitespace-nowrap");
+    expect(quotationValue?.className).toContain("whitespace-nowrap");
+    // The changed value is stronger than the chip alone: the quotation side
+    // carries the accent and both sides are emphasised over body copy.
+    expect(quotationValue?.className).toContain("text-accent-800");
+    expect(quotationValue?.className).toContain("font-semibold");
+    expect(poValue?.className).toContain("font-semibold");
+  });
+
+  it("lets a free-text value wrap", () => {
+    render();
+    const poValue = side("po").querySelector<HTMLElement>("[data-value]");
+    expect(poValue).not.toBeNull();
+    expect(poValue?.className).not.toContain("whitespace-nowrap");
+  });
+
   it("shows an empty side as a dashed (empty) placeholder", () => {
     render({ paymentTerms: "" });
     const placeholder = side("po").querySelector<HTMLElement>(
@@ -238,6 +267,34 @@ describe("two-sided difference review (#582)", () => {
     render({ items, acknowledgedMissing: ["3"] });
     expect(document.body.textContent).toContain("ACKNOWLEDGED");
     expect(document.body.textContent).toContain("Quotation line 3 — Spare");
+  });
+
+  it("acknowledges an extra line through the unchanged callback and then chips it", () => {
+    const onToggleExtra = vi.fn();
+    const base = order();
+    const items = [
+      base.Items[0],
+      {
+        ...base.Items[0],
+        LineNumber: 2,
+        QuotationItemNo: null,
+        QuotationSubNo: null,
+        Description: "Freight",
+        UnitPriceMinor: 0,
+      },
+    ];
+    render({ items, onToggleExtra });
+    act(() =>
+      document
+        .querySelector<HTMLInputElement>(
+          'input[aria-label="Acknowledge line 2 as extra"]'
+        )!
+        .click()
+    );
+    expect(onToggleExtra).toHaveBeenCalledWith(2);
+
+    render({ items, acknowledgedExtra: [2] });
+    expect(document.body.textContent).toContain("ACKNOWLEDGED");
   });
 
   it("counts differences, missing and extra lines in the summary", () => {

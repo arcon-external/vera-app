@@ -217,6 +217,51 @@ func TestPurchaseOrderCorrectionKeepsThePreviousValuesAndRequiresAReason(t *test
 // accepted `items: []` would be a second, weaker door into the same state. The
 // two paths share one validation function, so this test guards the shared rule,
 // not a copy of it. A draft may still be saved incomplete.
+// Issue #579: a correction replaces editable values only. A saved record that
+// had a confirmation number keeps its stored request when a later correction
+// edits something unrelated; the correction payload's zero value must not clear
+// it.
+func TestPurchaseOrderCorrectionKeepsTheConfirmationRequest(t *testing.T) {
+	database := openTestSchema(t, "vera_po_579_confirmation_correction")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Confirmation correction")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	finalize := finalizeInput(draft, user, "PO-579-CONF")
+	finalize.AssignConfirmationNumber = true
+	saved, err := database.FinalizePurchaseOrder(ctx, finalize)
+	if err != nil {
+		t.Fatalf("finalize with confirmation: %v", err)
+	}
+	if saved.ConfirmationNumber == nil || !saved.ConfirmationRequested {
+		t.Fatalf("saved request/number = %v/%v; want true and assigned",
+			saved.ConfirmationRequested, saved.ConfirmationNumber)
+	}
+
+	input := correctionInput(saved, user, "Customer changed the delivery address", saved.Version)
+	input.DeliveryAddress = "Jl. Corrected Delivery 9"
+	corrected, err := database.CorrectPurchaseOrder(ctx, input)
+	if err != nil {
+		t.Fatalf("correct: %v", err)
+	}
+	if corrected.DeliveryAddress != "Jl. Corrected Delivery 9" {
+		t.Errorf("delivery address = %q; want the corrected value", corrected.DeliveryAddress)
+	}
+	if !corrected.ConfirmationRequested {
+		t.Errorf("the correction cleared confirmation_requested: %+v", corrected)
+	}
+
+	reloaded, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("reload corrected record: %v", err)
+	}
+	if !reloaded.ConfirmationRequested || reloaded.ConfirmationNumber == nil {
+		t.Errorf("reloaded request/number = %v/%v; want true and assigned",
+			reloaded.ConfirmationRequested, reloaded.ConfirmationNumber)
+	}
+}
+
 func TestPurchaseOrderCorrectionKeepsTheFinalizeMinimum(t *testing.T) {
 	database := openTestSchema(t, "vera_po_473_minimum")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Minimum")

@@ -498,6 +498,7 @@ describe("final save from the editor (issue #471)", () => {
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.AssignConfirmationNumber).toBe(true);
     expect(payload).not.toHaveProperty("ConfirmationNumber");
+    expect(payload).not.toHaveProperty("ConfirmationRequested");
   });
 
   // Issue #581: a saved draft's request pre-fills the final checkbox, and the
@@ -533,7 +534,9 @@ describe("final save from the editor (issue #471)", () => {
     expect(finalizeMock).toHaveBeenCalledTimes(1);
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.AssignConfirmationNumber).toBe(false);
-    expect(payload.ConfirmationRequested).toBe(true);
+    // #579: the draft's old request never travels; only the checkbox answer
+    // does, and the server derives the stored request from it.
+    expect(payload).not.toHaveProperty("ConfirmationRequested");
   });
 
   it("focuses the failure banner when the final save fails", async () => {

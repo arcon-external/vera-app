@@ -282,11 +282,9 @@ type PurchaseOrderFinalizeInput struct {
 	ExpectedVersion       int64
 	Overwrite             bool
 	DocumentConfirmed     bool
-	// ConfirmationRequested is the draft preference (#581). The final checkbox
-	// is AssignConfirmationNumber; this field only records the request.
-	ConfirmationRequested bool
 	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
-	// the record unassigned and consumes no sequence.
+	// the record unassigned and consumes no sequence. The stored draft request
+	// is derived from this one answer (#579), never carried beside it.
 	AssignConfirmationNumber bool
 }
 
@@ -643,30 +641,32 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 	var response apicontract.PurchaseOrderRow
 	if err := client.Put("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10),
 		apicontract.PurchaseOrderUpdateRequest{
-			PurchaseOrderProtectedFieldsRequest: apicontract.PurchaseOrderProtectedFieldsRequest{
-				Currency:        stringPointer(input.Currency),
-				TaxZone:         stringPointer(input.TaxZone),
-				TaxType:         stringPointer(input.TaxType),
-				ServiceCategory: stringPointer(input.ServiceCategory),
+			PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+				PurchaseOrderProtectedFieldsRequest: apicontract.PurchaseOrderProtectedFieldsRequest{
+					Currency:        stringPointer(input.Currency),
+					TaxZone:         stringPointer(input.TaxZone),
+					TaxType:         stringPointer(input.TaxType),
+					ServiceCategory: stringPointer(input.ServiceCategory),
+				},
+				BillingAddress:        input.BillingAddress,
+				DeliveryAddress:       input.DeliveryAddress,
+				ShipToCode:            input.ShipToCode,
+				ContactEmail:          input.ContactEmail,
+				ContactPhone:          input.ContactPhone,
+				PONumber:              input.PONumber,
+				PODate:                input.PODate,
+				ReceivedDate:          input.ReceivedDate,
+				RequestedDeliveryDate: input.RequestedDeliveryDate,
+				PaymentTerms:          input.PaymentTerms,
+				Incoterms:             input.Incoterms,
+				Items:                 items,
+				DiscountPercent:       input.DiscountPercent,
+				AdjustmentMinor:       input.AdjustmentMinor,
+				AdjustmentReason:      input.AdjustmentReason,
+				ExpectedVersion:       input.ExpectedVersion,
+				Overwrite:             input.Overwrite,
 			},
-			BillingAddress:        input.BillingAddress,
-			DeliveryAddress:       input.DeliveryAddress,
-			ShipToCode:            input.ShipToCode,
-			ContactEmail:          input.ContactEmail,
-			ContactPhone:          input.ContactPhone,
-			PONumber:              input.PONumber,
-			PODate:                input.PODate,
-			ReceivedDate:          input.ReceivedDate,
-			RequestedDeliveryDate: input.RequestedDeliveryDate,
-			PaymentTerms:          input.PaymentTerms,
-			Incoterms:             input.Incoterms,
-			Items:                 items,
-			DiscountPercent:       input.DiscountPercent,
-			AdjustmentMinor:       input.AdjustmentMinor,
-			AdjustmentReason:      input.AdjustmentReason,
 			ConfirmationRequested: input.ConfirmationRequested,
-			ExpectedVersion:       input.ExpectedVersion,
-			Overwrite:             input.Overwrite,
 		}, &response); err != nil {
 		return purchaseOrderWriteFailure(err)
 	}
@@ -713,23 +713,25 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/correction",
 		apicontract.PurchaseOrderCorrectionRequest{
 			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
-				BillingAddress:        input.BillingAddress,
-				DeliveryAddress:       input.DeliveryAddress,
-				ShipToCode:            input.ShipToCode,
-				ContactEmail:          input.ContactEmail,
-				ContactPhone:          input.ContactPhone,
-				PONumber:              input.PONumber,
-				PODate:                input.PODate,
-				ReceivedDate:          input.ReceivedDate,
-				RequestedDeliveryDate: input.RequestedDeliveryDate,
-				PaymentTerms:          input.PaymentTerms,
-				Incoterms:             input.Incoterms,
-				Items:                 items,
-				DiscountPercent:       input.DiscountPercent,
-				AdjustmentMinor:       input.AdjustmentMinor,
-				AdjustmentReason:      input.AdjustmentReason,
-				ExpectedVersion:       input.ExpectedVersion,
-				Overwrite:             input.Overwrite,
+				PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+					BillingAddress:        input.BillingAddress,
+					DeliveryAddress:       input.DeliveryAddress,
+					ShipToCode:            input.ShipToCode,
+					ContactEmail:          input.ContactEmail,
+					ContactPhone:          input.ContactPhone,
+					PONumber:              input.PONumber,
+					PODate:                input.PODate,
+					ReceivedDate:          input.ReceivedDate,
+					RequestedDeliveryDate: input.RequestedDeliveryDate,
+					PaymentTerms:          input.PaymentTerms,
+					Incoterms:             input.Incoterms,
+					Items:                 items,
+					DiscountPercent:       input.DiscountPercent,
+					AdjustmentMinor:       input.AdjustmentMinor,
+					AdjustmentReason:      input.AdjustmentReason,
+					ExpectedVersion:       input.ExpectedVersion,
+					Overwrite:             input.Overwrite,
+				},
 			},
 			Reason: input.Reason,
 		}, &response); err != nil {
@@ -802,22 +804,24 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/source-repair",
 		apicontract.PurchaseOrderSourceRepairRequest{
 			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
-				BillingAddress:        input.BillingAddress,
-				DeliveryAddress:       input.DeliveryAddress,
-				ShipToCode:            input.ShipToCode,
-				ContactEmail:          input.ContactEmail,
-				ContactPhone:          input.ContactPhone,
-				PONumber:              input.PONumber,
-				PODate:                input.PODate,
-				ReceivedDate:          input.ReceivedDate,
-				RequestedDeliveryDate: input.RequestedDeliveryDate,
-				PaymentTerms:          input.PaymentTerms,
-				Incoterms:             input.Incoterms,
-				Items:                 items,
-				DiscountPercent:       input.DiscountPercent,
-				AdjustmentMinor:       input.AdjustmentMinor,
-				AdjustmentReason:      input.AdjustmentReason,
-				ExpectedVersion:       input.ExpectedVersion,
+				PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
+					BillingAddress:        input.BillingAddress,
+					DeliveryAddress:       input.DeliveryAddress,
+					ShipToCode:            input.ShipToCode,
+					ContactEmail:          input.ContactEmail,
+					ContactPhone:          input.ContactPhone,
+					PONumber:              input.PONumber,
+					PODate:                input.PODate,
+					ReceivedDate:          input.ReceivedDate,
+					RequestedDeliveryDate: input.RequestedDeliveryDate,
+					PaymentTerms:          input.PaymentTerms,
+					Incoterms:             input.Incoterms,
+					Items:                 items,
+					DiscountPercent:       input.DiscountPercent,
+					AdjustmentMinor:       input.AdjustmentMinor,
+					AdjustmentReason:      input.AdjustmentReason,
+					ExpectedVersion:       input.ExpectedVersion,
+				},
 			},
 			TargetQuotationID:    input.TargetQuotationID,
 			TargetRevisionNumber: &revision,
@@ -1186,7 +1190,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders/"+strconv.FormatInt(input.ID, 10)+"/finalize",
 		apicontract.PurchaseOrderFinalizeRequest{
-			PurchaseOrderUpdateRequest: apicontract.PurchaseOrderUpdateRequest{
+			PurchaseOrderEditableRequest: apicontract.PurchaseOrderEditableRequest{
 				BillingAddress:        input.BillingAddress,
 				DeliveryAddress:       input.DeliveryAddress,
 				ShipToCode:            input.ShipToCode,
@@ -1202,7 +1206,6 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
 				AdjustmentReason:      input.AdjustmentReason,
-				ConfirmationRequested: input.ConfirmationRequested,
 				ExpectedVersion:       input.ExpectedVersion,
 				Overwrite:             input.Overwrite,
 			},

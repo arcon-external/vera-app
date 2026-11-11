@@ -73,6 +73,11 @@ export interface DiffValueProps {
   muted?: boolean;
   /** Renders the dashed `(empty)` placeholder instead of the value. */
   empty?: boolean;
+  /**
+   * Money and other atomic values never wrap. Free text is left alone so a
+   * long address or payment term can still wrap inside its side.
+   */
+  nowrap?: boolean;
   /** Actions rendered under the value. */
   children?: ReactNode;
   /**
@@ -97,6 +102,7 @@ export function DiffValue({
   selected = false,
   muted = false,
   empty = false,
+  nowrap = false,
   children,
   onSelect,
   ariaLabel,
@@ -132,18 +138,24 @@ export function DiffValue({
       ) : null}
       {empty ? (
         <span className="flex">
-          <span
-            data-empty="true"
-            className="inline-flex min-h-6 items-center rounded-md border border-dashed border-ink-300 px-2 text-caption italic text-ink-400"
-          >
-            (empty)
-          </span>
+          <EmptyValue />
         </span>
       ) : (
         <span
-          className={`tnum text-small font-medium ${
-            muted ? "text-ink-500" : "text-ink-900"
-          }`}
+          data-value="true"
+          className={[
+            "tnum text-small",
+            // #582/#579: the changed value carries the emphasis, not only the
+            // chip; money stays on one line while free text may wrap.
+            nowrap ? "whitespace-nowrap" : "",
+            muted
+              ? "font-medium text-ink-500"
+              : side === "quotation"
+                ? "font-semibold text-accent-800"
+                : "font-semibold text-ink-950",
+          ]
+            .filter((part) => part !== "")
+            .join(" ")}
         >
           {value}
         </span>
@@ -186,7 +198,8 @@ export interface DiffChoiceProps {
   quotationValue: string;
   /** The chosen side, if any: none is preselected when the review opens. */
   choice?: DiffSide;
-  status?: DiffStatus;
+  /** Both values are formatted money and must never wrap. */
+  money?: boolean;
   poAction?: ReactNode;
   quotationAction?: ReactNode;
   /** Extra content under the two sides, such as provenance copy. */
@@ -203,7 +216,7 @@ export function DiffChoice({
   poValue,
   quotationValue,
   choice,
-  status = "changed",
+  money = false,
   poAction,
   quotationAction,
   children,
@@ -216,13 +229,14 @@ export function DiffChoice({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-small font-medium text-ink-900">{label}</p>
-        <DiffStatusChip status={status} />
+        <DiffStatusChip status="changed" />
       </div>
       <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-stretch">
         <DiffValue
           side="po"
           value={poValue}
           empty={poValue === ""}
+          nowrap={money}
           selected={choice === "po"}
           muted={choice === "quotation"}
         >
@@ -233,6 +247,7 @@ export function DiffChoice({
           side="quotation"
           value={quotationValue}
           empty={quotationValue === ""}
+          nowrap={money}
           selected={choice === "quotation"}
           muted={choice === "po"}
         >
