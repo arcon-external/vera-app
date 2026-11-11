@@ -14,6 +14,7 @@ import {
   formatUnitPriceMinor,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
+  latestPersistedVersion,
   listValidationBlockers,
   MAX_PAYMENT_TERMS_LENGTH,
   parseDiscountPercent,
@@ -1321,5 +1322,25 @@ describe("PO split-line payload (#573)", () => {
     expect(buildPurchaseOrderUpdate(state, USD).error).toContain(
       "each description line must be 500 characters or fewer"
     );
+  });
+});
+
+describe("retained draft version (#584)", () => {
+  it("takes the editor state when it has advanced past the retained draft", () => {
+    expect(latestPersistedVersion(41, 5, { id: 41, version: 2 })).toBe(5);
+  });
+
+  it("never moves backwards when the retained version is ahead", () => {
+    // A session save can adopt a version before React renders it; a lookup
+    // that ran on the older state must not undo it.
+    expect(latestPersistedVersion(41, 5, { id: 41, version: 6 })).toBe(6);
+  });
+
+  it("ignores a retained draft for a different row", () => {
+    expect(latestPersistedVersion(42, 3, { id: 41, version: 9 })).toBe(3);
+  });
+
+  it("uses the editor state when nothing is retained", () => {
+    expect(latestPersistedVersion(41, 4, null)).toBe(4);
   });
 });

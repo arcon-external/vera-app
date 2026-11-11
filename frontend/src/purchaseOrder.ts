@@ -1025,6 +1025,22 @@ export function canAssignConfirmationNumber(order: PurchaseOrderDTO): boolean {
 }
 
 /**
+ * The version a write may name for a stored row (#584). The editor state and
+ * the retained draft can each be a render behind the other: a draft save
+ * advances the state through `saveSucceeded`, while a session save advances
+ * the retained draft before React renders it. The write must name the newer of
+ * the two, and a retained version may never move backwards.
+ */
+export function latestPersistedVersion(
+  orderId: number,
+  stateVersion: number,
+  retained: { id: number; version: number } | null
+): number {
+  if (retained === null || retained.id !== orderId) return stateVersion;
+  return Math.max(stateVersion, retained.version);
+}
+
+/**
  * A full replace-lines payload, or the reason it cannot be built. Drafts may
  * be incomplete in content, but a line that cannot be parsed must not be
  * silently stored as zero: the reason names the field so the editor can show
