@@ -132,6 +132,11 @@ export interface PurchaseOrderDTO {
   ConfirmationAssignedAt?: string | null;
   ConfirmationWarn?: boolean;
   /**
+   * Whether the draft asked for a confirmation number (#581). It allocates
+   * nothing; the final save's checkbox remains the authority.
+   */
+  ConfirmationRequested?: boolean;
+  /**
    * The optimistic-concurrency revision (#473). It starts at 1 and moves
    * forward on every write; the editor submits the version it loaded.
    */
@@ -192,6 +197,8 @@ export interface PurchaseOrderHeader {
   requestedDeliveryDate: string;
   paymentTerms: string;
   incoterms: string;
+  /** The draft's confirmation-number request (#581); off by default. */
+  confirmationRequested: boolean;
 }
 
 export interface PurchaseOrderEditorState {
@@ -305,6 +312,8 @@ export interface PurchaseOrderUpdateInput {
   Incoterms: string;
   PaymentTerms: string;
   AdjustmentReason: string;
+  /** The draft's confirmation-number request (#581). Allocates nothing. */
+  ConfirmationRequested: boolean;
   Items: PurchaseOrderItemInput[];
   DiscountPercent: number;
   AdjustmentMinor: number;
@@ -876,6 +885,7 @@ function headerFromOrder(
     requestedDeliveryDate: order.RequestedDeliveryDate ?? "",
     paymentTerms: order.PaymentTerms,
     incoterms: order.Incoterms,
+    confirmationRequested: order.ConfirmationRequested ?? false,
   };
 }
 
@@ -1132,6 +1142,7 @@ export function buildPurchaseOrderUpdate(
       // stay dormant; every write pins them to zero so no new record carries a
       // value the editor can no longer show or explain.
       AdjustmentReason: "",
+      ConfirmationRequested: state.header.confirmationRequested,
       Items: items,
       DiscountPercent: 0,
       AdjustmentMinor: 0,
@@ -1165,7 +1176,9 @@ export interface ValidationBlocker {
  * Mirrors buildPurchaseOrderUpdate's checks one for one (same messages, same
  * order) so the gate can name blockers the payload builder would only report
  * as the first failure. No new requiredness is introduced: empty fields are
- * only blockers where the payload already refuses them.
+ * only blockers where the payload already refuses them. The saved-record
+ * minimum (at least one line, #580) is checked by Final Save itself, so a
+ * blank draft does not open with a blocker chip.
  */
 export function listValidationBlockers(
   state: PurchaseOrderEditorState,

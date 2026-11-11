@@ -19,9 +19,11 @@ import type {
 import {
   draftLinkCurrencyRemedy,
   draftTaxBasisLabel,
+  ppnLabel,
   type PurchaseOrderDraftLinkReviewDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "../poDraftLink";
+import { DiffDivider, DiffValue } from "./PODiff";
 import { PurchaseOrderDifferenceReviewView } from "./PurchaseOrderFinalize";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
@@ -146,6 +148,9 @@ export function PurchaseOrderDraftLinkReviewPanel({
     review.Source.Currency
   );
 
+  // #582: the tax basis is a two-sided diff like the value rows. The whole
+  // side is the selection target, so the old inner button is now the card
+  // itself and keeps the same accessible name and pressed state.
   const taxCard = (
     <Card className="p-4">
       <SectionHeading
@@ -156,45 +161,44 @@ export function PurchaseOrderDraftLinkReviewPanel({
             : "Both sides use the same basis"
         }
       />
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div
-          className={`grid content-start gap-2 rounded-lg border p-3 ${
-            taxChoice === "keep" ? "border-accent-500 bg-accent-50" : "border-rule"
-          }`}
+      <p className="mt-1 text-caption text-ink-500">
+        PPN difference: {ppnLabel(review.DraftTax)} on this purchase order;{" "}
+        {ppnLabel(review.SourceTax)} on the quotation revision.
+      </p>
+      <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-stretch">
+        <DiffValue
+          side="po"
+          caption="This purchase order"
+          value={draftTaxBasisLabel(review.DraftTax)}
+          selected={taxChoice === "keep"}
+          muted={taxChoice === "source"}
+          onSelect={review.TaxChoiceRequired ? () => onTaxChoice("keep") : undefined}
+          ariaLabel="Keep the draft tax basis"
+          ariaPressed={taxChoice === "keep"}
         >
-          <p className="text-small font-medium text-ink-900">This purchase order</p>
-          <p className="text-caption text-ink-600">{draftTaxBasisLabel(review.DraftTax)}</p>
           {review.TaxChoiceRequired ? (
-            <Button
-              size="sm"
-              variant={taxChoice === "keep" ? "primary" : "secondary"}
-              aria-pressed={taxChoice === "keep"}
-              aria-label="Keep the draft tax basis"
-              onClick={() => onTaxChoice("keep")}
-            >
+            <span className="text-small font-medium text-accent-700">
               Keep this basis
-            </Button>
+            </span>
           ) : null}
-        </div>
-        <div
-          className={`grid content-start gap-2 rounded-lg border p-3 ${
-            taxChoice === "source" ? "border-accent-500 bg-accent-50" : "border-rule"
-          }`}
+        </DiffValue>
+        <DiffDivider />
+        <DiffValue
+          side="quotation"
+          caption="Quotation revision"
+          value={draftTaxBasisLabel(review.SourceTax)}
+          selected={taxChoice === "source"}
+          muted={taxChoice === "keep"}
+          onSelect={review.TaxChoiceRequired ? () => onTaxChoice("source") : undefined}
+          ariaLabel="Use the quotation tax basis"
+          ariaPressed={taxChoice === "source"}
         >
-          <p className="text-small font-medium text-ink-900">Quotation revision</p>
-          <p className="text-caption text-ink-600">{draftTaxBasisLabel(review.SourceTax)}</p>
           {review.TaxChoiceRequired ? (
-            <Button
-              size="sm"
-              variant={taxChoice === "source" ? "primary" : "secondary"}
-              aria-pressed={taxChoice === "source"}
-              aria-label="Use the quotation tax basis"
-              onClick={() => onTaxChoice("source")}
-            >
-              Use the quotation's
-            </Button>
+            <span className="text-small font-medium text-accent-700">
+              Use the quotation&apos;s
+            </span>
           ) : null}
-        </div>
+        </DiffValue>
       </div>
       <p className="mt-3 text-caption text-ink-500">
         PPN is recomputed from the chosen basis when the link commits.{" "}

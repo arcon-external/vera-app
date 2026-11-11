@@ -228,13 +228,17 @@ func TestFinalizePurchaseOrderRequiresTheFinalSaveMinimum(t *testing.T) {
 		t.Fatalf("zero lines error = %v; want ErrPurchaseOrderIncomplete", err)
 	}
 
-	// The record is still a draft: neither refusal wrote anything.
+	// The record is still a draft: neither refusal wrote anything, and the
+	// zero-line draft reads back exactly as it was saved (#580).
 	reloaded, err := database.GetPurchaseOrder(ctx, draft.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 	if reloaded.State != PurchaseOrderStateDraft || reloaded.SavedAt != nil {
 		t.Errorf("a refused final save changed the record: %+v", reloaded)
+	}
+	if len(reloaded.Items) != 0 {
+		t.Errorf("zero-line draft reopened with %d lines; want 0", len(reloaded.Items))
 	}
 }
 

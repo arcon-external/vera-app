@@ -229,6 +229,11 @@ interface ItemEditorProps {
    *  hides it because the sub-items are matched customer lines; merging them
    *  would discard prices the customer's order carries. */
   allowMergeSubItems?: boolean;
+  /**
+   * #580: a PO draft may be emptied, so the last line is removable there.
+   * Quotation mode keeps its at-least-one-line guard by leaving this false.
+   */
+  allowEmpty?: boolean;
   /** Optional reconciliation hooks. The quotation leaves them absent; the PO
    *  commits one line field on blur and records focus for Final Save. */
   onLineFieldFocus?: (
@@ -306,6 +311,7 @@ export function ItemEditor({
   renderItemMeta,
   renderSubItemMeta,
   allowMergeSubItems = true,
+  allowEmpty = false,
   onLineFieldFocus,
   onLineFieldBlur,
   onLineDiscountCommit,
@@ -453,7 +459,7 @@ export function ItemEditor({
             key={item.key}
             item={item}
             index={index}
-            canRemove={items.length > 1}
+            canRemove={allowEmpty || items.length > 1}
             currency={currency}
             uomOptions={uomOptions}
             uomPendingLabel={uomPendingLabel}
@@ -876,6 +882,14 @@ function ItemRow({
   // inline row on the right, with narrower columns. Otherwise the cells
   // take the full-width grid.
   const showSplit = !hasSubItems && showPanel;
+  // #580: the parent control removes the whole split line, so its name says
+  // so; a sub-item has its own distinct control further down.
+  const removeLineLabel = hasSubItems
+    ? `Remove split line ${index + 1}`
+    : `Remove line ${index + 1}`;
+  const removeLineTitle = hasSubItems
+    ? `Remove split line ${index + 1} and all its sub-items`
+    : `Remove line ${index + 1}`;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -1214,7 +1228,8 @@ function ItemRow({
 
         <button
           type="button"
-          aria-label={`Remove line ${index + 1}`}
+          aria-label={removeLineLabel}
+          title={removeLineTitle}
           onClick={() => onRemoveItem(item.key)}
           disabled={!canRemove}
           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
@@ -1481,6 +1496,7 @@ function SubRow({
           <button
             type="button"
             aria-label={`Remove ${label}`}
+            title={`Remove ${label}`}
             onClick={onRemove}
             className="flex h-9 w-7 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
           >

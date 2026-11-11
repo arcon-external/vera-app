@@ -100,10 +100,12 @@ func (s *Server) updatePurchaseOrderDraft(context echo.Context) error {
 	if protected := request.NamedExceptSourceBasis(); protected != "" {
 		return purchaseOrderProtectedField(context, protected)
 	}
-	update, err := purchaseOrderUpdateFromRequest(request, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
+	// #581: only a draft save carries the confirmation-number request.
+	update.ConfirmationRequested = request.ConfirmationRequested
 	update.ID = id
 	requestContext, err := s.organizationContext(context.Request().Context())
 	if err != nil {
@@ -131,7 +133,7 @@ func (s *Server) correctPurchaseOrder(context echo.Context) error {
 	if protected := request.Named(); protected != "" {
 		return purchaseOrderProtectedField(context, protected)
 	}
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -197,7 +199,7 @@ func (s *Server) repairPurchaseOrderSource(context echo.Context) error {
 	if request.TargetQuotationID < 1 || request.TargetRevisionNumber == nil || *request.TargetRevisionNumber < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid target quotation source"})
 	}
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, requestUser(context).ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, requestUser(context).ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -358,7 +360,7 @@ func (s *Server) finalizePurchaseOrder(context echo.Context) error {
 		return purchaseOrderProtectedField(context, protected)
 	}
 	user := requestUser(context)
-	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderUpdateRequest, user.ID)
+	update, err := purchaseOrderUpdateFromRequest(request.PurchaseOrderEditableRequest, user.ID)
 	if err != nil {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -618,6 +620,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		SavedBy:                order.SavedBy,
 		ConfirmationNumber:     order.ConfirmationNumber,
 		ConfirmationWarn:       order.ConfirmationWarn,
+		ConfirmationRequested:  order.ConfirmationRequested,
 		CreatedAt:              order.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:              order.UpdatedAt.Format(time.RFC3339),
 	}
@@ -679,7 +682,7 @@ func purchaseOrderProtectedField(context echo.Context, field string) error {
 // purchaseOrderUpdateFromRequest converts the shared editable payload. It only
 // fails on a malformed date; every other rule belongs to the store so the API
 // and the desktop cannot disagree.
-func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderUpdateRequest, updatedBy int64) (store.PurchaseOrderUpdate, error) {
+func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableRequest, updatedBy int64) (store.PurchaseOrderUpdate, error) {
 	poDate, err := parsePurchaseOrderDate(request.PODate, "poDate")
 	if err != nil {
 		return store.PurchaseOrderUpdate{}, err

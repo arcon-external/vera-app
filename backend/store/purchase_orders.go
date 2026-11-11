@@ -242,6 +242,10 @@ type PurchaseOrder struct {
 	ConfirmationAssignedAt   *time.Time
 	ConfirmationAssignedBy   *int64
 	ConfirmationWarn         bool
+	// ConfirmationRequested is the draft's request for a confirmation number
+	// (#581). It allocates nothing; the final save's checkbox remains the
+	// authority. Existing rows read false.
+	ConfirmationRequested bool
 }
 
 // PurchaseOrderReview is one draft or saved record beside the exact source
@@ -265,6 +269,10 @@ const (
 // PurchaseOrderFinalize is the final-save request: the same replaced values a
 // draft save carries, plus the difference-review decisions, the explicit
 // missing/extra acknowledgements, and the document confirmation.
+//
+// The embedded update shape is shared with draft saves, but the final save
+// never reads its ConfirmationRequested: that preference is draft-only (#581)
+// and the stored request is derived from AssignConfirmationNumber (#579).
 type PurchaseOrderFinalize struct {
 	PurchaseOrderUpdate
 	Decisions           []PurchaseOrderDecision
@@ -304,15 +312,18 @@ type PurchaseOrderBlankCreate struct {
 // discount and adjustment, and every line. The source link, snapshots, currency
 // and tax basis are not editable here.
 type PurchaseOrderUpdate struct {
-	ID                    int64
-	BillingAddress        string
-	DeliveryAddress       string
-	ShipToCode            string
-	ContactEmail          string
-	ContactPhone          string
-	PONumber              string
-	Incoterms             string
-	AdjustmentReason      string
+	ID               int64
+	BillingAddress   string
+	DeliveryAddress  string
+	ShipToCode       string
+	ContactEmail     string
+	ContactPhone     string
+	PONumber         string
+	Incoterms        string
+	AdjustmentReason string
+	// ConfirmationRequested is the draft preference (#581). It never allocates
+	// a number; the final save's AssignConfirmationNumber does that.
+	ConfirmationRequested bool
 	UpdatedBy             int64
 	PaymentTerms          string
 	PODate                *time.Time
@@ -916,7 +927,8 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	// A draft keeps its number free while staff prepare it: the key is cleared,
 	// so two people may still compete for one order. Only the final save writes
 	// it.
-	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis, nil); err != nil {
+	if err := updatePurchaseOrderEditable(ctx, tx, schema, org.ID, input, calculation, basis,
+		&input.ConfirmationRequested, nil); err != nil {
 		return PurchaseOrder{}, err
 	}
 	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
@@ -1798,6 +1810,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       po.confirmation_number, po.confirmation_sequence,
 		       po.confirmation_year, po.confirmation_customer_code,
 		       po.confirmation_assigned_at, po.confirmation_assigned_by,
+		       po.confirmation_requested,
 		       CASE WHEN po.quotation_id IS NOT NULL THEN 'live'
 		            WHEN po.former_quotation_id IS NOT NULL THEN 'former'
 		            ELSE 'never' END
@@ -1855,6 +1868,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&confirmationCustomerCode,
 		&confirmationAssignedAt,
 		&confirmationAssignedBy,
+		&order.ConfirmationRequested,
 		&order.SourceState,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {

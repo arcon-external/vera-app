@@ -84,6 +84,17 @@ func TestNewNeverLinkedPayloadStillDecodesIntoAnOldRow(t *testing.T) {
 	}
 }
 
+// Issue #581: the request is a separate desktop mapping from the HTTP row. If
+// the mapper drops it, the editor toggle silently resets on every reopen.
+func TestPurchaseOrderDTOKeepsConfirmationRequest(t *testing.T) {
+	row := apicontract.PurchaseOrderRow{ID: 11, UUID: "u11", State: "draft",
+		ConfirmationRequested: true}
+	dto := mapPurchaseOrderDTO(row)
+	if !dto.ConfirmationRequested {
+		t.Errorf("confirmation_requested lost in the desktop DTO: %+v", dto)
+	}
+}
+
 // Issue #575: the desktop DTO is a separate mapping from the HTTP row. A split
 // line's grouping fields must survive it, or the editor flattens immediately
 // after a save even though the store kept them.

@@ -76,6 +76,7 @@ type purchaseOrderRow struct {
 	ConfirmationNumber     *string `json:"confirmationNumber"`
 	ConfirmationAssignedAt *string `json:"confirmationAssignedAt"`
 	ConfirmationWarn       bool    `json:"confirmationWarn"`
+	ConfirmationRequested  bool    `json:"confirmationRequested"`
 	Version                int64   `json:"version"`
 	SourceMissing          bool    `json:"sourceMissing"`
 	SourceState            string  `json:"sourceState"`
@@ -272,6 +273,143 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 		updated.Items[0].QuotationItemNo == nil || *updated.Items[0].QuotationItemNo != 1 ||
 		updated.Items[1].QuotationItemNo != nil {
 		t.Errorf("updated lines = %+v", updated.Items)
+	}
+}
+
+// Issue #581/#579: the confirmation-number request is a draft preference. It
+// defaults off, survives save draft and reload, and the final checkbox is the
+// only authority for what a saved record stores — the draft toggle that
+// prefilled it never travels with the final save.
+func TestPurchaseOrderConfirmationRequestRoundTripsOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_confirmation_request")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	if draft.ConfirmationRequested {
+		t.Errorf("a new draft requested a confirmation number; want off by default")
+	}
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	update := finalizeBody(draft, "PO-REQ-1")
+	update["confirmationRequested"] = true
+	code, body = doJSON(t, server, http.MethodPut, path, token, update)
+	if code != http.StatusOK {
+		t.Fatalf("draft save = %d (%v)", code, body)
+	}
+	updated := decodePurchaseOrder(t, body)
+	if !updated.ConfirmationRequested {
+		t.Errorf("draft save dropped confirmationRequested: %+v", updated)
+	}
+	if updated.ConfirmationNumber != nil {
+		t.Errorf("a draft save allocated confirmation number %v", *updated.ConfirmationNumber)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload = %d (%v)", code, body)
+	}
+	reloaded := decodePurchaseOrder(t, body)
+	if !reloaded.ConfirmationRequested {
+		t.Errorf("reload lost confirmationRequested: %+v", reloaded)
+	}
+
+	// The draft asked for a number, but the final checkbox is unchecked: the
+	// saved record must store false and allocate nothing. Sending the old draft
+	// request cannot override the box.
+	finalize := finalizeBody(reloaded, "PO-REQ-1")
+	finalize["confirmationRequested"] = true
+	finalize["assignConfirmationNumber"] = false
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalize)
+	if code != http.StatusOK {
+		t.Fatalf("finalize with an unchecked box = %d (%v)", code, body)
+	}
+	saved := decodePurchaseOrder(t, body)
+	if saved.ConfirmationRequested {
+		t.Errorf("stored request followed the draft instead of the unchecked box: %+v", saved)
+	}
+	if saved.ConfirmationNumber != nil {
+		t.Errorf("an unchecked final save assigned confirmation number %v", *saved.ConfirmationNumber)
+	}
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reload finalized = %d (%v)", code, body)
+	}
+	if persisted := decodePurchaseOrder(t, body); persisted.ConfirmationRequested {
+		t.Errorf("the reloaded saved record kept a request the box did not ask for: %+v", persisted)
+	}
+
+	// The other direction: a draft that never asked is finalized with the box
+	// checked, so the stored request follows the box and the number is issued.
+	plainQuotation, _ := exportForSelector(t, server, token, quotationInput())
+	code, body = createPODraft(t, server, token, plainQuotation, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("plain create = %d (%v)", code, body)
+	}
+	plain := decodePurchaseOrder(t, body)
+	if plain.ConfirmationRequested {
+		t.Errorf("plain draft requested a confirmation number; want off")
+	}
+	plainFinalize := finalizeBody(plain, "PO-REQ-2")
+	plainFinalize["confirmationRequested"] = false
+	plainFinalize["assignConfirmationNumber"] = true
+	code, body = doJSON(t, server, http.MethodPost,
+		"/v1/purchase-orders/"+strconv.FormatInt(plain.ID, 10)+"/finalize", token, plainFinalize)
+	if code != http.StatusOK {
+		t.Fatalf("checked finalize = %d (%v)", code, body)
+	}
+	savedPlain := decodePurchaseOrder(t, body)
+	if !savedPlain.ConfirmationRequested || savedPlain.ConfirmationNumber == nil {
+		t.Errorf("a checked final save stored request %v / number %v; want true and assigned",
+			savedPlain.ConfirmationRequested, savedPlain.ConfirmationNumber)
+	}
+}
+
+// Issue #580: a draft may carry zero lines over the API, while the final save
+// still requires at least one. The store rule already exists; this pins the
+// HTTP seam the spec names.
+func TestPurchaseOrderZeroLineDraftRoundTripsAndCannotFinalize(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_zero_lines")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v)", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	code, body = doJSON(t, server, http.MethodPut, path, token, map[string]any{
+		"expectedVersion": draft.Version,
+		"paymentTerms":    "30 days",
+		"items":           []any{},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("zero-line draft save = %d (%v); want 200", code, body)
+	}
+	empty := decodePurchaseOrder(t, body)
+	if len(empty.Items) != 0 {
+		t.Fatalf("zero-line draft save returned %d lines; want 0", len(empty.Items))
+	}
+	if empty.Version != draft.Version+1 {
+		t.Errorf("zero-line save version = %d; want %d", empty.Version, draft.Version+1)
+	}
+
+	code, body = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("zero-line reload = %d (%v)", code, body)
+	}
+	if reloaded := decodePurchaseOrder(t, body); len(reloaded.Items) != 0 {
+		t.Errorf("zero-line draft reloaded with %d lines; want 0", len(reloaded.Items))
+	}
+
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token,
+		finalizeBody(empty, "PO-EMPTY-API"))
+	if code != http.StatusUnprocessableEntity || body["code"] != "po_incomplete" {
+		t.Fatalf("zero-line finalize = %d %v; want 422 po_incomplete", code, body)
 	}
 }
 

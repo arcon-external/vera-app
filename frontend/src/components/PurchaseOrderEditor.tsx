@@ -1023,17 +1023,19 @@ export function PurchaseOrderEditorView({
             {correcting ? "Correction" : "Draft"}
           </span>
         </div>
-        <div className="relative z-10 mt-4 flex items-end justify-between gap-6">
+        <div className="relative z-10 mt-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div className="min-w-0">
             <h1 className="tnum text-[30px] font-semibold leading-none tracking-[-0.035em] sm:text-[34px]">
-              {neverLinked ? "New purchase order" : state.quoteNumber}
+              {state.header.poNumber.trim() !== ""
+                ? state.header.poNumber
+                : "New purchase order"}
             </h1>
             <p className="mt-2 truncate text-small text-accent-100">
               {neverLinked ? "No customer yet" : state.customerName}
               {state.header.billingAddress !== "" ? ` · ${state.header.billingAddress}` : ""}
             </p>
           </div>
-          <div className="hidden shrink-0 text-right text-micro uppercase tracking-[0.1em] text-accent-300 sm:block">
+          <div className="shrink-0 text-micro uppercase tracking-[0.1em] text-accent-300 sm:text-right">
             <span>Source quotation</span>
             <strong className="mt-1 block text-small normal-case tracking-normal text-white">
               {neverLinked
@@ -1069,6 +1071,123 @@ export function PurchaseOrderEditorView({
           {sourceLess ? " · Source missing" : ""}
         </p>
       </section>
+
+      {/* #580: the PO-owned details sit directly under the hero, which reads
+          the same state and updates as they change. The customer, quotation
+          identity, currency and tax basis are source snapshots, not controls
+          here. */}
+      <Card className="p-4">
+        <SectionHeading
+          title="Purchase order details"
+          hint="Editable on this purchase order"
+        />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Customer PO number"
+            value={state.header.poNumber}
+            placeholder="Optional"
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { poNumber: value } })
+            }
+          />
+          <Field
+            label="PO date"
+            type="date"
+            value={state.header.poDate}
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { poDate: value } })
+            }
+          />
+          <Field
+            label="Received date"
+            type="date"
+            value={state.header.receivedDate}
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { receivedDate: value } })
+            }
+          />
+          <Field
+            label="Requested delivery date"
+            type="date"
+            value={state.header.requestedDeliveryDate}
+            onChange={(value) =>
+              dispatch({
+                type: "headerChanged",
+                patch: { requestedDeliveryDate: value },
+              })
+            }
+          />
+          <Field
+            label="Payment terms"
+            value={state.header.paymentTerms}
+            placeholder="e.g. 50% advance, balance 30 days after delivery"
+            onChange={(value) =>
+              dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
+            }
+            onBlur={() => onCommitField?.("header:paymentTerms")}
+            onFocus={() => onFocusField?.("header:paymentTerms")}
+          />
+          <HeaderFieldFeedback
+            fieldKey="header:paymentTerms"
+            label={HEADER_FIELDS["header:paymentTerms"].label}
+            notice={notices?.["header:paymentTerms"]}
+            validationError={validationErrors?.["header:paymentTerms"]}
+            unresolvedItem={unresolvedByField?.["header:paymentTerms"]}
+            onShowItem={onShowItem}
+          />
+          <div className="grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">Incoterms</span>
+            <Select
+              ariaLabel="Incoterms"
+              value={state.header.incoterms}
+              options={incotermOptions}
+              onChange={(value) => {
+                const next = String(value);
+                dispatch({ type: "headerChanged", patch: { incoterms: next } });
+                onCommitField?.("header:incoterms", next);
+              }}
+            />
+            <HeaderFieldFeedback
+              fieldKey="header:incoterms"
+              label={HEADER_FIELDS["header:incoterms"].label}
+              notice={notices?.["header:incoterms"]}
+              validationError={validationErrors?.["header:incoterms"]}
+              unresolvedItem={unresolvedByField?.["header:incoterms"]}
+              onShowItem={onShowItem}
+            />
+          </div>
+        </div>
+        {correcting ? null : (
+          <label className="mt-4 flex items-start gap-2 rounded-lg border border-rule bg-paper-subtle p-3 text-small text-ink-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4 accent-accent-700"
+              aria-label="Generate a confirmation number when this purchase order is saved"
+              checked={state.header.confirmationRequested}
+              onChange={(event) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: { confirmationRequested: event.target.checked },
+                })
+              }
+            />
+            <span>
+              <span className="font-medium">
+                Generate a confirmation number when this purchase order is saved.
+              </span>{" "}
+              Optional. The number is issued at Final Save and cannot be edited
+              afterwards; saving a draft consumes no number.
+            </span>
+          </label>
+        )}
+        <p className="mt-4 text-caption text-ink-500">
+          {state.sourceState === "never"
+            ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis below are editable until then."
+            : state.sourceState === "former"
+              ? "The former quotation remains the reference for the printed totals and lines. Currency and tax basis below are editable until a new link."
+              : "The customer, quotation number and revision, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
+        </p>
+      </Card>
 
       {!correcting ? (
         <PurchaseOrderSourceLinkPanel
@@ -1223,6 +1342,10 @@ export function PurchaseOrderEditorView({
       ) : null}
 
       <Card className="p-4">
+        <SectionHeading
+          title="Addresses and contacts"
+          hint="Commercial contact details for this order"
+        />
         <div className="grid gap-4 sm:grid-cols-2">
           <TextAreaField
             label="Billing address"
@@ -1260,88 +1383,7 @@ export function PurchaseOrderEditorView({
               dispatch({ type: "headerChanged", patch: { contactPhone: value } })
             }
           />
-          <Field
-            label="Customer PO number"
-            value={state.header.poNumber}
-            placeholder="Optional"
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { poNumber: value } })
-            }
-          />
-          <Field
-            label="PO date"
-            type="date"
-            value={state.header.poDate}
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { poDate: value } })
-            }
-          />
-          <Field
-            label="Received date"
-            type="date"
-            value={state.header.receivedDate}
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { receivedDate: value } })
-            }
-          />
-          <Field
-            label="Requested delivery date"
-            type="date"
-            value={state.header.requestedDeliveryDate}
-            onChange={(value) =>
-              dispatch({
-                type: "headerChanged",
-                patch: { requestedDeliveryDate: value },
-              })
-            }
-          />
-          <Field
-            label="Payment terms"
-            value={state.header.paymentTerms}
-            placeholder="e.g. 50% advance, balance 30 days after delivery"
-            onChange={(value) =>
-              dispatch({ type: "headerChanged", patch: { paymentTerms: value } })
-            }
-            onBlur={() => onCommitField?.("header:paymentTerms")}
-            onFocus={() => onFocusField?.("header:paymentTerms")}
-          />
-          <HeaderFieldFeedback
-            fieldKey="header:paymentTerms"
-            label={HEADER_FIELDS["header:paymentTerms"].label}
-            notice={notices?.["header:paymentTerms"]}
-            validationError={validationErrors?.["header:paymentTerms"]}
-            unresolvedItem={unresolvedByField?.["header:paymentTerms"]}
-            onShowItem={onShowItem}
-          />
-          <div className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">Incoterms</span>
-            <Select
-              ariaLabel="Incoterms"
-              value={state.header.incoterms}
-              options={incotermOptions}
-              onChange={(value) => {
-                const next = String(value);
-                dispatch({ type: "headerChanged", patch: { incoterms: next } });
-                onCommitField?.("header:incoterms", next);
-              }}
-            />
-            <HeaderFieldFeedback
-              fieldKey="header:incoterms"
-              label={HEADER_FIELDS["header:incoterms"].label}
-              notice={notices?.["header:incoterms"]}
-              validationError={validationErrors?.["header:incoterms"]}
-              unresolvedItem={unresolvedByField?.["header:incoterms"]}
-              onShowItem={onShowItem}
-            />
-          </div>
         </div>
-        <p className="mt-4 text-caption text-ink-500">
-          {state.sourceState === "never"
-            ? "Customer, quotation link and printed totals are filled when a quotation is linked. Currency and tax basis above are editable until then."
-            : state.sourceState === "former"
-              ? "The former quotation remains the reference for the printed totals and lines. Currency and tax basis above are editable until a new link."
-              : "Customer, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
-        </p>
       </Card>
 
       <div>
@@ -1369,6 +1411,7 @@ export function PurchaseOrderEditorView({
             uomOptions={uomOptions}
             mode="purchase-order"
             allowMergeSubItems={false}
+            allowEmpty
             renderItemMeta={renderItemMeta}
             renderSubItemMeta={renderSubItemMeta}
             onLineFieldFocus={focusEditorLineField}
@@ -2395,6 +2438,17 @@ export function PurchaseOrderEditorPage({
   };
 
   const startReview = async () => {
+    // #580: a draft may be saved with zero lines, but a saved record may not
+    // be finalized empty. Refuse before persisting or loading the review, so a
+    // zero-line order never opens a review it cannot complete.
+    if (state.lines.length === 0) {
+      const message = "Add at least one line before Final Save.";
+      dispatch({ type: "saveFailed", error: message });
+      reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}.`);
+      const addLine = document.querySelector<HTMLElement>('[aria-label="Add line"]');
+      if (addLine !== null) addLine.focus();
+      return;
+    }
     // Contract section 7: commit the focused input first, before readiness.
     // The commit result is the readiness truth: a focused field that still
     // fails validation blocks with its message and focus.
@@ -2514,7 +2568,7 @@ export function PurchaseOrderEditorPage({
         incoterms: loaded.Source.Incoterms,
       });
       setCompareLines(loaded.Source.Lines);
-      const initial = initialFinalizeReviewState();
+      const initial = initialFinalizeReviewState(state.header.confirmationRequested);
       setReview(loaded);
       // U2: the finalize review is a receipt of the recorded session, not a
       // second workbench. Kept/used choices pre-fill from unchanged session

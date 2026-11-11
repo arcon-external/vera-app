@@ -567,9 +567,13 @@ export function buildFinalizeInput(
   if (update.input === null) {
     return { input: null, error: update.error ?? "The purchase order is incomplete." };
   }
+  // #579: the draft preference only pre-filled the final checkbox. The final
+  // save carries the checkbox answer and lets the server derive the stored
+  // request from it, so the draft field never travels with this payload.
+  const { ConfirmationRequested: _draftConfirmationRequest, ...finalizeFields } = update.input;
   return {
     input: {
-      ...update.input,
+      ...finalizeFields,
       Decisions: evaluation.comparison.differences.map((difference) => ({
         Key: difference.key,
         Choice: decisions[difference.key]!,
@@ -591,7 +595,7 @@ export function sourceLineLabel(line: PurchaseOrderSourceLineDTO): string {
 }
 
 /** Builds the blank review state for a freshly opened record. */
-export function initialFinalizeReviewState(): {
+export function initialFinalizeReviewState(confirmationRequested = false): {
   decisions: POReviewDecisions;
   acknowledgedMissing: string[];
   acknowledgedExtra: number[];
@@ -603,8 +607,9 @@ export function initialFinalizeReviewState(): {
     acknowledgedMissing: [],
     acknowledgedExtra: [],
     documentConfirmed: false,
-    // Optional means unchecked until staff ask for it (#474).
-    assignConfirmation: false,
+    // Optional means unchecked until staff ask for it (#474). A draft request
+    // seeds the checkbox but never binds it (#581).
+    assignConfirmation: confirmationRequested,
   };
 }
 

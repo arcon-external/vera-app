@@ -8,6 +8,7 @@ import {
   draftTaxBasisLabel,
   formatPpnBps,
   planDraftLink,
+  ppnLabel,
   type PurchaseOrderDraftLinkReviewDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "./poDraftLink";
@@ -147,6 +148,15 @@ describe("draft link tax vocabulary", () => {
       })
     ).toBe("NonFTZ / Goods · 11% PPN");
     expect(formatPpnBps(175)).toBe("1.75%");
+    expect(
+      ppnLabel({
+        TaxZone: "NonFTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+        TaxCategory: "",
+        PpnBps: 1100,
+      })
+    ).toBe("11% PPN");
     expect(
       draftTaxBasisLabel({
         TaxZone: "FTZ",
