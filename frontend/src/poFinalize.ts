@@ -572,7 +572,6 @@ export function buildFinalizeInput(
   return {
     input: {
       ...update.input,
-      ConfirmationRequested: update.input.ConfirmationRequested,
       Decisions: evaluation.comparison.differences.map((difference) => ({
         Key: difference.key,
         Choice: decisions[difference.key]!,

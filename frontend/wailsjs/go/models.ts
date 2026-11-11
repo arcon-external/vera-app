@@ -3024,6 +3024,7 @@ export namespace backend {
 	    Incoterms: string;
 	    PaymentTerms: string;
 	    AdjustmentReason: string;
+	    ConfirmationRequested: boolean;
 	    Items: PurchaseOrderItemInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
@@ -3032,7 +3033,6 @@ export namespace backend {
 	    TaxType: string;
 	    ServiceCategory: string;
 	    ExpectedVersion: number;
-	    ConfirmationRequested: boolean;
 	    Overwrite: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -3054,6 +3054,7 @@ export namespace backend {
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
+	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
@@ -3062,7 +3063,6 @@ export namespace backend {
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
-	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Overwrite = source["Overwrite"];
 	    }
 
