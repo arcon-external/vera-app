@@ -34,6 +34,7 @@ import {
   listValidationBlockers,
   initialPurchaseOrderEditorState,
   isPurchaseOrderDirty,
+  latestPersistedVersion,
   newPurchaseOrderLineKey,
   purchaseOrderEditorReducer,
   type PurchaseOrderDTO,
@@ -1865,7 +1866,10 @@ export function PurchaseOrderEditorPage({
   ) => {
     if (sessionVersion === undefined || sessionVersion === draftVersion) return;
     dispatch({ type: "versionAdopted", version: sessionVersion });
-    persistedRef.current = { id: orderId, version: sessionVersion };
+    persistedRef.current = {
+      id: orderId,
+      version: latestPersistedVersion(orderId, sessionVersion, persistedRef.current),
+    };
   };
 
   const handleSaved = async (savedOrder: PurchaseOrderDTO, corrected?: boolean) => {
@@ -2076,14 +2080,38 @@ export function PurchaseOrderEditorPage({
   // create resolves but before React renders the `created` action still sees
   // the one row.
   const persistedRef = useRef<PersistedDraft | null>(null);
+  /**
+   * #584: every successful write advances the retained version, so the next
+   * write names the row as the server now stands. The retained version never
+   * moves backwards (a session save may already have adopted a newer one).
+   */
+  const retainPersistedVersion = (order: { ID: number; Version: number }) => {
+    persistedRef.current = {
+      id: order.ID,
+      version: latestPersistedVersion(
+        order.ID,
+        order.Version,
+        persistedRef.current
+      ),
+    };
+  };
   const ensurePersisted = async (): Promise<PersistedDraft> => {
-    if (persistedRef.current !== null) return persistedRef.current;
     const current = editorStateRef.current;
     if (current.orderId > 0) {
-      const existing = { id: current.orderId, version: current.version };
+      // The editor state is the newer truth after an ordinary save: the
+      // retained version must follow it or the next pre-save conflicts.
+      const existing = {
+        id: current.orderId,
+        version: latestPersistedVersion(
+          current.orderId,
+          current.version,
+          persistedRef.current
+        ),
+      };
       persistedRef.current = existing;
       return existing;
     }
+    if (persistedRef.current !== null) return persistedRef.current;
     if (persisting.current !== null) return persisting.current;
     const promise = (async () => {
       const created = await CreatePurchaseOrderBlankDraft(
@@ -2162,7 +2190,7 @@ export function PurchaseOrderEditorPage({
         if (outcome.kind === "saved") {
           // Advance the retained version: an attach retry after a failed
           // upload must write against the row as it now stands.
-          persistedRef.current = { id: outcome.order.ID, version: outcome.order.Version };
+          retainPersistedVersion(outcome.order);
           dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
           return { kind: "saved", order: outcome.order };
         }
@@ -2288,6 +2316,7 @@ export function PurchaseOrderEditorPage({
         return;
       }
       dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+      retainPersistedVersion(outcome.order);
 
       const linkedAnswer = await LinkPurchaseOrderDraftSource(
         new backend.PurchaseOrderDraftLinkInput({
@@ -2315,6 +2344,9 @@ export function PurchaseOrderEditorPage({
         return;
       }
       dispatch({ type: "saveSucceeded", order: linked.order, currency: activeCurrency });
+      // A successful link advances the row; the retained version must follow
+      // so a Final Save right after the link does not pre-save at the stale one.
+      retainPersistedVersion(linked.order);
       setLinkReview(null);
       setDecisions({});
       setAcknowledgedMissing([]);
@@ -2410,6 +2442,7 @@ export function PurchaseOrderEditorPage({
       const outcome = writeOutcome(answer);
       if (outcome.kind === "saved") {
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+        retainPersistedVersion(outcome.order);
         setConflict(null);
         void handleSaved(outcome.order, correcting);
         return;
@@ -2740,6 +2773,7 @@ export function PurchaseOrderEditorPage({
       if (outcome.kind === "saved") {
         await waitForProgress();
         dispatch({ type: "saveSucceeded", order: outcome.order, currency: activeCurrency });
+        retainPersistedVersion(outcome.order);
         setConflict(null);
         // Round-2 N2: the saved record (and its session) is read-only. Never
         // attempt a session write after success: the server refuses it and

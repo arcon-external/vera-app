@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useState } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
@@ -118,12 +118,13 @@ function blank(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
   };
 }
 
-function createdRow(): PurchaseOrderDTO {
+function createdRow(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
   return {
     ...blank(),
     ID: 41,
     UUID: "uuid-497",
     Version: 1,
+    ...overrides,
   };
 }
 
@@ -365,8 +366,14 @@ function chooseFile(name = "Customer PO.pdf"): void {
   });
 }
 
-function Harness({ draft }: { draft?: PurchaseOrderDTO }) {
+function Harness({ draft, opened }: { draft?: PurchaseOrderDTO; opened?: PurchaseOrderDTO }) {
   const workspace = usePurchaseOrderWorkspace();
+  // A saved draft opens through the workspace controller, exactly as a row
+  // from the archive does. The blank fixture path mounts the transient editor,
+  // which remounts on its first save and so cannot reproduce #584.
+  useEffect(() => {
+    if (opened !== undefined) workspace.open(opened);
+  }, [opened, workspace.open]);
   const [target, setTarget] = useState<{
     quotationId: number;
     revisionNumber: number;
@@ -410,11 +417,12 @@ function Harness({ draft }: { draft?: PurchaseOrderDTO }) {
   );
 }
 
-async function render(draft?: PurchaseOrderDTO): Promise<void> {
-  latestOrder = draft ?? createdRow();
+async function render(draft?: PurchaseOrderDTO, opened?: PurchaseOrderDTO): Promise<void> {
+  latestOrder = opened ?? draft ?? createdRow();
   await act(async () => {
-    root.render(<Harness draft={draft} />);
+    root.render(<Harness draft={draft} opened={opened} />);
   });
+  await flush();
   await flush();
 }
 
@@ -506,6 +514,28 @@ describe("draft source link (issue #497)", () => {
     expect(linkSave.ID).toBe(41);
     expect(linkSave.ExpectedVersion).toBe(2);
     expect(linkSave.PONumber).toBe("UPLOAD-THEN-LINK");
+    expect(previewMock).toHaveBeenCalledWith(41, 12, 0);
+  });
+
+  it("links after a save at the version the save returned (#584)", async () => {
+    reviewForTest = review();
+    await render(undefined, createdRow({ Version: 4 }));
+
+    // Save the open draft: the server returns the next version.
+    act(() => button("Save draft").click());
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const save = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
+    expect(save.ID).toBe(41);
+    expect(save.ExpectedVersion).toBe(4);
+
+    // The link's pre-save must write against the version the save produced,
+    // not the one the editor opened with.
+    await openReview();
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    const linkSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(linkSave.ID).toBe(41);
+    expect(linkSave.ExpectedVersion).toBe(5);
     expect(previewMock).toHaveBeenCalledWith(41, 12, 0);
   });
 

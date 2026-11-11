@@ -343,6 +343,68 @@ describe("live header reconciliation in the editor (ticket 04)", () => {
     expect(sent.POVersion).toBe(4);
   });
 
+  it("Final Save after a save pre-saves at the version the save produced (#584)", async () => {
+    const line = {
+      QuotationItemNo: null,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Widget",
+      QuantityScaled: 20000,
+      UoM: "Pc",
+      UnitPriceMinor: 10000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 20000,
+      DiscountMinor: 0,
+      NetMinor: 20000,
+    };
+    // The server advances the row on every successful draft write, so the
+    // retained version must follow it; otherwise the Final Save pre-save names
+    // the version the editor opened with and the server refuses the write.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as Record<string, unknown>;
+      return {
+        Order: linkedOrder({
+          PaymentTerms: String(fields.PaymentTerms ?? "45 days"),
+          Incoterms: String(fields.Incoterms ?? "EXW"),
+          Version: Number(fields.ExpectedVersion ?? 4) + 1,
+          Items: [line],
+          QuotationID: 0,
+          SourceRevision: 0,
+          QuoteNumber: "",
+        }),
+      };
+    });
+    // Source-less: with no live session the save's session sync cannot adopt a
+    // version of its own, so the retained draft version is the one under test.
+    const orderWithLine = linkedOrder({
+      QuotationID: 0,
+      SourceRevision: 0,
+      QuoteNumber: "",
+      Items: [line],
+    });
+    const transport = fakeTransport(null);
+    await renderEditor(transport, orderWithLine);
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const saved = updateMock.mock.calls[0][0] as { ExpectedVersion: number };
+    expect(saved.ExpectedVersion).toBe(4);
+
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+    expect(updateMock).toHaveBeenCalledTimes(2);
+    const preSave = updateMock.mock.calls[1][0] as { ExpectedVersion: number };
+    expect(preSave.ExpectedVersion).toBe(5);
+  });
+
   it("Use Quotation writes the source value into the field and resolves", async () => {
     const transport = fakeTransport(null);
     await renderEditor(transport);
