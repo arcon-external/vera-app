@@ -84,6 +84,10 @@ wails dev
 npm --prefix frontend run dev
 ```
 
+`scripts/agent-env.sh` brings the local Postgres, the dev API and the Chrome/PDF
+wrappers up, down and checked in one persistent workspace. The commands and the
+test DSN are in `docs/agents/local-dev.md`.
+
 ## 5. Build Commands
 
 ```bash
@@ -114,6 +118,7 @@ gofmt -w .            # format (writes)
 gofmt -l .            # format check (must print nothing)
 go vet ./...          # static analysis
 npm --prefix frontend run build   # strict TypeScript validation
+scripts/check-agent-docs.sh       # every docs/agents pointer in AGENTS.md resolves
 ```
 
 ## 7. Test Commands
@@ -459,36 +464,17 @@ without validation.
 
 ### 12.1 The roles
 
-| Role        | Model                                                                     | Job                                                                            |
-| ----------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Worker**  | `opencode-go/deepseek-v4.1-flash` (default), fallbacks `opencode-go/muse-spark-1.3-contributor#xhigh` then `opencode-go/longcat-2.5-preview-free` | Writes code and tests. Loads `tdd` on every change and `diagnosing-bugs` for a bug; `prototype` only when the brief timeboxes it. |
-| **Riddler** | `opencode-go/longcat-2.5-preview-free`, fallback `opencode-go/deepseek-v4.1-flash` | Interrogates with `grilling`; loads `research`/`domain-modeling` when facts or vocabulary are missing. Never verifies or decides. |
-| **Advisor** | `opencode-go/muse-spark-1.3-contributor#xhigh` (the requested `#max` variant does not exist; `xhigh` is its highest) | Advises. Loads `codebase-design` for design forks and `karpathy-guideline` as the surgical lens; may evaluate a `prototype`. Never decides. |
-| **Judge**   | `opencode-go/deepseek-v4.1-flash#max`, fallback `opencode-go/longcat-2.5-preview-free` | Assumes everything is wrong; verifies by running; uses `tdd`, `diagnosing-bugs` and `code-review` as lenses. PASS/NOT PASS. |
-| **Checker** | `opencode-go/muse-spark-1.3-contributor`                                  | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
+| Role        | Job                                                                            |
+| ----------- | ------------------------------------------------------------------------------ |
+| **Worker**  | Writes code and tests. Loads `tdd` on every change and `diagnosing-bugs` for a bug; `prototype` only when the brief timeboxes it. |
+| **Riddler** | Interrogates with `grilling`; loads `research`/`domain-modeling` when facts or vocabulary are missing. Never verifies or decides. |
+| **Advisor** | Advises. Loads `codebase-design` for design forks and `karpathy-guideline` as the surgical lens; may evaluate a `prototype`. Never decides. |
+| **Judge**   | Assumes everything is wrong; verifies by running; uses `tdd`, `diagnosing-bugs` and `code-review` as lenses. PASS/NOT PASS. |
+| **Checker** | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
 
-Model references are exact (`provider/model#variant`) and are looked up with the
-models tool rather than guessed — a variant that does not exist fails silently at
-dispatch. A role with no variant suffix names the provider's **default** variant —
-the bare model ID, because `#default` is not a variant that exists.
-The Worker names a **chain** of fallbacks; the Riddler names one. A fallback is used
-when the model before it times out or errors at dispatch, and a dispatch that falls
-back says so in its report.
-The Judge is deliberately a **different model family** from the Advisor:
-two reviewers from one family share one family's blind spots.
-The pairing is what matters, not any single model: the two reviewers (Advisor and Judge) must differ in family. That rule holds under this roster — the Advisor is Muse Spark, the Judge is DeepSeek.
-
-**This is the quota-fallback roster (2026-10-21) while the OpenAI models are
-rate-limited.** It contains no OpenAI dependency. The Worker and the Judge now share
-DeepSeek: the executor/judge pairing is the one to watch. The Riddler (LongCat) and
-the Checker are not reviewers, so the pairing rule does not bind them. The requested
-Advisor `#max` variant does not exist — `#xhigh` is Muse Spark's highest available
-variant, and an exact reference is what makes dispatch reliable. A dispatch that
-falls back says so in its report. When the OpenAI limits clear, restore the primary
-roster (Worker/Advisor Muse Spark `xhigh`, Judge GPT-6.1 `high`) after looking the
-variants up with the models tool; the cross-family rule still decides the pairing.
-If a future run shows correlated misses between a reviewer and its family-mate,
-re-deal the families rather than defending the table.
+The exact model references (`provider/model#variant`), every role's fallback
+chain and the cross-family reviewer rule live in `docs/agents/models.md`. This
+table is the role summary; the models doc is what a dispatch is read from.
 
 Every brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
@@ -579,15 +565,8 @@ before the frontier moves, not a background opinion.
 
 ### 12.3 The todolist, and the tool that does not exist
 
-**OpenCode V2 has no todo tool.** Its built-in catalog is `read`, `glob`, `grep`,
-`edit`, `write`, `patch`, `shell`, `webfetch`, `websearch`, `question`, `skill`,
-`subagent`, `execute`, the `opencode` namespace — session utilities, worktrees, and
-a `models` lookup — and the `browser` namespace. Nothing in it tracks tasks. Checked
-against <https://opencode.ai/v2/docs/tools/>, the migration guide at
-<https://opencode.ai/v2/docs/migrate-v1/> (which lists every field V2 drops), and a
-live session catalog; all three agree. Note that the tools page does not list the
-`models` lookup even though the namespace exposes it — which is why §12.1 can name
-it, and why reading that page alone is not enough. Do not go looking for a todo tool.
+**OpenCode V2 has no todo tool** — the todolist is the plan comment (Section 11)
+and the live list below, both maintained by hand; do not go looking for one.
 
 The todolist is therefore maintained **by hand, in two places, both mandatory**:
 
@@ -814,6 +793,10 @@ or confused scope step runs the full suite rather than skipping it.
 ---
 
 ## 14. Release Process
+
+`docs/agents/release.md` is the runbook a release is run from: the pre-tag
+checklist with the exact commands, and the rule for the Dependabot pull requests
+that are open when it starts. This section is the always-loaded summary.
 
 ### When to release
 
