@@ -4,6 +4,15 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.17.1] - 2026-11-11
+
+### Fixed
+
+- **Linking a quotation or pressing Final Save no longer stops with a version
+  warning after you edit and save a purchase order.** The editor now keeps the
+  row version it last saved, so both actions write against the current record
+  instead of an older version.
+
 ## [0.17.0] - 2026-11-11
 
 ### Added
