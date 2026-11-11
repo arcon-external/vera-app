@@ -211,6 +211,48 @@ describe("two-sided difference review (#582)", () => {
     expect(side("po").textContent).toContain("30 days");
   });
 
+  it("uses the whole card for both values and keeps one hint on the unselected side (#587)", () => {
+    const onDecision = vi.fn();
+    render({ decisions: { "header:paymentTerms": "quotation" }, onDecision });
+    const quotationSide = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Use Quotation for Payment terms"]'
+    );
+    const poSide = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Use PO entry for Payment terms"]'
+    );
+    expect(quotationSide).not.toBeNull();
+    expect(poSide).not.toBeNull();
+    expect(quotationSide?.tagName).toBe("BUTTON");
+    expect(poSide?.tagName).toBe("BUTTON");
+    // The selected side keeps the ring and "Will be used" and has no action
+    // affordance; the unselected side offers one, and both remain clickable.
+    expect(quotationSide?.getAttribute("aria-pressed")).toBe("true");
+    expect(quotationSide?.textContent).toContain("Will be used");
+    expect(quotationSide?.textContent).not.toContain("Use this value");
+    expect(quotationSide?.querySelector("button")).toBeNull();
+    expect(poSide?.getAttribute("aria-pressed")).toBe("false");
+    expect(poSide?.textContent).toContain("Use this value");
+    expect(poSide?.querySelector("button")).toBeNull();
+    act(() => quotationSide?.click());
+    act(() => poSide?.click());
+    expect(onDecision).toHaveBeenNthCalledWith(1, "header:paymentTerms", "quotation");
+    expect(onDecision).toHaveBeenNthCalledWith(2, "header:paymentTerms", "po");
+  });
+
+  it("accepts keyboard activation because each side is a native button", () => {
+    render();
+    for (const label of [
+      "Use PO entry for Payment terms",
+      "Use Quotation for Payment terms",
+    ]) {
+      const card = document.querySelector<HTMLButtonElement>(
+        `button[aria-label="${label}"]`
+      );
+      expect(card?.type).toBe("button");
+      expect(card?.getAttribute("tabindex")).toBeNull();
+    }
+  });
+
   it("keeps a formatted money value on one line and gives the changed side the accent", () => {
     const base = order();
     render({ items: [{ ...base.Items[0], UnitPriceMinor: 12000 }] });

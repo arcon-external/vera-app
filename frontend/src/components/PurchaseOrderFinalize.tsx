@@ -191,6 +191,12 @@ export interface PurchaseOrderDifferenceReviewViewProps {
    */
   beforeDifferences?: ReactNode;
   /**
+   * #587: content rendered directly under the "Resolve before linking" blocker
+   * box. The draft link puts its bulk choices there, so a one-click decision is
+   * offered where the blocker lists what still needs one.
+   */
+  afterBlockers?: ReactNode;
+  /**
    * U2/N4: receipt provenance from the recorded reconciliation session.
    * hasSession is true only for an authoritative persisted session
    * (positive stored ID, even when empty, tax-only or all-unresolved, and
@@ -231,6 +237,7 @@ export function PurchaseOrderDifferenceReviewView({
   busy = false,
   blocked = false,
   beforeDifferences,
+  afterBlockers,
   receiptResolvedKeys = [],
   receiptAckedMissing = [],
   receiptAckedExtra = [],
@@ -555,28 +562,7 @@ export function PurchaseOrderDifferenceReviewView({
                   quotationValue={difference.sourceValue}
                   choice={chosen}
                   money={isMoneyDifference(difference.key)}
-                  poAction={
-                    <Button
-                      size="sm"
-                      variant={choice === "po" ? "primary" : "secondary"}
-                      aria-pressed={choice === "po"}
-                      aria-label={`Use PO entry for ${difference.label}`}
-                      onClick={() => onDecision(difference.key, "po")}
-                    >
-                      Use PO entry
-                    </Button>
-                  }
-                  quotationAction={
-                    <Button
-                      size="sm"
-                      variant={choice === "quotation" ? "primary" : "secondary"}
-                      aria-pressed={choice === "quotation"}
-                      aria-label={`Use Quotation for ${difference.label}`}
-                      onClick={() => onDecision(difference.key, "quotation")}
-                    >
-                      Use Quotation
-                    </Button>
-                  }
+                  onChoose={(side) => onDecision(difference.key, side)}
                 />
               );
             })}
@@ -745,6 +731,8 @@ export function PurchaseOrderDifferenceReviewView({
           </ul>
         </StatusBanner>
       ) : null}
+
+      {afterBlockers}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
         <Button

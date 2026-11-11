@@ -386,14 +386,6 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
-function input(label: string): HTMLInputElement {
-  const found = document.querySelector<HTMLInputElement>(
-    `input[aria-label="${label}"]`
-  );
-  if (found === null) throw new Error(`no input labelled ${label}`);
-  return found;
-}
-
 async function renderApp(): Promise<void> {
   await act(async () => {
     root.render(
@@ -433,8 +425,9 @@ describe("draft source link through the real App (issue #497)", () => {
     expect(mocks.listPOSources).toHaveBeenCalled();
     expect(document.body.textContent).toContain("Link this draft to a quotation");
 
-    act(() => input("Acknowledge omission of quotation line 1").click());
-    await flush();
+    // The missing quotation line is added to the review copy as a matched
+    // line, so the link needs no omission acknowledgement (#587).
+    expect(document.body.textContent).toContain("Source line 1");
     act(() => button("Link source").click());
     await flush();
     await flush();
@@ -444,7 +437,7 @@ describe("draft source link through the real App (issue #497)", () => {
     expect(linkInput.ID).toBe(41);
     expect(linkInput.TargetQuotationID).toBe(12);
     expect(linkInput.TargetRevisionNumber).toBe(0);
-    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
+    expect(linkInput.AcknowledgedMissing).toEqual([]);
     expect(document.body.textContent).toContain("Linked source");
     expect(document.body.textContent).toContain(
       "Linked to quotation 1502260001, revision 0. Your entered values were kept."

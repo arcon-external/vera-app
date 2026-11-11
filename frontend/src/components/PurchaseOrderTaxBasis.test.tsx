@@ -99,7 +99,7 @@ const REVIEW: PurchaseOrderDraftLinkReviewDTO = {
   TaxChoiceRequired: true,
 };
 
-function markup(): string {
+function markup(taxChoice: "keep" | "source" | "" = ""): string {
   const state = initialPurchaseOrderEditorState(ORDER, USD);
   return renderToString(
     <PurchaseOrderDraftLinkReviewPanel
@@ -109,7 +109,7 @@ function markup(): string {
       decisions={{}}
       acknowledgedMissing={[]}
       acknowledgedExtra={[]}
-      taxChoice=""
+      taxChoice={taxChoice}
       linking={false}
       error={null}
       onDecision={() => undefined}
@@ -121,6 +121,14 @@ function markup(): string {
       onLink={() => undefined}
     />
   ).replace(/<!-- -->/g, "");
+}
+
+function taxButton(html: string, ariaLabel: string): string {
+  const found = html.match(
+    new RegExp(`<button[^>]*aria-label="${ariaLabel}"[^>]*>[^]*?</button>`)
+  )?.[0];
+  if (found === undefined) throw new Error(`no button labelled ${ariaLabel}`);
+  return found;
 }
 
 describe("PurchaseOrderDraftLinkReviewPanel tax-basis diff (#582)", () => {
@@ -153,5 +161,32 @@ describe("PurchaseOrderDraftLinkReviewPanel tax-basis diff (#582)", () => {
     expect(source).toBeDefined();
     expect(source).toContain("Quotation revision");
     expect(source).toContain('aria-pressed="false"');
+  });
+
+  it("shows one hint only on the unselected side (#587)", () => {
+    const unselected = markup();
+    expect(taxButton(unselected, "Keep the draft tax basis")).toContain(
+      "Use this basis"
+    );
+    expect(taxButton(unselected, "Use the quotation tax basis")).toContain(
+      "Use this basis"
+    );
+
+    const kept = markup("keep");
+    expect(taxButton(kept, "Keep the draft tax basis")).not.toContain(
+      "Use this basis"
+    );
+    expect(taxButton(kept, "Keep the draft tax basis")).toContain("Will be used");
+    expect(taxButton(kept, "Use the quotation tax basis")).toContain(
+      "Use this basis"
+    );
+
+    const used = markup("source");
+    expect(taxButton(used, "Use the quotation tax basis")).not.toContain(
+      "Use this basis"
+    );
+    expect(taxButton(used, "Keep the draft tax basis")).toContain(
+      "Use this basis"
+    );
   });
 });

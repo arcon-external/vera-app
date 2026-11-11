@@ -69,9 +69,10 @@ export function sessionLineKey(
 
 /** A collision-resistant client key for a new editor line. */
 export function newClientKey(): string {
-  const random = (globalThis as { crypto?: { randomUUID?: () => string } })
-    .crypto?.randomUUID;
-  if (typeof random === "function") return `client:${random()}`;
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  const random = crypto?.randomUUID;
+  // Called as a method: a detached randomUUID loses its receiver.
+  if (typeof random === "function") return `client:${random.call(crypto)}`;
   return `client:local-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffffffff).toString(36)}`;
 }
 

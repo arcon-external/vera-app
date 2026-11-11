@@ -21,16 +21,22 @@ const {
   updateMock,
   finalizeMock,
   documentStateMock,
+  createMock,
+  previewMock,
+  linkMock,
 } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
   updateMock: vi.fn(),
   finalizeMock: vi.fn(),
   documentStateMock: vi.fn(),
+  createMock: vi.fn(),
+  previewMock: vi.fn(),
+  linkMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   CorrectPurchaseOrder: vi.fn(),
-  CreatePurchaseOrderBlankDraft: vi.fn(),
+  CreatePurchaseOrderBlankDraft: (...args: unknown[]) => createMock(...args),
   FinalizePurchaseOrder: (...args: unknown[]) => finalizeMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   GetPurchaseOrder: vi.fn(),
@@ -39,8 +45,8 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentVersion: vi.fn(),
   GetPurchaseOrderHistory: vi.fn(async () => []),
   GetPurchaseOrderReview: (...args: unknown[]) => reviewMock(...args),
-  LinkPurchaseOrderDraftSource: vi.fn(),
-  PreviewPurchaseOrderDraftLink: vi.fn(),
+  LinkPurchaseOrderDraftSource: (...args: unknown[]) => linkMock(...args),
+  PreviewPurchaseOrderDraftLink: (...args: unknown[]) => previewMock(...args),
   RemovePurchaseOrderDocument: vi.fn(),
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
   AssignPurchaseOrderConfirmationNumber: vi.fn(),
@@ -56,6 +62,7 @@ vi.mock("@backend/models", () => {
   return {
     backend: {
       PurchaseOrderCorrectionInput: Input,
+      PurchaseOrderDraftLinkInput: Input,
       PurchaseOrderFinalizeInput: Input,
       PurchaseOrderItemInput: Input,
       PurchaseOrderUpdateInput: Input,
@@ -2152,5 +2159,187 @@ describe("round-2 Final Save receipt and persistence (real page)", () => {
     // and no false sync banner may appear.
     expect(transport.saves.length).toBe(savesAtReview);
     expect(document.body.textContent?.includes("could not be saved")).toBe(false);
+  });
+
+  it("a linked session resolves a review-time price difference through the pane (#586/#587)", async () => {
+    const line: PurchaseOrderDTOItem = {
+      QuotationItemNo: 1,
+      QuotationSubNo: null,
+      LineNumber: 1,
+      Description: "Widget",
+      QuantityScaled: 20000,
+      UoM: "Pc",
+      UnitPriceMinor: 10000,
+      DiscountEnabled: false,
+      DiscountPercent: 0,
+      GrossMinor: 20000,
+      DiscountMinor: 0,
+      NetMinor: 20000,
+    };
+    const order = linkedOrder({
+      SourceState: "former",
+      SourceMissing: true,
+      QuotationID: 0,
+      QuoteNumber: "1502260099",
+      SourceRevision: 1,
+      PaymentTerms: "45 days",
+      Items: [line],
+    });
+    const source: PurchaseOrderSourceDTO = {
+      ...SOURCE,
+      PaymentTerms: "45 days",
+      Incoterms: "EXW",
+      Lines: [
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineLabel: "1",
+          Description: "Widget",
+          UoM: "Pc",
+          QuantityScaled: 20000,
+          UnitPriceMinor: 12000,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+        },
+      ],
+    };
+    let latestItems: PurchaseOrderDTOItem[] = [line];
+    const itemsFrom = (input: Record<string, unknown>): PurchaseOrderDTOItem[] =>
+      (input.Items as Array<Record<string, unknown>>).map((item, index) => ({
+        ID: item.ID === null || item.ID === undefined ? undefined : Number(item.ID),
+        ClientKey: String(item.ClientKey ?? ""),
+        QuotationItemNo:
+          item.QuotationItemNo === null || item.QuotationItemNo === undefined
+            ? null
+            : Number(item.QuotationItemNo),
+        QuotationSubNo:
+          item.QuotationSubNo === null || item.QuotationSubNo === undefined
+            ? null
+            : Number(item.QuotationSubNo),
+        LineNumber: index + 1,
+        Description: String(item.Description ?? ""),
+        QuantityScaled: Number(item.QuantityScaled ?? 0),
+        UoM: String(item.UoM ?? ""),
+        UnitPriceMinor: Number(item.UnitPriceMinor ?? 0),
+        DiscountEnabled: Boolean(item.DiscountEnabled),
+        DiscountPercent: Number(item.DiscountPercent ?? 0),
+        GrossMinor: 0,
+        DiscountMinor: 0,
+        NetMinor: 0,
+      }));
+    updateMock.mockImplementation(async (input: Record<string, unknown>) => {
+      latestItems = itemsFrom(input);
+      return {
+        Order: linkedOrder({
+          ...order,
+          Items: latestItems,
+          PaymentTerms: String(input.PaymentTerms ?? order.PaymentTerms),
+          Version: Number(input.ExpectedVersion ?? 4),
+        }),
+      };
+    });
+    previewMock.mockResolvedValue({
+      Order: order,
+      Source: source,
+      DocumentState: "none",
+      DraftTax: {
+        TaxZone: "FTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+        TaxCategory: "",
+        PpnBps: 0,
+      },
+      SourceTax: {
+        TaxZone: "FTZ",
+        TaxType: "Goods",
+        ServiceCategory: "",
+        TaxCategory: "",
+        PpnBps: 0,
+      },
+      TaxChoiceRequired: false,
+    });
+    linkMock.mockImplementation(async (input: Record<string, unknown>) => {
+      const linked = linkedOrder({
+        ...order,
+        Items: latestItems,
+        Version: Number(input.ExpectedVersion ?? 4) + 1,
+        SourceState: "live",
+        SourceMissing: false,
+        PrintedTotalsKnown: true,
+        QuotationID: 12,
+        SourceRevision: 1,
+        QuoteNumber: "1502260052",
+      });
+      return { Order: linked };
+    });
+    const transport = fakeTransport(null);
+    await act(async () => {
+      root.render(
+        <PurchaseOrderEditorPage
+          order={order}
+          currency={IDR}
+          uomOptions={UOMS}
+          incotermOptions={INCOTERMS}
+          pendingLinkTarget={{ quotationId: 12, revisionNumber: 1 }}
+          onLinkQuotation={() => undefined}
+          onSaved={() => undefined}
+          onCancel={() => undefined}
+          reconciliationTransport={transport}
+          actorId={7}
+          actorName="Rina"
+          mode="draft"
+        />
+      );
+    });
+    await flush();
+    await flush();
+
+    // The review matched the draft's line to quotation line 1 and kept the PO
+    // price, so linking succeeds with an unreviewed price difference.
+    expect(document.body.textContent).toContain("Link this draft to a quotation");
+    act(() => button("Use PO entry for Line 1 unit price").click());
+    await flush();
+    act(() => button("Link source").click());
+    await flush();
+    await flush();
+    await flush();
+    expect(linkMock).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("Link this draft to a quotation");
+
+    // The link's source is adopted: leaving the unit-price field now commits a
+    // difference and creates the pane item the old flow could not build.
+    const price = input("Unit price for line 1");
+    act(() => {
+      price.focus();
+      price.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+    await flush();
+
+    expect(
+      document.querySelector('button[aria-label="Keep PO entry for Line 1 unit price"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector(
+        'button[aria-label="Use Quotation value for Line 1 unit price"]'
+      )
+    ).not.toBeNull();
+
+    // Resolving that item clears the gate: Final Save reaches the review
+    // instead of dead-ending on a difference the pane could not represent.
+    act(() => button("Keep PO entry for Line 1 unit price").click());
+    await flush();
+    act(() => button("Yes, keep PO entry for Line 1 unit price").click());
+    await flush();
+    reviewMock.mockImplementation(async () => ({
+      Order: linkedOrder({ ...order, Items: latestItems, SourceState: "live" }),
+      Source: source,
+      DocumentState: "none",
+    }));
+    act(() => button("Final Save").click());
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain("Review differences before saving");
   });
 });
