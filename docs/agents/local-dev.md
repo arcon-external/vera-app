@@ -140,6 +140,12 @@ state file, both secrets, Chrome and both wrappers.
   `--yes`.
 - No command prints the signing key or the admin password.
 
+## Browser E2E
+
+The browser pass — agent API, the Mac's `wails dev`, and browse over the SSH
+tunnel — is in `docs/agents/e2e-runbook.md`. `scripts/browser-e2e.sh --check`
+prints every step and names a missing prerequisite without starting anything.
+
 ## Tests
 
 ```bash
