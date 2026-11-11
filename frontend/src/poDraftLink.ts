@@ -50,7 +50,9 @@ export function withMissingSourceLines(
     if (line.quotationItemNo === null) continue;
     claimed.add(sourceLineRef(line.quotationItemNo, line.quotationSubNo));
   }
-  const missing = sourceLines.filter((line) => !claimed.has(sourceLabel(line)));
+  const missing = sourceLines.filter(
+    (line) => !claimed.has(sourceLineRef(line.QuotationItemNo, line.QuotationSubNo))
+  );
   if (missing.length === 0) return state;
 
   const kept = state.lines.filter((line) => line.description.trim() !== "");
