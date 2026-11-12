@@ -45,6 +45,8 @@ export interface PurchaseOrderDocumentPanelViewProps {
    * the Save is about to remount.
    */
   disabled?: boolean;
+  /** The sticky rail's narrow card: stacked heading and full-width action. */
+  compact?: boolean;
   onChooseFile: () => void;
   onView: () => void;
   onRemove: () => void;
@@ -62,6 +64,7 @@ export function PurchaseOrderDocumentPanelView({
   absenceConfirmed = false,
   preview = null,
   disabled: disabledProp = false,
+  compact = false,
   onChooseFile,
   onView,
   onRemove,
@@ -76,15 +79,30 @@ export function PurchaseOrderDocumentPanelView({
 
   return (
     <Card className="p-4" data-tutorial="po-document">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <SectionHeading
-          title="Customer PO PDF"
-          hint="One original document, kept unchanged"
-        />
-        {active !== null ? (
-          <span className="text-caption text-ink-500">{versionLabel}</span>
-        ) : null}
-      </div>
+      {compact ? (
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-500">
+            Customer PO PDF
+          </p>
+          {active !== null ? (
+            <span className="text-caption text-ink-500">{versionLabel}</span>
+          ) : (
+            <span className="rounded-full border border-rule bg-paper-subtle px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-ink-500">
+              Optional
+            </span>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <SectionHeading
+            title="Customer PO PDF"
+            hint="One original document, kept unchanged"
+          />
+          {active !== null ? (
+            <span className="text-caption text-ink-500">{versionLabel}</span>
+          ) : null}
+        </div>
+      )}
 
       {loading ? (
         <p className="mt-2 text-small text-ink-500" role="status">
@@ -92,9 +110,14 @@ export function PurchaseOrderDocumentPanelView({
         </p>
       ) : active === null ? (
         <div className="mt-2 grid gap-1">
-          <p className="text-small text-ink-700" data-testid="po-document-none">
+          <p className="text-small font-medium text-ink-900" data-testid="po-document-none">
             {NO_DOCUMENT_TEXT}
           </p>
+          {compact ? (
+            <p className="text-caption text-ink-500">
+              One original document, kept unchanged.
+            </p>
+          ) : null}
           {state.Versions.length > 0 ? (
             <p className="text-caption text-ink-500">
               {state.Versions.length}{" "}
@@ -160,6 +183,31 @@ export function PurchaseOrderDocumentPanelView({
             </Button>
           </div>
         </div>
+      ) : compact ? (
+        <div className="mt-3 grid gap-2">
+          <Button
+            className="w-full"
+            aria-label={active === null ? "Attach customer PO PDF" : "Replace customer PO PDF"}
+            onClick={onChooseFile}
+            disabled={disabled}
+          >
+            {busy === "uploading"
+              ? "Uploading…"
+              : active === null
+                ? "Attach"
+                : "Replace"}
+          </Button>
+          {active !== null ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Button aria-label="View customer PO PDF" onClick={onView} disabled={disabled}>
+                View
+              </Button>
+              <Button aria-label="Remove customer PO PDF" onClick={onRemove} disabled={disabled}>
+                Remove
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button
@@ -201,7 +249,7 @@ export function PurchaseOrderDocumentPanelView({
           <iframe
             title="Customer PO PDF preview"
             src={preview.url}
-            className="h-[28rem] w-full rounded border border-rule bg-paper-subtle"
+            className={`${compact ? "h-[20rem]" : "h-[28rem]"} w-full rounded border border-rule bg-paper-subtle`}
           />
         </div>
       ) : null}
@@ -233,6 +281,8 @@ export interface PurchaseOrderDocumentPanelProps {
    * the real empty/attached shape but never reads or writes a server row.
    */
   tutorial?: boolean;
+  /** Renders the narrow sticky-rail card. */
+  compact?: boolean;
 }
 
 /**
@@ -249,6 +299,7 @@ export function PurchaseOrderDocumentPanel({
   onStateChange,
   disabled = false,
   tutorial = false,
+  compact = false,
 }: PurchaseOrderDocumentPanelProps) {
   const [state, setState] = useState<PurchaseOrderDocumentStateDTO>(
     initialState ?? { Document: null, Versions: [] }
@@ -449,6 +500,7 @@ export function PurchaseOrderDocumentPanel({
       />
       <PurchaseOrderDocumentPanelView
         state={state}
+        compact={compact}
         busy={busy}
         loading={loading}
         error={error}

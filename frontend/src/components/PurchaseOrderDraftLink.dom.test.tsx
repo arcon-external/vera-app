@@ -651,7 +651,7 @@ describe("draft source link (issue #497)", () => {
     );
 
     expect(document.body.textContent).toContain(
-      "The quotation this draft followed was deleted."
+      "The previous source was removed."
     );
     await openReview();
     expect(previewMock).toHaveBeenCalledWith(7, 12, 0);
