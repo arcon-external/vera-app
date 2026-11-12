@@ -239,7 +239,8 @@ describe("FeaturesTutorial", () => {
     });
     await flush();
     expect(document.body.textContent).not.toContain("First body");
-    expect(document.body.textContent).toContain("Features Tutorial · 1/2");
+    expect(document.body.textContent).toContain("Continue tutorial");
+    expect(document.body.textContent).toContain("1/2");
 
     act(() => {
       document

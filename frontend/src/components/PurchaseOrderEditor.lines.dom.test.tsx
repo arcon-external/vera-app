@@ -894,7 +894,7 @@ describe("confirmation-number request (#581)", () => {
     const label = "Generate a confirmation number when this purchase order is saved";
     const toggle = checkbox(label);
     expect(toggle.checked).toBe(false);
-    expect(document.body.textContent).toContain("issued at Final Save");
+    expect(document.body.textContent).toContain("Issued at Final Save");
     expect(document.body.textContent).toContain("cannot be edited afterwards");
 
     act(() => toggle.click());

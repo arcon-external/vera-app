@@ -226,14 +226,16 @@ export function DetailsPanel({
           />
         </div>
 
-        <Field label="Customer">
-          <Select
-            value={customerId}
-            options={customerOptions}
-            ariaLabel="Customer"
-            onChange={(next) => onCustomerChange(Number(next))}
-          />
-        </Field>
+        <div data-tutorial="quotation-customer">
+          <Field label="Customer">
+            <Select
+              value={customerId}
+              options={customerOptions}
+              ariaLabel="Customer"
+              onChange={(next) => onCustomerChange(Number(next))}
+            />
+          </Field>
+        </div>
 
         <Field label="Recipient name">
           <input
