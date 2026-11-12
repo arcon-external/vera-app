@@ -184,6 +184,8 @@ export interface PurchaseOrderEditorViewProps {
    * harnesses leave this unset and keep the totals below the lines.
    */
   totalsInRail?: boolean;
+  /** The page's rail owns the source card; standalone harnesses keep it inline. */
+  sourcePanelInRail?: boolean;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -619,6 +621,7 @@ export function PurchaseOrderEditorView({
   gateBlockedMessage = null,
   onBlockedActivate,
   totalsInRail = false,
+  sourcePanelInRail = false,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
@@ -1390,7 +1393,7 @@ export function PurchaseOrderEditorView({
         </Card>
       ) : null}
 
-      {!correcting ? (
+      {!correcting && !sourcePanelInRail ? (
         <PurchaseOrderSourceLinkPanel
           sourceState={state.sourceState}
           quoteNumber={state.quoteNumber}
@@ -1547,7 +1550,7 @@ export function PurchaseOrderEditorView({
           title="Addresses and contacts"
           hint="Commercial contact details for this order"
         />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <TextAreaField
             label="Billing address"
             value={state.header.billingAddress}
@@ -1562,6 +1565,8 @@ export function PurchaseOrderEditorView({
               dispatch({ type: "headerChanged", patch: { deliveryAddress: value } })
             }
           />
+        </div>
+        <div className="mt-4 grid gap-4 border-t border-rule pt-4 sm:grid-cols-3">
           <Field
             label="Ship-to code"
             value={state.header.shipToCode}
@@ -3113,12 +3118,21 @@ export function PurchaseOrderEditorPage({
           }
           onBlockedActivate={blockedActivate}
           totalsInRail
+          sourcePanelInRail
         />
         </div>
         <aside
-          aria-label="Totals and customer PO document"
+          aria-label="Source, totals and customer PO document"
           className="flex flex-col gap-4 lg:sticky lg:top-[88px] lg:max-h-[calc(100dvh-176px)] lg:self-start lg:overflow-y-auto"
         >
+          <PurchaseOrderSourceLinkPanel
+            sourceState={state.sourceState}
+            quoteNumber={state.quoteNumber}
+            sourceRevision={state.sourceRevision}
+            correcting={correcting}
+            onChooseSource={onLinkQuotation}
+            compact
+          />
           {railCalculation.error !== null ? (
             <StatusBanner tone="danger">{railCalculation.error}</StatusBanner>
           ) : null}
@@ -3134,22 +3148,23 @@ export function PurchaseOrderEditorPage({
             <StatusBanner tone="danger">{state.error}</StatusBanner>
           ) : null}
           <PurchaseOrderDocumentPanel
-        purchaseOrderId={state.orderId}
-        disabled={state.saving}
-        tutorial={tutorial}
-        resolvePurchaseOrderId={async () => {
-          const outcome = await persistWorkingCopy(false);
-          if (outcome.kind === "saved") return outcome.order.ID;
-          if (outcome.kind === "conflict") {
-            throw new Error(draftLinkConflictWarning(outcome.conflict));
-          }
-          if (outcome.kind === "savedRecord") {
-            throw new Error(
-              "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
-            );
-          }
-          throw new Error(outcome.message);
-        }}
+            compact
+            purchaseOrderId={state.orderId}
+            disabled={state.saving}
+            tutorial={tutorial}
+            resolvePurchaseOrderId={async () => {
+              const outcome = await persistWorkingCopy(false);
+              if (outcome.kind === "saved") return outcome.order.ID;
+              if (outcome.kind === "conflict") {
+                throw new Error(draftLinkConflictWarning(outcome.conflict));
+              }
+              if (outcome.kind === "savedRecord") {
+                throw new Error(
+                  "This purchase order was saved by someone else; reopen it before attaching the customer PO PDF."
+                );
+              }
+              throw new Error(outcome.message);
+            }}
           />
         </aside>
       </div>

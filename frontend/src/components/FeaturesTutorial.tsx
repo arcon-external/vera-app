@@ -425,7 +425,7 @@ export function FeaturesTutorial({
           type="button"
           aria-label="Show Features Tutorial guide"
           onClick={() => setCollapsed(false)}
-          className="fixed bottom-4 right-4 z-[82] inline-flex min-h-10 items-center gap-2 rounded-full border border-rule-strong bg-white/95 px-4 text-[12px] font-medium text-ink-800 shadow-pop backdrop-blur hover:border-accent-300 hover:text-accent-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50"
+          className="fixed bottom-20 right-4 z-[82] inline-flex min-h-10 items-center gap-2 rounded-full border border-rule-strong bg-white/95 px-4 text-[12px] font-medium text-ink-800 shadow-pop backdrop-blur hover:border-accent-300 hover:text-accent-900 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/50"
         >
           <span
             aria-hidden="true"

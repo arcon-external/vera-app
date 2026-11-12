@@ -17,6 +17,11 @@ export interface PurchaseOrderSourceLinkPanelProps {
   correcting: boolean;
   /** Opens the shared source selector. Undefined leaves the action disabled. */
   onChooseSource?: () => void;
+  /**
+   * The page's sticky rail is narrow. The compact card drops the horizontal
+   * heading rule and stacks the action, matching the customer-PDF card below.
+   */
+  compact?: boolean;
 }
 
 /**
@@ -29,10 +34,36 @@ export function PurchaseOrderSourceLinkPanel({
   sourceRevision,
   correcting,
   onChooseSource,
+  compact = false,
 }: PurchaseOrderSourceLinkPanelProps) {
   if (correcting) return null;
 
   if (sourceState === "live") {
+    if (compact) {
+      return (
+        <Card className="p-4" data-tutorial="po-linked-source">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-500">
+              Linked source
+            </p>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-success-200 bg-success-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-success-800">
+              <span
+                aria-hidden="true"
+                className="size-1.5 rounded-full bg-success-500"
+              />
+              Live
+            </span>
+          </div>
+          <p className="mt-1.5 text-small font-semibold text-ink-950">
+            {quoteNumber}
+          </p>
+          <p className="mt-0.5 text-caption text-ink-500">
+            Revision <span className="tnum">{sourceRevision}</span>. Your values
+            stay; quotation values appear beside each field.
+          </p>
+        </Card>
+      );
+    }
     return (
       <Card className="p-4">
         <SectionHeading
@@ -51,6 +82,59 @@ export function PurchaseOrderSourceLinkPanel({
   }
 
   const neverLinked = sourceState === "never";
+  if (compact) {
+    return (
+      <Card
+        className="border-accent-200 bg-accent-50/40 p-4"
+        data-tutorial="po-link"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="grid gap-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-accent-700">
+              Source quotation
+            </p>
+            <h2 className="text-[15px] font-semibold leading-snug tracking-[-0.01em] text-ink-950">
+              Link a quotation
+            </h2>
+          </div>
+          <span
+            aria-hidden="true"
+            className="grid size-7 shrink-0 place-items-center rounded-full bg-white text-accent-700 ring-1 ring-accent-200"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            >
+              <path d="M6.5 9.5l3-3" />
+              <path d="M7 4.5l1.2-1.2a2.5 2.5 0 013.5 3.5L10.5 8" />
+              <path d="M9 11.5l-1.2 1.2a2.5 2.5 0 01-3.5-3.5L5.5 8" />
+            </svg>
+          </span>
+        </div>
+        <p className="mt-2 text-caption leading-relaxed text-ink-600">
+          {neverLinked
+            ? "Every value you enter is kept. The quotation values appear beside your fields."
+            : "The previous source was removed. Your values stay; link a replacement to compare inline."}
+        </p>
+        <Button
+          className="mt-3 w-full"
+          aria-label="Link a Quotation"
+          data-tutorial="po-link-button"
+          onClick={onChooseSource}
+          disabled={onChooseSource === undefined}
+          title="Linking a quotation is the next step; your entries are kept."
+        >
+          Link a Quotation
+        </Button>
+      </Card>
+    );
+  }
+
   return (
     <Card className="p-4" data-tutorial="po-link">
       <div className="flex flex-wrap items-start justify-between gap-3">
