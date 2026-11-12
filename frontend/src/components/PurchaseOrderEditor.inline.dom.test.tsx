@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { StrictMode, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
@@ -356,6 +356,39 @@ describe("inline quotation values", () => {
     expect(document.body.textContent).toContain("Using quotation value");
   });
 
+  it("loads the inline source under StrictMode's double effect run", async () => {
+    reviewMock.mockResolvedValue(
+      review({
+        Source: reviewSource([sourceLine({ UnitPriceMinor: 12000 })]),
+      })
+    );
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <PurchaseOrderEditorPage
+            order={linkedOrder()}
+            currency={IDR}
+            uomOptions={UOMS}
+            incotermOptions={INCOTERMS}
+            onSaved={() => undefined}
+            onCancel={() => undefined}
+            actionsInShell
+            onShellActions={(actions) => {
+              shellActions = actions;
+            }}
+            reconciliationTransport={fakeTransport(null)}
+            actorId={7}
+            actorName="Rina"
+          />
+        </StrictMode>
+      );
+    });
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain("Quotation line 1");
+  });
+
   it("renders a quotation ghost under its matching line and accepts the whole item", async () => {
     reviewMock.mockResolvedValue(
       review({
@@ -374,6 +407,46 @@ describe("inline quotation values", () => {
 
     expect(document.body.textContent).not.toContain("Quotation line 1");
     expect(input("Unit price for line 1").value).toBe("Rp12.000");
+  });
+
+  it("renders a split quotation item through the real item row", async () => {
+    reviewMock.mockResolvedValue(
+      review({
+        Source: reviewSource([
+          sourceLine({
+            QuotationItemNo: 2,
+            QuotationSubNo: 1,
+            LineLabel: "2.1",
+            ParentDescription: "Mounting package",
+            Description: "Wall panels",
+            DescriptionLines: ["Cable tray"],
+            UnitPriceMinor: 100,
+          }),
+          sourceLine({
+            QuotationItemNo: 2,
+            QuotationSubNo: 2,
+            LineLabel: "2.2",
+            ParentDescription: "Mounting package",
+            Description: "Ceiling grid",
+            DescriptionLines: ["Two technicians"],
+            UnitPriceMinor: 200,
+          }),
+        ]),
+      })
+    );
+    await renderEditor(fakeTransport(null), linkedOrder({ Items: [] }));
+
+    expect(document.body.textContent).toContain("Quotation item 2");
+    expect(document.body.textContent).toContain("Mounting package");
+    expect(document.body.textContent).toContain("Cable tray");
+    expect(document.body.textContent).toContain("2 sub-items");
+
+    act(() => button("Use quotation 2").click());
+    await flush();
+
+    expect(document.body.textContent).toContain("2 sub-items");
+    expect(input("Description for sub-item 1 of line 1").value).toBe("Wall panels");
+    expect(input("Description for sub-item 2 of line 1").value).toBe("Ceiling grid");
   });
 
   it("lists every quotation item for an empty order and adds them all", async () => {
@@ -446,6 +519,30 @@ describe("inline final save", () => {
     expect(document.body.textContent).toContain(
       "I confirm this purchase order is saved without its customer PO PDF"
     );
+  });
+
+  it("blocks the confirmation when the customer PO number is empty", async () => {
+    reviewMock.mockResolvedValue(review());
+    const transport = fakeTransport(null);
+    await renderEditor(transport, linkedOrder({ PONumber: "" }));
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onFinalSave();
+    });
+    await flush();
+    await flush();
+
+    expect(document.body.textContent).toContain(
+      "A customer PO number is required before the PO can be saved."
+    );
+    expect(document.body.textContent).not.toContain(
+      "One-way: a saved record is read-only"
+    );
+    expect(document.activeElement?.getAttribute("aria-label")).toBe(
+      "Customer PO number"
+    );
+    expect(updateMock).not.toHaveBeenCalled();
   });
 
   it("persists the kept session, then finalizes with the session-bumped version", async () => {

@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
-import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
+import {
+  PurchaseOrderEditorPage,
+  type POEditorShellActions,
+} from "./PurchaseOrderEditor";
 
 // Issue #473: the correction editor and its version warning in a real DOM.
 // These are the interactions the SSR suite cannot reach: the required reason,
@@ -226,6 +229,41 @@ describe("correction editor (issue #473)", () => {
     expect(correctMock).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("A correction needs a reason.");
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("reads the current reason through the shell action bar", async () => {
+    correctMock.mockResolvedValue({ Order: order(), Conflict: null });
+    let shell: POEditorShellActions | null = null;
+    act(() =>
+      root.render(
+        <PurchaseOrderEditorPage
+          order={order()}
+          currency={USD}
+          uomOptions={[{ value: "Pc", label: "Pc" }]}
+          incotermOptions={[{ value: "CIF", label: "CIF" }]}
+          onSaved={() => undefined}
+          onCancel={() => undefined}
+          mode="correction"
+          actionsInShell
+          onShellActions={(actions) => {
+            shell = actions;
+          }}
+        />
+      )
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    typeInto("Correction reason", "Shell reason");
+    await act(async () => {
+      shell?.onSave();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(correctMock).toHaveBeenCalledTimes(1);
+    const input = correctMock.mock.calls[0][0] as { Reason?: string };
+    expect(input.Reason).toBe("Shell reason");
   });
 
   it("Cancel keeps the unsaved working copy and never applies the edit", async () => {
