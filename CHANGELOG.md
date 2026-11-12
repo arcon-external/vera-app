@@ -4,6 +4,38 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.19.0] - 2026-11-12
+
+### Added
+
+- **Features Tutorials for the Quotation and Purchase Order workspaces.**
+  Each workspace opens a guided tour the first time this account enters it on
+  this device. The tour explains the details, line items and pricing, totals,
+  drafts and archive, and for purchase orders, linking, inline quotation values,
+  ghosts and the final save. Finish or Skip marks it seen; leaving partway does
+  not, so it starts again on the next visit. Replay it from the workspace's
+  settings at any time. Practice data stays inside the app and never becomes a
+  real quotation or purchase order. (#596)
+
+### Changed
+
+- **Linking a quotation fills the purchase order inline instead of opening a
+  difference review.** Quotation values appear in the fields they belong to:
+  blue for a quotation value, green for a value you changed, with a bar to use
+  or revert. Split and sub-item quotations show as ghosts on the order, and
+  Final Save is now a confirmation step. (#590)
+
+### Fixed
+
+- **Linking a quotation fills its values as soon as the quotation finishes
+  loading** instead of leaving the fields blank until the editor is reopened. (#592)
+- **Final Save is blocked before the confirmation when the customer PO number is
+  empty.** (#592)
+- **A correction reason typed in the action bar now reaches the correction.** (#592)
+- **Editing or removing an accepted line brings its quotation ghost back.** (#594)
+- **The quotation ghost summary is announced to screen readers.** (#592)
+- **The currency remedy wording is corrected.** (#592)
+
 ## [0.18.0] - 2026-11-11
 
 ### Added
