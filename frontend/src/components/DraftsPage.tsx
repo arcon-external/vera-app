@@ -72,7 +72,11 @@ export function DraftsPage({ onOpenDraft, onNewQuotation }: DraftsPageProps) {
   };
 
   return (
-    <section aria-labelledby="drafts-heading" className="flex flex-col gap-5">
+    <section
+      aria-labelledby="drafts-heading"
+      className="flex flex-col gap-5"
+      data-tutorial="quotation-drafts"
+    >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 id="drafts-heading" className="text-title font-semibold text-ink-950">

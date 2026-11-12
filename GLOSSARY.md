@@ -54,6 +54,12 @@ _Avoid_: User account, seat
 The email a user signs in with; it is an identity, not a delivery channel.
 _Avoid_: Login email, account email, contact email
 
+### Workspace learning
+
+**Features Tutorial**:
+A progressive, interactive guide through one workspace's features. It opens automatically the first time an account enters that workspace on this device and can be replayed from that workspace's settings.
+_Avoid_: Onboarding, product tour, walkthrough, guided tour
+
 ### Company identity
 
 **Company**:

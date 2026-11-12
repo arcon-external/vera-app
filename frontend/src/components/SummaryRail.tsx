@@ -136,7 +136,7 @@ export function SummaryRail({
   const taxLabel = taxRateLabel(taxZone, taxType, serviceCategory);
 
   return (
-    <Card className="p-5">
+    <Card className="p-5" data-tutorial="quotation-totals">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-caption font-medium uppercase tracking-[0.14em] text-ink-500">
           Summary

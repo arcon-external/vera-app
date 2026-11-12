@@ -100,6 +100,7 @@ export function InlineQuoteField({
   onChange,
   onFocus,
   onBlur,
+  dataTutorial,
 }: {
   label: string;
   value: string;
@@ -109,10 +110,11 @@ export function InlineQuoteField({
   onChange: (value: string) => void;
   onFocus?: () => void;
   onBlur?: () => void;
+  dataTutorial?: string;
 }) {
   const [focused, setFocused] = useState(false);
   return (
-    <div className="relative grid gap-1.5">
+    <div className="relative grid gap-1.5" data-tutorial={dataTutorial}>
       <span className="text-small font-medium text-ink-700">{label}</span>
       <input
         type={type}

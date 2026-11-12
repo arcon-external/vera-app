@@ -1,4 +1,10 @@
-import type { ButtonHTMLAttributes, JSX, ReactNode, Ref } from "react";
+import type {
+  ButtonHTMLAttributes,
+  HTMLAttributes,
+  JSX,
+  ReactNode,
+  Ref,
+} from "react";
 
 type ButtonVariant = "primary" | "dark" | "secondary" | "ghost" | "danger";
 type ButtonSize = "xs" | "sm" | "md";
@@ -70,12 +76,16 @@ export function Button({
 export function Card({
   className = "",
   children,
+  ...rest
 }: {
   className?: string;
   children: ReactNode;
-}) {
+} & Omit<HTMLAttributes<HTMLDivElement>, "className" | "children">) {
   return (
-    <div className={`rounded-xl border border-rule bg-white shadow-card ${className}`}>
+    <div
+      {...rest}
+      className={`rounded-xl border border-rule bg-white shadow-card ${className}`}
+    >
       {children}
     </div>
   );

@@ -500,6 +500,13 @@ export function AppShell({
             <nav
               aria-label="Primary"
               data-workspace={workspace}
+              data-tutorial={
+                workspace === "quotation"
+                  ? "quotation-tabs"
+                  : workspace === "purchase-order"
+                    ? "po-tabs"
+                    : undefined
+              }
               className="flex items-center gap-1"
             >
               {tabs.map((tab) => {

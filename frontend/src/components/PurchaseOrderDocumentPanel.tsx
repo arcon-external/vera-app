@@ -75,7 +75,7 @@ export function PurchaseOrderDocumentPanelView({
   const uploadedDate = active?.UploadedAt ? active.UploadedAt.slice(0, 10) : "";
 
   return (
-    <Card className="p-4">
+    <Card className="p-4" data-tutorial="po-document">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <SectionHeading
           title="Customer PO PDF"
@@ -228,6 +228,11 @@ export interface PurchaseOrderDocumentPanelProps {
    * draft Save is in flight.
    */
   disabled?: boolean;
+  /**
+   * Issue #595: the Features Tutorial is a practice order. The panel keeps
+   * the real empty/attached shape but never reads or writes a server row.
+   */
+  tutorial?: boolean;
 }
 
 /**
@@ -243,6 +248,7 @@ export function PurchaseOrderDocumentPanel({
   absenceConfirmed = false,
   onStateChange,
   disabled = false,
+  tutorial = false,
 }: PurchaseOrderDocumentPanelProps) {
   const [state, setState] = useState<PurchaseOrderDocumentStateDTO>(
     initialState ?? { Document: null, Versions: [] }
@@ -282,6 +288,10 @@ export function PurchaseOrderDocumentPanel({
       setLoading(false);
       return;
     }
+    if (tutorial) {
+      setLoading(false);
+      return;
+    }
     if (purchaseOrderId < 1) {
       // A transient draft has no row to read. The first upload asks
       // resolvePurchaseOrderId to create one and then refreshes with that id.
@@ -309,7 +319,7 @@ export function PurchaseOrderDocumentPanel({
     return () => {
       cancelled = true;
     };
-  }, [purchaseOrderId, initialState]);
+  }, [purchaseOrderId, initialState, tutorial]);
 
   useEffect(() => {
     const current = previewUrl.current;
@@ -322,14 +332,16 @@ export function PurchaseOrderDocumentPanel({
 
   // The hidden input follows the view's disabled rule, plus the parent's block.
   // The view also disables every visible control while `disabled` is true.
-  const controlsDisabled = disabled || busy !== "idle" || loading;
+  const controlsDisabled =
+    tutorial || disabled || busy !== "idle" || loading;
 
   const chooseFile = () => {
+    if (tutorial) return;
     fileInput.current?.click();
   };
 
   const attach = async (file: File) => {
-    if (disabled) return;
+    if (tutorial || disabled) return;
     if (file.size > MAX_PURCHASE_ORDER_DOCUMENT_BYTES) {
       setError(documentErrorMessage(new Error("the customer PO PDF is larger than 20 MB")));
       return;

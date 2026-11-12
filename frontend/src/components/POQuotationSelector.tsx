@@ -55,6 +55,8 @@ export interface POQuotationSelectorProps {
   loadRevisions: (quotationId: number) => Promise<POSourceRevision[]>;
   /** Confirm-time server revalidation of the exact pair. */
   validate: (selection: POSourceSelection) => Promise<POSourceValidation>;
+  /** Issue #595: adds the Features Tutorial anchors and practice wording. */
+  tutorial?: boolean;
 }
 
 export interface POQuotationSelectorViewProps {
@@ -70,6 +72,8 @@ export interface POQuotationSelectorViewProps {
   dialogRef?: RefObject<HTMLDivElement | null>;
   /** Escape and Tab containment, owned by the container. */
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
+  /** Issue #595: the tutorial selector's single practice quotation. */
+  tutorial?: boolean;
 }
 
 // Everything the modal can focus. Disabled buttons (used Quotation rows) are
@@ -117,7 +121,11 @@ function StepOne({
   state,
   dispatch,
   onOpenDraft,
-}: Pick<POQuotationSelectorViewProps, "state" | "dispatch" | "onOpenDraft">) {
+  tutorial = false,
+}: Pick<
+  POQuotationSelectorViewProps,
+  "state" | "dispatch" | "onOpenDraft" | "tutorial"
+>) {
   const rows = visibleRows(state.rows, state.hideUsed);
   return (
     <div className="grid gap-4">
@@ -171,6 +179,7 @@ function StepOne({
                 <button
                   type="button"
                   disabled={used}
+                  data-tutorial={tutorial ? "tutorial-quotation-row" : undefined}
                   aria-disabled={used ? "true" : undefined}
                   aria-label={`Quotation ${row.quoteNumber}, ${row.customerName}`}
                   aria-describedby={used ? `po-source-used-${row.id}` : undefined}
@@ -344,6 +353,7 @@ export function POQuotationSelectorView({
   onOpenDraft,
   dialogRef,
   onKeyDown,
+  tutorial = false,
 }: POQuotationSelectorViewProps) {
   const confirming = state.confirming;
   const repairing = mode === "repair";
@@ -357,14 +367,19 @@ export function POQuotationSelectorView({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        data-tutorial={tutorial ? "tutorial-selector" : undefined}
         aria-label={
           repairing
             ? "Select a new quotation for the saved purchase order"
-            : "Select a quotation for the purchase order"
+            : tutorial
+              ? "Select the practice quotation for the Features Tutorial"
+              : "Select a quotation for the purchase order"
         }
         tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-rule bg-white shadow-card outline-none"
+        className={`flex max-h-[85vh] w-full flex-col rounded-xl border border-rule bg-white shadow-card outline-none ${
+          tutorial ? "max-w-xl" : "max-w-2xl"
+        }`}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-rule px-6 py-4">
@@ -391,6 +406,7 @@ export function POQuotationSelectorView({
               state={state}
               dispatch={dispatch}
               onOpenDraft={repairing ? undefined : onOpenDraft}
+              tutorial={tutorial}
             />
           ) : null}
           {state.step === 2 ? <StepTwo state={state} dispatch={dispatch} /> : null}
@@ -447,6 +463,7 @@ export function POQuotationSelector({
   loadPage,
   loadRevisions,
   validate,
+  tutorial = false,
 }: POQuotationSelectorProps) {
   const [state, dispatch] = useReducer(
     poSourceSelectorReducer,
@@ -661,6 +678,7 @@ export function POQuotationSelector({
       onOpenDraft={onOpenDraft}
       dialogRef={dialogRef}
       onKeyDown={handleDialogKeyDown}
+      tutorial={tutorial}
     />
   );
 }

@@ -52,7 +52,7 @@ export function PurchaseOrderSourceLinkPanel({
 
   const neverLinked = sourceState === "never";
   return (
-    <Card className="p-4">
+    <Card className="p-4" data-tutorial="po-link">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <SectionHeading
@@ -67,6 +67,7 @@ export function PurchaseOrderSourceLinkPanel({
         </div>
         <Button
           aria-label="Link a Quotation"
+          data-tutorial="po-link-button"
           onClick={onChooseSource}
           disabled={onChooseSource === undefined}
           title="Linking a quotation is the next step; your entries are kept."

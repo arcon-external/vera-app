@@ -238,6 +238,14 @@ export interface PurchaseOrderEditorPageProps {
   /** Attribution for local keep/use decisions; the server stamps its own. */
   actorId?: number;
   actorName?: string;
+  /**
+   * Issue #595: the Features Tutorial runs on a client-only practice order.
+   * The editor still shows the real controls, but Save and Final Save are
+   * practice actions and the source review is supplied, never fetched.
+   */
+  tutorial?: boolean;
+  tutorialReview?: PurchaseOrderReviewDTO | null;
+  onTutorialAction?: () => void;
 }
 
 /**
@@ -1172,7 +1180,7 @@ export function PurchaseOrderEditorView({
           the same state and updates as they change. The customer, quotation
           identity, currency and tax basis are source snapshots, not controls
           here. */}
-      <Card className="p-4">
+      <Card className="p-4" data-tutorial="po-header">
         <SectionHeading
           title="Purchase order details"
           hint="Editable on this purchase order"
@@ -1214,6 +1222,7 @@ export function PurchaseOrderEditorView({
             }
           />
           <InlineQuoteField
+            dataTutorial="po-payment-terms"
             label="Payment terms"
             value={state.header.paymentTerms}
             placeholder="e.g. 50% advance, balance 30 days after delivery"
@@ -1479,7 +1488,7 @@ export function PurchaseOrderEditorView({
         </div>
       </Card>
 
-      <div>
+      <div data-tutorial="po-lines">
         <SectionHeading
           title="Line items"
           hint={`${groups.length} ${groups.length === 1 ? "line" : "lines"}${
@@ -1740,6 +1749,9 @@ export function PurchaseOrderEditorPage({
   reconciliationTransport,
   actorId = 0,
   actorName = "You",
+  tutorial = false,
+  tutorialReview = null,
+  onTutorialAction,
 }: PurchaseOrderEditorPageProps) {
   // #473 wave 2: a draft write that meets an already-saved record keeps the
   // working copy and continues as a correction. The transition is local to this
@@ -1827,7 +1839,7 @@ export function PurchaseOrderEditorPage({
     sourceQuotationId: order.QuotationID,
     sourceRevision: order.SourceRevision,
     poVersion: state.version,
-    readOnly: correcting,
+    readOnly: correcting || tutorial,
     source: compareSource,
     sourceLines: compareLines,
     lines: state.lines.map((line, index) => ({
@@ -1904,6 +1916,17 @@ export function PurchaseOrderEditorPage({
   // compares against it, never against typed input. Transient drafts have no
   // server row to review, so nothing loads until the first persist.
   useEffect(() => {
+    // The practice tutorial never reads a server source: the fixture is the
+    // exact revision, and its review is already in memory.
+    if (tutorial && tutorialReview !== null) {
+      setCompareSource({
+        paymentTerms: tutorialReview.Source.PaymentTerms,
+        incoterms: tutorialReview.Source.Incoterms,
+      });
+      setCompareLines(tutorialReview.Source.Lines);
+      loadedSourceForRef.current = tutorialReview.Order.ID;
+      return;
+    }
     if (state.orderId < 1 || state.sourceState !== "live") {
       loadedSourceForRef.current = null;
       return;
@@ -1932,7 +1955,7 @@ export function PurchaseOrderEditorPage({
     return () => {
       cancelled = true;
     };
-  }, [state.orderId, state.sourceState]);
+  }, [state.orderId, state.sourceState, tutorial, tutorialReview]);
 
   /**
    * Wave 2 of #473: carry the working copy into the correction flow at the
@@ -2393,6 +2416,10 @@ export function PurchaseOrderEditorPage({
   }, [pendingLinkTarget]);
 
   const save = async (expectedVersion: number, overwrite: boolean) => {
+    if (tutorial) {
+      onTutorialAction?.();
+      return;
+    }
     if (correcting) {
       const reasonProblem = correctionReasonError(reason);
       if (reasonProblem !== null) {
@@ -2503,6 +2530,10 @@ export function PurchaseOrderEditorPage({
   };
 
   const startReview = async () => {
+    if (tutorial) {
+      onTutorialAction?.();
+      return;
+    }
     // #580: a draft may be saved with zero lines, but a saved record may not
     // be finalized empty. Refuse before persisting or loading the source.
     if (state.lines.length === 0) {
@@ -2680,6 +2711,10 @@ export function PurchaseOrderEditorPage({
   shellActionsRef.current = { save, startReview, blockedActivate };
 
   const finalSave = async (expectedVersion: number, overwrite: boolean) => {
+    if (tutorial) {
+      onTutorialAction?.();
+      return;
+    }
     if (review === null) return;
     const comparison = comparePurchaseOrder(state, review.Source, activeCurrency);
     const implicit = decisionsForCurrentValues(comparison);
@@ -2973,6 +3008,7 @@ export function PurchaseOrderEditorPage({
       <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
         disabled={state.saving}
+        tutorial={tutorial}
         resolvePurchaseOrderId={async () => {
           const outcome = await persistWorkingCopy(false);
           if (outcome.kind === "saved") return outcome.order.ID;

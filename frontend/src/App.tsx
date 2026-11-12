@@ -84,6 +84,29 @@ import type {
 import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
 import type { POEditorShellActions } from "./components/PurchaseOrderEditor";
 import { PurchaseOrderWorkspacePage } from "./components/PurchaseOrderWorkspace";
+import {
+  FeaturesTutorial,
+  emitFeaturesTutorialAdvance,
+} from "./components/FeaturesTutorial";
+import {
+  EMPTY_FEATURES_TUTORIAL,
+  markFeaturesTutorialComplete,
+  readFeaturesTutorial,
+  type FeaturesTutorialCompletion,
+  type FeaturesTutorialWorkspace,
+} from "./featuresTutorial";
+import {
+  PURCHASE_ORDER_TUTORIAL_STEPS,
+  QUOTATION_TUTORIAL_STEPS,
+} from "./featuresTutorial/steps";
+import {
+  TUTORIAL_RECONCILIATION_TRANSPORT,
+  TUTORIAL_SELECTOR_PAGE,
+  TUTORIAL_SELECTOR_REVISIONS,
+  TUTORIAL_SELECTOR_VALIDATION,
+  tutorialOrder as buildTutorialOrder,
+  tutorialReview as buildTutorialReview,
+} from "./featuresTutorial/tutorialData";
 import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import {
   isPurchaseOrderWorkspacePage,
@@ -554,6 +577,18 @@ function App() {
     quotationId: number;
     revisionNumber: number;
   } | null>(null);
+
+  // Issue #595: the Features Tutorial runs once per account/workspace on this
+  // device. The practice PO is client-only; these flags never travel to the
+  // server and reset when the account changes.
+  const [featuresTutorial, setFeaturesTutorial] =
+    useState<FeaturesTutorialCompletion>({ ...EMPTY_FEATURES_TUTORIAL });
+  const [activeTutorial, setActiveTutorial] =
+    useState<FeaturesTutorialWorkspace | null>(null);
+  const [tutorialForceStart, setTutorialForceStart] =
+    useState<FeaturesTutorialWorkspace | null>(null);
+  const [tutorialLinked, setTutorialLinked] = useState(false);
+  const [tutorialSelectorOpen, setTutorialSelectorOpen] = useState(false);
   // The PO workspace (#468/#473) owns the open record and its phase in one
   // controller, so Cancel from a correction can re-read the saved record
   // instead of leaving a stale editor behind. The page renders the archive when
@@ -1145,6 +1180,18 @@ function App() {
             IDR_FALLBACK_ENTRY
           ),
     [currencyCatalogue, poDraft]
+  );
+
+  // Issue #595: the practice quotation is a client-only fixture. It is stable
+  // per currency so the editor's source effect does not restart on every
+  // render, and it is never sent to a binding.
+  const tutorialReviewDto = useMemo(
+    () => (liveEntry === null ? null : buildTutorialReview(liveEntry)),
+    [liveEntry]
+  );
+  const tutorialLinkedOrder = useMemo(
+    () => (liveEntry === null ? null : buildTutorialOrder(liveEntry)),
+    [liveEntry]
   );
 
   // The resolved canonical unit every default falls back to: the profile's
@@ -2558,6 +2605,113 @@ function App() {
       ? preservedWorkspacePage
       : null;
 
+  // Issue #595: the Features Tutorial lifecycle. Completion is per account on
+  // this device; the practice PO is only an in-memory fixture.
+  useEffect(() => {
+    setFeaturesTutorial(
+      readFeaturesTutorial(localSettingsStorage(), user?.ID ?? null)
+    );
+    setActiveTutorial(null);
+    setTutorialForceStart(null);
+    setTutorialLinked(false);
+    setTutorialSelectorOpen(false);
+  }, [user?.ID]);
+
+  const tutorialPageAllowed = useCallback(
+    (workspace: FeaturesTutorialWorkspace, page: AppPage): boolean =>
+      workspace === "quotation"
+        ? isQuotationWorkspacePage(page) || page === "quotation-settings"
+        : isPurchaseOrderWorkspacePage(page) || page === "po-settings",
+    []
+  );
+
+  useEffect(() => {
+    if (user === null || checkingSession || activeTutorial !== null) return;
+    if (showHelp || whatsNew.length > 0 || poSelectorOpen || tutorialSelectorOpen) {
+      return;
+    }
+    const target =
+      tutorialForceStart ??
+      (isQuotationWorkspacePage(visiblePage)
+        ? "quotation"
+        : isPurchaseOrderWorkspacePage(visiblePage)
+          ? "purchase-order"
+          : null);
+    if (target === null) return;
+    if (tutorialForceStart === null && featuresTutorial[target]) return;
+    const timer = window.setTimeout(() => {
+      setActiveTutorial(target);
+      setTutorialForceStart(null);
+      if (target === "purchase-order") {
+        setTutorialLinked(false);
+        setTutorialSelectorOpen(false);
+      }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [
+    user,
+    checkingSession,
+    activeTutorial,
+    showHelp,
+    whatsNew.length,
+    poSelectorOpen,
+    tutorialSelectorOpen,
+    visiblePage,
+    featuresTutorial,
+    tutorialForceStart,
+  ]);
+
+  // Leaving every page that belongs to the tutorial's workspace closes the
+  // tour without marking it seen. The next entry starts it again.
+  useEffect(() => {
+    if (activeTutorial === null) return;
+    if (!tutorialPageAllowed(activeTutorial, visiblePage)) {
+      setActiveTutorial(null);
+      setTutorialLinked(false);
+      setTutorialSelectorOpen(false);
+      setTutorialForceStart(null);
+    }
+  }, [activeTutorial, tutorialPageAllowed, visiblePage]);
+
+  const finishFeaturesTutorial = useCallback(
+    (reason: "finished" | "skipped") => {
+      if (activeTutorial === null) return;
+      if (user !== null) {
+        setFeaturesTutorial(
+          markFeaturesTutorialComplete(
+            localSettingsStorage(),
+            user.ID,
+            activeTutorial
+          )
+        );
+      }
+      setActiveTutorial(null);
+      setTutorialLinked(false);
+      setTutorialSelectorOpen(false);
+      setTutorialForceStart(null);
+    },
+    [activeTutorial, user]
+  );
+
+  const replayFeaturesTutorial = useCallback(
+    (workspace: FeaturesTutorialWorkspace) => {
+      setTutorialLinked(false);
+      setTutorialSelectorOpen(false);
+      setTutorialForceStart(workspace);
+      setPage(workspace === "quotation" ? "create" : "po");
+    },
+    []
+  );
+
+  // The practice order is only ever the workspace's Editor tab; the tour's
+  // Drafts/Archive steps must show the real lists.
+  const tutorialDraft =
+    activeTutorial === "purchase-order"
+      ? tutorialLinked && tutorialLinkedOrder !== null && tutorialReviewDto !== null
+        ? tutorialLinkedOrder
+        : blankPODraft
+      : null;
+
   return (
     <>
       {showHelp && user !== null ? (
@@ -2625,6 +2779,19 @@ function App() {
         loadPage={loadPOSourcePage}
         loadRevisions={loadPOSourceRevisions}
         validate={validatePOSourceSelection}
+      />
+      <POQuotationSelector
+        open={tutorialSelectorOpen}
+        tutorial
+        onClose={() => setTutorialSelectorOpen(false)}
+        onConfirm={() => {
+          setTutorialSelectorOpen(false);
+          setTutorialLinked(true);
+          emitFeaturesTutorialAdvance("po-tutorial-linked");
+        }}
+        loadPage={async () => TUTORIAL_SELECTOR_PAGE}
+        loadRevisions={async () => TUTORIAL_SELECTOR_REVISIONS}
+        validate={async () => TUTORIAL_SELECTOR_VALIDATION}
       />
       {checkingSession ? (
         <div className="flex min-h-full items-center justify-center px-5">
@@ -2734,7 +2901,10 @@ function App() {
                 </span>
               )}
             </div>
-            <div className="ml-auto flex items-center gap-2.5">
+            <div
+              className="ml-auto flex items-center gap-2.5"
+              data-tutorial="quotation-actions"
+            >
               <Button
                 variant="ghost"
                 onClick={requestNewQuotation}
@@ -2802,7 +2972,10 @@ function App() {
                 )}
               </span>
             </div>
-            <div className="ml-auto flex items-center gap-2.5">
+            <div
+              className="ml-auto flex items-center gap-2.5"
+              data-tutorial="po-actions"
+            >
               <Button
                 variant="ghost"
                 aria-label={
@@ -2834,6 +3007,7 @@ function App() {
                 <Button
                   variant="primary"
                   aria-label="Final Save"
+                  data-tutorial="po-final-save"
                   aria-disabled={
                     poShellActions.unresolvedCount > 0 ? true : undefined
                   }
@@ -2891,6 +3065,10 @@ function App() {
           blankDraft={blankPODraft}
           currencyOptions={currencyCatalogue ?? []}
           onLinkQuotation={() => {
+            if (activeTutorial === "purchase-order") {
+              setTutorialSelectorOpen(true);
+              return;
+            }
             setPOSelectorMode("link");
             setPOSelectorRepairID(null);
             setPOSelectorOpen(true);
@@ -2944,6 +3122,15 @@ function App() {
           onShellActions={setPoShellActions}
           actorId={user?.ID ?? 0}
           actorName={user?.DisplayName ?? "You"}
+          tutorialDraft={tutorialDraft}
+          tutorialReview={tutorialLinked ? tutorialReviewDto : null}
+          tutorialReconciliationTransport={TUTORIAL_RECONCILIATION_TRANSPORT}
+          onTutorialAction={() =>
+            pushToast(
+              "info",
+              "Features Tutorial practice — nothing is saved to your workspace."
+            )
+          }
         />
         </div>
       ) : null}
@@ -3173,6 +3360,7 @@ function App() {
 
       {visiblePage === "quotation-settings" && user !== null ? (
         <QuotationSettingsPage
+          onReplayTutorial={() => replayFeaturesTutorial("quotation")}
           settings={workspaceSettings.quotation}
           onChange={saveQuotationSettings}
           onClear={clearSavedQuotationSettings}
@@ -3181,6 +3369,7 @@ function App() {
 
       {visiblePage === "po-settings" && user !== null ? (
         <PurchaseOrderSettingsPage
+          onReplayTutorial={() => replayFeaturesTutorial("purchase-order")}
           settings={workspaceSettings.purchaseOrder}
           onChange={savePurchaseOrderSettings}
           onClear={clearSavedPurchaseOrderSettings}
@@ -3193,6 +3382,23 @@ function App() {
         onDiscard={poLeave.discard}
         returnFocus={poLeave.pendingReturnFocus}
         description={poLeave.pendingDescription}
+      />
+    ) : null}
+    {activeTutorial !== null ? (
+      <FeaturesTutorial
+        workspace={activeTutorial}
+        steps={
+          activeTutorial === "quotation"
+            ? QUOTATION_TUTORIAL_STEPS
+            : PURCHASE_ORDER_TUTORIAL_STEPS
+        }
+        onNavigate={(page) => setPage(page)}
+        onClose={finishFeaturesTutorial}
+        onAction={(action) => {
+          if (action === "open-tutorial-selector") {
+            setTutorialSelectorOpen(true);
+          }
+        }}
       />
     ) : null}
     </>

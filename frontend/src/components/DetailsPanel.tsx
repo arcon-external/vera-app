@@ -201,7 +201,7 @@ export function DetailsPanel({
   const localizedTax = taxRateLabel(value.taxZone, value.taxType, value.serviceCategory);
 
   return (
-    <Card className="p-5">
+    <Card className="p-5" data-tutorial="quotation-details">
       <SectionHeading title="Quotation details" />
 
       <div className="grid gap-5 lg:grid-cols-2">

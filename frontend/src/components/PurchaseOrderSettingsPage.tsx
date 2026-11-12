@@ -8,6 +8,7 @@ import {
 import { MAX_PAYMENT_TERMS_LENGTH } from "../purchaseOrder";
 import { Select } from "./Select";
 import { Button, Card, SectionHeading, fieldClass } from "./ui";
+import { FeaturesTutorialCard } from "./FeaturesTutorialCard";
 import { NumberSetting, SettingsField } from "./WorkspaceSettingsFields";
 
 // Issue #492: the Purchase Order defaults surface. A profile surface like
@@ -27,10 +28,12 @@ export function PurchaseOrderSettingsPage({
   settings,
   onChange,
   onClear,
+  onReplayTutorial,
 }: {
   settings: PurchaseOrderSettings;
   onChange: (settings: PurchaseOrderSettings) => void;
   onClear: () => void;
+  onReplayTutorial?: () => void;
 }) {
   const patch = (next: Partial<PurchaseOrderSettings>) =>
     onChange({ ...settings, ...next });
@@ -118,6 +121,13 @@ export function PurchaseOrderSettingsPage({
           </Button>
         </div>
       </Card>
+
+      {onReplayTutorial !== undefined ? (
+        <FeaturesTutorialCard
+          workspace="purchase-order"
+          onReplay={onReplayTutorial}
+        />
+      ) : null}
     </section>
   );
 }
