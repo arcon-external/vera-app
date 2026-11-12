@@ -1,11 +1,12 @@
-// Issue #497: the Staff draft link's pure decisions, separated from the panel.
+// Issue #497: the Staff draft link's pure decisions, separated from the editor.
 //
-// A link starts from the draft's entered values and repeats the #471
-// difference review against the candidate revision. Everything here is pure:
-// the tax choice the server will require, the currency remedy wording, the
-// exact payload the binding sends, and the stale-version sentence. The
-// comparison, matching and "Use Quotation" application are the existing
-// finalize implementation, not a second one.
+// A link starts from the draft's entered values and compares them with the
+// candidate revision. There is no link review page: the editor saves, links
+// and shows the quotation values inline (#590). Everything here is pure: the
+// tax choice the server will require, the currency remedy wording, the exact
+// payload the binding sends, and the stale-version sentence. The comparison,
+// matching and choice application are the existing finalize implementation,
+// not a second one.
 
 import { conflictActorName, formatHistoryTime, type PurchaseOrderConflictDTO } from "./poCorrection";
 import type { CurrencyInfo } from "./format";
@@ -37,11 +38,10 @@ export interface PurchaseOrderDraftTaxBasisDTO {
 }
 
 /**
- * The Staff draft-link review: the same record/source/document shape a final
- * save reads, plus the two tax bases and whether a keep/source choice is
- * required.
+ * The link preview: the same record/source/document shape a final save reads,
+ * plus the two tax bases and whether a keep/source choice is required.
  */
-export interface PurchaseOrderDraftLinkReviewDTO {
+export interface PurchaseOrderDraftLinkPreviewDTO {
   Order: PurchaseOrderDTO;
   Source: PurchaseOrderSourceDTO;
   DocumentState: string;
@@ -87,7 +87,7 @@ export function ppnLabel(basis: PurchaseOrderDraftTaxBasisDTO): string {
  * bases differ, and an unknown choice is never sent.
  */
 export function draftLinkTaxChoiceError(
-  review: PurchaseOrderDraftLinkReviewDTO,
+  review: PurchaseOrderDraftLinkPreviewDTO,
   choice: PurchaseOrderDraftTaxChoice
 ): string | null {
   if (choice !== "" && choice !== "keep" && choice !== "source") {
@@ -144,7 +144,7 @@ export interface DraftLinkPlan {
 
 export function planDraftLink(
   state: PurchaseOrderEditorState,
-  review: PurchaseOrderDraftLinkReviewDTO,
+  review: PurchaseOrderDraftLinkPreviewDTO,
   currency: CurrencyInfo,
   decisions: POReviewDecisions,
   acknowledgedMissing: string[],

@@ -2743,7 +2743,7 @@ function App() {
           }
           if (poSelectorMode === "link") {
             // #497: the shared entry selector's exact pair. The editor saves
-            // the working copy and loads the difference review itself.
+            // the working copy, links it inline and keeps the entered values.
             setPendingLinkTarget({
               quotationId: selection.quotationId,
               revisionNumber: selection.revisionNumber,
@@ -3199,14 +3199,16 @@ function App() {
                       </StatusBanner>
                     </div>
                   ) : null}
-                  <SectionHeading
-                    title="Line items"
-                    action={
-                      <span className="text-caption text-ink-500">
-                        Toggle margin per line
-                      </span>
-                    }
-                  />
+                  <div data-tutorial="quotation-lines-header">
+                    <SectionHeading
+                      title="Line items"
+                      action={
+                        <span className="text-caption text-ink-500">
+                          Toggle margin per line
+                        </span>
+                      }
+                    />
+                  </div>
                   <ItemEditor
                     items={items}
                     currency={liveEntry}
@@ -3397,6 +3399,8 @@ function App() {
         onAction={(action) => {
           if (action === "open-tutorial-selector") {
             setTutorialSelectorOpen(true);
+          } else if (action === "close-tutorial-selector") {
+            setTutorialSelectorOpen(false);
           }
         }}
       />

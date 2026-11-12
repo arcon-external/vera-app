@@ -9,7 +9,7 @@ import {
   formatPpnBps,
   planDraftLink,
   ppnLabel,
-  type PurchaseOrderDraftLinkReviewDTO,
+  type PurchaseOrderDraftLinkPreviewDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "./poDraftLink";
 import {
@@ -112,8 +112,8 @@ function source(overrides: Partial<PurchaseOrderReviewDTO["Source"]> = {}) {
 }
 
 function review(
-  overrides: Partial<PurchaseOrderDraftLinkReviewDTO> = {}
-): PurchaseOrderDraftLinkReviewDTO {
+  overrides: Partial<PurchaseOrderDraftLinkPreviewDTO> = {}
+): PurchaseOrderDraftLinkPreviewDTO {
   return {
     Order: draft(),
     Source: source(),

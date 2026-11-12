@@ -114,11 +114,12 @@ export function InlineQuoteField({
 }) {
   const [focused, setFocused] = useState(false);
   return (
-    <div className="relative grid gap-1.5" data-tutorial={dataTutorial}>
+    <div className="relative grid gap-1.5">
       <span className="text-small font-medium text-ink-700">{label}</span>
       <input
         type={type}
         aria-label={label}
+        data-tutorial={dataTutorial}
         className={fieldClass}
         style={quote === undefined ? undefined : borderStyle(quote.mode)}
         value={value}

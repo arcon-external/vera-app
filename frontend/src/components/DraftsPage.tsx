@@ -98,7 +98,7 @@ export function DraftsPage({ onOpenDraft, onNewQuotation }: DraftsPageProps) {
         </div>
       </header>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden" data-tutorial="quotation-drafts-list">
         {loading ? (
           <div className="space-y-3 p-6" aria-label="Loading drafts">
             {[0, 1, 2].map((row) => (

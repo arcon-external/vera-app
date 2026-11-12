@@ -9,7 +9,7 @@ import type {
 } from "../poFinalize";
 import type {
   PurchaseOrderDraftLinkInput,
-  PurchaseOrderDraftLinkReviewDTO,
+  PurchaseOrderDraftLinkPreviewDTO,
 } from "../poDraftLink";
 import type { PurchaseOrderDTO, PurchaseOrderUpdateInput } from "../purchaseOrder";
 import { blankPurchaseOrderDraft } from "../purchaseOrder";
@@ -105,7 +105,7 @@ const UOMS = [{ value: "Pc", label: "Pc" }];
 const INCOTERMS = [{ value: "EXW", label: "EXW" }];
 
 let latestOrder: PurchaseOrderDTO;
-let reviewForTest: PurchaseOrderDraftLinkReviewDTO;
+let reviewForTest: PurchaseOrderDraftLinkPreviewDTO;
 
 function blank(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
   return {
@@ -219,8 +219,8 @@ function source(
 }
 
 function review(
-  overrides: Partial<PurchaseOrderDraftLinkReviewDTO> = {}
-): PurchaseOrderDraftLinkReviewDTO {
+  overrides: Partial<PurchaseOrderDraftLinkPreviewDTO> = {}
+): PurchaseOrderDraftLinkPreviewDTO {
   return {
     Order: createdRow(),
     Source: source(),
@@ -483,6 +483,42 @@ describe("draft source link (issue #497)", () => {
     expect(
       document.querySelector('button[aria-label="Link a Quotation"]')
     ).toBeNull();
+  });
+
+  it("keeps values typed before the link and offers the quotation values instead of applying them", async () => {
+    reviewForTest = review({
+      Source: source({ PaymentTerms: "30 days", Incoterms: "DAP" }),
+    });
+    await render();
+
+    type("Customer PO number", "KEEP-BEFORE-LINK");
+    type("Payment terms", "45 days");
+    await flush();
+
+    await openReview();
+    await flush();
+
+    // The link stores what staff typed; the quotation's differing values are
+    // offered in blue, not adopted behind their back.
+    expect(input("Customer PO number").value).toBe("KEEP-BEFORE-LINK");
+    expect(input("Payment terms").value).toBe("45 days");
+    expect(input("Payment terms").getAttribute("style")).toMatch(
+      /59, 130, 246|3b82f6/i
+    );
+    expect(button("Incoterms").textContent).toContain("EXW");
+    // The old link review is gone: linking never opens a difference page.
+    expect(document.body.textContent).not.toContain(
+      "Choose a side for each difference"
+    );
+    expect(document.body.textContent).not.toContain("Back without linking");
+    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
+    expect(linkInput.Decisions).toEqual(
+      expect.arrayContaining([
+        { Key: "header:paymentTerms", Choice: "po" },
+        { Key: "header:incoterms", Choice: "po" },
+      ])
+    );
+    expect(input("Customer PO number").value).not.toBe("");
   });
 
   it("links after an upload at the version the upload saved", async () => {

@@ -155,7 +155,7 @@ export function ArchivePage({
         </div>
       </header>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden" data-tutorial="quotation-archive-list">
         {loading ? (
           <div className="space-y-3 p-6" aria-label="Loading quotations">
             {[0, 1, 2, 3].map((item) => (

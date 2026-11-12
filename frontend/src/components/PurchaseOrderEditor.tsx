@@ -179,6 +179,11 @@ export interface PurchaseOrderEditorViewProps {
   gateUnresolvedCount?: number;
   gateBlockedMessage?: string | null;
   onBlockedActivate?: () => void;
+  /**
+   * The page renders totals in the sticky rail beside the form. Standalone
+   * harnesses leave this unset and keep the totals below the lines.
+   */
+  totalsInRail?: boolean;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -187,7 +192,7 @@ export interface PurchaseOrderEditorPageProps {
   currencyOptions?: CurrencyInfo[];
   uomOptions: CompanyUnitOption[];
   incotermOptions: { value: string; label: string }[];
-  /** Safe deferred linking for #497; App currently explains the next step. */
+  /** #497: the shared selector confirmed an exact pair; link it inline. */
   onLinkQuotation?: () => void;
   /**
    * Reports the stored record. `corrected` is true when this save went through
@@ -474,6 +479,36 @@ function Field({
   );
 }
 
+function LockedField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-small font-medium text-ink-700">{label}</span>
+      <div
+        aria-readonly="true"
+        className="flex h-10 cursor-default items-center justify-between gap-2 rounded-md border border-blue-500 bg-white px-3 text-body text-ink-900 shadow-sm ring-1 ring-blue-200/80"
+      >
+        <span className="truncate">{value}</span>
+        <svg
+          aria-hidden="true"
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className="shrink-0 text-ink-400"
+        >
+          <path
+            d="M3 4.5L6 7.5L9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function TextAreaField({
   label,
   value,
@@ -583,6 +618,7 @@ export function PurchaseOrderEditorView({
   gateUnresolvedCount = 0,
   gateBlockedMessage = null,
   onBlockedActivate,
+  totalsInRail = false,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
@@ -1185,7 +1221,26 @@ export function PurchaseOrderEditorView({
           title="Purchase order details"
           hint="Editable on this purchase order"
         />
-        <div className="grid gap-4 sm:grid-cols-2">
+        {state.sourceState === "live" ? (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-rule bg-paper-subtle/60 px-3 py-2 text-[10px] text-ink-600">
+            <span className="font-semibold uppercase tracking-[0.1em] text-ink-500">
+              Legend
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-3 rounded-sm border border-rule bg-white" />
+              Your value
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-3 rounded-sm border border-blue-500 bg-blue-50" />
+              Quotation value available
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="size-3 rounded-sm border border-success-400 bg-success-50" />
+              Using quotation value
+            </span>
+          </div>
+        ) : null}
+        <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <Field
             label="Customer PO number"
             value={state.header.poNumber}
@@ -1260,11 +1315,11 @@ export function PurchaseOrderEditorView({
           />
         </div>
         {correcting ? null : (
-          <label className="mt-4 flex items-start gap-2 rounded-lg border border-rule bg-paper-subtle p-3 text-small text-ink-800">
+          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-rule bg-white p-3 transition hover:border-rule-strong focus-within:ring-2 focus-within:ring-accent-500/30">
             <input
               type="checkbox"
-              className="mt-0.5 h-4 w-4 accent-accent-700"
               aria-label="Generate a confirmation number when this purchase order is saved"
+              className="peer sr-only"
               checked={state.header.confirmationRequested}
               onChange={(event) =>
                 dispatch({
@@ -1273,12 +1328,23 @@ export function PurchaseOrderEditorView({
                 })
               }
             />
-            <span>
-              <span className="font-medium">
-                Generate a confirmation number when this purchase order is saved.
-              </span>{" "}
-              Optional. The number is issued at Final Save and cannot be edited
-              afterwards; saving a draft consumes no number.
+            <span
+              aria-hidden="true"
+              className="relative mt-0.5 h-5 w-9 shrink-0 rounded-full bg-paper-muted transition after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow-sm after:transition after:content-[''] peer-checked:bg-accent-800 peer-checked:after:translate-x-4 peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40"
+            />
+            <span className="grid gap-0.5">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-small font-medium text-ink-900">
+                  Generate a confirmation number
+                </span>
+                <span className="rounded-full border border-internal-200 bg-internal-50 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-internal-700">
+                  Optional
+                </span>
+              </span>
+              <span className="text-caption text-ink-500">
+                Issued at Final Save and cannot be edited afterwards. Saving a
+                draft does not use a number.
+              </span>
             </span>
           </label>
         )}
@@ -1290,6 +1356,39 @@ export function PurchaseOrderEditorView({
               : "The customer, quotation number and revision, currency and tax basis are snapshots of the issued quotation revision and cannot be edited here."}
         </p>
       </Card>
+
+      {!correcting && state.sourceState === "live" ? (
+        <Card className="p-4" data-tutorial="po-source-basis">
+          <SectionHeading
+            title="Source basis"
+            hint={`From quotation ${state.quoteNumber} · revision ${state.sourceRevision}`}
+          />
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+            <LockedField
+              label="Currency"
+              value={`${activeCurrency.code} (${activeCurrency.symbol})`}
+            />
+            <LockedField
+              label="Tax zone"
+              value={
+                TAX_ZONE_OPTIONS.find((option) => option.value === state.taxZone)
+                  ?.label ?? state.taxZone
+              }
+            />
+            <LockedField
+              label="Tax type"
+              value={
+                TAX_TYPE_OPTIONS.find((option) => option.value === state.taxType)
+                  ?.label ?? state.taxType
+              }
+            />
+          </div>
+          <p className="mt-3 text-caption text-ink-500">
+            Currency and tax basis come from the linked quotation and are part of
+            its snapshot. They cannot be changed without a correction.
+          </p>
+        </Card>
+      ) : null}
 
       {!correcting ? (
         <PurchaseOrderSourceLinkPanel
@@ -1353,7 +1452,7 @@ export function PurchaseOrderEditorView({
                 : "Editable until a quotation is linked; the server computes PPN"
             }
           />
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
             <div className="grid gap-1.5">
               <span className="text-small font-medium text-ink-700">Currency</span>
               <Select
@@ -1501,7 +1600,12 @@ export function PurchaseOrderEditorView({
               : ""
           }`}
           action={
-            <Button size="sm" aria-label="Add line" onClick={addLine}>
+            <Button
+              size="sm"
+              aria-label="Add line"
+              data-tutorial="po-add-line"
+              onClick={addLine}
+            >
               Add line
             </Button>
           }
@@ -1624,22 +1728,24 @@ export function PurchaseOrderEditorView({
         ) : null}
       </div>
 
-      {calculation.error !== null ? (
-        <StatusBanner tone="danger">{calculation.error}</StatusBanner>
-      ) : null}
-
-      <PurchaseOrderTotals
-        totals={calculation.totals}
-        currency={activeCurrency}
-        ppnBps={state.ppnBps}
-        printedTotals={state.printedTotals}
-        sourceRevision={state.sourceRevision}
-        printedTotalsKnown={state.printedTotalsKnown}
-      />
-
-      {state.error !== null ? (
-        <StatusBanner tone="danger">{state.error}</StatusBanner>
-      ) : null}
+      {totalsInRail ? null : (
+        <>
+          {calculation.error !== null ? (
+            <StatusBanner tone="danger">{calculation.error}</StatusBanner>
+          ) : null}
+          <PurchaseOrderTotals
+            totals={calculation.totals}
+            currency={activeCurrency}
+            ppnBps={state.ppnBps}
+            printedTotals={state.printedTotals}
+            sourceRevision={state.sourceRevision}
+            printedTotalsKnown={state.printedTotalsKnown}
+          />
+          {state.error !== null ? (
+            <StatusBanner tone="danger">{state.error}</StatusBanner>
+          ) : null}
+        </>
+      )}
 
       {actionsInShell ? null : (
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
@@ -2215,7 +2321,7 @@ export function PurchaseOrderEditorPage({
 
   /**
    * #493: one persistence of the working copy, shared by Save, the
-   * upload's id resolver and the link review. It creates the row once and then
+   * upload's id resolver and the draft link. It creates the row once and then
    * writes the entered values with a single Update, so a concurrent Save and
    * upload produce one create and one successful update -- never a second row
    * or a version conflict. The retained version advances after the update, so a
@@ -2296,8 +2402,8 @@ export function PurchaseOrderEditorPage({
     return outcome;
   };
 
-  /** Loads the link review for the selector's confirmed exact pair. */
-  async function startDraftLinkReview(target: {
+  /** Links the selector's confirmed exact pair and loads the inline source. */
+  async function startDraftLink(target: {
     quotationId: number;
     revisionNumber: number;
   }) {
@@ -2410,7 +2516,7 @@ export function PurchaseOrderEditorPage({
     if (handledLinkTarget.current === pendingLinkTarget) return;
     handledLinkTarget.current = pendingLinkTarget;
     onLinkTargetHandled?.();
-    void startDraftLinkReview(pendingLinkTarget);
+    void startDraftLink(pendingLinkTarget);
     // The target object is the trigger; the callbacks read current values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingLinkTarget]);
@@ -2921,8 +3027,10 @@ export function PurchaseOrderEditorPage({
     }
   }
 
+  const railCalculation = calculatePurchaseOrder(state, activeCurrency);
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6">
       {linkLoading ? (
         <StatusBanner tone="info">
           <span role="status">Saving the draft and linking the quotation…</span>
@@ -2940,7 +3048,8 @@ export function PurchaseOrderEditorPage({
       {sessionBannerError !== null ? (
         <StatusBanner tone="danger">{sessionBannerError}</StatusBanner>
       ) : null}
-      <div className="@container min-w-0">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="@container min-w-0">
         <PurchaseOrderEditorView
           state={state}
           dispatch={dispatch}
@@ -3003,9 +3112,28 @@ export function PurchaseOrderEditorPage({
               : null
           }
           onBlockedActivate={blockedActivate}
+          totalsInRail
         />
-      </div>
-      <PurchaseOrderDocumentPanel
+        </div>
+        <aside
+          aria-label="Totals and customer PO document"
+          className="flex flex-col gap-4 lg:sticky lg:top-[88px] lg:max-h-[calc(100dvh-176px)] lg:self-start lg:overflow-y-auto"
+        >
+          {railCalculation.error !== null ? (
+            <StatusBanner tone="danger">{railCalculation.error}</StatusBanner>
+          ) : null}
+          <PurchaseOrderTotals
+            totals={railCalculation.totals}
+            currency={activeCurrency}
+            ppnBps={state.ppnBps}
+            printedTotals={state.printedTotals}
+            sourceRevision={state.sourceRevision}
+            printedTotalsKnown={state.printedTotalsKnown}
+          />
+          {state.error !== null ? (
+            <StatusBanner tone="danger">{state.error}</StatusBanner>
+          ) : null}
+          <PurchaseOrderDocumentPanel
         purchaseOrderId={state.orderId}
         disabled={state.saving}
         tutorial={tutorial}
@@ -3022,7 +3150,9 @@ export function PurchaseOrderEditorPage({
           }
           throw new Error(outcome.message);
         }}
-      />
+          />
+        </aside>
+      </div>
       {conflictPrompt}
       <div role="status" aria-live="polite" className="sr-only">
         {reconciliation.announcement}

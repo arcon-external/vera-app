@@ -561,7 +561,16 @@ export function PurchaseOrderListView({
         </div>
       </Card>
 
-      <Card className="overflow-hidden">
+      <Card
+        className="overflow-hidden"
+        data-tutorial={
+          mode === "drafts"
+            ? "po-drafts-list"
+            : mode === "archive"
+              ? "po-archive-list"
+              : undefined
+        }
+      >
         {state.loading && state.rows.length === 0 ? (
           <>
             <div

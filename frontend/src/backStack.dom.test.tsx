@@ -802,11 +802,26 @@ async function waitFor(ms: number): Promise<void> {
   });
 }
 
+/** The app settles the session check asynchronously; poll for the control
+ * rather than assuming one flush is enough under a loaded suite. */
+async function waitForButton(label: string): Promise<HTMLButtonElement> {
+  const started = Date.now();
+  while (Date.now() - started < 8000) {
+    const found = document.querySelector<HTMLButtonElement>(
+      `button[aria-label="${label}"]`
+    );
+    if (found !== null) return found;
+    await waitFor(100);
+  }
+  throw new Error(`no button labelled ${label}`);
+}
+
 describe("Features Tutorial (issue #595)", () => {
-  it("walks the Quotation workspace, finishes, and replays from settings", async () => {
+  it("walks the Quotation workspace, finishes, and replays from settings", { timeout: 20000 }, async () => {
     await renderApp();
+    const open = await waitForButton("Open Quotation");
     await act(async () => {
-      button("Open Quotation").click();
+      open.click();
     });
     await flush();
     await waitFor(650);
@@ -846,10 +861,11 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).not.toContain("One workspace, three views");
   });
 
-  it("does not mark the tour seen when the user leaves mid-tour", async () => {
+  it("does not mark the tour seen when the user leaves mid-tour", { timeout: 20000 }, async () => {
     await renderApp();
+    const open = await waitForButton("Open Quotation");
     await act(async () => {
-      button("Open Quotation").click();
+      open.click();
     });
     await flush();
     await waitFor(650);
@@ -867,10 +883,11 @@ describe("Features Tutorial (issue #595)", () => {
     await flush();
   });
 
-  it("shows only the practice quotation in the PO tutorial selector", async () => {
+  it("shows only the practice quotation in the PO tutorial selector", { timeout: 20000 }, async () => {
     await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
     await act(async () => {
-      button("Open Purchase Orders").click();
+      open.click();
     });
     await flush();
     await waitFor(650);
