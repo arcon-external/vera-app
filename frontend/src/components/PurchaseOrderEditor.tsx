@@ -597,7 +597,6 @@ export function PurchaseOrderEditorView({
   const [inlineUsedFields, setInlineUsedFields] = useState<Set<string>>(new Set());
   const [inlineOriginalFields, setInlineOriginalFields] = useState<Set<string>>(new Set());
   const inlineOriginalValues = useRef<Record<string, string>>({});
-  const [ghostAccepted, setGhostAccepted] = useState<Set<number>>(new Set());
   const [ghostRejected, setGhostRejected] = useState<Set<number>>(new Set());
 
   const sourceItems = useMemo(
@@ -618,7 +617,7 @@ export function PurchaseOrderEditorView({
       if (ghosted.has(itemNo)) continue;
       const item = sourceItems.find((entry) => entry.itemNo === itemNo);
       if (item === undefined) continue;
-      if (ghostAccepted.has(itemNo) || ghostRejected.has(itemNo)) continue;
+      if (ghostRejected.has(itemNo)) continue;
       if (sourceItemApplied(item, state.lines, activeCurrency)) continue;
       ghosted.add(itemNo);
       attached.push({ item, groupKey: group.groupKey, lineKey: group.lines[0].key });
@@ -627,11 +626,10 @@ export function PurchaseOrderEditorView({
       (item) =>
         !referenced.has(item.itemNo) &&
         !ghosted.has(item.itemNo) &&
-        !ghostAccepted.has(item.itemNo) &&
         !ghostRejected.has(item.itemNo)
     );
     return { attached, unmatched };
-  }, [groups, sourceItems, state.lines, activeCurrency, ghostAccepted, ghostRejected]);
+  }, [groups, sourceItems, state.lines, activeCurrency, ghostRejected]);
   const ghostCount = ghostAttachments.attached.length + ghostAttachments.unmatched.length;
 
   const applyGhost = (
@@ -663,7 +661,6 @@ export function PurchaseOrderEditorView({
     }
     if (!replaced) next = [...state.lines, ...fresh];
     dispatch({ type: "linesReplaced", lines: next });
-    setGhostAccepted((current) => new Set(current).add(item.itemNo));
   };
 
   const rejectGhost = (item: SourceItem) => {
@@ -674,7 +671,6 @@ export function PurchaseOrderEditorView({
   const acceptAllGhosts = () => {
     let next = [...state.lines];
     let startKey = Math.max(state.nextKey, ...state.lines.map((line) => line.key + 1), 1);
-    const accepted = new Set(ghostAccepted);
     const apply = (item: SourceItem, target?: { groupKey?: string; lineKey?: number }) => {
       const fresh = linesFromSourceItem(item, activeCurrency, startKey);
       startKey += fresh.length;
@@ -696,14 +692,12 @@ export function PurchaseOrderEditorView({
         built.push(line);
       }
       next = replaced ? built : [...next, ...fresh];
-      accepted.add(item.itemNo);
     };
     for (const attachment of ghostAttachments.attached) {
       apply(attachment.item, { groupKey: attachment.groupKey, lineKey: attachment.lineKey });
     }
     for (const item of ghostAttachments.unmatched) apply(item);
     dispatch({ type: "linesReplaced", lines: next });
-    setGhostAccepted(accepted);
   };
 
   const rejectAllGhosts = () => {

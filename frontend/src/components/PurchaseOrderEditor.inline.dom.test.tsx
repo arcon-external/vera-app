@@ -307,6 +307,10 @@ function review(overrides: Record<string, unknown> = {}) {
   };
 }
 
+async function pageCount(selector: string): Promise<number> {
+  return document.querySelectorAll(selector).length;
+}
+
 async function renderEditor(
   transport: ReconciliationTransport,
   order: PurchaseOrderDTO = linkedOrder()
@@ -407,6 +411,53 @@ describe("inline quotation values", () => {
 
     expect(document.body.textContent).not.toContain("Quotation line 1");
     expect(input("Unit price for line 1").value).toBe("Rp12.000");
+  });
+
+  it("reopens the ghost after an accepted line is edited away from the source", async () => {
+    reviewMock.mockResolvedValue(
+      review({
+        Source: reviewSource([sourceLine({ UnitPriceMinor: 12000 })]),
+      })
+    );
+    await renderEditor(fakeTransport(null));
+    expect(await pageCount("[data-quotation-ghost]")).toBe(1);
+
+    act(() => button("Use quotation 1").click());
+    await flush();
+    expect(await pageCount("[data-quotation-ghost]")).toBe(0);
+    expect(input("Unit price for line 1").value).toBe("Rp12.000");
+
+    const quantity = input("Quantity for line 1");
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(quantity, "3");
+      quantity.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      quantity.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    await flush();
+
+    expect(await pageCount("[data-quotation-ghost]")).toBe(1);
+  });
+
+  it("returns an added quotation line to the ghost list when it is removed", async () => {
+    reviewMock.mockResolvedValue(review());
+    await renderEditor(fakeTransport(null), linkedOrder({ Items: [] }));
+    expect(await pageCount("[data-quotation-ghost]")).toBe(1);
+
+    act(() => textButton("Use all").click());
+    await flush();
+    expect(await pageCount("[data-quotation-ghost]")).toBe(0);
+    expect(input("Description for line 1").value).toBe("Widget");
+
+    act(() => button("Remove line 1").click());
+    await flush();
+    expect(await pageCount("[data-quotation-ghost]")).toBe(1);
+    expect(document.body.textContent).toContain("Quotation line 1");
   });
 
   it("renders a split quotation item through the real item row", async () => {
