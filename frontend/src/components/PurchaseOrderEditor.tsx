@@ -1915,7 +1915,6 @@ export function PurchaseOrderEditorPage({
       return;
     }
     if (loadedSourceForRef.current === state.orderId) return;
-    loadedSourceForRef.current = state.orderId;
     let cancelled = false;
     // The binding throws synchronously with no Wails runtime (plain-browser
     // dev, partial harness mocks); the async wrapper turns that into a
@@ -1929,6 +1928,7 @@ export function PurchaseOrderEditorPage({
           incoterms: loaded.Source.Incoterms,
         });
         setCompareLines(loaded.Source.Lines);
+        loadedSourceForRef.current = state.orderId;
       } catch {
         if (cancelled) return;
         setCompareSource(null);
@@ -2120,6 +2120,7 @@ export function PurchaseOrderEditorPage({
     reconciliation.blockers,
     blockedActivate,
     onShellActions,
+    reason,
   ]);
   useEffect(() => {
     if (!actionsInShell) return;
@@ -2552,6 +2553,19 @@ export function PurchaseOrderEditorPage({
       );
       const target = document.querySelector<HTMLElement>(
         `[aria-label="${first.fieldLabel.replace(/"/g, "")}"]`
+      );
+      if (target !== null) revealIntoView(target);
+      return;
+    }
+    // A draft may be saved without a customer PO number, but a finalized
+    // record may not. Refuse before persisting or opening the confirmation so
+    // an empty required field never looks ready to save.
+    if (state.header.poNumber.trim() === "") {
+      const message = "A customer PO number is required before the PO can be saved.";
+      dispatch({ type: "saveFailed", error: message });
+      reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}`);
+      const target = document.querySelector<HTMLElement>(
+        '[aria-label="Customer PO number"]'
       );
       if (target !== null) revealIntoView(target);
       return;

@@ -185,13 +185,15 @@ describe("draft link tax vocabulary", () => {
 
   it("words the currency remedy for every draft that can still edit its basis", () => {
     const never = draftLinkCurrencyRemedy("never", "IDR", "USD");
-    expect(never).toContain("Back without linking");
+    expect(never).toContain("Change the draft currency");
+    expect(never).not.toContain("Back without linking");
     expect(never).toContain("Source basis");
     expect(never).toContain("never converted");
     // A formerly-linked draft is still before a new link: same remedy, no
     // conversion.
     const former = draftLinkCurrencyRemedy("former", "IDR", "USD");
-    expect(former).toContain("Back without linking");
+    expect(former).toContain("Change the draft currency");
+    expect(former).not.toContain("Back without linking");
     expect(former).toContain("Source basis");
     expect(former).toContain("then link again");
     expect(former).toContain("never converted");

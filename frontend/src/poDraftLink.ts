@@ -111,7 +111,7 @@ export function draftLinkCurrencyRemedy(
 ): string {
   if (draftCurrency === sourceCurrency) return "";
   if (sourceState !== "live") {
-    return `This draft is in ${draftCurrency}; the quotation is in ${sourceCurrency}. Choose Back without linking, change the draft currency to ${sourceCurrency} in the editor's Source basis card, then link again. Amounts are never converted.`;
+    return `This draft is in ${draftCurrency}; the quotation is in ${sourceCurrency}. Change the draft currency to ${sourceCurrency} in the editor's Source basis card, then link again. Amounts are never converted.`;
   }
   return `This draft is fixed in ${draftCurrency}; the quotation is in ${sourceCurrency}. Choose a quotation in ${draftCurrency}. Amounts are never converted.`;
 }

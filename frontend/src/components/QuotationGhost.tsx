@@ -4,7 +4,7 @@ import {
   type EditorItem,
   type EditorSubItem,
 } from "./ItemEditor";
-import type { CurrencyInfo } from "../format";
+import { formatMoney, type CurrencyInfo } from "../format";
 import { formatQuantityScaled } from "../purchaseOrder";
 import type { SourceItem } from "../poSourceItems";
 
@@ -171,6 +171,20 @@ export function QuotationGhost({
             ✕
           </button>
         </div>
+      </div>
+
+      <div className="sr-only">
+        <p>{item.description}</p>
+        {item.descriptionLines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
+        {item.subItems.map((sub) => (
+          <p key={sub.key}>
+            {sub.label} {sub.description}, {formatQuantityScaled(sub.quantityScaled)}{" "}
+            {sub.uom}, {formatMoney(currency, sub.unitPriceMinor)}
+            {sub.descriptionLines.map((line) => `, ${line}`).join("")}
+          </p>
+        ))}
       </div>
 
       <div
