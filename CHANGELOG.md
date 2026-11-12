@@ -4,6 +4,16 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.19.2] - 2026-11-12
+
+### Changed
+
+- **The purchase order rail is one clean stack.** The Link a Quotation card
+  (or the linked-source status) now sits above the totals and the customer PO
+  PDF, and both cards use the same compact style with a full-width action. The
+  addresses card puts Ship-to code, Contact email and Contact phone on one
+  three-column row instead of leaving an empty column. (#600)
+
 ## [0.19.1] - 2026-11-12
 
 ### Changed
