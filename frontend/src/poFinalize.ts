@@ -46,6 +46,10 @@ export interface PurchaseOrderSourceLineDTO {
   UnitPriceMinor: number;
   DiscountEnabled: boolean;
   DiscountPercent: number;
+  /** The split item's title, empty for a plain line. */
+  ParentDescription?: string;
+  /** The line's sub-sub description lines. */
+  DescriptionLines?: string[];
 }
 
 /** The exact revision a final save is compared against. */
@@ -318,9 +322,32 @@ export function comparePurchaseOrder(
   };
 }
 
-/** The initial review: no difference has a choice yet. */
-export function initialReviewDecisions(): POReviewDecisions {
-  return {};
+/**
+ * The choices the inline editor makes implicitly. Every remaining difference
+ * is the purchase order's own value (the green "using quotation value" state
+ * has already removed that difference), every missing quotation line was left
+ * off deliberately, and every extra line was entered deliberately. The final
+ * save only needs these derived lists; nothing in the UI asks the user to
+ * restate a choice the field already shows.
+ */
+export interface CurrentValueDecisions {
+  decisions: POReviewDecisions;
+  acknowledgedMissing: string[];
+  acknowledgedExtra: number[];
+}
+
+export function decisionsForCurrentValues(
+  comparison: POComparison
+): CurrentValueDecisions {
+  const decisions: POReviewDecisions = {};
+  for (const difference of comparison.differences) {
+    decisions[difference.key] = "po";
+  }
+  return {
+    decisions,
+    acknowledgedMissing: comparison.missing.map(sourceLabel),
+    acknowledgedExtra: [...comparison.extraLineNumbers],
+  };
 }
 
 /**
@@ -592,25 +619,6 @@ export function buildFinalizeInput(
 /** A compact label for one source line, used by the reviewer's match picker. */
 export function sourceLineLabel(line: PurchaseOrderSourceLineDTO): string {
   return `${sourceLabel(line)} — ${line.Description || "(no description)"}`;
-}
-
-/** Builds the blank review state for a freshly opened record. */
-export function initialFinalizeReviewState(confirmationRequested = false): {
-  decisions: POReviewDecisions;
-  acknowledgedMissing: string[];
-  acknowledgedExtra: number[];
-  documentConfirmed: boolean;
-  assignConfirmation: boolean;
-} {
-  return {
-    decisions: initialReviewDecisions(),
-    acknowledgedMissing: [],
-    acknowledgedExtra: [],
-    documentConfirmed: false,
-    // Optional means unchecked until staff ask for it (#474). A draft request
-    // seeds the checkbox but never binds it (#581).
-    assignConfirmation: confirmationRequested,
-  };
 }
 
 /** The editor state a saved record opens in (#471 read-only view). */

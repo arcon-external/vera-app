@@ -9,7 +9,6 @@ import {
   formatPpnBps,
   planDraftLink,
   ppnLabel,
-  withMissingSourceLines,
   type PurchaseOrderDraftLinkReviewDTO,
   type PurchaseOrderDraftTaxChoice,
 } from "./poDraftLink";
@@ -137,128 +136,6 @@ function review(
     ...overrides,
   };
 }
-
-describe("withMissingSourceLines (#587)", () => {
-  function lineItem(
-    description: string,
-    overrides: Partial<PurchaseOrderDTO["Items"][number]> = {}
-  ): PurchaseOrderDTO["Items"][number] {
-    return {
-      QuotationItemNo: null,
-      QuotationSubNo: null,
-      LineNumber: 1,
-      Description: description,
-      QuantityScaled: 10000,
-      UoM: "Pc",
-      UnitPriceMinor: 100,
-      DiscountEnabled: false,
-      DiscountPercent: 0,
-      GrossMinor: 0,
-      DiscountMinor: 0,
-      NetMinor: 0,
-      ...overrides,
-    };
-  }
-
-  it("appends every missing quotation line as a real PO line", () => {
-    const state = initialPurchaseOrderEditorState(draft(), IDR);
-    const lines = [
-      source().Lines[0],
-      {
-        QuotationItemNo: 2,
-        QuotationSubNo: 1,
-        LineLabel: "2.1",
-        Description: "Sub item",
-        UoM: "Lot",
-        QuantityScaled: 25000,
-        UnitPriceMinor: 1250,
-        DiscountEnabled: true,
-        DiscountPercent: 5,
-      },
-    ];
-    const next = withMissingSourceLines(state, lines, IDR);
-    expect(next.lines).toHaveLength(3);
-    expect(next.lines[0].description).toBe("Manual line");
-    const added = next.lines.slice(1);
-    expect(added.map((line) => [line.quotationItemNo, line.quotationSubNo])).toEqual([
-      [1, null],
-      [2, 1],
-    ]);
-    expect(added[0]).toMatchObject({
-      description: "Source line",
-      quantity: "1",
-      uom: "Pc",
-      unitPrice: "Rp100",
-      discountEnabled: false,
-      discountPercent: "0",
-    });
-    expect(added[1]).toMatchObject({
-      description: "Sub item",
-      quantity: "2.5",
-      uom: "Lot",
-      unitPrice: "Rp1.250",
-      discountEnabled: true,
-      discountPercent: "5",
-    });
-    expect(added.every((line) => line.clientKey.startsWith("client:"))).toBe(true);
-    expect(new Set(next.lines.map((line) => line.clientKey)).size).toBe(3);
-    expect(added.map((line) => line.key)).toEqual([
-      state.nextKey,
-      state.nextKey + 1,
-    ]);
-    expect(next.nextKey).toBe(state.nextKey + 2);
-  });
-
-  it("drops blank placeholder lines when a source line is added and keeps filled lines", () => {
-    const state = initialPurchaseOrderEditorState(
-      draft({ Items: [lineItem(""), lineItem("Kept manual")] }),
-      IDR
-    );
-    const next = withMissingSourceLines(state, [source().Lines[0]], IDR);
-    expect(next.lines.map((line) => line.description)).toEqual([
-      "Kept manual",
-      "Source line",
-    ]);
-  });
-
-  it("returns the state untouched when every source line is already claimed", () => {
-    const state = initialPurchaseOrderEditorState(
-      draft({
-        Items: [lineItem("Manual line", { QuotationItemNo: 1 })],
-      }),
-      IDR
-    );
-    expect(withMissingSourceLines(state, [source().Lines[0]], IDR)).toBe(state);
-  });
-
-  it("does not append a duplicate for a sub-item already claimed", () => {
-    const state: PurchaseOrderEditorState = initialPurchaseOrderEditorState(
-      draft({
-        Items: [lineItem("Manual line", { QuotationItemNo: 2, QuotationSubNo: 1 })],
-      }),
-      IDR
-    );
-    expect(
-      withMissingSourceLines(
-        state,
-        [
-          {
-            QuotationItemNo: 2,
-            QuotationSubNo: 1,
-            LineLabel: "2.1",
-            Description: "Sub item",
-            UoM: "Lot",
-            QuantityScaled: 10000,
-            UnitPriceMinor: 100,
-            DiscountEnabled: false,
-            DiscountPercent: 0,
-          },
-        ],
-        IDR
-      )
-    ).toBe(state);
-  });
-});
 
 describe("draft link tax vocabulary", () => {
   it("renders the basis and the PPN rate", () => {

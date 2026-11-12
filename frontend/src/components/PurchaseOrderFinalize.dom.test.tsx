@@ -320,42 +320,28 @@ function render(onSaved = vi.fn(), order: PurchaseOrderDTO = ORDER) {
   return onSaved;
 }
 
-describe("final save from the editor (issue #471)", () => {
-  it("opens the review with no choice preselected and recalculates after a choice", async () => {
+describe("final save from the inline editor", () => {
+  it("opens the confirmation directly with the entered totals", async () => {
     render();
     await act(async () => {
       button("Final Save").click();
     });
-
-    expect(document.body.textContent).toContain("Review differences before saving");
-    expect(button("Use PO entry for Line 1 unit price")).toBeTruthy();
-    expect(button("Use Quotation for Line 1 unit price")).toBeTruthy();
-    expect(pressed("Use PO entry for Line 1 unit price")).toBe("false");
-    expect(pressed("Use Quotation for Line 1 unit price")).toBe("false");
-    // No choice anywhere is preselected: both sides of both differences are
-    // unpressed when the review opens.
-    expect(
-      document.querySelectorAll('button[aria-pressed="true"]')
-    ).toHaveLength(0);
-    expect(disabled("Continue final save")).toBe(true);
-
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(pressed("Use Quotation for Line 1 unit price")).toBe("true");
-    expect(pressed("Use PO entry for Line 1 unit price")).toBe("false");
-    // The wording difference is independent; the price alone does not enable
-    // the save.
-    expect(disabled("Continue final save")).toBe(true);
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    expect(pressed("Use Quotation for Payment terms")).toBe("true");
-    // Every difference now has an explicit choice, so the review can continue.
-    // The total is the purchase order's own arithmetic, not a target.
-    expect(disabled("Continue final save")).toBe(false);
-    expect(document.body.textContent).not.toContain("-$20.00");
-    expect(document.body.textContent).toContain("$0.00");
+
+    expect(document.body.textContent).toContain("Final save");
+    expect(document.body.textContent).toContain(
+      "One-way: a saved record is read-only"
+    );
+    expect(document.body.textContent).not.toContain(
+      "Review differences before saving"
+    );
+    expect(document.body.textContent).toContain("$265.00");
+    expect(document.body.textContent).toContain("PO-471");
+    // The difference is already represented by the field's own value; the
+    // confirmation never asks the user to restate it.
+    expect(document.querySelector('button[aria-label^="Use Quotation"]')).toBeNull();
   });
 
   it("returns to entry with the entered values still there", async () => {
@@ -364,7 +350,10 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Back to entry").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      button("Back to editor").click();
     });
     const terms = document.querySelector<HTMLInputElement>(
       'input[aria-label="Payment terms"]'
@@ -379,13 +368,7 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
-    });
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    await act(async () => {
-      button("Continue final save").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(document.body.textContent).toContain("Final save");
@@ -403,16 +386,13 @@ describe("final save from the editor (issue #471)", () => {
     expect(finalizeMock).toHaveBeenCalledTimes(1);
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.PONumber).toBe("PO-471");
-    expect(payload.PaymentTerms).toBe("45 days");
+    expect(payload.PaymentTerms).toBe("30 days");
     expect(payload.DocumentConfirmed).toBe(true);
     expect(payload.Decisions).toEqual([
-      { Key: "header:paymentTerms", Choice: "quotation" },
-      { Key: "line:1:unitPrice", Choice: "quotation" },
+      { Key: "header:paymentTerms", Choice: "po" },
+      { Key: "line:1:unitPrice", Choice: "po" },
     ]);
-    expect(payload.Decisions).not.toEqual(
-      expect.arrayContaining([{ Key: "line:1:unitPrice", Choice: "po" }])
-    );
-    expect((payload.Items as Array<{ UnitPriceMinor: number }>)[0].UnitPriceMinor).toBe(10000);
+    expect((payload.Items as Array<{ UnitPriceMinor: number }>)[0].UnitPriceMinor).toBe(11000);
     // The progress handoff holds for 300 ms; the saved view must not arrive
     // in the same tick as the response.
     expect(onSaved).not.toHaveBeenCalled();
@@ -432,13 +412,7 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
-    });
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    await act(async () => {
-      button("Continue final save").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     // The stored record still says PO-471; the editor says UNSAVED-NEW. The
@@ -468,13 +442,7 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
-    });
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    await act(async () => {
-      button("Continue final save").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     // Optional means unchecked: a save that never touches it must send false.
@@ -509,13 +477,7 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
-    });
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    await act(async () => {
-      button("Continue final save").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(checkbox("Assign confirmation number").checked).toBe(true);
@@ -545,13 +507,7 @@ describe("final save from the editor (issue #471)", () => {
       button("Final Save").click();
     });
     await act(async () => {
-      button("Use Quotation for Line 1 unit price").click();
-    });
-    await act(async () => {
-      button("Use Quotation for Payment terms").click();
-    });
-    await act(async () => {
-      button("Continue final save").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await act(async () => {
       checkbox("Confirm saving without the customer PDF").click();

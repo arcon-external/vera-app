@@ -43,6 +43,9 @@ const mocks = vi.hoisted(() => ({
   version: vi.fn(),
   changelog: vi.fn(),
   updates: vi.fn(),
+  review: vi.fn(),
+  loadReconciliation: vi.fn(),
+  saveReconciliation: vi.fn(),
 }));
 
 vi.mock("@backend/backend/AuthAPI", async (importOriginal) => {
@@ -97,7 +100,11 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     RemovePurchaseOrderDocument: vi.fn(),
     FinalizePurchaseOrder: vi.fn(),
     CorrectPurchaseOrder: vi.fn(),
-    GetPurchaseOrderReview: vi.fn(),
+    GetPurchaseOrderReview: (...args: unknown[]) => mocks.review(...args),
+    LoadPOReconciliation: (...args: unknown[]) =>
+      mocks.loadReconciliation(...args),
+    SavePOReconciliation: (...args: unknown[]) =>
+      mocks.saveReconciliation(...args),
   };
 });
 
@@ -358,6 +365,42 @@ beforeEach(() => {
     return { Order: latestOrder };
   });
   mocks.documentState.mockResolvedValue({ Document: null, Versions: [] });
+  mocks.loadReconciliation.mockRejectedValue(
+    new Error("no reconciliation recorded")
+  );
+  mocks.saveReconciliation.mockImplementation(async (_id: unknown, session: unknown) => session);
+  mocks.review.mockImplementation(async () => ({
+    Order: latestOrder,
+    Source: {
+      QuotationID: 12,
+      RevisionNumber: 0,
+      QuoteNumber: "1502260001",
+      CustomerID: 2,
+      CustomerName: "PT. Source",
+      Currency: "IDR",
+      PaymentTerms: "",
+      Incoterms: "EXW",
+      DiscountPercent: 0,
+      Lines: [
+        {
+          QuotationItemNo: 1,
+          QuotationSubNo: null,
+          LineLabel: "1",
+          Description: "Source line 1",
+          UoM: "Pc",
+          QuantityScaled: 10000,
+          UnitPriceMinor: 100,
+          DiscountEnabled: false,
+          DiscountPercent: 0,
+        },
+      ],
+      PrintedSubtotalMinor: 100,
+      PrintedDiscountMinor: 0,
+      PrintedPpnMinor: 0,
+      PrintedGrandTotalMinor: 100,
+    },
+    DocumentState: "none",
+  }));
 
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -417,28 +460,23 @@ describe("draft source link through the real App (issue #497)", () => {
     await flush();
     await flush();
 
-    // The editor persisted the working copy and loaded the review for the
-    // confirmed pair; the shared selector was in entry mode, not repair.
+    // The editor persisted the working copy, previewed the pair and linked it
+    // immediately: there is no review step between the selector and the link.
     expect(mocks.createBlank).toHaveBeenCalledTimes(1);
     expect(mocks.updateDraft).toHaveBeenCalledTimes(1);
     expect(mocks.previewLink).toHaveBeenCalledWith(41, 12, 0);
     expect(mocks.listPOSources).toHaveBeenCalled();
-    expect(document.body.textContent).toContain("Link this draft to a quotation");
-
-    // The missing quotation line is added to the review copy as a matched
-    // line, so the link needs no omission acknowledgement (#587).
-    expect(document.body.textContent).toContain("Source line 1");
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
     expect(mocks.linkSource).toHaveBeenCalledTimes(1);
+
     const linkInput = mocks.linkSource.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.ID).toBe(41);
     expect(linkInput.TargetQuotationID).toBe(12);
     expect(linkInput.TargetRevisionNumber).toBe(0);
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    // The empty order keeps no value and omits the quotation's line: the
+    // inline editor surfaces it as a ghost instead of adding it silently.
+    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
     expect(document.body.textContent).toContain("Linked source");
+    expect(document.body.textContent).not.toContain("Link this draft to a quotation");
     expect(document.body.textContent).toContain(
       "Linked to quotation 1502260001, revision 0. Your entered values were kept."
     );

@@ -969,7 +969,7 @@ export function PurchaseOrderFinalConfirmationView({
       ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-4">
-        <Button aria-label="Back to review" onClick={onBack} disabled={saving}>
+        <Button aria-label="Back to editor" onClick={onBack} disabled={saving}>
           Back
         </Button>
         <Button

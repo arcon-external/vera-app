@@ -4,8 +4,8 @@ import {
   applyReviewChoices,
   buildFinalizeInput,
   comparePurchaseOrder,
+  decisionsForCurrentValues,
   evaluateReview,
-  initialFinalizeReviewState,
   isSavedPurchaseOrder,
   sourceLineLabel,
   suggestSourceLine,
@@ -416,19 +416,6 @@ describe("purchase order matching", () => {
 });
 
 describe("difference choices", () => {
-  it("preselects nothing", () => {
-    expect(initialFinalizeReviewState().decisions).toEqual({});
-    // #474: the confirmation number is an explicit opt-in too.
-    expect(initialFinalizeReviewState().assignConfirmation).toBe(false);
-  });
-
-  // Issue #581: the draft's request seeds the checkbox; the checkbox remains
-  // the final authority and can still be cleared.
-  it("seeds the confirmation checkbox from the draft request", () => {
-    expect(initialFinalizeReviewState(true).assignConfirmation).toBe(true);
-    expect(initialFinalizeReviewState(false).assignConfirmation).toBe(false);
-  });
-
   it("applies only Use Quotation choices", () => {
     const base = order();
     const state = stateFrom(
@@ -734,5 +721,28 @@ describe("source tax triple (F5)", () => {
     expect(legacy.TaxZone).toBeUndefined();
     const state = stateFrom(order({}));
     expect(() => comparePurchaseOrder(state, legacy, USD)).not.toThrow();
+  });
+});
+
+
+describe("inline decisions", () => {
+  it("keeps every current value and acknowledges every omission and extra", () => {
+    const base = order();
+    const state = stateFrom(
+      order({
+        PaymentTerms: "60 days",
+        Items: [
+          { ...base.Items[0], Description: "Widget revised" },
+          { ...base.Items[1], QuotationItemNo: null, Description: "Freight" },
+        ],
+      })
+    );
+    const source = { ...SOURCE, PaymentTerms: "30 days" };
+    const comparison = comparePurchaseOrder(state, source, USD);
+    const implicit = decisionsForCurrentValues(comparison);
+    expect(implicit.decisions["header:paymentTerms"]).toBe("po");
+    expect(implicit.decisions["line:1:description"]).toBe("po");
+    expect(implicit.acknowledgedMissing).toEqual(["3"]);
+    expect(implicit.acknowledgedExtra).toEqual([2]);
   });
 });

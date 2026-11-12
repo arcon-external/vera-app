@@ -76,6 +76,10 @@ const mocks = vi.hoisted(() => ({
     Document: null,
     Versions: [],
   })),
+  loadReconciliation: vi.fn(async (..._args: unknown[]) => {
+    throw new Error("no reconciliation recorded");
+  }),
+  saveReconciliation: vi.fn(async (...args: unknown[]) => args[1]),
 }));
 
 vi.mock("@backend/backend/AuthAPI", async (importOriginal) => {
@@ -133,6 +137,10 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
       mocks.getPurchaseOrderReview(...args),
     GetPurchaseOrderDocumentState: (...args: unknown[]) =>
       mocks.getPurchaseOrderDocumentState(...args),
+    LoadPOReconciliation: (...args: unknown[]) =>
+      mocks.loadReconciliation(...args),
+    SavePOReconciliation: (...args: unknown[]) =>
+      mocks.saveReconciliation(...args),
     ListPurchaseOrders: (...args: unknown[]) =>
       mocks.listPurchaseOrders(...args),
   };
@@ -619,6 +627,16 @@ describe("PO back stack (ticket 02)", () => {
       TotalPages: 1,
     });
     mocks.getPurchaseOrder.mockResolvedValue(purchaseOrder());
+    mocks.updatePurchaseOrderDraft.mockImplementation(async (fields: unknown) => {
+      const input = fields as Record<string, unknown>;
+      return {
+        Order: {
+          ...purchaseOrder(),
+          PONumber: String(input.PONumber ?? "PO-502"),
+          Version: 2,
+        },
+      };
+    });
     await renderApp();
     await act(async () => {
       button("Open Purchase Orders").click();
@@ -639,7 +657,9 @@ describe("PO back stack (ticket 02)", () => {
       withinActionBar("Final Save")?.click();
     });
     await flush();
-    expect(document.body.textContent).toContain("Review differences before saving");
+    expect(document.body.textContent).toContain(
+      "One-way: a saved record is read-only"
+    );
 
     await openMenuItem("Purchase Order settings");
     expect(discardPrompt()).toBeNull();
@@ -649,8 +669,10 @@ describe("PO back stack (ticket 02)", () => {
       button("Back").click();
     });
     await flush();
-    expect(document.body.textContent).toContain("Review differences before saving");
-    expect(buttonWithText("Back to entry")).not.toBeNull();
+    expect(document.body.textContent).toContain(
+      "One-way: a saved record is read-only"
+    );
+    expect(button("Back to editor")).not.toBeNull();
   });
 
   it("restores the saved scroll position on the way back", async () => {
