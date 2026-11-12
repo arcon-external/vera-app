@@ -4,6 +4,25 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.19.1] - 2026-11-12
+
+### Changed
+
+- **The purchase order editor now matches the approved layout.** On wide
+  screens the totals, the printed quotation totals and the customer PO PDF sit
+  in a sticky rail beside the form. The source basis is three compact fields
+  before linking and a read-only blue snapshot after it, the confirmation
+  request is a switch, and a legend explains the blue and green inline values. (#598)
+- **The Features Tutorials point at the exact control.** The spotlight no
+  longer highlights a whole row or card, the selector guide steps aside so the
+  dialog stays usable, and the card is shorter and easier to read. (#598)
+
+### Fixed
+
+- **Linking a quotation goes straight to the inline values.** Values typed
+  before the link stay, and the old difference page is no longer part of the
+  build. (#598)
+
 ## [0.19.0] - 2026-11-12
 
 ### Added
