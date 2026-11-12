@@ -104,7 +104,7 @@ export function PurchaseOrderTotals({
   const showPpn = ppnBps > 0;
   const printedAvailable = printedTotalsAvailable(printedTotals);
   return (
-    <Card className="p-4">
+    <Card className="p-4" data-tutorial="po-totals">
       <SectionHeading title="Totals" hint="Calculated from the entered lines" />
       {totals === null ? (
         <p

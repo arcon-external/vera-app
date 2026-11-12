@@ -792,3 +792,120 @@ describe("sign-out clears the stack (ticket 02)", () => {
     expect(workspace()).toBeNull();
   });
 });
+
+// Issue #595: the Features Tutorial is a real App-level journey. These tests
+// drive the same shell the staff see, including the first-open gate, the
+// settings replay card and the practice quotation selector.
+async function waitFor(ms: number): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  });
+}
+
+describe("Features Tutorial (issue #595)", () => {
+  it("walks the Quotation workspace, finishes, and replays from settings", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).toContain("Features Tutorial");
+    expect(document.body.textContent).toContain("One workspace, three views");
+
+    // The tour owns the page transitions: Editor -> Drafts -> Archive ->
+    // Settings. Each Next waits for the target to exist.
+    for (let step = 0; step < 7; step += 1) {
+      act(() => button("Next step").click());
+      await waitFor(350);
+    }
+    expect(document.body.textContent).toContain("Replay this tutorial anytime");
+    expect(document.body.textContent).toContain("Replay tutorial");
+    act(() => button("Finish Features Tutorial").click());
+    await flush();
+    expect(document.body.textContent).not.toContain("One workspace, three views");
+    expect(document.body.textContent).toContain("Replay tutorial");
+
+    // The settings card re-triggers from step 1.
+    act(() => button("Replay Features Tutorial").click());
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).toContain("One workspace, three views");
+
+    // Skip marks it seen, so a reload + workspace entry stays quiet.
+    act(() => button("Skip Features Tutorial").click());
+    await flush();
+    act(() => root.unmount());
+    root = createRoot(container);
+    await renderApp();
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).not.toContain("One workspace, three views");
+  });
+
+  it("does not mark the tour seen when the user leaves mid-tour", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).toContain("One workspace, three views");
+
+    act(() => button("Back to Home").click());
+    await flush();
+    expect(document.body.textContent).not.toContain("One workspace, three views");
+
+    act(() => button("Open Quotation").click());
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).toContain("One workspace, three views");
+    act(() => button("Skip Features Tutorial").click());
+    await flush();
+  });
+
+  it("shows only the practice quotation in the PO tutorial selector", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
+    await waitFor(650);
+    expect(document.body.textContent).toContain("One workspace, three views");
+
+    act(() => button("Next step").click());
+    await waitFor(350);
+    expect(document.body.textContent).toContain(
+      "A purchase order begins with a quotation"
+    );
+    act(() => button("Link a Quotation").click());
+    await waitFor(650);
+    expect(document.body.textContent).toContain("Choose the practice quotation");
+    expect(document.body.textContent).toContain("TUT-2026-001");
+    expect(document.body.textContent).toContain("Vera Features Tutorial (MOCK)");
+    expect(mocks.listPOSourceQuotations).not.toHaveBeenCalled();
+
+    act(() =>
+      button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
+    );
+    await waitFor(350);
+    const cont = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Continue to confirmation"]'
+    );
+    if (cont !== null) {
+      act(() => cont.click());
+      await waitFor(350);
+    }
+    act(() => button("Confirm source").click());
+    await waitFor(800);
+
+    expect(document.body.textContent).toContain("MOCK-TUTORIAL-PO");
+    expect(document.body.textContent).toContain("Quotation values appear inline");
+    expect(document.body.textContent).toContain("Quotation item 2");
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+  });
+});

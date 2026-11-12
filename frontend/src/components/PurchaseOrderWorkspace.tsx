@@ -11,6 +11,7 @@ import { useState } from "react";
 import type { CompanyUnitOption } from "../companyUnits";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
 import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
@@ -85,6 +86,11 @@ export interface PurchaseOrderWorkspacePageProps {
   reconciliationTransport?: ReconciliationTransport;
   actorId?: number;
   actorName?: string;
+  /** Issue #595: the client-only Features Tutorial practice order. */
+  tutorialDraft?: PurchaseOrderDTO | null;
+  tutorialReview?: PurchaseOrderReviewDTO | null;
+  tutorialReconciliationTransport?: ReconciliationTransport;
+  onTutorialAction?: () => void;
 }
 
 /**
@@ -153,8 +159,52 @@ export function PurchaseOrderWorkspacePage({
   reconciliationTransport,
   actorId,
   actorName,
+  tutorialDraft = null,
+  tutorialReview = null,
+  tutorialReconciliationTransport,
+  onTutorialAction,
 }: PurchaseOrderWorkspacePageProps) {
   const { draft, phase } = workspace;
+  const tutorialCurrency =
+    tutorialDraft === null
+      ? null
+      : (currencyOptions.find(
+          (option) => option.code === tutorialDraft.Currency
+        ) ?? currency);
+  if (tab === "editor" && tutorialDraft !== null) {
+    if (tutorialCurrency === null) {
+      return (
+        <StatusBanner tone="danger">
+          The tutorial purchase order's currency ({tutorialDraft.Currency}) is
+          not in the loaded currency catalogue.
+        </StatusBanner>
+      );
+    }
+    return (
+      <PurchaseOrderEditorPage
+        key={`tutorial-${tutorialDraft.ID}`}
+        order={tutorialDraft}
+        currency={tutorialCurrency}
+        currencyOptions={currencyOptions}
+        uomOptions={uomOptions}
+        incotermOptions={incotermOptions}
+        onLinkQuotation={onLinkQuotation}
+        onSaved={() => undefined}
+        onCancel={onCancel}
+        onDirtyChange={() => undefined}
+        actionsInShell={actionsInShell}
+        onShellActions={onShellActions}
+        reconciliationTransport={
+          tutorialReconciliationTransport ?? reconciliationTransport
+        }
+        actorId={actorId}
+        actorName={actorName}
+        tutorial
+        tutorialReview={tutorialReview}
+        onTutorialAction={onTutorialAction}
+      />
+    );
+  }
   // #518: one-shot focus signal for returning from the repair flow. The saved
   // view consumes it and the parent clears it, so a later re-render cannot
   // steal focus again.
@@ -204,26 +254,30 @@ export function PurchaseOrderWorkspacePage({
     }
     if (tab === "drafts") {
       return (
-        <PurchaseOrderListPage
-          key="drafts"
-          mode="drafts"
-          pageSize={pageSize}
-          onAdd={onAdd}
-          onOpen={onOpen}
-          isAdmin={isAdmin}
-        />
+        <div data-tutorial="po-drafts">
+          <PurchaseOrderListPage
+            key="drafts"
+            mode="drafts"
+            pageSize={pageSize}
+            onAdd={onAdd}
+            onOpen={onOpen}
+            isAdmin={isAdmin}
+          />
+        </div>
       );
     }
     if (tab === "archive") {
       return (
-        <PurchaseOrderListPage
-          key="archive"
-          mode="archive"
-          pageSize={pageSize}
-          onAdd={onAdd}
-          onOpen={onOpen}
-          isAdmin={isAdmin}
-        />
+        <div data-tutorial="po-archive">
+          <PurchaseOrderListPage
+            key="archive"
+            mode="archive"
+            pageSize={pageSize}
+            onAdd={onAdd}
+            onOpen={onOpen}
+            isAdmin={isAdmin}
+          />
+        </div>
       );
     }
     return <PurchaseOrderEntryPage onAdd={onAdd} />;

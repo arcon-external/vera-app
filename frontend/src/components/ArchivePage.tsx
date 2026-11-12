@@ -126,7 +126,11 @@ export function ArchivePage({
   };
 
   return (
-    <section aria-labelledby="archive-heading" className="flex flex-col gap-5">
+    <section
+      aria-labelledby="archive-heading"
+      className="flex flex-col gap-5"
+      data-tutorial="quotation-archive"
+    >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1

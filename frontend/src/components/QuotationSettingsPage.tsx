@@ -7,6 +7,7 @@ import {
 import { SERVICE_CATEGORY_OPTIONS, TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "../tax";
 import { Select } from "./Select";
 import { Button, Card, SectionHeading, fieldClass } from "./ui";
+import { FeaturesTutorialCard } from "./FeaturesTutorialCard";
 import { NumberSetting, SettingsField } from "./WorkspaceSettingsFields";
 
 // Issue #492: the Quotation defaults surface. It is a profile surface like
@@ -20,10 +21,12 @@ export function QuotationSettingsPage({
   settings,
   onChange,
   onClear,
+  onReplayTutorial,
 }: {
   settings: QuotationSettings;
   onChange: (settings: QuotationSettings) => void;
   onClear: () => void;
+  onReplayTutorial?: () => void;
 }) {
   const patch = (next: Partial<QuotationSettings>) =>
     onChange({ ...settings, ...next });
@@ -140,6 +143,13 @@ export function QuotationSettingsPage({
           </Button>
         </div>
       </Card>
+
+      {onReplayTutorial !== undefined ? (
+        <FeaturesTutorialCard
+          workspace="quotation"
+          onReplay={onReplayTutorial}
+        />
+      ) : null}
     </section>
   );
 }
