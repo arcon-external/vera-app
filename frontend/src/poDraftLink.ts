@@ -15,13 +15,9 @@ import {
   type POReviewChoice,
   type POReviewDecisions,
   type PurchaseOrderSourceDTO,
-  type PurchaseOrderSourceLineDTO,
 } from "./poFinalize";
-import { newClientKey, sourceLineRef } from "./poReconciliation.lines";
 import {
   buildPurchaseOrderUpdate,
-  formatQuantityScaled,
-  formatUnitPriceMinor,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderSourceState,
@@ -30,53 +26,6 @@ import {
 
 /** The explicit tax-basis choice a link may need. */
 export type PurchaseOrderDraftTaxChoice = "" | "keep" | "source";
-
-/**
- * #587: the review copy of the draft. Every quotation line no PO line claims
- * is appended as a real PO line, so the order being reviewed is the order the
- * link would save and a source line can never stay MISSING beside a resolved
- * rail item. Blank placeholder lines are dropped when lines are added; filled
- * lines are never touched. The returned state is never dispatched by opening
- * the review: only a confirmed link persists it, and Back leaves the working
- * draft as it was.
- */
-export function withMissingSourceLines(
-  state: PurchaseOrderEditorState,
-  sourceLines: PurchaseOrderSourceLineDTO[],
-  currency: CurrencyInfo
-): PurchaseOrderEditorState {
-  const claimed = new Set<string>();
-  for (const line of state.lines) {
-    if (line.quotationItemNo === null) continue;
-    claimed.add(sourceLineRef(line.quotationItemNo, line.quotationSubNo));
-  }
-  const missing = sourceLines.filter(
-    (line) => !claimed.has(sourceLineRef(line.QuotationItemNo, line.QuotationSubNo))
-  );
-  if (missing.length === 0) return state;
-
-  const kept = state.lines.filter((line) => line.description.trim() !== "");
-  const added = missing.map((line, index) => ({
-    key: state.nextKey + index,
-    clientKey: newClientKey(),
-    description: line.Description,
-    quantity: formatQuantityScaled(line.QuantityScaled),
-    uom: line.UoM,
-    unitPrice: formatUnitPriceMinor(currency, line.UnitPriceMinor),
-    discountEnabled: line.DiscountEnabled,
-    discountPercent: String(line.DiscountPercent),
-    quotationItemNo: line.QuotationItemNo,
-    quotationSubNo: line.QuotationSubNo ?? null,
-    groupKey: "",
-    parentDescription: "",
-    descriptionLines: [],
-  }));
-  return {
-    ...state,
-    lines: [...kept, ...added],
-    nextKey: state.nextKey + added.length,
-  };
-}
 
 /** One side of the link's tax decision, as the server reports it. */
 export interface PurchaseOrderDraftTaxBasisDTO {

@@ -9,6 +9,7 @@ import {
   orderPaneItems,
   paneFilterCounts,
   prefillDecisionsFromSession,
+  resolveKept,
   type ReconciliationItem,
 } from "./poReconciliation";
 
@@ -455,5 +456,22 @@ describe("prefill used_quotation decisions", () => {
       { PaymentTerms: "30 days", Incoterms: "CIF" }
     );
     expect(decisions).toEqual({});
+  });
+});
+
+
+describe("resolveKept", () => {
+  it("records the entered value as a deliberate keep with history", () => {
+    const kept = resolveKept(item(), 7, "2026-11-12T00:00:00Z");
+    expect(kept.Status).toBe("resolved");
+    expect(kept.Resolution).toBe("kept_po");
+    expect(kept.POValue).toBe("50% advance");
+    expect(kept.History.at(-1)).toMatchObject({
+      Status: "resolved",
+      Resolution: "kept_po",
+      ActorID: 7,
+    });
+    // Idempotent: a resolved item is never rewritten.
+    expect(resolveKept(kept, 8, "later")).toBe(kept);
   });
 });

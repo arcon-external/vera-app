@@ -384,7 +384,7 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     expect(html).not.toContain('type="text"');
     expect(html).not.toContain('type="date"');
     expect(html).not.toContain("Save draft");
-    expect(html).not.toContain("Final Save");
+    expect(html).not.toContain('aria-label="Final Save"');
     expect(html).not.toContain("Add line");
   });
 

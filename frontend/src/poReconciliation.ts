@@ -215,6 +215,31 @@ function historyEventOf(
 }
 
 /**
+ * Resolves an unresolved difference as a deliberate "keep what I entered"
+ * decision. The inline editor has no pane to confirm a keep: the field's own
+ * state says the value is the user's, so the commit records that choice
+ * immediately and the persisted session stays final-save ready.
+ */
+export function resolveKept(
+  item: ReconciliationItem,
+  actorId: number,
+  now: string
+): ReconciliationItem {
+  if (item.Status !== "unresolved") return item;
+  return {
+    ...item,
+    Status: "resolved",
+    Resolution: "kept_po",
+    ActorID: actorId,
+    UpdatedAt: now,
+    History: [
+      ...item.History,
+      historyEventOf(item, "resolved", "kept_po", actorId, now),
+    ],
+  };
+}
+
+/**
  * One commit of one header field. Idempotent: re-committing the same value
  * returns the same item unchanged; editing back to the source value resolves
  * it as values-now-match while retaining its history.

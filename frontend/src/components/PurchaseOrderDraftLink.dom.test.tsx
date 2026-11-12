@@ -48,7 +48,11 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrder: vi.fn(),
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
   GetPurchaseOrderHistory: vi.fn(async () => []),
-  GetPurchaseOrderReview: vi.fn(),
+  GetPurchaseOrderReview: async () => ({
+    Order: latestOrder,
+    Source: reviewForTest.Source,
+    DocumentState: "none",
+  }),
   LinkPurchaseOrderDraftSource: (...args: unknown[]) => linkMock(...args),
   PreviewPurchaseOrderDraftLink: (...args: unknown[]) => previewMock(...args),
   RemovePurchaseOrderDocument: vi.fn(),
@@ -409,6 +413,12 @@ function Harness({ draft, opened }: { draft?: PurchaseOrderDTO; opened?: Purchas
         onBack={() => {}}
         onCancel={() => {}}
         onDirtyChange={() => {}}
+        reconciliationTransport={{
+          load: async () => {
+            throw new Error("no reconciliation recorded");
+          },
+          save: async (_id, session) => session,
+        }}
       />
       <span data-testid="linked">
         {linked === null ? "none" : `${linked.QuoteNumber}:${linked.SourceRevision}`}
@@ -434,7 +444,7 @@ async function openReview(): Promise<void> {
 }
 
 describe("draft source link (issue #497)", () => {
-  it("links a never-linked draft through the selector, review and commit", async () => {
+  it("links a never-linked draft immediately, without a review step", async () => {
     reviewForTest = review();
     await render();
     type("Customer PO number", "KEEP-497");
@@ -448,35 +458,23 @@ describe("draft source link (issue #497)", () => {
     expect(preSave.PONumber).toBe("KEEP-497");
     expect(previewMock).toHaveBeenCalledWith(41, 12, 0);
 
-    expect(document.body.textContent).toContain("Link this draft to a quotation");
-    expect(document.body.textContent).toContain("Source link");
-    // The missing quotation line is added to the review copy as a matched
-    // line, so the link needs no omission acknowledgement (#587).
-    expect(document.body.textContent).toContain("Source line 1");
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
+    // The source is previewed and linked in the same action; the editor shows
+    // the quotation values inline instead of a review screen.
     expect(linkMock).toHaveBeenCalledTimes(1);
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.ID).toBe(41);
-    expect(linkInput.ExpectedVersion).toBe(3);
+    expect(linkInput.ExpectedVersion).toBe(2);
     expect(linkInput.TargetQuotationID).toBe(12);
     expect(linkInput.TargetRevisionNumber).toBe(0);
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    // The empty order keeps no value and leaves the quotation line off; the
+    // ghost below the line is where staff decide to add it.
+    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
     expect(linkInput.AcknowledgedExtra).toEqual([]);
     expect(linkInput.TaxChoice).toBe("keep");
-
-    // The applied review values were saved before the link, carrying the typed
-    // PO number untouched and the added quotation line.
-    const appliedSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.PONumber).toBe("KEEP-497");
-    expect(appliedSave.ExpectedVersion).toBe(2);
-    expect(appliedSave.Items).toHaveLength(1);
-    expect(appliedSave.Items[0]).toMatchObject({
-      QuotationItemNo: 1,
-      Description: "Source line 1",
-    });
+    expect(document.body.textContent).not.toContain(
+      "Link this draft to a quotation"
+    );
+    expect(document.body.textContent).toContain("Quotation line 1");
 
     expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
       "1502260001:0"
@@ -548,15 +546,13 @@ describe("draft source link (issue #497)", () => {
     await openReview();
 
     expect(document.body.textContent).toContain(
-      "This purchase order is in IDR; quotation 1502260001 revision 0 is in USD."
+      "The purchase order is in IDR but its quotation revision is in USD."
     );
-    expect(document.body.textContent).toContain("Back without linking");
     expect(document.body.textContent).toContain("Source basis");
-    expect(button("Link source").disabled).toBe(true);
     expect(linkMock).not.toHaveBeenCalled();
   });
 
-  it("requires the tax choice and sends the chosen basis", async () => {
+  it("keeps the draft tax basis automatically when the bases differ", async () => {
     reviewForTest = review({
       Source: source({ Lines: [] }),
       SourceTax: {
@@ -571,17 +567,12 @@ describe("draft source link (issue #497)", () => {
     await render();
     await openReview();
 
-    expect(document.body.textContent).toContain("A choice is required before linking");
-    expect(button("Link source").disabled).toBe(true);
-    act(() => button("Use the quotation tax basis").click());
-    await flush();
-    expect(button("Link source").disabled).toBe(false);
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
+    // There is no second question in the inline model: the PO-owned basis is
+    // kept, exactly as the old default did, and the source can still be
+    // adopted on a later link through the source-basis card.
+    expect(linkMock).toHaveBeenCalledTimes(1);
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.TaxChoice).toBe("source");
+    expect(linkInput.TaxChoice).toBe("keep");
   });
 
   it("edits the currency and retries the link after the mismatch", async () => {
@@ -589,23 +580,12 @@ describe("draft source link (issue #497)", () => {
     await render();
     await openReview();
 
-    expect(button("Link source").disabled).toBe(true);
-    expect(document.body.textContent).toContain("Back without linking");
-    act(() => button("Back without linking").click());
-    await flush();
-
-    // Back returns to the editor, where a never-linked draft's currency is
-    // editable. No amount is converted; the same amounts are relabelled USD.
+    // The editor stays open on the mismatch, so the currency is editable
+    // without leaving the page. No amount is converted; the same amounts are
+    // relabelled USD.
     chooseSelect("Currency", "USD");
     await flush();
     act(() => button("Link a Quotation").click());
-    await flush();
-    await flush();
-
-    // The added quotation line is already matched, and the currency now
-    // agrees, so the link is confirmable without an acknowledgement (#587).
-    expect(button("Link source").disabled).toBe(false);
-    act(() => button("Link source").click());
     await flush();
     await flush();
 
@@ -616,7 +596,7 @@ describe("draft source link (issue #497)", () => {
     expect(linked).toBe("1502260001:0");
   });
 
-  it("links a formerly-linked draft through the same panel and review", async () => {
+  it("links a formerly-linked draft immediately", async () => {
     reviewForTest = review();
     await render(
       blank({
@@ -639,17 +619,12 @@ describe("draft source link (issue #497)", () => {
     );
     await openReview();
     expect(previewMock).toHaveBeenCalledWith(7, 12, 0);
-    // The missing source line is added to the review copy (#587).
-    expect(document.body.textContent).toContain("Source line 1");
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
 
     expect(linkMock).toHaveBeenCalledTimes(1);
     const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
     expect(linkInput.ID).toBe(7);
     expect(linkInput.TargetQuotationID).toBe(12);
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
+    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
     expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
       "1502260001:0"
     );
@@ -685,22 +660,12 @@ describe("draft source link (issue #497)", () => {
     expect(editorText).toContain("former quotation remains the reference");
 
     await openReview();
-    expect(button("Link source").disabled).toBe(true);
-    // The remedy is editing this draft, not choosing another revision.
-    expect(document.body.textContent).toContain("change the draft currency");
-    act(() => button("Back without linking").click());
-    await flush();
+    expect(linkMock).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("quotation revision is in USD");
 
     chooseSelect("Currency", "USD");
     await flush();
     act(() => button("Link a Quotation").click());
-    await flush();
-    await flush();
-
-    // The added source line is matched and the currency agrees, so no
-    // acknowledgement is needed (#587).
-    expect(button("Link source").disabled).toBe(false);
-    act(() => button("Link source").click());
     await flush();
     await flush();
 
@@ -732,270 +697,4 @@ describe("draft source link (issue #497)", () => {
     expect(document.body.textContent).toContain("Received date must be YYYY-MM-DD.");
   });
 
-  it("adds ten missing quotation lines beside ten filled manual lines (#587)", async () => {
-    const items = Array.from({ length: 10 }, (_, index) => ({
-      QuotationItemNo: null,
-      QuotationSubNo: null,
-      LineNumber: index + 1,
-      Description: `Source line ${index + 1}`,
-      QuantityScaled: 10000,
-      UoM: "Pc",
-      UnitPriceMinor: 100,
-      DiscountEnabled: false,
-      DiscountPercent: 0,
-      GrossMinor: 0,
-      DiscountMinor: 0,
-      NetMinor: 0,
-    }));
-    const lines = Array.from({ length: 10 }, (_, index) => sourceLine(index + 1));
-    reviewForTest = review({ Source: source({ Lines: lines }) });
-    await render(blank({ Items: items }));
-    await openReview();
-
-    // All ten quotation lines are added to the review copy as matched lines;
-    // the ten filled manual lines stay and are acknowledged as extras.
-    const summary = document.querySelector<HTMLElement>(
-      '[data-testid="po-diff-summary"]'
-    );
-    expect(summary?.getAttribute("data-missing")).toBe("0");
-    expect(summary?.getAttribute("data-extra")).toBe("10");
-    expect(document.body.textContent).toContain("Resolve before linking");
-    expect(button("Link source").disabled).toBe(true);
-    act(() => button("Keep all PO values").click());
-    await flush();
-    expect(button("Link source").disabled).toBe(false);
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
-    const appliedSave = updateMock.mock.calls[
-      updateMock.mock.calls.length - 1
-    ][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.Items).toHaveLength(20);
-    expect(
-      appliedSave.Items.slice(10).map((item) => item.QuotationItemNo)
-    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
-    expect(linkInput.AcknowledgedExtra).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-    ]);
-    expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
-      "1502260001:0"
-    );
-  });
-
-  it("adds a missing quotation line to the review copy and saves it only on link (#587)", async () => {
-    reviewForTest = review();
-    await render();
-    type("Customer PO number", "AUTO-587");
-    await flush();
-    await openReview();
-
-    // The review compares the order that would be saved: the missing source
-    // line is already a matched line, so nothing is missing or extra.
-    const summary = document.querySelector<HTMLElement>(
-      '[data-testid="po-diff-summary"]'
-    );
-    expect(summary?.getAttribute("data-missing")).toBe("0");
-    expect(summary?.getAttribute("data-extra")).toBe("0");
-    expect(summary?.getAttribute("data-differences")).toBe("0");
-    expect(document.body.textContent).toContain("Source line 1");
-    expect(
-      document.querySelector(
-        'input[aria-label="Acknowledge omission of quotation line 1"]'
-      )
-    ).toBeNull();
-    expect(button("Link source").disabled).toBe(false);
-
-    // Back leaves the working draft without the added line.
-    act(() => button("Back without linking").click());
-    await flush();
-    expect(
-      document.querySelector('[aria-label="Description for line 1"]')
-    ).toBeNull();
-
-    // Confirming the link saves the added line with the rest of the applied
-    // review.
-    await openReview();
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
-    const appliedSave = updateMock.mock.calls[
-      updateMock.mock.calls.length - 1
-    ][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.Items).toHaveLength(1);
-    expect(appliedSave.Items[0]).toMatchObject({
-      QuotationItemNo: 1,
-      Description: "Source line 1",
-      UoM: "Pc",
-      QuantityScaled: 10000,
-      UnitPriceMinor: 100,
-    });
-    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
-    expect(document.querySelector('[data-testid="linked"]')?.textContent).toBe(
-      "1502260001:0"
-    );
-  });
-
-  it("Use all quotation values resolves every difference, the tax basis and extras (#587)", async () => {
-    reviewForTest = review({
-      Source: source({ PaymentTerms: "45 days", Lines: [sourceLine(1)] }),
-      SourceTax: {
-        TaxZone: "NonFTZ",
-        TaxType: "Goods",
-        ServiceCategory: "",
-        TaxCategory: "",
-        PpnBps: 1100,
-      },
-      TaxChoiceRequired: true,
-    });
-    await render(
-      blank({
-        Items: [
-          {
-            QuotationItemNo: 1,
-            QuotationSubNo: null,
-            LineNumber: 1,
-            Description: "Source line 1",
-            QuantityScaled: 10000,
-            UoM: "Pc",
-            UnitPriceMinor: 500,
-            DiscountEnabled: false,
-            DiscountPercent: 0,
-            GrossMinor: 0,
-            DiscountMinor: 0,
-            NetMinor: 0,
-          },
-          {
-            QuotationItemNo: null,
-            QuotationSubNo: null,
-            LineNumber: 2,
-            Description: "Freight",
-            QuantityScaled: 10000,
-            UoM: "Pc",
-            UnitPriceMinor: 0,
-            DiscountEnabled: false,
-            DiscountPercent: 0,
-            GrossMinor: 0,
-            DiscountMinor: 0,
-            NetMinor: 0,
-          },
-        ],
-      })
-    );
-    await openReview();
-
-    expect(button("Link source").disabled).toBe(true);
-    const group = document.querySelector<HTMLElement>(
-      '[role="group"][aria-label="Bulk choices"]'
-    );
-    expect(group).not.toBeNull();
-    expect(group?.textContent).toContain("Use all quotation values");
-    const blocker = Array.from(
-      document.querySelectorAll<HTMLElement>('[role="alert"]')
-    ).find((node) => node.textContent?.includes("Resolve before linking"));
-    if (blocker === undefined || group === null) {
-      throw new Error("blocker or bulk choices missing");
-    }
-    expect(
-      blocker.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-
-    act(() => button("Use all quotation values").click());
-    await flush();
-    expect(button("Link source").disabled).toBe(false);
-
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
-    const appliedSave = updateMock.mock.calls[
-      updateMock.mock.calls.length - 1
-    ][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.PaymentTerms).toBe("45 days");
-    expect(appliedSave.Items[0].UnitPriceMinor).toBe(100);
-    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.Decisions).toEqual([
-      { Key: "header:paymentTerms", Choice: "quotation" },
-      { Key: "line:1:unitPrice", Choice: "quotation" },
-    ]);
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
-    expect(linkInput.AcknowledgedExtra).toEqual([2]);
-    expect(linkInput.TaxChoice).toBe("source");
-  });
-
-  it("Keep all PO values keeps every value and the tax basis and acknowledges extras (#587)", async () => {
-    reviewForTest = review({
-      Source: source({ PaymentTerms: "45 days", Lines: [sourceLine(1)] }),
-      SourceTax: {
-        TaxZone: "NonFTZ",
-        TaxType: "Goods",
-        ServiceCategory: "",
-        TaxCategory: "",
-        PpnBps: 1100,
-      },
-      TaxChoiceRequired: true,
-    });
-    await render(
-      blank({
-        Items: [
-          {
-            QuotationItemNo: 1,
-            QuotationSubNo: null,
-            LineNumber: 1,
-            Description: "Source line 1",
-            QuantityScaled: 10000,
-            UoM: "Pc",
-            UnitPriceMinor: 500,
-            DiscountEnabled: false,
-            DiscountPercent: 0,
-            GrossMinor: 0,
-            DiscountMinor: 0,
-            NetMinor: 0,
-          },
-          {
-            QuotationItemNo: null,
-            QuotationSubNo: null,
-            LineNumber: 2,
-            Description: "Freight",
-            QuantityScaled: 10000,
-            UoM: "Pc",
-            UnitPriceMinor: 0,
-            DiscountEnabled: false,
-            DiscountPercent: 0,
-            GrossMinor: 0,
-            DiscountMinor: 0,
-            NetMinor: 0,
-          },
-        ],
-      })
-    );
-    await openReview();
-
-    expect(button("Link source").disabled).toBe(true);
-    act(() => button("Keep all PO values").click());
-    await flush();
-    expect(button("Link source").disabled).toBe(false);
-
-    act(() => button("Link source").click());
-    await flush();
-    await flush();
-
-    const appliedSave = updateMock.mock.calls[
-      updateMock.mock.calls.length - 1
-    ][0] as PurchaseOrderUpdateInput;
-    expect(appliedSave.PaymentTerms).toBe("50% advance");
-    expect(appliedSave.Items[0].UnitPriceMinor).toBe(500);
-    const linkInput = linkMock.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.Decisions).toEqual([
-      { Key: "header:paymentTerms", Choice: "po" },
-      { Key: "line:1:unitPrice", Choice: "po" },
-    ]);
-    expect(linkInput.AcknowledgedMissing).toEqual([]);
-    expect(linkInput.AcknowledgedExtra).toEqual([2]);
-    expect(linkInput.TaxChoice).toBe("keep");
-  });
 });

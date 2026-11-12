@@ -2,32 +2,12 @@
 //
 // The idle panel replaces the deferred #496 affordance: a never-linked or
 // formerly-linked draft offers "Link a Quotation", and a live draft shows a
-// read-only linked-source line with no re-link action. The review panel is the
-// same difference review the final save uses, with the link's tax decision and
-// currency remedy in front of it; no second comparison or review page exists.
+// read-only linked-source line with no re-link action. The inline editor owns
+// the comparison: linking keeps the entered values and shows the quotation
+// values beside each field.
 
-import type { CurrencyInfo } from "../format";
-import {
-  comparePurchaseOrder,
-  sourceLabel,
-  type POReviewChoice,
-  type POReviewDecisions,
-  type PurchaseOrderSourceLineDTO,
-} from "../poFinalize";
-import type {
-  PurchaseOrderEditorState,
-  PurchaseOrderSourceState,
-} from "../purchaseOrder";
-import {
-  draftLinkCurrencyRemedy,
-  draftTaxBasisLabel,
-  ppnLabel,
-  type PurchaseOrderDraftLinkReviewDTO,
-  type PurchaseOrderDraftTaxChoice,
-} from "../poDraftLink";
-import { DiffDivider, DiffValue } from "./PODiff";
-import { PurchaseOrderDifferenceReviewView } from "./PurchaseOrderFinalize";
-import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
+import type { PurchaseOrderSourceState } from "../purchaseOrder";
+import { Button, Card, SectionHeading } from "./ui";
 
 export interface PurchaseOrderSourceLinkPanelProps {
   sourceState: PurchaseOrderSourceState;
@@ -77,12 +57,12 @@ export function PurchaseOrderSourceLinkPanel({
         <div>
           <SectionHeading
             title="Link a Quotation"
-            hint="Linking repeats the difference review and keeps every value you enter"
+            hint="Linking keeps every value you enter and shows the quotation values inline"
           />
           <p className="mt-1 max-w-2xl text-small leading-relaxed text-ink-500">
             {neverLinked
               ? "This draft has no source yet. Enter the customer's order now; linking a quotation is the next step and will not replace these fields."
-              : "The quotation this draft followed was deleted. The values below are kept; link a replacement through the same difference review."}
+              : "The quotation this draft followed was deleted. The values below are kept; link a replacement to compare its values inline."}
           </p>
         </div>
         <Button
@@ -95,207 +75,5 @@ export function PurchaseOrderSourceLinkPanel({
         </Button>
       </div>
     </Card>
-  );
-}
-
-export interface PurchaseOrderDraftLinkReviewPanelProps {
-  state: PurchaseOrderEditorState;
-  review: PurchaseOrderDraftLinkReviewDTO;
-  currency: CurrencyInfo;
-  decisions: POReviewDecisions;
-  acknowledgedMissing: string[];
-  acknowledgedExtra: number[];
-  taxChoice: PurchaseOrderDraftTaxChoice;
-  linking: boolean;
-  error: string | null;
-  onDecision: (key: string, choice: POReviewChoice) => void;
-  onToggleMissing: (label: string) => void;
-  onToggleExtra: (lineNumber: number) => void;
-  onMatchChange: (lineKey: number, source: PurchaseOrderSourceLineDTO | null) => void;
-  onTaxChoice: (choice: PurchaseOrderDraftTaxChoice) => void;
-  onBack: () => void;
-  onLink: () => void;
-}
-
-/**
- * The draft-link review. It reuses the final-save difference view in its link
- * mode and adds only the tax decision the server requires, plus an explicit
- * currency-mismatch remedy. The link button is blocked while a required tax
- * choice is unmade, because the server refuses that request by name.
- */
-export function PurchaseOrderDraftLinkReviewPanel({
-  state,
-  review,
-  currency,
-  decisions,
-  acknowledgedMissing,
-  acknowledgedExtra,
-  taxChoice,
-  linking,
-  error,
-  onDecision,
-  onToggleMissing,
-  onToggleExtra,
-  onMatchChange,
-  onTaxChoice,
-  onBack,
-  onLink,
-}: PurchaseOrderDraftLinkReviewPanelProps) {
-  const taxUnresolved = review.TaxChoiceRequired && taxChoice === "";
-  const displayPpnBps =
-    taxChoice === "source" ? review.SourceTax.PpnBps : review.DraftTax.PpnBps;
-  const currencyRemedy = draftLinkCurrencyRemedy(
-    state.sourceState,
-    state.currency,
-    review.Source.Currency
-  );
-
-  // #587: one click for the common cases. The comparison is recomputed from
-  // the review copy at click time, never from the last render, so a bulk
-  // choice applies to what the panel currently shows.
-  const chooseAll = (side: POReviewChoice) => {
-    const current = comparePurchaseOrder(state, review.Source, currency);
-    for (const difference of current.differences) {
-      onDecision(difference.key, side);
-    }
-    for (const line of current.missing) {
-      const label = sourceLabel(line);
-      if (!acknowledgedMissing.includes(label)) onToggleMissing(label);
-    }
-    for (const lineNumber of current.extraLineNumbers) {
-      if (!acknowledgedExtra.includes(lineNumber)) onToggleExtra(lineNumber);
-    }
-    onTaxChoice(side === "quotation" ? "source" : "keep");
-  };
-  const bulkChoices = (
-    <div
-      role="group"
-      aria-label="Bulk choices"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-rule bg-white px-4 py-3"
-    >
-      <div className="grid gap-0.5">
-        <p className="text-small font-medium text-ink-900">
-          Choose one side for everything
-        </p>
-        <p className="text-caption text-ink-500">
-          Every difference, the tax basis and every missing or extra line.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button aria-label="Use all quotation values" onClick={() => chooseAll("quotation")}>
-          Use all quotation values
-        </Button>
-        <Button aria-label="Keep all PO values" onClick={() => chooseAll("po")}>
-          Keep all PO values
-        </Button>
-      </div>
-    </div>
-  );
-
-  // #582: the tax basis is a two-sided diff like the value rows. The whole
-  // side is the selection target, so the old inner button is now the card
-  // itself and keeps the same accessible name and pressed state.
-  const taxCard = (
-    <Card className="p-4">
-      <SectionHeading
-        title="Tax basis"
-        hint={
-          review.TaxChoiceRequired
-            ? "A choice is required before linking"
-            : "Both sides use the same basis"
-        }
-      />
-      <p className="mt-1 text-caption text-ink-500">
-        PPN difference: {ppnLabel(review.DraftTax)} on this purchase order;{" "}
-        {ppnLabel(review.SourceTax)} on the quotation revision.
-      </p>
-      <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-stretch">
-        <DiffValue
-          side="po"
-          caption="This purchase order"
-          value={draftTaxBasisLabel(review.DraftTax)}
-          selected={taxChoice === "keep"}
-          muted={taxChoice === "source"}
-          onSelect={review.TaxChoiceRequired ? () => onTaxChoice("keep") : undefined}
-          ariaLabel="Keep the draft tax basis"
-          ariaPressed={taxChoice === "keep"}
-        >
-          {review.TaxChoiceRequired && taxChoice !== "keep" ? (
-            <span className="text-small font-medium text-accent-700">
-              Use this basis
-            </span>
-          ) : null}
-        </DiffValue>
-        <DiffDivider />
-        <DiffValue
-          side="quotation"
-          caption="Quotation revision"
-          value={draftTaxBasisLabel(review.SourceTax)}
-          selected={taxChoice === "source"}
-          muted={taxChoice === "keep"}
-          onSelect={review.TaxChoiceRequired ? () => onTaxChoice("source") : undefined}
-          ariaLabel="Use the quotation tax basis"
-          ariaPressed={taxChoice === "source"}
-        >
-          {review.TaxChoiceRequired && taxChoice !== "source" ? (
-            <span className="text-small font-medium text-accent-700">
-              Use this basis
-            </span>
-          ) : null}
-        </DiffValue>
-      </div>
-      <p className="mt-3 text-caption text-ink-500">
-        PPN is recomputed from the chosen basis when the link commits.{" "}
-        {review.TaxChoiceRequired
-          ? "Nothing is adopted silently, and the basis is frozen again once the link is saved."
-          : "Both bases are the same, so no choice is needed."}
-      </p>
-    </Card>
-  );
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <SectionHeading
-            title="Link this draft to a quotation"
-            hint={`${review.Source.QuoteNumber} · revision ${review.Source.RevisionNumber}`}
-          />
-          <p className="mt-1 max-w-3xl text-body text-ink-500">
-            Linking makes this draft follow the selected quotation revision. The
-            customer, quote number, revision, quotation line references and printed
-            totals come from it; every other value stays as you entered it. Each
-            difference needs an explicit choice before the link can be saved.
-          </p>
-        </div>
-        <Badge tone="accent">Source link</Badge>
-      </div>
-
-      {error !== null ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
-
-      <PurchaseOrderDifferenceReviewView
-        state={state}
-        source={review.Source}
-        currency={currency}
-        quoteNumber={review.Source.QuoteNumber}
-        mode="link"
-        documentState={review.DocumentState === "attached" ? "attached" : "none"}
-        decisions={decisions}
-        acknowledgedMissing={acknowledgedMissing}
-        acknowledgedExtra={acknowledgedExtra}
-        onDecision={onDecision}
-        onToggleMissing={onToggleMissing}
-        onToggleExtra={onToggleExtra}
-        onMatchChange={onMatchChange}
-        onBack={onBack}
-        onContinue={onLink}
-        ppnBpsOverride={displayPpnBps}
-        currencyRemedy={currencyRemedy}
-        busy={linking}
-        blocked={taxUnresolved}
-        beforeDifferences={taxCard}
-        afterBlockers={bulkChoices}
-      />
-    </div>
   );
 }

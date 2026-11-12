@@ -7,6 +7,7 @@ import {
   emptyLocalSession,
   orderPaneItems,
   paneFilterCounts,
+  resolveKept,
   type CommitNotice,
   type CommitResult,
   type HeaderFieldDef,
@@ -312,7 +313,11 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
    * wires onBlur (and Select onChange, which is itself a commit).
    */
   const commitField = useCallback(
-    (field: HeaderFieldKey, explicitValue?: string): CommitResult | null => {
+    (
+      field: HeaderFieldKey,
+      explicitValue?: string,
+      options?: { autoKeep?: boolean }
+    ): CommitResult | null => {
       if (readOnlyRef.current || !liveRef.current) return null;
       const currentSource = sourceRef.current;
       if (currentSource === null) return null;
@@ -331,6 +336,17 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
         actorId: actor.id,
         now: new Date().toISOString(),
       });
+      let item = result.item;
+      // The inline editor has no pane: a differing field is a visible "using
+      // my value" state, so the commit itself records that keep instead of
+      // leaving an unresolved review item nobody can resolve.
+      if (
+        options?.autoKeep === true &&
+        item !== null &&
+        item.Status === "unresolved"
+      ) {
+        item = resolveKept(item, actor.id, new Date().toISOString());
+      }
       setNotices((current) => ({ ...current, [field]: result.notice }));
       setValidationErrors((current) => ({
         ...current,
@@ -347,19 +363,19 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       if (result.validationError !== null) {
         setAnnouncement(result.validationError);
       }
-      if (result.item !== null) {
-        upsertItem(result.item, result.itemChanged);
-        if (result.itemChanged && result.item.Status === "unresolved") {
+      if (item !== null) {
+        upsertItem(item, result.itemChanged);
+        if (result.itemChanged && item.Status === "unresolved") {
           const count = [
-            ...(session?.Items.filter((entry) => entry.Key !== result.item?.Key) ?? []),
-            result.item,
+            ...(session?.Items.filter((entry) => entry.Key !== item?.Key) ?? []),
+            item,
           ].filter((entry) => entry.Status === "unresolved").length;
           setAnnouncement(
             `${def.label}: differs from the Quotation. ${count} ${count === 1 ? "item" : "items"} to resolve.`
           );
         }
       }
-      return result;
+      return { ...result, item };
     },
     // session read for the count only; the transition itself is pure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -375,7 +391,8 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
     (
       lineKey: string,
       field: LineField,
-      explicitRaw?: string | { enabled: boolean; percent: string | number }
+      explicitRaw?: string | { enabled: boolean; percent: string | number },
+      options?: { autoKeep?: boolean }
     ): LineCommitResult | null => {
       if (readOnlyRef.current || !liveRef.current) return null;
       const currentSources = sourceLinesRef.current;
@@ -412,6 +429,14 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
         now: new Date().toISOString(),
         currency: currencyRef.current,
       });
+      let item = result.item;
+      if (
+        options?.autoKeep === true &&
+        item !== null &&
+        item.Status === "unresolved"
+      ) {
+        item = resolveKept(item, actorRef.current.id, new Date().toISOString());
+      }
       setLineNotices((current) => ({ ...current, [feedbackKey]: result.notice }));
       setLineValidationErrors((current) => ({
         ...current,
@@ -429,14 +454,14 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
       if (result.validationError !== null) {
         setAnnouncement(result.validationError);
       }
-      if (result.item !== null) {
-        upsertItem(result.item, result.itemChanged);
-        if (result.itemChanged && result.item.Status === "unresolved") {
+      if (item !== null) {
+        upsertItem(item, result.itemChanged);
+        if (result.itemChanged && item.Status === "unresolved") {
           const label = lineFieldLabel(line.displayNumber, field);
           setAnnouncement(`${label}: differs from the Quotation.`);
         }
       }
-      return result;
+      return { ...result, item };
     },
     // sessionKey read for the identity; the transition itself is pure.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -465,7 +490,7 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
   );
 
   const acknowledgeExtra = useCallback(
-    (key: string) => {
+    (key: string, options?: { silent?: boolean }) => {
       if (readOnlyRef.current) return;
       setSession((current) => {
         if (current === null) return current;
@@ -476,7 +501,7 @@ export function useReconciliationSession(options: UseReconciliationSessionOption
           actorRef.current.id,
           new Date().toISOString()
         );
-        if (changed) {
+        if (changed && options?.silent !== true) {
           setAnnouncement("Extra line acknowledged. Unknown references still block Final Save until corrected.");
         }
         return changed ? next : current;

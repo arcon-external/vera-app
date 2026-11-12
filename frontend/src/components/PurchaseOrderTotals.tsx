@@ -180,8 +180,8 @@ export function PurchaseOrderTotals({
               <p className="mt-1 text-small text-ink-500">Printed totals unavailable.</p>
             )}
             <p className="mt-2 text-caption text-ink-400">
-              Source-document evidence, kept as printed. Differences are reviewed
-              before the order is finalized.
+              Source-document evidence, kept as printed. Quotation values appear
+              inline in the editor; Final Save confirms the entered values.
             </p>
           </>
         )}

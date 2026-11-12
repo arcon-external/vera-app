@@ -257,6 +257,14 @@ function input(label: string): HTMLInputElement {
   return found;
 }
 
+function lineInput(label: string): HTMLInputElement | null {
+  return (
+    Array.from(
+      document.querySelectorAll<HTMLInputElement>(`input[aria-label="${label}"]`)
+    ).find((entry) => entry.closest("[data-quotation-ghost]") === null) ?? null
+  );
+}
+
 function checkbox(label: string): HTMLInputElement {
   const found = document.querySelector<HTMLInputElement>(
     `input[type="checkbox"][aria-label="${label}"]`
@@ -315,7 +323,7 @@ async function renderEditor(
 }
 
 describe("line reconciliation in the editor (ticket 05)", () => {
-  it("a differing line blur commit creates one unresolved line item", async () => {
+  it("a differing line blur commit records the entered value as a keep", async () => {
     reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
     const transport = fakeTransport(null);
     await renderEditor(transport);
@@ -328,17 +336,14 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     await blur(quantity);
     await flush();
 
-    expect(document.body.textContent).toContain("Line 1 quantity");
+    // The typed value is untouched, and the inline editor records the keep
+    // immediately: there is no pane item left to resolve.
+    expect(input("Quantity for line 1").value).toBe("3");
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Line 1 quantity"]')
-    ).not.toBeNull();
-    // The typed value is untouched: the decision is recorded, not the edit.
-    expect(input("Quantity for line 1").value).toBe("3");
-
-    // The Final Save gate names the line blocker.
+    ).toBeNull();
     if (shellActions === null) throw new Error("no shell actions reported");
-    expect(shellActions.unresolvedCount).toBe(1);
-    expect(shellActions.blockedMessage).toContain("Line 1 quantity");
+    expect(shellActions.unresolvedCount).toBe(0);
   });
 
   it("a matching line blur commit shows the match notice and creates no item", async () => {
@@ -375,8 +380,10 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     // Both lines claim quotation line 1: the duplicate blocks by name.
     await flush();
     if (shellActions === null) throw new Error("no shell actions reported");
-    expect(document.body.textContent).toContain("Duplicate match · Quotation 1");
     expect(shellActions.blockedMessage).toContain("Duplicate match · Quotation 1");
+    act(() => shellActions?.onBlockedActivate());
+    await flush();
+    expect(document.body.textContent).toContain("Duplicate match · Quotation 1");
 
     // Correcting line 2 to an extra line clears the duplicate blocker (the
     // resolved duplicate stays visible as history; the gate moves on).
@@ -406,33 +413,33 @@ describe("line reconciliation in the editor (ticket 05)", () => {
       })
     );
 
-    // Canonical unknown card: names the reference, offers correction.
+    // The canonical unknown reference blocks until it is corrected.
     await flush();
     if (shellActions === null) throw new Error("no shell actions reported");
-    expect(document.body.textContent).toContain("Unknown reference · 99");
-    expect(document.body.textContent).toContain("No Quotation line 99 exists.");
     expect(shellActions.blockedMessage).toContain("Unknown reference · 99");
+    act(() => shellActions?.onBlockedActivate());
+    await flush();
+    expect(document.body.textContent).toContain("Unknown reference · 99");
 
     // Correcting the match to the valid reference keeps a valid shape.
-    button("Change quotation match for Line 1").click();
+    act(() => button("Change quotation match for Line 1").click());
     await flush();
-    button("Line 1 quotation match").click();
+    act(() => button("Line 1 quotation match").click());
     await flush();
     const allOptions = Array.from(
       document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
     );
     const valid = allOptions.find((el) => (el.textContent ?? "").includes("Quotation item 1 ·"));
     if (valid === undefined) throw new Error("no Quotation item 1 option");
-    valid.click();
+    act(() => valid.click());
     await flush();
     await flush();
 
     // The correction resolves everything: no blocker remains.
     expect(shellActions.blockedMessage).toBeNull();
-    expect(document.body.textContent).toContain("Match corrected");
   });
 
-  it("removing a matched line resolves its items as line_removed with history kept", async () => {
+  it("removing a matched line surfaces its quotation item as a remaining choice", async () => {
     reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
     const transport = fakeTransport(null);
     await renderEditor(transport);
@@ -441,12 +448,8 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     typeInto(quantity, "3");
     await blur(quantity);
     await flush();
-    expect(
-      document.querySelector('button[aria-label="Keep PO entry for Line 1 quantity"]')
-    ).not.toBeNull();
 
-    // Add a second line so the matched one can be removed and its items can
-    // be inspected as history while a line remains.
+    // Add a second line so the matched one can be removed while a line remains.
     button("Add line").click();
     await flush();
     button("Remove line 1").click();
@@ -455,33 +458,19 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     // The removed row is gone; the blank added row moved up into its place.
     const remainingDescriptions = Array.from(
       document.querySelectorAll<HTMLInputElement>('input[aria-label^="Description for line"]')
-    );
+    ).filter((entry) => entry.closest("[data-quotation-ghost]") === null);
     expect(remainingDescriptions).toHaveLength(1);
     expect(remainingDescriptions[0]?.value).toBe("");
-    const resolvedTab = document.querySelector<HTMLButtonElement>("#rail-filter-resolved");
-    if (resolvedTab === null) throw new Error("no Resolved filter tab");
-    await act(async () => {
-      resolvedTab.click();
-    });
+
+    // The now-unclaimed quotation line becomes a ghost choice: the gate asks
+    // for a decision instead of silently dropping it.
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(1);
+    expect(document.body.textContent).toContain("Quotation line 1");
+    act(() => button("Ignore quotation 1").click());
     await flush();
-    expect(document.body.textContent).toContain("Line removed");
-  });
-
-  it("the totals strip reads matched, then names the differing input", async () => {
-    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
-    const transport = fakeTransport(null);
-    await renderEditor(transport);
-
-    expect(document.body.textContent).toContain("Totals check");
-    expect(document.body.textContent).toContain("Matches the printed totals");
-
-    const quantity = input("Quantity for line 1");
-    typeInto(quantity, "3");
-    await blur(quantity);
-    await flush();
-    await flush();
-
-    expect(document.body.textContent).toContain("Different");
+    if (shellActions === null) throw new Error("no shell actions after ignore");
+    expect(shellActions.unresolvedCount).toBe(0);
   });
 
   it("a draft save submits the persisted id and the editor alias per line", async () => {
@@ -552,10 +541,12 @@ describe("committed select and checkbox values (F3)", () => {
     await flush();
     await flush();
 
-    expect(document.body.textContent).toContain("Line 1 unit of measure");
+    expect(select.value).toBe("Box");
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Line 1 unit of measure"]')
-    ).not.toBeNull();
+    ).toBeNull();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
   });
 
   it("toggling a row discount commits the new enabled state, not the stale one", async () => {
@@ -570,11 +561,14 @@ describe("committed select and checkbox values (F3)", () => {
     await flush();
     await flush();
 
-    // Enabled 0% differs from the source disabled 0%: a decision is recorded.
+    // Enabled 0% differs from the source disabled 0%, and the inline editor
+    // records the keep without leaving a pane item.
     expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("true");
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
-    ).not.toBeNull();
+    ).toBeNull();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
   });
 
   it("changing Incoterms commits the selected value, not the stale one", async () => {
@@ -595,30 +589,9 @@ describe("committed select and checkbox values (F3)", () => {
     expect(document.body.textContent).toContain("Incoterms");
     expect(
       document.querySelector('button[aria-label="Keep PO entry for Incoterms"]')
-    ).not.toBeNull();
-  });
-});
-
-describe("small-screen sheet bounds (U4)", () => {
-  it("sheet starts at the viewport top below 640px and below the header above", async () => {
-    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
-    const transport = fakeTransport(null);
-    await renderEditor(transport);
-
-    const trigger = document.querySelector<HTMLButtonElement>(
-      'button[aria-expanded="false"]'
-    );
-    if (trigger === null) throw new Error("no sheet trigger");
-    await act(async () => {
-      trigger.click();
-    });
-    await flush();
-    const sheet = document.querySelector('[role="region"][aria-label="Reconciliation"]');
-    if (sheet === null) throw new Error("no open sheet");
-    const tokens = sheet.className.split(/\s+/);
-    // Round-2 U4: the sheet starts below the measured shell header instead of
-    // viewport top, so the heading and Close stay visible at 360.
-    expect(tokens).toContain("top-[var(--shell-header-h,64px)]");
+    ).toBeNull();
+    if (shellActions === null) throw new Error("no shell actions reported");
+    expect(shellActions.unresolvedCount).toBe(0);
   });
 });
 
@@ -803,7 +776,7 @@ describe("PO workspace header and line controls (#580)", () => {
     expect(document.body.textContent).toContain(
       "No lines yet. Add the customer's first line."
     );
-    expect(document.querySelector('input[aria-label="Description for line 1"]')).toBeNull();
+    expect(lineInput("Description for line 1")).toBeNull();
 
     // Zero lines is a valid draft: the save sends an empty Items list.
     if (shellActions === null) throw new Error("no shell actions reported");
@@ -874,10 +847,8 @@ describe("PO workspace header and line controls (#580)", () => {
     await flush();
 
     // The parent takes its sub-items with it: no orphan rows remain.
-    expect(document.querySelector('input[aria-label="Description for line 1"]')).toBeNull();
-    expect(
-      document.querySelector('input[aria-label="Description for sub-item 1 of line 1"]')
-    ).toBeNull();
+    expect(lineInput("Description for line 1")).toBeNull();
+    expect(lineInput("Description for sub-item 1 of line 1")).toBeNull();
     expect(document.body.textContent).toContain(
       "No lines yet. Add the customer's first line."
     );

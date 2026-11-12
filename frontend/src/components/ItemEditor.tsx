@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { loadBindings, matchShortcut } from "../shortcuts";
 import { Button } from "./ui";
 import {
@@ -218,6 +218,9 @@ interface ItemEditorProps {
   /** Optional row metadata (a source-match badge and its control). Rendered
    *  under the description line so ItemEditor stays unaware of POs. */
   renderItemMeta?: (item: EditorItem, index: number) => React.ReactNode;
+  /** Optional content rendered directly after one row, used by the PO editor
+   *  to place a quotation ghost under the line it belongs to. */
+  renderAfterItem?: (item: EditorItem, index: number) => React.ReactNode;
   /** Optional sub-item metadata, rendered under the sub-item description. */
   renderSubItemMeta?: (
     item: EditorItem,
@@ -309,6 +312,7 @@ export function ItemEditor({
   uomPendingLabel,
   mode = "quotation",
   renderItemMeta,
+  renderAfterItem,
   renderSubItemMeta,
   allowMergeSubItems = true,
   allowEmpty = false,
@@ -455,6 +459,7 @@ export function ItemEditor({
           vanish. */}
       <div ref={gridRef} onKeyDown={gridKeyDown} className="divide-y divide-rule">
         {items.map((item, index) => (
+          <Fragment key={item.key}>
           <ItemRow
             key={item.key}
             item={item}
@@ -501,6 +506,8 @@ export function ItemEditor({
             onSubBulletChange={onSubBulletChange}
             onPasteItems={onPasteItems}
           />
+          {renderAfterItem?.(item, index)}
+          </Fragment>
         ))}
       </div>
 
@@ -771,7 +778,7 @@ function UoMSelect({
   );
 }
 
-function ItemRow({
+export function ItemRow({
   item,
   index,
   canRemove,
