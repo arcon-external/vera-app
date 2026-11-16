@@ -8,6 +8,7 @@ import {
   buildPurchaseOrderUpdate,
   type PurchaseOrderDTO,
 } from "../purchaseOrder";
+import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 import {
   PurchaseOrderDifferenceReviewView,
   PurchaseOrderFinalConfirmationView,
@@ -181,6 +182,27 @@ function markup(element: ReactElement): string {
   return renderToString(element).replace(/<!-- -->/g, "");
 }
 
+function documentStateWith(attached: boolean): PurchaseOrderDocumentStateDTO {
+  return {
+    Document: attached
+      ? {
+          UUID: "doc-1",
+          SHA256: "sha-1",
+          ContentType: "application/pdf",
+          OriginalFilename: "Customer PO.pdf",
+          UploadedAt: "2026-10-21T10:00:00Z",
+          ID: 1,
+          PurchaseOrderID: 7,
+          Version: 1,
+          SizeBytes: 1536,
+          UploadedBy: 4,
+          Active: true,
+        }
+      : null,
+    Versions: [],
+  };
+}
+
 describe("PurchaseOrderDifferenceReviewView (issue #471)", () => {
   it("shows both choices for every difference with none preselected", () => {
     const html = markup(reviewElement());
@@ -301,6 +323,16 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     expect(confirmed).not.toMatch(/aria-label="Final save"[^>]*disabled/);
   });
 
+  // #610: the checkbox records a deliberate absence, not a permanent loss. A
+  // PDF that arrives after the customer confirms is attached from the saved
+  // record without a correction, and the copy says so.
+  it("says the missing PDF can be attached later from the saved record", () => {
+    const html = markup(confirmationElement(false));
+    expect(html).toContain(
+      "attach it later from the saved record, without creating a correction"
+    );
+  });
+
   it("shows the Final Save handoff progress while saving", () => {
     const html = markup(
       confirmationElement(true, "attached", reviewState(), order(), false, true)
@@ -372,7 +404,7 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     );
     expect(html).toContain("Saved");
     expect(html).toContain("not a business approval");
-    expect(html).toContain("keep the values they replace in the correction history");
+    expect(html).toContain("Corrections and the customer PO PDF are separate");
     expect(html).toContain("PO-471");
     expect(html).toContain("Widget");
     expect(html).toContain("Quotation 1");
@@ -432,6 +464,109 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     expect(html).not.toContain('aria-label="Assign confirmation number"');
     expect(html).not.toContain("Not assigned");
     expect(html).toContain("cannot be edited, cleared or regenerated");
+  });
+});
+
+// #610: the customer PO PDF arrives after the customer confirms, so the saved
+// record must make attaching it a first-class action beside the confirmation
+// number rather than a card buried under the totals. The status is derived
+// from the document state the view already receives; nothing new is persisted.
+describe("PurchaseOrderSavedView customer PO PDF (#610)", () => {
+  function saved(overrides: Partial<PurchaseOrderDTO> = {}) {
+    return (
+      <PurchaseOrderSavedView
+        order={order({ State: "saved", ...overrides })}
+        currency={USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        documentInitialState={documentStateWith(false)}
+      />
+    );
+  }
+
+  it("puts the PDF card beside the confirmation number, before the recorded details", () => {
+    const html = markup(saved({ PdfAbsentConfirmed: true }));
+    const rowStart = html.indexOf('data-testid="saved-top-row"');
+    expect(rowStart).toBeGreaterThanOrEqual(0);
+    const row = html.slice(rowStart, html.indexOf("Recorded details"));
+    expect(row).toContain("Confirmation number");
+    expect(row).toContain("Customer PO PDF");
+    expect(html.indexOf("Customer PO PDF")).toBeLessThan(
+      html.indexOf("Recorded details")
+    );
+    // The old placement was under the lines and totals; the card no longer
+    // follows the printed totals.
+    expect(html.indexOf("Customer PO PDF")).toBeLessThan(
+      html.indexOf("Saved purchase order lines")
+    );
+  });
+
+  it("shows PDF pending when the final save recorded the absence and nothing is attached", () => {
+    const html = markup(saved({ PdfAbsentConfirmed: true }));
+    expect(html).toMatch(/>PDF pending</);
+    expect(html).not.toMatch(/>PDF attached</);
+  });
+
+  it("shows PDF attached when an active document exists", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved", PdfAbsentConfirmed: true })}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={documentStateWith(true)}
+      />
+    );
+    expect(html).toMatch(/>PDF attached</);
+    expect(html).not.toMatch(/>PDF pending</);
+    expect(html).toContain("Customer PO.pdf");
+  });
+
+  it("shows no PDF status when the record never recorded a deliberate absence", () => {
+    const html = markup(saved());
+    expect(html).not.toMatch(/>PDF pending</);
+    expect(html).not.toMatch(/>PDF attached</);
+  });
+
+  it("says the absent PDF can be attached later without a correction", () => {
+    const html = markup(saved({ PdfAbsentConfirmed: true }));
+    expect(html).toContain("Attach it later; this does not create a correction.");
+    expect(html).toContain("The final save recorded this omission deliberately.");
+  });
+
+  it("separates value corrections from document changes in the banner", () => {
+    const html = markup(saved({ PdfAbsentConfirmed: true }));
+    expect(html).toContain("Corrections and the customer PO PDF are separate");
+    expect(html).toContain("only a correction changes a PO value");
+    expect(html).toContain("no correction is created");
+  });
+
+  it("links sending the confirmation number to attaching the customer PDF", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({
+          State: "saved",
+          ConfirmationNumber: "2302260007",
+          ConfirmationAssignedAt: "2026-10-21T09:00:00Z",
+        })}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={documentStateWith(false)}
+      />
+    );
+    expect(html).toContain(
+      "Send it to the customer with the customer PO PDF"
+    );
+  });
+
+  it("names the value-editing action Correct values and says the PDF needs none", () => {
+    const html = markup(saved({ PdfAbsentConfirmed: true }));
+    expect(html).toContain('aria-label="Correct values"');
+    expect(html).toContain(">Correct values<");
+    expect(html).toContain("Correct values edits PO values only.");
+    expect(html).toContain(
+      "Attaching, replacing or removing the customer PO PDF does not need a correction"
+    );
+    expect(html).not.toContain('aria-label="Correct purchase order"');
   });
 });
 
@@ -516,7 +651,7 @@ describe("PurchaseOrderSavedView source missing (issue #481)", () => {
     expect(html).not.toContain(">Source missing<");
     expect(html).not.toContain("No new Delivery Order or Invoice");
     expect(html).toContain('aria-label="Repair source link"');
-    expect(html).toContain('aria-label="Correct purchase order"');
+    expect(html).toContain('aria-label="Correct values"');
   });
 
   it("does not offer a correction that the server would refuse while the source is missing", () => {
@@ -529,7 +664,7 @@ describe("PurchaseOrderSavedView source missing (issue #481)", () => {
         documentInitialState={{ Document: null, Versions: [] }}
       />
     );
-    expect(staff).not.toContain('aria-label="Correct purchase order"');
+    expect(staff).not.toContain('aria-label="Correct values"');
 
     const admin = markup(
       <PurchaseOrderSavedView
@@ -542,7 +677,7 @@ describe("PurchaseOrderSavedView source missing (issue #481)", () => {
         documentInitialState={{ Document: null, Versions: [] }}
       />
     );
-    expect(admin).not.toContain('aria-label="Correct purchase order"');
+    expect(admin).not.toContain('aria-label="Correct values"');
     expect(admin).toContain('aria-label="Link Quotation"');
   });
 });

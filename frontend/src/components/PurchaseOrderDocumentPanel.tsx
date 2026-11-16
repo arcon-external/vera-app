@@ -38,6 +38,11 @@ export interface PurchaseOrderDocumentPanelViewProps {
   pendingRemoval?: boolean;
   /** True when the saved record recorded a deliberate no-PDF final save. */
   absenceConfirmed?: boolean;
+  /**
+   * #610: the card belongs to a saved record rather than a draft, so the empty
+   * state says the PDF can be attached later without a correction.
+   */
+  savedRecord?: boolean;
   preview?: { url: string; filename: string } | null;
   /**
    * Blocks every document control, including the hidden file input. The editor
@@ -62,6 +67,7 @@ export function PurchaseOrderDocumentPanelView({
   error = null,
   pendingRemoval = false,
   absenceConfirmed = false,
+  savedRecord = false,
   preview = null,
   disabled: disabledProp = false,
   compact = false,
@@ -115,7 +121,9 @@ export function PurchaseOrderDocumentPanelView({
           </p>
           {compact ? (
             <p className="text-caption text-ink-500">
-              One original document, kept unchanged.
+              {savedRecord
+                ? "Attach it later; this does not create a correction."
+                : "One original document, kept unchanged."}
             </p>
           ) : null}
           {state.Versions.length > 0 ? (
@@ -269,6 +277,8 @@ export interface PurchaseOrderDocumentPanelProps {
   /** Server state when the parent already has it (snapshots, saved views). */
   initialState?: PurchaseOrderDocumentStateDTO | null;
   absenceConfirmed?: boolean;
+  /** #610: the saved record's card can say the PDF is still attachable later. */
+  savedRecord?: boolean;
   onStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
   /**
    * Blocks every document control, including the hidden file input, and makes
@@ -296,6 +306,7 @@ export function PurchaseOrderDocumentPanel({
   resolvePurchaseOrderId,
   initialState = null,
   absenceConfirmed = false,
+  savedRecord = false,
   onStateChange,
   disabled = false,
   tutorial = false,
@@ -506,6 +517,7 @@ export function PurchaseOrderDocumentPanel({
         error={error}
         pendingRemoval={pendingRemoval}
         absenceConfirmed={absenceConfirmed}
+        savedRecord={savedRecord}
         preview={preview}
         disabled={disabled}
         onChooseFile={chooseFile}

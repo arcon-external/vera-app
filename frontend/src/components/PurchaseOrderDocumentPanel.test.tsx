@@ -89,8 +89,17 @@ describe("customer PO PDF panel", () => {
   });
 
   it("records a deliberate omission on a saved record with no PDF", () => {
-    const html = render({ absenceConfirmed: true });
+    const html = render({ absenceConfirmed: true, savedRecord: true, compact: true });
     expect(html).toContain("The final save recorded this omission deliberately.");
+    // #610: the saved record makes the later attachment the normal next step,
+    // and states that it is a document change rather than a correction.
+    expect(html).toContain("Attach it later; this does not create a correction.");
+  });
+
+  it("keeps the draft card's document copy unchanged", () => {
+    const html = render({ compact: true });
+    expect(html).toContain("One original document, kept unchanged.");
+    expect(html).not.toContain("Attach it later");
   });
 
   it("renders the content preview when the caller has one", () => {

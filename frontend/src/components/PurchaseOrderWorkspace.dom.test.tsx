@@ -282,7 +282,7 @@ function expectSavedView() {
   expect(document.body.textContent).toContain(
     "Finalized entry data for later documents"
   );
-  expect(queryButton("Correct purchase order")).not.toBeNull();
+  expect(queryButton("Correct values")).not.toBeNull();
   expect(queryButton("Save draft")).toBeNull();
   expect(queryButton("Save correction")).toBeNull();
   expect(queryButton("Cancel correction")).toBeNull();
@@ -409,7 +409,7 @@ describe("cancel from a saved-record correction (issue #473)", () => {
     expect(document.body.textContent).toContain("Jl. Loaded Snapshot 1");
 
     await act(async () => {
-      button("Correct purchase order").click();
+      button("Correct values").click();
     });
     typeInto("Delivery address", "Jl. Working Copy 9");
     await cancelCorrectionAndDiscard();
@@ -450,7 +450,7 @@ describe("cancel from a saved-record correction (issue #473)", () => {
     expect(onRefreshError).toHaveBeenCalledTimes(1);
     expect(document.body.textContent).toContain("New purchase order");
     expect(queryButton("Save correction")).toBeNull();
-    expect(queryButton("Correct purchase order")).toBeNull();
+    expect(queryButton("Correct values")).toBeNull();
   });
 });
 

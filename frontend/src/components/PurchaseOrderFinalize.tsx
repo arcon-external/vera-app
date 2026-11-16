@@ -860,8 +860,9 @@ export function PurchaseOrderFinalConfirmationView({
             />
             <span>
               I confirm this purchase order is saved without its customer PO PDF.
-              You can attach one before saving; this confirmation records that
-              the missing evidence is deliberate rather than silent.
+              You can attach it later from the saved record, without creating a
+              correction; this confirmation records that the missing evidence is
+              deliberate rather than silent.
             </span>
           </label>
         ) : (
@@ -1016,6 +1017,11 @@ export type RepairReturn =
  * corrections, so this view exposes no editable control and no save action. It
  * shows the stored values, the exact source link, the calculated totals and the
  * printed document figures side by side.
+ *
+ * #610: the customer PO PDF is the one document evidence task that usually
+ * happens after Final Save. Its card sits beside the confirmation number, the
+ * record names a derived `PDF pending` / `PDF attached` status, and the copy
+ * states that document changes never need a correction.
  */
 /** Description bullets under a saved line or sub-item. */
 function SavedDescriptionLines({ lines }: { lines: string[] }) {
@@ -1078,6 +1084,22 @@ export function PurchaseOrderSavedView({
       : order;
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
+  // #610: the customer PO PDF is often unavailable at Final Save. The saved
+  // record tracks the document state its panel already reads or is told, so it
+  // can name the evidence step at the top; nothing here is persisted.
+  const [documentState, setDocumentState] =
+    useState<PurchaseOrderDocumentStateDTO | null>(documentInitialState ?? null);
+  const activeDocument = documentState?.Document ?? null;
+  const pdfStatus: "pending" | "attached" | null =
+    activeDocument !== null
+      ? "attached"
+      : documentState !== null && current.PdfAbsentConfirmed === true
+        ? "pending"
+        : null;
+  const documentStateChanged = (next: PurchaseOrderDocumentStateDTO) => {
+    setDocumentState(next);
+    onDocumentStateChange?.(next);
+  };
   const state = initialPurchaseOrderEditorState(order, currency);
   // #575: the saved record keeps the split-line structure the editor entered.
   const savedGroups = groupPurchaseOrderLines(state.lines);
@@ -1270,31 +1292,50 @@ export function PurchaseOrderSavedView({
                 {order.Currency.toUpperCase()}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="success">Saved</Badge>
-              {current.SourceMissing ? (
-                <Badge tone="danger">Source missing</Badge>
-              ) : null}
-              {/*
-                #481: a correction needs the frozen source revision to compare
-                against, and the server refuses one while the source is missing
-                (po_source_missing). Offering the action would be a dead end; the
-                admin's Link Quotation is the one repair path in this state.
-              */}
+            <div className="flex flex-col gap-1.5 sm:items-end">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <Badge tone="success">Saved</Badge>
+                {/* #610: evidence status derived from the document state. A
+                    deliberate no-PDF save is pending; an active file is
+                    attached. Only the two known conditions get a status. */}
+                {pdfStatus !== null ? (
+                  <Badge tone={pdfStatus === "attached" ? "success" : "accent"}>
+                    {pdfStatus === "attached" ? "PDF attached" : "PDF pending"}
+                  </Badge>
+                ) : null}
+                {current.SourceMissing ? (
+                  <Badge tone="danger">Source missing</Badge>
+                ) : null}
+                {/*
+                  #481: a correction needs the frozen source revision to compare
+                  against, and the server refuses one while the source is missing
+                  (po_source_missing). Offering the action would be a dead end; the
+                  admin's Link Quotation is the one repair path in this state.
+
+                  #610: the label says what the action edits. A document change is
+                  not a correction, and the caption beside it says so.
+                */}
+                {onCorrect !== undefined && !current.SourceMissing ? (
+                  <Button size="sm" aria-label="Correct values" onClick={onCorrect}>
+                    Correct values
+                  </Button>
+                ) : null}
+                {canRepairSource && onRepairSource !== undefined ? (
+                  <Button
+                    ref={repairActionRef}
+                    size="sm"
+                    aria-label={sourceRepairActionLabel(current)}
+                    onClick={onRepairSource}
+                  >
+                    {sourceRepairActionLabel(current)}
+                  </Button>
+                ) : null}
+              </div>
               {onCorrect !== undefined && !current.SourceMissing ? (
-                <Button size="sm" aria-label="Correct purchase order" onClick={onCorrect}>
-                  Correct
-                </Button>
-              ) : null}
-              {canRepairSource && onRepairSource !== undefined ? (
-                <Button
-                  ref={repairActionRef}
-                  size="sm"
-                  aria-label={sourceRepairActionLabel(current)}
-                  onClick={onRepairSource}
-                >
-                  {sourceRepairActionLabel(current)}
-                </Button>
+                <p className="max-w-xs text-caption text-ink-500 sm:text-right">
+                  Correct values edits PO values only. Attaching, replacing or
+                  removing the customer PO PDF does not need a correction.
+                </p>
               ) : null}
             </div>
           </div>
@@ -1321,73 +1362,98 @@ export function PurchaseOrderSavedView({
             </>
           ) : null}
           <StatusBanner tone="info">
-            Corrections need a reason and keep the values they replace in the
-            correction history. The customer PO PDF can still be attached, replaced
-            or removed; the customer, quotation link, currency and confirmation
-            number stay protected. An admin can repair a wrong source link; that
-            repeats the difference review and is recorded with the old and new
-            source.
+            Corrections and the customer PO PDF are separate. A correction needs
+            a reason and keeps the values it replaces in the correction history;
+            only a correction changes a PO value. The customer PO PDF keeps its
+            own versions: attach, replace or remove it beside the confirmation
+            number and no correction is created. The customer, quotation link,
+            currency and confirmation number stay protected. An admin can repair
+            a wrong source link; that repeats the difference review and is
+            recorded with the old and new source.
           </StatusBanner>
 
-          <Card className="p-4">
-            <SectionHeading title="Confirmation number" hint="Customer-system reference" />
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              <span
-                className={
-                  confirmationNumber === ""
-                    ? "text-small text-ink-600"
-                    : "tnum whitespace-nowrap text-h2 font-semibold text-ink-950"
-                }
-              >
-                {confirmationNumberLabel(current)}
-              </span>
-              {confirmationNumber !== "" ? (
-                <Button
-                  size="sm"
-                  aria-label="Copy confirmation number"
-                  onClick={() => void copyConfirmation()}
+          {/*
+            #610: the customer PO PDF usually arrives after the customer
+            confirms the order, so it sits beside the confirmation number as the
+            next evidence step instead of under the lines and totals. Below a
+            720px column the two cards stack and the PDF card follows the
+            number. The compact variant fits the narrower column.
+          */}
+          <div
+            data-testid="saved-top-row"
+            className="grid gap-3 @min-[720px]:grid-cols-2 @min-[720px]:items-start"
+          >
+            <Card className="p-4">
+              <SectionHeading title="Confirmation number" hint="Customer-system reference" />
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <span
+                  className={
+                    confirmationNumber === ""
+                      ? "text-small text-ink-600"
+                      : "tnum whitespace-nowrap text-h2 font-semibold text-ink-950"
+                  }
                 >
-                  Copy
-                </Button>
-              ) : canAssign ? (
-                <Button
-                  size="sm"
-                  variant="primary"
-                  aria-label="Assign confirmation number"
-                  disabled={assigning}
-                  onClick={() => void assignConfirmation()}
-                >
-                  {assigning ? "Assigning…" : "Assign confirmation number"}
-                </Button>
-              ) : null}
-            </div>
-            <p className="mt-2 text-caption text-ink-500">
-              This number is a reference for manual submission to the customer
-              system. Vera does not submit it, and this record is not marked as
-              submitted. Once assigned, the number is fixed: it cannot be edited,
-              cleared or regenerated.
-            </p>
-            {current.ConfirmationWarn ? (
-              <div className="mt-2">
-                <StatusBanner tone="info">
-                  <span className="font-medium">Confirmation sequence warning: </span>
-                  this customer's cycle has reached the 8,000 warning threshold.
-                  Numbers keep issuing; past 9,999 the sequence widens to five
-                  digits instead of wrapping.
-                </StatusBanner>
+                  {confirmationNumberLabel(current)}
+                </span>
+                {confirmationNumber !== "" ? (
+                  <Button
+                    size="sm"
+                    aria-label="Copy confirmation number"
+                    onClick={() => void copyConfirmation()}
+                  >
+                    Copy
+                  </Button>
+                ) : canAssign ? (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    aria-label="Assign confirmation number"
+                    disabled={assigning}
+                    onClick={() => void assignConfirmation()}
+                  >
+                    {assigning ? "Assigning…" : "Assign confirmation number"}
+                  </Button>
+                ) : null}
               </div>
-            ) : null}
-            {copyStatus !== null ? (
-              <p role="status" className="mt-2 text-caption text-ink-600">
-                {copyStatus}
+              <p className="mt-2 text-caption text-ink-500">
+                This number is a reference for manual submission to the customer
+                system. Vera does not submit it, and this record is not marked as
+                submitted. Send it to the customer with the customer PO PDF:
+                attach or replace that PDF beside this number, and no correction
+                is created. Once assigned, the number is fixed: it cannot be
+                edited, cleared or regenerated.
               </p>
-            ) : null}
-            {assignError !== null ? (
-              <div className="mt-2">
-                <StatusBanner tone="danger">{assignError}</StatusBanner>
-              </div>
-            ) : null}
-          </Card>
+              {current.ConfirmationWarn ? (
+                <div className="mt-2">
+                  <StatusBanner tone="info">
+                    <span className="font-medium">Confirmation sequence warning: </span>
+                    this customer's cycle has reached the 8,000 warning threshold.
+                    Numbers keep issuing; past 9,999 the sequence widens to five
+                    digits instead of wrapping.
+                  </StatusBanner>
+                </div>
+              ) : null}
+              {copyStatus !== null ? (
+                <p role="status" className="mt-2 text-caption text-ink-600">
+                  {copyStatus}
+                </p>
+              ) : null}
+              {assignError !== null ? (
+                <div className="mt-2">
+                  <StatusBanner tone="danger">{assignError}</StatusBanner>
+                </div>
+              ) : null}
+            </Card>
+
+            <PurchaseOrderDocumentPanel
+              purchaseOrderId={order.ID}
+              initialState={documentInitialState}
+              absenceConfirmed={order.PdfAbsentConfirmed === true}
+              savedRecord
+              onStateChange={documentStateChanged}
+              compact
+            />
+          </div>
 
           <Card className="p-4">
             <SectionHeading title="Recorded details" hint="Snapshots kept as entered" />
@@ -1669,13 +1735,6 @@ export function PurchaseOrderSavedView({
             ppnBps={order.PpnBps}
             printedTotals={state.printedTotals}
             sourceRevision={order.SourceRevision}
-          />
-
-          <PurchaseOrderDocumentPanel
-            purchaseOrderId={order.ID}
-            initialState={documentInitialState}
-            absenceConfirmed={order.PdfAbsentConfirmed === true}
-            onStateChange={onDocumentStateChange}
           />
 
           <PurchaseOrderHistoryPanel
