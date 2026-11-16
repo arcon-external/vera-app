@@ -4,6 +4,18 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.20.1] - 2026-11-17
+
+### Changed
+
+- **The Quotation workspace now opens with a card that describes the quotation
+  as you build it.** The card shows who the quotation is for, the validity,
+  payment terms, Incoterm, tax basis and the customer total, and it updates as
+  you change any of them, so the figures you are about to send are visible
+  without reading the whole form. When you edit an issued quotation, the card
+  names the revision you started from and the revision Export will create. The
+  practice quotation in the Features Tutorial shows the same card. (#622)
+
 ## [0.20.0] - 2026-11-16
 
 ### Added
