@@ -17,7 +17,7 @@ import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 // The bindings are replaced at their module boundary, which is what the
 // desktop provides; everything inside the editor and the review is real.
 
-const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessionMock, saveSessionMock, documentStateMock, attachDocumentMock, correctPurchaseOrderMock } = vi.hoisted(() => ({
+const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessionMock, saveSessionMock, documentStateMock, attachDocumentMock, removeDocumentMock, correctPurchaseOrderMock } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
   updateMock: vi.fn(),
   finalizeMock: vi.fn(),
@@ -26,6 +26,7 @@ const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessio
   saveSessionMock: vi.fn(),
   documentStateMock: vi.fn(),
   attachDocumentMock: vi.fn(),
+  removeDocumentMock: vi.fn(),
   correctPurchaseOrderMock: vi.fn(),
 }));
 
@@ -47,7 +48,7 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
   AttachPurchaseOrderDocument: (...args: unknown[]) => attachDocumentMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
-  RemovePurchaseOrderDocument: vi.fn(),
+  RemovePurchaseOrderDocument: (...args: unknown[]) => removeDocumentMock(...args),
 }));
 
 vi.mock("@backend/models", () => ({
@@ -252,6 +253,7 @@ beforeEach(() => {
   assignConfirmationMock.mockReset();
   documentStateMock.mockReset();
   attachDocumentMock.mockReset();
+  removeDocumentMock.mockReset();
   correctPurchaseOrderMock.mockReset();
   documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
   reviewMock.mockResolvedValue(REVIEW);
@@ -686,5 +688,53 @@ describe("customer PO PDF on the saved record (#610)", () => {
     // A document change is not a value correction.
     expect(onCorrect).not.toHaveBeenCalled();
     expect(correctPurchaseOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps PDF pending when an attached document is later removed", async () => {
+    // Saved with a PDF (so no recorded absence), then the document is removed.
+    // The badge must stay as pending evidence, not disappear.
+    const attached = attachedState();
+    const removed: PurchaseOrderDocumentStateDTO = {
+      Document: null,
+      Versions: attached.Document != null ? [attached.Document] : [],
+    };
+    const onStateChange = vi.fn();
+    removeDocumentMock.mockResolvedValueOnce(attached.Document);
+    documentStateMock.mockResolvedValueOnce(removed);
+
+    act(() =>
+      root.render(
+        <PurchaseOrderSavedView
+          order={{ ...SAVED, PdfAbsentConfirmed: false }}
+          currency={USD}
+          onBack={() => undefined}
+          documentInitialState={attached}
+          onDocumentStateChange={onStateChange}
+        />
+      )
+    );
+    expect(document.body.textContent).toContain("PDF attached");
+    expect(button("Remove customer PO PDF")).toBeTruthy();
+
+    await act(async () => {
+      button("Remove customer PO PDF").click();
+    });
+    await act(async () => {
+      button("Remove PDF").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(removeDocumentMock).toHaveBeenCalledWith(7, true);
+    expect(document.body.textContent).toContain("PDF pending");
+    // The badge label, not the empty-state sentence that contains "PDF attached".
+    expect(
+      Array.from(document.querySelectorAll("span")).some(
+        (span) => span.textContent === "PDF attached"
+      )
+    ).toBe(false);
+    // The saved view forwards the panel's own state object; it does not keep
+    // a second copy of the DTO.
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+    expect(onStateChange.mock.calls[0][0]).toBe(removed);
   });
 });

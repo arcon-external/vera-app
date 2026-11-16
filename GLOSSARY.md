@@ -296,6 +296,14 @@ _Avoid_: Attachment, supporting file
 One retained upload of the customer PO document; replaced and removed versions stay viewable.
 _Avoid_: Upload, attachment version
 
+**PDF pending**:
+The saved record's derived status when no customer PO document is active; it names the next evidence step and is not stored.
+_Avoid_: Missing PDF, no PDF
+
+**PDF attached**:
+The saved record's derived status when one customer PO document version is active.
+_Avoid_: Uploaded PDF, PDF complete
+
 **Document chain**:
 A PO's customer PO document and all its retained versions; a deletion request can remove the chain.
 _Avoid_: Attachments
@@ -349,7 +357,7 @@ A purchase order that has not been finalized; it is editable and can be discarde
 _Avoid_: Draft PO, unsaved PO
 
 **Finalized PO**:
-A purchase order saved after the difference review; its totals and document state are fixed.
+A purchase order saved after the difference review; its values and totals are fixed, but its customer PO document stays attachable, replaceable and removable as versioned evidence.
 _Avoid_: Saved PO, approved PO
 
 **Finalize**:

@@ -1084,20 +1084,24 @@ export function PurchaseOrderSavedView({
       : order;
   const confirmationNumber = confirmationNumberOf(current);
   const canAssign = canAssignConfirmationNumber(current);
-  // #610: the customer PO PDF is often unavailable at Final Save. The saved
-  // record tracks the document state its panel already reads or is told, so it
-  // can name the evidence step at the top; nothing here is persisted.
-  const [documentState, setDocumentState] =
-    useState<PurchaseOrderDocumentStateDTO | null>(documentInitialState ?? null);
-  const activeDocument = documentState?.Document ?? null;
-  const pdfStatus: "pending" | "attached" | null =
-    activeDocument !== null
-      ? "attached"
-      : documentState !== null && current.PdfAbsentConfirmed === true
-        ? "pending"
-        : null;
+  // #610: the customer PO PDF is often unavailable at Final Save. This view
+  // tracks only whether an active document exists and whether that is known;
+  // the panel owns the document state, so nothing here mirrors the DTO.
+  const [documentKnown, setDocumentKnown] = useState(documentInitialState != null);
+  const [documentAttached, setDocumentAttached] = useState(
+    documentInitialState?.Document != null
+  );
+  // An attached file is the evidence. A known empty state is pending even when
+  // the record was saved with a PDF that was later removed; before the read
+  // lands, a recorded deliberate absence already says pending.
+  const pdfStatus: "pending" | "attached" | null = documentAttached
+    ? "attached"
+    : documentKnown || current.PdfAbsentConfirmed === true
+      ? "pending"
+      : null;
   const documentStateChanged = (next: PurchaseOrderDocumentStateDTO) => {
-    setDocumentState(next);
+    setDocumentKnown(true);
+    setDocumentAttached(next.Document != null);
     onDocumentStateChange?.(next);
   };
   const state = initialPurchaseOrderEditorState(order, currency);
@@ -1295,9 +1299,10 @@ export function PurchaseOrderSavedView({
             <div className="flex flex-col gap-1.5 sm:items-end">
               <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 <Badge tone="success">Saved</Badge>
-                {/* #610: evidence status derived from the document state. A
-                    deliberate no-PDF save is pending; an active file is
-                    attached. Only the two known conditions get a status. */}
+                {/* #610: evidence status derived from the document state. An
+                    active file is attached; a known empty state is pending,
+                    even when a PDF was attached and later removed. Before the
+                    state arrives, only a recorded absence can say pending. */}
                 {pdfStatus !== null ? (
                   <Badge tone={pdfStatus === "attached" ? "success" : "accent"}>
                     {pdfStatus === "attached" ? "PDF attached" : "PDF pending"}
@@ -1451,7 +1456,6 @@ export function PurchaseOrderSavedView({
               absenceConfirmed={order.PdfAbsentConfirmed === true}
               savedRecord
               onStateChange={documentStateChanged}
-              compact
             />
           </div>
 
