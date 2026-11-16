@@ -1091,6 +1091,25 @@ describe("Features Tutorial (issue #595)", () => {
     await waitForTutorialStep("po-payment-terms");
   }
 
+  /** Issue #606: the ghost lesson follows the quote-bar lesson, so a ghost test
+   *  walks both real lessons rather than jumping the guide. */
+  async function walkToGhostIntro(): Promise<void> {
+    await walkToPaymentTerms();
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    act(() => button("Use quotation value").click());
+    await waitForTutorialStep("po-quote-result");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost");
+  }
+
+  function ghostCards(): Element[] {
+    return Array.from(document.querySelectorAll("[data-quotation-ghost]"));
+  }
+
   it("opens the quotation bar on Press and keeps it open while the guide explains it", { timeout: 30000 }, async () => {
     await walkToPaymentTerms();
     await waitForBeacon("Press");
@@ -1159,6 +1178,79 @@ describe("Features Tutorial (issue #595)", () => {
 
     expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
     expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it("accepts the first quotation ghost and explains the updated line", { timeout: 40000 }, async () => {
+    await walkToGhostIntro();
+
+    // The intro points at the first split ghost and explains what it shows.
+    expect(ghostCards()).toHaveLength(3);
+    const firstGhost = ghostCards()[0];
+    expect(firstGhost.textContent).toContain("Quotation item 2");
+    expect(firstGhost.textContent).toContain("Tutorial split package (MOCK)");
+    expect(firstGhost.textContent).toContain("Tutorial split part A (MOCK)");
+    expect(firstGhost.textContent).toContain("Tutorial scope A1");
+    expect(document.body.textContent).toContain("parent");
+    expect(document.body.textContent).toContain("scope");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost-choice");
+    await waitForBeacon("Choose");
+    expect(
+      document.querySelector('[data-tutorial="po-ghost-actions"]')
+    ).not.toBeNull();
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+
+    act(() => button("Use quotation 2").click());
+    await waitForTutorialStep("po-ghost-result");
+
+    // Accepting removes that ghost and puts the quotation values on the line.
+    expect(ghostCards()).toHaveLength(2);
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("2");
+    // The result step points at the line that owned the ghost.
+    expect(
+      document.querySelector(
+        '[data-tutorial="po-lines"] input[aria-label="Description for line 2"]'
+      )
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("brings its ghost back");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-extra");
+
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.saveReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("ignores the first quotation ghost, keeps the PO value and explains the omission", { timeout: 40000 }, async () => {
+    await walkToGhostIntro();
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost-choice");
+    await waitForBeacon("Choose");
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+
+    act(() => button("Ignore quotation 2").click());
+    await waitForTutorialStep("po-ghost-result");
+
+    // Ignoring removes the ghost but leaves the entered PO values untouched.
+    expect(ghostCards()).toHaveLength(2);
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+    expect(
+      document.querySelector(
+        '[data-tutorial="po-lines"] input[aria-label="Description for line 2"]'
+      )
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("omission is recorded");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-extra");
+
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.saveReconciliation).not.toHaveBeenCalled();
   });
 
   it("closes the selector when staff leave the workspace mid-link", { timeout: 20000 }, async () => {

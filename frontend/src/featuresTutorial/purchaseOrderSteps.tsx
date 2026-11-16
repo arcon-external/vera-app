@@ -1,5 +1,7 @@
 import type { FeaturesTutorialStep } from "../components/FeaturesTutorial";
 import {
+  GHOST_ACTIONS_ANCHOR,
+  GHOST_RESOLVED_EVENT,
   QUOTE_BAR_CHOICE_REVEAL,
   QUOTE_BAR_REVEAL,
   QUOTE_BAR_RESOLVED_EVENT,
@@ -200,20 +202,63 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       </>
     ),
   },
+  // Issue #606: the ghost stops being a picture and becomes a decision. The
+  // intro explains the card, the choice waits for the real ✓/✕ pair, and the
+  // result points at the line that owned the ghost, whether it was accepted or
+  // ignored. The practice order is the only record involved.
   {
     id: "po-ghost",
     target: '[data-quotation-ghost]',
     page: "po",
-    title: "Quotation ghosts show the whole item",
+    title: "A ghost is the whole quotation item",
     body: (
       <>
         <p>
-          A ghost is the real quotation item, not a second form. This split item
-          shows its parent, both priced parts and their scope lines.
+          This split ghost shows its <strong>parent</strong>, both{" "}
+          <strong>priced parts</strong> and their <strong>scope lines</strong> —
+          exactly what the quotation carries.
         </p>
         <p className="mt-2">
-          ✓ uses the quotation values. ✕ keeps yours and records the omission.
-          Editing an accepted line brings its ghost back.
+          It waits here because your line&rsquo;s values differ from it. The
+          next step lets you accept or ignore it.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "po-ghost-choice",
+    target: `[data-tutorial="${GHOST_ACTIONS_ANCHOR}"]`,
+    page: "po",
+    title: "Accept or ignore the ghost",
+    body: (
+      <p>
+        <strong>✓</strong> copies the quotation&rsquo;s parent, parts and scope
+        onto your line. <strong>✕</strong> keeps the values you entered and
+        records the omission. Either answer moves the guide on.
+      </p>
+    ),
+    advance: "event",
+    advanceEvent: GHOST_RESOLVED_EVENT,
+    beaconLabel: "Choose",
+  },
+  {
+    id: "po-ghost-result",
+    // The split package is editor item 2, the line that owned the first ghost.
+    // Its description input is a stable anchor even after the ghost card is
+    // gone, and it is where staff see the accepted (or kept) values.
+    target:
+      '[data-tutorial="po-lines"] input[aria-label="Description for line 2"]',
+    page: "po",
+    title: "The line now carries your choice",
+    body: (
+      <>
+        <p>
+          Accepted, the line uses the quotation values. Ignored, it keeps the PO
+          values you entered and the omission is recorded.
+        </p>
+        <p className="mt-2">
+          Editing or removing an accepted line brings its ghost back, so you can
+          decide again.
         </p>
       </>
     ),

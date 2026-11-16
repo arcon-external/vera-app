@@ -51,6 +51,9 @@ function Harness({
       <button type="button" data-tutorial="second">
         Second target
       </button>
+      <button type="button" data-tutorial="third">
+        Third target
+      </button>
       <input data-tutorial="field" aria-label="Tutorial field" />
       <FeaturesTutorial
         workspace="quotation"
@@ -260,6 +263,55 @@ describe("FeaturesTutorial", () => {
     act(() => emitFeaturesTutorialAdvance("linked"));
     await flush();
     expect(document.body.textContent).toContain("Done");
+  });
+
+  it("waits for the ghost resolution event and ignores an unrelated one", async () => {
+    const onClose = vi.fn();
+    const ghostSteps: FeaturesTutorialStep[] = [
+      {
+        id: "ghost-intro",
+        target: '[data-tutorial="first"]',
+        title: "Quotation ghost",
+        body: "Parent, priced parts and scope lines.",
+      },
+      {
+        id: "ghost-choice",
+        target: '[data-tutorial="second"]',
+        title: "Accept or ignore",
+        body: "Either action answers this step.",
+        advance: "event",
+        advanceEvent: "po-ghost-resolved",
+        beaconLabel: "Choose",
+      },
+      {
+        id: "ghost-result",
+        target: '[data-tutorial="third"]',
+        title: "The line changed",
+        body: "Editing brings the ghost back.",
+        final: true,
+      },
+    ];
+    act(() => root.render(<Harness onClose={onClose} steps={ghostSteps} />));
+    await flush();
+
+    // The intro is read-only: it explains the ghost before asking for a choice.
+    expect(document.querySelector("[data-tutorial-beacon]")).toBeNull();
+    act(() => nextButton().click());
+    await flush();
+    expect(document.body.textContent).toContain("Accept or ignore");
+    expect(
+      document.querySelector('[data-tutorial-beacon="choose"]')?.textContent
+    ).toContain("Choose");
+
+    // A different tutorial event must not resolve this step.
+    act(() => emitFeaturesTutorialAdvance("po-quote-resolved"));
+    await flush();
+    expect(document.body.textContent).toContain("Accept or ignore");
+    expect(document.body.textContent).not.toContain("The line changed");
+
+    act(() => emitFeaturesTutorialAdvance("po-ghost-resolved"));
+    await flush();
+    expect(document.body.textContent).toContain("The line changed");
   });
 
   it("uses the keyboard: arrows move, Escape skips", async () => {
