@@ -233,6 +233,12 @@ interface ItemEditorProps {
    *  would discard prices the customer's order carries. */
   allowMergeSubItems?: boolean;
   /**
+   * Issue #607: render the Quotation tour's stable first-line anchors. Only
+   * the tour's practice editor sets this, so the real editor and the PO ghosts
+   * stay unmarked.
+   */
+  tutorialAnchors?: boolean;
+  /**
    * #580: a PO draft may be emptied, so the last line is removable there.
    * Quotation mode keeps its at-least-one-line guard by leaving this false.
    */
@@ -315,6 +321,7 @@ export function ItemEditor({
   renderAfterItem,
   renderSubItemMeta,
   allowMergeSubItems = true,
+  tutorialAnchors = false,
   allowEmpty = false,
   onLineFieldFocus,
   onLineFieldBlur,
@@ -472,6 +479,7 @@ export function ItemEditor({
             meta={renderItemMeta?.(item, index)}
             renderSubItemMeta={renderSubItemMeta}
             allowMergeSubItems={allowMergeSubItems}
+            tutorialAnchors={tutorialAnchors}
             onLineFieldFocus={onLineFieldFocus}
             onLineFieldBlur={onLineFieldBlur}
             onLineDiscountCommit={onLineDiscountCommit}
@@ -789,6 +797,7 @@ export function ItemRow({
   meta,
   renderSubItemMeta,
   allowMergeSubItems,
+  tutorialAnchors = false,
   onLineFieldFocus,
   onLineFieldBlur,
   onLineDiscountCommit,
@@ -827,6 +836,7 @@ export function ItemRow({
     subIndex: number
   ) => React.ReactNode;
   allowMergeSubItems: boolean;
+  tutorialAnchors?: boolean;
   onLineFieldFocus?: (
     itemKey: number,
     field: EditorLineField,
@@ -870,6 +880,9 @@ export function ItemRow({
 }) {
   const purchaseOrder = mode === "purchase-order";
   const hasSubItems = item.subItems.length > 0;
+  // Issue #607: only the Quotation tour's practice editor marks the first
+  // line, and only the first line, so each guided step resolves to one control.
+  const tourLine = tutorialAnchors && index === 0;
   const rollup = hasSubItems ? subItemsRollup(item.subItems) : null;
   const unitCost = parseIntOrZero(item.unitPrice);
   const marginPercent = parseIntOrZero(item.marginPercent);
@@ -995,6 +1008,7 @@ export function ItemRow({
           data-grid-cell=""
           data-grid-row={index}
           data-grid-col={3}
+          data-tutorial={tourLine ? "quotation-line-cost" : undefined}
           inputMode="numeric"
           aria-label={`Unit price for line ${index + 1}`}
           placeholder="0"
@@ -1019,6 +1033,7 @@ export function ItemRow({
             role="switch"
             aria-checked={item.marginEnabled}
             aria-label={`Enable profit margin for line ${index + 1}`}
+            data-tutorial={tourLine ? "quotation-line-margin" : undefined}
             onClick={() =>
               onChange(item.key, "marginEnabled", !item.marginEnabled)
             }
@@ -1076,6 +1091,7 @@ export function ItemRow({
           role="switch"
           aria-checked={item.discountEnabled}
           aria-label={`Enable a discount for line ${index + 1}`}
+          data-tutorial={tourLine ? "quotation-line-discount" : undefined}
           onClick={() => {
             const enabled = !item.discountEnabled;
             onChange(item.key, "discountEnabled", enabled);
@@ -1148,7 +1164,10 @@ export function ItemRow({
   );
 
   return (
-    <div className="animate-item-in px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50">
+    <div
+      className="animate-item-in px-4 py-3.5 transition-colors duration-150 hover:bg-paper-subtle/50"
+      data-tutorial={tourLine ? "quotation-line-row" : undefined}
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
         <div className="relative">
@@ -1201,6 +1220,7 @@ export function ItemRow({
               type="button"
               onClick={() => onEnableSubItems(item.key)}
               title="Each sub-item is priced on its own; the line becomes their sum and always quantity 1."
+              data-tutorial={tourLine ? "quotation-line-split" : undefined}
               className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md border border-accent-300 bg-accent-50 px-2.5 py-1.5 text-caption font-medium text-accent-800 transition-colors duration-150 hover:border-accent-500 hover:bg-accent-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40"
             >
               <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">

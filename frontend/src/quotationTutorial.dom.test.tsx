@@ -305,7 +305,36 @@ async function openQuotationTour(): Promise<void> {
   await waitFor(650);
 }
 
-describe("Quotation practice sandbox (issue #605)", () => {
+/** The active tour step, as the guide itself names it. */
+function tutorialStep(): string | null {
+  return (
+    document.querySelector<HTMLElement>("[data-features-tutorial]")?.dataset
+      .featuresTutorialStep ?? null
+  );
+}
+
+/** Walks the guide with Next until it reaches the named step. */
+async function advanceTutorialTo(stepId: string): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < 25000) {
+    if (tutorialStep() === stepId) return;
+    const next = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Next step"]'
+    );
+    if (next === null) {
+      throw new Error(
+        `tutorial has no Next button while waiting for ${stepId} (on ${tutorialStep()})`
+      );
+    }
+    await act(async () => {
+      next.click();
+    });
+    await waitFor(600);
+  }
+  throw new Error(`tutorial never reached ${stepId} (on ${tutorialStep()})`);
+}
+
+describe("Quotation tutorial practice (issues #605, #607)", () => {
   it(
     "opens on practice values and computes totals through the real rail",
     { timeout: 20000 },
@@ -531,6 +560,158 @@ describe("Quotation practice sandbox (issue #605)", () => {
       expect(buttonWithText("Update draft").textContent?.trim()).toBe(
         "Update draft"
       );
+    }
+  );
+
+  it(
+    "focuses the note to reveal its formatting toolbar, then focuses the subject",
+    { timeout: 30000 },
+    async () => {
+      await openQuotationTour();
+      await advanceTutorialTo("quotation-note");
+
+      // The practice note starts with its toolbar hidden; the step's action
+      // is focusing the note, which is what reveals it.
+      expect(
+        document.querySelector('[data-tutorial="quotation-note-toolbar"]')
+      ).toBeNull();
+      const note = document.querySelector<HTMLElement>(
+        '[data-tutorial="quotation-note"]'
+      );
+      if (note === null) throw new Error("no practice note");
+      const noteEditor = note.querySelector<HTMLElement>('[role="textbox"]');
+      if (noteEditor === null) throw new Error("no practice note editor");
+
+      act(() => noteEditor.focus());
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-note-toolbar");
+      const toolbar = document.querySelector<HTMLElement>(
+        '[data-tutorial="quotation-note-toolbar"]'
+      );
+      expect(toolbar).not.toBeNull();
+      for (const label of ["Bold", "Italic", "Bullet list"]) {
+        expect(
+          toolbar?.querySelector(`button[aria-label="${label}"]`)
+        ).not.toBeNull();
+      }
+      // The read-only step explains the toolbar rather than asking for a click.
+      expect(document.querySelector("[data-tutorial-beacon]")).toBeNull();
+
+      await advanceTutorialTo("quotation-subject");
+      expect(document.body.textContent).toContain("Excel");
+      act(() => subjectInput().focus());
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-details");
+
+      act(() => button("Skip Features Tutorial").click());
+      await flush();
+    }
+  );
+
+  it(
+    "types a cost, then toggles margin and row discount and splits the line",
+    { timeout: 40000 },
+    async () => {
+      await openQuotationTour();
+      await advanceTutorialTo("quotation-line-cost");
+
+      // The cost step waits for typing, so its cue is Type, not Click.
+      expect(
+        document.querySelector("[data-tutorial-beacon]")?.textContent
+      ).toContain("Type");
+
+      typeInto(input("Unit price for line 1"), "7500000");
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-line-sell");
+      // Worked example: 2 x (7.500.000 + 15%) = 17.250.000 for line 1, plus
+      // the split line's 7.162.500. FTZ goods carry no PPN, so the customer
+      // grand total is that sum.
+      expect(railText()).toContain("Rp24.412.500");
+      expect(document.body.textContent).toContain("sell price");
+
+      await advanceTutorialTo("quotation-line-margin");
+      const margin = document.querySelector<HTMLButtonElement>(
+        '[data-tutorial="quotation-line-margin"]'
+      );
+      if (margin === null) throw new Error("no first-line margin switch");
+      expect(margin.getAttribute("aria-checked")).toBe("true");
+      act(() => margin.click());
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-line-discount");
+      expect(
+        document
+          .querySelector('[data-tutorial="quotation-line-margin"]')
+          ?.getAttribute("aria-checked")
+      ).toBe("false");
+      // Margin off: 2 x 7.500.000 = 15.000.000, plus the split line.
+      expect(railText()).toContain("Rp22.162.500");
+
+      const discount = document.querySelector<HTMLButtonElement>(
+        '[data-tutorial="quotation-line-discount"]'
+      );
+      if (discount === null) throw new Error("no first-line discount switch");
+      expect(discount.getAttribute("aria-checked")).toBe("false");
+      act(() => discount.click());
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-line-split");
+      expect(
+        document
+          .querySelector('[data-tutorial="quotation-line-discount"]')
+          ?.getAttribute("aria-checked")
+      ).toBe("true");
+      // The row carries 10% ready: 15.000.000 less 10% = 13.500.000, plus the
+      // split line's 7.162.500.
+      expect(railText()).toContain("Rp20.662.500");
+
+      const split = document.querySelector<HTMLButtonElement>(
+        '[data-tutorial="quotation-line-split"]'
+      );
+      if (split === null) throw new Error("no first-line split button");
+      act(() => split.click());
+      await waitFor(650);
+      expect(tutorialStep()).toBe("quotation-totals");
+      const row = document.querySelector<HTMLElement>(
+        '[data-tutorial="quotation-line-row"]'
+      );
+      expect(row?.textContent).toContain("Sub-items");
+      // The line now prices its parts. The converted scope line carries no
+      // cost yet, so line 1 contributes nothing and the split package's
+      // 7.162.500 is the whole customer total.
+      expect(railText()).toContain("Rp7.162.500");
+      expect(railText()).not.toContain("Rp20.662.500");
+
+      act(() => button("Skip Features Tutorial").click());
+      await flush();
+    }
+  );
+
+  it(
+    "points at Save and Export with a beacon and never presses them",
+    { timeout: 30000 },
+    async () => {
+      await openQuotationTour();
+      await advanceTutorialTo("quotation-actions");
+
+      // The actions step is read-only: the beacon names the click, but the
+      // guide advances with Next and never invokes either control.
+      expect(
+        document.querySelector("[data-tutorial-beacon]")?.textContent
+      ).toContain("Click");
+      expect(mocks.saveDraft).not.toHaveBeenCalled();
+      expect(mocks.prepare).not.toHaveBeenCalled();
+      expect(mocks.exportPdf).not.toHaveBeenCalled();
+
+      await act(async () => button("Next step").click());
+      await waitFor(700);
+      expect(tutorialStep()).toBe("quotation-drafts");
+      expect(practiceWorkspace()).toBeNull();
+      expect(mocks.saveDraft).not.toHaveBeenCalled();
+      expect(mocks.prepare).not.toHaveBeenCalled();
+      expect(mocks.exportPdf).not.toHaveBeenCalled();
+      expect(mocks.setDraftContext).not.toHaveBeenCalled();
+
+      act(() => button("Skip Features Tutorial").click());
+      await flush();
     }
   );
 });
