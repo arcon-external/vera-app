@@ -4,6 +4,36 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.20.0] - 2026-11-16
+
+### Added
+
+- **Guided Features Tutorials for the Quotation and Purchase Order
+  workspaces.** Each workspace opens a short tour the first time this account
+  enters it on this device, and the same tour can be replayed from that
+  workspace's settings. The guide moves smoothly between steps, points at the
+  control it is explaining, and waits while you try the real control. The
+  Quotation tour runs on a practice quotation and the PO tour on a practice
+  purchase order, so nothing you type or click during the tour reaches your real
+  records. The PO tour includes linking a quotation, the inline quotation bar,
+  and accepting or ignoring a quotation ghost; the Quotation tour includes the
+  note toolbar, line cost, margin, row discount and splitting a line. (#608)
+
+### Changed
+
+- **The customer PO PDF now lives beside the confirmation number on a saved
+  purchase order.** The saved record shows whether the PDF is pending or
+  attached, the uploader, and any earlier document versions. Attaching,
+  replacing or removing the PDF does not create a correction and does not change
+  the purchase order's values. (#612)
+
+### Fixed
+
+- **Saving a purchase order without the customer PO PDF no longer suggests a
+  correction is needed to attach it.** The final-save confirmation and the saved
+  record now say the PDF can be attached once the customer sends it, and the
+  value-editing action is clearly named "Correct values". (#612)
+
 ## [0.19.2] - 2026-11-12
 
 ### Changed
