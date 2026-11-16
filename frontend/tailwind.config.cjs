@@ -114,12 +114,24 @@ module.exports = {
       fontSize: {
         // 5-step scale, >=1.25 ratio between display steps.
         micro: ["10.5px", { lineHeight: "14px", letterSpacing: "0.08em" }],
+        // Two below-micro steps for dense hero meta (issue #622). Line height
+        // stays inherited exactly as the arbitrary values they replaced did,
+        // so tokenising the size does not move the card.
+        "micro-xs": "9px",
+        "micro-sm": "10px",
         caption: ["11.5px", { lineHeight: "16px" }],
         small: ["12.5px", { lineHeight: "18px" }],
         body: ["13.5px", { lineHeight: "21px" }],
         lead: ["15px", { lineHeight: "23px" }],
         title: ["19px", { lineHeight: "26px", letterSpacing: "-0.02em" }],
         display: ["26px", { lineHeight: "32px", letterSpacing: "-0.03em" }],
+        // The hero cards' document number (issue #622): two steps above
+        // `display`, and the largest type in the app. Tight leading and the
+        // negative tracking are part of the style, not the call site.
+        "display-lg": ["30px", { lineHeight: "1", letterSpacing: "-0.035em" }],
+        "display-xl": ["34px", { lineHeight: "1", letterSpacing: "-0.035em" }],
+        // A hero's customer total: a figure, not a headline.
+        metric: ["24px", { lineHeight: "28px" }],
       },
       // The 6-14 numeric min-height scale is custom. Tailwind v4's dynamic
       // spacing scale compiles any other number (e.g. `min-h-13`) without a

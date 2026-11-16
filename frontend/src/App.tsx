@@ -45,7 +45,8 @@ import { ItemEditor, newSubItem } from "./components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import type { CompanyUnitOption } from "./companyUnits";
 import { ReviewPanel } from "./components/ReviewPanel";
-import { SummaryRail } from "./components/SummaryRail";
+import { QuotationHero } from "./components/QuotationHero";
+import { SummaryRail, computePricing } from "./components/SummaryRail";
 import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
@@ -1615,6 +1616,14 @@ function App() {
     }
   }, [page]);
 
+  // Issue #622: one lookup of the selected customer's name, shared by Save
+  // draft and the hero, so the two can never label the same selection
+  // differently.
+  const selectedCustomerName = useMemo(
+    () => customerOptions.find((option) => option.value === customerId)?.label ?? "",
+    [customerOptions, customerId]
+  );
+
   const handleSaveDraft = useCallback(async () => {
     // Issue #605: the tour's editor is practice. Saving would persist made-up
     // lines into the real workspace, so the guard refuses before the binding
@@ -1625,13 +1634,11 @@ function App() {
     }
     setSavingDraft(true);
     try {
-      const customerName =
-        customerOptions.find((option) => option.value === customerId)?.label ?? "";
       const id = await SaveDraft(
         new backend.SavedDraft({
           Label: details.subject.trim(),
           Subject: details.subject.trim(),
-          CustomerName: customerName,
+          CustomerName: selectedCustomerName,
           Payload: JSON.stringify({ items, details, customerId }),
           ID: activeDraftId,
           ItemCount: countDraftItems(items),
@@ -1658,7 +1665,7 @@ function App() {
     } finally {
       setSavingDraft(false);
     }
-  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot, activeTutorial]);
+  }, [items, details, customerId, selectedCustomerName, activeDraftId, pushToast, clearRecoverySnapshot, activeTutorial]);
 
   const handleOpenDraft = useCallback(
     async (id: number) => {
@@ -2434,6 +2441,26 @@ function App() {
   }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot, activeTutorial]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
+  // Issue #622: one pricing computation for the whole screen. The Quotation
+  // hero and the Summary rail are both handed this object, so the two figures
+  // cannot disagree and neither prices a second time.
+  const quotationPricing = useMemo(
+    () =>
+      computePricing(
+        items,
+        details.discountPercent,
+        details.taxZone,
+        details.taxType,
+        details.serviceCategory
+      ),
+    [
+      items,
+      details.discountPercent,
+      details.taxZone,
+      details.taxType,
+      details.serviceCategory,
+    ]
+  );
   const hasRenderableItems = items.some(
     (item) =>
       item.description.trim() !== "" ||
@@ -3209,10 +3236,27 @@ function App() {
         />
       ) : (visiblePage === "create" || preservedQuotationPage === "create") ? (
         <div
-          className="flex flex-col gap-6"
+          className="mx-auto flex w-full max-w-[1280px] flex-col gap-6"
           hidden={visiblePage !== "create"}
           onPasteCapture={handleCopyPasteCapture}
         >
+          {/* Issue #623: the same dark hero the PO editor opens with, mirroring
+              the editor state above the form + rail and capped with them. */}
+          <QuotationHero
+            customerName={selectedCustomerName}
+            details={details}
+            currencyCode={liveEntry?.code ?? companyCurrency}
+            currency={liveEntry}
+            customerGrand={quotationPricing.customerGrand}
+            ppnAmount={quotationPricing.ppnAmount}
+            quoteNumber={editingQuote?.number ?? null}
+            nextRevision={editingQuote?.revision ?? null}
+            draftSavedLabel={
+              draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
+            }
+            ready={ready}
+          />
+
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (
@@ -3321,6 +3365,7 @@ function App() {
                 <SummaryRail
                   items={items}
                   currency={liveEntry}
+                  pricing={quotationPricing}
                   discountPercent={details.discountPercent}
                   taxZone={details.taxZone}
                   taxType={details.taxType}

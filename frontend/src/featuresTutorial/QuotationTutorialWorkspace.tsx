@@ -1,10 +1,11 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { DetailsPanel } from "../components/DetailsPanel";
 import type { DetailsState } from "../components/DetailsPanel";
 import { ItemEditor, newSubItem } from "../components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "../components/ItemEditor";
+import { QuotationHero } from "../components/QuotationHero";
 import { SectionHeading, StatusBanner } from "../components/ui";
-import { SummaryRail } from "../components/SummaryRail";
+import { SummaryRail, computePricing } from "../components/SummaryRail";
 import type { CurrencyInfo } from "../format";
 import {
   TUTORIAL_QUOTATION_CUSTOMER_ID,
@@ -13,6 +14,7 @@ import {
   tutorialQuotationDetails,
   tutorialQuotationItems,
 } from "./practiceQuotation";
+import { TUTORIAL_PRACTICE_COPY } from "./tutorialData";
 
 export interface QuotationTutorialWorkspaceProps {
   currency: CurrencyInfo;
@@ -28,7 +30,9 @@ export interface QuotationTutorialWorkspaceProps {
  * Issue #605: the Quotation tour's practice editor. It composes the real
  * DetailsPanel, ItemEditor and SummaryRail -- so staff practise on the same
  * controls and the same pricing path -- over local state that never leaves
- * this component.
+ * this component. Issue #624 adds the real editor's QuotationHero above them,
+ * mirroring the same practice state, so the tour matches the workspace it
+ * teaches.
  *
  * The sandbox mirrors App's line-item handlers rather than reaching into the
  * real editor: the real draft, the archive and the client directory are
@@ -282,11 +286,50 @@ export function QuotationTutorialWorkspace({
     []
   );
 
+  // Issue #622: the practice hero and rail share one pricing computation, the
+  // same way App's editor does, so the card and the rail can never disagree.
+  const pricing = useMemo(
+    () =>
+      computePricing(
+        items,
+        details.discountPercent,
+        details.taxZone,
+        details.taxType,
+        details.serviceCategory
+      ),
+    [
+      items,
+      details.discountPercent,
+      details.taxZone,
+      details.taxType,
+      details.serviceCategory,
+    ]
+  );
+  const customerName =
+    TUTORIAL_QUOTATION_CUSTOMER_OPTIONS.find(
+      (option) => option.value === customerId
+    )?.label ?? "";
+
   return (
     <div
-      className="flex flex-col gap-6"
+      className="mx-auto flex w-full max-w-[1280px] flex-col gap-6"
       data-tutorial-practice="quotation"
     >
+      {/* Issue #624: the real editor's hero, over the practice values. The
+          practice quotation is never issued, so it is always a draft: no
+          quotation number, no revision pair, and the sandbox status line in
+          place of "Save draft stores it". It is read-only; every control on
+          this surface stays in the form below. */}
+      <QuotationHero
+        customerName={customerName}
+        details={details}
+        currencyCode={currency.code}
+        currency={currency}
+        customerGrand={pricing.customerGrand}
+        ppnAmount={pricing.ppnAmount}
+        statusOverride={TUTORIAL_PRACTICE_COPY}
+      />
+
       <StatusBanner tone="info">
         <span>
           <strong>Practice quotation.</strong> This is a sandbox with made-up
@@ -350,6 +393,7 @@ export function QuotationTutorialWorkspace({
           <SummaryRail
             items={items}
             currency={currency}
+            pricing={pricing}
             discountPercent={details.discountPercent}
             taxZone={details.taxZone}
             taxType={details.taxType}

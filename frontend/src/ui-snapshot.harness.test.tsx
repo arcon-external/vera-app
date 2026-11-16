@@ -26,6 +26,8 @@ import { describe, expect, it } from "vitest";
 import type { backend } from "@backend/models";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
+import { QuotationHero } from "./components/QuotationHero";
+import { QuotationTutorialWorkspace } from "./featuresTutorial/QuotationTutorialWorkspace";
 import type { EditorItem } from "./components/ItemEditor";
 import { ItemEditor } from "./components/ItemEditor";
 import { CompanyGeneralPanel } from "./components/CompanyGeneralPanel";
@@ -1934,6 +1936,87 @@ const CASES: SnapshotCase[] = [
         />
       </div>
     </div>
+    ),
+  },
+  {
+    // Issue #623: the Quotation editor's hero, a new draft. The accent-800
+    // surface, the DRAFT badge, the live customer total (PPN included) and the
+    // four-item meta row come from the same computePricing path the Summary
+    // rail uses. 360 is the informative width: the badge row, the total block
+    // and the meta row must wrap instead of overflowing.
+    //
+    // What this case cannot show: live typing (the App DOM suite drives it)
+    // and the hero's read-only nature, which the component suite pins.
+    name: "QuotationHeroDraft",
+    element: (
+      <QuotationHero
+        customerName="PT. Infineon Technologies Batam"
+        details={{
+          validity: 30,
+          paymentTerm: 90,
+          incoterm: "EXW",
+          taxZone: "NonFTZ",
+          taxType: "Goods",
+          serviceCategory: "",
+        }}
+        currencyCode="IDR"
+        currency={PO_EDITOR_IDR}
+        customerGrand={1_110_000}
+        ppnAmount={110_000}
+        quoteNumber={null}
+        nextRevision={null}
+        draftSavedLabel={null}
+        ready={false}
+      />
+    ),
+  },
+  {
+    // Issue #623: editing an issued revision. The quotation number is the
+    // title, the badge row names the source revision and the revision Export
+    // will create, and the status line repeats both so they cannot be
+    // confused.
+    name: "QuotationHeroIssued",
+    element: (
+      <QuotationHero
+        customerName="PT. Infineon Technologies Batam"
+        details={{
+          validity: 45,
+          paymentTerm: 60,
+          incoterm: "DAP",
+          taxZone: "FTZ",
+          taxType: "Goods",
+          serviceCategory: "",
+        }}
+        currencyCode="IDR"
+        currency={PO_EDITOR_IDR}
+        customerGrand={0}
+        ppnAmount={0}
+        quoteNumber="1502260012"
+        nextRevision={3}
+        draftSavedLabel={null}
+        ready={false}
+      />
+    ),
+  },
+  {
+    // Issue #624: the Features Tutorial's practice Quotation workspace, hero
+    // included, so the tour can be compared with the real editor at both
+    // widths. The workspace caps its content at the editor's 1280px inside the
+    // shell, and the hero spans it above the practice details, lines and
+    // summary; the practice quotation is always a draft.
+    //
+    // What this case cannot show: live typing (the tutorial DOM suite drives
+    // it) and the guide overlay, which mounts only in the running app.
+    name: "QuotationTutorialPractice",
+    element: (
+      <QuotationTutorialWorkspace
+        currency={PO_EDITOR_IDR}
+        canonicalUnit="Lot"
+        uomOptions={[{ value: "Lot", label: "Lot" }]}
+        incotermOptions={INCOTERM_OPTIONS}
+        taxZoneOptions={TAX_ZONE_OPTIONS}
+        taxTypeOptions={TAX_TYPE_OPTIONS}
+      />
     ),
   },
   {
