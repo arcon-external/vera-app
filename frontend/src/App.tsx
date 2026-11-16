@@ -589,6 +589,10 @@ function App() {
     useState<FeaturesTutorialWorkspace | null>(null);
   const [tutorialLinked, setTutorialLinked] = useState(false);
   const [tutorialSelectorOpen, setTutorialSelectorOpen] = useState(false);
+  // Issue #604: the active step's reveal key. The tour owns it; the PO editor
+  // maps it onto the quote bar it must keep open, and it is cleared with the
+  // tour so no forced-open surface outlives the guide.
+  const [tutorialReveal, setTutorialReveal] = useState<string | null>(null);
   // The PO workspace (#468/#473) owns the open record and its phase in one
   // controller, so Cancel from a correction can re-read the saved record
   // instead of leaving a stale editor behind. The page renders the archive when
@@ -2640,6 +2644,7 @@ function App() {
     setTutorialForceStart(null);
     setTutorialLinked(false);
     setTutorialSelectorOpen(false);
+    setTutorialReveal(null);
   }, [user?.ID]);
 
   const tutorialPageAllowed = useCallback(
@@ -2695,6 +2700,7 @@ function App() {
       setTutorialLinked(false);
       setTutorialSelectorOpen(false);
       setTutorialForceStart(null);
+      setTutorialReveal(null);
     }
   }, [activeTutorial, tutorialPageAllowed, visiblePage]);
 
@@ -2714,6 +2720,7 @@ function App() {
       setTutorialLinked(false);
       setTutorialSelectorOpen(false);
       setTutorialForceStart(null);
+      setTutorialReveal(null);
     },
     [activeTutorial, user]
   );
@@ -2723,6 +2730,7 @@ function App() {
       setTutorialLinked(false);
       setTutorialSelectorOpen(false);
       setTutorialForceStart(workspace);
+      setTutorialReveal(null);
       setPage(workspace === "quotation" ? "create" : "po");
     },
     []
@@ -3164,6 +3172,9 @@ function App() {
           actorId={user?.ID ?? 0}
           actorName={user?.DisplayName ?? "You"}
           tutorialDraft={tutorialDraft}
+          tutorialReveal={
+            activeTutorial === "purchase-order" ? tutorialReveal : null
+          }
           tutorialReview={tutorialLinked ? tutorialReviewDto : null}
           tutorialReconciliationTransport={TUTORIAL_RECONCILIATION_TRANSPORT}
           onTutorialAction={() =>
@@ -3457,6 +3468,7 @@ function App() {
         }
         onNavigate={(page) => setPage(page)}
         onClose={finishFeaturesTutorial}
+        onReveal={setTutorialReveal}
         onAction={(action) => {
           if (action === "open-tutorial-selector") {
             setTutorialSelectorOpen(true);

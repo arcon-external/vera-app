@@ -439,6 +439,16 @@ export function FeaturesTutorial({
 
     const enter = () => {
       if (cancelled || !measured || !veilDone) return;
+      // A step that is already being left must not enter again. A target that
+      // mounts late — a forced-open surface revealed after the step — would
+      // otherwise clear the pending leave timer and strand the tour on the
+      // step the user just answered.
+      if (
+        phaseRef.current === "leaving" &&
+        transitionFromRef.current === step?.id
+      ) {
+        return;
+      }
       setVeil(false);
       phaseRef.current = "entering";
       setPhase("entering");

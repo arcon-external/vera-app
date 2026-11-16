@@ -997,7 +997,7 @@ describe("Features Tutorial (issue #595)", () => {
     );
 
     act(() => button("Confirm source").click());
-    await waitForTutorialStep("po-header");
+    await waitForTutorialStep("po-payment-terms");
     // Only now does the tour move to the inline editor.
     expect(selectorDialog()).toBeNull();
     expect(document.body.textContent).toContain("MOCK-TUTORIAL-PO");
@@ -1053,6 +1053,112 @@ describe("Features Tutorial (issue #595)", () => {
     await flush();
     expect(selectorDialog()).toBeNull();
     expect(document.querySelector("[data-features-tutorial]")).toBeNull();
+  });
+
+  async function waitForQuoteBar(): Promise<HTMLElement> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      const found = document.querySelector<HTMLElement>(
+        '[data-tutorial="po-quote-bar"]'
+      );
+      if (found !== null) return found;
+      await waitFor(50);
+    }
+    throw new Error("the tutorial never opened the quotation bar");
+  }
+
+  /** The link flow is a prerequisite for the quote-bar lesson; this walks it
+   *  exactly as staff do, so each test pays only for what it asserts. */
+  async function walkToPaymentTerms(): Promise<void> {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    act(() =>
+      button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
+    );
+    await waitForTutorialStep("po-selector-continue");
+    act(() => button("Continue to confirmation").click());
+    await waitForTutorialStep("po-selector-confirm");
+    act(() => button("Confirm source").click());
+    await waitForTutorialStep("po-payment-terms");
+  }
+
+  it("opens the quotation bar on Press and keeps it open while the guide explains it", { timeout: 30000 }, async () => {
+    await walkToPaymentTerms();
+    await waitForBeacon("Press");
+
+    expect(input("Payment terms").value).toBe("45 days");
+    // The bar is a hands-on lesson: it is closed until the field is pressed.
+    expect(document.body.textContent).not.toContain("Value from quotation");
+
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    expect(document.body.textContent).toContain("Value from quotation");
+    expect(document.body.textContent).toContain("30 days");
+
+    // Next moves the guide's focus into the tooltip. The bar must survive that
+    // because a reveal, not focus luck, holds it open.
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    await waitForQuoteBar();
+    expect(
+      document.querySelector('[data-tutorial="po-quote-bar-actions"]')
+    ).not.toBeNull();
+    expect(document.activeElement).not.toBe(input("Payment terms"));
+
+    act(() => button("Use quotation value").click());
+    await waitForTutorialStep("po-quote-result");
+    expect(input("Payment terms").value).toBe("30 days");
+    expect(input("Payment terms").style.borderColor).toBe("rgb(82, 152, 115)");
+    // The result step explains both outcomes and that editing reopens the
+    // choice, not only the path this run took.
+    expect(document.body.textContent).toContain("Green");
+    expect(document.body.textContent).toContain("White");
+    expect(document.body.textContent).toContain(
+      "Editing the field brings the choice back"
+    );
+    // The result step is no longer a forced-open surface.
+    expect(document.body.textContent).not.toContain("Value from quotation");
+
+    // The whole lesson stayed client-only.
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.validatePOSource).not.toHaveBeenCalled();
+  });
+
+  it("resolves the choice from either bar action and leaves the field white when the entered value is kept", { timeout: 30000 }, async () => {
+    await walkToPaymentTerms();
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    await waitForQuoteBar();
+
+    // Keeping the entered value is a real answer, not a round-trip through the
+    // quotation value first: the step offers both sides while the guide is up.
+    expect(
+      document.querySelector('button[aria-label="Use quotation value"]')
+    ).not.toBeNull();
+    act(() => button("Use my value").click());
+    await waitForTutorialStep("po-quote-result");
+
+    expect(input("Payment terms").value).toBe("45 days");
+    expect(input("Payment terms").style.borderColor).toBe("");
+    expect(document.body.textContent).toContain("White");
+
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
   });
 
   it("closes the selector when staff leave the workspace mid-link", { timeout: 20000 }, async () => {
