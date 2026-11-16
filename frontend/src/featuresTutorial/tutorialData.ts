@@ -37,6 +37,13 @@ export const QUOTE_BAR_REVEAL = "quote-bar";
 export const QUOTE_BAR_CHOICE_REVEAL = "quote-bar-choice";
 export const QUOTE_BAR_RESOLVED_EVENT = "po-tutorial-quote-resolved";
 
+// Issue #606: the ghost lesson. The action group is the ✓/✕ pair the guide
+// points at, and either action reports the same resolution event. The DOM
+// anchor only exists while the PO editor is in tutorial mode, so a real ghost
+// outside the tour never carries tutorial state.
+export const GHOST_ACTIONS_ANCHOR = "po-ghost-actions";
+export const GHOST_RESOLVED_EVENT = "po-ghost-resolved";
+
 /**
  * Issue #605: the one sentence every guarded shell action says while either
  * tutorial is live. It names the sandbox rather than the control, because the

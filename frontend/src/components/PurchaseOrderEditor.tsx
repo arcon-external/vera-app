@@ -198,6 +198,8 @@ export interface PurchaseOrderEditorViewProps {
    * additionally lets either bar action resolve the step.
    */
   tutorialReveal?: string | null;
+  /** Issue #606: the ghost lesson targets the ✓/✕ pair of each ghost card. */
+  tutorial?: boolean;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -637,6 +639,7 @@ export function PurchaseOrderEditorView({
   totalsInRail = false,
   sourcePanelInRail = false,
   tutorialReveal = null,
+  tutorial = false,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
@@ -1673,6 +1676,7 @@ export function PurchaseOrderEditorView({
                     currency={activeCurrency}
                     existing={filled}
                     pointer
+                    tutorial={tutorial}
                     onAccept={() =>
                       applyGhost(attachment.item, {
                         groupKey: attachment.groupKey,
@@ -1743,6 +1747,7 @@ export function PurchaseOrderEditorView({
                     key={item.itemNo}
                     item={item}
                     currency={activeCurrency}
+                    tutorial={tutorial}
                     onAccept={() => applyGhost(item)}
                     onReject={() => rejectGhost(item)}
                   />
@@ -3102,6 +3107,7 @@ export function PurchaseOrderEditorPage({
           confirmationNumber={order.ConfirmationNumber ?? ""}
           actionsInShell={actionsInShell}
           tutorialReveal={tutorialReveal}
+          tutorial={tutorial}
           onCommitField={(field, explicitValue) => {
             focusedFieldRef.current = field;
             reconciliation.commitField(field, explicitValue, { autoKeep: true });

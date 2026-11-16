@@ -7,6 +7,11 @@ import {
 import { formatMoney, type CurrencyInfo } from "../format";
 import { formatQuantityScaled } from "../purchaseOrder";
 import type { SourceItem } from "../poSourceItems";
+import {
+  GHOST_ACTIONS_ANCHOR,
+  GHOST_RESOLVED_EVENT,
+} from "../featuresTutorial/tutorialData";
+import { emitFeaturesTutorialAdvance } from "./FeaturesTutorial";
 
 const UOMS = [
   "Lot",
@@ -105,6 +110,7 @@ export function QuotationGhost({
   onReject,
   existing = false,
   pointer = false,
+  tutorial = false,
 }: {
   item: SourceItem;
   currency: CurrencyInfo;
@@ -112,11 +118,21 @@ export function QuotationGhost({
   onReject: () => void;
   existing?: boolean;
   pointer?: boolean;
+  /**
+   * Issue #606: inside the Features Tutorial the ✓/✕ pair is the ghost
+   * lesson's target, and either answer resolves that step. The editor's own
+   * handlers still decide what happens to the line, so this only reports.
+   */
+  tutorial?: boolean;
 }) {
   const { ref, progress } = useScrollReveal();
   const editorItem = editorItemFromSource(item);
   const split = item.subItems.length > 0;
   const noop = () => undefined;
+  const resolve = (action: () => void) => {
+    action();
+    if (tutorial) emitFeaturesTutorialAdvance(GHOST_RESOLVED_EVENT);
+  };
 
   return (
     <div
@@ -153,11 +169,14 @@ export function QuotationGhost({
               : "Not on your order yet. Using this adds it."}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div
+          className="flex shrink-0 items-center gap-1.5"
+          data-tutorial={tutorial ? GHOST_ACTIONS_ANCHOR : undefined}
+        >
           <button
             type="button"
             aria-label={`Use quotation ${item.label}`}
-            onClick={onAccept}
+            onClick={() => resolve(onAccept)}
             className="grid size-8 place-items-center rounded-md bg-accent-800 text-small font-semibold text-white hover:bg-accent-900"
           >
             ✓
@@ -165,7 +184,7 @@ export function QuotationGhost({
           <button
             type="button"
             aria-label={`Ignore quotation ${item.label}`}
-            onClick={onReject}
+            onClick={() => resolve(onReject)}
             className="grid size-8 place-items-center rounded-md border border-rule-strong bg-white text-small text-ink-600 hover:bg-paper-subtle"
           >
             ✕
