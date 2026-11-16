@@ -95,10 +95,8 @@ import {
   type FeaturesTutorialCompletion,
   type FeaturesTutorialWorkspace,
 } from "./featuresTutorial";
-import {
-  PURCHASE_ORDER_TUTORIAL_STEPS,
-  QUOTATION_TUTORIAL_STEPS,
-} from "./featuresTutorial/steps";
+import { PURCHASE_ORDER_TUTORIAL_STEPS } from "./featuresTutorial/purchaseOrderSteps";
+import { QUOTATION_TUTORIAL_STEPS } from "./featuresTutorial/quotationSteps";
 import {
   TUTORIAL_RECONCILIATION_TRANSPORT,
   TUTORIAL_SELECTOR_PAGE,
