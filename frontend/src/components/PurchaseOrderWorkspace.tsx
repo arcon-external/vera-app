@@ -88,6 +88,8 @@ export interface PurchaseOrderWorkspacePageProps {
   actorName?: string;
   /** Issue #595: the client-only Features Tutorial practice order. */
   tutorialDraft?: PurchaseOrderDTO | null;
+  /** Issue #604: the active tutorial step's quote-bar reveal key. */
+  tutorialReveal?: string | null;
   tutorialReview?: PurchaseOrderReviewDTO | null;
   tutorialReconciliationTransport?: ReconciliationTransport;
   onTutorialAction?: () => void;
@@ -160,6 +162,7 @@ export function PurchaseOrderWorkspacePage({
   actorId,
   actorName,
   tutorialDraft = null,
+  tutorialReveal = null,
   tutorialReview = null,
   tutorialReconciliationTransport,
   onTutorialAction,
@@ -200,6 +203,7 @@ export function PurchaseOrderWorkspacePage({
         actorId={actorId}
         actorName={actorName}
         tutorial
+        tutorialReveal={tutorialReveal}
         tutorialReview={tutorialReview}
         onTutorialAction={onTutorialAction}
       />

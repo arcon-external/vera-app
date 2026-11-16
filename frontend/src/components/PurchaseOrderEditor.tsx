@@ -62,6 +62,12 @@ import {
 } from "../poSourceItems";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
 import { PurchaseOrderConflictPrompt } from "./PurchaseOrderConflictPrompt";
+import { emitFeaturesTutorialAdvance } from "./FeaturesTutorial";
+import {
+  QUOTE_BAR_CHOICE_REVEAL,
+  QUOTE_BAR_RESOLVED_EVENT,
+  QUOTE_BAR_REVEAL,
+} from "../featuresTutorial/tutorialData";
 import { PurchaseOrderFinalConfirmationView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderSourceLinkPanel } from "./PurchaseOrderSourceLinkPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";
@@ -186,6 +192,12 @@ export interface PurchaseOrderEditorViewProps {
   totalsInRail?: boolean;
   /** The page's rail owns the source card; standalone harnesses keep it inline. */
   sourcePanelInRail?: boolean;
+  /**
+   * Issue #604: the active tutorial step's reveal key. `quote-bar` keeps the
+   * Payment terms bar open while the guide explains it; `quote-bar-choice`
+   * additionally lets either bar action resolve the step.
+   */
+  tutorialReveal?: string | null;
 }
 
 export interface PurchaseOrderEditorPageProps {
@@ -253,6 +265,8 @@ export interface PurchaseOrderEditorPageProps {
   tutorial?: boolean;
   tutorialReview?: PurchaseOrderReviewDTO | null;
   onTutorialAction?: () => void;
+  /** Issue #604: the active step's reveal key, mapped to the quote bar. */
+  tutorialReveal?: string | null;
 }
 
 /**
@@ -622,9 +636,17 @@ export function PurchaseOrderEditorView({
   onBlockedActivate,
   totalsInRail = false,
   sourcePanelInRail = false,
+  tutorialReveal = null,
 }: PurchaseOrderEditorViewProps) {
   const dirty = isPurchaseOrderDirty(state);
   const correcting = mode === "correction";
+  const quoteBarForcedOpen =
+    tutorialReveal === QUOTE_BAR_REVEAL ||
+    tutorialReveal === QUOTE_BAR_CHOICE_REVEAL;
+  const quoteBarResolvesTutorial = tutorialReveal === QUOTE_BAR_CHOICE_REVEAL;
+  const resolveQuoteBar = quoteBarResolvesTutorial
+    ? () => emitFeaturesTutorialAdvance(QUOTE_BAR_RESOLVED_EVENT)
+    : undefined;
   const activeCurrency =
     currencyOptions.find((option) => option.code === state.currency) ?? currency;
   // The panel and the save guard read the same pure calculation, so the number
@@ -1284,6 +1306,10 @@ export function PurchaseOrderEditorView({
             label="Payment terms"
             value={state.header.paymentTerms}
             placeholder="e.g. 50% advance, balance 30 days after delivery"
+            forcedOpen={quoteBarForcedOpen}
+            quoteBarTutorialAnchor="po-quote-bar"
+            offerBothChoices={quoteBarForcedOpen}
+            onQuoteResolved={resolveQuoteBar}
             quote={inlineQuote(
               "header:paymentTerms",
               state.header.paymentTerms,
@@ -1863,6 +1889,7 @@ export function PurchaseOrderEditorPage({
   tutorial = false,
   tutorialReview = null,
   onTutorialAction,
+  tutorialReveal = null,
 }: PurchaseOrderEditorPageProps) {
   // #473 wave 2: a draft write that meets an already-saved record keeps the
   // working copy and continues as a correction. The transition is local to this
@@ -3074,6 +3101,7 @@ export function PurchaseOrderEditorPage({
           onCorrectionReasonChange={setReason}
           confirmationNumber={order.ConfirmationNumber ?? ""}
           actionsInShell={actionsInShell}
+          tutorialReveal={tutorialReveal}
           onCommitField={(field, explicitValue) => {
             focusedFieldRef.current = field;
             reconciliation.commitField(field, explicitValue, { autoKeep: true });
