@@ -152,6 +152,35 @@ describe("NoteEditor toolbar", () => {
   });
 });
 
+describe("NoteEditor tutorial reveal", () => {
+  it("keeps the toolbar hidden until the note is focused, then keeps it", () => {
+    const { editor } = mount({ value: "Hello", revealToolbarOnFocus: true });
+    expect(container.querySelector('[role="toolbar"]')).toBeNull();
+    expect(
+      container.querySelector('[data-tutorial="quotation-note"]')
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-tutorial="quotation-note-toolbar"]')
+    ).toBeNull();
+
+    act(() => editor.focus());
+    expect(container.querySelector('[role="toolbar"]')).not.toBeNull();
+    expect(
+      container.querySelector('[data-tutorial="quotation-note-toolbar"]')
+    ).not.toBeNull();
+
+    // The note step hands focus to the guide; the toolbar stays revealed so
+    // the next step can point at it.
+    act(() => editor.blur());
+    expect(container.querySelector('[role="toolbar"]')).not.toBeNull();
+  });
+
+  it("renders the toolbar immediately by default", () => {
+    mount({ value: "Hello" });
+    expect(container.querySelector('[role="toolbar"]')).not.toBeNull();
+  });
+});
+
 describe("NoteEditor shortcuts", () => {
   it("runs bold and italic for Ctrl and for Cmd", () => {
     const { editor } = mount({ value: "Hello" });

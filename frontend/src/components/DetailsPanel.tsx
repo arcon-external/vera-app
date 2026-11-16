@@ -41,6 +41,12 @@ interface DetailsPanelProps {
   onChange: (patch: Partial<DetailsState>) => void;
   onCustomerChange: (value: number) => void;
   onPaste: (event: React.ClipboardEvent<HTMLInputElement>) => void;
+  /**
+   * Issue #607: the Quotation tour reveals the note's formatting toolbar by
+   * focusing the note. The real editor leaves this off, so its toolbar is
+   * always visible.
+   */
+  revealNoteToolbarOnFocus?: boolean;
 }
 
 const fieldClass =
@@ -197,6 +203,7 @@ export function DetailsPanel({
   onChange,
   onCustomerChange,
   onPaste,
+  revealNoteToolbarOnFocus = false,
 }: DetailsPanelProps) {
   const localizedTax = taxRateLabel(value.taxZone, value.taxType, value.serviceCategory);
 
@@ -209,6 +216,7 @@ export function DetailsPanel({
           <Field label="Subject" hint="paste from Excel to fill all details">
             <input
               type="text"
+              data-tutorial="quotation-subject"
               placeholder="Supply and installation of electrical and mechanical systems"
               value={value.subject}
               onChange={(event) => onChange({ subject: event.target.value })}
@@ -223,6 +231,7 @@ export function DetailsPanel({
             value={value.note}
             onChange={(note) => onChange({ note })}
             hint="Prints under the line items on the customer quotation."
+            revealToolbarOnFocus={revealNoteToolbarOnFocus}
           />
         </div>
 

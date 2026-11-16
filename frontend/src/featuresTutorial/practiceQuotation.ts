@@ -63,7 +63,8 @@ export function tutorialQuotationDetails(): DetailsState {
 }
 
 /**
- * Two lines: one plain line with margin on, and one split package whose
+ * Two lines: one plain line with margin on and a 10% row discount ready (off
+ * until the tour's discount step turns it on), and one split package whose
  * sub-items carry their own margin and row discount. The split line prices
  * through the real rollup, so the rail exercises the same arithmetic a real
  * package would. The unit is the company's served canonical unit (#337) so
@@ -81,7 +82,7 @@ export function tutorialQuotationItems(uom: string): EditorItem[] {
       marginEnabled: true,
       marginPercent: "15",
       discountEnabled: false,
-      discountPercent: "0",
+      discountPercent: "10",
       subItems: [],
       showSubPrices: false,
     },

@@ -39,11 +39,11 @@ export interface FeaturesTutorialStep {
   page?: AppPage;
   placement?: "auto" | "top" | "bottom" | "left" | "right";
   /**
-   * `next` is a read-only explanation. `click` and `focus` advance when the
-   * user actually uses the highlighted control. `event` waits for the app to
-   * emit FEATURES_TUTORIAL_ADVANCE_EVENT with the matching key.
+   * `next` is a read-only explanation. `click`, `focus` and `input` advance
+   * when the user actually uses the highlighted control. `event` waits for the
+   * app to emit FEATURES_TUTORIAL_ADVANCE_EVENT with the matching key.
    */
-  advance?: "next" | "click" | "focus" | "event";
+  advance?: "next" | "click" | "focus" | "input" | "event";
   advanceEvent?: string;
   /** Label for the target-side cue. Interactive steps default by action. */
   beaconLabel?: string;
@@ -150,6 +150,7 @@ function beaconLabelFor(step: FeaturesTutorialStep): string | null {
   if (step.beaconLabel !== undefined) return step.beaconLabel;
   if (step.advance === "click") return "Click";
   if (step.advance === "focus") return "Press";
+  if (step.advance === "input") return "Type";
   if (step.advance === "event") return "Select";
   return null;
 }
@@ -684,6 +685,19 @@ export function FeaturesTutorial({
       document.addEventListener("focusin", onFocus, true);
       return () => document.removeEventListener("focusin", onFocus, true);
     }
+    if (step.advance === "input") {
+      // Typing one value into the highlighted field is the step's action. A
+      // controlled field fires `input`, so this also catches a field React
+      // rewrites; input anywhere else on the page is ignored.
+      const onInput = (event: Event) => {
+        const element = target();
+        if (element !== null && event.target instanceof Node && element.contains(event.target)) {
+          advance(true);
+        }
+      };
+      document.addEventListener("input", onInput, true);
+      return () => document.removeEventListener("input", onInput, true);
+    }
     if (step.advance === "event" && step.advanceEvent !== undefined) {
       const onAdvance = (event: Event) => {
         const detail = (event as CustomEvent<{ key?: string }>).detail;
@@ -825,9 +839,11 @@ export function FeaturesTutorial({
       ? "Click the highlighted control"
       : step.advance === "focus"
         ? "Focus the highlighted field"
-        : step.advance === "event"
-          ? "Use the highlighted control"
-          : null;
+        : step.advance === "input"
+          ? "Type in the highlighted field"
+          : step.advance === "event"
+            ? "Use the highlighted control"
+            : null;
 
   return (
     <div
