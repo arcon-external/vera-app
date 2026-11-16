@@ -87,6 +87,20 @@ describe("QuotationHero", () => {
     expect(html).not.toContain("Not saved yet");
   });
 
+  it("replaces the derived status line when a surface supplies its own", () => {
+    // The practice tutorial's draft is never saved, so it must not promise
+    // that Save draft stores the work (issue #624).
+    const html = markup({
+      statusOverride: "Practice — nothing is saved to your workspace.",
+    });
+
+    expect(html).toContain("Practice — nothing is saved to your workspace.");
+    expect(html).not.toContain("Not saved yet");
+    // The override changes the sentence, never the state it describes.
+    expect(html).toContain("DRAFT");
+    expect(html).toContain("New quotation");
+  });
+
   it("names the quotation number and both revisions when editing an issued revision", () => {
     const html = markup({ quoteNumber: "1502260012", nextRevision: 3 });
 

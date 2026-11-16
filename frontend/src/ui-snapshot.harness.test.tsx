@@ -27,6 +27,7 @@ import type { backend } from "@backend/models";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import { QuotationHero } from "./components/QuotationHero";
+import { QuotationTutorialWorkspace } from "./featuresTutorial/QuotationTutorialWorkspace";
 import type { EditorItem } from "./components/ItemEditor";
 import { ItemEditor } from "./components/ItemEditor";
 import { CompanyGeneralPanel } from "./components/CompanyGeneralPanel";
@@ -1990,6 +1991,27 @@ const CASES: SnapshotCase[] = [
         nextRevision={3}
         draftSavedLabel={null}
         ready={false}
+      />
+    ),
+  },
+  {
+    // Issue #624: the Features Tutorial's practice Quotation workspace, hero
+    // included, so the tour can be compared with the real editor at both
+    // widths. The workspace caps its content at the editor's 1280px inside the
+    // shell, and the hero spans it above the practice details, lines and
+    // summary; the practice quotation is always a draft.
+    //
+    // What this case cannot show: live typing (the tutorial DOM suite drives
+    // it) and the guide overlay, which mounts only in the running app.
+    name: "QuotationTutorialPractice",
+    element: (
+      <QuotationTutorialWorkspace
+        currency={PO_EDITOR_IDR}
+        canonicalUnit="Lot"
+        uomOptions={[{ value: "Lot", label: "Lot" }]}
+        incotermOptions={INCOTERM_OPTIONS}
+        taxZoneOptions={TAX_ZONE_OPTIONS}
+        taxTypeOptions={TAX_TYPE_OPTIONS}
       />
     ),
   },
