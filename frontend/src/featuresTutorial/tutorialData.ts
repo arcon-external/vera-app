@@ -29,28 +29,19 @@ export const TUTORIAL_SUBJECT =
 export const TUTORIAL_PAYMENT_TERMS = "30 days";
 export const TUTORIAL_INCOTERMS = "DAP";
 
-// Issue #604: the quote-bar lesson. The reveal key forces the inline bar open
-// without focusing the field; the choice key additionally lets the bar's two
-// actions resolve the tour step. The event name is the bar's only tutorial
-// output, so no resolution is ever reported outside that step.
-export const QUOTE_BAR_REVEAL = "quote-bar";
-export const QUOTE_BAR_CHOICE_REVEAL = "quote-bar-choice";
-export const QUOTE_BAR_RESOLVED_EVENT = "po-tutorial-quote-resolved";
-
-// Issue #606: the ghost lesson. The action group is the ✓/✕ pair the guide
-// points at, and either action reports the same resolution event. The DOM
-// anchor only exists while the PO editor is in tutorial mode, so a real ghost
-// outside the tour never carries tutorial state.
-export const GHOST_ACTIONS_ANCHOR = "po-ghost-actions";
-export const GHOST_RESOLVED_EVENT = "po-ghost-resolved";
+// Issue #604 and #606: the tutorial anchors and events shared by the product
+// components and the tutorial scripts live in `tutorialAnchors.ts`, outside
+// this module, so a component never imports from the tutorial feature that
+// imports it.
 
 /**
  * Issue #605: the one sentence every guarded shell action says while either
- * tutorial is live. It names the sandbox rather than the control, because the
- * point of the guard is that the data is practice -- not that the button is
- * broken.
+ * tutorial is live. It is used as the guard toast, the action-bar caption and
+ * a guarded button's title, so it is named for the copy rather than the
+ * surface. It names the sandbox rather than the control, because the point of
+ * the guard is that the data is practice -- not that the button is broken.
  */
-export const TUTORIAL_PRACTICE_TOAST =
+export const TUTORIAL_PRACTICE_COPY =
   "Features Tutorial practice — nothing is saved to your workspace.";
 
 const SOURCE_LINES: PurchaseOrderSourceLineDTO[] = [

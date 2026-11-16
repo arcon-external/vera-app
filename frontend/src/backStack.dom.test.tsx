@@ -817,7 +817,7 @@ async function waitForButton(label: string): Promise<HTMLButtonElement> {
 }
 
 describe("Features Tutorial (issue #595)", () => {
-  it("walks the Quotation workspace, finishes, and replays from settings", { timeout: 20000 }, async () => {
+  it("walks the Quotation workspace, finishes, and replays from settings", { timeout: 30000 }, async () => {
     await renderApp();
     const open = await waitForButton("Open Quotation");
     await act(async () => {
@@ -829,22 +829,21 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).toContain("One workspace, three views");
 
     // The tour owns the page transitions: Editor -> Drafts -> Archive ->
-    // Settings. Walk it to the settings step rather than counting clicks, so
-    // a longer script (the Quotation practice steps, #607) does not break the
-    // journey.
-    const startedAt = Date.now();
-    while (
-      !document.body.textContent?.includes("Replay this tutorial anytime")
-    ) {
+    // Settings. Walk it step by step (the guide's own step id, polled) rather
+    // than by a fixed delay, so a longer script (#607) or a loaded runner
+    // cannot make the walk race its own motion phases.
+    while (tutorialStepID() !== "quotation-settings-tutorial") {
+      const from = tutorialStepID();
       const next = document.querySelector<HTMLButtonElement>(
         'button[aria-label="Next step"]'
       );
-      if (next === null) throw new Error("the tour never reached its final step");
-      if (Date.now() - startedAt > 15000) {
-        throw new Error("the tour took too long to reach its final step");
+      if (next === null) {
+        throw new Error(
+          `the tour never reached its final step (on ${from ?? "none"})`
+        );
       }
       act(() => next.click());
-      await waitFor(400);
+      await waitForTutorialStepChange(from);
     }
     expect(document.body.textContent).toContain("Replay this tutorial anytime");
     expect(document.body.textContent).toContain("Replay tutorial");
@@ -928,6 +927,16 @@ describe("Features Tutorial (issue #595)", () => {
     throw new Error(
       `tutorial stayed on ${tutorialStepID() ?? "none"} instead of ${id}`
     );
+  }
+
+  /** Polls the guide's own step id until the Next click has swapped it. */
+  async function waitForTutorialStepChange(from: string | null): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (tutorialStepID() !== from) return;
+      await waitFor(100);
+    }
+    throw new Error(`tutorial stayed on ${from ?? "none"}`);
   }
 
   async function waitForBeacon(label: string): Promise<void> {
@@ -1195,7 +1204,7 @@ describe("Features Tutorial (issue #595)", () => {
 
     act(() => button("Next step").click());
     await waitForTutorialStep("po-ghost-choice");
-    await waitForBeacon("Choose");
+    await waitForBeacon("Select");
     expect(
       document.querySelector('[data-tutorial="po-ghost-actions"]')
     ).not.toBeNull();
@@ -1228,7 +1237,7 @@ describe("Features Tutorial (issue #595)", () => {
     await walkToGhostIntro();
     act(() => button("Next step").click());
     await waitForTutorialStep("po-ghost-choice");
-    await waitForBeacon("Choose");
+    await waitForBeacon("Select");
     expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
 
     act(() => button("Ignore quotation 2").click());

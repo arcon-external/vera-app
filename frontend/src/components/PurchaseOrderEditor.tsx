@@ -67,7 +67,7 @@ import {
   QUOTE_BAR_CHOICE_REVEAL,
   QUOTE_BAR_RESOLVED_EVENT,
   QUOTE_BAR_REVEAL,
-} from "../featuresTutorial/tutorialData";
+} from "../tutorialAnchors";
 import { PurchaseOrderFinalConfirmationView } from "./PurchaseOrderFinalize";
 import { PurchaseOrderSourceLinkPanel } from "./PurchaseOrderSourceLinkPanel";
 import { PurchaseOrderTotals } from "./PurchaseOrderTotals";

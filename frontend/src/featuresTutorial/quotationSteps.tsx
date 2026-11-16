@@ -38,7 +38,6 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       </p>
     ),
     advance: "focus",
-    beaconLabel: "Press",
   },
   {
     id: "quotation-note-toolbar",
@@ -71,7 +70,6 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       </p>
     ),
     advance: "focus",
-    beaconLabel: "Press",
   },
   {
     id: "quotation-details",
@@ -80,9 +78,9 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     title: "Start with the customer",
     body: (
       <p>
-        The client drives the printed details. Recipient, subject, validity,
+        The customer drives the printed details. Recipient, subject, validity,
         payment terms and tax sit around it, and all of them become a snapshot
-        on the issued revision — later client edits cannot rewrite an old
+        on the issued revision — later customer edits cannot rewrite an old
         quotation.
       </p>
     ),
@@ -96,10 +94,12 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       <p>
         The first line is a practice service. Type any cost into{" "}
         <strong>Unit cost</strong> — try 7500000 — and the line's sell price
-        updates beside it as you type. Nothing leaves this workspace.
+        updates beside it as you type. Then press <strong>Next</strong> to keep
+        going. Nothing leaves this workspace.
       </p>
     ),
-    advance: "input",
+    advance: "next",
+    beaconLabel: "Type",
   },
   {
     id: "quotation-line-sell",
@@ -174,7 +174,6 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     target: '[data-tutorial="quotation-actions"]',
     page: "create",
     title: "Save a draft, or issue a revision",
-    beaconLabel: "Click",
     body: (
       <>
         <p>
@@ -183,8 +182,8 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
           can never change; the next export becomes the following revision.
         </p>
         <p className="mt-2">
-          The practice quotation is never saved: pointing here creates no draft
-          and no revision.
+          There is nothing to press on this step: the practice quotation is
+          never saved, so pointing here creates no draft and no revision.
         </p>
       </>
     ),
