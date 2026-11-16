@@ -96,6 +96,7 @@ function NumberField({
           <input
             type="text"
             inputMode="numeric"
+            aria-label={label}
             value={value}
             onChange={(event) => {
               const parsed = Number.parseInt(event.target.value.replace(/\D/g, ""), 10);

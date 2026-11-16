@@ -45,7 +45,8 @@ import { ItemEditor, newSubItem } from "./components/ItemEditor";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
 import type { CompanyUnitOption } from "./companyUnits";
 import { ReviewPanel } from "./components/ReviewPanel";
-import { SummaryRail } from "./components/SummaryRail";
+import { QuotationHero } from "./components/QuotationHero";
+import { SummaryRail, computePricing } from "./components/SummaryRail";
 import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
@@ -2434,6 +2435,27 @@ function App() {
   }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot, activeTutorial]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
+  // Issue #623: the hero mirrors what the Summary rail prices, through the
+  // same computePricing call, so the two figures can never disagree.
+  const quotationPricing = useMemo(
+    () =>
+      computePricing(
+        items,
+        details.discountPercent,
+        details.taxZone,
+        details.taxType,
+        details.serviceCategory
+      ),
+    [
+      items,
+      details.discountPercent,
+      details.taxZone,
+      details.taxType,
+      details.serviceCategory,
+    ]
+  );
+  const quotationCustomerName =
+    customerOptions.find((option) => option.value === customerId)?.label ?? "";
   const hasRenderableItems = items.some(
     (item) =>
       item.description.trim() !== "" ||
@@ -3209,10 +3231,32 @@ function App() {
         />
       ) : (visiblePage === "create" || preservedQuotationPage === "create") ? (
         <div
-          className="flex flex-col gap-6"
+          className="mx-auto flex w-full max-w-[1280px] flex-col gap-6"
           hidden={visiblePage !== "create"}
           onPasteCapture={handleCopyPasteCapture}
         >
+          {/* Issue #623: the same dark hero the PO editor opens with, mirroring
+              the editor state above the form + rail and capped with them. */}
+          <QuotationHero
+            customerName={quotationCustomerName}
+            validity={details.validity}
+            paymentTerm={details.paymentTerm}
+            incoterm={details.incoterm}
+            currencyCode={liveEntry?.code ?? companyCurrency}
+            taxZone={details.taxZone}
+            taxType={details.taxType}
+            serviceCategory={details.serviceCategory}
+            currency={liveEntry}
+            customerGrand={quotationPricing.customerGrand}
+            ppnAmount={quotationPricing.ppnAmount}
+            quoteNumber={editingQuote?.number ?? null}
+            nextRevision={editingQuote?.revision ?? null}
+            draftSavedLabel={
+              draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
+            }
+            ready={ready}
+          />
+
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (
