@@ -477,6 +477,143 @@ func TestFinalizePurchaseOrderWritesAbsenceFieldsOnlyWhenThereIsNoPDF(t *testing
 	})
 }
 
+// Issue #611: the customer PO PDF is evidence, not a purchase-order value. A
+// record finalized without one keeps its version, saved state, no-PDF
+// confirmation and empty correction history while a PDF is attached, replaced
+// and removed, and every document version stays readable.
+func TestSavedPurchaseOrderDocumentChangesLeaveTheRecordAndItsHistoryUntouched(t *testing.T) {
+	database := openTestSchema(t, "vera_po_611_saved_document")
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Saved document invariant")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	input := finalizeInput(draft, user, "PO-611")
+	input.DocumentConfirmed = true
+	saved, err := database.FinalizePurchaseOrder(ctx, input)
+	if err != nil {
+		t.Fatalf("finalize without a PDF: %v", err)
+	}
+	if saved.State != PurchaseOrderStateSaved || !saved.PDFAbsentConfirmed {
+		t.Fatalf("finalized record = state %q, no-PDF confirmation %v; want saved and confirmed",
+			saved.State, saved.PDFAbsentConfirmed)
+	}
+
+	baseline, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("load saved record: %v", err)
+	}
+	if baseline.Version != saved.Version {
+		t.Fatalf("stored version = %d; want the finalized %d", baseline.Version, saved.Version)
+	}
+	state, err := database.GetPurchaseOrderDocumentState(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("document state before attach: %v", err)
+	}
+	if state.Active != nil || len(state.Versions) != 0 {
+		t.Fatalf("documents before attach = %+v; want none", state.Versions)
+	}
+
+	// assertRecordUnchanged is the invariant under test. It names each field
+	// the ticket protects, then compares the whole stored record so a silent
+	// write to any other column fails too.
+	assertRecordUnchanged := func(t *testing.T, step string) {
+		t.Helper()
+		stored, err := database.GetPurchaseOrder(ctx, saved.ID)
+		if err != nil {
+			t.Fatalf("%s: load record: %v", step, err)
+		}
+		if stored.Version != baseline.Version {
+			t.Errorf("%s: version = %d; want %d unchanged", step, stored.Version, baseline.Version)
+		}
+		if stored.State != baseline.State {
+			t.Errorf("%s: state = %q; want %q unchanged", step, stored.State, baseline.State)
+		}
+		if stored.PDFAbsentConfirmed != baseline.PDFAbsentConfirmed {
+			t.Errorf("%s: no-PDF confirmation = %v; want %v unchanged",
+				step, stored.PDFAbsentConfirmed, baseline.PDFAbsentConfirmed)
+		}
+		if !reflect.DeepEqual(baseline, stored) {
+			t.Errorf("%s: a document change rewrote purchase order fields:\nbefore %+v\nafter  %+v",
+				step, baseline, stored)
+		}
+		history, err := database.GetPurchaseOrderHistory(ctx, saved.ID)
+		if err != nil {
+			t.Fatalf("%s: load correction history: %v", step, err)
+		}
+		if len(history) != 0 {
+			t.Errorf("%s: correction history = %d entries; want none: %+v", step, len(history), history)
+		}
+	}
+
+	firstData := minimalPDF(nil, "")
+	first := attachTestDocument(t, database, ctx, saved.ID, user, firstData)
+	if first.Version != 1 || !first.Active {
+		t.Fatalf("first document = version %d active %v; want 1/true", first.Version, first.Active)
+	}
+	active, err := database.GetActivePurchaseOrderDocument(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("load active document: %v", err)
+	}
+	if active.Version != 1 || !bytes.Equal(active.Data, firstData) {
+		t.Errorf("active document = version %d with %d bytes; want version 1 with the attached bytes",
+			active.Version, len(active.Data))
+	}
+	assertRecordUnchanged(t, "attach")
+
+	secondData := minimalPDF([]string{"3 0 obj\n<< /Type /Metadata >>\nendobj\n"}, "")
+	second := attachTestDocument(t, database, ctx, saved.ID, user, secondData)
+	if second.Version != 2 || !second.Active {
+		t.Fatalf("replacement = version %d active %v; want 2/true", second.Version, second.Active)
+	}
+	state, err = database.GetPurchaseOrderDocumentState(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("document state after replace: %v", err)
+	}
+	if state.Active == nil || state.Active.Version != 2 || len(state.Versions) != 2 {
+		t.Fatalf("documents after replace = active %+v, %d versions; want active version 2 of two",
+			state.Active, len(state.Versions))
+	}
+	previous, err := database.GetPurchaseOrderDocumentVersion(ctx, saved.ID, 1)
+	if err != nil {
+		t.Fatalf("load replaced version 1: %v", err)
+	}
+	if !bytes.Equal(previous.Data, firstData) {
+		t.Error("replacing the document rewrote version 1's bytes")
+	}
+	assertRecordUnchanged(t, "replace")
+
+	removed, err := database.RemovePurchaseOrderDocument(ctx, PurchaseOrderDocumentRemoval{
+		PurchaseOrderID: saved.ID,
+		RemovedBy:       user.ID,
+		Confirmed:       true,
+	})
+	if err != nil {
+		t.Fatalf("remove document: %v", err)
+	}
+	if removed.Version != 2 || removed.Active || removed.RemovedAt == nil ||
+		removed.RemovedBy == nil || *removed.RemovedBy != user.ID {
+		t.Errorf("removed document = %+v; want version 2 inactive with who and when",
+			removed)
+	}
+	state, err = database.GetPurchaseOrderDocumentState(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("document state after remove: %v", err)
+	}
+	if state.Active != nil || len(state.Versions) != 2 {
+		t.Fatalf("documents after remove = active %+v, %d versions; want none active of two retained",
+			state.Active, len(state.Versions))
+	}
+	retained, err := database.GetPurchaseOrderDocumentVersion(ctx, saved.ID, 2)
+	if err != nil {
+		t.Fatalf("load removed version 2: %v", err)
+	}
+	if !bytes.Equal(retained.Data, secondData) {
+		t.Error("removing the document discarded version 2's bytes")
+	}
+	assertRecordUnchanged(t, "remove")
+}
+
 func TestGetPurchaseOrderReviewReportsTheDocumentState(t *testing.T) {
 	database := openTestSchema(t, "vera_po_document_review_state")
 	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Review state")
