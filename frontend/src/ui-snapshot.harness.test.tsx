@@ -2437,6 +2437,22 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // The saved record with an active customer PO PDF (#609 review): the PDF
+    // attached badge, the uploader id beside size and date, and the compact
+    // earlier-versions disclosure under the file.
+    name: "PurchaseOrderSavedPdfAttached",
+    element: (
+      <PurchaseOrderSavedView
+        order={{ ...PO_EDITOR_ORDER, State: "saved", PdfAbsentConfirmed: false }}
+        currency={PO_EDITOR_USD}
+        onBack={() => undefined}
+        onCorrect={() => undefined}
+        documentInitialState={PO_DOCUMENT_ATTACHED}
+        historyInitial={PO_HISTORY}
+      />
+    ),
+  },
+  {
     // The saved record with the admin source-repair action (issue #475), beside
     // Correct. The action is absent from the staff case above.
     name: "PurchaseOrderSavedRepairAction",
@@ -2674,7 +2690,7 @@ const CASES: SnapshotCase[] = [
   },
   {
     // Removal's own confirmation (#472): no second dialog exists elsewhere,
-    // and the copy says the prior versions remain in correction history.
+    // and the copy says the prior document versions are kept.
     name: "PurchaseOrderDocumentRemovalConfirmation",
     element: (
       <PurchaseOrderDocumentPanelView

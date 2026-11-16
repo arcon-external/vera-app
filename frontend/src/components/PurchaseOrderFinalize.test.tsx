@@ -521,8 +521,35 @@ describe("PurchaseOrderSavedView customer PO PDF (#610)", () => {
     expect(html).toContain("Customer PO.pdf");
   });
 
-  it("shows no PDF status when the record never recorded a deliberate absence", () => {
+  it("shows PDF pending when the known state has no active document", () => {
+    // The record was saved with a PDF and its document was later removed, or
+    // saved without one: either way the known empty state is pending evidence.
     const html = markup(saved());
+    expect(html).toMatch(/>PDF pending</);
+    expect(html).not.toMatch(/>PDF attached</);
+  });
+
+  it("shows PDF pending immediately from the recorded absence before the fetch", () => {
+    // The app supplies no document state, so the badge must not wait for the
+    // panel's read when the final save recorded that no PDF was supplied.
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved", PdfAbsentConfirmed: true })}
+        currency={USD}
+        onBack={() => undefined}
+      />
+    );
+    expect(html).toMatch(/>PDF pending</);
+  });
+
+  it("shows no PDF status until the document state is known", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved", PdfAbsentConfirmed: false })}
+        currency={USD}
+        onBack={() => undefined}
+      />
+    );
     expect(html).not.toMatch(/>PDF pending</);
     expect(html).not.toMatch(/>PDF attached</);
   });

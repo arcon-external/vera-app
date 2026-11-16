@@ -23,7 +23,7 @@ import { Button, Card, SectionHeading, StatusBanner } from "./ui";
 // Issue #472: the one optional customer PO PDF.
 //
 // The panel is deliberately not a supporting-file manager: it shows the single
-// current document, its version against the retained correction history, and
+// current document, its version against the retained document versions, and
 // the four operations staff need. Attaching or replacing a PDF never saves the
 // purchase order, so a checked draft stays exactly as entered.
 
@@ -40,7 +40,8 @@ export interface PurchaseOrderDocumentPanelViewProps {
   absenceConfirmed?: boolean;
   /**
    * #610: the card belongs to a saved record rather than a draft, so the empty
-   * state says the PDF can be attached later without a correction.
+   * state says the PDF can be attached later without a correction. A saved
+   * record always renders the compact card, so this implies `compact`.
    */
   savedRecord?: boolean;
   preview?: { url: string; filename: string } | null;
@@ -70,7 +71,7 @@ export function PurchaseOrderDocumentPanelView({
   savedRecord = false,
   preview = null,
   disabled: disabledProp = false,
-  compact = false,
+  compact: compactProp = false,
   onChooseFile,
   onView,
   onRemove,
@@ -78,10 +79,25 @@ export function PurchaseOrderDocumentPanelView({
   onCancelRemove,
   onClosePreview,
 }: PurchaseOrderDocumentPanelViewProps) {
+  // A saved record's card is always compact; deriving it here means the two
+  // props cannot drift into the non-compact draft layout.
+  const compact = compactProp || savedRecord;
   const active: PurchaseOrderDocumentDTO | null = state.Document ?? null;
   const disabled = busy !== "idle" || loading || disabledProp;
   const versionLabel = documentVersionLabel(state);
   const uploadedDate = active?.UploadedAt ? active.UploadedAt.slice(0, 10) : "";
+  // The DTO carries the uploader id only, so the card names that and never
+  // invents a person. Earlier versions are metadata: nothing here reads bytes.
+  const uploaderLabel =
+    active !== null && active.UploadedBy > 0 ? `user #${active.UploadedBy}` : "";
+  const earlierVersions =
+    active === null
+      ? []
+      : state.Versions.filter((version) => version.ID !== active.ID);
+  const retainedVersionsLabel =
+    state.Versions.length === 1
+      ? "1 earlier document version is kept."
+      : `${state.Versions.length} earlier document versions are kept.`;
 
   return (
     <Card className="p-4" data-tutorial="po-document">
@@ -127,11 +143,7 @@ export function PurchaseOrderDocumentPanelView({
             </p>
           ) : null}
           {state.Versions.length > 0 ? (
-            <p className="text-caption text-ink-500">
-              {state.Versions.length}{" "}
-              {state.Versions.length === 1 ? "earlier version is" : "earlier versions are"}{" "}
-              kept in the correction history.
-            </p>
+            <p className="text-caption text-ink-500">{retainedVersionsLabel}</p>
           ) : null}
         </div>
       ) : (
@@ -142,7 +154,26 @@ export function PurchaseOrderDocumentPanelView({
           <p className="tnum whitespace-nowrap text-caption text-ink-500">
             {formatDocumentSize(active.SizeBytes)}
             {uploadedDate !== "" ? ` · uploaded ${uploadedDate}` : ""}
+            {uploaderLabel !== "" ? ` · ${uploaderLabel}` : ""}
           </p>
+          {earlierVersions.length > 0 ? (
+            <details className="mt-1 text-caption text-ink-500">
+              <summary className="w-fit cursor-pointer select-none font-medium text-ink-600">
+                {`Earlier versions (${earlierVersions.length})`}
+              </summary>
+              <ul className="mt-1 grid gap-0.5">
+                {earlierVersions.map((version) => (
+                  <li key={version.UUID} className="tnum">
+                    {`Version ${version.Version} · ${formatDocumentSize(version.SizeBytes)}${
+                      version.UploadedAt !== ""
+                        ? ` · uploaded ${version.UploadedAt.slice(0, 10)}`
+                        : ""
+                    }`}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
         </div>
       )}
 
@@ -169,8 +200,8 @@ export function PurchaseOrderDocumentPanelView({
             Remove the customer PO PDF?
           </p>
           <p className="text-caption text-ink-600">
-            The current file stops being attached. Earlier versions stay in the
-            correction history, and no purchase order field changes.
+            The current file stops being attached. Earlier document versions are
+            kept, and no purchase order field changes.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -277,7 +308,7 @@ export interface PurchaseOrderDocumentPanelProps {
   /** Server state when the parent already has it (snapshots, saved views). */
   initialState?: PurchaseOrderDocumentStateDTO | null;
   absenceConfirmed?: boolean;
-  /** #610: the saved record's card can say the PDF is still attachable later. */
+  /** #610: the saved record's card, compact and attachable later. */
   savedRecord?: boolean;
   onStateChange?: (state: PurchaseOrderDocumentStateDTO) => void;
   /**
@@ -291,7 +322,7 @@ export interface PurchaseOrderDocumentPanelProps {
    * the real empty/attached shape but never reads or writes a server row.
    */
   tutorial?: boolean;
-  /** Renders the narrow sticky-rail card. */
+  /** Renders the narrow sticky-rail card. A saved record always does. */
   compact?: boolean;
 }
 
