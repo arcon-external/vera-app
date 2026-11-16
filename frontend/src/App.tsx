@@ -1616,6 +1616,14 @@ function App() {
     }
   }, [page]);
 
+  // Issue #622: one lookup of the selected customer's name, shared by Save
+  // draft and the hero, so the two can never label the same selection
+  // differently.
+  const selectedCustomerName = useMemo(
+    () => customerOptions.find((option) => option.value === customerId)?.label ?? "",
+    [customerOptions, customerId]
+  );
+
   const handleSaveDraft = useCallback(async () => {
     // Issue #605: the tour's editor is practice. Saving would persist made-up
     // lines into the real workspace, so the guard refuses before the binding
@@ -1626,13 +1634,11 @@ function App() {
     }
     setSavingDraft(true);
     try {
-      const customerName =
-        customerOptions.find((option) => option.value === customerId)?.label ?? "";
       const id = await SaveDraft(
         new backend.SavedDraft({
           Label: details.subject.trim(),
           Subject: details.subject.trim(),
-          CustomerName: customerName,
+          CustomerName: selectedCustomerName,
           Payload: JSON.stringify({ items, details, customerId }),
           ID: activeDraftId,
           ItemCount: countDraftItems(items),
@@ -1659,7 +1665,7 @@ function App() {
     } finally {
       setSavingDraft(false);
     }
-  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot, activeTutorial]);
+  }, [items, details, customerId, selectedCustomerName, activeDraftId, pushToast, clearRecoverySnapshot, activeTutorial]);
 
   const handleOpenDraft = useCallback(
     async (id: number) => {
@@ -2435,8 +2441,9 @@ function App() {
   }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot, activeTutorial]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
-  // Issue #623: the hero mirrors what the Summary rail prices, through the
-  // same computePricing call, so the two figures can never disagree.
+  // Issue #622: one pricing computation for the whole screen. The Quotation
+  // hero and the Summary rail are both handed this object, so the two figures
+  // cannot disagree and neither prices a second time.
   const quotationPricing = useMemo(
     () =>
       computePricing(
@@ -2454,8 +2461,6 @@ function App() {
       details.serviceCategory,
     ]
   );
-  const quotationCustomerName =
-    customerOptions.find((option) => option.value === customerId)?.label ?? "";
   const hasRenderableItems = items.some(
     (item) =>
       item.description.trim() !== "" ||
@@ -3238,14 +3243,9 @@ function App() {
           {/* Issue #623: the same dark hero the PO editor opens with, mirroring
               the editor state above the form + rail and capped with them. */}
           <QuotationHero
-            customerName={quotationCustomerName}
-            validity={details.validity}
-            paymentTerm={details.paymentTerm}
-            incoterm={details.incoterm}
+            customerName={selectedCustomerName}
+            details={details}
             currencyCode={liveEntry?.code ?? companyCurrency}
-            taxZone={details.taxZone}
-            taxType={details.taxType}
-            serviceCategory={details.serviceCategory}
             currency={liveEntry}
             customerGrand={quotationPricing.customerGrand}
             ppnAmount={quotationPricing.ppnAmount}
@@ -3365,6 +3365,7 @@ function App() {
                 <SummaryRail
                   items={items}
                   currency={liveEntry}
+                  pricing={quotationPricing}
                   discountPercent={details.discountPercent}
                   taxZone={details.taxZone}
                   taxType={details.taxType}

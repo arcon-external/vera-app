@@ -1951,13 +1951,15 @@ const CASES: SnapshotCase[] = [
     element: (
       <QuotationHero
         customerName="PT. Infineon Technologies Batam"
-        validity={30}
-        paymentTerm={90}
-        incoterm="EXW"
+        details={{
+          validity: 30,
+          paymentTerm: 90,
+          incoterm: "EXW",
+          taxZone: "NonFTZ",
+          taxType: "Goods",
+          serviceCategory: "",
+        }}
         currencyCode="IDR"
-        taxZone="NonFTZ"
-        taxType="Goods"
-        serviceCategory=""
         currency={PO_EDITOR_IDR}
         customerGrand={1_110_000}
         ppnAmount={110_000}
@@ -1977,13 +1979,15 @@ const CASES: SnapshotCase[] = [
     element: (
       <QuotationHero
         customerName="PT. Infineon Technologies Batam"
-        validity={45}
-        paymentTerm={60}
-        incoterm="DAP"
+        details={{
+          validity: 45,
+          paymentTerm: 60,
+          incoterm: "DAP",
+          taxZone: "FTZ",
+          taxType: "Goods",
+          serviceCategory: "",
+        }}
         currencyCode="IDR"
-        taxZone="FTZ"
-        taxType="Goods"
-        serviceCategory=""
         currency={PO_EDITOR_IDR}
         customerGrand={0}
         ppnAmount={0}
