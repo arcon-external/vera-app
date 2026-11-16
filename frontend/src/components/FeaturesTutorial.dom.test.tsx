@@ -34,11 +34,13 @@ function Harness({
   onClose,
   onNavigate = () => undefined,
   onReveal,
+  onAction,
   steps: tutorialSteps = steps,
 }: {
   onClose: (reason: "finished" | "skipped") => void;
   onNavigate?: () => void;
   onReveal?: (reveal: string | null) => void;
+  onAction?: (action: string) => void;
   steps?: FeaturesTutorialStep[];
 }) {
   return (
@@ -54,6 +56,7 @@ function Harness({
         steps={tutorialSteps}
         onNavigate={onNavigate}
         onReveal={onReveal}
+        onAction={onAction}
         onClose={onClose}
       />
     </div>
@@ -616,5 +619,167 @@ describe("FeaturesTutorial", () => {
     act(() => nextButton().click());
     await flush();
     expect(reveals.at(-1)).toBeNull();
+  });
+
+  it("runs onLeave only when the guide leaves without the step's own action", async () => {
+    const onAction = vi.fn();
+    const surfaceSteps: FeaturesTutorialStep[] = [
+      {
+        id: "intro",
+        target: '[data-tutorial="first"]',
+        title: "Intro",
+        body: "Open the surface.",
+      },
+      {
+        id: "row",
+        target: '[data-tutorial="first"]',
+        title: "Pick a row",
+        body: "Click the row.",
+        advance: "click",
+        onLeave: "close-surface",
+      },
+      {
+        id: "done",
+        target: '[data-tutorial="second"]',
+        title: "Done",
+        body: "The surface is done.",
+        final: true,
+      },
+    ];
+    act(() =>
+      root.render(
+        <Harness onClose={vi.fn()} onAction={onAction} steps={surfaceSteps} />
+      )
+    );
+    await flush();
+    act(() => nextButton().click());
+    await flush();
+    expect(document.body.textContent).toContain("Pick a row");
+
+    // The step's action fulfilled it: the surface must stay open for the next
+    // micro-step, so the leave action is not run.
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-tutorial="first"]')
+        ?.click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Done");
+    expect(onAction).not.toHaveBeenCalledWith("close-surface");
+
+    // Back from the fulfilled step runs the *current* step's leave action,
+    // which the Done step does not have.
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Previous step"]')
+        ?.click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Pick a row");
+    expect(onAction).not.toHaveBeenCalledWith("close-surface");
+
+    // Next skips the step without its action: that is an unfulfilled exit.
+    act(() => nextButton().click());
+    await flush();
+    expect(onAction).toHaveBeenCalledWith("close-surface");
+
+    // Back from a step that owns the surface closes it too.
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Previous step"]')
+        ?.click();
+    });
+    await flush();
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Previous step"]')
+        ?.click();
+    });
+    await flush();
+    expect(onAction.mock.calls.filter(([key]) => key === "close-surface")).toHaveLength(2);
+    expect(document.body.textContent).toContain("Intro");
+  });
+
+  it("sends Back to the step named by backTo", async () => {
+    const namedSteps: FeaturesTutorialStep[] = [
+      {
+        id: "start",
+        target: '[data-tutorial="first"]',
+        title: "Start",
+        body: "Start body.",
+      },
+      {
+        id: "middle",
+        target: '[data-tutorial="first"]',
+        title: "Middle",
+        body: "Middle body.",
+      },
+      {
+        id: "deep",
+        target: '[data-tutorial="first"]',
+        title: "Deep",
+        body: "Deep body.",
+        backTo: "start",
+      },
+      {
+        id: "end",
+        target: '[data-tutorial="second"]',
+        title: "End",
+        body: "End body.",
+        final: true,
+      },
+    ];
+    act(() => root.render(<Harness onClose={vi.fn()} steps={namedSteps} />));
+    await flush();
+    act(() => nextButton().click());
+    await flush();
+    act(() => nextButton().click());
+    await flush();
+    expect(document.body.textContent).toContain("Deep body.");
+
+    // The default Back would land on Middle; backTo skips the micro-steps
+    // that belong to a surface the step just closed.
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('button[aria-label="Previous step"]')
+        ?.click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Start body.");
+  });
+
+  it("restores the spotlight when a target mounts after the step was missing", async () => {
+    vi.useFakeTimers();
+    const lateSteps: FeaturesTutorialStep[] = [
+      {
+        id: "late",
+        target: '[data-tutorial="late-target"]',
+        title: "Late target",
+        body: "The surface was reopened.",
+        advance: "click",
+        final: true,
+      },
+    ];
+    act(() => root.render(<Harness onClose={vi.fn()} steps={lateSteps} />));
+    const startedAt = performance.now();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2700);
+    });
+    // The timeout is what marks the target missing; without a faked clock this
+    // test would only prove the re-measure, not the re-acquire.
+    expect(performance.now() - startedAt).toBeGreaterThan(2500);
+    expect(document.querySelector("[data-tutorial-spotlight]")).toBeNull();
+    expect(document.querySelector("[data-tutorial-beacon]")).toBeNull();
+
+    const late = document.createElement("button");
+    late.dataset.tutorial = "late-target";
+    late.textContent = "Reopened";
+    container.appendChild(late);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(400);
+    });
+
+    expect(document.querySelector("[data-tutorial-spotlight]")).not.toBeNull();
+    expect(document.querySelector("[data-tutorial-beacon]")).not.toBeNull();
   });
 });

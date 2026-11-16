@@ -91,6 +91,7 @@ interface HarnessProps {
   onConfirm?: (selection: POSourceSelection) => void;
   mode?: "entry" | "repair";
   excludePOID?: number;
+  tutorial?: boolean;
 }
 
 function Harness({
@@ -101,6 +102,7 @@ function Harness({
   onConfirm = () => {},
   mode = "entry",
   excludePOID,
+  tutorial = false,
 }: HarnessProps) {
   const [open, setOpen] = useState(initialOpen);
   return (
@@ -120,6 +122,7 @@ function Harness({
         loadPage={loadPage}
         loadRevisions={loadRevisions}
         validate={validate}
+        tutorial={tutorial}
       />
     </>
   );
@@ -395,6 +398,34 @@ describe("POQuotationSelector repair mode (issue #475)", () => {
     await renderHarness();
     expect(document.body.textContent).toContain("Select a quotation");
     expect(document.body.textContent).not.toContain("Select the new quotation");
+  });
+});
+
+// Issue #603: the PO tutorial guides the practice row, the continue control and
+// the confirm control as separate micro-steps, so each needs a stable anchor.
+describe("POQuotationSelector tutorial anchors (issue #603)", () => {
+  it("labels the practice row, continue and confirm controls for the guide", async () => {
+    await renderHarness({ tutorial: true });
+    expect(
+      document.querySelector('[data-tutorial="tutorial-quotation-row"]')
+    ).not.toBeNull();
+
+    await chooseQuotationAndRevision();
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-continue"]')
+    ).not.toBeNull();
+
+    await click(button("Continue to confirmation"));
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-confirm"]')
+    ).not.toBeNull();
+  });
+
+  it("leaves ordinary selectors free of tutorial anchors", async () => {
+    await renderHarness();
+    await chooseQuotationAndRevision();
+    await click(button("Continue to confirmation"));
+    expect(document.querySelector("[data-tutorial]")).toBeNull();
   });
 });
 
