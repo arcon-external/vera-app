@@ -46,7 +46,7 @@ export function blankPracticeItem(key: number, uom: string): EditorItem {
 export function tutorialQuotationDetails(): DetailsState {
   return {
     subject: TUTORIAL_SUBJECT,
-    recipientName: "Practice Contact (MOCK)",
+    recipientName: "Practice Recipient (MOCK)",
     validity: 30,
     paymentTerm: 90,
     leadTimeYears: 0,

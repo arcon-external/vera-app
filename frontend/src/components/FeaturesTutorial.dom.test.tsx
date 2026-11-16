@@ -193,48 +193,74 @@ describe("FeaturesTutorial", () => {
     expect(document.body.textContent).toContain("Done");
   });
 
-  it("advances when the highlighted field receives input", async () => {
-    const inputSteps: FeaturesTutorialStep[] = [
+  it("focuses the guide heading only for a read-only step", async () => {
+    vi.useFakeTimers();
+    const focusSteps: FeaturesTutorialStep[] = [
       {
-        id: "input",
-        target: '[data-tutorial="field"]',
-        title: "Type a cost",
-        body: "Type in the field.",
-        advance: "input",
+        id: "intro",
+        target: '[data-tutorial="second"]',
+        title: "Intro",
+        body: "Read this first.",
+      },
+      {
+        id: "click",
+        target: '[data-tutorial="first"]',
+        title: "Use the control",
+        body: "Click the control.",
+        advance: "click",
       },
       {
         id: "done",
         target: '[data-tutorial="second"]',
         title: "Done",
-        body: "Next.",
+        body: "Read only.",
         final: true,
       },
     ];
-    act(() => root.render(<Harness onClose={vi.fn()} steps={inputSteps} />));
-    await flush();
-    expect(
-      document.querySelector("[data-tutorial-beacon]")?.textContent
-    ).toContain("Type");
+    act(() => root.render(<Harness onClose={vi.fn()} steps={focusSteps} />));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    // A read-only step announces itself: the heading takes focus after the
+    // step settles.
+    expect(document.activeElement?.id).toBe("features-tutorial-title");
+
+    act(() => nextButton().click());
+    // The entering step is interactive. Wait only for the swap, then focus
+    // the field the user is about to use — before the guide's 30 ms focus
+    // timer would fire.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(130);
+    });
+    expect(document.body.textContent).toContain("Click the control.");
     const field = document.querySelector<HTMLInputElement>(
       '[data-tutorial="field"]'
     );
     if (field === null) throw new Error("no tutorial field");
+    act(() => field.focus());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+    // An interactive step must not steal focus from the field the user is
+    // typing in or about to click.
+    expect(document.activeElement).toBe(field);
 
-    // Input anywhere else is not this step's action.
-    act(() => {
+    // The guide moves on; the final read-only step takes focus again. Two
+    // timer advances let React commit the swap before the focus timer runs.
+    act(() =>
       document
-        .querySelector<HTMLElement>('[data-tutorial="second"]')
-        ?.dispatchEvent(new Event("input", { bubbles: true }));
+        .querySelector<HTMLButtonElement>('[data-tutorial="first"]')
+        ?.click()
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(130);
     });
-    await flush(50);
-    expect(document.body.textContent).toContain("Type a cost");
-
-    act(() => {
-      field.value = "7500000";
-      field.dispatchEvent(new Event("input", { bubbles: true }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
     });
-    await flush();
-    expect(document.body.textContent).toContain("Done");
+    expect(document.body.textContent).toContain("Read only.");
+    expect(document.activeElement?.id).toBe("features-tutorial-title");
   });
 
   it("advances on the app's tutorial event", async () => {
@@ -532,6 +558,27 @@ describe("FeaturesTutorial", () => {
     await flush();
     expect(document.body.textContent).toContain("Read only.");
     expect(document.querySelector("[data-tutorial-beacon]")).toBeNull();
+  });
+
+  it("ignores pointer events until the entering phase settles", async () => {
+    vi.useFakeTimers();
+    act(() => root.render(<Harness onClose={vi.fn()} />));
+    // The step starts in its entering phase, still fading and settling into
+    // place. A click aimed at the target must not land on the guide instead.
+    expect(motionPhase()).toBe("entering");
+    const tooltip = document.querySelector<HTMLElement>('[role="dialog"]');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.style.pointerEvents).toBe("none");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(motionPhase()).toBe("idle");
+    // Buttons are usable again once the guide has settled.
+    expect(
+      document.querySelector<HTMLElement>('[role="dialog"]')?.style
+        .pointerEvents
+    ).toBe("auto");
   });
 
   it("keeps the fade but drops movement under prefers-reduced-motion", async () => {

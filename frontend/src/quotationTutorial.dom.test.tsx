@@ -350,7 +350,7 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       // carrying the same anchors would make the guide measure the wrong one.
       for (const anchor of [
         "quotation-customer",
-        "quotation-lines-header",
+        "quotation-line-cost",
         "quotation-totals",
       ]) {
         expect(
@@ -386,6 +386,32 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       typeInto(input("Quantity for line 1"), "4");
       await flush();
       expect(railText()).toContain("Rp30.162.500");
+
+      act(() => button("Skip Features Tutorial").click());
+      await flush();
+    }
+  );
+
+  it(
+    "mounts the practice workspace even when the currency catalogue cannot resolve the profile",
+    { timeout: 20000 },
+    async () => {
+      // A USD company whose entry is missing from the catalogue resolves to
+      // "currency unknown". The tour must still replace the real editor: the
+      // practice lines are sandbox data, and showing the real editor under
+      // the guide would let a practice step point at real controls.
+      mocks.getCompany.mockResolvedValue({ ...PROFILE, Currency: "USD" });
+      mocks.getCurrencyCatalogue.mockResolvedValue([]);
+      await openQuotationTour();
+
+      expect(practiceWorkspace()).not.toBeNull();
+      expect(document.body.textContent).not.toContain("Amounts are hidden");
+      expect(document.body.textContent).toContain(
+        "This is a sandbox with made-up lines"
+      );
+      // The fallback entry still renders money: it is the denomination every
+      // stored integer was written in, and the practice data is not stored.
+      expect(railText()).toContain("Rp18.662.500");
 
       act(() => button("Skip Features Tutorial").click());
       await flush();
@@ -615,18 +641,26 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       await openQuotationTour();
       await advanceTutorialTo("quotation-line-cost");
 
-      // The cost step waits for typing, so its cue is Type, not Click.
+      // The step says to type the cost and then press Next. Its cue is Type,
+      // but it never advances on a keystroke: the sell price updates in place
+      // while the guide stays put.
       expect(
         document.querySelector("[data-tutorial-beacon]")?.textContent
       ).toContain("Type");
 
       typeInto(input("Unit price for line 1"), "7500000");
-      await waitFor(650);
-      expect(tutorialStep()).toBe("quotation-line-sell");
+      // Give the guide the full leave window: if a keystroke advanced the
+      // step, the id would have changed by now.
+      await waitFor(700);
+      expect(tutorialStep()).toBe("quotation-line-cost");
       // Worked example: 2 x (7.500.000 + 15%) = 17.250.000 for line 1, plus
       // the split line's 7.162.500. FTZ goods carry no PPN, so the customer
       // grand total is that sum.
       expect(railText()).toContain("Rp24.412.500");
+
+      await act(async () => button("Next step").click());
+      await waitFor(700);
+      expect(tutorialStep()).toBe("quotation-line-sell");
       expect(document.body.textContent).toContain("sell price");
 
       await advanceTutorialTo("quotation-line-margin");
@@ -686,17 +720,19 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
   );
 
   it(
-    "points at Save and Export with a beacon and never presses them",
+    "points at Save and Export without a cue and never presses them",
     { timeout: 30000 },
     async () => {
       await openQuotationTour();
       await advanceTutorialTo("quotation-actions");
 
-      // The actions step is read-only: the beacon names the click, but the
-      // guide advances with Next and never invokes either control.
+      // The actions step is read-only: the spotlight marks the controls, but
+      // there is no beacon because the guide is not asking for a press. It
+      // advances with Next and never invokes either control.
       expect(
-        document.querySelector("[data-tutorial-beacon]")?.textContent
-      ).toContain("Click");
+        document.querySelector('[data-tutorial-spotlight="target"]')
+      ).not.toBeNull();
+      expect(document.querySelector("[data-tutorial-beacon]")).toBeNull();
       expect(mocks.saveDraft).not.toHaveBeenCalled();
       expect(mocks.prepare).not.toHaveBeenCalled();
       expect(mocks.exportPdf).not.toHaveBeenCalled();

@@ -5,8 +5,8 @@ import {
   QUOTE_BAR_CHOICE_REVEAL,
   QUOTE_BAR_REVEAL,
   QUOTE_BAR_RESOLVED_EVENT,
-  TUTORIAL_PAYMENT_TERMS,
-} from "./tutorialData";
+} from "../tutorialAnchors";
+import { TUTORIAL_PAYMENT_TERMS } from "./tutorialData";
 
 // Issue #595: the Purchase Order Features Tutorial script. It is deliberately
 // workspace-shaped rather than a generic carousel: each step names a real
@@ -47,7 +47,6 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       </p>
     ),
     advance: "click",
-    beaconLabel: "Click",
   },
   // Issue #603: the selector is guided one real click at a time instead of
   // explained as a block. Each micro-step docks the guide, keeps the modal
@@ -88,7 +87,6 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     ),
     spotlight: "none",
     advance: "click",
-    beaconLabel: "Click",
     // Back closes the selector, so it returns to the rail link rather than
     // to a micro-step whose control is gone with the dialog.
     backTo: "po-link",
@@ -141,7 +139,6 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       </>
     ),
     advance: "focus",
-    beaconLabel: "Press",
   },
   // Issue #604: the bar is explained, then chosen from. Both of these steps
   // carry the reveal so the bar stays open while the guide is visible — a
@@ -181,7 +178,6 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     ),
     advance: "event",
     advanceEvent: QUOTE_BAR_RESOLVED_EVENT,
-    beaconLabel: "Select",
     reveal: QUOTE_BAR_CHOICE_REVEAL,
   },
   {
@@ -239,7 +235,6 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     ),
     advance: "event",
     advanceEvent: GHOST_RESOLVED_EVENT,
-    beaconLabel: "Choose",
   },
   {
     id: "po-ghost-result",

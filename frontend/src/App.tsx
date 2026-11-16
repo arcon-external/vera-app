@@ -99,7 +99,7 @@ import { PURCHASE_ORDER_TUTORIAL_STEPS } from "./featuresTutorial/purchaseOrderS
 import { QUOTATION_TUTORIAL_STEPS } from "./featuresTutorial/quotationSteps";
 import { QuotationTutorialWorkspace } from "./featuresTutorial/QuotationTutorialWorkspace";
 import {
-  TUTORIAL_PRACTICE_TOAST,
+  TUTORIAL_PRACTICE_COPY,
   TUTORIAL_RECONCILIATION_TRANSPORT,
   TUTORIAL_SELECTOR_PAGE,
   TUTORIAL_SELECTOR_REVISIONS,
@@ -1620,7 +1620,7 @@ function App() {
     // lines into the real workspace, so the guard refuses before the binding
     // is reached and says why.
     if (activeTutorial === "quotation") {
-      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      pushToast("info", TUTORIAL_PRACTICE_COPY);
       return;
     }
     setSavingDraft(true);
@@ -2215,7 +2215,7 @@ function App() {
     // Issue #605: practice lines must never reach the server as a real
     // quotation, even though the practice panel looks like the editor.
     if (activeTutorial === "quotation") {
-      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      pushToast("info", TUTORIAL_PRACTICE_COPY);
       return;
     }
     // #390: a keyboard shortcut bypasses the rendered gate, so the refusal is
@@ -2389,7 +2389,7 @@ function App() {
     // never be created. Refuse before the binding, exactly as Save and
     // Prepare do.
     if (activeTutorial === "quotation") {
-      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      pushToast("info", TUTORIAL_PRACTICE_COPY);
       return;
     }
     // #390: the export shortcut bypasses the rendered gate exactly as prepare
@@ -2874,7 +2874,7 @@ function App() {
             <div className="flex min-w-0 items-center gap-2">
               {activeTutorial === "quotation" ? (
                 <span className="text-caption text-ink-500">
-                  {TUTORIAL_PRACTICE_TOAST}
+                  {TUTORIAL_PRACTICE_COPY}
                 </span>
               ) : pendingPaste ? (
                 <span className="flex items-center gap-2">
@@ -2959,7 +2959,7 @@ function App() {
                 }
                 title={
                   activeTutorial === "quotation"
-                    ? TUTORIAL_PRACTICE_TOAST
+                    ? TUTORIAL_PRACTICE_COPY
                     : dirty
                       ? "Save this quotation to come back to it later"
                       : "Nothing to save yet"
@@ -3178,22 +3178,22 @@ function App() {
           tutorialReview={tutorialLinked ? tutorialReviewDto : null}
           tutorialReconciliationTransport={TUTORIAL_RECONCILIATION_TRANSPORT}
           onTutorialAction={() =>
-            pushToast("info", TUTORIAL_PRACTICE_TOAST)
+            pushToast("info", TUTORIAL_PRACTICE_COPY)
           }
         />
         </div>
       ) : null}
 
-      {activeTutorial === "quotation" &&
-      visiblePage === "create" &&
-      liveEntry !== null ? (
+      {activeTutorial === "quotation" && visiblePage === "create" ? (
         // Issue #605: while the Quotation tour is live on the editor page, the
         // practice workspace replaces the real one entirely. The real draft,
         // its clipboard capture and its anchors are not mounted, so no tour
         // target can resolve to a real control and no practice edit can reach
-        // real state.
+        // real state. The guide must not wait for the currency catalogue
+        // either: the practice lines are sandbox data, and the IDR fallback is
+        // the one honest denomination for it.
         <QuotationTutorialWorkspace
-          currency={liveEntry}
+          currency={liveEntry ?? IDR_FALLBACK_ENTRY}
           canonicalUnit={canonicalUnit}
           uomOptions={storedUoMs ?? []}
           uomPendingLabel={

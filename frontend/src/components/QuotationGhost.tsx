@@ -10,7 +10,7 @@ import type { SourceItem } from "../poSourceItems";
 import {
   GHOST_ACTIONS_ANCHOR,
   GHOST_RESOLVED_EVENT,
-} from "../featuresTutorial/tutorialData";
+} from "../tutorialAnchors";
 import { emitFeaturesTutorialAdvance } from "./FeaturesTutorial";
 
 const UOMS = [

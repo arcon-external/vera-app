@@ -53,6 +53,12 @@ export function QuotationTutorialWorkspace({
     tutorialQuotationItems(canonicalUnit)
   );
 
+  // These line handlers deliberately mirror App's handlers rather than import
+  // them: App's are entangled with the draft, recovery and paste state, and
+  // sharing them would either drag that state into the sandbox or force a
+  // refactor of the real editor. The duplication is the price of unmounting as
+  // the whole teardown. Both paths edit the same EditorItem shape, so a change
+  // to one set of handlers must be made to the other in the same change.
   const changeDetails = useCallback((patch: Partial<DetailsState>) => {
     setDetails((current) => ({ ...current, ...patch }));
   }, []);
@@ -305,16 +311,14 @@ export function QuotationTutorialWorkspace({
           />
 
           <div>
-            <div data-tutorial="quotation-lines-header">
-              <SectionHeading
-                title="Line items"
-                action={
-                  <span className="text-caption text-ink-500">
-                    Toggle margin per line
-                  </span>
-                }
-              />
-            </div>
+            <SectionHeading
+              title="Line items"
+              action={
+                <span className="text-caption text-ink-500">
+                  Toggle margin per line
+                </span>
+              }
+            />
             <ItemEditor
               items={items}
               currency={currency}
