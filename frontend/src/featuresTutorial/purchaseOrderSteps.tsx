@@ -33,32 +33,79 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     title: "A purchase order begins with a quotation",
     body: (
       <p>
-        Every purchase order follows one issued quotation revision. Use this
-        link to choose the practice quotation — nothing is written to your real
-        quotation or purchase-order lists.
+        Every purchase order follows one issued quotation revision. Click{" "}
+        <strong>Link a Quotation</strong> to choose the practice quotation —
+        nothing is written to your real quotation or purchase-order lists.
       </p>
     ),
     advance: "click",
     beaconLabel: "Click",
   },
+  // Issue #603: the selector is guided one real click at a time instead of
+  // explained as a block. Each micro-step docks the guide, keeps the modal
+  // fully usable and waits for its own control. `onLeave` closes the selector
+  // only when the tour leaves a step *without* its action (Back, Next), so a
+  // fulfilled click keeps the modal open for the next micro-step.
   {
-    id: "po-tutorial-selector",
-    target: '[data-tutorial="tutorial-selector"]',
-    title: "Choose the practice quotation",
+    id: "po-selector-quotation",
+    target: '[data-tutorial="tutorial-quotation-row"]',
+    title: "Select the practice quotation",
     body: (
       <p>
-        Only the practice quotation is available here. Select{" "}
-        <strong>TUT-2026-001</strong>, keep revision 0, and confirm the source.
-        The guide steps aside so the selector is fully usable.
+        Choose <strong>TUT-2026-001</strong>. It is the only quotation in this
+        sandbox, so nothing real is touched.
       </p>
     ),
     // The selector is a modal with its own focus. Dimming a box around it and
-    // stacking the guide on top made the two fight; the guide docks below the
-    // modal and leaves every control clickable.
+    // stacking the guide on top made the two fight; the guide docks in the
+    // corner and leaves every control clickable.
+    spotlight: "none",
+    advance: "click",
+    beaconLabel: "Select",
+    onLeave: "close-tutorial-selector",
+    action: {
+      label: "Open the practice selector again",
+      action: "open-tutorial-selector",
+    },
+  },
+  {
+    id: "po-selector-continue",
+    target: '[data-tutorial="tutorial-selector-continue"]',
+    title: "Keep revision 0 and continue",
+    body: (
+      <p>
+        The practice quotation has one issued revision, already selected.{" "}
+        <strong>Continue</strong> moves to the final check.
+      </p>
+    ),
+    spotlight: "none",
+    advance: "click",
+    beaconLabel: "Click",
+    // Back closes the selector, so it returns to the rail link rather than
+    // to a micro-step whose control is gone with the dialog.
+    backTo: "po-link",
+    onLeave: "close-tutorial-selector",
+    action: {
+      label: "Open the practice selector again",
+      action: "open-tutorial-selector",
+    },
+  },
+  {
+    id: "po-selector-confirm",
+    target: '[data-tutorial="tutorial-selector-confirm"]',
+    title: "Confirm the source",
+    body: (
+      <p>
+        <strong>Confirm source</strong> links the practice order to this exact
+        revision. The selector closes and the source values appear beside your
+        fields; nothing is saved.
+      </p>
+    ),
     spotlight: "none",
     advance: "event",
     advanceEvent: "po-tutorial-linked",
-    beaconLabel: "Select",
+    beaconLabel: "Click",
+    backTo: "po-link",
     onLeave: "close-tutorial-selector",
     action: {
       label: "Open the practice selector again",

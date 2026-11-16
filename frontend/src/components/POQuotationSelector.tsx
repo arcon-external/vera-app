@@ -430,6 +430,9 @@ export function POQuotationSelectorView({
               <Button
                 variant="primary"
                 aria-label="Continue to confirmation"
+                data-tutorial={
+                  tutorial ? "tutorial-selector-continue" : undefined
+                }
                 disabled={!canContinue(state)}
                 onClick={() => dispatch({ type: "continue" })}
               >
@@ -440,6 +443,9 @@ export function POQuotationSelectorView({
               <Button
                 variant="primary"
                 aria-label="Confirm source"
+                data-tutorial={
+                  tutorial ? "tutorial-selector-confirm" : undefined
+                }
                 disabled={!canConfirm(state)}
                 onClick={onConfirm}
               >
