@@ -357,6 +357,16 @@ function heroTotal(): string {
   );
 }
 
+/** The Summary rail's own "Grand total" figure, read from the rail it rendered. */
+function railGrandTotal(): string {
+  const text =
+    document.querySelector<HTMLElement>('[data-tutorial="quotation-totals"]')
+      ?.textContent ?? "";
+  const match = /Grand total\s*(Rp[\d.,]+)/.exec(text);
+  if (match === null) throw new Error("no grand total in the Summary rail");
+  return match[1];
+}
+
 async function openQuotationEditor(): Promise<void> {
   await act(async () => {
     root.render(
@@ -431,6 +441,27 @@ describe("Quotation hero (issue #623)", () => {
     expect(heroText()).toContain("Non-FTZ · Services · Non-construction");
     expect(heroTotal()).toBe("Rp1.000.000");
     expect(heroText()).not.toContain("Includes PPN");
+  });
+
+  it("shows the same customer total as the Summary rail, live", async () => {
+    // Issue #622: App prices once and hands the object to both surfaces. This
+    // is the behavioural half of that: whatever the editor is showing, the
+    // hero figure and the rail figure are the same figure.
+    await openQuotationEditor();
+
+    expect(heroTotal()).toBe(railGrandTotal());
+
+    pickRadio("Tax zone", "Non-FTZ");
+    typeInto(input("Unit price for line 1"), "1000000");
+    expect(heroTotal()).toBe("Rp1.110.000");
+    expect(railGrandTotal()).toBe("Rp1.110.000");
+
+    typeInto(input("Quantity for line 1"), "3");
+    expect(heroTotal()).toBe(railGrandTotal());
+
+    pickRadio("Tax type", "Services");
+    expect(heroTotal()).toBe(railGrandTotal());
+    expect(heroTotal()).toBe("Rp3.000.000");
   });
 
   it("reports a saved draft without leaving its draft state", async () => {

@@ -4,6 +4,16 @@ import {
   TAX_TYPE_OPTIONS,
   TAX_ZONE_OPTIONS,
 } from "../tax";
+import type { DetailsState } from "./DetailsPanel";
+
+/**
+ * Issue #622: the details fields the hero mirrors, taken straight from the
+ * editor's state so a field rename cannot drift through hand-kept props.
+ */
+export type QuotationHeroDetails = Pick<
+  DetailsState,
+  "validity" | "paymentTerm" | "incoterm" | "taxZone" | "taxType" | "serviceCategory"
+>;
 
 /**
  * Issue #623: the Quotation editor's dark hero, matching the Purchase Order
@@ -17,14 +27,10 @@ import {
  */
 export interface QuotationHeroProps {
   customerName: string;
-  validity: number;
-  paymentTerm: number;
-  incoterm: string;
+  /** The details fields the hero mirrors (issue #622). */
+  details: QuotationHeroDetails;
   /** The profile currency code, shown beside the Incoterm. */
   currencyCode: string;
-  taxZone: string;
-  taxType: string;
-  serviceCategory: string;
   /** The live currency entry; null while unresolved. */
   currency: CurrencyInfo | null;
   /** Customer grand total in minor units (PPN included when charged). */
@@ -60,13 +66,8 @@ function padRevision(revision: number): string {
 
 export function QuotationHero({
   customerName,
-  validity,
-  paymentTerm,
-  incoterm,
+  details,
   currencyCode,
-  taxZone,
-  taxType,
-  serviceCategory,
   currency,
   customerGrand,
   ppnAmount,
@@ -76,9 +77,16 @@ export function QuotationHero({
   ready = false,
   statusOverride = null,
 }: QuotationHeroProps) {
+  const { validity, paymentTerm, incoterm, taxZone, taxType, serviceCategory } =
+    details;
   const number = quoteNumber?.trim() ?? "";
   const currentRevision = nextRevision === null ? null : nextRevision - 1;
-  const issued = number !== "" && currentRevision !== null;
+  // Issue #622: a record is issued because a stored revision exists, not
+  // because its number is non-empty. `nextRevision` is null only for a new or
+  // saved draft, so its presence is the whole signal -- and an issued record
+  // whose number went missing still reads as issued (the title falls back to
+  // "Quotation" rather than announcing a new draft).
+  const issued = currentRevision !== null;
 
   const taxLabel =
     [
@@ -139,8 +147,8 @@ export function QuotationHero({
 
       <div className="relative z-10 mt-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
-          <h1 className="tnum text-[30px] font-semibold leading-none tracking-[-0.035em] sm:text-[34px]">
-            {issued ? number : "New quotation"}
+          <h1 className="tnum text-display-lg font-semibold sm:text-display-xl">
+            {issued ? (number !== "" ? number : "Quotation") : "New quotation"}
           </h1>
           <p className="mt-2 truncate text-small text-accent-100">
             {customerName.trim() !== "" ? customerName : "No customer yet"}
@@ -150,12 +158,12 @@ export function QuotationHero({
           <span>Customer total</span>
           <strong
             data-testid="quotation-hero-total"
-            className="tnum mt-1 block whitespace-nowrap text-[24px] font-semibold normal-case tracking-normal text-white"
+            className="tnum mt-1 block whitespace-nowrap text-metric font-semibold normal-case tracking-normal text-white"
           >
             {currency === null ? "—" : formatMoney(currency, customerGrand)}
           </strong>
           {ppnAmount > 0 ? (
-            <span className="mt-0.5 block text-[10px] normal-case tracking-normal text-accent-200">
+            <span className="mt-0.5 block text-micro-sm normal-case tracking-normal text-accent-200">
               Includes PPN
             </span>
           ) : null}
@@ -164,19 +172,19 @@ export function QuotationHero({
 
       <dl className="relative z-10 mt-5 flex flex-wrap gap-x-7 gap-y-3 border-t border-white/15 pt-3 text-small text-accent-100">
         <div>
-          <dt className="text-[9px] uppercase tracking-[0.14em] text-accent-300">
+          <dt className="text-micro-xs uppercase tracking-[0.14em] text-accent-300">
             Validity
           </dt>
           <dd>{`${validity} days`}</dd>
         </div>
         <div>
-          <dt className="text-[9px] uppercase tracking-[0.14em] text-accent-300">
+          <dt className="text-micro-xs uppercase tracking-[0.14em] text-accent-300">
             Payment
           </dt>
           <dd>{`${paymentTerm} days`}</dd>
         </div>
         <div>
-          <dt className="text-[9px] uppercase tracking-[0.14em] text-accent-300">
+          <dt className="text-micro-xs uppercase tracking-[0.14em] text-accent-300">
             Terms
           </dt>
           <dd>{`${incoterm.trim() !== "" ? incoterm : "—"} · ${
@@ -184,7 +192,7 @@ export function QuotationHero({
           }`}</dd>
         </div>
         <div>
-          <dt className="text-[9px] uppercase tracking-[0.14em] text-accent-300">
+          <dt className="text-micro-xs uppercase tracking-[0.14em] text-accent-300">
             Tax
           </dt>
           <dd>{taxLabel}</dd>

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Badge, Card } from "./ui";
 import { ppnRateBps, servicesRateBps, taxRateLabel } from "../tax";
 import { applyDiscount, applyMargin, formatMoney, parseIntOrZero, type CurrencyInfo } from "../format";
@@ -35,6 +35,12 @@ interface SummaryRailProps {
   taxZone: string;
   taxType: string;
   serviceCategory: string;
+  /**
+   * Issue #622: the caller's single pricing computation. The Quotation editor
+   * prices once and hands the same object to this rail and the Quotation hero,
+   * so the two figures cannot disagree. Omitted, the rail prices on its own.
+   */
+  pricing?: QuotationPricing;
   /** The live profile currency: this rail prices un-exported editor input,
    * so every figure is a raw minor-unit integer rendered with it. */
   currency?: CurrencyInfo;
@@ -122,17 +128,25 @@ export function computePricing(
   };
 }
 
+export type QuotationPricing = ReturnType<typeof computePricing>;
+
 export function SummaryRail({
   items,
   discountPercent,
   taxZone,
   taxType,
   serviceCategory,
+  pricing: suppliedPricing,
   currency = IDR_ENTRY,
   variant = "editor",
   footer,
 }: SummaryRailProps) {
-  const pricing = computePricing(items, discountPercent, taxZone, taxType, serviceCategory);
+  const pricing = useMemo(
+    () =>
+      suppliedPricing ??
+      computePricing(items, discountPercent, taxZone, taxType, serviceCategory),
+    [suppliedPricing, items, discountPercent, taxZone, taxType, serviceCategory]
+  );
   const taxLabel = taxRateLabel(taxZone, taxType, serviceCategory);
 
   return (

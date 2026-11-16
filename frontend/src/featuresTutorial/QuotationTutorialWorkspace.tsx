@@ -286,9 +286,8 @@ export function QuotationTutorialWorkspace({
     []
   );
 
-  // Issue #624: the practice hero mirrors these lines through the same
-  // computePricing call the Summary rail makes, so the card and the rail can
-  // never disagree -- exactly as App does for the real editor.
+  // Issue #622: the practice hero and rail share one pricing computation, the
+  // same way App's editor does, so the card and the rail can never disagree.
   const pricing = useMemo(
     () =>
       computePricing(
@@ -323,13 +322,8 @@ export function QuotationTutorialWorkspace({
           this surface stays in the form below. */}
       <QuotationHero
         customerName={customerName}
-        validity={details.validity}
-        paymentTerm={details.paymentTerm}
-        incoterm={details.incoterm}
+        details={details}
         currencyCode={currency.code}
-        taxZone={details.taxZone}
-        taxType={details.taxType}
-        serviceCategory={details.serviceCategory}
         currency={currency}
         customerGrand={pricing.customerGrand}
         ppnAmount={pricing.ppnAmount}
@@ -399,6 +393,7 @@ export function QuotationTutorialWorkspace({
           <SummaryRail
             items={items}
             currency={currency}
+            pricing={pricing}
             discountPercent={details.discountPercent}
             taxZone={details.taxZone}
             taxType={details.taxType}
