@@ -1,4 +1,10 @@
 import type { FeaturesTutorialStep } from "../components/FeaturesTutorial";
+import {
+  QUOTE_BAR_CHOICE_REVEAL,
+  QUOTE_BAR_REVEAL,
+  QUOTE_BAR_RESOLVED_EVENT,
+  TUTORIAL_PAYMENT_TERMS,
+} from "./tutorialData";
 
 // Issue #595: the Purchase Order Features Tutorial script. It is deliberately
 // workspace-shaped rather than a generic carousel: each step names a real
@@ -113,7 +119,7 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     },
   },
   {
-    id: "po-header",
+    id: "po-payment-terms",
     target: '[data-tutorial="po-payment-terms"]',
     page: "po",
     // Above the field keeps the source-basis card (the blue quotation values)
@@ -124,11 +130,72 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       <>
         <p>
           A <strong>blue</strong> border is a quotation value you have not used
-          yet; <strong>green</strong> means this field is using it.
+          yet. Press <strong>Payment terms</strong> to compare it with yours and
+          choose a side.
         </p>
         <p className="mt-2">
-          Focus Payment terms to compare both values and keep one side. Your own
-          value leaves the field normal.
+          This is the practice order; nothing is written to your real records.
+        </p>
+      </>
+    ),
+    advance: "focus",
+    beaconLabel: "Press",
+  },
+  // Issue #604: the bar is explained, then chosen from. Both of these steps
+  // carry the reveal so the bar stays open while the guide is visible — a
+  // focus-driven bar would close as soon as the guide takes focus for Next.
+  {
+    id: "po-quote-bar",
+    target: '[data-tutorial="po-quote-bar"]',
+    page: "po",
+    title: "Value from quotation",
+    body: (
+      <>
+        <p>
+          The bar shows the value this quotation carries:{" "}
+          <strong>{TUTORIAL_PAYMENT_TERMS}</strong>.{" "}
+          <strong>Use quotation value</strong> fills the field with it;{" "}
+          <strong>Use my value</strong> keeps the value you entered.
+        </p>
+        <p className="mt-2">
+          The guide keeps the bar open while you read it, even after Next.
+        </p>
+      </>
+    ),
+    reveal: QUOTE_BAR_REVEAL,
+  },
+  {
+    id: "po-quote-choice",
+    target: '[data-tutorial="po-quote-bar-actions"]',
+    page: "po",
+    // Right of the action row keeps the bar's header and the field visible.
+    placement: "right",
+    title: "Choose the value to keep",
+    body: (
+      <p>
+        Either button answers this step. The next step explains what the
+        field&rsquo;s border says about the value you kept.
+      </p>
+    ),
+    advance: "event",
+    advanceEvent: QUOTE_BAR_RESOLVED_EVENT,
+    beaconLabel: "Select",
+    reveal: QUOTE_BAR_CHOICE_REVEAL,
+  },
+  {
+    id: "po-quote-result",
+    target: '[data-tutorial="po-payment-terms"]',
+    page: "po",
+    placement: "top",
+    title: "The border is the answer",
+    body: (
+      <>
+        <p>
+          <strong>Green</strong> means this field is using the quotation&rsquo;s
+          value. <strong>White</strong> means your own value is kept.
+        </p>
+        <p className="mt-2">
+          Editing the field brings the choice back, so nothing is locked in.
         </p>
       </>
     ),

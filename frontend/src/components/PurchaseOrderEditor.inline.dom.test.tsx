@@ -5,9 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderSourceLineDTO } from "../poFinalize";
 import type { PurchaseOrderDTO, PurchaseOrderDTOItem } from "../purchaseOrder";
-import { PurchaseOrderEditorPage, type POEditorShellActions } from "./PurchaseOrderEditor";
+import {
+  PurchaseOrderEditorPage,
+  type POEditorShellActions,
+  type PurchaseOrderEditorPageProps,
+} from "./PurchaseOrderEditor";
 import type { ReconciliationSession } from "../poReconciliation";
 import type { ReconciliationTransport } from "../poReconciliationAdapter";
+import { FEATURES_TUTORIAL_ADVANCE_EVENT } from "./FeaturesTutorial";
+import {
+  tutorialOrder,
+  tutorialReview,
+} from "../featuresTutorial/tutorialData";
 
 // The inline quotation model: blue/green header fields, quotation ghosts built
 // from the real item row, and a final save that never opens a difference
@@ -313,7 +322,8 @@ async function pageCount(selector: string): Promise<number> {
 
 async function renderEditor(
   transport: ReconciliationTransport,
-  order: PurchaseOrderDTO = linkedOrder()
+  order: PurchaseOrderDTO = linkedOrder(),
+  extra: Partial<PurchaseOrderEditorPageProps> = {}
 ) {
   await act(async () => {
     root.render(
@@ -331,6 +341,7 @@ async function renderEditor(
         reconciliationTransport={transport}
         actorId={7}
         actorName="Rina"
+        {...extra}
       />
     );
   });
@@ -352,6 +363,10 @@ describe("inline quotation values", () => {
     act(() => terms.focus());
     expect(document.body.textContent).toContain("Value from quotation");
     expect(document.body.textContent).toContain("30 days");
+    // Real use offers the one next action, not the tutorial's second side.
+    expect(
+      document.querySelector('button[aria-label="Use my value"]')
+    ).toBeNull();
     act(() => button("Use quotation value").click());
     await flush();
 
@@ -552,6 +567,127 @@ describe("inline quotation values", () => {
     expect(document.body.textContent).not.toContain("Quotation line 2");
     if (shellActions === null) throw new Error("no shell actions after ignore");
     expect(shellActions.unresolvedCount).toBe(0);
+  });
+});
+
+describe("tutorial quotation bar (issue #604)", () => {
+  function tutorialEditor(reveal: string) {
+    return renderEditor(fakeTransport(null), tutorialOrder(IDR), {
+      tutorial: true,
+      tutorialReview: tutorialReview(IDR),
+      tutorialReveal: reveal,
+    });
+  }
+
+  it("forces the bar open without focusing the field or faking its focus ring", async () => {
+    await tutorialEditor("quote-bar");
+
+    // The practice order keeps 45 days; the quotation offers 30 days, so the
+    // explanation can show both sides with nothing clicked.
+    expect(input("Payment terms").value).toBe("45 days");
+    expect(document.body.textContent).toContain("Value from quotation");
+    expect(document.body.textContent).toContain("30 days");
+    // Both sides of the choice are offered while the tour holds the bar open.
+    expect(
+      document.querySelector('button[aria-label="Use quotation value"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Use my value"]')
+    ).not.toBeNull();
+    // The reveal is not a focus: the input stays unfocused, so the field never
+    // shows the focus ring it would show if staff had pressed it.
+    expect(document.activeElement).not.toBe(input("Payment terms"));
+    // The practice review is in memory: no server read backs this screen.
+    expect(reviewMock).not.toHaveBeenCalled();
+  });
+
+  it("closes the bar when the tutorial leaves the forced-open step", async () => {
+    await tutorialEditor("quote-bar");
+    expect(document.body.textContent).toContain("Value from quotation");
+
+    await renderEditor(fakeTransport(null), tutorialOrder(IDR), {
+      tutorial: true,
+      tutorialReview: tutorialReview(IDR),
+      tutorialReveal: null,
+    });
+    expect(document.body.textContent).not.toContain("Value from quotation");
+  });
+
+  it("does not resolve a tutorial choice while the bar is only being explained", async () => {
+    const keys: string[] = [];
+    const onAdvance = (event: Event) => {
+      keys.push((event as CustomEvent<{ key: string }>).detail.key);
+    };
+    window.addEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    try {
+      await tutorialEditor("quote-bar");
+      act(() => button("Use quotation value").click());
+      await flush();
+
+      // The action still does its real job; it just is not a tutorial answer.
+      expect(input("Payment terms").value).toBe("30 days");
+      expect(keys).toEqual([]);
+    } finally {
+      window.removeEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    }
+  });
+
+  it("turns the field green when the tutorial choice uses the quotation value", async () => {
+    const keys: string[] = [];
+    const onAdvance = (event: Event) => {
+      keys.push((event as CustomEvent<{ key: string }>).detail.key);
+    };
+    window.addEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    try {
+      await tutorialEditor("quote-bar-choice");
+      expect(document.body.textContent).toContain("Value from quotation");
+      expect(
+        document.querySelector('[data-tutorial="po-quote-bar"]')
+      ).not.toBeNull();
+      expect(
+        document.querySelector('[data-tutorial="po-quote-bar-actions"]')
+      ).not.toBeNull();
+
+      act(() => button("Use quotation value").click());
+      await flush();
+
+      expect(input("Payment terms").value).toBe("30 days");
+      expect(input("Payment terms").style.borderColor).toBe("rgb(82, 152, 115)");
+      expect(document.body.textContent).toContain("Using quotation value");
+      expect(keys).toEqual(["po-tutorial-quote-resolved"]);
+      expect(reviewMock).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    }
+  });
+
+  it("leaves the field white when the tutorial choice keeps the entered value", async () => {
+    const keys: string[] = [];
+    const onAdvance = (event: Event) => {
+      keys.push((event as CustomEvent<{ key: string }>).detail.key);
+    };
+    window.addEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    try {
+      await tutorialEditor("quote-bar-choice");
+      // Both sides of the choice are offered while the guide holds the bar
+      // open, so keeping the entered value needs no quotation round-trip.
+      expect(
+        document.querySelector('button[aria-label="Use quotation value"]')
+      ).not.toBeNull();
+      expect(
+        document.querySelector('button[aria-label="Use my value"]')
+      ).not.toBeNull();
+
+      act(() => button("Use my value").click());
+      await flush();
+
+      expect(input("Payment terms").value).toBe("45 days");
+      expect(input("Payment terms").style.borderColor).toBe("");
+      expect(document.body.textContent).toContain("Using your value");
+      expect(keys).toEqual(["po-tutorial-quote-resolved"]);
+    } finally {
+      window.removeEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
+    }
   });
 });
 

@@ -29,6 +29,14 @@ export const TUTORIAL_SUBJECT =
 export const TUTORIAL_PAYMENT_TERMS = "30 days";
 export const TUTORIAL_INCOTERMS = "DAP";
 
+// Issue #604: the quote-bar lesson. The reveal key forces the inline bar open
+// without focusing the field; the choice key additionally lets the bar's two
+// actions resolve the tour step. The event name is the bar's only tutorial
+// output, so no resolution is ever reported outside that step.
+export const QUOTE_BAR_REVEAL = "quote-bar";
+export const QUOTE_BAR_CHOICE_REVEAL = "quote-bar-choice";
+export const QUOTE_BAR_RESOLVED_EVENT = "po-tutorial-quote-resolved";
+
 /**
  * Issue #605: the one sentence every guarded shell action says while either
  * tutorial is live. It names the sandbox rather than the control, because the

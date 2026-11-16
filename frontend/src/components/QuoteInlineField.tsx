@@ -27,11 +27,37 @@ function borderStyle(mode: InlineQuoteMode) {
   return undefined;
 }
 
-function QuoteBar({ quote }: { quote: InlineQuoteValue }) {
+function QuoteBar({
+  quote,
+  tutorialAnchor,
+  onResolved,
+  offerBothChoices = false,
+}: {
+  quote: InlineQuoteValue;
+  /** Issue #604: marks the bar and its action row for the PO tour. */
+  tutorialAnchor?: string;
+  /** Reports either action so the tutorial choice step can resolve. */
+  onResolved?: () => void;
+  /**
+   * Issue #604: the tour teaches both sides, so the alternative is offered
+   * alongside the primary action while the guide holds the bar open. Real use
+   * keeps the single next action it has always shown.
+   */
+  offerBothChoices?: boolean;
+}) {
   const using = quote.mode === "used";
   const original = quote.mode === "original";
+  const useMine = () => {
+    quote.onUseMine();
+    onResolved?.();
+  };
+  const useQuotation = () => {
+    quote.onUse();
+    onResolved?.();
+  };
   return (
     <div
+      data-tutorial={tutorialAnchor}
       className="quote-bar-enter absolute bottom-[calc(100%+7px)] left-0 right-0 z-50 rounded-lg border border-accent-200 bg-white shadow-pop"
       onMouseDown={(event) => event.preventDefault()}
     >
@@ -59,7 +85,12 @@ function QuoteBar({ quote }: { quote: InlineQuoteValue }) {
           {using ? "Using quotation value" : original ? "Using your value" : "Not used yet"}
         </span>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+      <div
+        data-tutorial={
+          tutorialAnchor === undefined ? undefined : `${tutorialAnchor}-actions`
+        }
+        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+      >
         <p className="text-caption text-ink-500">
           {using
             ? "This field is filled from the quotation."
@@ -71,20 +102,32 @@ function QuoteBar({ quote }: { quote: InlineQuoteValue }) {
           <button
             type="button"
             aria-label="Use my value"
-            onClick={quote.onUseMine}
+            onClick={useMine}
             className="rounded-md border border-rule-strong bg-white px-2.5 py-1.5 text-caption font-medium text-ink-800 hover:bg-paper-subtle"
           >
             Use my value
           </button>
         ) : (
-          <button
-            type="button"
-            aria-label="Use quotation value"
-            onClick={quote.onUse}
-            className="rounded-md bg-accent-800 px-2.5 py-1.5 text-caption font-medium text-white hover:bg-accent-900"
-          >
-            Use quotation value
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-label="Use quotation value"
+              onClick={useQuotation}
+              className="rounded-md bg-accent-800 px-2.5 py-1.5 text-caption font-medium text-white hover:bg-accent-900"
+            >
+              Use quotation value
+            </button>
+            {offerBothChoices ? (
+              <button
+                type="button"
+                aria-label="Use my value"
+                onClick={useMine}
+                className="rounded-md border border-rule-strong bg-white px-2.5 py-1.5 text-caption font-medium text-ink-800 hover:bg-paper-subtle"
+              >
+                Use my value
+              </button>
+            ) : null}
+          </div>
         )}
       </div>
     </div>
@@ -101,6 +144,10 @@ export function InlineQuoteField({
   onFocus,
   onBlur,
   dataTutorial,
+  forcedOpen = false,
+  quoteBarTutorialAnchor,
+  offerBothChoices = false,
+  onQuoteResolved,
 }: {
   label: string;
   value: string;
@@ -111,8 +158,20 @@ export function InlineQuoteField({
   onFocus?: () => void;
   onBlur?: () => void;
   dataTutorial?: string;
+  /**
+   * Issue #604: the tutorial shows the bar without pointing at the field, so
+   * the bar is open here while the input keeps its normal, unfocused look.
+   */
+  forcedOpen?: boolean;
+  /** Marks the bar and its action row when a tutorial step points at them. */
+  quoteBarTutorialAnchor?: string;
+  /** Shows the second side of the choice while the tour holds the bar open. */
+  offerBothChoices?: boolean;
+  /** Called after either bar action; only a tutorial choice passes it. */
+  onQuoteResolved?: () => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const barOpen = quote !== undefined && (focused || forcedOpen);
   return (
     <div className="relative grid gap-1.5">
       <span className="text-small font-medium text-ink-700">{label}</span>
@@ -134,7 +193,14 @@ export function InlineQuoteField({
           onBlur?.();
         }}
       />
-      {focused && quote !== undefined ? <QuoteBar quote={quote} /> : null}
+      {barOpen ? (
+        <QuoteBar
+          quote={quote}
+          tutorialAnchor={quoteBarTutorialAnchor}
+          offerBothChoices={offerBothChoices}
+          onResolved={onQuoteResolved}
+        />
+      ) : null}
     </div>
   );
 }
