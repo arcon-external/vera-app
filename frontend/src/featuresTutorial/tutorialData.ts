@@ -37,6 +37,15 @@ export const QUOTE_BAR_REVEAL = "quote-bar";
 export const QUOTE_BAR_CHOICE_REVEAL = "quote-bar-choice";
 export const QUOTE_BAR_RESOLVED_EVENT = "po-tutorial-quote-resolved";
 
+/**
+ * Issue #605: the one sentence every guarded shell action says while either
+ * tutorial is live. It names the sandbox rather than the control, because the
+ * point of the guard is that the data is practice -- not that the button is
+ * broken.
+ */
+export const TUTORIAL_PRACTICE_TOAST =
+  "Features Tutorial practice — nothing is saved to your workspace.";
+
 const SOURCE_LINES: PurchaseOrderSourceLineDTO[] = [
   {
     QuotationItemNo: 1,

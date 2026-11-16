@@ -97,7 +97,9 @@ import {
 } from "./featuresTutorial";
 import { PURCHASE_ORDER_TUTORIAL_STEPS } from "./featuresTutorial/purchaseOrderSteps";
 import { QUOTATION_TUTORIAL_STEPS } from "./featuresTutorial/quotationSteps";
+import { QuotationTutorialWorkspace } from "./featuresTutorial/QuotationTutorialWorkspace";
 import {
+  TUTORIAL_PRACTICE_TOAST,
   TUTORIAL_RECONCILIATION_TRANSPORT,
   TUTORIAL_SELECTOR_PAGE,
   TUTORIAL_SELECTOR_REVISIONS,
@@ -1614,6 +1616,13 @@ function App() {
   }, [page]);
 
   const handleSaveDraft = useCallback(async () => {
+    // Issue #605: the tour's editor is practice. Saving would persist made-up
+    // lines into the real workspace, so the guard refuses before the binding
+    // is reached and says why.
+    if (activeTutorial === "quotation") {
+      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      return;
+    }
     setSavingDraft(true);
     try {
       const customerName =
@@ -1649,7 +1658,7 @@ function App() {
     } finally {
       setSavingDraft(false);
     }
-  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot]);
+  }, [items, details, customerId, customerOptions, activeDraftId, pushToast, clearRecoverySnapshot, activeTutorial]);
 
   const handleOpenDraft = useCallback(
     async (id: number) => {
@@ -1763,6 +1772,11 @@ function App() {
   // ordinary text falls through to them untouched.
   const handleCopyPasteCapture = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
+      // Issue #605: a marked quotation copy must never replace real editor
+      // state while the Quotation tour is showing its own practice quotation.
+      // Returning before preventDefault leaves an ordinary paste to the
+      // browser, which is what a practice field should do with it.
+      if (activeTutorial === "quotation") return;
       const raw = event.clipboardData?.getData("text");
       const decision = resolveCopyPasteText(raw, {
         dirty,
@@ -1793,7 +1807,7 @@ function App() {
       }
       applyCopyPayload(decision.payload);
     },
-    [dirty, customerOptions, companyCurrency, pushToast, applyCopyPayload]
+    [dirty, customerOptions, companyCurrency, pushToast, applyCopyPayload, activeTutorial]
   );
 
   const handleOpenQuotation = useCallback((id: number, revision: number) => {
@@ -2198,6 +2212,12 @@ function App() {
   );
 
   const handlePrepare = useCallback(async () => {
+    // Issue #605: practice lines must never reach the server as a real
+    // quotation, even though the practice panel looks like the editor.
+    if (activeTutorial === "quotation") {
+      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      return;
+    }
     // #390: a keyboard shortcut bypasses the rendered gate, so the refusal is
     // repeated here. Preparing under an unknown entry would store figures the
     // editor cannot even display.
@@ -2311,7 +2331,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [items, details, customerId, clearPreview, pushToast, liveEntry, canonicalUnit]);
+  }, [items, details, customerId, clearPreview, pushToast, liveEntry, canonicalUnit, activeTutorial]);
 
   const handlePasteDetails = useCallback(
     (event: React.ClipboardEvent<HTMLInputElement>) => {
@@ -2365,6 +2385,13 @@ function App() {
   );
 
   const handleExport = useCallback(async () => {
+    // Issue #605: a signed revision cannot be unsent, and a practice one must
+    // never be created. Refuse before the binding, exactly as Save and
+    // Prepare do.
+    if (activeTutorial === "quotation") {
+      pushToast("info", TUTORIAL_PRACTICE_TOAST);
+      return;
+    }
     // #390: the export shortcut bypasses the rendered gate exactly as prepare
     // does, and a signed revision cannot be unsent.
     if (liveEntry === null) {
@@ -2404,7 +2431,7 @@ function App() {
       setStatus({ type: "error", message });
       pushToast("error", message);
     }
-  }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot]);
+  }, [activeDraftId, clearPreview, pushToast, liveEntry, clearRecoverySnapshot, activeTutorial]);
 
   const ready = customerPreview !== null && breakdown !== null && quotationHTML !== null;
   const hasRenderableItems = items.some(
@@ -2845,7 +2872,11 @@ function App() {
         visiblePage === "create" ? (
           <>
             <div className="flex min-w-0 items-center gap-2">
-              {pendingPaste ? (
+              {activeTutorial === "quotation" ? (
+                <span className="text-caption text-ink-500">
+                  {TUTORIAL_PRACTICE_TOAST}
+                </span>
+              ) : pendingPaste ? (
                 <span className="flex items-center gap-2">
                   <span className="text-caption text-ink-600">
                     Replace this quotation with {pendingPaste.source.quoteNumber}{" "}
@@ -2921,11 +2952,17 @@ function App() {
               <Button
                 variant="secondary"
                 onClick={handleSaveDraft}
-                disabled={loading || savingDraft || !dirty}
+                disabled={
+                  activeTutorial === "quotation"
+                    ? loading
+                    : loading || savingDraft || !dirty
+                }
                 title={
-                  dirty
-                    ? "Save this quotation to come back to it later"
-                    : "Nothing to save yet"
+                  activeTutorial === "quotation"
+                    ? TUTORIAL_PRACTICE_TOAST
+                    : dirty
+                      ? "Save this quotation to come back to it later"
+                      : "Nothing to save yet"
                 }
                 leading={
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -2939,7 +2976,11 @@ function App() {
               <Button
                 variant="secondary"
                 onClick={handlePrepare}
-                disabled={loading || !hasRenderableItems}
+                disabled={
+                  activeTutorial === "quotation"
+                    ? loading
+                    : loading || !hasRenderableItems
+                }
                 leading={
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M1.333 12.167V2.833a1 1 0 011-1h11.334a1 1 0 011 1v9.334a1 1 0 01-1 1H2.333a1 1 0 01-1-1z" />
@@ -2952,7 +2993,9 @@ function App() {
               <Button
                 variant="primary"
                 onClick={handleExport}
-                disabled={!ready || loading}
+                disabled={
+                  activeTutorial === "quotation" ? loading : !ready || loading
+                }
                 leading={
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M2.667 11.333v1.334A1.333 1.333 0 004 14h8a1.333 1.333 0 001.333-1.333v-1.334M11.333 8L8 11.333 4.667 8M8 11.333V2" />
@@ -3135,16 +3178,36 @@ function App() {
           tutorialReview={tutorialLinked ? tutorialReviewDto : null}
           tutorialReconciliationTransport={TUTORIAL_RECONCILIATION_TRANSPORT}
           onTutorialAction={() =>
-            pushToast(
-              "info",
-              "Features Tutorial practice — nothing is saved to your workspace."
-            )
+            pushToast("info", TUTORIAL_PRACTICE_TOAST)
           }
         />
         </div>
       ) : null}
 
-      {(visiblePage === "create" || preservedQuotationPage === "create") ? (
+      {activeTutorial === "quotation" &&
+      visiblePage === "create" &&
+      liveEntry !== null ? (
+        // Issue #605: while the Quotation tour is live on the editor page, the
+        // practice workspace replaces the real one entirely. The real draft,
+        // its clipboard capture and its anchors are not mounted, so no tour
+        // target can resolve to a real control and no practice edit can reach
+        // real state.
+        <QuotationTutorialWorkspace
+          currency={liveEntry}
+          canonicalUnit={canonicalUnit}
+          uomOptions={storedUoMs ?? []}
+          uomPendingLabel={
+            storedUoMs === null
+              ? unitsError
+                ? "Units unavailable"
+                : "Loading units…"
+              : undefined
+          }
+          incotermOptions={INCOTERM_OPTIONS}
+          taxZoneOptions={TAX_ZONE_OPTIONS}
+          taxTypeOptions={TAX_TYPE_OPTIONS}
+        />
+      ) : (visiblePage === "create" || preservedQuotationPage === "create") ? (
         <div
           className="flex flex-col gap-6"
           hidden={visiblePage !== "create"}

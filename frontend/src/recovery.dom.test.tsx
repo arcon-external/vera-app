@@ -4,6 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { ToastProvider } from "./toast";
+import {
+  FEATURES_TUTORIAL_VERSION,
+  featuresTutorialKey,
+} from "./featuresTutorial";
 import { RECOVERY_DEBOUNCE_MS, parseRecoverySnapshot } from "./recovery";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
 
@@ -271,6 +275,16 @@ let nextIntervalID: number;
 
 beforeEach(() => {
   window.localStorage.clear();
+  // Issue #605: these cases pin the real editor's recovery debounce, so the
+  // Quotation tour must not auto-start over it and replace the editor with
+  // its practice quotation while fake timers advance.
+  window.localStorage.setItem(
+    featuresTutorialKey(USER.ID),
+    JSON.stringify({
+      version: FEATURES_TUTORIAL_VERSION,
+      completed: { quotation: true },
+    })
+  );
   for (const mock of Object.values(mocks)) mock.mockClear();
   mocks.restoreSession.mockResolvedValue(USER);
   mocks.checkSession.mockResolvedValue({ State: "active", User: USER });
