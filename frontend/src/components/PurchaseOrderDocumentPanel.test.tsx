@@ -116,7 +116,7 @@ describe("customer PO PDF panel", () => {
   it("records a deliberate omission on a saved record with no PDF", () => {
     // `savedRecord` alone implies the compact card; the pairing cannot drift.
     const html = render({ absenceConfirmed: true, savedRecord: true });
-    expect(html).toContain("The final save recorded this omission deliberately.");
+    expect(html).toContain("The final save recorded that the customer PO PDF was not available; attaching it later is allowed.");
     // #610: the saved record makes the later attachment the normal next step,
     // and states that it is a document change rather than a correction.
     expect(html).toContain("Attach it later; this does not create a correction.");

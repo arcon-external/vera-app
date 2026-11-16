@@ -557,7 +557,7 @@ describe("PurchaseOrderSavedView customer PO PDF (#610)", () => {
   it("says the absent PDF can be attached later without a correction", () => {
     const html = markup(saved({ PdfAbsentConfirmed: true }));
     expect(html).toContain("Attach it later; this does not create a correction.");
-    expect(html).toContain("The final save recorded this omission deliberately.");
+    expect(html).toContain("The final save recorded that the customer PO PDF was not available; attaching it later is allowed.");
   });
 
   it("separates value corrections from document changes in the banner", () => {

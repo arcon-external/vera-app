@@ -179,7 +179,8 @@ export function PurchaseOrderDocumentPanelView({
 
       {active === null && absenceConfirmed ? (
         <p className="mt-1 text-caption text-ink-500">
-          The final save recorded this omission deliberately.
+          The final save recorded that the customer PO PDF was not available;
+          attaching it later is allowed.
         </p>
       ) : null}
 
