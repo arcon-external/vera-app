@@ -64,19 +64,42 @@ describe("customer PO PDF panel", () => {
     const html = render();
     expect(html).toContain("No customer PO PDF attached");
     expect(html).toContain("Attach");
+    // Earlier versions are document versions, never correction history.
+    expect(html).toContain("1 earlier document version is kept.");
+    expect(html).not.toContain("correction history");
     expect(html).not.toContain("View</button>");
     expect(html).not.toContain("Replace");
   });
 
-  it("shows the active filename, size and version against the retained history", () => {
+  it("shows the active filename, size, uploader and version against the retained versions", () => {
     const html = render({ state: stateWith(2) });
     expect(html).toContain("Customer PO 2.pdf");
     expect(html).toContain("Version 2 of 2");
     expect(html).toContain("1.5 KB");
+    // The DTO carries only the uploader id; no name is invented.
+    expect(html).toContain("user #4");
     expect(html).toContain("View</button>");
     expect(html).toContain("Replace");
     expect(html).toContain("Remove</button>");
     expect(html).not.toContain("No customer PO PDF attached");
+  });
+
+  it("lists earlier versions as metadata only, and omits the list when none exist", () => {
+    const html = render({ state: stateWith(2) });
+    expect(html).toContain("<details");
+    expect(html).toContain("Earlier versions (1)");
+    const start = html.indexOf("<details");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const earlier = html.slice(start, html.indexOf("</details>", start));
+    expect(earlier).toContain("Version 1");
+    expect(earlier).toContain("1.5 KB");
+    expect(earlier).toContain("2026-10-21");
+    // No content control inside the disclosure: the list never fetches bytes.
+    expect(earlier).not.toContain("<button");
+
+    const only = render({ state: stateWith(1) });
+    expect(only).not.toContain("<details");
+    expect(only).not.toContain("Earlier versions");
   });
 
   it("asks its own confirmation before removing the current PDF", () => {
@@ -85,12 +108,26 @@ describe("customer PO PDF panel", () => {
     expect(html).toContain("Remove the customer PO PDF?");
     expect(html).toContain("Keep PDF");
     expect(html).toContain("Remove PDF");
-    expect(html).toContain("Earlier versions stay in the correction history");
+    // Not correction history: these are versions of the document.
+    expect(html).toContain("Earlier document versions are kept");
+    expect(html).not.toContain("correction history");
   });
 
   it("records a deliberate omission on a saved record with no PDF", () => {
-    const html = render({ absenceConfirmed: true });
-    expect(html).toContain("The final save recorded this omission deliberately.");
+    // `savedRecord` alone implies the compact card; the pairing cannot drift.
+    const html = render({ absenceConfirmed: true, savedRecord: true });
+    expect(html).toContain("The final save recorded that the customer PO PDF was not available; attaching it later is allowed.");
+    // #610: the saved record makes the later attachment the normal next step,
+    // and states that it is a document change rather than a correction.
+    expect(html).toContain("Attach it later; this does not create a correction.");
+    // The compact header's Optional pill, not the draft card's heading.
+    expect(html).toContain(">Optional<");
+  });
+
+  it("keeps the draft card's document copy unchanged", () => {
+    const html = render({ compact: true });
+    expect(html).toContain("One original document, kept unchanged.");
+    expect(html).not.toContain("Attach it later");
   });
 
   it("renders the content preview when the caller has one", () => {

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { PurchaseOrderDocumentStateDTO } from "../purchaseOrderDocument";
 import { PurchaseOrderEditorPage } from "./PurchaseOrderEditor";
 import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 
@@ -16,13 +17,17 @@ import { PurchaseOrderSavedView } from "./PurchaseOrderFinalize";
 // The bindings are replaced at their module boundary, which is what the
 // desktop provides; everything inside the editor and the review is real.
 
-const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessionMock, saveSessionMock } = vi.hoisted(() => ({
+const { reviewMock, updateMock, finalizeMock, assignConfirmationMock, loadSessionMock, saveSessionMock, documentStateMock, attachDocumentMock, removeDocumentMock, correctPurchaseOrderMock } = vi.hoisted(() => ({
   reviewMock: vi.fn(),
   updateMock: vi.fn(),
   finalizeMock: vi.fn(),
   assignConfirmationMock: vi.fn(),
   loadSessionMock: vi.fn(),
   saveSessionMock: vi.fn(),
+  documentStateMock: vi.fn(),
+  attachDocumentMock: vi.fn(),
+  removeDocumentMock: vi.fn(),
+  correctPurchaseOrderMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
@@ -33,16 +38,17 @@ vi.mock("@backend/backend/Quotation", () => ({
   UpdatePurchaseOrderDraft: (...args: unknown[]) => updateMock(...args),
   LoadPOReconciliation: (...args: unknown[]) => loadSessionMock(...args),
   SavePOReconciliation: (...args: unknown[]) => saveSessionMock(...args),
+  CorrectPurchaseOrder: (...args: unknown[]) => correctPurchaseOrderMock(...args),
   GetPurchaseOrderHistory: vi.fn(async () => []),
   ListPOReconciliationSessions: vi.fn(async () => ({
     PurchaseOrderID: 0,
     POVersion: 0,
     Sessions: [],
   })),
-  GetPurchaseOrderDocumentState: vi.fn(async () => ({ Document: null, Versions: [] })),
-  AttachPurchaseOrderDocument: vi.fn(),
+  GetPurchaseOrderDocumentState: (...args: unknown[]) => documentStateMock(...args),
+  AttachPurchaseOrderDocument: (...args: unknown[]) => attachDocumentMock(...args),
   GetActivePurchaseOrderDocumentContent: vi.fn(),
-  RemovePurchaseOrderDocument: vi.fn(),
+  RemovePurchaseOrderDocument: (...args: unknown[]) => removeDocumentMock(...args),
 }));
 
 vi.mock("@backend/models", () => ({
@@ -58,6 +64,11 @@ vi.mock("@backend/models", () => ({
       }
     },
     PurchaseOrderItemInput: class {
+      constructor(source: Record<string, unknown>) {
+        Object.assign(this, source);
+      }
+    },
+    PurchaseOrderDocumentUploadInput: class {
       constructor(source: Record<string, unknown>) {
         Object.assign(this, source);
       }
@@ -240,6 +251,11 @@ beforeEach(() => {
     };
   });
   assignConfirmationMock.mockReset();
+  documentStateMock.mockReset();
+  attachDocumentMock.mockReset();
+  removeDocumentMock.mockReset();
+  correctPurchaseOrderMock.mockReset();
+  documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
   reviewMock.mockResolvedValue(REVIEW);
   finalizeMock.mockResolvedValue({
     Order: {
@@ -284,6 +300,22 @@ function checkbox(label: string): HTMLInputElement {
   );
   if (!found) throw new Error(`checkbox ${label} not found`);
   return found;
+}
+
+/** Chooses a file on the panel's hidden input, the way the picker reports it. */
+function chooseFile(name = "Customer PO.pdf", content = "%PDF-1.7\n"): void {
+  const input = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Customer PO PDF file"]'
+  );
+  if (!input) throw new Error("file input not found");
+  const file = new File([content], name, { type: "application/pdf" });
+  Object.defineProperty(input, "files", {
+    configurable: true,
+    value: [file],
+  });
+  act(() => {
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 
 /**
@@ -581,5 +613,128 @@ describe("confirmation number on a saved record (issue #474)", () => {
     // The only write a saved record exposes is assignment; the number is not
     // an editable control, and a second assignment is not offered.
     expect(document.querySelectorAll('input[aria-label*="confirmation" i]')).toHaveLength(0);
+  });
+});
+
+// #610: the PDF arrives after the customer confirms, so the saved record must
+// attach it in place. The document write is independent of corrections: it
+// carries the saved ID, refreshes the derived status, and never enters the
+// correction editor or calls the correction binding.
+describe("customer PO PDF on the saved record (#610)", () => {
+  const SAVED: PurchaseOrderDTO = {
+    ...ORDER,
+    State: "saved",
+    PdfAbsentConfirmed: true,
+  };
+
+  function attachedState(): PurchaseOrderDocumentStateDTO {
+    return {
+      Document: {
+        UUID: "doc-1",
+        SHA256: "sha-1",
+        ContentType: "application/pdf",
+        OriginalFilename: "Customer PO.pdf",
+        UploadedAt: "2026-10-21T10:00:00Z",
+        ID: 1,
+        PurchaseOrderID: 7,
+        Version: 1,
+        SizeBytes: 1536,
+        UploadedBy: 4,
+        Active: true,
+      },
+      Versions: [],
+    };
+  }
+
+  it("attaches with the saved ID, flips the status and never starts a correction", async () => {
+    const onCorrect = vi.fn();
+    documentStateMock.mockResolvedValueOnce(attachedState());
+
+    act(() =>
+      root.render(
+        <PurchaseOrderSavedView
+          order={SAVED}
+          currency={USD}
+          onBack={() => undefined}
+          onCorrect={onCorrect}
+          documentInitialState={{ Document: null, Versions: [] }}
+        />
+      )
+    );
+    expect(document.body.textContent).toContain("PDF pending");
+    expect(button("Attach customer PO PDF")).toBeTruthy();
+    expect(correctPurchaseOrderMock).not.toHaveBeenCalled();
+
+    // The visible Attach control opens the panel's file picker; the chosen file
+    // is what reaches the document binding.
+    await act(async () => {
+      button("Attach customer PO PDF").click();
+    });
+    chooseFile("Customer PO.pdf");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(attachDocumentMock).toHaveBeenCalledTimes(1);
+    const upload = attachDocumentMock.mock.calls[0][0] as {
+      PurchaseOrderID: number;
+      Filename: string;
+    };
+    expect(upload.PurchaseOrderID).toBe(7);
+    expect(upload.Filename).toBe("Customer PO.pdf");
+    // The derived status follows the document state the panel reports.
+    expect(document.body.textContent).toContain("PDF attached");
+    expect(document.body.textContent).not.toContain("PDF pending");
+    // A document change is not a value correction.
+    expect(onCorrect).not.toHaveBeenCalled();
+    expect(correctPurchaseOrderMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps PDF pending when an attached document is later removed", async () => {
+    // Saved with a PDF (so no recorded absence), then the document is removed.
+    // The badge must stay as pending evidence, not disappear.
+    const attached = attachedState();
+    const removed: PurchaseOrderDocumentStateDTO = {
+      Document: null,
+      Versions: attached.Document != null ? [attached.Document] : [],
+    };
+    const onStateChange = vi.fn();
+    removeDocumentMock.mockResolvedValueOnce(attached.Document);
+    documentStateMock.mockResolvedValueOnce(removed);
+
+    act(() =>
+      root.render(
+        <PurchaseOrderSavedView
+          order={{ ...SAVED, PdfAbsentConfirmed: false }}
+          currency={USD}
+          onBack={() => undefined}
+          documentInitialState={attached}
+          onDocumentStateChange={onStateChange}
+        />
+      )
+    );
+    expect(document.body.textContent).toContain("PDF attached");
+    expect(button("Remove customer PO PDF")).toBeTruthy();
+
+    await act(async () => {
+      button("Remove customer PO PDF").click();
+    });
+    await act(async () => {
+      button("Remove PDF").click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(removeDocumentMock).toHaveBeenCalledWith(7, true);
+    expect(document.body.textContent).toContain("PDF pending");
+    // The badge label, not the empty-state sentence that contains "PDF attached".
+    expect(
+      Array.from(document.querySelectorAll("span")).some(
+        (span) => span.textContent === "PDF attached"
+      )
+    ).toBe(false);
+    // The saved view forwards the panel's own state object; it does not keep
+    // a second copy of the DTO.
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+    expect(onStateChange.mock.calls[0][0]).toBe(removed);
   });
 });

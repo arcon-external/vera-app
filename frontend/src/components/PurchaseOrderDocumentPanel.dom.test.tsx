@@ -256,7 +256,7 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
 
     expect(removeMock).toHaveBeenCalledWith(7, true);
     expect(container.textContent).toContain("No customer PO PDF attached");
-    expect(container.textContent).toContain("2 earlier versions are kept in the correction history.");
+    expect(container.textContent).toContain("2 earlier document versions are kept.");
     expect(
       container.querySelector('[role="alertdialog"]')
     ).toBeNull();
@@ -278,6 +278,22 @@ describe("customer PO PDF panel interactions (issue #472)", () => {
     );
     expect(container.textContent).toContain("No customer PO PDF attached");
     expect(button("Attach customer PO PDF")).toBeTruthy();
+  });
+
+  it("discloses earlier versions as metadata without fetching their content", async () => {
+    stateMock.mockResolvedValueOnce(stateWith(2, [2, 1]));
+
+    act(() => root.render(<PurchaseOrderDocumentPanel purchaseOrderId={7} />));
+    await flush();
+
+    const details = container.querySelector<HTMLDetailsElement>("details");
+    expect(details).not.toBeNull();
+    expect(details!.textContent).toContain("Earlier versions (1)");
+    expect(details!.textContent).toContain("Version 1");
+    act(() => {
+      details!.open = true;
+    });
+    expect(contentMock).not.toHaveBeenCalled();
   });
 
   it("opens the current PDF in a preview and closes it", async () => {
