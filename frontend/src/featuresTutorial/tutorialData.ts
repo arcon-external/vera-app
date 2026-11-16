@@ -29,6 +29,15 @@ export const TUTORIAL_SUBJECT =
 export const TUTORIAL_PAYMENT_TERMS = "30 days";
 export const TUTORIAL_INCOTERMS = "DAP";
 
+/**
+ * Issue #605: the one sentence every guarded shell action says while either
+ * tutorial is live. It names the sandbox rather than the control, because the
+ * point of the guard is that the data is practice -- not that the button is
+ * broken.
+ */
+export const TUTORIAL_PRACTICE_TOAST =
+  "Features Tutorial practice — nothing is saved to your workspace.";
+
 const SOURCE_LINES: PurchaseOrderSourceLineDTO[] = [
   {
     QuotationItemNo: 1,
