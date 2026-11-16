@@ -45,6 +45,13 @@ export interface FeaturesTutorialStep {
    */
   advance?: "next" | "click" | "focus" | "event";
   advanceEvent?: string;
+  /** Label for the target-side cue. Interactive steps default by action. */
+  beaconLabel?: string;
+  /**
+   * A key the App can use to force a surface open for this step (the PO quote
+   * bar is the first one). Reported through `onReveal` while the step is live.
+   */
+  reveal?: string;
   /** Optional action shown in the tooltip, e.g. reopening the practice selector. */
   action?: FeaturesTutorialAction;
   /**
@@ -52,8 +59,19 @@ export interface FeaturesTutorialStep {
    * and docks the guide at the bottom-left instead of drawing a box around it.
    */
   spotlight?: "target" | "none";
-  /** Action to run when the step is left with Back or Next. */
+  /**
+   * An unfulfilled exit action, run when the step is left with Back or Next
+   * rather than by its own click/focus/event. A modal the step guides through
+   * stays open when the user really performs the action; Back and Next close
+   * it with the step.
+   */
   onLeave?: string;
+  /**
+   * Step id Back returns to instead of the previous index. A guided modal's
+   * micro-steps use it so Back closes the modal and lands on the step that
+   * opened it, never on another step pointing inside the closed dialog.
+   */
+  backTo?: string;
   /** The last step's primary button is Finish. */
   final?: boolean;
 }
@@ -64,7 +82,24 @@ export interface FeaturesTutorialProps {
   onNavigate: (page: AppPage) => void;
   onClose: (reason: "finished" | "skipped") => void;
   onAction?: (action: string) => void;
+  /** Reports the active step's reveal key, then null when the tour closes. */
+  onReveal?: (reveal: string | null) => void;
 }
+
+/**
+ * The guide's transition state. A step change is never an instant swap:
+ * the old step fades out (`leaving`), the page/navigation and target
+ * measurement happen behind the veil, then the new step fades in
+ * (`entering`) and settles (`idle`).
+ */
+export type FeaturesTutorialMotionPhase = "idle" | "leaving" | "entering";
+
+/** How long the current step fades out before the swap. */
+const LEAVE_MS = 120;
+/** How long the next step fades in; geometry keeps animating through it. */
+const ENTER_MS = 220;
+/** The page veil stays up at least this long, so a swap never flashes. */
+const PAGE_VEIL_MS = 160;
 
 interface TooltipPosition {
   left: number;
@@ -110,15 +145,149 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+/** The action an interactive step expects, written on its beacon. */
+function beaconLabelFor(step: FeaturesTutorialStep): string | null {
+  if (step.beaconLabel !== undefined) return step.beaconLabel;
+  if (step.advance === "click") return "Click";
+  if (step.advance === "focus") return "Press";
+  if (step.advance === "event") return "Select";
+  return null;
+}
+
+interface TutorialBeaconProps {
+  label: string;
+  rect: DOMRect;
+  reducedMotion: boolean;
+  transition: string;
+  /** Preferred pill side, chosen opposite the tooltip when it can fit. */
+  prefer?: "top" | "bottom";
+}
+
+/**
+ * A target-side cue, never a cover: the ring sits outside the control and the
+ * pill sits above or below it, and the whole layer ignores pointer events so
+ * the control stays fully usable while the label explains it.
+ */
+function TutorialBeacon({
+  label,
+  rect,
+  reducedMotion,
+  transition,
+  prefer,
+}: TutorialBeaconProps) {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const ringPadding = 7;
+  const pillHeight = 26;
+  const gap = 10;
+  const chipWidth = Math.max(58, label.length * 7 + 28);
+  const above = rect.top - gap - pillHeight >= 8;
+  const below = rect.bottom + gap + pillHeight <= viewportHeight - 8;
+  const preferred =
+    (prefer === "top" && above) || (prefer === "bottom" && below);
+  const side: "top" | "bottom" | "right" | "left" = preferred
+    ? (prefer as "top" | "bottom")
+    : above
+      ? "top"
+      : below
+        ? "bottom"
+        : rect.right + gap + chipWidth <= viewportWidth - 8
+          ? "right"
+          : "left";
+
+  let pillLeft = rect.left + rect.width / 2;
+  let pillTop = rect.top + rect.height / 2 - pillHeight / 2;
+  if (side === "top") {
+    pillTop = rect.top - gap - pillHeight;
+  } else if (side === "bottom") {
+    pillTop = rect.bottom + gap;
+  } else if (side === "right") {
+    pillLeft = rect.right + gap + chipWidth / 2;
+  } else {
+    pillLeft = rect.left - gap - chipWidth / 2;
+  }
+  pillTop = Math.max(
+    8,
+    Math.min(pillTop, viewportHeight - pillHeight - 8)
+  );
+  pillLeft = Math.max(
+    chipWidth / 2 + 8,
+    Math.min(pillLeft, viewportWidth - chipWidth / 2 - 8)
+  );
+
+  // The chevron always points from the pill back at the control: down when
+  // the pill sits above it, up when below, and sideways on a tight viewport.
+  const chevronRotation =
+    side === "top" ? 0 : side === "bottom" ? 180 : side === "right" ? 90 : -90;
+  const ringStyle = {
+    top: rect.top - ringPadding,
+    left: rect.left - ringPadding,
+    width: Math.max(0, rect.width + ringPadding * 2),
+    height: Math.max(0, rect.height + ringPadding * 2),
+  };
+
+  return (
+    <div
+      aria-hidden="true"
+      data-tutorial-beacon={label.toLowerCase()}
+      className="pointer-events-none fixed inset-0 z-[81]"
+    >
+      <span
+        data-tutorial-beacon-ring
+        className="pointer-events-none absolute rounded-xl border-2 border-accent-400 shadow-[0_0_0_4px_rgba(255,255,255,0.18)]"
+        style={{ ...ringStyle, transition }}
+      />
+      {reducedMotion ? null : (
+        <span
+          data-tutorial-beacon-pulse
+          className="pointer-events-none absolute animate-pulse rounded-xl border-2 border-accent-300/80"
+          style={ringStyle}
+        />
+      )}
+      <span
+        data-tutorial-beacon-pill
+        className="pointer-events-none absolute inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-accent-800 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white shadow-pop"
+        style={{ top: pillTop, left: pillLeft, transition }}
+      >
+        {label}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 10 6"
+          className="size-2 shrink-0"
+          style={{
+            transform: `rotate(${chevronRotation}deg)`,
+            transition: reducedMotion ? "none" : "transform 220ms ease-out",
+          }}
+        >
+          <path
+            d="M1 1l4 4 4-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    </div>
+  );
+}
+
 export function FeaturesTutorial({
   workspace,
   steps,
   onNavigate,
   onClose,
   onAction,
+  onReveal,
 }: FeaturesTutorialProps) {
   const safeSteps = steps.length > 0 ? steps : [];
   const [index, setIndex] = useState(0);
+  // The first appearance starts in the entering phase, so mount and every
+  // later step change run the same settle timer and release the same way.
+  const [phase, setPhase] = useState<FeaturesTutorialMotionPhase>("entering");
+  // A page swap is hidden behind paper, not left as a white flash.
+  const [veil, setVeil] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [targetMissing, setTargetMissing] = useState(false);
   const [position, setPosition] = useState<TooltipPosition | null>(null);
@@ -131,6 +300,19 @@ export function FeaturesTutorial({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const navigateRef = useRef(onNavigate);
   navigateRef.current = onNavigate;
+  const revealRef = useRef(onReveal);
+  revealRef.current = onReveal;
+  const phaseTimerRef = useRef<number | undefined>(undefined);
+  // The DOM click/key listener can hold a handler from the previous render;
+  // a ref makes the leaving guard truthful at the moment of the event.
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  /** The step a leaving transition started from, so a second click on the
+   * same step cannot advance twice while a new step's effects settle. */
+  const transitionFromRef = useRef<string | null>(null);
+  /** Whether the pending step change swaps pages and therefore owns a veil. */
+  const pageVeilRef = useRef(false);
+  const revealedRef = useRef<string | null>(null);
   const reducedMotion = useReducedMotion();
   const step = safeSteps[Math.min(index, Math.max(0, safeSteps.length - 1))];
   const finalStep = step?.final === true || index === safeSteps.length - 1;
@@ -139,23 +321,93 @@ export function FeaturesTutorial({
     setCollapsed(false);
   }, [index]);
 
+  // Report the reveal key while the step is live, and clear it when the tour
+  // closes so a forced-open surface is released with the guide.
+  useEffect(() => {
+    const key = step?.reveal ?? null;
+    if (revealedRef.current === key) return;
+    revealedRef.current = key;
+    revealRef.current?.(key);
+  }, [step?.id, step?.reveal]);
+
+  useEffect(
+    () => () => {
+      if (revealedRef.current !== null) {
+        revealedRef.current = null;
+        revealRef.current?.(null);
+      }
+    },
+    []
+  );
+
+  // Leaving is a real phase, not a delay on the content swap: the old step is
+  // still readable while it fades, and a page is only navigated afterwards.
+  const changeStep = useCallback(
+    (target: number) => {
+      // Only a real page swap is hidden behind paper; moving between two steps
+      // of the same page slides the spotlight and tooltip in place.
+      const pageChange =
+        safeSteps[target]?.page !== undefined &&
+        safeSteps[target]?.page !== safeSteps[index]?.page;
+      pageVeilRef.current = pageChange;
+      phaseRef.current = "leaving";
+      setVeil(false);
+      setPhase("leaving");
+      window.clearTimeout(phaseTimerRef.current);
+      phaseTimerRef.current = window.setTimeout(() => {
+        if (pageChange) setVeil(true);
+        setIndex(target);
+      }, LEAVE_MS);
+    },
+    [safeSteps, index]
+  );
+
   const leave = useCallback(() => {
     if (step?.onLeave !== undefined) onAction?.(step.onLeave);
   }, [step?.onLeave, onAction]);
 
-  const next = useCallback(() => {
-    leave();
-    if (index >= safeSteps.length - 1) {
-      onClose("finished");
-      return;
-    }
-    setIndex((current) => Math.min(current + 1, safeSteps.length - 1));
-  }, [index, leave, onClose, safeSteps.length]);
+  /**
+   * Moves to the next step. `fulfilled` is true when the step's own action
+   * fired — the click, focus or app event it was waiting for. Only an
+   * unfulfilled exit runs `onLeave`: a guided modal must stay open when the
+   * user performed the step, and must close when the guide moves on by itself.
+   */
+  const advance = useCallback(
+    (fulfilled: boolean) => {
+      if (
+        phaseRef.current === "leaving" &&
+        transitionFromRef.current === step?.id
+      ) {
+        return;
+      }
+      transitionFromRef.current = step?.id ?? null;
+      if (!fulfilled) leave();
+      if (index >= safeSteps.length - 1) {
+        onClose("finished");
+        return;
+      }
+      changeStep(Math.min(index + 1, safeSteps.length - 1));
+    },
+    [step?.id, index, leave, onClose, safeSteps.length, changeStep]
+  );
+
+  const next = useCallback(() => advance(false), [advance]);
 
   const back = useCallback(() => {
+    if (
+      index === 0 ||
+      (phaseRef.current === "leaving" && transitionFromRef.current === step?.id)
+    ) {
+      return;
+    }
+    transitionFromRef.current = step?.id ?? null;
     leave();
-    setIndex((current) => Math.max(0, current - 1));
-  }, [leave]);
+    const named =
+      step?.backTo === undefined
+        ? -1
+        : safeSteps.findIndex((candidate) => candidate.id === step.backTo);
+    changeStep(named >= 0 ? named : Math.max(0, index - 1));
+  }, [step?.backTo, step?.id, index, leave, changeStep, safeSteps]);
 
   const skip = useCallback(() => onClose("skipped"), [onClose]);
 
@@ -170,15 +422,56 @@ export function FeaturesTutorial({
   }, []);
 
   // Enter a step: navigate, wait for the target, measure it, and bring it into
-  // view. A missing target is a graceful state, never a crash or a dead tour.
+  // view. Entering is gated on the measurement, so the spotlight never points
+  // at the previous target while the new one is still mounting. A missing
+  // target is a graceful state, never a crash or a dead tour.
   useEffect(() => {
     if (step === undefined) return;
     setTargetMissing(false);
-    setRect(null);
-    if (step.page !== undefined) navigateRef.current(step.page);
     let cancelled = false;
-    let timer: number | undefined;
+    let findTimer: number | undefined;
+    let veilTimer: number | undefined;
+    let measured = false;
+    const veilActive = pageVeilRef.current;
+    let veilDone = !veilActive;
     const started = performance.now();
+
+    const enter = () => {
+      if (cancelled || !measured || !veilDone) return;
+      // A step that is already being left must not enter again. A target that
+      // mounts late — a forced-open surface revealed after the step — would
+      // otherwise clear the pending leave timer and strand the tour on the
+      // step the user just answered.
+      if (
+        phaseRef.current === "leaving" &&
+        transitionFromRef.current === step?.id
+      ) {
+        return;
+      }
+      setVeil(false);
+      phaseRef.current = "entering";
+      setPhase("entering");
+      window.clearTimeout(phaseTimerRef.current);
+      phaseTimerRef.current = window.setTimeout(() => {
+        if (!cancelled) {
+          phaseRef.current = "idle";
+          setPhase("idle");
+        }
+      }, ENTER_MS);
+    };
+
+    if (veilActive) {
+      // The page swap is already under the veil; keep it up long enough to be
+      // seen as a transition rather than a one-frame flash.
+      veilTimer = window.setTimeout(() => {
+        veilDone = true;
+        enter();
+      }, PAGE_VEIL_MS);
+    }
+    if (step.page !== undefined) {
+      navigateRef.current(step.page);
+    }
+
     const find = () => {
       if (cancelled) return;
       const element = document.querySelector<HTMLElement>(step.target);
@@ -197,6 +490,13 @@ export function FeaturesTutorial({
           if (cancelled) return;
           setRect(element.getBoundingClientRect());
         };
+        // Measure now so entering is not held hostage by a frame callback,
+        // then re-measure on the frame to catch layout that settles after the
+        // commit. `measured` is set before `enter`, so the guide never enters
+        // before it has a target rectangle.
+        measure();
+        measured = true;
+        enter();
         if (typeof window.requestAnimationFrame === "function") {
           window.requestAnimationFrame(measure);
         } else {
@@ -206,20 +506,34 @@ export function FeaturesTutorial({
       }
       if (performance.now() - started >= TARGET_TIMEOUT_MS) {
         setTargetMissing(true);
+        setRect(null);
+        measured = true;
+        veilDone = true;
+        enter();
         return;
       }
-      timer = window.setTimeout(find, 80);
+      findTimer = window.setTimeout(find, 80);
     };
     find();
-    const focusTimer = window.setTimeout(() => {
-      headingRef.current?.focus({ preventScroll: true });
-    }, 30);
+    // Only a read-only step announces itself by taking focus. An interactive
+    // step hands the user a control: focusing the guide heading 30 ms after it
+    // opens would pull focus out of the field they just pressed, and would
+    // race the target's own click/focus handling.
+    const readOnly = step.advance === undefined || step.advance === "next";
+    const focusTimer = readOnly
+      ? window.setTimeout(() => {
+          headingRef.current?.focus({ preventScroll: true });
+        }, 30)
+      : undefined;
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearTimeout(findTimer);
+      window.clearTimeout(veilTimer);
       window.clearTimeout(focusTimer);
     };
-  }, [step, reducedMotion]);
+  }, [step]);
+
+  useEffect(() => () => window.clearTimeout(phaseTimerRef.current), []);
 
   // Keep the hole and the tooltip attached while the page or a modal scrolls.
   useEffect(() => {
@@ -228,6 +542,10 @@ export function FeaturesTutorial({
       const element = document.querySelector<HTMLElement>(step.target);
       if (element !== null) {
         setRect(element.getBoundingClientRect());
+        // A target that mounts after the step opened — a modal the step's own
+        // action reopened — gets its spotlight back instead of staying
+        // "missing" for the rest of the step.
+        setTargetMissing(false);
       }
     };
     const onScroll = () => update();
@@ -367,7 +685,7 @@ export function FeaturesTutorial({
       const onClick = (event: MouseEvent) => {
         const element = target();
         if (element !== null && event.target instanceof Node && element.contains(event.target)) {
-          next();
+          advance(true);
         }
       };
       document.addEventListener("click", onClick, true);
@@ -377,7 +695,7 @@ export function FeaturesTutorial({
       const onFocus = (event: FocusEvent) => {
         const element = target();
         if (element !== null && event.target instanceof Node && element.contains(event.target)) {
-          next();
+          advance(true);
         }
       };
       document.addEventListener("focusin", onFocus, true);
@@ -386,14 +704,14 @@ export function FeaturesTutorial({
     if (step.advance === "event" && step.advanceEvent !== undefined) {
       const onAdvance = (event: Event) => {
         const detail = (event as CustomEvent<{ key?: string }>).detail;
-        if (detail?.key === step.advanceEvent) next();
+        if (detail?.key === step.advanceEvent) advance(true);
       };
       window.addEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
       return () =>
         window.removeEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
     }
     return;
-  }, [next, step]);
+  }, [advance, step]);
 
   // Keyboard navigation. Escape means Skip, matching the visible button.
   useEffect(() => {
@@ -420,7 +738,12 @@ export function FeaturesTutorial({
 
   if (collapsed) {
     return (
-      <div data-features-tutorial={workspace}>
+      <div
+        data-features-tutorial={workspace}
+        data-features-tutorial-phase={phase}
+        data-features-tutorial-step={step.id}
+        data-features-tutorial-motion={reducedMotion ? "reduced" : "full"}
+      >
         <button
           type="button"
           aria-label="Show Features Tutorial guide"
@@ -445,6 +768,16 @@ export function FeaturesTutorial({
     zIndex: 80,
     background: "rgba(28, 27, 25, 0.34)",
   };
+  // Reduced motion keeps the fade (opacity is not movement) and drops the
+  // geometry slide. The phase machine still runs, so the guide still eases
+  // out and in rather than snapping.
+  const geometryTransition = reducedMotion
+    ? "opacity 120ms linear"
+    : "top 220ms cubic-bezier(0.25, 1, 0.5, 1), left 220ms cubic-bezier(0.25, 1, 0.5, 1), width 220ms cubic-bezier(0.25, 1, 0.5, 1), height 220ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms linear";
+  const dimOpacity = phase === "leaving" ? 0 : 1;
+  const tooltipTransition = reducedMotion
+    ? "opacity 120ms linear"
+    : "left 220ms cubic-bezier(0.25, 1, 0.5, 1), top 220ms cubic-bezier(0.25, 1, 0.5, 1), opacity 120ms linear";
   const scrollPanel = (event: WheelEvent) => {
     window.scrollBy(0, event.deltaY);
   };
@@ -452,6 +785,9 @@ export function FeaturesTutorial({
     rect !== null && rect.width > window.innerWidth * 0.55;
   const showHole =
     step.spotlight !== "none" && rect !== null && !targetMissing;
+  const beaconLabel = beaconLabelFor(step);
+  const showBeacon =
+    beaconLabel !== null && rect !== null && !targetMissing && phase !== "leaving";
   // Four panels, each covering one side of the hole and none overlapping the
   // others. Overlapping semi-transparent panels made the target's row or
   // column visibly darker than the rest of the dimmed page.
@@ -511,12 +847,32 @@ export function FeaturesTutorial({
           : null;
 
   return (
-    <div data-features-tutorial={workspace}>
+    <div
+      data-features-tutorial={workspace}
+      data-features-tutorial-phase={phase}
+      data-features-tutorial-step={step.id}
+      data-features-tutorial-motion={reducedMotion ? "reduced" : "full"}
+    >
+      {veil ? (
+        <div
+          aria-hidden="true"
+          data-features-tutorial-veil
+          className="pointer-events-none fixed inset-0 z-[79] bg-paper"
+        />
+      ) : null}
       {showHole ? (
         <>
           <div
             aria-hidden="true"
-            style={{ ...panelStyle, top: 0, left: 0, right: 0, height: holeTop }}
+            style={{
+              ...panelStyle,
+              top: 0,
+              left: 0,
+              right: 0,
+              height: holeTop,
+              opacity: dimOpacity,
+              transition: geometryTransition,
+            }}
             onWheel={scrollPanel}
           />
           <div
@@ -527,6 +883,8 @@ export function FeaturesTutorial({
               left: 0,
               width: holeLeft,
               height: sideHeight,
+              opacity: dimOpacity,
+              transition: geometryTransition,
             }}
             onWheel={scrollPanel}
           />
@@ -538,6 +896,8 @@ export function FeaturesTutorial({
               left: holeRight,
               right: 0,
               height: sideHeight,
+              opacity: dimOpacity,
+              transition: geometryTransition,
             }}
             onWheel={scrollPanel}
           />
@@ -549,12 +909,15 @@ export function FeaturesTutorial({
               left: 0,
               right: 0,
               height: Math.max(0, window.innerHeight - holeBottom),
+              opacity: dimOpacity,
+              transition: geometryTransition,
             }}
             onWheel={scrollPanel}
           />
           {ring !== null ? (
             <div
               aria-hidden="true"
+              data-tutorial-spotlight="target"
               className="pointer-events-none fixed rounded-[10px] border-[1.5px] border-accent-400 shadow-[0_0_0_4px_rgba(255,255,255,0.16),0_0_22px_rgba(47,107,79,0.22)]"
               style={{
                 zIndex: 81,
@@ -562,6 +925,8 @@ export function FeaturesTutorial({
                 left: ring.left,
                 width: ring.width,
                 height: ring.height,
+                opacity: dimOpacity,
+                transition: geometryTransition,
               }}
             />
           ) : null}
@@ -569,10 +934,31 @@ export function FeaturesTutorial({
       ) : step.spotlight === "none" ? null : (
         <div
           aria-hidden="true"
-          style={{ ...panelStyle, inset: 0 }}
+          style={{
+            ...panelStyle,
+            inset: 0,
+            opacity: dimOpacity,
+            transition: geometryTransition,
+          }}
           onWheel={scrollPanel}
         />
       )}
+
+      {showBeacon && rect !== null && beaconLabel !== null ? (
+        <TutorialBeacon
+          label={beaconLabel}
+          rect={rect}
+          reducedMotion={reducedMotion}
+          transition={geometryTransition}
+          prefer={
+            position?.placement === "bottom"
+              ? "top"
+              : position?.placement === "top"
+                ? "bottom"
+                : undefined
+          }
+        />
+      ) : null}
 
       <div
         ref={tooltipRef}
@@ -585,6 +971,11 @@ export function FeaturesTutorial({
           zIndex: 82,
           left: position?.left ?? 0,
           top: position?.top ?? 0,
+          // A guide that is still fading or sliding into place must not eat a
+          // click aimed at the control it points at. The wrapper takes pointer
+          // events back only once the step is idle; the spotlight and beacon
+          // layers ignore them throughout.
+          pointerEvents: phase === "idle" ? "auto" : "none",
           width:
             position?.placement === "sheet"
               ? "calc(100vw - 24px)"
@@ -593,8 +984,8 @@ export function FeaturesTutorial({
                 : compactTooltip
                   ? "min(320px, calc(100vw - 24px))"
                   : "min(380px, calc(100vw - 24px))",
-          opacity: position === null ? 0 : 1,
-          transition: reducedMotion ? "none" : "opacity 120ms ease-out",
+          opacity: phase === "leaving" || position === null ? 0 : 1,
+          transition: tooltipTransition,
         }}
       >
         {arrow !== null ? (

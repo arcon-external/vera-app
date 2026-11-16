@@ -817,7 +817,7 @@ async function waitForButton(label: string): Promise<HTMLButtonElement> {
 }
 
 describe("Features Tutorial (issue #595)", () => {
-  it("walks the Quotation workspace, finishes, and replays from settings", { timeout: 20000 }, async () => {
+  it("walks the Quotation workspace, finishes, and replays from settings", { timeout: 30000 }, async () => {
     await renderApp();
     const open = await waitForButton("Open Quotation");
     await act(async () => {
@@ -829,10 +829,21 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).toContain("One workspace, three views");
 
     // The tour owns the page transitions: Editor -> Drafts -> Archive ->
-    // Settings. Each Next waits for the target to exist.
-    for (let step = 0; step < 7; step += 1) {
-      act(() => button("Next step").click());
-      await waitFor(350);
+    // Settings. Walk it step by step (the guide's own step id, polled) rather
+    // than by a fixed delay, so a longer script (#607) or a loaded runner
+    // cannot make the walk race its own motion phases.
+    while (tutorialStepID() !== "quotation-settings-tutorial") {
+      const from = tutorialStepID();
+      const next = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Next step"]'
+      );
+      if (next === null) {
+        throw new Error(
+          `the tour never reached its final step (on ${from ?? "none"})`
+        );
+      }
+      act(() => next.click());
+      await waitForTutorialStepChange(from);
     }
     expect(document.body.textContent).toContain("Replay this tutorial anytime");
     expect(document.body.textContent).toContain("Replay tutorial");
@@ -883,7 +894,61 @@ describe("Features Tutorial (issue #595)", () => {
     await flush();
   });
 
-  it("shows only the practice quotation in the PO tutorial selector", { timeout: 20000 }, async () => {
+  // Issue #603: the link flow is guided one real click at a time. The tour's
+  // active step, its beacon label and the real selector control are asserted
+  // together, because a guide that advances on its own would still pass a
+  // text-only test.
+  function tutorialStepID(): string | null {
+    return (
+      document.querySelector<HTMLElement>("[data-features-tutorial]")?.dataset
+        .featuresTutorialStep ?? null
+    );
+  }
+
+  function beaconText(): string {
+    return (
+      document.querySelector<HTMLElement>("[data-tutorial-beacon]")?.textContent ??
+      ""
+    );
+  }
+
+  function selectorDialog(): Element | null {
+    return document.querySelector('[data-tutorial="tutorial-selector"]');
+  }
+
+  /** The motion phases hold a step off-screen while it fades, so poll for the
+   *  settled state rather than assuming a duration. */
+  async function waitForTutorialStep(id: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (tutorialStepID() === id) return;
+      await waitFor(50);
+    }
+    throw new Error(
+      `tutorial stayed on ${tutorialStepID() ?? "none"} instead of ${id}`
+    );
+  }
+
+  /** Polls the guide's own step id until the Next click has swapped it. */
+  async function waitForTutorialStepChange(from: string | null): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (tutorialStepID() !== from) return;
+      await waitFor(100);
+    }
+    throw new Error(`tutorial stayed on ${from ?? "none"}`);
+  }
+
+  async function waitForBeacon(label: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (beaconText().includes(label)) return;
+      await waitFor(50);
+    }
+    throw new Error(`no ${label} beacon appeared`);
+  }
+
+  it("guides the PO link one click at a time and reaches the editor only after confirmation", { timeout: 25000 }, async () => {
     await renderApp();
     const open = await waitForButton("Open Purchase Orders");
     await act(async () => {
@@ -894,13 +959,22 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).toContain("One workspace, three views");
 
     act(() => button("Next step").click());
-    await waitFor(350);
-    expect(document.body.textContent).toContain(
-      "A purchase order begins with a quotation"
-    );
+    await waitForTutorialStep("po-link");
+    await waitForBeacon("Click");
+    // The rail's link card is the target and carries a Click cue. Nothing is
+    // open yet.
+    expect(
+      document.querySelector('[data-tutorial="po-link-button"]')
+    ).not.toBeNull();
+    expect(selectorDialog()).toBeNull();
+
     act(() => button("Link a Quotation").click());
-    await waitFor(650);
-    expect(document.body.textContent).toContain("Choose the practice quotation");
+    await waitForTutorialStep("po-selector-quotation");
+    await waitForBeacon("Select");
+    // Step 1: the practice row, with the guide docked and the modal usable.
+    expect(document.body.textContent).toContain("Select the practice quotation");
+    expect(selectorDialog()).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 1 of 3");
     expect(document.body.textContent).toContain("TUT-2026-001");
     expect(document.body.textContent).toContain("Vera Features Tutorial (MOCK)");
     expect(mocks.listPOSourceQuotations).not.toHaveBeenCalled();
@@ -908,21 +982,307 @@ describe("Features Tutorial (issue #595)", () => {
     act(() =>
       button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
     );
-    await waitFor(350);
-    const cont = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Continue to confirmation"]'
+    await waitForTutorialStep("po-selector-continue");
+    await waitForBeacon("Click");
+    // Step 2: the revision/continue control, still inside the selector.
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-continue"]')
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 2 of 3");
+    expect(document.body.textContent).not.toContain(
+      "Quotation values appear inline"
     );
-    if (cont !== null) {
-      act(() => cont.click());
-      await waitFor(350);
-    }
-    act(() => button("Confirm source").click());
-    await waitFor(800);
 
+    act(() => button("Continue to confirmation").click());
+    await waitForTutorialStep("po-selector-confirm");
+    await waitForBeacon("Click");
+    // Step 3: the confirm control, still inside the selector.
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-confirm"]')
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 3 of 3");
+    expect(document.body.textContent).not.toContain(
+      "Quotation values appear inline"
+    );
+
+    act(() => button("Confirm source").click());
+    await waitForTutorialStep("po-payment-terms");
+    // Only now does the tour move to the inline editor.
+    expect(selectorDialog()).toBeNull();
     expect(document.body.textContent).toContain("MOCK-TUTORIAL-PO");
     expect(document.body.textContent).toContain("Quotation values appear inline");
     expect(document.body.textContent).toContain("Quotation item 2");
+
+    // The whole journey is client-only: every real call stayed untouched.
+    expect(mocks.listPOSourceQuotations).not.toHaveBeenCalled();
+    expect(mocks.listPOSourceRevisions).not.toHaveBeenCalled();
+    expect(mocks.validatePOSource).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
     expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
     expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+  });
+
+  it("closes the selector when the tour goes back, and re-entering starts cleanly", { timeout: 20000 }, async () => {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+
+    // A deeper micro-step: picking the row leaves the guide waiting on
+    // Continue.
+    act(() =>
+      button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
+    );
+    await waitForTutorialStep("po-selector-continue");
+    expect(selectorDialog()).not.toBeNull();
+
+    // Back is an unfulfilled exit: it closes the selector and returns to the
+    // link that opened it, never to a step pointing inside the closed dialog.
+    act(() => button("Previous step").click());
+    await waitForTutorialStep("po-link");
+    expect(selectorDialog()).toBeNull();
+    await waitForBeacon("Click");
+
+    // Re-entering starts a fresh selector at step 1, not the abandoned step.
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 1 of 3");
+
+    // Skip closes it too; no tour step is left pointing at a closed dialog.
+    act(() => button("Skip Features Tutorial").click());
+    await flush();
+    expect(selectorDialog()).toBeNull();
+    expect(document.querySelector("[data-features-tutorial]")).toBeNull();
+  });
+
+  async function waitForQuoteBar(): Promise<HTMLElement> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      const found = document.querySelector<HTMLElement>(
+        '[data-tutorial="po-quote-bar"]'
+      );
+      if (found !== null) return found;
+      await waitFor(50);
+    }
+    throw new Error("the tutorial never opened the quotation bar");
+  }
+
+  /** The link flow is a prerequisite for the quote-bar lesson; this walks it
+   *  exactly as staff do, so each test pays only for what it asserts. */
+  async function walkToPaymentTerms(): Promise<void> {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    act(() =>
+      button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
+    );
+    await waitForTutorialStep("po-selector-continue");
+    act(() => button("Continue to confirmation").click());
+    await waitForTutorialStep("po-selector-confirm");
+    act(() => button("Confirm source").click());
+    await waitForTutorialStep("po-payment-terms");
+  }
+
+  /** Issue #606: the ghost lesson follows the quote-bar lesson, so a ghost test
+   *  walks both real lessons rather than jumping the guide. */
+  async function walkToGhostIntro(): Promise<void> {
+    await walkToPaymentTerms();
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    act(() => button("Use quotation value").click());
+    await waitForTutorialStep("po-quote-result");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost");
+  }
+
+  function ghostCards(): Element[] {
+    return Array.from(document.querySelectorAll("[data-quotation-ghost]"));
+  }
+
+  it("opens the quotation bar on Press and keeps it open while the guide explains it", { timeout: 30000 }, async () => {
+    await walkToPaymentTerms();
+    await waitForBeacon("Press");
+
+    expect(input("Payment terms").value).toBe("45 days");
+    // The bar is a hands-on lesson: it is closed until the field is pressed.
+    expect(document.body.textContent).not.toContain("Value from quotation");
+
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    expect(document.body.textContent).toContain("Value from quotation");
+    expect(document.body.textContent).toContain("30 days");
+
+    // Next moves the guide's focus into the tooltip. The bar must survive that
+    // because a reveal, not focus luck, holds it open.
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    await waitForQuoteBar();
+    expect(
+      document.querySelector('[data-tutorial="po-quote-bar-actions"]')
+    ).not.toBeNull();
+    expect(document.activeElement).not.toBe(input("Payment terms"));
+
+    act(() => button("Use quotation value").click());
+    await waitForTutorialStep("po-quote-result");
+    expect(input("Payment terms").value).toBe("30 days");
+    expect(input("Payment terms").style.borderColor).toBe("rgb(82, 152, 115)");
+    // The result step explains both outcomes and that editing reopens the
+    // choice, not only the path this run took.
+    expect(document.body.textContent).toContain("Green");
+    expect(document.body.textContent).toContain("White");
+    expect(document.body.textContent).toContain(
+      "Editing the field brings the choice back"
+    );
+    // The result step is no longer a forced-open surface.
+    expect(document.body.textContent).not.toContain("Value from quotation");
+
+    // The whole lesson stayed client-only.
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.validatePOSource).not.toHaveBeenCalled();
+  });
+
+  it("resolves the choice from either bar action and leaves the field white when the entered value is kept", { timeout: 30000 }, async () => {
+    await walkToPaymentTerms();
+    act(() => input("Payment terms").focus());
+    await waitForQuoteBar();
+    await waitForTutorialStep("po-quote-bar");
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-quote-choice");
+    await waitForQuoteBar();
+
+    // Keeping the entered value is a real answer, not a round-trip through the
+    // quotation value first: the step offers both sides while the guide is up.
+    expect(
+      document.querySelector('button[aria-label="Use quotation value"]')
+    ).not.toBeNull();
+    act(() => button("Use my value").click());
+    await waitForTutorialStep("po-quote-result");
+
+    expect(input("Payment terms").value).toBe("45 days");
+    expect(input("Payment terms").style.borderColor).toBe("");
+    expect(document.body.textContent).toContain("White");
+
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+  });
+
+  it("accepts the first quotation ghost and explains the updated line", { timeout: 40000 }, async () => {
+    await walkToGhostIntro();
+
+    // The intro points at the first split ghost and explains what it shows.
+    expect(ghostCards()).toHaveLength(3);
+    const firstGhost = ghostCards()[0];
+    expect(firstGhost.textContent).toContain("Quotation item 2");
+    expect(firstGhost.textContent).toContain("Tutorial split package (MOCK)");
+    expect(firstGhost.textContent).toContain("Tutorial split part A (MOCK)");
+    expect(firstGhost.textContent).toContain("Tutorial scope A1");
+    expect(document.body.textContent).toContain("parent");
+    expect(document.body.textContent).toContain("scope");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost-choice");
+    await waitForBeacon("Select");
+    expect(
+      document.querySelector('[data-tutorial="po-ghost-actions"]')
+    ).not.toBeNull();
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+
+    act(() => button("Use quotation 2").click());
+    await waitForTutorialStep("po-ghost-result");
+
+    // Accepting removes that ghost and puts the quotation values on the line.
+    expect(ghostCards()).toHaveLength(2);
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("2");
+    // The result step points at the line that owned the ghost.
+    expect(
+      document.querySelector(
+        '[data-tutorial="po-lines"] input[aria-label="Description for line 2"]'
+      )
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("brings its ghost back");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-extra");
+
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.saveReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("ignores the first quotation ghost, keeps the PO value and explains the omission", { timeout: 40000 }, async () => {
+    await walkToGhostIntro();
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-ghost-choice");
+    await waitForBeacon("Select");
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+
+    act(() => button("Ignore quotation 2").click());
+    await waitForTutorialStep("po-ghost-result");
+
+    // Ignoring removes the ghost but leaves the entered PO values untouched.
+    expect(ghostCards()).toHaveLength(2);
+    expect(input("Quantity for sub-item 1 of line 2").value).toBe("3");
+    expect(
+      document.querySelector(
+        '[data-tutorial="po-lines"] input[aria-label="Description for line 2"]'
+      )
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("omission is recorded");
+
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-extra");
+
+    expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+    expect(mocks.saveReconciliation).not.toHaveBeenCalled();
+  });
+
+  it("closes the selector when staff leave the workspace mid-link", { timeout: 20000 }, async () => {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+
+    act(() => button("Back to Home").click());
+    await flush();
+    await waitFor(300);
+    expect(selectorDialog()).toBeNull();
+    expect(document.querySelector("[data-features-tutorial]")).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      "Select the practice quotation"
+    );
   });
 });

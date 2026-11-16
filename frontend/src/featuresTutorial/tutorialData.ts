@@ -29,6 +29,21 @@ export const TUTORIAL_SUBJECT =
 export const TUTORIAL_PAYMENT_TERMS = "30 days";
 export const TUTORIAL_INCOTERMS = "DAP";
 
+// Issue #604 and #606: the tutorial anchors and events shared by the product
+// components and the tutorial scripts live in `tutorialAnchors.ts`, outside
+// this module, so a component never imports from the tutorial feature that
+// imports it.
+
+/**
+ * Issue #605: the one sentence every guarded shell action says while either
+ * tutorial is live. It is used as the guard toast, the action-bar caption and
+ * a guarded button's title, so it is named for the copy rather than the
+ * surface. It names the sandbox rather than the control, because the point of
+ * the guard is that the data is practice -- not that the button is broken.
+ */
+export const TUTORIAL_PRACTICE_COPY =
+  "Features Tutorial practice — nothing is saved to your workspace.";
+
 const SOURCE_LINES: PurchaseOrderSourceLineDTO[] = [
   {
     QuotationItemNo: 1,
