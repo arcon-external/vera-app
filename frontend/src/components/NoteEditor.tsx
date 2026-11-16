@@ -25,6 +25,13 @@ export interface NoteEditorProps {
   disabled?: boolean;
   /** Optional standing explanation, e.g. where the note prints. */
   hint?: string;
+  /**
+   * Issue #607: hide the formatting toolbar until the note is focused, and
+   * keep it visible afterwards. The Quotation tour reveals it by focusing the
+   * note, so the toolbar can be explained as its own step; the real editor
+   * leaves this off and always shows the toolbar.
+   */
+  revealToolbarOnFocus?: boolean;
 }
 
 type Command = "bold" | "italic" | "insertUnorderedList" | "insertOrderedList";
@@ -64,11 +71,16 @@ export function NoteEditor({
   maxLength = NOTE_MAX_LENGTH,
   disabled = false,
   hint,
+  revealToolbarOnFocus = false,
 }: NoteEditorProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const focusedRef = useRef(false);
   const lastGoodHTML = useRef("");
   const [focused, setFocused] = useState(false);
+  // Once revealed the toolbar stays, even when the guide takes focus for its
+  // next step: a toolbar that vanished under the spotlight would explain
+  // itself only for the instant it was measured.
+  const [toolbarRevealed, setToolbarRevealed] = useState(false);
   const [length, setLength] = useState(() => noteLength(value));
   const [overLimit, setOverLimit] = useState(false);
   const [active, setActive] = useState<FormatState>(NO_FORMAT);
@@ -228,6 +240,7 @@ export function NoteEditor({
   const handleFocus = (): void => {
     focusedRef.current = true;
     setFocused(true);
+    setToolbarRevealed(true);
     refreshFormatState();
   };
 
@@ -262,7 +275,7 @@ export function NoteEditor({
   );
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1.5" data-tutorial="quotation-note">
       <span className="flex items-baseline justify-between gap-2">
         <span className="text-caption font-medium text-ink-600">{label}</span>
         <span className="tnum text-caption text-ink-400">
@@ -277,44 +290,47 @@ export function NoteEditor({
             : "border-rule focus-within:border-accent-400 focus-within:ring-2 focus-within:ring-accent-500/20"
         }`}
       >
-        <div
-          role="toolbar"
-          aria-label="Note formatting"
-          className="flex flex-wrap items-center gap-1 border-b border-rule px-2 py-1.5"
-        >
-          {button(
-            "bold",
-            "Bold",
-            "Control+B Meta+B",
-            "Bold (Ctrl+B or Cmd+B)",
-            active.bold,
-            <strong aria-hidden="true">B</strong>
-          )}
-          {button(
-            "italic",
-            "Italic",
-            "Control+I Meta+I",
-            "Italic (Ctrl+I or Cmd+I)",
-            active.italic,
-            <em aria-hidden="true">I</em>
-          )}
-          {button(
-            "insertUnorderedList",
-            "Bullet list",
-            "Control+Shift+8 Meta+Shift+8",
-            "Bullet list (Ctrl+Shift+8 or Cmd+Shift+8)",
-            active.bullets,
-            <span aria-hidden="true">• List</span>
-          )}
-          {button(
-            "insertOrderedList",
-            "Numbered list",
-            "Control+Shift+7 Meta+Shift+7",
-            "Numbered list (Ctrl+Shift+7 or Cmd+Shift+7)",
-            active.numbers,
-            <span aria-hidden="true">1. List</span>
-          )}
-        </div>
+        {!revealToolbarOnFocus || toolbarRevealed ? (
+          <div
+            role="toolbar"
+            aria-label="Note formatting"
+            data-tutorial="quotation-note-toolbar"
+            className="flex flex-wrap items-center gap-1 border-b border-rule px-2 py-1.5"
+          >
+            {button(
+              "bold",
+              "Bold",
+              "Control+B Meta+B",
+              "Bold (Ctrl+B or Cmd+B)",
+              active.bold,
+              <strong aria-hidden="true">B</strong>
+            )}
+            {button(
+              "italic",
+              "Italic",
+              "Control+I Meta+I",
+              "Italic (Ctrl+I or Cmd+I)",
+              active.italic,
+              <em aria-hidden="true">I</em>
+            )}
+            {button(
+              "insertUnorderedList",
+              "Bullet list",
+              "Control+Shift+8 Meta+Shift+8",
+              "Bullet list (Ctrl+Shift+8 or Cmd+Shift+8)",
+              active.bullets,
+              <span aria-hidden="true">• List</span>
+            )}
+            {button(
+              "insertOrderedList",
+              "Numbered list",
+              "Control+Shift+7 Meta+Shift+7",
+              "Numbered list (Ctrl+Shift+7 or Cmd+Shift+7)",
+              active.numbers,
+              <span aria-hidden="true">1. List</span>
+            )}
+          </div>
+        ) : null}
 
         <div
           ref={rootRef}

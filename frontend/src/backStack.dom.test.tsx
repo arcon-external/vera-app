@@ -829,10 +829,22 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).toContain("One workspace, three views");
 
     // The tour owns the page transitions: Editor -> Drafts -> Archive ->
-    // Settings. Each Next waits for the target to exist.
-    for (let step = 0; step < 7; step += 1) {
-      act(() => button("Next step").click());
-      await waitFor(350);
+    // Settings. Walk it to the settings step rather than counting clicks, so
+    // a longer script (the Quotation practice steps, #607) does not break the
+    // journey.
+    const startedAt = Date.now();
+    while (
+      !document.body.textContent?.includes("Replay this tutorial anytime")
+    ) {
+      const next = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Next step"]'
+      );
+      if (next === null) throw new Error("the tour never reached its final step");
+      if (Date.now() - startedAt > 15000) {
+        throw new Error("the tour took too long to reach its final step");
+      }
+      act(() => next.click());
+      await waitFor(400);
     }
     expect(document.body.textContent).toContain("Replay this tutorial anytime");
     expect(document.body.textContent).toContain("Replay tutorial");

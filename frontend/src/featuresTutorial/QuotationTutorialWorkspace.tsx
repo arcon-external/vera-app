@@ -301,6 +301,7 @@ export function QuotationTutorialWorkspace({
             onChange={changeDetails}
             onCustomerChange={setCustomerId}
             onPaste={() => undefined}
+            revealNoteToolbarOnFocus
           />
 
           <div>
@@ -319,6 +320,7 @@ export function QuotationTutorialWorkspace({
               currency={currency}
               uomOptions={uomOptions}
               uomPendingLabel={uomPendingLabel}
+              tutorialAnchors
               onAddItem={addItem}
               onRemoveItem={removeItem}
               onChange={changeItem}

@@ -54,6 +54,7 @@ function Harness({
       <button type="button" data-tutorial="third">
         Third target
       </button>
+      <input data-tutorial="field" aria-label="Tutorial field" />
       <FeaturesTutorial
         workspace="quotation"
         steps={tutorialSteps}
@@ -187,6 +188,50 @@ describe("FeaturesTutorial", () => {
       document
         .querySelector<HTMLButtonElement>('[data-tutorial="first"]')
         ?.click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Done");
+  });
+
+  it("advances when the highlighted field receives input", async () => {
+    const inputSteps: FeaturesTutorialStep[] = [
+      {
+        id: "input",
+        target: '[data-tutorial="field"]',
+        title: "Type a cost",
+        body: "Type in the field.",
+        advance: "input",
+      },
+      {
+        id: "done",
+        target: '[data-tutorial="second"]',
+        title: "Done",
+        body: "Next.",
+        final: true,
+      },
+    ];
+    act(() => root.render(<Harness onClose={vi.fn()} steps={inputSteps} />));
+    await flush();
+    expect(
+      document.querySelector("[data-tutorial-beacon]")?.textContent
+    ).toContain("Type");
+    const field = document.querySelector<HTMLInputElement>(
+      '[data-tutorial="field"]'
+    );
+    if (field === null) throw new Error("no tutorial field");
+
+    // Input anywhere else is not this step's action.
+    act(() => {
+      document
+        .querySelector<HTMLElement>('[data-tutorial="second"]')
+        ?.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await flush(50);
+    expect(document.body.textContent).toContain("Type a cost");
+
+    act(() => {
+      field.value = "7500000";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await flush();
     expect(document.body.textContent).toContain("Done");

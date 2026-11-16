@@ -27,6 +27,53 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     ),
   },
   {
+    id: "quotation-note",
+    target: '[data-tutorial="quotation-note"]',
+    page: "create",
+    title: "Write the note, then format it",
+    body: (
+      <p>
+        Focus the practice note. A formatting toolbar appears above it, and
+        everything you type stays in this sandbox.
+      </p>
+    ),
+    advance: "focus",
+    beaconLabel: "Press",
+  },
+  {
+    id: "quotation-note-toolbar",
+    target: '[data-tutorial="quotation-note-toolbar"]',
+    page: "create",
+    title: "Bold, italic and lists",
+    body: (
+      <>
+        <p>
+          <strong>B</strong> toggles bold, <em>I</em> italic, and the two list
+          buttons start a bullet or numbered list. The same commands work from
+          the keyboard.
+        </p>
+        <p className="mt-2">
+          The note prints under the line items on the customer quotation.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: "quotation-subject",
+    target: '[data-tutorial="quotation-subject"]',
+    page: "create",
+    title: "Paste the details from Excel",
+    body: (
+      <p>
+        The subject prints above the lines. Focus it, or paste a row from Excel
+        — in the real editor one paste fills the subject, recipient and the
+        rest of the details in a single step.
+      </p>
+    ),
+    advance: "focus",
+    beaconLabel: "Press",
+  },
+  {
     id: "quotation-details",
     target: '[data-tutorial="quotation-customer"]',
     page: "create",
@@ -41,22 +88,73 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     ),
   },
   {
-    id: "quotation-lines",
-    target: '[data-tutorial="quotation-lines-header"]',
+    id: "quotation-line-cost",
+    target: '[data-tutorial="quotation-line-cost"]',
     page: "create",
-    title: "Price every line in place",
+    title: "Type a cost and watch the sell price",
     body: (
-      <>
-        <p>
-          Each line carries its own description, quantity, cost, margin and row
-          discount, with the sell price updating beside it.
-        </p>
-        <p className="mt-2">
-          Split a line into priced sub-items for a package, add scope lines
-          beneath a part, or paste a block from Excel.
-        </p>
-      </>
+      <p>
+        The first line is a practice service. Type any cost into{" "}
+        <strong>Unit cost</strong> — try 7500000 — and the line's sell price
+        updates beside it as you type. Nothing leaves this workspace.
+      </p>
     ),
+    advance: "input",
+  },
+  {
+    id: "quotation-line-sell",
+    target: '[data-tutorial="quotation-line-row"]',
+    page: "create",
+    title: "Cost, margin and discount make the sell price",
+    body: (
+      <p>
+        A line's sell price starts at its cost, adds that line's margin, then
+        takes off any row discount. The Summary rail adds every line together,
+        so each practice edit moves the totals.
+      </p>
+    ),
+  },
+  {
+    id: "quotation-line-margin",
+    target: '[data-tutorial="quotation-line-margin"]',
+    page: "create",
+    title: "Margin is set per line",
+    body: (
+      <p>
+        This line carries a 15% margin. Click its switch to turn the margin
+        off: the sell price drops at once. Turn it back on whenever you like —
+        one line's margin never applies to another.
+      </p>
+    ),
+    advance: "click",
+  },
+  {
+    id: "quotation-line-discount",
+    target: '[data-tutorial="quotation-line-discount"]',
+    page: "create",
+    title: "Discount comes after margin",
+    body: (
+      <p>
+        Cost plus margin is the list price, and a row discount then comes off
+        it. Click the switch — this line has 10% ready — and the sell price
+        drops while what we pay the supplier stays the same.
+      </p>
+    ),
+    advance: "click",
+  },
+  {
+    id: "quotation-line-split",
+    target: '[data-tutorial="quotation-line-split"]',
+    page: "create",
+    title: "Split a line into priced parts",
+    body: (
+      <p>
+        <strong>Split into sub-items</strong> turns the line into a package.
+        Each part carries its own cost, margin and discount, and the line
+        becomes their sum at quantity 1. The rail follows along.
+      </p>
+    ),
+    advance: "click",
   },
   {
     id: "quotation-totals",
@@ -76,12 +174,19 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     target: '[data-tutorial="quotation-actions"]',
     page: "create",
     title: "Save a draft, or issue a revision",
+    beaconLabel: "Click",
     body: (
-      <p>
-        <strong>Save draft</strong> keeps the work editable.{" "}
-        <strong>Export PDF</strong> stores a numbered, signed revision that can
-        never change; the next export becomes the following revision.
-      </p>
+      <>
+        <p>
+          <strong>Save draft</strong> keeps the work editable.{" "}
+          <strong>Export PDF</strong> stores a numbered, signed revision that
+          can never change; the next export becomes the following revision.
+        </p>
+        <p className="mt-2">
+          The practice quotation is never saved: pointing here creates no draft
+          and no revision.
+        </p>
+      </>
     ),
   },
   {
