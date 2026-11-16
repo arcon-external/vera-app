@@ -39,6 +39,12 @@ export interface QuotationHeroProps {
   draftSavedLabel?: string | null;
   /** Whether Prepare has produced an exportable review. */
   ready?: boolean;
+  /**
+   * Replaces the derived status line. The practice tutorial passes its
+   * sandbox copy here: its draft is never saved, so the default "Save draft
+   * stores it" line would promise something the tour cannot do.
+   */
+  statusOverride?: string | null;
 }
 
 function optionLabel(
@@ -68,6 +74,7 @@ export function QuotationHero({
   nextRevision = null,
   draftSavedLabel = null,
   ready = false,
+  statusOverride = null,
 }: QuotationHeroProps) {
   const number = quoteNumber?.trim() ?? "";
   const currentRevision = nextRevision === null ? null : nextRevision - 1;
@@ -84,15 +91,17 @@ export function QuotationHero({
       .filter((part) => part !== "")
       .join(" · ") || "—";
 
-  const status = issued
-    ? `Revision ${padRevision(currentRevision)} stays as issued. Export creates revision ${padRevision(
-        currentRevision + 1
-      )}.`
-    : draftSavedLabel
-      ? `Draft saved ${draftSavedLabel} — save again to update it.`
-      : ready
-        ? "Ready to export. Review the three stages, then export."
-        : "Not saved yet. Save draft stores it so you can continue later.";
+  const status =
+    statusOverride ??
+    (issued
+      ? `Revision ${padRevision(currentRevision)} stays as issued. Export creates revision ${padRevision(
+          currentRevision + 1
+        )}.`
+      : draftSavedLabel
+        ? `Draft saved ${draftSavedLabel} — save again to update it.`
+        : ready
+          ? "Ready to export. Review the three stages, then export."
+          : "Not saved yet. Save draft stores it so you can continue later.");
 
   return (
     <section

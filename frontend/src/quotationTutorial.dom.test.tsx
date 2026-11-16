@@ -295,6 +295,39 @@ function railText(): string {
   );
 }
 
+function practiceHero(): HTMLElement {
+  const found = document.querySelector<HTMLElement>(
+    '[data-testid="quotation-hero"]'
+  );
+  if (found === null) throw new Error("no quotation hero");
+  return found;
+}
+
+function practiceHeroText(): string {
+  return practiceHero().textContent ?? "";
+}
+
+function practiceHeroTotal(): string {
+  const found = document.querySelector<HTMLElement>(
+    '[data-testid="quotation-hero-total"]'
+  );
+  if (found === null) throw new Error("no quotation hero total");
+  return found.textContent?.trim() ?? "";
+}
+
+/** The practice details panel renders its tax basis as a radio group. */
+function pickTaxZone(label: string): void {
+  const group = document.querySelector<HTMLElement>(
+    '[role="radiogroup"][aria-label="Tax zone"]'
+  );
+  if (group === null) throw new Error("no Tax zone radiogroup");
+  const radio = Array.from(
+    group.querySelectorAll<HTMLButtonElement>('[role="radio"]')
+  ).find((candidate) => candidate.textContent?.trim() === label);
+  if (radio === undefined) throw new Error(`no radio reading ${label}`);
+  act(() => radio.click());
+}
+
 async function openQuotationTour(): Promise<void> {
   await renderApp();
   const open = await waitForButton("Open Quotation");
@@ -750,4 +783,108 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       await flush();
     }
   );
+
+  // Issue #624: the practice quotation renders the same dark hero the real
+  // editor opens with, over its own local values. These cases drive the real
+  // App, so what is asserted is the production wiring: the practice customer,
+  // details and tax basis reach the hero, the practice lines price through the
+  // same computePricing call the Summary rail uses, and no real quotation is
+  // read or written to get there.
+  describe("practice hero (issue #624)", () => {
+    it(
+      "mirrors the practice quotation with draft semantics and a live total",
+      { timeout: 20000 },
+      async () => {
+        await openQuotationTour();
+
+        const workspace = practiceWorkspace();
+        if (workspace === null) throw new Error("no practice workspace");
+        // The hero lives inside the practice sandbox -- not above it, where
+        // the real editor's hero would sit -- so the whole card is practice
+        // data by construction.
+        expect(workspace.contains(practiceHero())).toBe(true);
+        expect(practiceHero().parentElement).toBe(workspace);
+
+        // Draft semantics: the practice quotation has never been issued, and
+        // nothing in the tour can issue one.
+        const hero = practiceHeroText();
+        expect(hero).toContain("DRAFT");
+        expect(hero).toContain("New quotation");
+        expect(hero).not.toContain("CURRENT REV");
+        expect(hero).not.toContain("NEXT REV");
+
+        // Practice values, and never the real client directory's row: the
+        // hero names the fixture customer the panel itself offers.
+        expect(hero).toContain(TUTORIAL_CUSTOMER);
+        expect(hero).not.toContain(REAL_CUSTOMER);
+        expect(hero).toContain("30 days");
+        expect(hero).toContain("90 days");
+        expect(hero).toContain("EXW · IDR");
+        expect(hero).toContain("FTZ · Goods");
+
+        // Worked example, independent of computePricing (the same figures the
+        // rail case uses above): line 1 is 2 x (5.000.000 + 15%) = 11.500.000,
+        // the split package is 7.162.500, and FTZ goods charge no PPN, so the
+        // customer total is their sum.
+        expect(practiceHeroTotal()).toBe("Rp18.662.500");
+        expect(hero).not.toContain("Includes PPN");
+
+        // The sandbox says so in the hero too: Save draft refuses in the tour,
+        // so the hero must not promise that saving stores the work.
+        expect(hero).toContain(
+          "Features Tutorial practice — nothing is saved to your workspace."
+        );
+        expect(hero).not.toContain("Save draft stores it");
+
+        // Read-only mirror: the practice form stays the only editing surface.
+        expect(
+          practiceHero().querySelectorAll("input, button, select, textarea")
+        ).toHaveLength(0);
+
+        // The workspace is capped at the real editor's 1280px and the hero
+        // spans it above the details/lines/summary composition.
+        expect(workspace.className).toContain("max-w-[1280px]");
+        const details = document.querySelector('[data-tutorial="quotation-details"]');
+        if (details === null) throw new Error("no practice details panel");
+        expect(
+          practiceHero().compareDocumentPosition(details) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ).not.toBe(0);
+
+        // Live: editing the practice line reprices the hero through the same
+        // pricing path as the rail. Qty 4 makes line 1 23.000.000, so the
+        // customer total becomes 30.162.500 -- and the rail agrees.
+        typeInto(input("Quantity for line 1"), "4");
+        await flush();
+        expect(practiceHeroTotal()).toBe("Rp30.162.500");
+        expect(railText()).toContain("Rp30.162.500");
+
+        // The practice details are live too: validity, payment and tax basis
+        // reach the hero without touching a real quotation.
+        typeInto(input("Validity"), "45");
+        await flush();
+        expect(practiceHeroText()).toContain("45 days");
+
+        // Non-FTZ goods charge 11% PPN on top, so the hero's customer total
+        // includes it. The line is still at qty 4, so the subtotal is
+        // 30.162.500 and PPN adds 3.317.875: 33.480.375. The card says PPN is
+        // included, exactly as the real editor's hero would.
+        pickTaxZone("Non-FTZ");
+        await flush();
+        expect(practiceHeroText()).toContain("Non-FTZ · Goods");
+        expect(practiceHeroText()).toContain("Includes PPN");
+        expect(practiceHeroTotal()).toBe("Rp33.480.375");
+
+        expect(customerLabel()).toContain(TUTORIAL_CUSTOMER);
+        expect(mocks.getDraft).not.toHaveBeenCalled();
+        expect(mocks.saveDraft).not.toHaveBeenCalled();
+        expect(mocks.prepare).not.toHaveBeenCalled();
+        expect(mocks.exportPdf).not.toHaveBeenCalled();
+        expect(mocks.setDraftContext).not.toHaveBeenCalled();
+
+        act(() => button("Skip Features Tutorial").click());
+        await flush();
+      }
+    );
+  });
 });
