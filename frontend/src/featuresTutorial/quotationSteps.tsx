@@ -150,8 +150,9 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         <strong>Split into sub-items</strong> turns the line into a package.
-        Each part carries its own cost, margin and discount, and the line
-        becomes their sum at quantity 1. The rail follows along.
+        The parent price moves out, so enter each part&rsquo;s cost, margin and
+        discount — the line becomes their sum at quantity 1. The rail follows
+        along.
       </p>
     ),
     advance: "click",
@@ -160,6 +161,9 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     id: "quotation-totals",
     target: '[data-tutorial="quotation-totals"]',
     page: "create",
+    // The rail is against the right edge; place the guide in the main column
+    // so it never covers the totals it is explaining.
+    placement: "left",
     title: "Know the number before you issue it",
     body: (
       <p>
