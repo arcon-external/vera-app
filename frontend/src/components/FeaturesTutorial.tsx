@@ -59,8 +59,19 @@ export interface FeaturesTutorialStep {
    * and docks the guide at the bottom-left instead of drawing a box around it.
    */
   spotlight?: "target" | "none";
-  /** Action to run when the step is left with Back or Next. */
+  /**
+   * An unfulfilled exit action, run when the step is left with Back or Next
+   * rather than by its own click/focus/event. A modal the step guides through
+   * stays open when the user really performs the action; Back and Next close
+   * it with the step.
+   */
   onLeave?: string;
+  /**
+   * Step id Back returns to instead of the previous index. A guided modal's
+   * micro-steps use it so Back closes the modal and lands on the step that
+   * opened it, never on another step pointing inside the closed dialog.
+   */
+  backTo?: string;
   /** The last step's primary button is Finish. */
   final?: boolean;
 }
@@ -355,21 +366,32 @@ export function FeaturesTutorial({
     if (step?.onLeave !== undefined) onAction?.(step.onLeave);
   }, [step?.onLeave, onAction]);
 
-  const next = useCallback(() => {
-    if (
-      phaseRef.current === "leaving" &&
-      transitionFromRef.current === step?.id
-    ) {
-      return;
-    }
-    transitionFromRef.current = step?.id ?? null;
-    leave();
-    if (index >= safeSteps.length - 1) {
-      onClose("finished");
-      return;
-    }
-    changeStep(Math.min(index + 1, safeSteps.length - 1));
-  }, [step?.id, index, leave, onClose, safeSteps.length, changeStep]);
+  /**
+   * Moves to the next step. `fulfilled` is true when the step's own action
+   * fired — the click, focus or app event it was waiting for. Only an
+   * unfulfilled exit runs `onLeave`: a guided modal must stay open when the
+   * user performed the step, and must close when the guide moves on by itself.
+   */
+  const advance = useCallback(
+    (fulfilled: boolean) => {
+      if (
+        phaseRef.current === "leaving" &&
+        transitionFromRef.current === step?.id
+      ) {
+        return;
+      }
+      transitionFromRef.current = step?.id ?? null;
+      if (!fulfilled) leave();
+      if (index >= safeSteps.length - 1) {
+        onClose("finished");
+        return;
+      }
+      changeStep(Math.min(index + 1, safeSteps.length - 1));
+    },
+    [step?.id, index, leave, onClose, safeSteps.length, changeStep]
+  );
+
+  const next = useCallback(() => advance(false), [advance]);
 
   const back = useCallback(() => {
     if (
@@ -380,8 +402,12 @@ export function FeaturesTutorial({
     }
     transitionFromRef.current = step?.id ?? null;
     leave();
-    changeStep(Math.max(0, index - 1));
-  }, [step?.id, index, leave, changeStep]);
+    const named =
+      step?.backTo === undefined
+        ? -1
+        : safeSteps.findIndex((candidate) => candidate.id === step.backTo);
+    changeStep(named >= 0 ? named : Math.max(0, index - 1));
+  }, [step?.backTo, step?.id, index, leave, changeStep, safeSteps]);
 
   const skip = useCallback(() => onClose("skipped"), [onClose]);
 
@@ -499,6 +525,10 @@ export function FeaturesTutorial({
       const element = document.querySelector<HTMLElement>(step.target);
       if (element !== null) {
         setRect(element.getBoundingClientRect());
+        // A target that mounts after the step opened — a modal the step's own
+        // action reopened — gets its spotlight back instead of staying
+        // "missing" for the rest of the step.
+        setTargetMissing(false);
       }
     };
     const onScroll = () => update();
@@ -638,7 +668,7 @@ export function FeaturesTutorial({
       const onClick = (event: MouseEvent) => {
         const element = target();
         if (element !== null && event.target instanceof Node && element.contains(event.target)) {
-          next();
+          advance(true);
         }
       };
       document.addEventListener("click", onClick, true);
@@ -648,7 +678,7 @@ export function FeaturesTutorial({
       const onFocus = (event: FocusEvent) => {
         const element = target();
         if (element !== null && event.target instanceof Node && element.contains(event.target)) {
-          next();
+          advance(true);
         }
       };
       document.addEventListener("focusin", onFocus, true);
@@ -657,14 +687,14 @@ export function FeaturesTutorial({
     if (step.advance === "event" && step.advanceEvent !== undefined) {
       const onAdvance = (event: Event) => {
         const detail = (event as CustomEvent<{ key?: string }>).detail;
-        if (detail?.key === step.advanceEvent) next();
+        if (detail?.key === step.advanceEvent) advance(true);
       };
       window.addEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
       return () =>
         window.removeEventListener(FEATURES_TUTORIAL_ADVANCE_EVENT, onAdvance);
     }
     return;
-  }, [next, step]);
+  }, [advance, step]);
 
   // Keyboard navigation. Escape means Skip, matching the visible button.
   useEffect(() => {

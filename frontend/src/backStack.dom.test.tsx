@@ -883,7 +883,51 @@ describe("Features Tutorial (issue #595)", () => {
     await flush();
   });
 
-  it("shows only the practice quotation in the PO tutorial selector", { timeout: 20000 }, async () => {
+  // Issue #603: the link flow is guided one real click at a time. The tour's
+  // active step, its beacon label and the real selector control are asserted
+  // together, because a guide that advances on its own would still pass a
+  // text-only test.
+  function tutorialStepID(): string | null {
+    return (
+      document.querySelector<HTMLElement>("[data-features-tutorial]")?.dataset
+        .featuresTutorialStep ?? null
+    );
+  }
+
+  function beaconText(): string {
+    return (
+      document.querySelector<HTMLElement>("[data-tutorial-beacon]")?.textContent ??
+      ""
+    );
+  }
+
+  function selectorDialog(): Element | null {
+    return document.querySelector('[data-tutorial="tutorial-selector"]');
+  }
+
+  /** The motion phases hold a step off-screen while it fades, so poll for the
+   *  settled state rather than assuming a duration. */
+  async function waitForTutorialStep(id: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (tutorialStepID() === id) return;
+      await waitFor(50);
+    }
+    throw new Error(
+      `tutorial stayed on ${tutorialStepID() ?? "none"} instead of ${id}`
+    );
+  }
+
+  async function waitForBeacon(label: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < 8000) {
+      if (beaconText().includes(label)) return;
+      await waitFor(50);
+    }
+    throw new Error(`no ${label} beacon appeared`);
+  }
+
+  it("guides the PO link one click at a time and reaches the editor only after confirmation", { timeout: 25000 }, async () => {
     await renderApp();
     const open = await waitForButton("Open Purchase Orders");
     await act(async () => {
@@ -894,13 +938,22 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).toContain("One workspace, three views");
 
     act(() => button("Next step").click());
-    await waitFor(350);
-    expect(document.body.textContent).toContain(
-      "A purchase order begins with a quotation"
-    );
+    await waitForTutorialStep("po-link");
+    await waitForBeacon("Click");
+    // The rail's link card is the target and carries a Click cue. Nothing is
+    // open yet.
+    expect(
+      document.querySelector('[data-tutorial="po-link-button"]')
+    ).not.toBeNull();
+    expect(selectorDialog()).toBeNull();
+
     act(() => button("Link a Quotation").click());
-    await waitFor(650);
-    expect(document.body.textContent).toContain("Choose the practice quotation");
+    await waitForTutorialStep("po-selector-quotation");
+    await waitForBeacon("Select");
+    // Step 1: the practice row, with the guide docked and the modal usable.
+    expect(document.body.textContent).toContain("Select the practice quotation");
+    expect(selectorDialog()).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 1 of 3");
     expect(document.body.textContent).toContain("TUT-2026-001");
     expect(document.body.textContent).toContain("Vera Features Tutorial (MOCK)");
     expect(mocks.listPOSourceQuotations).not.toHaveBeenCalled();
@@ -908,21 +961,109 @@ describe("Features Tutorial (issue #595)", () => {
     act(() =>
       button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
     );
-    await waitFor(350);
-    const cont = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Continue to confirmation"]'
+    await waitForTutorialStep("po-selector-continue");
+    await waitForBeacon("Click");
+    // Step 2: the revision/continue control, still inside the selector.
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-continue"]')
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 2 of 3");
+    expect(document.body.textContent).not.toContain(
+      "Quotation values appear inline"
     );
-    if (cont !== null) {
-      act(() => cont.click());
-      await waitFor(350);
-    }
-    act(() => button("Confirm source").click());
-    await waitFor(800);
 
+    act(() => button("Continue to confirmation").click());
+    await waitForTutorialStep("po-selector-confirm");
+    await waitForBeacon("Click");
+    // Step 3: the confirm control, still inside the selector.
+    expect(
+      document.querySelector('[data-tutorial="tutorial-selector-confirm"]')
+    ).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 3 of 3");
+    expect(document.body.textContent).not.toContain(
+      "Quotation values appear inline"
+    );
+
+    act(() => button("Confirm source").click());
+    await waitForTutorialStep("po-header");
+    // Only now does the tour move to the inline editor.
+    expect(selectorDialog()).toBeNull();
     expect(document.body.textContent).toContain("MOCK-TUTORIAL-PO");
     expect(document.body.textContent).toContain("Quotation values appear inline");
     expect(document.body.textContent).toContain("Quotation item 2");
+
+    // The whole journey is client-only: every real call stayed untouched.
+    expect(mocks.listPOSourceQuotations).not.toHaveBeenCalled();
+    expect(mocks.listPOSourceRevisions).not.toHaveBeenCalled();
+    expect(mocks.validatePOSource).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
     expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
     expect(mocks.getPurchaseOrderReview).not.toHaveBeenCalled();
+  });
+
+  it("closes the selector when the tour goes back, and re-entering starts cleanly", { timeout: 20000 }, async () => {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+
+    // A deeper micro-step: picking the row leaves the guide waiting on
+    // Continue.
+    act(() =>
+      button("Quotation TUT-2026-001, Vera Features Tutorial (MOCK)").click()
+    );
+    await waitForTutorialStep("po-selector-continue");
+    expect(selectorDialog()).not.toBeNull();
+
+    // Back is an unfulfilled exit: it closes the selector and returns to the
+    // link that opened it, never to a step pointing inside the closed dialog.
+    act(() => button("Previous step").click());
+    await waitForTutorialStep("po-link");
+    expect(selectorDialog()).toBeNull();
+    await waitForBeacon("Click");
+
+    // Re-entering starts a fresh selector at step 1, not the abandoned step.
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+    expect(document.body.textContent).toContain("Step 1 of 3");
+
+    // Skip closes it too; no tour step is left pointing at a closed dialog.
+    act(() => button("Skip Features Tutorial").click());
+    await flush();
+    expect(selectorDialog()).toBeNull();
+    expect(document.querySelector("[data-features-tutorial]")).toBeNull();
+  });
+
+  it("closes the selector when staff leave the workspace mid-link", { timeout: 20000 }, async () => {
+    await renderApp();
+    const open = await waitForButton("Open Purchase Orders");
+    await act(async () => {
+      open.click();
+    });
+    await flush();
+    await waitFor(650);
+    act(() => button("Next step").click());
+    await waitForTutorialStep("po-link");
+    act(() => button("Link a Quotation").click());
+    await waitForTutorialStep("po-selector-quotation");
+    expect(selectorDialog()).not.toBeNull();
+
+    act(() => button("Back to Home").click());
+    await flush();
+    await waitFor(300);
+    expect(selectorDialog()).toBeNull();
+    expect(document.querySelector("[data-features-tutorial]")).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      "Select the practice quotation"
+    );
   });
 });
