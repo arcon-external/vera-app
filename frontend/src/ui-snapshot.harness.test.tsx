@@ -2006,9 +2006,10 @@ const CASES: SnapshotCase[] = [
   {
     // Issue #624: the Features Tutorial's practice Quotation workspace, hero
     // included, so the tour can be compared with the real editor at both
-    // widths. The workspace caps its content at the editor's 1280px inside the
-    // shell, and the hero spans it above the practice details, lines and
-    // summary; the practice quotation is always a draft.
+    // widths. The workspace caps its content at the editor's 1280px in the
+    // shell, the notice spans it above the grid, and the hero is the left
+    // column's first child above the practice details, lines and summary; the
+    // practice quotation is always a draft.
     //
     // What this case cannot show: live typing (the tutorial DOM suite drives
     // it) and the guide overlay, which mounts only in the running app.

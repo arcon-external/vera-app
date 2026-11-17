@@ -3244,23 +3244,10 @@ function App() {
           hidden={visiblePage !== "create"}
           onPasteCapture={handleCopyPasteCapture}
         >
-          {/* Issue #623: the same dark hero the PO editor opens with, mirroring
-              the editor state above the form + rail and capped with them. */}
-          <QuotationHero
-            customerName={selectedCustomerName}
-            details={details}
-            currencyCode={liveEntry?.code ?? companyCurrency}
-            currency={liveEntry}
-            customerGrand={quotationPricing.customerGrand}
-            ppnAmount={quotationPricing.ppnAmount}
-            quoteNumber={editingQuote?.number ?? null}
-            nextRevision={editingQuote?.revision ?? null}
-            draftSavedLabel={
-              draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
-            }
-            ready={ready}
-          />
-
+          {/* Issue #627: the PO editor's banners sit above its grid, full
+              width, and its header card is the left column's first child.
+              The Quotation editor mirrors that so both workspaces read as one
+              product. */}
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (
@@ -3274,8 +3261,27 @@ function App() {
             </StatusBanner>
           ) : null}
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="flex min-w-0 flex-col gap-6">
+              {/* Issue #623: the same dark hero the PO editor opens with,
+                  mirroring the editor state. Issue #627: it is the left
+                  column's first child, level with the Summary rail, exactly
+                  as the PO editor's header card is. */}
+              <QuotationHero
+                customerName={selectedCustomerName}
+                details={details}
+                currencyCode={liveEntry?.code ?? companyCurrency}
+                currency={liveEntry}
+                customerGrand={quotationPricing.customerGrand}
+                ppnAmount={quotationPricing.ppnAmount}
+                quoteNumber={editingQuote?.number ?? null}
+                nextRevision={editingQuote?.revision ?? null}
+                draftSavedLabel={
+                  draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
+                }
+                ready={ready}
+              />
+
               <DetailsPanel
                 value={details}
                 customerId={customerId}
