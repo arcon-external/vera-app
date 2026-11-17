@@ -1007,6 +1007,8 @@ function App() {
         // Issue #492: the received date is a PO fact the source revision never
         // supplies. Blank means the server stores today in WIB.
         ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+        // #628: the category is chosen in the editor; a new draft is Unassigned.
+        BusinessCategory: "",
       });
       // The cross-workspace move still asks the leave guard. The detail page
       // holds no editable state, so it answers at once today; routing through
@@ -2818,6 +2820,8 @@ function App() {
             // Issue #492: the received date is a PO fact the source revision
             // never supplies. Blank means the server stores today in WIB.
             ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+            // #628: the category is chosen in the editor; a new draft is Unassigned.
+            BusinessCategory: "",
           });
           adoptCreatedPurchaseOrder(draft);
           closePOSourceSelector();

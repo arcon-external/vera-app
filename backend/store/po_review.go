@@ -488,6 +488,11 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		return PurchaseOrder{}, fmt.Errorf("%w: payment terms must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxPaymentTermsLength)
 	}
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
 
 	pool, err := s.poolOrError()
 	if err != nil {
@@ -556,7 +561,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	for index := range input.Items {
 		input.Items[index].LineNumber = index + 1
 	}
-	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
+	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, true); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
@@ -656,6 +661,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 			pdf_absent_confirmed_at = CASE WHEN $25::boolean THEN NOW() ELSE NULL::timestamptz END,
 			pdf_absent_confirmed_by = CASE WHEN $25::boolean THEN $26::bigint ELSE NULL::bigint END,
 			confirmation_requested = $27,
+			business_category = $28,
 			updated_by = $24,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2 AND state = 'draft'`, schema),
@@ -667,6 +673,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		calculation.PpnBps, calculation.PpnMinor, calculation.AdjustmentMinor,
 		calculation.AdjustmentReason, calculation.GrandTotalMinor, input.UpdatedBy,
 		recordAbsence, input.UpdatedBy, confirmationRequested,
+		input.BusinessCategory,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {

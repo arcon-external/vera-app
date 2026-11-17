@@ -195,6 +195,7 @@ function purchaseOrder(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrder
     Currency: "IDR",
     TaxZone: "FTZ",
     TaxCategory: "SupplyOnly",
+    BusinessCategory: "OTHERS",
     AdjustmentReason: "",
     CreatedAt: "2026-10-22T03:00:00Z",
     UpdatedAt: "2026-10-22T03:00:00Z",

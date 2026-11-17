@@ -101,6 +101,13 @@ func finalizeInput(draft PurchaseOrder, user AuthUser, number string) PurchaseOr
 		item.LineNumber = index + 1
 		items[index] = item
 	}
+	// #628: a saved record always names a business category. Existing tests are
+	// about other final-save rules, so a draft without one gets OTHERS here; a
+	// test exercising the category rule sets the field itself.
+	category := draft.BusinessCategory
+	if category == "" {
+		category = PurchaseOrderBusinessCategoryOthers
+	}
 	return PurchaseOrderFinalize{
 		PurchaseOrderUpdate: PurchaseOrderUpdate{
 			ID:                    draft.ID,
@@ -115,6 +122,7 @@ func finalizeInput(draft PurchaseOrder, user AuthUser, number string) PurchaseOr
 			RequestedDeliveryDate: draft.RequestedDeliveryDate,
 			PaymentTerms:          draft.PaymentTerms,
 			Incoterms:             draft.Incoterms,
+			BusinessCategory:      category,
 			UpdatedBy:             user.ID,
 			ExpectedVersion:       draft.Version,
 			Items:                 items,

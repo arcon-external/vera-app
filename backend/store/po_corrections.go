@@ -170,6 +170,10 @@ type PurchaseOrderCorrection struct {
 	PODate                *time.Time
 	RequestedDeliveryDate *time.Time
 	ReceivedDate          time.Time
+
+	// BusinessCategory is the category the corrected version carried. Empty
+	// means Unassigned: a record saved before the category existed.
+	BusinessCategory string
 }
 
 // purchaseOrderWriteLock is the row facts every versioned write needs. It is
@@ -309,7 +313,12 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 			"%w: the correction reason must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxCorrectionReasonLength)
 	}
-	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
+	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, true); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -379,6 +388,11 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		return fmt.Errorf("%w: payment terms must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxPaymentTermsLength)
 	}
+	// An empty category is legal on a draft; a supplied one must be a code. The
+	// final-save requirement is separate because only a saved record needs it.
+	if _, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory); err != nil {
+		return err
+	}
 	for index, item := range input.Items {
 		if item.QuantityScaled <= 0 {
 			return fmt.Errorf("%w: line %d quantity must be positive", ErrPurchaseOrderInvalid, index+1)
@@ -439,12 +453,16 @@ func isPurchaseOrderClientKey(key string) bool {
 
 // validateSavedPurchaseOrderUpdateInput is the final-save minimum, shared by
 // finalization and a saved-record correction so the two can never drift: a
-// saved record needs its customer PO number and at least one valid line, and
-// every line must pass the same shape check a draft line does. The caller has
-// already trimmed the header values it submits.
-func validateSavedPurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
+// saved record needs its customer PO number, at least one valid line, and
+// (unless the caller is a source repair preserving the stored value) its
+// business category. Every line must pass the same shape check a draft line
+// does. The caller has already trimmed the header values it submits.
+func validateSavedPurchaseOrderUpdateInput(input PurchaseOrderUpdate, requireBusinessCategory bool) error {
 	if err := validatePurchaseOrderUpdateInput(input); err != nil {
 		return err
+	}
+	if requireBusinessCategory && strings.TrimSpace(input.BusinessCategory) == "" {
+		return ErrPurchaseOrderBusinessCategoryRequired
 	}
 	if input.PONumber == "" {
 		return fmt.Errorf(
@@ -501,6 +519,7 @@ func updatePurchaseOrderEditable(
 			service_category = $27,
 			tax_category = $28,
 			confirmation_requested = COALESCE($29::boolean, confirmation_requested),
+			business_category = $30,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2`, schema),
 		input.ID, orgID, input.BillingAddress, input.DeliveryAddress,
@@ -513,7 +532,7 @@ func updatePurchaseOrderEditable(
 		int64(0), "",
 		calculation.GrandTotalMinor, basis.Currency, basis.TaxZone,
 		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
-		confirmationRequested,
+		confirmationRequested, input.BusinessCategory,
 	)
 	if err != nil {
 		if isSavedPurchaseOrderNumberConflict(err) {
@@ -589,11 +608,12 @@ func insertPurchaseOrderCorrection(
 			requested_delivery_date, payment_terms, incoterms,
 			discount_percent, subtotal_minor, discount_minor, ppn_bps,
 			ppn_minor, adjustment_minor, adjustment_reason, grand_total_minor,
-			attachment_version, attachment_sha256, attachment_filename
+			attachment_version, attachment_sha256, attachment_filename,
+			business_category
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
 			$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,
-			$33,$34,$35,$36,$37,$38
+			$33,$34,$35,$36,$37,$38,$39
 		) RETURNING id`, schema),
 		orgID, order.ID, order.Version, order.Version+1, kind, order.State,
 		reason, actor, snapshotQuotationID, snapshotRevision, order.QuoteNumber,
@@ -606,6 +626,7 @@ func insertPurchaseOrderCorrection(
 		order.SubtotalMinor, order.DiscountMinor, order.PpnBps, order.PpnMinor,
 		int64(0), "", order.GrandTotalMinor,
 		attachmentVersion, attachmentSHA, attachmentFilename,
+		order.BusinessCategory,
 	).Scan(&correctionID)
 	if err != nil {
 		return 0, fmt.Errorf("store purchase order correction snapshot: %w", err)
@@ -678,6 +699,7 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		       c.quotation_id, c.source_revision, c.quote_number, c.customer_id,
 		       (c.quotation_id IS NULL),
 		       c.customer_name, c.currency, c.tax_zone, c.tax_category,
+		       c.business_category,
 		       c.billing_address, c.delivery_address, c.ship_to_code,
 		       c.contact_email, c.contact_phone, COALESCE(c.po_number, ''),
 		       c.po_date, c.received_date, c.requested_delivery_date,
@@ -711,7 +733,8 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 			&quotationID, &sourceRevision, &entry.QuoteNumber,
 			&customerID, &entry.SourceMissing,
 			&entry.CustomerName, &entry.Currency,
-			&entry.TaxZone, &entry.TaxCategory, &entry.BillingAddress,
+			&entry.TaxZone, &entry.TaxCategory, &entry.BusinessCategory,
+			&entry.BillingAddress,
 			&entry.DeliveryAddress, &entry.ShipToCode, &entry.ContactEmail,
 			&entry.ContactPhone, &entry.PONumber, &poDate, &entry.ReceivedDate,
 			&requestedDelivery, &entry.PaymentTerms, &entry.Incoterms,

@@ -132,7 +132,15 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 			"%w: the repair reason must be at most %d characters",
 			ErrPurchaseOrderInvalid, maxRepairReasonLength)
 	}
-	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate); err != nil {
+	// A repair links a source; it is not a category edit. An omitted category
+	// preserves the stored one (set after the row is read), while a supplied
+	// value is still validated.
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
+	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, false); err != nil {
 		return PurchaseOrder{}, err
 	}
 
@@ -158,6 +166,11 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	// #628: an omitted category is not a category edit. Preserve what the saved
+	// record already carried, including Unassigned on a pre-category record.
+	if input.BusinessCategory == "" {
+		input.BusinessCategory = stored.BusinessCategory
 	}
 
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema,
@@ -269,6 +282,7 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 			printed_grand_total_minor = $32,
 			tax_type = $34,
 			service_category = $35,
+			business_category = $36,
 			updated_by = $33,
 			updated_at = NOW()
 		WHERE id = $1 AND org_id = $2 AND state = 'saved'
@@ -285,7 +299,7 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		calculation.AdjustmentReason, calculation.GrandTotalMinor,
 		source.PrintedSubtotalMinor, source.PrintedDiscountMinor,
 		source.PrintedPpnMinor, source.PrintedGrandTotalMinor, input.UpdatedBy,
-		source.TaxType, source.ServiceCategory,
+		source.TaxType, source.ServiceCategory, input.BusinessCategory,
 	).Scan(&resultingVersion)
 	if err != nil {
 		if mapped := purchaseOrderRepairConflict(err); mapped != nil {

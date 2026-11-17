@@ -18,17 +18,18 @@ import (
 // single seeded one.
 
 type poListRow struct {
-	UUID           string `json:"uuid"`
-	State          string `json:"state"`
-	PONumber       string `json:"poNumber"`
-	QuoteNumber    string `json:"quoteNumber"`
-	CustomerName   string `json:"customerName"`
-	ReceivedDate   string `json:"receivedDate"`
-	Currency       string `json:"currency"`
-	ID             int64  `json:"id"`
-	CustomerID     int64  `json:"customerId"`
-	SourceRevision int16  `json:"sourceRevision"`
-	SourceMissing  bool   `json:"sourceMissing"`
+	UUID             string `json:"uuid"`
+	State            string `json:"state"`
+	PONumber         string `json:"poNumber"`
+	QuoteNumber      string `json:"quoteNumber"`
+	CustomerName     string `json:"customerName"`
+	ReceivedDate     string `json:"receivedDate"`
+	Currency         string `json:"currency"`
+	BusinessCategory string `json:"businessCategory"`
+	ID               int64  `json:"id"`
+	CustomerID       int64  `json:"customerId"`
+	SourceRevision   int16  `json:"sourceRevision"`
+	SourceMissing    bool   `json:"sourceMissing"`
 }
 
 type poListCustomer struct {

@@ -289,6 +289,12 @@ type PurchaseOrderRow struct {
 	// and moves forward on every write; a save must state the version it
 	// loaded.
 	Version int64 `json:"version"`
+
+	// BusinessCategory is the #628 reporting category (FM, FAB, SUPPLY_GEN,
+	// OTHERS). Empty is Unassigned: a draft that has not chosen one, or a
+	// record saved before the category existed. It is required by the final
+	// save and never inferred.
+	BusinessCategory string `json:"businessCategory"`
 }
 
 // PurchaseOrderSourceLineRow is one customer-facing line of the exact source
@@ -423,6 +429,9 @@ type PurchaseOrderCreateRequest struct {
 	TaxType         string `json:"taxType,omitempty"`
 	ServiceCategory string `json:"serviceCategory,omitempty"`
 	TaxCategory     string `json:"taxCategory,omitempty"`
+	// BusinessCategory is optional at creation: a draft may start Unassigned.
+	// A supplied value must be one of the four codes.
+	BusinessCategory string `json:"businessCategory,omitempty"`
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. LineNumber is assigned by
@@ -467,6 +476,11 @@ type PurchaseOrderEditableRequest struct {
 	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
 	ExpectedVersion       int64                    `json:"expectedVersion"`
 	Overwrite             bool                     `json:"overwrite"`
+
+	// BusinessCategory is the #628 reporting category. It is editable on a
+	// draft and on a saved-record correction; a source repair preserves the
+	// stored value when the field is absent.
+	BusinessCategory string `json:"businessCategory"`
 }
 
 // PurchaseOrderUpdateRequest replaces the editable draft fields. Source,
@@ -742,20 +756,23 @@ type PurchaseOrderCorrectionRow struct {
 	// never-linked draft overwrite or a formerly-linked record. The numeric
 	// QuotationID/SourceRevision stay 0 for older readers, so the history
 	// panel must branch on this rather than print a fabricated revision 0.
-	SourceMissing    bool                             `json:"sourceMissing"`
-	QuoteNumber      string                           `json:"quoteNumber"`
-	CustomerName     string                           `json:"customerName"`
-	Currency         string                           `json:"currency"`
-	BillingAddress   string                           `json:"billingAddress"`
-	DeliveryAddress  string                           `json:"deliveryAddress"`
-	ShipToCode       string                           `json:"shipToCode"`
-	ContactEmail     string                           `json:"contactEmail"`
-	ContactPhone     string                           `json:"contactPhone"`
-	PONumber         string                           `json:"poNumber"`
-	PaymentTerms     string                           `json:"paymentTerms"`
-	Incoterms        string                           `json:"incoterms"`
-	TaxZone          string                           `json:"taxZone"`
-	TaxCategory      string                           `json:"taxCategory"`
+	SourceMissing   bool   `json:"sourceMissing"`
+	QuoteNumber     string `json:"quoteNumber"`
+	CustomerName    string `json:"customerName"`
+	Currency        string `json:"currency"`
+	BillingAddress  string `json:"billingAddress"`
+	DeliveryAddress string `json:"deliveryAddress"`
+	ShipToCode      string `json:"shipToCode"`
+	ContactEmail    string `json:"contactEmail"`
+	ContactPhone    string `json:"contactPhone"`
+	PONumber        string `json:"poNumber"`
+	PaymentTerms    string `json:"paymentTerms"`
+	Incoterms       string `json:"incoterms"`
+	TaxZone         string `json:"taxZone"`
+	TaxCategory     string `json:"taxCategory"`
+	// BusinessCategory is the category the snapshot carried. Empty means
+	// Unassigned: a record corrected before the category existed.
+	BusinessCategory string                           `json:"businessCategory"`
 	AdjustmentReason string                           `json:"adjustmentReason"`
 	ActorName        string                           `json:"actorName"`
 	ReceivedDate     string                           `json:"receivedDate"`

@@ -66,6 +66,8 @@ export interface PurchaseOrderHistoryEntry {
   Currency: string;
   TaxZone: string;
   TaxCategory: string;
+  /** #628: the category the snapshot carried; missing reads Unassigned. */
+  BusinessCategory?: string;
   BillingAddress: string;
   DeliveryAddress: string;
   ShipToCode: string;

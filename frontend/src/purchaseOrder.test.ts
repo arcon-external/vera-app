@@ -74,6 +74,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     Currency: "USD",
     TaxZone: "NonFTZ",
     TaxCategory: "SupplyInstall",
+    BusinessCategory: "OTHERS",
     CreatedAt: "2026-10-20T10:00:00Z",
     UpdatedAt: "2026-10-20T10:00:00Z",
     Items: [
@@ -1199,6 +1200,54 @@ describe("#517 stable line identity across load, payload and save", () => {
     });
     const carried = after.lines.find((line) => line.persistedId === 109);
     expect(carried?.clientKey).toBe(fresh.clientKey);
+  });
+});
+
+describe("PO business category (#628)", () => {
+  it("reads the stored category into the editor and carries it back in the save payload", () => {
+    const state = initial({ BusinessCategory: "FAB" });
+    expect(state.header.businessCategory).toBe("FAB");
+    expect(buildPurchaseOrderUpdate(state, USD).input?.BusinessCategory).toBe("FAB");
+
+    const changed = purchaseOrderEditorReducer(state, {
+      type: "headerChanged",
+      patch: { businessCategory: "SUPPLY_GEN" },
+    });
+    expect(changed.header.businessCategory).toBe("SUPPLY_GEN");
+    expect(buildPurchaseOrderUpdate(changed, USD).input?.BusinessCategory).toBe(
+      "SUPPLY_GEN"
+    );
+  });
+
+  it("treats an older payload without the field as Unassigned, never inferred", () => {
+    const state = initial({ BusinessCategory: undefined });
+    expect(state.header.businessCategory).toBe("");
+    expect(buildPurchaseOrderUpdate(state, USD).input?.BusinessCategory).toBe("");
+  });
+
+  it("is part of the dirty snapshot", () => {
+    const state = initial();
+    const changed = purchaseOrderEditorReducer(state, {
+      type: "headerChanged",
+      patch: { businessCategory: "FM" },
+    });
+    expect(isPurchaseOrderDirty(changed)).toBe(true);
+    const restored = purchaseOrderEditorReducer(changed, {
+      type: "headerChanged",
+      patch: { businessCategory: "OTHERS" },
+    });
+    expect(isPurchaseOrderDirty(restored)).toBe(false);
+  });
+
+  it("keeps the category out of the draft-save blockers", () => {
+    // The requirement is Final Save's alone: a draft stays saveable while it
+    // is Unassigned, so this list must not carry it.
+    const state = initial({ BusinessCategory: "" });
+    const blockers = listValidationBlockers(state, USD);
+    expect(blockers.map((entry) => entry.key)).not.toContain(
+      "header:businessCategory"
+    );
+    expect(buildPurchaseOrderUpdate(state, USD).error).toBeNull();
   });
 });
 

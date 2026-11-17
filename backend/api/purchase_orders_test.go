@@ -39,6 +39,7 @@ type purchaseOrderRow struct {
 	TaxType               string  `json:"taxType"`
 	ServiceCategory       string  `json:"serviceCategory"`
 	TaxCategory           string  `json:"taxCategory"`
+	BusinessCategory      string  `json:"businessCategory"`
 	Items                 []struct {
 		QuotationItemNo *int   `json:"quotationItemNo"`
 		QuotationSubNo  *int   `json:"quotationSubNo"`
@@ -88,6 +89,16 @@ func decodePurchaseOrder(t *testing.T, body map[string]any) purchaseOrderRow {
 	var row purchaseOrderRow
 	encodeDecode(t, body, &row)
 	return row
+}
+
+// businessCategoryOrDefault keeps existing final-save tests about their own
+// rule: a draft with no category finalises as OTHERS unless the test clears the
+// field to exercise the #628 refusal itself.
+func businessCategoryOrDefault(category string) string {
+	if category == "" {
+		return "OTHERS"
+	}
+	return category
 }
 
 // setPurchaseOrderStateForTest moves a stored record into the saved state.
@@ -1012,6 +1023,7 @@ func finalizeBody(row purchaseOrderRow, number string) map[string]any {
 		"receivedDate":        row.ReceivedDate,
 		"paymentTerms":        row.PaymentTerms,
 		"incoterms":           row.Incoterms,
+		"businessCategory":    businessCategoryOrDefault(row.BusinessCategory),
 		"items":               items,
 		"discountPercent":     row.DiscountPercent,
 		"adjustmentMinor":     row.AdjustmentMinor,

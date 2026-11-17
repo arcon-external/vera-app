@@ -1816,6 +1816,7 @@ export namespace backend {
 	    TaxZone: string;
 	    TaxType: string;
 	    ServiceCategory: string;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderBlankCreateInput(source);
@@ -1827,6 +1828,7 @@ export namespace backend {
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderConflictDTO {
@@ -2011,6 +2013,7 @@ export namespace backend {
 	    PpnMinor: number;
 	    AdjustmentMinor: number;
 	    GrandTotalMinor: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionDTO(source);
@@ -2059,6 +2062,7 @@ export namespace backend {
 	        this.PpnMinor = source["PpnMinor"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.GrandTotalMinor = source["GrandTotalMinor"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2128,6 +2132,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
@@ -2154,6 +2159,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
@@ -2186,6 +2192,7 @@ export namespace backend {
 	    ReceivedDate: string;
 	    QuotationID: number;
 	    RevisionNumber: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCreateInput(source);
@@ -2196,6 +2203,7 @@ export namespace backend {
 	        this.ReceivedDate = source["ReceivedDate"];
 	        this.QuotationID = source["QuotationID"];
 	        this.RevisionNumber = source["RevisionNumber"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderItemDTO {
@@ -2293,6 +2301,7 @@ export namespace backend {
 	    ConfirmationWarn: boolean;
 	    ConfirmationRequested: boolean;
 	    Version: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
@@ -2350,6 +2359,7 @@ export namespace backend {
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
 	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Version = source["Version"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2702,6 +2712,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Items: PurchaseOrderItemInput[];
 	    Decisions: PurchaseOrderDecisionInput[];
@@ -2732,6 +2743,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.Decisions = this.convertValues(source["Decisions"], PurchaseOrderDecisionInput);
@@ -2792,6 +2804,7 @@ export namespace backend {
 	    SourceRevision: number;
 	    SourceMissing: boolean;
 	    SourceState: string;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListRowDTO(source);
@@ -2811,6 +2824,7 @@ export namespace backend {
 	        this.SourceRevision = source["SourceRevision"];
 	        this.SourceMissing = source["SourceMissing"];
 	        this.SourceState = source["SourceState"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderListPageDTO {
@@ -2860,6 +2874,7 @@ export namespace backend {
 	    ReceivedFrom: string;
 	    ReceivedTo: string;
 	    SourceMissing: string;
+	    Category: string;
 	    Page: number;
 	    PageSize: number;
 
@@ -2875,6 +2890,7 @@ export namespace backend {
 	        this.ReceivedFrom = source["ReceivedFrom"];
 	        this.ReceivedTo = source["ReceivedTo"];
 	        this.SourceMissing = source["SourceMissing"];
+	        this.Category = source["Category"];
 	        this.Page = source["Page"];
 	        this.PageSize = source["PageSize"];
 	    }
@@ -2933,6 +2949,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
@@ -2963,6 +2980,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
@@ -3030,6 +3048,7 @@ export namespace backend {
 	    TaxZone: string;
 	    TaxType: string;
 	    ServiceCategory: string;
+	    BusinessCategory: string;
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
 
@@ -3060,6 +3079,7 @@ export namespace backend {
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	    }

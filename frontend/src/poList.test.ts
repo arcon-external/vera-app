@@ -72,9 +72,29 @@ describe("buildPOListQuery (issue #469)", () => {
       ReceivedFrom: "",
       ReceivedTo: "",
       SourceMissing: "any",
+      Category: "",
       Page: 1,
       PageSize: PO_LIST_PAGE_SIZE,
     });
+  });
+
+  it("carries the business category filter", () => {
+    const { query, error } = buildPOListQuery(
+      { ...initialPOListFilters, category: "FAB" },
+      1,
+      PO_LIST_PAGE_SIZE
+    );
+    expect(error).toBeNull();
+    expect(query?.Category).toBe("FAB");
+
+    const refused = buildPOListQuery(
+      // A stale or hand-built filter must be refused, not sent as All.
+      { ...initialPOListFilters, category: "NOPE" as never },
+      1,
+      PO_LIST_PAGE_SIZE
+    );
+    expect(refused.query).toBeNull();
+    expect(refused.error).toContain("category");
   });
 
   it("carries every filter, the page and the requested page size", () => {
@@ -86,6 +106,7 @@ describe("buildPOListQuery (issue #469)", () => {
         receivedTo: "2026-12-31",
         state: "saved",
         sourceMissing: "only",
+        category: "SUPPLY_GEN",
       },
       3,
       25
@@ -98,6 +119,7 @@ describe("buildPOListQuery (issue #469)", () => {
       ReceivedFrom: "2026-01-01",
       ReceivedTo: "2026-12-31",
       SourceMissing: "only",
+      Category: "SUPPLY_GEN",
       Page: 3,
       PageSize: 25,
     });
@@ -155,6 +177,7 @@ describe("filter helpers (issue #469)", () => {
   it("counts each active filter dimension once", () => {
     expect(activeFilterCount(initialPOListFilters)).toBe(0);
     expect(activeFilterCount({ ...initialPOListFilters, search: "abc" })).toBe(1);
+    expect(activeFilterCount({ ...initialPOListFilters, category: "FM" })).toBe(1);
     expect(
       activeFilterCount({
         ...initialPOListFilters,
@@ -163,6 +186,19 @@ describe("filter helpers (issue #469)", () => {
         state: "draft",
       })
     ).toBe(3);
+  });
+
+  it("resets the category filter with the rest", () => {
+    const filtered = { ...resetPOListFilters("saved"), category: "FAB" as const };
+    const state: POListState = {
+      ...initialPOListState,
+      filters: filtered,
+      page: 3,
+    };
+    const reset = poListReducer(state, { type: "resetFilters", state: "saved" });
+    expect(reset.filters.category).toBe("");
+    expect(reset.filters.state).toBe("saved");
+    expect(reset.page).toBe(1);
   });
 
   it("toggles a customer in and out without mutating the filter", () => {

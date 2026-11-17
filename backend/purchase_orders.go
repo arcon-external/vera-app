@@ -109,6 +109,10 @@ type PurchaseOrderDTO struct {
 	// Version is the optimistic-concurrency revision (#473): the editor sends
 	// the version it loaded, and every write moves it forward.
 	Version int64
+
+	// BusinessCategory is the #628 reporting category (FM, FAB, SUPPLY_GEN,
+	// OTHERS). Empty is Unassigned for a draft or a pre-category record.
+	BusinessCategory string
 }
 
 // PurchaseOrderSourceLineDTO is one customer-facing line of the exact source
@@ -272,6 +276,7 @@ type PurchaseOrderFinalizeInput struct {
 	RequestedDeliveryDate string
 	Incoterms             string
 	PaymentTerms          string
+	BusinessCategory      string
 	AdjustmentReason      string
 	Items                 []PurchaseOrderItemInput
 	Decisions             []PurchaseOrderDecisionInput
@@ -291,19 +296,21 @@ type PurchaseOrderFinalizeInput struct {
 // PurchaseOrderCreateInput is the selector's confirmed pair plus an optional
 // received-date override. An empty date asks the server for today.
 type PurchaseOrderCreateInput struct {
-	ReceivedDate   string
-	QuotationID    int64
-	RevisionNumber int16
+	ReceivedDate     string
+	QuotationID      int64
+	RevisionNumber   int16
+	BusinessCategory string
 }
 
 // PurchaseOrderBlankCreateInput starts a source-less draft (#496). The server
 // seeds the company currency; the tax triple is the user's Quotation default
 // and is editable again on the draft until a quotation is linked.
 type PurchaseOrderBlankCreateInput struct {
-	ReceivedDate    string
-	TaxZone         string
-	TaxType         string
-	ServiceCategory string
+	ReceivedDate     string
+	TaxZone          string
+	TaxType          string
+	ServiceCategory  string
+	BusinessCategory string
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. Line numbers come from
@@ -356,8 +363,11 @@ type PurchaseOrderUpdateInput struct {
 	TaxZone         string
 	TaxType         string
 	ServiceCategory string
-	ExpectedVersion int64
-	Overwrite       bool
+	// BusinessCategory is the #628 reporting category. A draft may leave it
+	// empty; the final save refuses that. A correction names the new value.
+	BusinessCategory string
+	ExpectedVersion  int64
+	Overwrite        bool
 }
 
 // PurchaseOrderCorrectionInput replaces a saved record. It carries the same
@@ -377,6 +387,7 @@ type PurchaseOrderCorrectionInput struct {
 	RequestedDeliveryDate string
 	Incoterms             string
 	PaymentTerms          string
+	BusinessCategory      string
 	AdjustmentReason      string
 	Reason                string
 	Items                 []PurchaseOrderItemInput
@@ -414,6 +425,7 @@ type PurchaseOrderSourceRepairInput struct {
 	RequestedDeliveryDate string
 	Incoterms             string
 	PaymentTerms          string
+	BusinessCategory      string
 	AdjustmentReason      string
 	Reason                string
 	Items                 []PurchaseOrderItemInput
@@ -545,6 +557,10 @@ type PurchaseOrderCorrectionDTO struct {
 	PpnMinor              int64
 	AdjustmentMinor       int64
 	GrandTotalMinor       int64
+
+	// BusinessCategory is the category the snapshot carried; empty means
+	// Unassigned.
+	BusinessCategory string
 }
 
 // CreatePurchaseOrderDraft creates the one active PO for a Quotation from the
@@ -560,9 +576,10 @@ func (q *Quotation) CreatePurchaseOrderDraft(input PurchaseOrderCreateInput) (Pu
 	revision := input.RevisionNumber
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders", apicontract.PurchaseOrderCreateRequest{
-		QuotationID:    input.QuotationID,
-		RevisionNumber: &revision,
-		ReceivedDate:   input.ReceivedDate,
+		QuotationID:      input.QuotationID,
+		RevisionNumber:   &revision,
+		ReceivedDate:     input.ReceivedDate,
+		BusinessCategory: input.BusinessCategory,
 	}, &response); err != nil {
 		return PurchaseOrderDTO{}, err
 	}
@@ -583,10 +600,11 @@ func (q *Quotation) CreatePurchaseOrderBlankDraft(input PurchaseOrderBlankCreate
 	}
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders", apicontract.PurchaseOrderCreateRequest{
-		ReceivedDate:    input.ReceivedDate,
-		TaxZone:         input.TaxZone,
-		TaxType:         input.TaxType,
-		ServiceCategory: input.ServiceCategory,
+		ReceivedDate:     input.ReceivedDate,
+		TaxZone:          input.TaxZone,
+		TaxType:          input.TaxType,
+		ServiceCategory:  input.ServiceCategory,
+		BusinessCategory: input.BusinessCategory,
 	}, &response); err != nil {
 		return PurchaseOrderDTO{}, err
 	}
@@ -659,6 +677,7 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 				RequestedDeliveryDate: input.RequestedDeliveryDate,
 				PaymentTerms:          input.PaymentTerms,
 				Incoterms:             input.Incoterms,
+				BusinessCategory:      input.BusinessCategory,
 				Items:                 items,
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
@@ -725,6 +744,7 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 					RequestedDeliveryDate: input.RequestedDeliveryDate,
 					PaymentTerms:          input.PaymentTerms,
 					Incoterms:             input.Incoterms,
+					BusinessCategory:      input.BusinessCategory,
 					Items:                 items,
 					DiscountPercent:       input.DiscountPercent,
 					AdjustmentMinor:       input.AdjustmentMinor,
@@ -816,6 +836,7 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 					RequestedDeliveryDate: input.RequestedDeliveryDate,
 					PaymentTerms:          input.PaymentTerms,
 					Incoterms:             input.Incoterms,
+					BusinessCategory:      input.BusinessCategory,
 					Items:                 items,
 					DiscountPercent:       input.DiscountPercent,
 					AdjustmentMinor:       input.AdjustmentMinor,
@@ -968,6 +989,7 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 		Currency:              row.Currency,
 		TaxZone:               row.TaxZone,
 		TaxCategory:           row.TaxCategory,
+		BusinessCategory:      row.BusinessCategory,
 		BillingAddress:        row.BillingAddress,
 		DeliveryAddress:       row.DeliveryAddress,
 		ShipToCode:            row.ShipToCode,
@@ -1084,6 +1106,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		TaxType:                row.TaxType,
 		ServiceCategory:        row.ServiceCategory,
 		TaxCategory:            row.TaxCategory,
+		BusinessCategory:       row.BusinessCategory,
 		DiscountPercent:        row.DiscountPercent,
 		PpnBps:                 row.PpnBps,
 		SubtotalMinor:          row.SubtotalMinor,
@@ -1202,6 +1225,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 				RequestedDeliveryDate: input.RequestedDeliveryDate,
 				PaymentTerms:          input.PaymentTerms,
 				Incoterms:             input.Incoterms,
+				BusinessCategory:      input.BusinessCategory,
 				Items:                 items,
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,

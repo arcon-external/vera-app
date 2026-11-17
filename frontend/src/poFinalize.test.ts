@@ -53,6 +53,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     Currency: "USD",
     TaxZone: "FTZ",
     TaxCategory: "",
+    BusinessCategory: "OTHERS",
     AdjustmentReason: "",
     CreatedAt: "2026-10-02T10:00:00Z",
     UpdatedAt: "2026-10-02T10:00:00Z",
@@ -575,6 +576,21 @@ describe("final-save payload", () => {
     );
     expect(result.input).toBeNull();
     expect(result.error).toContain("customer PO number");
+  });
+
+  it("requires a business category", () => {
+    const result = buildFinalizeInput(
+      stateFrom(order({ BusinessCategory: "" })),
+      SOURCE,
+      USD,
+      "none",
+      {},
+      [],
+      [],
+      true
+    );
+    expect(result.input).toBeNull();
+    expect(result.error).toBe("Business category is required before Final Save.");
   });
 
   it("requires the no-PDF confirmation in the no-document branch", () => {

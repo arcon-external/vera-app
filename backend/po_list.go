@@ -28,8 +28,12 @@ type PurchaseOrderListQuery struct {
 	ReceivedFrom  string
 	ReceivedTo    string
 	SourceMissing string
-	Page          int
-	PageSize      int
+	// Category filters to one of the #628 codes (FM, FAB, SUPPLY_GEN,
+	// OTHERS). Empty means All categories, including Unassigned records saved
+	// before the category existed. An unknown value is refused by the server.
+	Category string
+	Page     int
+	PageSize int
 }
 
 // PurchaseOrderListRowDTO is one archive row.
@@ -47,6 +51,8 @@ type PurchaseOrderListRowDTO struct {
 	SourceMissing  bool
 	// SourceState is "live", "never" or "former" (#496).
 	SourceState string
+	// BusinessCategory is the #628 reporting category; empty is Unassigned.
+	BusinessCategory string
 }
 
 // PurchaseOrderListCustomerDTO is one option of the customer multi-select.
@@ -103,6 +109,9 @@ func (q *Quotation) ListPurchaseOrders(query PurchaseOrderListQuery) (PurchaseOr
 	if mode := strings.TrimSpace(query.SourceMissing); mode != "" && mode != "any" {
 		params.Set("sourceMissing", mode)
 	}
+	if category := strings.TrimSpace(query.Category); category != "" {
+		params.Set("category", category)
+	}
 	for _, id := range query.CustomerIDs {
 		params.Add("customerId", strconv.FormatInt(id, 10))
 	}
@@ -115,18 +124,19 @@ func (q *Quotation) ListPurchaseOrders(query PurchaseOrderListQuery) (PurchaseOr
 	rows := make([]PurchaseOrderListRowDTO, 0, len(response.PurchaseOrders))
 	for _, row := range response.PurchaseOrders {
 		rows = append(rows, PurchaseOrderListRowDTO{
-			ID:             row.ID,
-			UUID:           row.UUID,
-			State:          row.State,
-			PONumber:       row.PONumber,
-			QuoteNumber:    row.QuoteNumber,
-			SourceRevision: row.SourceRevision,
-			CustomerID:     row.CustomerID,
-			CustomerName:   row.CustomerName,
-			ReceivedDate:   row.ReceivedDate,
-			Currency:       row.Currency,
-			SourceMissing:  row.SourceMissing,
-			SourceState:    row.SourceState,
+			ID:               row.ID,
+			UUID:             row.UUID,
+			State:            row.State,
+			PONumber:         row.PONumber,
+			QuoteNumber:      row.QuoteNumber,
+			SourceRevision:   row.SourceRevision,
+			CustomerID:       row.CustomerID,
+			CustomerName:     row.CustomerName,
+			ReceivedDate:     row.ReceivedDate,
+			Currency:         row.Currency,
+			BusinessCategory: row.BusinessCategory,
+			SourceMissing:    row.SourceMissing,
+			SourceState:      row.SourceState,
 		})
 	}
 	customers := make([]PurchaseOrderListCustomerDTO, 0, len(response.Customers))

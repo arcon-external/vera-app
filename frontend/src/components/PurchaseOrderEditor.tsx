@@ -32,10 +32,13 @@ import {
   calculatePurchaseOrder,
   listValidationBlockers,
   initialPurchaseOrderEditorState,
+  isPurchaseOrderBusinessCategory,
   isPurchaseOrderDirty,
   latestPersistedVersion,
   newPurchaseOrderLineKey,
+  PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS,
   purchaseOrderEditorReducer,
+  type PurchaseOrderBusinessCategory,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
@@ -1269,6 +1272,35 @@ export function PurchaseOrderEditorView({
           </div>
         ) : null}
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-1.5">
+            <span className="text-small font-medium text-ink-700">
+              Business category
+            </span>
+            <Select
+              ariaLabel="Business category"
+              value={state.header.businessCategory}
+              options={PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS}
+              onChange={(value) =>
+                dispatch({
+                  type: "headerChanged",
+                  patch: {
+                    businessCategory: value as PurchaseOrderBusinessCategory,
+                  },
+                })
+              }
+            />
+            <p
+              className={
+                state.header.businessCategory === ""
+                  ? "text-caption font-medium text-danger-700"
+                  : "text-caption text-ink-500"
+              }
+            >
+              {state.header.businessCategory === ""
+                ? "Required before Final Save."
+                : "Used in purchase order reports."}
+            </p>
+          </div>
           <Field
             label="Customer PO number"
             value={state.header.poNumber}
@@ -2341,6 +2373,7 @@ export function PurchaseOrderEditorPage({
           TaxZone: current.taxZone,
           TaxType: current.taxType,
           ServiceCategory: current.serviceCategory,
+          BusinessCategory: current.header.businessCategory,
         })
       );
       dispatch({ type: "created", orderId: created.ID, version: created.Version });
@@ -2721,6 +2754,18 @@ export function PurchaseOrderEditorPage({
       );
       const target = document.querySelector<HTMLElement>(
         `[aria-label="${first.fieldLabel.replace(/"/g, "")}"]`
+      );
+      if (target !== null) revealIntoView(target);
+      return;
+    }
+    // #628: a draft may be Unassigned; a saved record may not. This is the
+    // gate before the review opens, and it leaves the draft editable.
+    if (!isPurchaseOrderBusinessCategory(state.header.businessCategory)) {
+      const message = "Business category is required before Final Save.";
+      dispatch({ type: "saveFailed", error: message });
+      reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}`);
+      const target = document.querySelector<HTMLElement>(
+        '[aria-label="Business category"]'
       );
       if (target !== null) revealIntoView(target);
       return;

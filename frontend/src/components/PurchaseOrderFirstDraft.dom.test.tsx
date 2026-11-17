@@ -324,6 +324,7 @@ function legacyDraft(state: "live" | "former"): PurchaseOrderDTO {
     TaxType: undefined,
     ServiceCategory: undefined,
     TaxCategory: "SupplyInstall",
+    BusinessCategory: "OTHERS",
     Items: [],
   };
 }

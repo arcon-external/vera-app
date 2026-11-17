@@ -44,8 +44,12 @@ type PurchaseOrderListQuery struct {
 	ReceivedFrom  *time.Time
 	ReceivedTo    *time.Time
 	SourceMissing string
-	Page          int
-	PageSize      int
+	// BusinessCategory filters to exactly one of the four #628 codes. Empty
+	// means All categories, including the Unassigned records saved before the
+	// category existed; an unknown value is refused, never read as All.
+	BusinessCategory string
+	Page             int
+	PageSize         int
 }
 
 // PurchaseOrderListRow is one archive row. The customer name is the PO's own
@@ -66,6 +70,9 @@ type PurchaseOrderListRow struct {
 	// ids for older readers; this state is what the copy branches on, so a
 	// never-linked draft is not described as a former revision 0.
 	SourceState string
+	// BusinessCategory is the #628 reporting category. Empty is Unassigned and
+	// renders as such; it is never inferred from the customer or the lines.
+	BusinessCategory string
 }
 
 // PurchaseOrderListCustomer is one option of the customer multi-select. The
@@ -157,6 +164,10 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 	if !from.IsZero() && !to.IsZero() && from.After(to) {
 		return PurchaseOrderListPage{}, fmt.Errorf("%w: received-from must not be after received-to", ErrPurchaseOrderInvalid)
 	}
+	category, err := NormalizePurchaseOrderBusinessCategory(query.BusinessCategory)
+	if err != nil {
+		return PurchaseOrderListPage{}, err
+	}
 
 	schema := s.configSchema()
 	fromClause := fmt.Sprintf(`
@@ -192,6 +203,10 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		args = append(args, to.Format("2006-01-02"))
 		where += fmt.Sprintf(" AND po.received_date <= $%d::date", len(args))
 	}
+	if category != PurchaseOrderBusinessCategoryUnassigned {
+		args = append(args, category)
+		where += fmt.Sprintf(" AND po.business_category = $%d", len(args))
+	}
 	switch sourceMissing {
 	case PurchaseOrderSourceMissingOnly:
 		where += " AND q.id IS NULL"
@@ -211,7 +226,8 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 		       (q.id IS NULL),
 		       CASE WHEN po.quotation_id IS NOT NULL THEN 'live'
 		            WHEN po.former_quotation_id IS NOT NULL THEN 'former'
-		            ELSE 'never' END
+		            ELSE 'never' END,
+		       po.business_category
 		%s%s
 		ORDER BY po.received_date DESC, po.id DESC
 		LIMIT $%d OFFSET $%d`, fromClause, where, len(args)+1, len(args)+2),
@@ -239,6 +255,7 @@ func (s *Store) ListPurchaseOrders(ctx context.Context, query PurchaseOrderListQ
 			&row.Currency,
 			&row.SourceMissing,
 			&row.SourceState,
+			&row.BusinessCategory,
 		); err != nil {
 			return PurchaseOrderListPage{}, fmt.Errorf("scan purchase order row: %w", err)
 		}
