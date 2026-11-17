@@ -799,11 +799,46 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
 
         const workspace = practiceWorkspace();
         if (workspace === null) throw new Error("no practice workspace");
-        // The hero lives inside the practice sandbox -- not above it, where
-        // the real editor's hero would sit -- so the whole card is practice
-        // data by construction.
+        // Issue #627: the hero lives inside the practice sandbox, in the left
+        // column of the PO editor's grid -- not above it, where the real
+        // editor's hero used to be -- so the whole card is practice data by
+        // construction and the rail starts level with it.
         expect(workspace.contains(practiceHero())).toBe(true);
-        expect(practiceHero().parentElement).toBe(workspace);
+        const heroColumn = practiceHero().parentElement;
+        const grid = heroColumn?.parentElement;
+        const practiceDetails = document.querySelector(
+          '[data-tutorial="quotation-details"]'
+        );
+        const practiceRail = document.querySelector(
+          '[data-tutorial="quotation-totals"]'
+        )?.parentElement;
+        expect(heroColumn?.firstElementChild).toBe(practiceHero());
+        expect(practiceDetails?.parentElement).toBe(heroColumn);
+        expect(grid?.className).toContain(
+          "lg:grid-cols-[minmax(0,1fr)_320px]"
+        );
+        expect(grid?.className).toContain(
+          "xl:grid-cols-[minmax(0,1fr)_340px]"
+        );
+        expect(grid?.children[0]).toBe(heroColumn);
+        expect(grid?.children[1]).toBe(practiceRail);
+        expect(
+          practiceRail?.contains(
+            document.querySelector('[data-tutorial="quotation-totals"]')
+          )
+        ).toBe(true);
+
+        // The practice notice stays above the grid, full width, as the PO
+        // editor's banners do.
+        const practiceBanner = Array.from(
+          workspace.querySelectorAll<HTMLElement>('[role="status"]')
+        ).find((node) => node.textContent?.includes("Practice quotation."));
+        expect(practiceBanner?.parentElement).toBe(workspace);
+        expect(grid?.parentElement).toBe(workspace);
+        expect(
+          practiceBanner!.compareDocumentPosition(grid!) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ).not.toBe(0);
 
         // Draft semantics: the practice quotation has never been issued, and
         // nothing in the tour can issue one.
@@ -841,8 +876,9 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
           practiceHero().querySelectorAll("input, button, select, textarea")
         ).toHaveLength(0);
 
-        // The workspace is capped at the real editor's 1280px and the hero
-        // spans it above the details/lines/summary composition.
+        // The workspace is capped at the real editor's 1280px and the hero is
+        // the first child of the left column above the details, lines and
+        // summary.
         expect(workspace.className).toContain("max-w-[1280px]");
         const details = document.querySelector('[data-tutorial="quotation-details"]');
         if (details === null) throw new Error("no practice details panel");
