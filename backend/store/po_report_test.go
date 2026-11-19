@@ -1058,6 +1058,177 @@ func TestPurchaseOrderReportMigrationCreatesThePartialIndex(t *testing.T) {
 	}
 }
 
+// TestPurchaseOrderReportKeepsActualsWhenHistoryAmountExceedsTheExactRange is
+// the Judge regression: two individually valid historical POs sum above the
+// exact JSON range in January 2025. That month is not an actual figure for the
+// March 2026 report, so the actual snapshot must survive and only the forecast
+// is suppressed with value_out_of_range and the truthful basis.
+func TestPurchaseOrderReportKeepsActualsWhenHistoryAmountExceedsTheExactRange(t *testing.T) {
+	database := openTestSchema(t, "vera_po_report_history_amount_overflow")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	historyOne := seedReportQuotation(t, database, 2, "PT. Buyer", "History overflow one", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+	historyTwo := seedReportQuotation(t, database, 3, "PT. Buyer Two", "History overflow two", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+	actualQuote := seedReportQuotation(t, database, 4, "PT. Buyer Three", "Safe actual", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+
+	one := finalizeReportPO(t, database, ctx, user, historyOne, "PO-HIST-OVERFLOW-1", "2025-01-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+	two := finalizeReportPO(t, database, ctx, user, historyTwo, "PO-HIST-OVERFLOW-2", "2025-01-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+	actual := finalizeReportPO(t, database, ctx, user, actualQuote, "PO-HIST-OVERFLOW-ACTUAL", "2026-03-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	for _, id := range []int64{one.ID, two.ID} {
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET subtotal_minor = $2, grand_total_minor = $2
+			WHERE id = $1`, database.configSchema()), id, poreport.MaxExactMinor); err != nil {
+			t.Fatalf("raise historical amount on %d: %v", id, err)
+		}
+	}
+
+	report := mustReport(t, database, ctx,
+		reportQuery("2026-03-01", "2026-04-01", poreport.BucketMonth, poreport.CategoryAll, "IDR"))
+	if report.Totals.PoCount != 1 || report.Totals.AmountMinor != actual.SubtotalMinor {
+		t.Fatalf("actual totals = %+v; want the safe March PO preserved", report.Totals)
+	}
+	if !report.HistoryOutOfRange {
+		t.Error("history out-of-range = false; want the oversized January 2025 aggregate flagged")
+	}
+	if len(report.History) != 0 {
+		t.Errorf("history = %+v; want no sample passed to the projection", report.History)
+	}
+	basis := report.HistoryBasis
+	if basis.HistoryFrom != "2025-01-01" || basis.HistoryTo != "2026-04-01" ||
+		basis.CompleteMonths != 15 || basis.PoCount != 3 || basis.AsOf != "2026-11-19" {
+		t.Errorf("history basis = %+v; want 2025-01-01..2026-04-01, 15 months, 3 POs, as of 2026-11-19", basis)
+	}
+}
+
+// TestPurchaseOrderReportKeepsAnEmptyActualRangeWhenHistoryAmountExceedsTheExactRange
+// is the same defect with no actual PO at all: the report is still a valid
+// empty report, not a 422. The forecast states value_out_of_range rather than
+// no_data_in_range because the stored history it would have used is corrupt.
+func TestPurchaseOrderReportKeepsAnEmptyActualRangeWhenHistoryAmountExceedsTheExactRange(t *testing.T) {
+	database := openTestSchema(t, "vera_po_report_history_amount_overflow_empty")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	first := seedReportQuotation(t, database, 2, "PT. Buyer", "Empty history overflow one", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+	second := seedReportQuotation(t, database, 3, "PT. Buyer Two", "Empty history overflow two", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+	one := finalizeReportPO(t, database, ctx, user, first, "PO-HIST-OVERFLOW-EMPTY-1", "2025-01-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+	two := finalizeReportPO(t, database, ctx, user, second, "PO-HIST-OVERFLOW-EMPTY-2", "2025-01-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	for _, id := range []int64{one.ID, two.ID} {
+		if _, err := pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET subtotal_minor = $2, grand_total_minor = $2
+			WHERE id = $1`, database.configSchema()), id, poreport.MaxExactMinor); err != nil {
+			t.Fatalf("raise historical amount on %d: %v", id, err)
+		}
+	}
+
+	report := mustReport(t, database, ctx,
+		reportQuery("2026-03-01", "2026-04-01", poreport.BucketMonth, poreport.CategoryAll, "IDR"))
+	if report.Totals.PoCount != 0 || report.Totals.AmountMinor != 0 {
+		t.Errorf("actual totals = %+v; want an empty March 2026 actual range", report.Totals)
+	}
+	if !report.HistoryOutOfRange {
+		t.Error("history out-of-range = false; want the oversized January 2025 aggregate flagged")
+	}
+	if len(report.History) != 0 {
+		t.Errorf("history = %+v; want no sample passed to the projection", report.History)
+	}
+	if basis := report.HistoryBasis; basis.CompleteMonths != 15 || basis.PoCount != 2 {
+		t.Errorf("history basis = %+v; want 15 complete months and 2 historical POs", basis)
+	}
+}
+
+// TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios is the ratio half of
+// the Judge regression. A restored whole-order discount makes January 2025's
+// amount 1 against a costed MaxExactMinor; every stored money field is exact,
+// but the unused coverage percentage would overflow. The history the projection
+// actually reads is amount/costed/capital, so the actual report and the sample
+// must remain usable. A forecast-derived ratio that genuinely overflows is
+// still caught by the domain projection, not here.
+func TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios(t *testing.T) {
+	database := openTestSchema(t, "vera_po_report_history_ratio_overflow")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	ratioQuote := seedReportQuotation(t, database, 2, "PT. Buyer", "History ratio overflow", "IDR", "FTZ",
+		[]reportQuotationLine{{
+			Description: "Line", UoM: "Pc", Qty: 1,
+			Cost: 100, Sell: poreport.MaxExactMinor,
+		}})
+	actualQuote := seedReportQuotation(t, database, 3, "PT. Buyer Two", "Safe actual", "IDR", "FTZ",
+		[]reportQuotationLine{{Description: "Line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 200}})
+	ratioPO := finalizeReportPO(t, database, ctx, user, ratioQuote, "PO-HIST-RATIO", "2025-01-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+	actual := finalizeReportPO(t, database, ctx, user, actualQuote, "PO-HIST-RATIO-ACTUAL", "2026-03-10",
+		PurchaseOrderBusinessCategoryFm, nil)
+
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_orders
+		SET discount_minor = subtotal_minor - 1, grand_total_minor = 1
+		WHERE id = $1`, database.configSchema()), ratioPO.ID); err != nil {
+		t.Fatalf("restore legacy whole-order discount: %v", err)
+	}
+	// The line net is an exact history value; only the coverage percentage
+	// derived from amount=1 and costed=MaxExactMinor is out of range.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_order_items SET net_minor = $2 WHERE purchase_order_id = $1`,
+		database.configSchema()), ratioPO.ID, poreport.MaxExactMinor); err != nil {
+		t.Fatalf("raise historical line net: %v", err)
+	}
+
+	report := mustReport(t, database, ctx,
+		reportQuery("2026-03-01", "2026-04-01", poreport.BucketMonth, poreport.CategoryAll, "IDR"))
+	if report.Totals.PoCount != 1 || report.Totals.AmountMinor != actual.SubtotalMinor {
+		t.Fatalf("actual totals = %+v; want the safe March PO preserved", report.Totals)
+	}
+	if report.HistoryOutOfRange {
+		t.Fatal("history out-of-range = true; the unused ratio must not invalidate exact history")
+	}
+	var january poreport.HistoryMonth
+	found := false
+	for _, month := range report.History {
+		if month.MonthStart == "2025-01-01" {
+			january = month
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("history = %+v; want the January 2025 observation", report.History)
+	}
+	if january.AmountMinor != 1 || january.CostedMinor != poreport.MaxExactMinor ||
+		january.CapitalMinor != 100 || january.UncostedMinor != 1-poreport.MaxExactMinor {
+		t.Errorf("January history metrics = %+v; want exact amount/cost/capital with no truncation", january.Metrics)
+	}
+	if january.MarginBps != nil || january.CoverageBps != nil {
+		t.Errorf("January history ratios = %v/%v; want the unused ratios not computed",
+			january.MarginBps, january.CoverageBps)
+	}
+}
+
 func TestPurchaseOrderReportHistoryIsContinuousAndEndsAtTheCompleteMonth(t *testing.T) {
 	database := openTestSchema(t, "vera_po_report_history")
 	ctx := poContext(t, database)

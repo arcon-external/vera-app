@@ -384,6 +384,150 @@ func TestPurchaseOrderReportDisclosesARestoredLegacyAdjustment(t *testing.T) {
 	}
 }
 
+// TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows is the
+// Judge endpoint regression: a January 2025 history total above the exact range
+// is not an actual figure for a March 2026 report. The endpoint must return 200
+// with an empty actual range and an explicit unavailable/value_out_of_range
+// forecast that still states the history window and sample.
+func TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_report_history_overflow_empty")
+	first := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-OVERFLOW-1", "2025-01-10", "FM")
+	second := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-OVERFLOW-2", "2025-01-10", "FM")
+
+	schema := "vera_api_po_report_history_overflow_empty"
+	pool := apiReportPool(t, schema)
+	for _, id := range []int64{first.ID, second.ID} {
+		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET subtotal_minor = $2, grand_total_minor = $2
+			WHERE id = $1`, schema), id, poreport.MaxExactMinor); err != nil {
+			t.Fatalf("raise historical amount on %d: %v", id, err)
+		}
+	}
+
+	code, body := doJSON(t, server, http.MethodGet,
+		reportURL(reportQueryParams("2026-03-01", "2026-04-01", "month", "", "IDR")), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("history-only overflow = %d (%v); want 200 with the empty actuals preserved", code, body)
+	}
+	report := decodeReport(t, body)
+	if report.Totals.PoCount != 0 || report.Totals.AmountMinor != 0 {
+		t.Errorf("actual totals = %+v; want an empty March 2026 range", report.Totals)
+	}
+	for name, series := range map[string]poreport.ProjectionSeries{
+		"monthly": report.Projection.Monthly,
+		"yearly":  report.Projection.Yearly,
+	} {
+		if series.Status != poreport.ProjectionStatusUnavailable || series.Reason != poreport.ReasonValueOutOfRange {
+			t.Errorf("%s = %s/%s; want unavailable/%s",
+				name, series.Status, series.Reason, poreport.ReasonValueOutOfRange)
+		}
+		if series.Basis.HistoryFrom != "2025-01-01" || series.Basis.HistoryTo != "2026-04-01" ||
+			series.Basis.CompleteMonths != 15 || series.Basis.PoCount != 2 {
+			t.Errorf("%s basis = %+v; want the truthful 15-month, 2-PO history window", name, series.Basis)
+		}
+		if series.Basis.AsOf != report.AsOf {
+			t.Errorf("%s basis asOf = %s; want the response asOf %s", name, series.Basis.AsOf, report.AsOf)
+		}
+	}
+}
+
+// TestPurchaseOrderReportKeepsActualsWhenHistoryAmountOverflows adds a safe
+// March 2026 PO beside the oversized January 2025 history. The actual totals
+// must be preserved exactly; only the forecast is suppressed.
+func TestPurchaseOrderReportKeepsActualsWhenHistoryAmountOverflows(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_report_history_overflow_actual")
+	first := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-ACTUAL-1", "2025-01-10", "FM")
+	second := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-ACTUAL-2", "2025-01-10", "FM")
+	actual := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-ACTUAL-SAFE", "2026-03-10", "FM")
+
+	schema := "vera_api_po_report_history_overflow_actual"
+	pool := apiReportPool(t, schema)
+	for _, id := range []int64{first.ID, second.ID} {
+		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+			UPDATE %s.purchase_orders
+			SET subtotal_minor = $2, grand_total_minor = $2
+			WHERE id = $1`, schema), id, poreport.MaxExactMinor); err != nil {
+			t.Fatalf("raise historical amount on %d: %v", id, err)
+		}
+	}
+
+	code, body := doJSON(t, server, http.MethodGet,
+		reportURL(reportQueryParams("2026-03-01", "2026-04-01", "month", "", "IDR")), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("history overflow with a safe actual = %d (%v); want 200", code, body)
+	}
+	report := decodeReport(t, body)
+	wantAmount := actual.SubtotalMinor - actual.DiscountMinor + actual.AdjustmentMinor
+	if report.Totals.PoCount != 1 || report.Totals.AmountMinor != wantAmount {
+		t.Errorf("actual totals = %+v; want the one safe PO worth %d", report.Totals, wantAmount)
+	}
+	if report.Projection.Monthly.Status != poreport.ProjectionStatusUnavailable ||
+		report.Projection.Monthly.Reason != poreport.ReasonValueOutOfRange {
+		t.Errorf("monthly projection = %s/%s; want unavailable/%s",
+			report.Projection.Monthly.Status, report.Projection.Monthly.Reason, poreport.ReasonValueOutOfRange)
+	}
+	if basis := report.Projection.Monthly.Basis; basis.CompleteMonths != 15 || basis.PoCount != 3 {
+		t.Errorf("monthly basis = %+v; want 15 complete months and 3 historical POs", basis)
+	}
+}
+
+// TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios pins the other half:
+// a historical month whose amount is 1 against a costed MaxExactMinor would
+// overflow its unused coverage percentage. Every money field the projection
+// reads is exact, so the endpoint must return 200 and the forecast must fail
+// only on its real guard (here: too few POs), never on an unused ratio.
+func TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_report_history_ratio")
+	ratio := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-RATIO", "2025-01-10", "FM")
+	actual := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-RATIO-SAFE", "2026-03-10", "FM")
+
+	schema := "vera_api_po_report_history_ratio"
+	pool := apiReportPool(t, schema)
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.purchase_orders
+		SET subtotal_minor = 1, discount_minor = 0, grand_total_minor = 1
+		WHERE id = $1`, schema), ratio.ID); err != nil {
+		t.Fatalf("lower historical amount: %v", err)
+	}
+	// The seeded quotation has two lines. Make one line carry the exact bound
+	// and clear the other, so the month's costed total is exactly
+	// MaxExactMinor and only the unused coverage percentage would overflow.
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.purchase_order_items
+		SET gross_minor = 0, discount_minor = 0, net_minor = 0
+		WHERE purchase_order_id = $1`, schema), ratio.ID); err != nil {
+		t.Fatalf("clear historical line nets: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.purchase_order_items
+		SET gross_minor = $2, discount_minor = 0, net_minor = $2
+		WHERE purchase_order_id = $1 AND line_number = 1`,
+		schema), ratio.ID, poreport.MaxExactMinor); err != nil {
+		t.Fatalf("raise historical costed amount: %v", err)
+	}
+
+	code, body := doJSON(t, server, http.MethodGet,
+		reportURL(reportQueryParams("2026-03-01", "2026-04-01", "month", "", "IDR")), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("ratio-only history overflow = %d (%v); want 200", code, body)
+	}
+	report := decodeReport(t, body)
+	wantAmount := actual.SubtotalMinor - actual.DiscountMinor + actual.AdjustmentMinor
+	if report.Totals.PoCount != 1 || report.Totals.AmountMinor != wantAmount {
+		t.Errorf("actual totals = %+v; want the safe March PO preserved", report.Totals)
+	}
+	for name, series := range map[string]poreport.ProjectionSeries{
+		"monthly": report.Projection.Monthly,
+		"yearly":  report.Projection.Yearly,
+	} {
+		if series.Status != poreport.ProjectionStatusUnavailable || series.Reason != poreport.ReasonInsufficientHistory {
+			t.Errorf("%s = %s/%s; want unavailable/%s from the real sample guard, not an unused ratio",
+				name, series.Status, series.Reason, poreport.ReasonInsufficientHistory)
+		}
+	}
+}
+
 func TestPurchaseOrderReportFailsClosedOnAggregateOverflow(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_report_overflow")
 	first := finalizeOneReportPO(t, server, token, "PO-REPORT-API-OVERFLOW-1", "2026-03-10", "FM")

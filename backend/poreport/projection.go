@@ -67,6 +67,18 @@ func Project(history []HistoryMonth, query Query, asOf time.Time, actualPoCount 
 	return Projection{Monthly: monthly, Yearly: yearly}
 }
 
+// UnavailableProjection returns both series unavailable with one reason and one
+// basis. The caller uses it when the stored history cannot be represented
+// exactly (for example, an aggregate outside the exact JSON range), so Project
+// never receives a truncated sample. Actual figures are independent of this
+// function and are never suppressed by it.
+func UnavailableProjection(reason string, basis ProjectionBasis) Projection {
+	return Projection{
+		Monthly: unavailableSeries(MethodMonthly, reason, basis),
+		Yearly:  unavailableSeries(MethodYearly, reason, basis),
+	}
+}
+
 // monthlyBuckets builds the next twelve months. Each bucket reads the same
 // calendar month from every complete history month; when that month has no
 // history at all, it reads the last three complete months instead. Amount and

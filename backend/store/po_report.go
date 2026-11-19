@@ -83,8 +83,19 @@ type PurchaseOrderReportSnapshot struct {
 	// omitted.
 	CategorySeries []poreport.CategorySeries
 	// History is the continuous monthly history before the complete-month
-	// cutoff. Zeros are observations, not invented pre-Vera history.
+	// cutoff. Zeros are observations, not invented pre-Vera history. It is
+	// empty when HistoryOutOfRange is true: a truncated sample must never reach
+	// the projection.
 	History []poreport.HistoryMonth
+	// HistoryOutOfRange reports that a stored history aggregate could not be
+	// represented exactly. The actual report is unaffected; the caller renders
+	// the forecast unavailable/value_out_of_range from HistoryBasis instead of
+	// projecting a corrupted sample.
+	HistoryOutOfRange bool
+	// HistoryBasis is the complete-month window and sample count behind the
+	// history. It is populated even when HistoryOutOfRange is true, so the
+	// unavailable forecast can state the sample it would have used.
+	HistoryBasis poreport.ProjectionBasis
 	// AvailableCurrencies is date-scoped and ignores the selected currency and
 	// category. The selected currency is always present.
 	AvailableCurrencies []string
@@ -216,7 +227,7 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
 	}
-	history, err := reportHistory(historyRaw, historyTo)
+	history, err := reportHistory(historyRaw, historyTo, asOf)
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
 	}
@@ -231,7 +242,9 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 		Periods:                 periods,
 		Categories:              categories,
 		CategorySeries:          series,
-		History:                 history,
+		History:                 history.months,
+		HistoryOutOfRange:       history.outOfRange,
+		HistoryBasis:            history.basis,
 		AvailableCurrencies:     currencies,
 		HasUnassigned:           hasUnassigned,
 		SourceMissingPoCount:    totalsRow.SourceMissingPoCount,
@@ -301,6 +314,21 @@ func reportExactNumber(value json.Number, field string) (int64, error) {
 			poreport.ErrValueOutOfRange, field, value)
 	}
 	result := rational.Num().Int64()
+	if err := poreport.CheckExact(result); err != nil {
+		return 0, fmt.Errorf("%s: %w", field, err)
+	}
+	return result, nil
+}
+
+// reportExactBigInt is reportExactNumber for a derived value that was computed
+// exactly in big.Int first. It refuses a value whose int64 or exact-JSON bound
+// would lose a digit rather than letting a later projection see a truncated one.
+func reportExactBigInt(value *big.Int, field string) (int64, error) {
+	if !value.IsInt64() {
+		return 0, fmt.Errorf("%w: %s = %s does not fit an int64",
+			poreport.ErrValueOutOfRange, field, value)
+	}
+	result := value.Int64()
 	if err := poreport.CheckExact(result); err != nil {
 		return 0, fmt.Errorf("%s: %w", field, err)
 	}
@@ -517,56 +545,111 @@ func reportCategorySeries(raw []byte, periods []poreport.Period, filter string, 
 	return series, nil
 }
 
+// reportHistorySample is the projection input plus the facts that survive an
+// unrepresentable aggregate. The basis is built from the month labels and
+// counts, never from money, so it stays truthful when a stored total is outside
+// the exact JSON range.
+type reportHistorySample struct {
+	months     []poreport.HistoryMonth
+	basis      poreport.ProjectionBasis
+	outOfRange bool
+}
+
 // reportHistory turns grouped history months into the continuous sequence the
 // domain projection consumes: from the first observed month (an observed month
 // counts even if Vera's data began mid-month) through the last complete month
 // before the cutoff. Months with no orders stay present as zeros. Nothing
 // earlier than the first observed month is invented, because pre-Vera history
 // is not evidence of zero sales.
-func reportHistory(raw []byte, historyTo time.Time) ([]poreport.HistoryMonth, error) {
+//
+// Only the fields Project reads are populated. History is not a wire object, so
+// its margin and percentages are deliberately not computed: a ratio overflow on
+// an unused value must never fail an actual report. When a money value itself is
+// outside the exact range, the sample is withheld and the basis is returned with
+// outOfRange set, so the caller can mark only the forecast unavailable. Values
+// are never clamped or zeroed and then projected.
+func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, error) {
 	var rows []reportHistoryJSON
 	if err := json.Unmarshal(raw, &rows); err != nil {
-		return nil, fmt.Errorf("decode purchase order report history: %w", err)
+		return reportHistorySample{}, fmt.Errorf("decode purchase order report history: %w", err)
 	}
 	if len(rows) == 0 {
-		return []poreport.HistoryMonth{}, nil
+		return reportHistorySample{months: []poreport.HistoryMonth{}}, nil
 	}
 	byMonth := make(map[string]reportHistoryJSON, len(rows))
 	first := rows[0].MonthStart
+	count := new(big.Int)
 	for _, row := range rows {
 		byMonth[row.MonthStart] = row
 		if row.MonthStart < first {
 			first = row.MonthStart
 		}
+		count.Add(count, big.NewInt(row.PoCount))
 	}
 	start, err := time.Parse(time.DateOnly, first)
 	if err != nil {
-		return nil, fmt.Errorf("%w: history month %q", poreport.ErrValueOutOfRange, first)
+		return reportHistorySample{}, fmt.Errorf("%w: history month %q", poreport.ErrValueOutOfRange, first)
 	}
 	last := historyTo.AddDate(0, -1, 0)
-	history := make([]poreport.HistoryMonth, 0, 12)
+	if start.After(last) {
+		return reportHistorySample{months: []poreport.HistoryMonth{}}, nil
+	}
+
+	basis := poreport.ProjectionBasis{
+		HistoryFrom: first,
+		HistoryTo:   historyTo.Format(time.DateOnly),
+		AsOf:        asOf.Format(time.DateOnly),
+	}
+	for month := start; !month.After(last); month = month.AddDate(0, 1, 0) {
+		basis.CompleteMonths++
+	}
+	if count.IsInt64() {
+		if err := poreport.CheckExact(count.Int64()); err == nil {
+			basis.PoCount = count.Int64()
+		} else {
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
+		}
+	} else {
+		return reportHistorySample{basis: basis, outOfRange: true}, nil
+	}
+
+	history := make([]poreport.HistoryMonth, 0, basis.CompleteMonths)
 	for month := start; !month.After(last); month = month.AddDate(0, 1, 0) {
 		key := month.Format(time.DateOnly)
 		row := byMonth[key]
+		if err := poreport.CheckExact(row.PoCount); err != nil {
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
+		}
 		amount, err := reportOptionalExact(row.AmountMinor, "history "+key+" amount")
 		if err != nil {
-			return nil, err
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
 		costed, err := reportOptionalExact(row.CostedMinor, "history "+key+" costed amount")
 		if err != nil {
-			return nil, err
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
 		capital, err := reportOptionalExact(row.CapitalMinor, "history "+key+" capital")
 		if err != nil {
-			return nil, err
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
-		metrics, err := reportMetrics(row.PoCount, amount, costed, capital)
+		uncosted, err := reportExactBigInt(
+			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			"history "+key+" uncosted amount")
 		if err != nil {
-			return nil, fmt.Errorf("history %s: %w", key, err)
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
-		history = append(history, poreport.HistoryMonth{MonthStart: key, Metrics: metrics})
+		history = append(history, poreport.HistoryMonth{
+			MonthStart: key,
+			Metrics: poreport.Metrics{
+				PoCount:       row.PoCount,
+				AmountMinor:   amount,
+				CostedMinor:   costed,
+				UncostedMinor: uncosted,
+				CapitalMinor:  capital,
+			},
+		})
 	}
-	return history, nil
+	return reportHistorySample{months: history, basis: basis}, nil
 }
 
 // reportCurrencies decodes the date-scoped facet and guarantees the selected

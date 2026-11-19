@@ -107,6 +107,14 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 				"the uncosted figure is the part of the amount without a resolved source cost.",
 		})
 	}
+	var projection poreport.Projection
+	if snapshot.HistoryOutOfRange {
+		projection = poreport.UnavailableProjection(
+			poreport.ReasonValueOutOfRange, snapshot.HistoryBasis)
+	} else {
+		projection = poreport.Project(
+			snapshot.History, query, snapshot.AsOf, snapshot.Totals.PoCount)
+	}
 	report := poreport.Report{
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 		AsOf:        snapshot.AsOf.Format(time.DateOnly),
@@ -124,9 +132,8 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 		Periods:        snapshot.Periods,
 		Categories:     snapshot.Categories,
 		CategorySeries: snapshot.CategorySeries,
-		Projection: poreport.Project(
-			snapshot.History, query, snapshot.AsOf, snapshot.Totals.PoCount),
-		Notes: notes,
+		Projection:     projection,
+		Notes:          notes,
 	}
 	return context.JSON(http.StatusOK, apicontract.PurchaseOrderReport(report))
 }

@@ -51,6 +51,38 @@ func TestProjectEmptyActualPopulationIsNoData(t *testing.T) {
 	}
 }
 
+func TestUnavailableProjectionStatesBothSeries(t *testing.T) {
+	t.Parallel()
+
+	basis := ProjectionBasis{
+		HistoryFrom:    "2025-01-01",
+		HistoryTo:      "2026-04-01",
+		CompleteMonths: 15,
+		PoCount:        3,
+		AsOf:           "2026-11-19",
+	}
+	projection := UnavailableProjection(ReasonValueOutOfRange, basis)
+
+	for name, series := range map[string]ProjectionSeries{
+		"monthly": projection.Monthly,
+		"yearly":  projection.Yearly,
+	} {
+		if series.Status != ProjectionStatusUnavailable || series.Reason != ReasonValueOutOfRange {
+			t.Errorf("%s = %s/%s; want unavailable/%s",
+				name, series.Status, series.Reason, ReasonValueOutOfRange)
+		}
+		if series.Basis != basis {
+			t.Errorf("%s basis = %+v; want %+v", name, series.Basis, basis)
+		}
+		if series.Buckets == nil || len(series.Buckets) != 0 {
+			t.Errorf("%s buckets = %+v; want an empty non-nil slice", name, series.Buckets)
+		}
+		if series.Method == "" {
+			t.Errorf("%s method is empty; want the stated method", name)
+		}
+	}
+}
+
 func TestProjectInsufficientCompleteMonths(t *testing.T) {
 	t.Parallel()
 
