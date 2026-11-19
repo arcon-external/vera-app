@@ -37,6 +37,7 @@ import {
 } from "../poReport";
 import { todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
+import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
@@ -200,8 +201,10 @@ function PeriodTable({
       </div>
       <div className="overflow-x-auto scroll-thin">
         <table
+          id="report-period-table"
+          tabIndex={-1}
           aria-label="Period totals"
-          className="w-full min-w-[760px] text-left text-body"
+          className="w-full min-w-[760px] scroll-mt-6 text-left text-body"
         >
           <thead>
             <tr className="border-y border-rule bg-paper-subtle/60 text-micro uppercase tracking-[0.1em] text-ink-500">
@@ -678,6 +681,7 @@ export function PurchaseOrderReportsView({
       {showFigures && report !== null ? (
         <>
           <KpiStrip report={report} entry={entry} />
+          <PurchaseOrderReportChart report={report} currency={entry} />
           <CategoryTable report={report} entry={entry} />
           <PeriodTable report={report} entry={entry} />
           <ProjectionSection report={report} entry={entry} />

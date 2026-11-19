@@ -171,3 +171,62 @@
 .quotation-ghost-preview .text-accent-800 {
   color: #4b7a77 !important;
 }
+
+/* Issue #631: entry motion for the performance chart. Marks only -- axes,
+   labels and the table never animate. The final state is the base state, so
+   SSR and reduced-motion renders are complete before any animation runs.
+   Durations are 450-600ms, staggered by at most 120ms. */
+@keyframes report-chart-column-in {
+  from {
+    opacity: 0.55;
+    transform: scaleY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes report-chart-line-in {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes report-chart-band-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.report-chart-column-in {
+  transform-box: view-box;
+  animation: report-chart-column-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.report-chart-line-in {
+  stroke-dasharray: 1;
+  animation: report-chart-line-in 520ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+}
+
+.report-chart-band-in {
+  animation: report-chart-band-in 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .report-chart-column-in,
+  .report-chart-line-in,
+  .report-chart-band-in {
+    animation: none !important;
+  }
+
+  .report-chart-line-in {
+    stroke-dasharray: none;
+  }
+}

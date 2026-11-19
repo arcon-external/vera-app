@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { backend } from "@backend/models";
+import type { backend, poreport } from "@backend/models";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import { QuotationHero } from "./components/QuotationHero";
@@ -41,6 +41,10 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import {
+  normalizePurchaseOrderReport,
+  type PurchaseOrderReportData,
+} from "./poReport";
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
@@ -114,6 +118,11 @@ import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 import { UPDATE_NEWER, UPDATE_REQUIRED } from "./updateFixture";
+import {
+  addDaysIso,
+  type ReportBucket,
+  type ReportFilterState,
+} from "./poReportPage";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
 // the harness behaves the same however it is invoked.
@@ -1330,6 +1339,94 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
 const REPORTS_MAX_AED = purchaseOrderReportMaxFixture();
 REPORTS_MAX_AED.filter = { ...REPORTS_MAX_AED.filter, currency: "AED" };
 
+// Issue #631: the chart snapshot cases share the Reports view's real props and
+// the same normalized server snapshot the screen consumes. The harness renders
+// to a string and screenshots at 360 and 1280 only (there is no 390 viewport).
+//
+// What the static render cannot show: the chart's measured container width is a
+// client effect. The SSR fallback is 960px, so the 360 screenshot shows the
+// scroll container and the first columns rather than the measured 360 layout;
+// the real browser measures and reflows. The 1280 read is the desktop chart.
+// Hover, keyboard and entry motion remain hand-driven/DOM-tested.
+const REPORT_CATALOGUE: CurrencyInfo[] = [
+  {
+    code: "IDR",
+    exponent: 0,
+    symbol: "Rp",
+    position: "before",
+    groupSep: ".",
+    decimalSep: ",",
+    symbolSpaced: false,
+  },
+  {
+    code: "USD",
+    exponent: 2,
+    symbol: "$",
+    position: "before",
+    groupSep: ",",
+    decimalSep: ".",
+    symbolSpaced: false,
+  },
+];
+
+function reportChartFilters(report: PurchaseOrderReportData): ReportFilterState {
+  return {
+    preset: "custom",
+    from: report.filter.from,
+    to: addDaysIso(report.filter.to, -1),
+    bucket: report.filter.bucket as ReportBucket,
+    category: report.filter.category,
+    currency: report.filter.currency,
+  };
+}
+
+function reportChartView(report: PurchaseOrderReportData): ReactElement {
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(report)}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+    />
+  );
+}
+
+function sharedReportSnapshot(): PurchaseOrderReportData {
+  const raw = JSON.parse(
+    readFileSync(
+      path.join(
+        REPO_ROOT,
+        "backend",
+        "render",
+        "report",
+        "testdata",
+        "report_snapshot.json"
+      ),
+      "utf8"
+    )
+  ) as { report: poreport.Report };
+  return normalizePurchaseOrderReport(raw.report);
+}
+
+// The shared fixture is read only when this case renders, never at module load:
+// the harness is collected by every test run even when UI_SNAPSHOT is unset.
+function SharedReportChartView(): ReactElement {
+  return reportChartView(sharedReportSnapshot());
+}
+
 const CASES: SnapshotCase[] = [
   {
     // Ticket #536: the "Stay signed in" window, idle and with the last
@@ -1646,7 +1743,8 @@ const CASES: SnapshotCase[] = [
     // tables; the projection is visibly marked as not part of actual totals.
     //
     // What this case cannot show: loading, error and empty states (covered by
-    // the DOM suite), filter interactions, and the chart, which is #631.
+    // the DOM suite), filter interactions, and the chart's measured width and
+    // motion (covered by the DOM suite; the static chart uses its 960 fallback).
     name: "Reports",
     element: (
       <PurchaseOrderReportsView
@@ -1697,6 +1795,31 @@ const CASES: SnapshotCase[] = [
         onExport={() => undefined}
       />
     ),
+  },
+  {
+    // Issue #631, normal actual data: the chart cropped to its own heading so
+    // the grouped money columns, zero baseline, margin % line and legend are
+    // legible without scrolling past the KPI strip.
+    name: "ReportsChartActual",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportFixture()),
+  },
+  {
+    // Issue #631, a real negative period (December) and the shared fixture's
+    // available monthly and yearly projections. The projected columns sit
+    // after the dashed divider inside the low-high amount band; they are never
+    // part of actual totals.
+    name: "ReportsChartForecastNegative",
+    cropToHeading: "Performance",
+    element: <SharedReportChartView />,
+  },
+  {
+    // Issue #631, JavaScript's largest exact money range: the money axis must
+    // keep a finite compact domain at this magnitude, and the negative margin
+    // space must remain below zero.
+    name: "ReportsChartMaxRange",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportMaxFixture()),
   },
   {
     // Issue #630 review: the same assembled screen at JavaScript's largest

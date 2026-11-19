@@ -483,6 +483,78 @@ describe("Reports figures (issue #630)", () => {
   });
 });
 
+describe("Reports performance chart placement (issue #631)", () => {
+  it("places the chart after the KPI strip and before the category tables", async () => {
+    await renderPage();
+
+    const kpis = document.querySelector('[aria-label="Report KPIs"]');
+    const chart = document.querySelector("[data-report-chart]");
+    const categories = document.querySelector(
+      'table[aria-label="Category totals"]'
+    );
+    expect(kpis).not.toBeNull();
+    expect(chart).not.toBeNull();
+    expect(categories).not.toBeNull();
+    expect(
+      kpis!.compareDocumentPosition(chart!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      chart!.compareDocumentPosition(categories!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("draws no chart when the range has no purchase orders", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = reportFor(query);
+      report.totals = {
+        poCount: 0,
+        amountMinor: 0,
+        costedMinor: 0,
+        uncostedMinor: 0,
+        capitalMinor: 0,
+        marginMinor: 0,
+        marginBps: null,
+        coverageBps: null,
+      };
+      report.periods = [];
+      report.categories = [];
+      return report;
+    });
+    await renderPage();
+
+    expect(document.body.textContent).toContain("No purchase orders");
+    expect(document.querySelector("[data-report-chart]")).toBeNull();
+  });
+
+  it("keeps the previous chart on the previous snapshot while a refresh fails", async () => {
+    await renderPage();
+    const before = document.querySelector("[data-report-chart]");
+    expect(before?.textContent).toContain("11 actual monthly periods");
+
+    reportMock.mockRejectedValueOnce(new Error("Network is unreachable."));
+    await choose("Bucket", "Year");
+
+    expect(document.body.textContent).toContain("Network is unreachable.");
+    expect(document.body.textContent).toContain("Showing the previous");
+    const after = document.querySelector("[data-report-chart]");
+    expect(after).toBe(before);
+    expect(after?.textContent).toContain("11 actual monthly periods");
+  });
+
+  it("anchors the chart's table link to the period table", async () => {
+    await renderPage();
+    const link = document.querySelector<HTMLAnchorElement>(
+      '[data-report-chart] a[href="#report-period-table"]'
+    );
+    const table = document.querySelector("#report-period-table");
+    expect(link).not.toBeNull();
+    expect(table).not.toBeNull();
+    expect(table?.getAttribute("aria-label")).toBe("Period totals");
+    expect(table?.getAttribute("tabindex")).toBe("-1");
+  });
+});
+
 describe("Reports export seam (issue #630)", () => {
   it("disables Export PDF when no callback is wired", async () => {
     await renderPage();
