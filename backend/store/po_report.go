@@ -732,6 +732,13 @@ func reportNextPeriod(start time.Time, bucket string) time.Time {
 // and the unassigned flag. Both the actual population and the projection
 // history share the same cost resolution, so the two can never disagree about
 // what a PO cost.
+//
+// The actual figures come from one CUBE pass: the grand total, the period rows,
+// the category rows and the category-period series are four grouping sets over
+// the same scanned rows, so four aggregates no longer rescan a materialized
+// population. The currency facet and the unassigned flag share one grouped scan
+// as well; the flag is category-independent by contract, which is why it can
+// ride with the currency rollup.
 func purchaseOrderReportSQL(schema string) string {
 	return fmt.Sprintf(`
 WITH base_population AS (
@@ -751,12 +758,20 @@ WITH base_population AS (
           OR po.business_category = $5
       )
 ),
-line_costs AS (
-    SELECT poi.purchase_order_id,
-           SUM(poi.net_minor::numeric) FILTER (WHERE resolved.cost_unit IS NOT NULL) AS costed,
-           SUM(poi.quantity_scaled::numeric * resolved.cost_unit) AS capital_raw
+po_metrics AS (
+    SELECT po.id,
+           po.received_date,
+           po.business_category,
+           po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
+           COALESCE(SUM(poi.net_minor::numeric)
+                    FILTER (WHERE resolved.cost_unit IS NOT NULL), 0) AS costed,
+           ROUND(COALESCE(SUM(poi.quantity_scaled::numeric * resolved.cost_unit), 0) / 10000) AS capital,
+           (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
+           (po.quotation_id IS NULL) AS source_missing,
+           po.is_actual,
+           po.is_history
     FROM base_population po
-    JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
+    LEFT JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
     LEFT JOIN %[1]s.quotation_revisions revision
            ON revision.quotation_id = po.quotation_id
           AND revision.revision_number = po.source_revision
@@ -774,60 +789,41 @@ line_costs AS (
             ELSE sub.unit_cost
         END AS cost_unit
     ) resolved
-    GROUP BY poi.purchase_order_id
+    GROUP BY po.id, po.received_date, po.business_category,
+             po.subtotal_minor, po.discount_minor, po.adjustment_minor,
+             po.quotation_id, po.source_revision, po.currency,
+             po.is_actual, po.is_history
 ),
-po_metrics AS (
-    SELECT po.id,
-           po.received_date,
-           po.business_category,
-           po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
-           COALESCE(cost.costed, 0) AS costed,
-           ROUND(COALESCE(cost.capital_raw, 0) / 10000) AS capital,
-           (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
-           (po.quotation_id IS NULL) AS source_missing,
-           po.is_actual,
-           po.is_history
-    FROM base_population po
-    LEFT JOIN line_costs cost ON cost.purchase_order_id = po.id
-),
-actual_metrics AS (
-    SELECT po.*,
-           date_trunc(
+actual_rows AS (
+    SELECT date_trunc(
                CASE $7
                    WHEN 'month' THEN 'month'
                    WHEN 'quarter' THEN 'quarter'
                    ELSE 'year'
                END,
                po.received_date
-           )::date AS bucket_start
+           )::date AS bucket_start,
+           CASE WHEN po.business_category = '' THEN 'UNASSIGNED' ELSE po.business_category END AS category,
+           po.amount, po.costed, po.capital, po.source_missing, po.legacy_adjustment
     FROM po_metrics po
     WHERE po.is_actual
 ),
-period_metrics AS (
+actual_cube AS (
+    -- GROUPING(bucket_start, category): 0 = both keys, 1 = period only,
+    -- 2 = category only, 3 = the grand total. One CUBE pass replaces the four
+    -- separate aggregates, so totals, periods, categories and the series all
+    -- come from the same scanned rows.
     SELECT bucket_start,
+           category,
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
-           SUM(capital) AS capital
-    FROM actual_metrics
-    GROUP BY bucket_start
-),
-category_metrics AS (
-    SELECT CASE WHEN business_category = '' THEN 'UNASSIGNED' ELSE business_category END AS category,
-           COUNT(*) AS po_count,
-           SUM(amount) AS amount,
-           SUM(costed) AS costed,
-           SUM(capital) AS capital
-    FROM actual_metrics
-    GROUP BY 1
-),
-category_period_metrics AS (
-    SELECT bucket_start,
-           CASE WHEN business_category = '' THEN 'UNASSIGNED' ELSE business_category END AS category,
-           SUM(costed - capital) AS margin,
-           SUM(capital) AS capital
-    FROM actual_metrics
-    GROUP BY 1, 2
+           SUM(capital) AS capital,
+           COUNT(*) FILTER (WHERE source_missing) AS source_missing_count,
+           COUNT(*) FILTER (WHERE legacy_adjustment) AS legacy_adjustment_count,
+           GROUPING(bucket_start, category) AS grouping
+    FROM actual_rows
+    GROUP BY CUBE(bucket_start, category)
 ),
 history_metrics AS (
     SELECT date_trunc('month', received_date)::date AS month_start,
@@ -838,36 +834,46 @@ history_metrics AS (
     FROM po_metrics
     WHERE received_date < $6::date
     GROUP BY 1
+),
+facet_rollup AS (
+    SELECT po.currency,
+           bool_or(po.business_category = '') AS has_unassigned
+    FROM %[1]s.purchase_orders po
+    WHERE po.org_id = $1
+      AND po.state = 'saved'
+      AND po.received_date >= $3::date
+      AND po.received_date < $4::date
+    GROUP BY po.currency
 )
 SELECT
     (SELECT jsonb_build_object(
-        'poCount', COUNT(*),
-        'amountMinor', COALESCE(SUM(amount), 0),
-        'costedMinor', COALESCE(SUM(costed), 0),
-        'capitalMinor', COALESCE(SUM(capital), 0),
-        'sourceMissingPoCount', COUNT(*) FILTER (WHERE source_missing),
-        'legacyAdjustmentPoCount', COUNT(*) FILTER (WHERE legacy_adjustment)
-     ) FROM actual_metrics),
+        'poCount', po_count,
+        'amountMinor', COALESCE(amount, 0),
+        'costedMinor', COALESCE(costed, 0),
+        'capitalMinor', COALESCE(capital, 0),
+        'sourceMissingPoCount', source_missing_count,
+        'legacyAdjustmentPoCount', legacy_adjustment_count
+     ) FROM actual_cube WHERE grouping = 3),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'periodStart', to_char(bucket_start, 'YYYY-MM-DD'),
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
         'capitalMinor', capital
-     ) ORDER BY bucket_start), '[]'::jsonb) FROM period_metrics),
+     ) ORDER BY bucket_start), '[]'::jsonb) FROM actual_cube WHERE grouping = 1),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'businessCategory', category,
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
         'capitalMinor', capital
-     ) ORDER BY category), '[]'::jsonb) FROM category_metrics),
+     ) ORDER BY category), '[]'::jsonb) FROM actual_cube WHERE grouping = 2),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'periodStart', to_char(bucket_start, 'YYYY-MM-DD'),
         'businessCategory', category,
-        'marginMinor', margin,
+        'marginMinor', costed - capital,
         'capitalMinor', capital
-     ) ORDER BY bucket_start, category), '[]'::jsonb) FROM category_period_metrics),
+     ) ORDER BY bucket_start, category), '[]'::jsonb) FROM actual_cube WHERE grouping = 0),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'monthStart', to_char(month_start, 'YYYY-MM-DD'),
         'poCount', po_count,
@@ -875,24 +881,7 @@ SELECT
         'costedMinor', costed,
         'capitalMinor', capital
      ) ORDER BY month_start), '[]'::jsonb) FROM history_metrics),
-    (SELECT COALESCE(jsonb_agg(currency ORDER BY currency), '[]'::jsonb)
-     FROM (
-         SELECT DISTINCT po.currency
-         FROM %[1]s.purchase_orders po
-         WHERE po.org_id = $1
-           AND po.state = 'saved'
-           AND po.received_date >= $3::date
-           AND po.received_date < $4::date
-     ) currencies),
-    (SELECT EXISTS (
-        SELECT 1
-        FROM %[1]s.purchase_orders po
-        WHERE po.org_id = $1
-          AND po.state = 'saved'
-          AND po.currency = $2
-          AND po.received_date >= $3::date
-          AND po.received_date < $4::date
-          AND po.business_category = ''
-    ))
+    (SELECT COALESCE(jsonb_agg(currency ORDER BY currency), '[]'::jsonb) FROM facet_rollup),
+    (SELECT COALESCE((SELECT has_unassigned FROM facet_rollup WHERE currency = $2), false))
 `, schema)
 }

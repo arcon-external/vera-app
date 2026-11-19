@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -24,12 +25,33 @@ import (
 //	  -benchtime=10x -count=1 \
 //	  -timeout=20m
 func BenchmarkPurchaseOrderReport10000(b *testing.B) {
+	benchmarkPurchaseOrderReport(b, 10000)
+}
+
+// BenchmarkPurchaseOrderReportScale runs the same measurement at the three
+// sizes the report has to hold: a small office, a busy month, and the 10k
+// archive the ticket names. Each sub-benchmark seeds its own throwaway schema
+// and reports per-iteration p50/p95 alongside the mean, so a regression in the
+// tail is visible rather than hidden by an average.
+//
+//	go test ./backend/store -run '^$' -bench BenchmarkPurchaseOrderReportScale \
+//	  -benchtime=20x -count=5 -benchmem -timeout=30m
+func BenchmarkPurchaseOrderReportScale(b *testing.B) {
+	for _, total := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprintf("%d", total), func(b *testing.B) {
+			benchmarkPurchaseOrderReport(b, total)
+		})
+	}
+}
+
+func benchmarkPurchaseOrderReport(b *testing.B, total int) {
+	b.Helper()
 	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
 	if dsn == "" {
 		b.Skip("set VERA_POSTGRES_TEST_DSN to run the report benchmark")
 	}
 	ctx := context.Background()
-	const schema = "vera_po_report_bench"
+	const schema = "vera_po_report_bench_629"
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -56,7 +78,7 @@ func BenchmarkPurchaseOrderReport10000(b *testing.B) {
 	if err != nil {
 		b.Fatalf("benchmark user: %v", err)
 	}
-	seedReportBenchmark(b, database, org.ID, user.ID)
+	seedReportBenchmark(b, database, org.ID, user.ID, total)
 
 	query := poreport.Query{
 		From: "2025-01-01", To: "2026-01-01", Bucket: poreport.BucketMonth,
@@ -67,13 +89,19 @@ func BenchmarkPurchaseOrderReport10000(b *testing.B) {
 
 	b.ResetTimer()
 	var snapshot PurchaseOrderReportSnapshot
+	durations := make([]time.Duration, 0, b.N)
 	for iteration := 0; iteration < b.N; iteration++ {
+		started := time.Now()
 		snapshot, err = database.ReportPurchaseOrders(ctx, query, now)
+		durations = append(durations, time.Since(started))
 		if err != nil {
-			b.Fatalf("report at 10k POs: %v", err)
+			b.Fatalf("report at %d POs: %v", total, err)
 		}
 	}
 	b.StopTimer()
+	slices.Sort(durations)
+	b.ReportMetric(float64(reportQuantile(durations, 0.50).Microseconds())/1000, "p50_ms")
+	b.ReportMetric(float64(reportQuantile(durations, 0.95).Microseconds())/1000, "p95_ms")
 
 	// The payload is measured on the same shape the screen receives, including
 	// the two projections. It is reported, not enforced: the approved range is
@@ -96,18 +124,18 @@ func BenchmarkPurchaseOrderReport10000(b *testing.B) {
 		b.Fatalf("marshal benchmark report: %v", err)
 	}
 	b.ReportMetric(float64(len(payload)), "payload_bytes")
-	b.Logf("10k-PO report: %d periods, %d categories, %d history months, %d PO count",
-		len(snapshot.Periods), len(snapshot.Categories), len(snapshot.History), snapshot.Totals.PoCount)
+	b.Logf("%d-PO report: %d periods, %d categories, %d history months, %d PO count",
+		total, len(snapshot.Periods), len(snapshot.Categories), len(snapshot.History), snapshot.Totals.PoCount)
 
 	// The approved 120-period cap is measured rather than assumed: the same
-	// 10k-PO population over a ten-year month axis, including 108 zero buckets.
+	// population over a ten-year month axis, including 108 zero buckets.
 	wideQuery := poreport.Query{
 		From: "2016-01-01", To: "2026-01-01", Bucket: poreport.BucketMonth,
 		Category: poreport.CategoryAll, Currency: "IDR",
 	}
 	wide, err := database.ReportPurchaseOrders(ctx, wideQuery, now)
 	if err != nil {
-		b.Fatalf("120-period report at 10k POs: %v", err)
+		b.Fatalf("120-period report at %d POs: %v", total, err)
 	}
 	wideReport := report
 	wideReport.Filter = wideQuery
@@ -130,11 +158,33 @@ func BenchmarkPurchaseOrderReport10000(b *testing.B) {
 	b.Logf("120-period cap payload: %d bytes across %d periods", len(widePayload), len(wide.Periods))
 
 	// One EXPLAIN ANALYZE of the exact production statement, for the index and
-	// plan evidence the ticket requires. It runs after the timed loop.
+	// plan evidence the ticket requires. It runs after the timed loop; the
+	// smaller sizes get the same measurement because their plan choice is the
+	// question (seq scan versus the report index), not just their latency.
 	explainBenchmarkReport(b, database, org.ID, query, historyTo)
 }
 
-func seedReportBenchmark(b *testing.B, database *Store, orgID string, userID int64) {
+// reportQuantile is the nearest-rank percentile of an already sorted sample:
+// the smallest duration at or above the requested rank. With b.N samples it
+// makes no interpolation assumptions, so p95 of 20 runs is the 19th value.
+func reportQuantile(sorted []time.Duration, quantile float64) time.Duration {
+	if len(sorted) == 0 {
+		return 0
+	}
+	rank := int(float64(len(sorted)) * quantile)
+	if float64(rank) < float64(len(sorted))*quantile {
+		rank++
+	}
+	if rank < 1 {
+		rank = 1
+	}
+	if rank > len(sorted) {
+		rank = len(sorted)
+	}
+	return sorted[rank-1]
+}
+
+func seedReportBenchmark(b *testing.B, database *Store, orgID string, userID int64, total int) {
 	b.Helper()
 	ctx := context.Background()
 	pool, err := database.poolOrError()
@@ -142,7 +192,6 @@ func seedReportBenchmark(b *testing.B, database *Store, orgID string, userID int
 		b.Fatalf("pool: %v", err)
 	}
 	schema := database.configSchema()
-	const total = 10000
 
 	var customerID int64
 	if err := pool.QueryRow(ctx, fmt.Sprintf(`
@@ -247,7 +296,7 @@ func explainBenchmarkReport(b *testing.B, database *Store, orgID string, query p
 		b.Fatalf("explain report: %v", err)
 	}
 	defer rows.Close()
-	b.Log("EXPLAIN (ANALYZE, BUFFERS) for the 10k-PO report:")
+	b.Log("EXPLAIN (ANALYZE, BUFFERS) for the seeded report population:")
 	for rows.Next() {
 		var line string
 		if err := rows.Scan(&line); err != nil {
