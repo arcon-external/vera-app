@@ -8,6 +8,7 @@ import {
   type PurchaseOrderDTO,
 } from "./purchaseOrder";
 import type { PurchaseOrderReviewDTO } from "./poFinalize";
+import { purchaseOrderReportFixture } from "./poReportFixtures";
 import { ToastProvider } from "./toast";
 
 // Ticket 02: the page-history stack for Home → workspace → settings.
@@ -80,6 +81,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error("no reconciliation recorded");
   }),
   saveReconciliation: vi.fn(async (...args: unknown[]) => args[1]),
+  getPurchaseOrderReport: vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined),
 }));
 
 vi.mock("@backend/backend/AuthAPI", async (importOriginal) => {
@@ -143,6 +145,8 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
       mocks.saveReconciliation(...args),
     ListPurchaseOrders: (...args: unknown[]) =>
       mocks.listPurchaseOrders(...args),
+    GetPurchaseOrderReport: (...args: unknown[]) =>
+      mocks.getPurchaseOrderReport(...args),
   };
 });
 
@@ -289,6 +293,14 @@ beforeEach(() => {
     Total: 0,
     TotalPages: 1,
   });
+  mocks.getPurchaseOrderReport.mockImplementation(async (query: unknown) => {
+    const report = purchaseOrderReportFixture();
+    report.filter = { ...(query as typeof report.filter) };
+    return report;
+  });
+  // jsdom has no scrollIntoView; the custom Select uses it to keep the
+  // highlighted option visible.
+  Element.prototype.scrollIntoView = () => undefined;
   // jsdom has no layout: scrolling is a stub that only logs. Replace it so
   // the save/restore calls the stack test pins stay assertion-clean.
   scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
@@ -383,6 +395,20 @@ function typeInto(
     setter?.call(element, value);
     element.dispatchEvent(new Event("input", { bubbles: true }));
   });
+}
+
+async function chooseFromSelect(control: string, option: string): Promise<void> {
+  await act(async () => {
+    button(control).click();
+  });
+  const found = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="option"]')
+  ).find((node) => node.textContent?.trim() === option);
+  if (found === undefined) throw new Error(`no option ${option} in ${control}`);
+  await act(async () => {
+    found.click();
+  });
+  await flush();
 }
 
 async function openMenuItem(label: string): Promise<void> {
@@ -1285,5 +1311,133 @@ describe("Features Tutorial (issue #595)", () => {
     expect(document.body.textContent).not.toContain(
       "Select the practice quotation"
     );
+  });
+});
+
+describe("Reports workspace (#630)", () => {
+  it("offers Reports after the four document workspaces and before Admin", async () => {
+    await renderApp();
+
+    const labels = [
+      "Open Quotation",
+      "Open Purchase Orders",
+      "Delivery Order (coming later)",
+      "Invoice (coming later)",
+      "Open Reports",
+    ];
+    const positions = labels.map((label) =>
+      Array.from(document.querySelectorAll<HTMLButtonElement>("button")).findIndex(
+        (node) => node.getAttribute("aria-label") === label
+      )
+    );
+    for (let index = 1; index < positions.length; index += 1) {
+      expect(positions[index]).toBeGreaterThan(positions[index - 1]);
+    }
+    expect(button("Open Reports").disabled).toBe(false);
+  });
+
+  it("shows Reports to an admin as well, with Admin Dashboard last", async () => {
+    const admin = { ...USER, ID: 8, DisplayName: "Ada Admin", Role: "admin" };
+    mocks.restoreSession.mockResolvedValue(admin);
+    mocks.currentUser.mockResolvedValue(admin);
+    await renderApp();
+
+    const reports = button("Open Reports");
+    const adminCard = button("Open Admin Dashboard");
+    expect(reports.disabled).toBe(false);
+    expect(adminCard.disabled).toBe(false);
+    expect(
+      reports.compareDocumentPosition(adminCard) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("opens Reports as a standalone shell workspace and Back returns Home", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Reports").click();
+    });
+    await flush();
+
+    expect(workspace()).toBe("reports");
+    expect(document.getElementById("reports-heading")?.textContent).toBe(
+      "Reports"
+    );
+    expect(document.querySelector('nav[aria-label="Primary"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Purchase Order settings");
+    expect(discardPrompt()).toBeNull();
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+
+    expect(workspace()).toBe("home");
+    expect(document.getElementById("reports-heading")).not.toBeNull();
+    // The workspace stays mounted but hidden, so going back keeps its state.
+    expect(document.getElementById("reports-heading")?.closest("[hidden]")).not.toBeNull();
+  });
+
+  it("keeps the selected filters across Account settings and back", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Reports").click();
+    });
+    await flush();
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+
+    await chooseFromSelect("Bucket", "Year");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+    expect(button("Bucket").textContent).toContain("Year");
+
+    await openMenuItem("Account settings");
+    expect(workspace()).toBe("account");
+
+    await act(async () => {
+      button("Back").click();
+    });
+    await flush();
+
+    expect(workspace()).toBe("reports");
+    expect(button("Bucket").textContent).toContain("Year");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the existing unsaved-document guard after a Reports visit", async () => {
+    await renderApp();
+    await act(async () => {
+      button("Open Reports").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+
+    await act(async () => {
+      button("Open Quotation").click();
+    });
+    await flush();
+
+    const subjectField = document.querySelector<HTMLInputElement>(
+      'input[placeholder="Supply and installation of electrical and mechanical systems"]'
+    );
+    if (subjectField === null) throw new Error("no quotation subject field");
+    typeInto(subjectField, "Unsaved after Reports");
+    await flush();
+
+    await act(async () => {
+      button("Back to Home").click();
+    });
+    await flush();
+
+    expect(discardPrompt()).not.toBeNull();
+    await act(async () => {
+      button("Keep editing").click();
+    });
+    await flush();
+    expect(workspace()).toBe("quotation");
+    expect(subjectField.value).toBe("Unsaved after Reports");
   });
 });

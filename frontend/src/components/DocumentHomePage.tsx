@@ -4,7 +4,9 @@ import { Badge, Button, Card, SectionHeading } from "./ui";
 // Issue #466: the post-login home. Issue #491: it is now a global workspace
 // dashboard, not a tab inside Quotation. Each card opens a workspace; Delivery
 // Order and Invoice are visible but disabled with "Coming later", so
-// unavailable features are not misleading. No data is fetched here: this is a
+// unavailable features are not misleading. Issue #630 adds Reports as its own
+// global workspace, available to everyone, after the four document workspaces
+// and before the admin-only Admin Dashboard. No data is fetched here: this is a
 // routing surface, not a document list.
 
 export interface DocumentHomePageProps {
@@ -12,6 +14,8 @@ export interface DocumentHomePageProps {
   onOpenQuotation: () => void;
   /** Opens the Purchase Order workspace's Editor tab. */
   onOpenPurchaseOrder: () => void;
+  /** Opens the standalone global Reports workspace. */
+  onOpenReports: () => void;
   /** Opens the Admin Dashboard. Hidden for non-admins. */
   onOpenAdmin?: () => void;
   /** Whether the signed-in user may see the Admin Dashboard card. */
@@ -121,9 +125,20 @@ function AdminIcon() {
   );
 }
 
+function ReportsIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M4 20h16" />
+      <path d="M7 20v-6M12 20V8M17 20v-9" />
+      <path d="M5 9l4-4 3 3 5-5" />
+    </svg>
+  );
+}
+
 export function DocumentHomePage({
   onOpenQuotation,
   onOpenPurchaseOrder,
+  onOpenReports,
   onOpenAdmin,
   isAdmin = false,
 }: DocumentHomePageProps) {
@@ -188,6 +203,21 @@ export function DocumentHomePage({
               aria-disabled="true"
             >
               Invoice
+            </Button>
+          }
+        />
+        <DestinationCard
+          title="Reports"
+          description="Purchase order performance by category and period, with projections."
+          icon={<ReportsIcon />}
+          wide
+          action={
+            <Button
+              variant="primary"
+              aria-label="Open Reports"
+              onClick={onOpenReports}
+            >
+              Open Reports
             </Button>
           }
         />

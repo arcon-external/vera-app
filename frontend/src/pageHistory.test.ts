@@ -33,6 +33,7 @@ describe("settings pages", () => {
       "po-drafts",
       "po-archive",
       "admin-clients",
+      "reports",
     ] as const) {
       expect(isSettingsPage(page)).toBe(false);
     }
@@ -64,6 +65,8 @@ describe("shouldPushHistory", () => {
   it("pushes across workspaces: home to workspace, workspace to settings", () => {
     expect(shouldPushHistory("home", "po")).toBe(true);
     expect(shouldPushHistory("home", "create")).toBe(true);
+    expect(shouldPushHistory("home", "reports")).toBe(true);
+    expect(shouldPushHistory("reports", "settings")).toBe(true);
     expect(shouldPushHistory("po", "po-settings")).toBe(true);
     expect(shouldPushHistory("create", "quotation-settings")).toBe(true);
     expect(shouldPushHistory("po-drafts", "po-settings")).toBe(true);
@@ -126,6 +129,10 @@ describe("workspaceKeyOf / lastWorkspacePage", () => {
     expect(workspaceKeyOf("archive")).toBe(workspaceKeyOf("detail"));
     expect(workspaceKeyOf("po")).not.toBe(workspaceKeyOf("create"));
     expect(workspaceKeyOf("home")).not.toBe(workspaceKeyOf("po"));
+    // #630: Reports is its own global workspace, never a PO page.
+    expect(workspaceKeyOf("reports")).toBe("reports");
+    expect(workspaceKeyOf("reports")).not.toBe(workspaceKeyOf("po"));
+    expect(workspaceKeyOf("reports")).not.toBe(workspaceKeyOf("home"));
   });
 
   it("finds the workspace to keep alive behind settings pages", () => {
@@ -134,5 +141,8 @@ describe("workspaceKeyOf / lastWorkspacePage", () => {
     expect(lastWorkspacePage(["home", "create"], "quotation-settings")).toBe("create");
     expect(lastWorkspacePage(["home"], "settings")).toBeNull();
     expect(lastWorkspacePage(["home", "po"], "po")).toBeNull();
+    // #630: Back from Account settings returns to Reports, whose filters the
+    // shell kept mounted. Reports is never treated as a settings page.
+    expect(lastWorkspacePage(["home", "reports"], "settings")).toBe("reports");
   });
 });

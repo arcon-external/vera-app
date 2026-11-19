@@ -176,6 +176,25 @@ describe("AppShell Admin workspace", () => {
   });
 });
 
+describe("AppShell Reports workspace (issue #630)", () => {
+  it("names Reports as its own tab-less global workspace", () => {
+    const html = renderShell("reports");
+    expect(html).toContain(">Reports<");
+    expect(html).not.toContain(">Purchase Orders<");
+    expect(buttonTagFor(html, "Back to Home")).toBeDefined();
+    expect(html).not.toContain('aria-label="Primary"');
+    expect(html).toContain('data-workspace="reports"');
+  });
+
+  it("does not leak a PO tab into the Reports workspace", () => {
+    const html = renderShell("reports");
+    // The page is independent: its shell has no Editor/Drafts/Archive tabs.
+    expect(html).not.toContain(">Editor</button>");
+    expect(html).not.toContain(">Drafts</button>");
+    expect(html).not.toContain(">Archive</button>");
+  });
+});
+
 describe("AppShell account settings", () => {
   it("is its own surface with a back arrow and no tabs", () => {
     const html = renderShell("settings");
