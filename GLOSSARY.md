@@ -486,6 +486,52 @@ _Avoid_: Source totals, original totals
 The deliberate acknowledgement, on a first final save with no customer PO PDF, that the order has no document.
 _Avoid_: Skip upload, PDF waiver
 
+### Purchase order reporting
+
+**Business category**:
+The reporting line a purchase order belongs to: FM (Facility Management), FAB (Fabrication), SUPPLY_GEN (Goods Supply & General) or OTHERS. It is chosen on the PO and required before final save; it is never inferred from the subject or the customer.
+_Avoid_: Report category, cost category, tax category
+
+**Unassigned**:
+The report bucket for a saved purchase order with no business category: a record saved before the category existed, or a draft that has not chosen one. It is a visible bucket, not a missing value to drop.
+_Avoid_: Unknown category, empty category
+
+**PO amount**:
+A purchase order's sell total for reporting: subtotal minus discount plus adjustment, excluding PPN. It is not the customer total, which includes PPN.
+_Avoid_: Revenue, grand total, customer total
+
+**Costed amount**:
+The part of the PO amount carried by lines whose exact source cost resolved. An order with a deleted or unresolved source still contributes its sell amount but no costed amount.
+_Avoid_: Known revenue, matched amount
+
+**Uncosted amount**:
+The PO amount minus the costed amount. It is disclosed as incomplete evidence and is never counted as margin.
+_Avoid_: Pure profit, missing cost, unknown revenue
+
+**Capital**:
+The pinned source revision's cost for the PO's ordered quantity: a line's original unit cost, or a sub-item's unit cost, multiplied by the PO's quantity and rounded once per PO. It is not the quotation's total, not its latest revision, and never a sell field.
+_Avoid_: Cost total, quotation cost, supplier value
+
+**PO margin**:
+The costed amount minus Capital; it is signed and can be negative when a discount cuts below cost. PPH22 is not subtracted because this is a purchase-order margin, not the quotation's nett profit.
+_Avoid_: Nett profit, gross profit, quotation margin
+
+**PO margin %**:
+PO margin divided by Capital, weighted across the period and expressed in basis points; it is null when Capital is zero.
+_Avoid_: Markup, profit rate, average of line percentages
+
+**Coverage**:
+The costed amount divided by the PO amount, showing how much of the reported sell value has a known cost; it is null when the PO amount is zero.
+_Avoid_: Confidence, completeness score
+
+**Complete month**:
+A calendar month that has ended before both the report end month and the as-of month in WIB. Months between the first observed PO month and the last complete month count even when they contain no orders; earlier months are not invented.
+_Avoid_: Full month, closed month
+
+**PO projection**:
+A range for the next twelve months or three years, derived from complete-month history as a low, base and high amount with a stated method and sample. It is never actual evidence and never enters a total.
+_Avoid_: Forecast actual, trend, confidence interval
+
 ### Verification and retention
 
 **Verification**:
