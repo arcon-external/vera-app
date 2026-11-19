@@ -23,9 +23,10 @@ type Scale struct {
 	Ticks []float64
 }
 
-// DefaultTargetTicks is the tick count the report asks for. The algorithm may
+// DefaultTargetTicks is the tick count the money chart asks for in production
+// (render.go uses 5; the margin percentage axis asks for 4). The algorithm may
 // return a few more or fewer; it never returns zero ticks.
-const DefaultTargetTicks = 6
+const DefaultTargetTicks = 5
 
 // NiceScale returns a zero-inclusive axis over [min, max].
 //
@@ -96,9 +97,10 @@ func NiceScale(min, max float64, targetTicks int) Scale {
 	return Scale{Min: niceMin, Max: niceMax, Step: step, Ticks: ticks}
 }
 
-// niceStep rounds a raw step up to the nearest 1, 2 or 5 times a power of ten.
-// The thresholds are the midpoints between those candidates on a log view, so
-// the chosen step is the nearest one rather than always the next larger one.
+// niceStep rounds a raw step to 1, 2 or 5 times a power of ten. The cut points
+// are the conventional 1.5/3/7 boundaries: a raw step at or above one moves to
+// the next candidate, so this is not strict nearest-rounding and the comment
+// says "nice", not "nearest", on purpose.
 func niceStep(raw float64) float64 {
 	if raw <= 0 || math.IsNaN(raw) || math.IsInf(raw, 0) {
 		return 1

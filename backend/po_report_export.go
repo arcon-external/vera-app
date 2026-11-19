@@ -76,9 +76,11 @@ func reportFilename(snapshot poreport.Report) string {
 }
 
 // writeReportPDF writes the report through a temporary file in the
-// destination directory and renames it into place, following the recovery
-// snapshot's atomic-write pattern. An interrupted export therefore leaves the
-// previous file intact rather than a truncated PDF.
+// destination directory and renames it into place. On Unix the rename replaces
+// the destination atomically; Windows does not guarantee that, so the comment
+// claims no universal atomicity. In every case a failed write or rename is
+// returned after the temporary file is removed, and the previous destination
+// is not replaced with a truncated PDF.
 func writeReportPDF(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".report-*.tmp")

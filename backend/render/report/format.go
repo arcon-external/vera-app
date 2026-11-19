@@ -106,42 +106,81 @@ func projectionStatusLabel(status string) string {
 	return "Unavailable"
 }
 
-// formatMoney renders a non-negative minor amount with the currency's own
-// symbol placement, exponent and separators. An unresolved code is refused
-// during validation, so this helper never invents IDR.
+// formatMoney renders a signed minor amount with the currency's own symbol
+// placement, exponent and separators. The sign goes inside the affixes
+// ("Rp-30.000.000", "$-1,234.56", "-1.234,56 €"), which is the established
+// app-wide convention (`formatMoney` in frontend/src/format.ts). An unresolved
+// code is refused during validation, so this helper never invents IDR.
 func formatMoney(code string, minor int64) string {
-	if minor < 0 {
-		return "-" + formatMoney(code, -minor)
+	negative := minor < 0
+	magnitude := uint64(minor)
+	if negative {
+		magnitude = uint64(-minor)
 	}
-	return currency.Decorate(code, currency.FormatAmount(code, uint64(minor)))
+	bare := currency.FormatAmount(code, magnitude)
+	if negative {
+		bare = "-" + bare
+	}
+	return currency.Decorate(code, bare)
 }
 
-// formatSignedMoney puts the minus before the symbol ("-Rp1.234") rather than
-// between the symbol and the digits ("Rp-1.234"), which is how a loss reads in
-// the ledger and in the screen's KPI strip.
+// formatSignedMoney exists for call sites that read a value as profit or loss.
+// The established convention is the same string as formatMoney: the minus sits
+// inside the currency affixes, never between the symbol and the digits.
 func formatSignedMoney(code string, minor int64) string {
-	if minor < 0 {
-		return "-" + formatMoney(code, -minor)
-	}
 	return formatMoney(code, minor)
 }
 
+// formatCount renders a count with en-US grouping, matching the screen's
+// formatReportCount. A count is never abbreviated in a table: "1,234" is exact.
 func formatCount(value int64) string {
-	return strconv.FormatInt(value, 10)
+	negative := value < 0
+	magnitude := value
+	if negative {
+		magnitude = -magnitude
+	}
+	digits := strconv.FormatInt(magnitude, 10)
+	if len(digits) <= 3 {
+		if negative {
+			return "-" + digits
+		}
+		return digits
+	}
+	var parts []string
+	for len(digits) > 3 {
+		parts = append([]string{digits[len(digits)-3:]}, parts...)
+		digits = digits[:len(digits)-3]
+	}
+	parts = append([]string{digits}, parts...)
+	grouped := strings.Join(parts, ",")
+	if negative {
+		return "-" + grouped
+	}
+	return grouped
 }
 
-// formatPct renders basis points as a percentage. A nil ratio is unknown and
-// prints an em dash, never "0.0%": the report's whole point is that a margin
-// with no capital is unknowable, not zero.
+// formatPct renders basis points as an exact two-decimal percentage using
+// integer arithmetic, matching the screen's formatReportBps. A nil ratio is
+// unknown and prints an em dash, never "0.00%": the report's whole point is
+// that a margin with no capital is unknowable, not zero. No floating-point
+// division is involved, so 1077 is always 10.77%, never a rounded 10.8%.
 func formatPct(bps *int64) string {
 	if bps == nil {
 		return "—"
 	}
-	value := float64(*bps) / 100
-	if value == 0 {
-		value = 0
+	value := *bps
+	negative := value < 0
+	magnitude := value
+	if negative {
+		magnitude = -magnitude
 	}
-	return strconv.FormatFloat(value, 'f', 1, 64) + "%"
+	whole := magnitude / 100
+	fraction := magnitude % 100
+	sign := ""
+	if negative {
+		sign = "-"
+	}
+	return fmt.Sprintf("%s%d.%02d%%", sign, whole, fraction)
 }
 
 // compactMoney is the axis label form: one significant decimal and K/M/B/T,
@@ -155,7 +194,7 @@ func compactMoney(code string, value float64) string {
 	prefix, suffix := currency.Affixes(code)
 	bare := compactNumber(value)
 	if negative {
-		return "-" + prefix + bare + suffix
+		return prefix + "-" + bare + suffix
 	}
 	return prefix + bare + suffix
 }
@@ -242,6 +281,10 @@ func generatedLabel(value string) string {
 	return value
 }
 
+// fittedSize shrinks a single-line label to minimum. Its callers are labels
+// whose content is already bounded (dates, currency codes, chart ticks); table
+// cells and KPI values use wrapCell instead, because shrinking to a floor that
+// is still wider than the box would put text into the next column.
 func fittedSize(measure func(string, float64, bool) float64, text string, maxWidth, preferred, minimum float64, bold bool) float64 {
 	size := preferred
 	for size > minimum && measure(text, size, bold) > maxWidth {

@@ -209,3 +209,76 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
     ],
   };
 }
+
+/** Splits an exact integer total into `parts` whole parts that sum back to it. */
+function splitExact(total: number, parts: number): number[] {
+  const base = Math.floor(total / parts);
+  const remainder = total - base * parts;
+  return Array.from({ length: parts }, (_, index) =>
+    index < remainder ? base + 1 : base
+  );
+}
+
+/**
+ * Issue #630 review: the same footed shape at JavaScript's largest exact
+ * figure. It exists so the 360px KPI strip and the snapshot harness are read
+ * against `MAX_SAFE_INTEGER`, not only against a comfortable Rp480m. Every row
+ * still sums to the total: the amounts are split exactly, and each row's
+ * margin is its own costed-minus-capital.
+ */
+export function purchaseOrderReportMaxFixture(): PurchaseOrderReportData {
+  const report = purchaseOrderReportFixture();
+  const max = Number.MAX_SAFE_INTEGER;
+  const costed = max - 5;
+  const uncosted = 5;
+  const capital = max - 1005;
+  const margin = costed - capital;
+
+  const periodCounts = splitExact(max, report.periods.length);
+  const periodAmounts = splitExact(max, report.periods.length);
+  const periodCosted = splitExact(costed, report.periods.length);
+  const periodUncosted = splitExact(uncosted, report.periods.length);
+  const periodCapital = splitExact(capital, report.periods.length);
+
+  report.periods = report.periods.map((period, index) => ({
+    ...period,
+    poCount: periodCounts[index],
+    amountMinor: periodAmounts[index],
+    costedMinor: periodCosted[index],
+    uncostedMinor: periodUncosted[index],
+    capitalMinor: periodCapital[index],
+    marginMinor: periodCosted[index] - periodCapital[index],
+    marginBps: index === 0 ? max : null,
+    coverageBps: 10000,
+  }));
+
+  const categoryCounts = splitExact(max, report.categories.length);
+  const categoryAmounts = splitExact(max, report.categories.length);
+  const categoryCosted = splitExact(costed, report.categories.length);
+  const categoryUncosted = splitExact(uncosted, report.categories.length);
+  const categoryCapital = splitExact(capital, report.categories.length);
+
+  report.categories = report.categories.map((category, index) => ({
+    ...category,
+    poCount: categoryCounts[index],
+    amountMinor: categoryAmounts[index],
+    costedMinor: categoryCosted[index],
+    uncostedMinor: categoryUncosted[index],
+    capitalMinor: categoryCapital[index],
+    marginMinor: categoryCosted[index] - categoryCapital[index],
+    marginBps: index === 0 ? max : null,
+    coverageBps: 10000,
+  }));
+
+  report.totals = {
+    poCount: max,
+    amountMinor: max,
+    costedMinor: costed,
+    uncostedMinor: uncosted,
+    capitalMinor: capital,
+    marginMinor: margin,
+    marginBps: max,
+    coverageBps: 10000,
+  };
+  return report;
+}

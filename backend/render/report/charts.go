@@ -228,7 +228,7 @@ func (r *reportRenderer) drawMarginLine(periods []poreport.Period, plotX, plotRi
 		lastKnown = index
 	}
 	if lastKnown >= 0 {
-		label := formatPct(periods[lastKnown].MarginBps)
+		label := percentTick(float64(*periods[lastKnown].MarginBps) / 100)
 		labelX := lastX + 3
 		if labelX+r.canvas.faces.width(label, 6.2, true) > plotRight {
 			labelX = lastX - r.canvas.faces.width(label, 6.2, true) - 3
@@ -398,6 +398,22 @@ func maxFloat(values []float64) float64 {
 }
 
 func percentTick(value float64) string {
+	// A chart tick is a visual guide, not a table figure. Compact very large
+	// percentages so an accepted extreme value does not run off the axis; the
+	// exact figure remains in the KPI strip and the projection table. Normal
+	// percentages keep every digit the scale produced.
+	negative := value < 0
+	magnitude := value
+	if negative {
+		magnitude = -magnitude
+	}
+	if magnitude >= 10000 {
+		label := compactNumber(magnitude) + "%"
+		if negative {
+			return "-" + label
+		}
+		return label
+	}
 	return strconv.FormatFloat(value, 'f', -1, 64) + "%"
 }
 

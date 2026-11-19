@@ -1,0 +1,103 @@
+{
+  "description": "The Reports screen and the native PDF must format the same money, basis-point and count values byte-for-byte. The app's established convention puts the sign inside the currency affixes (Rp-1.234, USD $-1,234.56, EUR -1.234,56 €); percentages are two exact decimals from integer basis points; counts use en-US grouping. Both implementations read this one fixture.",
+  "money": [
+    {
+      "name": "negative IDR",
+      "code": "IDR",
+      "minor": -30000000,
+      "expected": "Rp-30.000.000"
+    },
+    {
+      "name": "negative USD",
+      "code": "USD",
+      "minor": -123456,
+      "expected": "$-1,234.56"
+    },
+    {
+      "name": "negative EUR",
+      "code": "EUR",
+      "minor": -123456,
+      "expected": "-1.234,56 €"
+    },
+    {
+      "name": "zero IDR",
+      "code": "IDR",
+      "minor": 0,
+      "expected": "Rp0"
+    },
+    {
+      "name": "positive IDR",
+      "code": "IDR",
+      "minor": 1234567890,
+      "expected": "Rp1.234.567.890"
+    },
+    {
+      "name": "positive USD",
+      "code": "USD",
+      "minor": 123456,
+      "expected": "$1,234.56"
+    },
+    {
+      "name": "positive EUR",
+      "code": "EUR",
+      "minor": 123456,
+      "expected": "1.234,56 €"
+    },
+    {
+      "name": "max exact IDR",
+      "code": "IDR",
+      "minor": 9007199254740991,
+      "expected": "Rp9.007.199.254.740.991"
+    },
+    {
+      "name": "negative max exact IDR",
+      "code": "IDR",
+      "minor": -9007199254740991,
+      "expected": "Rp-9.007.199.254.740.991"
+    }
+  ],
+  "bps": [
+    {
+      "name": "unknown",
+      "value": null,
+      "expected": "—"
+    },
+    {
+      "name": "zero",
+      "value": 0,
+      "expected": "0.00%"
+    },
+    {
+      "name": "ten point seven seven",
+      "value": 1077,
+      "expected": "10.77%"
+    },
+    {
+      "name": "twenty point four eight",
+      "value": 2048,
+      "expected": "20.48%"
+    },
+    {
+      "name": "negative",
+      "value": -2857,
+      "expected": "-28.57%"
+    }
+  ],
+  "count": [
+    {
+      "name": "zero",
+      "value": 0,
+      "expected": "0"
+    },
+    {
+      "name": "grouped",
+      "value": 1234,
+      "expected": "1,234"
+    },
+    {
+      "name": "max exact",
+      "value": 9007199254740991,
+      "expected": "9,007,199,254,740,991"
+    }
+  ]
+}

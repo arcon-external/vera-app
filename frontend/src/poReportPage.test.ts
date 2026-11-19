@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import type { CurrencyInfo } from "./format";
+import { formatMoney } from "./format";
 import {
   REPORT_BUCKET_OPTIONS,
   REPORT_CATEGORY_OPTIONS,
@@ -6,6 +9,7 @@ import {
   addDaysIso,
   categoryFilterOptions,
   formatReportBps,
+  formatReportCount,
   formatReportDate,
   initialReportFilters,
   projectionReasonLabel,
@@ -20,6 +24,55 @@ import {
 } from "./poReportPage";
 import type { ReportFilterState } from "./poReportPage";
 import type { PurchaseOrderReportData } from "./poReport";
+
+// The shared cross-language formatting contract (#630/#632). The Go PDF
+// renderer reads the same file, so a sign or separator change cannot land on
+// one surface only.
+interface ReportFormatFixture {
+  money: Array<{ name: string; code: string; minor: number; expected: string }>;
+  bps: Array<{ name: string; value: number | null; expected: string }>;
+  count: Array<{ name: string; value: number; expected: string }>;
+}
+
+const FORMAT_FIXTURE = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../backend/render/report/testdata/report_formats.json",
+      import.meta.url
+    ),
+    "utf8"
+  )
+) as ReportFormatFixture;
+
+const FORMAT_CURRENCIES: Record<string, CurrencyInfo> = {
+  IDR: {
+    code: "IDR",
+    exponent: 0,
+    symbol: "Rp",
+    position: "before",
+    groupSep: ".",
+    decimalSep: ",",
+    symbolSpaced: false,
+  },
+  USD: {
+    code: "USD",
+    exponent: 2,
+    symbol: "$",
+    position: "before",
+    groupSep: ",",
+    decimalSep: ".",
+    symbolSpaced: false,
+  },
+  EUR: {
+    code: "EUR",
+    exponent: 2,
+    symbol: "€",
+    position: "after",
+    groupSep: ".",
+    decimalSep: ",",
+    symbolSpaced: true,
+  },
+};
 
 // Issue #630: the pure half of the global Reports workspace. The screen's
 // honesty rests on these decisions, so they are pinned without React:
@@ -251,5 +304,29 @@ describe("the normalized report is the only shape the page reads", () => {
       },
     } as PurchaseOrderReportData;
     expect(reportFilterKey(report.filter)).toBe("2026-01-01|2027-01-01|month|all|IDR");
+  });
+});
+
+describe("cross-surface formatting fixture (issues #630/#632)", () => {
+  it("formats every money case exactly as the PDF renderer does", () => {
+    for (const entry of FORMAT_FIXTURE.money) {
+      const currency = FORMAT_CURRENCIES[entry.code];
+      if (currency === undefined) {
+        throw new Error(`fixture names an unmapped currency ${entry.code}`);
+      }
+      expect(formatMoney(currency, entry.minor), entry.name).toBe(entry.expected);
+    }
+  });
+
+  it("formats every basis-point case with two exact decimals", () => {
+    for (const entry of FORMAT_FIXTURE.bps) {
+      expect(formatReportBps(entry.value), entry.name).toBe(entry.expected);
+    }
+  });
+
+  it("groups every count in en-US threes", () => {
+    for (const entry of FORMAT_FIXTURE.count) {
+      expect(formatReportCount(entry.value), entry.name).toBe(entry.expected);
+    }
   });
 });

@@ -1,10 +1,6 @@
 package report
 
-import (
-	"strconv"
-
-	"vera-app/backend/poreport"
-)
+import "vera-app/backend/poreport"
 
 type tableAlign int
 
@@ -25,6 +21,19 @@ type tableRow struct {
 	fill  *rgb
 }
 
+// The body face is deliberately readable: an accepted report may carry a
+// maximum exact amount, so the renderer wraps a cell onto measured lines
+// rather than shrinking it to a 5pt floor that still overflows into the next
+// column. A typical amount fits on one line at 8pt; only the widest accepted
+// values and the longest label take two or more.
+const (
+	tableBodySize      = 8.0
+	tableLineHeight    = 9.8
+	tableCellPadX      = 4.0
+	tableCellPadTop    = 3.0
+	tableCellPadBottom = 3.0
+)
+
 // drawTable prints a titled table, repeating its header on every page it
 // spans. A 120-period report is the reason this exists: the period rows are
 // never clipped, never reduced to an unreadable font, and never dropped, and a
@@ -32,9 +41,15 @@ type tableRow struct {
 func (r *reportRenderer) drawTable(title, note string, columns []tableColumn, rows []tableRow, total *tableRow) {
 	c := r.canvas
 	noteLines := r.faces.wrap(note, 7, contentWidth, false)
-	// Keep the title, the header and at least two rows together. A header
+	firstRowHeight := 18.0
+	if len(rows) > 0 {
+		firstRowHeight = r.tableRowHeight(columns, rows[0], false)
+	} else if total != nil {
+		firstRowHeight = r.tableRowHeight(columns, *total, true)
+	}
+	// Keep the title, the header and at least one row together. A header
 	// alone at the bottom of a page is not a table.
-	c.ensure(15 + float64(len(noteLines))*9 + 3 + 18 + 31)
+	c.ensure(15 + float64(len(noteLines))*9 + 3 + 18 + firstRowHeight)
 	c.text(title, marginX, c.y+10, 9.5, true, r.pal.emphasis)
 	c.y += 15
 	if note != "" {
@@ -46,7 +61,8 @@ func (r *reportRenderer) drawTable(title, note string, columns []tableColumn, ro
 	c.y += 3
 	r.drawTableHeader(columns)
 	for _, row := range rows {
-		if c.y+15.5 > contentBot {
+		height := r.tableRowHeight(columns, row, false)
+		if c.y+height > contentBot {
 			c.newPage()
 			c.text(title+" (continued)", marginX, c.y+9, 8.8, true, r.pal.emphasis)
 			c.y += 14
@@ -55,7 +71,8 @@ func (r *reportRenderer) drawTable(title, note string, columns []tableColumn, ro
 		r.drawTableRow(columns, row, false)
 	}
 	if total != nil {
-		if c.y+17 > contentBot {
+		height := r.tableRowHeight(columns, *total, true)
+		if c.y+height > contentBot {
 			c.newPage()
 			c.text(title+" (continued)", marginX, c.y+9, 8.8, true, r.pal.emphasis)
 			c.y += 14
@@ -82,36 +99,66 @@ func (r *reportRenderer) drawTableHeader(columns []tableColumn) {
 	c.y += 18
 }
 
+func (r *reportRenderer) tableCellLines(cell string, width float64, bold bool) []string {
+	lines := r.faces.wrapCell(cell, tableBodySize, width-2*tableCellPadX, bold)
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
+}
+
+// tableRowHeight is measured from the wrapped cell lines, not assumed. A
+// wrapped amount or a 128-character category label therefore pushes the next
+// row down instead of colliding with it.
+func (r *reportRenderer) tableRowHeight(columns []tableColumn, row tableRow, total bool) float64 {
+	bold := row.bold || total
+	maxLines := 1
+	for index, column := range columns {
+		cell := ""
+		if index < len(row.cells) {
+			cell = row.cells[index]
+		}
+		if lines := len(r.tableCellLines(cell, column.width, bold)); lines > maxLines {
+			maxLines = lines
+		}
+	}
+	return float64(maxLines)*tableLineHeight + tableCellPadTop + tableCellPadBottom
+}
+
 func (r *reportRenderer) drawTableRow(columns []tableColumn, row tableRow, total bool) {
 	c := r.canvas
 	if total {
 		c.line(marginX, c.y, marginX+contentWidth, c.y, r.pal.emphasis, 0.8)
 	}
+	height := r.tableRowHeight(columns, row, total)
 	fill := row.fill
 	if total {
 		surface := r.pal.surface
 		fill = &surface
 	}
 	if fill != nil {
-		c.rect(marginX, c.y, contentWidth, 15.5, fill, nil, 0)
+		c.rect(marginX, c.y, contentWidth, height, fill, nil, 0)
 	}
 	x := marginX
+	bold := row.bold || total
 	for index, column := range columns {
 		cell := ""
 		if index < len(row.cells) {
 			cell = row.cells[index]
 		}
-		bold := row.bold || total
-		size := fittedSize(r.faces.width, cell, column.width-8, 7.1, 5.5, bold)
-		if column.align == alignRight {
-			c.textRight(cell, x+column.width-4, c.y+10.9, size, bold, r.pal.emphasis)
-		} else {
-			c.text(cell, x+4, c.y+10.9, size, bold, r.pal.emphasis)
+		lines := r.tableCellLines(cell, column.width, bold)
+		for lineIndex, line := range lines {
+			baseline := c.y + tableCellPadTop + tableBodySize + float64(lineIndex)*tableLineHeight
+			if column.align == alignRight {
+				c.textRight(line, x+column.width-tableCellPadX, baseline, tableBodySize, bold, r.pal.emphasis)
+			} else {
+				c.text(line, x+tableCellPadX, baseline, tableBodySize, bold, r.pal.emphasis)
+			}
 		}
 		x += column.width
 	}
-	c.line(marginX, c.y+15.5, marginX+contentWidth, c.y+15.5, r.pal.rule, 0.3)
-	c.y += 15.5
+	c.line(marginX, c.y+height, marginX+contentWidth, c.y+height, r.pal.rule, 0.3)
+	c.y += height
 }
 
 func (r *reportRenderer) drawCategoryTable() {
@@ -122,13 +169,13 @@ func (r *reportRenderer) drawCategoryTable() {
 		return
 	}
 	columns := []tableColumn{
-		{title: "CATEGORY", width: 100, align: alignLeft},
-		{title: "POs", width: 30, align: alignRight},
-		{title: "AMOUNT", width: 93, align: alignRight},
-		{title: "COSTED", width: 88, align: alignRight},
-		{title: "CAPITAL", width: 76, align: alignRight},
-		{title: "MARGIN", width: 76, align: alignRight},
-		{title: "MARGIN %", width: contentWidth - 463, align: alignRight},
+		{title: "CATEGORY", width: 86, align: alignLeft},
+		{title: "POs", width: 28, align: alignRight},
+		{title: "AMOUNT", width: 88, align: alignRight},
+		{title: "COSTED", width: 86, align: alignRight},
+		{title: "CAPITAL", width: 78, align: alignRight},
+		{title: "MARGIN", width: 78, align: alignRight},
+		{title: "MARGIN %", width: contentWidth - 444, align: alignRight},
 	}
 	rows := make([]tableRow, 0, len(r.snapshot.Categories))
 	for index, category := range r.snapshot.Categories {
@@ -155,13 +202,13 @@ func (r *reportRenderer) drawCategoryTable() {
 
 func (r *reportRenderer) drawPeriodTable() {
 	columns := []tableColumn{
-		{title: "PERIOD", width: 88, align: alignLeft},
-		{title: "POs", width: 32, align: alignRight},
-		{title: "AMOUNT", width: 93, align: alignRight},
-		{title: "COSTED", width: 88, align: alignRight},
+		{title: "PERIOD", width: 86, align: alignLeft},
+		{title: "POs", width: 28, align: alignRight},
+		{title: "AMOUNT", width: 88, align: alignRight},
+		{title: "COSTED", width: 86, align: alignRight},
 		{title: "CAPITAL", width: 78, align: alignRight},
 		{title: "MARGIN", width: 78, align: alignRight},
-		{title: "MARGIN %", width: contentWidth - 457, align: alignRight},
+		{title: "MARGIN %", width: contentWidth - 444, align: alignRight},
 	}
 	rows := make([]tableRow, 0, len(r.snapshot.Periods))
 	for index, period := range r.snapshot.Periods {
@@ -229,7 +276,7 @@ func (r *reportRenderer) drawProjectionTable(series poreport.ProjectionSeries, b
 			r.money(projected.CapitalMinor),
 			r.signedMoney(projected.MarginMinor),
 			formatPct(projected.MarginBps),
-			strconv.Itoa(projected.SampleSize),
+			formatCount(int64(projected.SampleSize)),
 		}})
 	}
 	r.drawTable("Projected range",

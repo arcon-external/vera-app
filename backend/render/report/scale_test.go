@@ -71,6 +71,21 @@ func TestNiceScaleMatchesTheSharedFixture(t *testing.T) {
 	}
 }
 
+// TestNiceScaleProductionTickCounts pins the two target counts the renderer
+// actually uses: 5 for a money axis and 4 for the margin percentage axis.
+// DefaultTargetTicks is the money default and must be 5, not the old 6.
+func TestNiceScaleProductionTickCounts(t *testing.T) {
+	if DefaultTargetTicks != 5 {
+		t.Fatalf("DefaultTargetTicks = %d, want 5 (the money chart's production target)", DefaultTargetTicks)
+	}
+	for _, target := range []int{4, 5} {
+		scale := NiceScale(-1_250_000, 3_250_000, target)
+		if len(scale.Ticks) < 2 {
+			t.Errorf("target %d returned %d ticks", target, len(scale.Ticks))
+		}
+	}
+}
+
 // TestNiceScaleAlwaysIncludesZero makes the fixture's "zero-inclusive" rule a
 // property rather than a coincidence of the cases: a chart column has to grow
 // from zero, and an axis with no zero cannot show a loss.

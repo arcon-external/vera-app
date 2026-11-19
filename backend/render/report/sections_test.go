@@ -25,6 +25,19 @@ func requireText(t *testing.T, text string, wants ...string) {
 	}
 }
 
+func requireInOrder(t *testing.T, text string, wants ...string) {
+	t.Helper()
+	at := 0
+	for _, want := range wants {
+		index := strings.Index(text[at:], want)
+		if index < 0 {
+			t.Errorf("rendered report does not print %q after %q", want, text[at:])
+			return
+		}
+		at += index + len(want)
+	}
+}
+
 // TestSampleReportPrintsTheFrozenSnapshot pins the words a reader uses to
 // judge the document: the filter, the KPI figures, the negative margin, the
 // unknown percentage and the internal nature of the report.
@@ -50,8 +63,8 @@ func TestSampleReportPrintsTheFrozenSnapshot(t *testing.T) {
 		"PO MARGIN",
 		"Rp170.000.000",
 		"PO MARGIN %",
-		"20.5%",
-		"Costed Rp1.000.000.000 of Rp1.234.567.890 (81.0%)",
+		"20.48%",
+		"Costed Rp1.000.000.000 of Rp1.234.567.890 (81.00%)",
 		"Uncosted Rp234.567.890",
 		"2 purchase order(s) in this range have a deleted source quotation; their amount is uncosted.",
 	)
@@ -61,19 +74,55 @@ func TestSampleReportPrintsCategoryAndPeriodTables(t *testing.T) {
 	text := renderPageText(t, sampleReport())
 	requireText(t, text,
 		"By business category",
-		"Facility Management (FM)",
-		"Fabrication (FAB)",
-		"Goods Supply & General (SUPPLY_GEN)",
-		"Others (OTHERS)",
-		"Unassigned (UNASSIGNED)",
+		"Facility",
+		"Management",
+		"(FM)",
+		"Fabrication",
+		"(FAB)",
+		"Goods Supply &",
+		"General",
+		"(SUPPLY_GEN)",
+		"Others",
+		"(OTHERS)",
+		"Unassigned",
+		"(UNASSIGNED)",
 		"By period",
 		"Jan 2025",
 		"Dec 2025 IP",
-		"-Rp20.000.000",
+		"Rp-30.000.000",
 		"—",
 		"Total",
 		"P = partial period; IP = period still in progress.",
 	)
+}
+
+func TestRenderedTableTotalsMatchTheFootedFixture(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot poreport.Report
+		total    []string
+	}{
+		{
+			name:     "sample",
+			snapshot: sampleReport(),
+			total: []string{
+				"Total", "24", "Rp1.234.567.890", "Rp1.000.000.000",
+				"Rp830.000.000", "Rp170.000.000", "20.48%",
+			},
+		},
+		{
+			name:     "long120",
+			snapshot: longReport(poreport.MaxPeriods),
+			total: []string{
+				"Total", "120", "Rp1.200.000.000", "Rp1.080.000.000",
+				"Rp960.000.000", "Rp120.000.000", "11.11%",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireInOrder(t, renderPageText(t, tc.snapshot), tc.total...)
+		})
+	}
 }
 
 func TestSampleReportPrintsProjectionRangeBasisAndMethod(t *testing.T) {
