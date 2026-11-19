@@ -33,6 +33,8 @@ export function DraftRevision(arg1:string,arg2:Array<number>,arg3:string):Promis
 
 export function Export(arg1:string):Promise<void>;
 
+export function ExportPurchaseOrderReport(arg1:string):Promise<string>;
+
 export function ExportTo(arg1:string):Promise<void>;
 
 export function FinalizePurchaseOrder(arg1:backend.PurchaseOrderFinalizeInput):Promise<backend.PurchaseOrderWriteResult>;

@@ -55,3 +55,26 @@ func TestGeneratedPurchaseOrderReportBindingUsesTheContractTags(t *testing.T) {
 		}
 	}
 }
+
+// TestGeneratedPurchaseOrderReportExportUsesTheFrozenContract pins #632's
+// binding exactly: the supplied snapshot travels as a string and a successful
+// save returns the chosen path, while an empty string means the user
+// cancelled. The PDF is rendered from that snapshot, not fetched again.
+func TestGeneratedPurchaseOrderReportExportUsesTheFrozenContract(t *testing.T) {
+	declaration, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "backend", "Quotation.d.ts"))
+	if err != nil {
+		t.Fatalf("cannot read the Quotation declaration: %v", err)
+	}
+	want := "ExportPurchaseOrderReport(arg1:string):Promise<string>;"
+	if !strings.Contains(string(declaration), want) {
+		t.Errorf("Quotation.d.ts does not declare %q; run: wails generate module", want)
+	}
+
+	implementation, err := os.ReadFile(filepath.Join("frontend", "wailsjs", "go", "backend", "Quotation.js"))
+	if err != nil {
+		t.Fatalf("cannot read the Quotation implementation: %v", err)
+	}
+	if !strings.Contains(string(implementation), "['ExportPurchaseOrderReport'](arg1)") {
+		t.Errorf("Quotation.js does not call ExportPurchaseOrderReport; run: wails generate module")
+	}
+}
