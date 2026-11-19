@@ -119,8 +119,9 @@ func TestBinaryPDFTextKeepsTheLongTableComplete(t *testing.T) {
 		t.Fatalf("Render 120 periods: %v", err)
 	}
 	pages := binaryPDFText(t, pdf)
+	assertReportPages(t, "binaryPDFText", pages)
 	text := strings.Join(pages, "\n")
-	requireText(t, text, "Jan 2016", "Dec 2025", "Page 1 of", "Page "+fmt.Sprint(len(pages))+" of "+fmt.Sprint(len(pages)))
+	requireText(t, text, "Jan 2016", "Dec 2025", "Page 1 of")
 	headers := strings.Count(text, "PERIOD")
 	if headers < 3 {
 		t.Errorf("extracted text repeats the period header %d times", headers)
@@ -163,6 +164,32 @@ func pageText(pages []*page) string {
 	return out.String()
 }
 
+// splitPDFPages turns a text reader's output into pages. pdftotext separates
+// pages with a form feed and terminates the document with one more, so a naive
+// strings.Split reports an extra empty page after the real last page. Trimming
+// exactly one trailing form feed removes that record-separator artifact while
+// preserving a genuinely blank middle or final page (which is represented by an
+// empty span between two separators).
+func splitPDFPages(text string) []string {
+	if strings.HasSuffix(text, "\f") {
+		text = strings.TrimSuffix(text, "\f")
+	}
+	return strings.Split(text, "\f")
+}
+
+func readPDFWithPoppler(path string) (string, error) {
+	out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
+	return string(out), err
+}
+
+func readPDFWithPyMuPDF(path string) (string, error) {
+	python := "import fitz,sys\n" +
+		"doc=fitz.open(sys.argv[1])\n" +
+		"sys.stdout.write('\\f'.join(p.get_text() for p in doc))\n"
+	out, err := exec.Command("python3", "-c", python, path).Output()
+	return string(out), err
+}
+
 // binaryPDFText extracts the rendered document's text with whichever external
 // reader this machine has. The repository's existing PDF tests use pdftotext
 // and skip when it is absent; PyMuPDF is the second reader because some
@@ -175,26 +202,128 @@ func binaryPDFText(t *testing.T, pdf []byte) []string {
 		t.Fatal(err)
 	}
 	if _, err := exec.LookPath("pdftotext"); err == nil {
-		out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
+		text, err := readPDFWithPoppler(path)
 		if err != nil {
 			if os.Getenv("CI") != "" {
 				t.Fatalf("pdftotext failed in CI: %v", err)
 			}
 			t.Skipf("pdftotext failed: %v", err)
 		}
-		return strings.Split(string(out), "\f")
+		return splitPDFPages(text)
 	}
 	if os.Getenv("CI") != "" {
 		t.Fatalf("pdftotext is required in CI; install poppler-utils")
 	}
-	python := "import fitz,sys\n" +
-		"doc=fitz.open(sys.argv[1])\n" +
-		"sys.stdout.write('\\f'.join(p.get_text() for p in doc))\n"
-	out, err := exec.Command("python3", "-c", python, path).Output()
+	text, err := readPDFWithPyMuPDF(path)
 	if err != nil {
 		t.Skipf("no PDF text reader available (pdftotext and PyMuPDF both failed): %v", err)
 	}
-	return strings.Split(string(out), "\f")
+	return splitPDFPages(text)
+}
+
+// assertReportPages verifies that an extracted page list has no empty
+// artifact page and that every real page carries its own "Page i of n" footer.
+// It is stronger than checking only the last footer: an extractor that appends
+// or drops a page fails on the page that disagrees, not on a count the test
+// computed from the same broken list.
+func assertReportPages(t *testing.T, reader string, pages []string) {
+	t.Helper()
+	if len(pages) == 0 {
+		t.Fatalf("%s returned no pages", reader)
+	}
+	for index, page := range pages {
+		if strings.TrimSpace(page) == "" {
+			t.Errorf("%s page %d is blank; that is a reader delimiter artifact or a renderer defect, never a report page",
+				reader, index+1)
+			continue
+		}
+		want := fmt.Sprintf("Page %d of %d", index+1, len(pages))
+		if !strings.Contains(page, want) {
+			t.Errorf("%s page %d does not carry its footer %q", reader, index+1, want)
+		}
+	}
+}
+
+// TestSplitPDFPagesNormalizesOnlyTheTerminalDelimiter pins the two reader
+// shapes: pdftotext ends with a form feed, PyMuPDF does not. Both must produce
+// the same real pages, and a blank middle or final page must survive.
+func TestSplitPDFPagesNormalizesOnlyTheTerminalDelimiter(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"poppler terminal delimiter", "page1\fpage2\f", []string{"page1", "page2"}},
+		{"pymupdf no terminal delimiter", "page1\fpage2", []string{"page1", "page2"}},
+		{"single page terminal delimiter", "page1\f", []string{"page1"}},
+		{"single page no delimiter", "page1", []string{"page1"}},
+		{"blank middle page", "page1\f\fpage2\f", []string{"page1", "", "page2"}},
+		{"blank final page", "page1\f\f", []string{"page1", ""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitPDFPages(tc.raw)
+			if len(got) != len(tc.want) {
+				t.Fatalf("splitPDFPages(%q) = %q; want %q", tc.raw, got, tc.want)
+			}
+			for index := range tc.want {
+				if got[index] != tc.want[index] {
+					t.Fatalf("splitPDFPages(%q) = %q; want %q", tc.raw, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+// TestPDFTextReadersAgreeOnPageFooters exercises both reader branches when the
+// machine has them. poppler is mandatory in CI; PyMuPDF is optional. Both must
+// agree on the real page count and every page's footer, which is the check that
+// catches a terminal-delimiter page without inventing a renderer page.
+func TestPDFTextReadersAgreeOnPageFooters(t *testing.T) {
+	pdf, err := Render(longReport(poreport.MaxPeriods), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render 120 periods: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "report.pdf")
+	if err := os.WriteFile(path, pdf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	counts := map[string]int{}
+	if _, err := exec.LookPath("pdftotext"); err == nil {
+		text, err := readPDFWithPoppler(path)
+		if err != nil {
+			// A present-but-unloadable poppler is an environment fault. CI
+			// must fail; a local machine may fall back to PyMuPDF exactly as
+			// binaryPDFText does.
+			if os.Getenv("CI") != "" {
+				t.Fatalf("pdftotext failed in CI: %v", err)
+			}
+			t.Logf("pdftotext is present but failed locally: %v", err)
+		} else {
+			pages := splitPDFPages(text)
+			assertReportPages(t, "pdftotext", pages)
+			counts["pdftotext"] = len(pages)
+		}
+	} else if os.Getenv("CI") != "" {
+		t.Fatalf("pdftotext is required in CI; install poppler-utils")
+	}
+
+	if text, err := readPDFWithPyMuPDF(path); err == nil {
+		pages := splitPDFPages(text)
+		assertReportPages(t, "PyMuPDF", pages)
+		counts["PyMuPDF"] = len(pages)
+	}
+
+	if len(counts) == 0 {
+		t.Skip("no PDF text reader available (pdftotext and PyMuPDF both failed)")
+	}
+	if len(counts) == 2 {
+		if counts["pdftotext"] != counts["PyMuPDF"] {
+			t.Errorf("pdftotext reports %d pages, PyMuPDF reports %d; both must see the same document",
+				counts["pdftotext"], counts["PyMuPDF"])
+		}
+	}
 }
 
 // TestPDFTextReaderIsInstalledInCI makes the CI contract explicit: the
