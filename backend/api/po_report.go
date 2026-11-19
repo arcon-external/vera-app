@@ -109,8 +109,17 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 	}
 	var projection poreport.Projection
 	if snapshot.HistoryOutOfRange {
-		projection = poreport.UnavailableProjection(
-			poreport.ReasonValueOutOfRange, snapshot.HistoryBasis)
+		// The empty actual population is the reason staff see first: there is
+		// nothing to forecast from in the selected range. The history overflow
+		// still determines the basis and suppresses the series, but it must not
+		// replace the empty-range explanation. A nonempty range keeps
+		// value_out_of_range because the corrupt history is then the only thing
+		// preventing a forecast.
+		reason := poreport.ReasonValueOutOfRange
+		if snapshot.Totals.PoCount == 0 {
+			reason = poreport.ReasonNoDataInRange
+		}
+		projection = poreport.UnavailableProjection(reason, snapshot.HistoryBasis)
 	} else {
 		projection = poreport.Project(
 			snapshot.History, query, snapshot.AsOf, snapshot.Totals.PoCount)

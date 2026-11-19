@@ -387,8 +387,10 @@ func TestPurchaseOrderReportDisclosesARestoredLegacyAdjustment(t *testing.T) {
 // TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows is the
 // Judge endpoint regression: a January 2025 history total above the exact range
 // is not an actual figure for a March 2026 report. The endpoint must return 200
-// with an empty actual range and an explicit unavailable/value_out_of_range
-// forecast that still states the history window and sample.
+// with an empty actual range. The empty actual population is the authoritative
+// reason for the forecast (no_data_in_range), while the truthful history window
+// and sample still state the basis; a nonempty actual range keeps
+// value_out_of_range.
 func TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_report_history_overflow_empty")
 	first := finalizeOneReportPO(t, server, token, "PO-REPORT-API-HIST-OVERFLOW-1", "2025-01-10", "FM")
@@ -418,9 +420,9 @@ func TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows(t *testi
 		"monthly": report.Projection.Monthly,
 		"yearly":  report.Projection.Yearly,
 	} {
-		if series.Status != poreport.ProjectionStatusUnavailable || series.Reason != poreport.ReasonValueOutOfRange {
-			t.Errorf("%s = %s/%s; want unavailable/%s",
-				name, series.Status, series.Reason, poreport.ReasonValueOutOfRange)
+		if series.Status != poreport.ProjectionStatusUnavailable || series.Reason != poreport.ReasonNoDataInRange {
+			t.Errorf("%s = %s/%s; want unavailable/%s from the empty actual population",
+				name, series.Status, series.Reason, poreport.ReasonNoDataInRange)
 		}
 		if series.Basis.HistoryFrom != "2025-01-01" || series.Basis.HistoryTo != "2026-04-01" ||
 			series.Basis.CompleteMonths != 15 || series.Basis.PoCount != 2 {
