@@ -69,7 +69,7 @@ const SERIES = {
   marginNegative: "#ad453d",
   marginLine: "#1c1b19",
   grid: "#e6e3dc",
-  rule: "#d5d1c2",
+  rule: "#8a887e",
   axis: "#67655d",
   accent: "#295453",
   band: "#eef7f6",
@@ -1148,7 +1148,8 @@ export function PurchaseOrderReportChart({
                     x2={layout.dividerX}
                     y1={layout.plot.y}
                     y2={layout.plot.y + layout.plot.height}
-                    stroke={SERIES.bandEdge}
+                    stroke={SERIES.accent}
+                    strokeOpacity={0.55}
                     strokeWidth={1.2}
                     strokeDasharray="4 4"
                   />
