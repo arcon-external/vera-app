@@ -201,6 +201,21 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(hatched?.getAttribute("fill")).toContain("url(#");
   });
 
+  it("leaves a real gap where a period's margin percentage is null", async () => {
+    const report = purchaseOrderReportFixture();
+    report.periods[3] = { ...report.periods[3], marginBps: null };
+    await render(report);
+    const line = svg().querySelector<SVGPathElement>(
+      "[data-chart-margin-line]"
+    );
+    expect(line).not.toBeNull();
+    const path = line?.getAttribute("d") ?? "";
+    expect(path.match(/M/g)).toHaveLength(2);
+    expect(path).not.toContain("C");
+    expect(path).not.toContain("Q");
+    expect(svg().querySelector("[data-chart-latest-margin]")).not.toBeNull();
+  });
+
   it("shows one overlay and one tooltip with every actual metric on hover", async () => {
     const report = purchaseOrderReportFixture();
     await render(report);
