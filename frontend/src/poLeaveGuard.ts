@@ -21,6 +21,7 @@ export type AppPage =
   | "po"
   | "po-drafts"
   | "po-archive"
+  | "reports"
   | "admin-clients"
   | "admin-team"
   | "admin-company"

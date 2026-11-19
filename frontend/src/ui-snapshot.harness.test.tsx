@@ -40,6 +40,8 @@ import { SessionRenewBanner } from "./components/SessionRenewBanner";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import { purchaseOrderReportFixture } from "./poReportFixtures";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
@@ -1548,9 +1550,10 @@ const CASES: SnapshotCase[] = [
   },
   {
     // The document home (issue #466, now the global workspace dashboard in
-    // #491): five destinations for an admin. Quotation, Purchase Order and
-    // Admin are enabled; Delivery Order and Invoice render disabled with their
-    // Coming later badges.
+    // #491/#630): six destinations for an admin. Quotation, Purchase Order,
+    // Reports and Admin are enabled; Delivery Order and Invoice render
+    // disabled with their Coming later badges. Reports and Admin both use the
+    // wide two-column pattern and stack at 360.
     //
     // What this case cannot show, stated so it is not assumed: the clicks
     // behind the enabled buttons, keyboard order, and focus visibility
@@ -1561,18 +1564,21 @@ const CASES: SnapshotCase[] = [
         isAdmin
         onOpenQuotation={() => undefined}
         onOpenPurchaseOrder={() => undefined}
+        onOpenReports={() => undefined}
         onOpenAdmin={() => undefined}
       />
     ),
   },
   {
-    // Issue #491: Home for a staff member. The Admin card is absent, so the
-    // screenshot proves the gate is visual as well as logical.
+    // Issue #630: Home for a staff member. The Admin card is absent and the
+    // Reports card is still present, so the screenshot proves both the gate
+    // and Reports' independent availability.
     name: "DocumentHomeStaff",
     element: (
       <DocumentHomePage
         onOpenQuotation={() => undefined}
         onOpenPurchaseOrder={() => undefined}
+        onOpenReports={() => undefined}
       />
     ),
   },
@@ -1611,6 +1617,73 @@ const CASES: SnapshotCase[] = [
       <AppShell page="admin-company" onNavigate={() => undefined}>
         <p className="text-body text-ink-500">Company settings body.</p>
       </AppShell>
+    ),
+  },
+  {
+    // Issue #630: Reports is its own global workspace. The shell names it,
+    // offers Back to Home, and renders no PO tabs.
+    name: "AppShellReports",
+    element: (
+      <AppShell page="reports" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Report filters sit here.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #630: the assembled Reports page with a stable normalized fixture.
+    // It is the presentational View, so renderToString shows the loaded screen
+    // without effects. The same figures foot in the category and period
+    // tables; the projection is visibly marked as not part of actual totals.
+    //
+    // What this case cannot show: loading, error and empty states (covered by
+    // the DOM suite), filter interactions, and the chart, which is #631.
+    name: "Reports",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          preset: "last-year",
+          from: "2026-01-01",
+          to: "2026-12-31",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
     ),
   },
   {

@@ -12,6 +12,7 @@ export type WorkspaceKey =
   | "home"
   | "quotation"
   | "purchase-order"
+  | "reports"
   | "admin"
   | "account-settings"
   | "quotation-settings"
@@ -19,6 +20,13 @@ export type WorkspaceKey =
 
 export function isSettingsPage(page: AppPage): boolean {
   return page === "settings" || page === "quotation-settings" || page === "po-settings";
+}
+
+// #630: Reports is a standalone global workspace. It is not a PO tab and not
+// a settings surface: Back from it returns Home, and its own filter state is
+// preserved by App keeping it mounted.
+export function isReportsWorkspacePage(page: AppPage): boolean {
+  return page === "reports";
 }
 
 export function isPurchaseOrderWorkspacePage(page: AppPage): boolean {
@@ -31,6 +39,7 @@ export function isQuotationWorkspacePage(page: AppPage): boolean {
 
 export function workspaceKeyOf(page: AppPage): WorkspaceKey {
   if (page === "home") return "home";
+  if (isReportsWorkspacePage(page)) return "reports";
   if (isPurchaseOrderWorkspacePage(page)) return "purchase-order";
   if (isQuotationWorkspacePage(page)) return "quotation";
   if (page.startsWith("admin-")) return "admin";
@@ -81,7 +90,11 @@ export function lastWorkspacePage(
   if (!isSettingsPage(current)) return null;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const candidate = history[index];
-    if (isPurchaseOrderWorkspacePage(candidate) || isQuotationWorkspacePage(candidate)) {
+    if (
+      isPurchaseOrderWorkspacePage(candidate) ||
+      isQuotationWorkspacePage(candidate) ||
+      isReportsWorkspacePage(candidate)
+    ) {
       return candidate;
     }
   }

@@ -73,6 +73,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
+import { PurchaseOrderReportsPage } from "./components/PurchaseOrderReportsPage";
 import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
@@ -615,6 +616,11 @@ function App() {
   // from anywhere in a workspace returns Home rather than the previous tab.
   // No new global store: the existing shell state holds the stack.
   const [pageHistoryStack, setPageHistoryStack] = useState<AppPage[]>([]);
+  // #630: Reports is a standalone global workspace. Once visited it stays
+  // mounted (hidden on other pages), so its filters and last snapshot survive
+  // navigation while the workspace remains mounted. Opening it only changes
+  // this page state; it never touches the PO workspace or a document draft.
+  const [reportsOpened, setReportsOpened] = useState(false);
   // Ticket 02: the PO editor's primary actions as the shell action bar
   // renders them. Reported by the editor's entry view; null everywhere else.
   const [poShellActions, setPoShellActions] = useState<POEditorShellActions | null>(null);
@@ -645,6 +651,10 @@ function App() {
       ) {
         closePurchaseOrder();
       }
+      // #630: the Reports workspace is mounted from its first visit onward.
+      // Marking it here means a navigation refused by the leave guard never
+      // creates a hidden report page.
+      if (next === "reports") setReportsOpened(true);
       // Issue #494: a successful return to Home ends the remembered workspace
       // context. Only the allowed navigation reaches here; a refused one has
       // no way to clear it.
@@ -1448,6 +1458,7 @@ function App() {
     setPageHistoryStack([]);
     setPoShellActions(null);
     scrollPositions.current.clear();
+    setReportsOpened(false);
     setPage("home");
   }, [closePurchaseOrder, resetForm]);
 
@@ -3125,8 +3136,18 @@ function App() {
           isAdmin={isAdmin}
           onOpenQuotation={() => poLeave.request("create")}
           onOpenPurchaseOrder={() => poLeave.request("po")}
+          onOpenReports={() => poLeave.request("reports")}
           onOpenAdmin={() => poLeave.request("admin-clients")}
         />
+      ) : null}
+
+      {reportsOpened ? (
+        <div hidden={visiblePage !== "reports"}>
+          <PurchaseOrderReportsPage
+            defaultCurrency={companyCurrency}
+            currencyCatalogue={currencyCatalogue}
+          />
+        </div>
       ) : null}
 
       {(isPurchaseOrderPage(visiblePage) || preservedPOPage !== null) ? (
