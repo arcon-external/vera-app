@@ -420,7 +420,9 @@ describe("PO business category (#628)", () => {
     await flush();
 
     expect(button("Business category").textContent).toContain("Unassigned");
-    expect(document.body.textContent).toContain("Required before Final Save.");
+    expect(document.body.textContent).toContain(
+      "Required before Final Save or a correction."
+    );
 
     click(button("Business category"));
     const fabrication = Array.from(
@@ -431,7 +433,9 @@ describe("PO business category (#628)", () => {
 
     expect(button("Business category").textContent).toContain("Fabrication");
     expect(document.body.textContent).toContain("Used in purchase order reports.");
-    expect(document.body.textContent).not.toContain("Required before Final Save.");
+    expect(document.body.textContent).not.toContain(
+      "Required before Final Save or a correction."
+    );
   });
 
   it("refuses Final Save with a message naming the field, leaving the draft editable", async () => {
@@ -444,7 +448,7 @@ describe("PO business category (#628)", () => {
       document.querySelectorAll<HTMLElement>('[role="alert"]')
     ).map((alert) => alert.textContent ?? "");
     expect(alerts.join(" ")).toContain(
-      "Business category is required before Final Save."
+      "Business category is required to save a purchase order."
     );
     // Still the editor, still editable: no review opened and no save happened.
     expect(inputValue("Customer PO number")).toBe("PO-1");

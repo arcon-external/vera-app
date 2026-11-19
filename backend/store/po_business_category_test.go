@@ -3,7 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Issue #628: every purchase order carries a business category, chosen at
@@ -255,5 +259,191 @@ func TestSavedPurchaseOrderWithoutACategoryReadsAsUnassigned(t *testing.T) {
 	}
 	if len(all.Rows) != 1 || all.Rows[0].BusinessCategory != "" {
 		t.Errorf("legacy row = %+v; want one empty category (Unassigned)", all.Rows)
+	}
+}
+
+// savedPurchaseOrderWithCategory finalizes one linked draft with an explicit
+// category, so a source-repair test starts from a real saved record rather than
+// from a direct column write.
+func savedPurchaseOrderWithCategory(
+	t *testing.T,
+	database *Store,
+	ctx context.Context,
+	user AuthUser,
+	quotation QuotationRecord,
+	category, number string,
+) PurchaseOrder {
+	t.Helper()
+	draft := createFinalizeDraft(t, database, ctx, user, quotation)
+	withCategory := saveDraftWithCategory(t, database, ctx, draft, category, user)
+	saved, err := database.FinalizePurchaseOrder(ctx, finalizeInput(withCategory, user, number))
+	if err != nil {
+		t.Fatalf("finalize with category %q: %v", category, err)
+	}
+	return saved
+}
+
+// TestRepairPurchaseOrderSourcePreservesAnOmittedBusinessCategory pins the
+// source-repair rule from #628: a repair moves the link, it is not a category
+// edit. A payload that leaves the field out keeps the FAB the saved record
+// carried, and the snapshot of the version the repair replaced keeps it too.
+func TestRepairPurchaseOrderSourcePreservesAnOmittedBusinessCategory(t *testing.T) {
+	database := openTestSchema(t, "vera_po_category_repair")
+	ctx := poContext(t, database)
+	staff := poTestUser(t, database)
+	admin := poRepairAdmin(t, database)
+	original := seedRepairQuotation(t, database, 2, "PT. Buyer", "Original", "Jl. Billing A", 100, 45)
+	target := seedRepairQuotation(t, database, 2, "PT. Buyer", "Replacement", "Jl. Billing A", 100, 45)
+	saved := savedPurchaseOrderWithCategory(t, database, ctx, staff, original,
+		PurchaseOrderBusinessCategoryFab, "PO-CATEGORY-REPAIR")
+
+	// repairInput deliberately leaves BusinessCategory at its zero value: the
+	// repair form does not own the category, so omission means "keep".
+	repaired, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, saved, admin, target, "the order followed the wrong revision"))
+	if err != nil {
+		t.Fatalf("repair with omitted category: %v", err)
+	}
+	if repaired.BusinessCategory != PurchaseOrderBusinessCategoryFab {
+		t.Errorf("repaired category = %q; want the preserved FAB", repaired.BusinessCategory)
+	}
+
+	history, err := database.GetPurchaseOrderHistory(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history entries = %d; want 1 source-repair snapshot", len(history))
+	}
+	if history[0].BusinessCategory != PurchaseOrderBusinessCategoryFab {
+		t.Errorf("snapshot category = %q; want the preserved FAB", history[0].BusinessCategory)
+	}
+}
+
+// TestRepairPurchaseOrderSourceKeepsALegacyUnassignedCategory proves omission
+// is preservation, not defaulting: a record saved before #628 stays empty
+// through a source repair rather than acquiring a category nobody chose.
+func TestRepairPurchaseOrderSourceKeepsALegacyUnassignedCategory(t *testing.T) {
+	database := openTestSchema(t, "vera_po_category_repair_legacy")
+	ctx := poContext(t, database)
+	staff := poTestUser(t, database)
+	admin := poRepairAdmin(t, database)
+	original := seedRepairQuotation(t, database, 2, "PT. Buyer", "Original", "Jl. Billing A", 100, 45)
+	target := seedRepairQuotation(t, database, 2, "PT. Buyer", "Replacement", "Jl. Billing A", 100, 45)
+	saved := savedPurchaseOrderWithCategory(t, database, ctx, staff, original,
+		PurchaseOrderBusinessCategoryOthers, "PO-CATEGORY-REPAIR-LEGACY")
+
+	// A record saved before migration 050 carries the empty default.
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_orders SET business_category = ''
+		WHERE id = $1`, database.configSchema()), saved.ID); err != nil {
+		t.Fatalf("clear stored category: %v", err)
+	}
+	legacy, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("reload legacy record: %v", err)
+	}
+	if legacy.BusinessCategory != "" {
+		t.Fatalf("legacy category = %q; want empty", legacy.BusinessCategory)
+	}
+
+	repaired, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, legacy, admin, target, "the order followed the wrong revision"))
+	if err != nil {
+		t.Fatalf("repair legacy record: %v", err)
+	}
+	if repaired.BusinessCategory != "" {
+		t.Errorf("repaired legacy category = %q; want preserved empty", repaired.BusinessCategory)
+	}
+
+	history, err := database.GetPurchaseOrderHistory(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history entries = %d; want 1", len(history))
+	}
+	if history[0].BusinessCategory != "" {
+		t.Errorf("snapshot category = %q; want preserved empty", history[0].BusinessCategory)
+	}
+}
+
+// TestPurchaseOrderCorrectionRefusesAnEmptyCategoryWithNeutralWording proves
+// the correction path shares the final save's refusal and that the message is
+// not written for the Final Save button alone.
+func TestPurchaseOrderCorrectionRefusesAnEmptyCategoryWithNeutralWording(t *testing.T) {
+	database := openTestSchema(t, "vera_po_category_correction_wording")
+	ctx := poContext(t, database)
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Category wording")
+	user := poTestUser(t, database)
+	saved := savedPurchaseOrder(t, database, ctx, user, quotation, "PO-CATEGORY-WORDING")
+
+	input := correctionInput(saved, user, "Reclassify the order", saved.Version)
+	input.BusinessCategory = ""
+	if _, err := database.CorrectPurchaseOrder(ctx, input); !errors.Is(err, ErrPurchaseOrderBusinessCategoryRequired) {
+		t.Fatalf("empty-category correction = %v; want ErrPurchaseOrderBusinessCategoryRequired", err)
+	}
+	message := ErrPurchaseOrderBusinessCategoryRequired.Error()
+	if !strings.Contains(strings.ToLower(message), "business category") {
+		t.Errorf("refusal %q does not name the business category", message)
+	}
+	if strings.Contains(strings.ToLower(message), "final save") {
+		t.Errorf("refusal %q names Final Save, but a correction returns the same error", message)
+	}
+}
+
+// TestMigration050CheckRejectsInvalidBusinessCategories drives raw SQL so the
+// database constraint itself is proven, not only the Go validator: both the
+// live row and the correction snapshot reject an invalid code with SQLSTATE
+// 23514 from the migration's CHECK.
+func TestMigration050CheckRejectsInvalidBusinessCategories(t *testing.T) {
+	database := openTestSchema(t, "vera_po_category_check")
+	ctx := poContext(t, database)
+	quotation := seedFinalizeQuotation(t, database, 2, "PT. Buyer", "Category check")
+	user := poTestUser(t, database)
+	saved := savedPurchaseOrder(t, database, ctx, user, quotation, "PO-CATEGORY-CHECK")
+
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	schema := database.configSchema()
+	invalid := []string{"NOT_A_CATEGORY", "fab", "FM ", " FM"}
+	for _, category := range invalid {
+		_, err := pool.Exec(ctx, fmt.Sprintf(`
+			UPDATE %s.purchase_orders SET business_category = $1
+			WHERE id = $2`, schema), category, saved.ID)
+		requireBusinessCategoryCheck(t, err, "purchase_orders", category)
+	}
+	for _, category := range invalid {
+		_, err := pool.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO %s.purchase_order_corrections (
+				org_id, purchase_order_id, previous_version, resulting_version,
+				kind, state, reason, actor, quotation_id, source_revision,
+				customer_id, currency, received_date, business_category
+			) VALUES (
+				(SELECT org_id FROM %s.purchase_orders WHERE id = $1),
+				$1, $2, $3, 'correction', 'saved', 'check', $4, $5, $6, $7, $8, $9, $10
+			)`, schema, schema),
+			saved.ID, saved.Version, saved.Version+1, user.ID,
+			saved.QuotationID, saved.SourceRevision, saved.CustomerID,
+			saved.Currency, saved.ReceivedDate, category)
+		requireBusinessCategoryCheck(t, err, "purchase_order_corrections", category)
+	}
+}
+
+func requireBusinessCategoryCheck(t *testing.T, err error, table, category string) {
+	t.Helper()
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("%s accepted category %q: error = %v; want SQLSTATE 23514", table, category, err)
+	}
+	if !strings.Contains(pgErr.ConstraintName, "business_category_check") {
+		t.Errorf("%s category %q failed %q; want the business_category_check constraint",
+			table, category, pgErr.ConstraintName)
 	}
 }

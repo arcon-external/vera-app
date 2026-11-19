@@ -246,11 +246,15 @@ describe("PurchaseOrderListView dockets (ticket 03)", () => {
           docketRow({ ID: 7, BusinessCategory: "FM" }),
           docketRow({ ID: 8, PONumber: "PO-2", BusinessCategory: "" }),
           docketRow({ ID: 9, PONumber: "PO-3", BusinessCategory: undefined }),
+          docketRow({ ID: 10, PONumber: "PO-4", BusinessCategory: "LEGACY_CODE" }),
         ],
       }),
     });
     expect(viewContainer.textContent).toContain("Facility Management");
     expect(viewContainer.textContent).toContain("Unassigned");
+    // A code this build does not know is shown as stored, never folded into
+    // Unassigned.
+    expect(viewContainer.textContent).toContain("LEGACY_CODE");
     expect(viewContainer.textContent).not.toContain("FAB");
   });
 

@@ -114,10 +114,12 @@ var (
 	// until a source is linked. The wording is deliberately neutral because a
 	// never-linked draft was not deleted.
 	ErrPurchaseOrderSourceMissing = errors.New("purchase order has no live source quotation; link a quotation before this action")
-	// ErrPurchaseOrderBusinessCategoryRequired is the #628 final-save rule: an
-	// order cannot become final without the business category it is reported
-	// under. A draft may stay Unassigned, and the refusal leaves it editable.
-	ErrPurchaseOrderBusinessCategoryRequired = errors.New("a business category is required before Final Save")
+	// ErrPurchaseOrderBusinessCategoryRequired is the #628 saved-record rule: a
+	// final save or a correction cannot store a purchase order without the
+	// business category it is reported under. A draft may stay Unassigned, and
+	// the refusal leaves it editable. The wording is shared by both writes, so
+	// it never names one button.
+	ErrPurchaseOrderBusinessCategoryRequired = errors.New("a business category is required to save a purchase order")
 )
 
 // PurchaseOrderDecision is one explicit difference-review choice for a review

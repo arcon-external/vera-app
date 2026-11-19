@@ -21,40 +21,19 @@ const (
 	PurchaseOrderBusinessCategoryOthers        = "OTHERS"
 )
 
-// PurchaseOrderBusinessCategoryOption is one selectable category and the label
-// staff read. Labels are product vocabulary, not company data, so they live
-// with the codes rather than in a company-held label table.
-type PurchaseOrderBusinessCategoryOption struct {
-	Code  string
-	Label string
-}
-
-// PurchaseOrderBusinessCategories is the ordered option list: the four codes in
-// the client's workbook order. It never includes the empty draft value; a
-// caller that needs Unassigned names it separately.
-func PurchaseOrderBusinessCategories() []PurchaseOrderBusinessCategoryOption {
-	return []PurchaseOrderBusinessCategoryOption{
-		{Code: PurchaseOrderBusinessCategoryFm, Label: "Facility Management"},
-		{Code: PurchaseOrderBusinessCategoryFab, Label: "Fabrication"},
-		{Code: PurchaseOrderBusinessCategorySupplyGeneral, Label: "Goods Supply & General"},
-		{Code: PurchaseOrderBusinessCategoryOthers, Label: "Others"},
-	}
-}
-
-// IsPurchaseOrderBusinessCategory reports whether a non-empty value is one of
+// isPurchaseOrderBusinessCategory reports whether a non-empty value is one of
 // the four codes. Empty is deliberately not a category here: callers that allow
 // a draft's Unassigned value say so explicitly.
-func IsPurchaseOrderBusinessCategory(value string) bool {
-	candidate := strings.TrimSpace(value)
-	if candidate == PurchaseOrderBusinessCategoryUnassigned {
+func isPurchaseOrderBusinessCategory(value string) bool {
+	switch value {
+	case PurchaseOrderBusinessCategoryFm,
+		PurchaseOrderBusinessCategoryFab,
+		PurchaseOrderBusinessCategorySupplyGeneral,
+		PurchaseOrderBusinessCategoryOthers:
+		return true
+	default:
 		return false
 	}
-	for _, option := range PurchaseOrderBusinessCategories() {
-		if candidate == option.Code {
-			return true
-		}
-	}
-	return false
 }
 
 // NormalizePurchaseOrderBusinessCategory validates a submitted value. An empty
@@ -66,26 +45,10 @@ func NormalizePurchaseOrderBusinessCategory(value string) (string, error) {
 	if candidate == PurchaseOrderBusinessCategoryUnassigned {
 		return PurchaseOrderBusinessCategoryUnassigned, nil
 	}
-	if IsPurchaseOrderBusinessCategory(candidate) {
+	if isPurchaseOrderBusinessCategory(candidate) {
 		return candidate, nil
 	}
 	return PurchaseOrderBusinessCategoryUnassigned, fmt.Errorf(
 		"%w: business category %q must be one of FM, FAB, SUPPLY_GEN or OTHERS",
 		ErrPurchaseOrderInvalid, value)
-}
-
-// PurchaseOrderBusinessCategoryLabel is the label for a stored value. An empty
-// value is Unassigned, the honest bucket for every record saved before the
-// category existed; an unknown value is returned as-is rather than recast.
-func PurchaseOrderBusinessCategoryLabel(value string) string {
-	candidate := strings.TrimSpace(value)
-	if candidate == PurchaseOrderBusinessCategoryUnassigned {
-		return "Unassigned"
-	}
-	for _, option := range PurchaseOrderBusinessCategories() {
-		if candidate == option.Code {
-			return option.Label
-		}
-	}
-	return candidate
 }

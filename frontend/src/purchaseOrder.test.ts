@@ -21,6 +21,7 @@ import {
   parseQuantityScaled,
   parseUnitPriceMinor,
   printedTotalsKnownOf,
+  purchaseOrderBusinessCategoryLabel,
   purchaseOrderEditorReducer,
   purchaseOrderPpnBps,
   sourceStateOf,
@@ -1223,6 +1224,15 @@ describe("PO business category (#628)", () => {
     const state = initial({ BusinessCategory: undefined });
     expect(state.header.businessCategory).toBe("");
     expect(buildPurchaseOrderUpdate(state, USD).input?.BusinessCategory).toBe("");
+  });
+
+  it("labels an unknown nonempty category with its raw code, never Unassigned", () => {
+    expect(purchaseOrderBusinessCategoryLabel("FAB")).toBe("Fabrication");
+    expect(purchaseOrderBusinessCategoryLabel("")).toBe("Unassigned");
+    expect(purchaseOrderBusinessCategoryLabel(undefined)).toBe("Unassigned");
+    // A code this build does not know yet is shown as stored. Calling it
+    // Unassigned would silently erase a category someone else recorded.
+    expect(purchaseOrderBusinessCategoryLabel("LEGACY_CODE")).toBe("LEGACY_CODE");
   });
 
   it("is part of the dirty snapshot", () => {

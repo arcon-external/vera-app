@@ -10,6 +10,7 @@ import {
   sourceLineLabel,
   suggestSourceLine,
   type POReviewDecisions,
+  type PurchaseOrderFinalizeInput,
   type PurchaseOrderReviewDTO,
   type PurchaseOrderSourceDTO,
 } from "./poFinalize";
@@ -553,6 +554,10 @@ describe("final-save payload", () => {
     );
     expect(result.error).toBeNull();
     expect(result.input).not.toBeNull();
+    // #628: the category is declared on the payload type, not merely carried
+    // by the spread that builds it from the update input.
+    const input: PurchaseOrderFinalizeInput = result.input!;
+    expect(input.BusinessCategory).toBe("OTHERS");
     expect(result.input?.PONumber).toBe("PO-471");
     expect(result.input?.PaymentTerms).toBe("45 days");
     expect(result.input?.Decisions).toEqual([
@@ -590,7 +595,12 @@ describe("final-save payload", () => {
       true
     );
     expect(result.input).toBeNull();
-    expect(result.error).toBe("Business category is required before Final Save.");
+    // #628: the refusal is shared with a saved-record correction, so it names
+    // the field without claiming the Final Save flow is the only one.
+    expect(result.error).toBe(
+      "Business category is required to save a purchase order."
+    );
+    expect(result.error).not.toContain("Final Save");
   });
 
   it("requires the no-PDF confirmation in the no-document branch", () => {

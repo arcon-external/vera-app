@@ -96,6 +96,7 @@ function order(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
     Currency: "USD",
     TaxZone: "FTZ",
     TaxCategory: "",
+    BusinessCategory: "FAB",
     AdjustmentReason: "",
     CreatedAt: "2026-10-02T10:00:00Z",
     UpdatedAt: "2026-10-02T10:00:00Z",
@@ -156,6 +157,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = () => undefined;
   correctMock.mockReset();
   updateMock.mockReset();
   documentStateMock.mockReset();
@@ -377,6 +379,51 @@ describe("correction editor (issue #473)", () => {
     ]) {
       expect(payload).not.toHaveProperty(protectedField);
     }
+  });
+
+  it("carries the stored category in a correction payload", async () => {
+    correctMock.mockResolvedValue({ Order: order({ Version: 5 }), Conflict: null });
+    render("correction");
+
+    typeInto("Correction reason", "Keep the category as recorded");
+    await act(async () => {
+      button("Save correction").click();
+    });
+
+    expect(correctMock).toHaveBeenCalledTimes(1);
+    const payload = correctMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.BusinessCategory).toBe("FAB");
+  });
+
+  it("sends a reclassified category in the correction payload", async () => {
+    correctMock.mockResolvedValue({
+      Order: order({ Version: 5, BusinessCategory: "FM" }),
+      Conflict: null,
+    });
+    render("correction");
+
+    await act(async () => {
+      button("Business category").click();
+    });
+    const facilityManagement = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="option"]')
+    ).find((option) => option.textContent === "Facility Management");
+    if (facilityManagement === undefined) {
+      throw new Error("no Facility Management option");
+    }
+    await act(async () => {
+      facilityManagement.click();
+    });
+
+    typeInto("Correction reason", "The order belongs to facility management");
+    await act(async () => {
+      button("Save correction").click();
+    });
+
+    expect(correctMock).toHaveBeenCalledTimes(1);
+    const payload = correctMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.BusinessCategory).toBe("FM");
+    expect(payload.Reason).toBe("The order belongs to facility management");
   });
 
   it("offers Final Save only on a draft, never on a saved correction", () => {

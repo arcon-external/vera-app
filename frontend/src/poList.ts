@@ -6,6 +6,11 @@
 // overwriting a newer one. No totals, fulfilment or payment status exists --
 // the stored entry state is draft or saved, and nothing else is invented.
 
+import {
+  isPurchaseOrderBusinessCategory,
+  type PurchaseOrderBusinessCategory,
+} from "./purchaseOrder";
+
 /** The server's fixed page size when no size is requested (issue #469). */
 export const PO_LIST_PAGE_SIZE = 15;
 
@@ -121,9 +126,9 @@ export type POListStateFilter = "" | "draft" | "saved";
 /**
  * One business category (#628) or "" for All. All includes the Unassigned
  * records saved before the category existed, so no revenue disappears from the
- * archive.
+ * archive. The union is the editor's one definition, not a second list.
  */
-export type POListCategoryFilter = "" | "FM" | "FAB" | "SUPPLY_GEN" | "OTHERS";
+export type POListCategoryFilter = PurchaseOrderBusinessCategory;
 
 /**
  * Source missing is an independent predicate, not a third state. "any" is the
@@ -275,10 +280,7 @@ export function buildPOListQuery(
   }
   if (
     filters.category !== "" &&
-    filters.category !== "FM" &&
-    filters.category !== "FAB" &&
-    filters.category !== "SUPPLY_GEN" &&
-    filters.category !== "OTHERS"
+    !isPurchaseOrderBusinessCategory(filters.category)
   ) {
     return { query: null, error: "Business category must be All, FM, FAB, SUPPLY_GEN or OTHERS." };
   }

@@ -19,6 +19,7 @@ import {
   finalSaveSendsAbsenceConfirmation,
 } from "./purchaseOrderDocument";
 import type {
+  PurchaseOrderBusinessCategory,
   PurchaseOrderDTO,
   PurchaseOrderEditorState,
   PurchaseOrderItemInput,
@@ -532,6 +533,8 @@ export interface PurchaseOrderFinalizeInput {
   Incoterms: string;
   PaymentTerms: string;
   AdjustmentReason: string;
+  /** The #628 reporting category; a saved record always names one. */
+  BusinessCategory: PurchaseOrderBusinessCategory;
   Items: PurchaseOrderItemInput[];
   Decisions: Array<{ Key: string; Choice: POReviewChoice }>;
   AcknowledgedMissing: string[];
@@ -574,7 +577,7 @@ export function buildFinalizeInput(
   if (!isPurchaseOrderBusinessCategory(state.header.businessCategory)) {
     return {
       input: null,
-      error: "Business category is required before Final Save.",
+      error: "Business category is required to save a purchase order.",
     };
   }
   // An unknown branch is treated as "none": asking for the confirmation again

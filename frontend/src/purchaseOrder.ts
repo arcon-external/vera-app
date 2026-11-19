@@ -80,14 +80,19 @@ export const PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS: readonly PurchaseOrderBus
     { value: "OTHERS", label: "Others" },
   ];
 
-/** The label for a stored category; empty reads Unassigned, never a guess. */
+/**
+ * The label for a stored category. Only an empty value is Unassigned; a code
+ * this build does not know is shown as stored, because recasting it as
+ * Unassigned would silently erase a category someone else recorded.
+ */
 export function purchaseOrderBusinessCategoryLabel(
   value: string | undefined
 ): string {
+  if (value === undefined || value.trim() === "") return "Unassigned";
   const option = PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS.find(
     (entry) => entry.value === value
   );
-  return option?.label ?? "Unassigned";
+  return option?.label ?? value;
 }
 
 /** Whether a stored value is one of the four codes (empty is not a category). */

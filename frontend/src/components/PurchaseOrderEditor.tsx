@@ -1297,7 +1297,7 @@ export function PurchaseOrderEditorView({
               }
             >
               {state.header.businessCategory === ""
-                ? "Required before Final Save."
+                ? "Required before Final Save or a correction."
                 : "Used in purchase order reports."}
             </p>
           </div>
@@ -2761,7 +2761,7 @@ export function PurchaseOrderEditorPage({
     // #628: a draft may be Unassigned; a saved record may not. This is the
     // gate before the review opens, and it leaves the draft editable.
     if (!isPurchaseOrderBusinessCategory(state.header.businessCategory)) {
-      const message = "Business category is required before Final Save.";
+      const message = "Business category is required to save a purchase order.";
       dispatch({ type: "saveFailed", error: message });
       reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}`);
       const target = document.querySelector<HTMLElement>(
