@@ -1,0 +1,553 @@
+{
+  "description": "The one full report snapshot shared by the Go PDF renderer and the TypeScript screen. The report itself is the single source of every figure; the expected block is the hand-checked formatting contract both surfaces must print. Negative money, a real measured zero, and a null percentage (em dash) are all present.",
+  "expected": {
+    "metrics": [
+      "24",
+      "Rp1.234.567.890",
+      "Rp910.000.000",
+      "Rp810.000.000",
+      "Rp100.000.000",
+      "Rp324.567.890",
+      "Rp-30.000.000",
+      "Rp-50.000.000",
+      "Rp24.691.358",
+      "12.35%",
+      "73.71%",
+      "28.57%",
+      "-25.00%",
+      "-83.33%",
+      "—"
+    ],
+    "pdf": {
+      "filterRange": "2025-01-01 → 2025-12-20 (exclusive)",
+      "generatedAt": "20 Dec 2025 08:30:00 UTC",
+      "asOf": "2025-12-20"
+    },
+    "screen": {
+      "asOfDate": "20 Dec 2025",
+      "filterRange": "1 Jan 2025 – 19 Dec 2025"
+    }
+  },
+  "report": {
+    "generatedAt": "2025-12-20T08:30:00Z",
+    "asOf": "2025-12-20",
+    "filter": {
+      "from": "2025-01-01",
+      "to": "2025-12-20",
+      "bucket": "month",
+      "category": "all",
+      "currency": "IDR"
+    },
+    "company": {
+      "name": "PT. Arcon Penta Persada",
+      "address": "Komp. Ruko Legenda Gemilang, Blok D. No. 12, Baloi Permai, Batam"
+    },
+    "population": {
+      "availableCurrencies": [
+        "IDR",
+        "USD"
+      ],
+      "hasUnassigned": true,
+      "sourceMissingPoCount": 2
+    },
+    "totals": {
+      "poCount": 24,
+      "amountMinor": 1234567890,
+      "costedMinor": 910000000,
+      "uncostedMinor": 324567890,
+      "capitalMinor": 810000000,
+      "marginMinor": 100000000,
+      "marginBps": 1235,
+      "coverageBps": 7371
+    },
+    "periods": [
+      {
+        "periodStart": "2025-01-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-02-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-03-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 120000000,
+        "marginMinor": -30000000,
+        "marginBps": -2500,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-04-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-05-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-06-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 0,
+        "uncostedMinor": 100000000,
+        "capitalMinor": 0,
+        "marginMinor": 0,
+        "marginBps": null,
+        "coverageBps": 0
+      },
+      {
+        "periodStart": "2025-07-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-08-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-09-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-10-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-11-01",
+        "partial": false,
+        "inProgress": false,
+        "poCount": 2,
+        "amountMinor": 100000000,
+        "costedMinor": 90000000,
+        "uncostedMinor": 10000000,
+        "capitalMinor": 70000000,
+        "marginMinor": 20000000,
+        "marginBps": 2857,
+        "coverageBps": 9000
+      },
+      {
+        "periodStart": "2025-12-01",
+        "partial": true,
+        "inProgress": true,
+        "poCount": 2,
+        "amountMinor": 134567890,
+        "costedMinor": 10000000,
+        "uncostedMinor": 124567890,
+        "capitalMinor": 60000000,
+        "marginMinor": -50000000,
+        "marginBps": -8333,
+        "coverageBps": 743
+      }
+    ],
+    "categories": [
+      {
+        "businessCategory": "FM",
+        "label": "Facility Management",
+        "poCount": 8,
+        "amountMinor": 493827156,
+        "costedMinor": 364000000,
+        "uncostedMinor": 129827156,
+        "capitalMinor": 291600000,
+        "marginMinor": 72400000,
+        "marginBps": 2483,
+        "coverageBps": 7371
+      },
+      {
+        "businessCategory": "FAB",
+        "label": "Fabrication",
+        "poCount": 6,
+        "amountMinor": 370370367,
+        "costedMinor": 273000000,
+        "uncostedMinor": 97370367,
+        "capitalMinor": 251100000,
+        "marginMinor": 21900000,
+        "marginBps": 872,
+        "coverageBps": 7371
+      },
+      {
+        "businessCategory": "SUPPLY_GEN",
+        "label": "Goods Supply & General",
+        "poCount": 5,
+        "amountMinor": 246913578,
+        "costedMinor": 182000000,
+        "uncostedMinor": 64913578,
+        "capitalMinor": 170100000,
+        "marginMinor": 11900000,
+        "marginBps": 700,
+        "coverageBps": 7371
+      },
+      {
+        "businessCategory": "OTHERS",
+        "label": "Others",
+        "poCount": 3,
+        "amountMinor": 98765431,
+        "costedMinor": 72800000,
+        "uncostedMinor": 25965431,
+        "capitalMinor": 97200000,
+        "marginMinor": -24400000,
+        "marginBps": -2510,
+        "coverageBps": 7371
+      },
+      {
+        "businessCategory": "UNASSIGNED",
+        "label": "Unassigned",
+        "poCount": 2,
+        "amountMinor": 24691358,
+        "costedMinor": 18200000,
+        "uncostedMinor": 6491358,
+        "capitalMinor": 0,
+        "marginMinor": 18200000,
+        "marginBps": null,
+        "coverageBps": 7371
+      }
+    ],
+    "categorySeries": [
+      {
+        "businessCategory": "FM",
+        "marginBps": [
+          4286,
+          4286,
+          -1667,
+          4286,
+          4286,
+          null,
+          4286,
+          4286,
+          4286,
+          4286,
+          4286,
+          -8148
+        ]
+      },
+      {
+        "businessCategory": "FAB",
+        "marginBps": [
+          2442,
+          2442,
+          -2742,
+          2442,
+          2442,
+          null,
+          2442,
+          2442,
+          2442,
+          2442,
+          2442,
+          -8387
+        ]
+      },
+      {
+        "businessCategory": "SUPPLY_GEN",
+        "marginBps": [
+          2245,
+          2245,
+          -2857,
+          2245,
+          2245,
+          null,
+          2245,
+          2245,
+          2245,
+          2245,
+          2245,
+          -8413
+        ]
+      },
+      {
+        "businessCategory": "OTHERS",
+        "marginBps": [
+          -1429,
+          -1429,
+          -5000,
+          -1429,
+          -1429,
+          null,
+          -1429,
+          -1429,
+          -1429,
+          -1429,
+          -1429,
+          -8889
+        ]
+      }
+    ],
+    "projection": {
+      "monthly": {
+        "status": "available",
+        "method": "Median of the same calendar month across complete history; P25-P75 range (min-max under four observations), trailing three complete months when that calendar month has no history.",
+        "basis": {
+          "historyFrom": "2024-07-01",
+          "historyTo": "2025-12-01",
+          "completeMonths": 17,
+          "poCount": 34,
+          "asOf": "2025-12-20"
+        },
+        "buckets": [
+          {
+            "periodStart": "2026-01-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-02-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-03-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-04-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-05-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-06-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-07-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-08-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-09-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-10-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-11-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          },
+          {
+            "periodStart": "2026-12-01",
+            "amountLowMinor": 8000000,
+            "amountBaseMinor": 10000000,
+            "amountHighMinor": 13000000,
+            "capitalMinor": 7500000,
+            "marginMinor": 2500000,
+            "marginBps": 3333,
+            "sampleSize": 6,
+            "source": "same_calendar_month"
+          }
+        ]
+      },
+      "yearly": {
+        "status": "available",
+        "method": "The last twelve complete months held flat; P25-P75 range of rolling twelve-month totals, widened only to include the base.",
+        "basis": {
+          "historyFrom": "2024-07-01",
+          "historyTo": "2025-12-01",
+          "completeMonths": 17,
+          "poCount": 34,
+          "asOf": "2025-12-20"
+        },
+        "buckets": [
+          {
+            "periodStart": "2026-01-01",
+            "amountLowMinor": 100000000,
+            "amountBaseMinor": 120000000,
+            "amountHighMinor": 150000000,
+            "capitalMinor": 90000000,
+            "marginMinor": 30000000,
+            "marginBps": 3333,
+            "sampleSize": 12,
+            "source": "trailing_twelve_complete_months"
+          },
+          {
+            "periodStart": "2027-01-01",
+            "amountLowMinor": 100000000,
+            "amountBaseMinor": 120000000,
+            "amountHighMinor": 150000000,
+            "capitalMinor": 90000000,
+            "marginMinor": 30000000,
+            "marginBps": 3333,
+            "sampleSize": 12,
+            "source": "trailing_twelve_complete_months"
+          },
+          {
+            "periodStart": "2028-01-01",
+            "amountLowMinor": 100000000,
+            "amountBaseMinor": 120000000,
+            "amountHighMinor": 150000000,
+            "capitalMinor": 90000000,
+            "marginMinor": 30000000,
+            "marginBps": 3333,
+            "sampleSize": 12,
+            "source": "trailing_twelve_complete_months"
+          }
+        ]
+      }
+    },
+    "notes": [
+      {
+        "code": "legacy_order_adjustment",
+        "text": "Some purchase orders in this range carry a retired whole-order discount or adjustment. The amount includes it, but it is not supplier cost and no margin is inferred from it."
+      }
+    ]
+  }
+}

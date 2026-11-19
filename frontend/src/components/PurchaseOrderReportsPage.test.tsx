@@ -311,7 +311,7 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("Rp48.000.000");
   });
 
-  it("renders the whole maximum exact amount and percentage", async () => {
+  it("renders the whole maximum exact amount with its derived percentage", async () => {
     reportMock.mockImplementation(async (query: Query) => {
       const report = purchaseOrderReportMaxFixture();
       report.filter = { ...query };
@@ -320,9 +320,11 @@ describe("Reports figures (issue #630)", () => {
     await renderPage();
 
     // The complete strings, not a rounded or clipped stand-in. The separate
-    // width guard measures them against the real one-column mobile cell.
+    // width guard measures the synthetic widest percentage; this assembled
+    // report carries the honest 0.00% of a 1000-minor margin against capital
+    // near MAX_SAFE_INTEGER.
     expect(document.body.textContent).toContain("Rp9.007.199.254.740.991");
-    expect(document.body.textContent).toContain("90071992547409.91%");
+    expect(document.body.textContent).toContain("0.00%");
     expect(document.body.textContent).toContain("9,007,199,254,740,991");
   });
 
@@ -391,8 +393,8 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("Low");
     expect(document.body.textContent).toContain("Base");
     expect(document.body.textContent).toContain("High");
-    expect(document.body.textContent).toContain("Apr 2026");
-    expect(document.body.textContent).toContain("12 complete months");
+    expect(document.body.textContent).toContain("Dec 2026");
+    expect(document.body.textContent).toContain("8 complete months");
     expect(document.body.textContent).toContain("Method:");
     expect(document.body.textContent).toContain(
       "before the range's end month and the report's as-of month"

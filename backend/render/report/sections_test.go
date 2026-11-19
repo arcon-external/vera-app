@@ -48,24 +48,24 @@ func TestSampleReportPrintsTheFrozenSnapshot(t *testing.T) {
 		"INTERNAL REPORT",
 		"Internal report — not a customer quotation. PPN is excluded from every figure.",
 		"PT. Arcon Penta Persada",
-		"2025-01-01 → 2026-01-01 (exclusive)",
+		"2025-01-01 → 2025-12-20 (exclusive)",
 		"Monthly",
 		"All categories (all)",
 		"IDR",
-		"05 Jan 2026 08:30:00 UTC",
-		"2026-01-04",
+		"20 Dec 2025 08:30:00 UTC",
+		"2025-12-20",
 		"PO COUNT",
 		"24",
 		"PO AMOUNT",
 		"Rp1.234.567.890",
 		"CAPITAL",
-		"Rp830.000.000",
+		"Rp810.000.000",
 		"PO MARGIN",
-		"Rp170.000.000",
+		"Rp100.000.000",
 		"PO MARGIN %",
-		"20.48%",
-		"Costed Rp1.000.000.000 of Rp1.234.567.890 (81.00%)",
-		"Uncosted Rp234.567.890",
+		"12.35%",
+		"Costed Rp910.000.000 of Rp1.234.567.890 (73.71%)",
+		"Uncosted Rp324.567.890",
 		"2 purchase order(s) in this range have a deleted source quotation; their amount is uncosted.",
 	)
 }
@@ -106,8 +106,8 @@ func TestRenderedTableTotalsMatchTheFootedFixture(t *testing.T) {
 			name:     "sample",
 			snapshot: sampleReport(),
 			total: []string{
-				"Total", "24", "Rp1.234.567.890", "Rp1.000.000.000",
-				"Rp830.000.000", "Rp170.000.000", "20.48%",
+				"Total", "24", "Rp1.234.567.890", "Rp910.000.000",
+				"Rp810.000.000", "Rp100.000.000", "12.35%",
 			},
 		},
 		{
@@ -115,7 +115,7 @@ func TestRenderedTableTotalsMatchTheFootedFixture(t *testing.T) {
 			snapshot: longReport(poreport.MaxPeriods),
 			total: []string{
 				"Total", "120", "Rp1.200.000.000", "Rp1.080.000.000",
-				"Rp960.000.000", "Rp120.000.000", "11.11%",
+				"Rp960.000.000", "Rp120.000.000", "12.50%",
 			},
 		},
 	} {
@@ -141,10 +141,10 @@ func TestSampleReportPrintsProjectionRangeBasisAndMethod(t *testing.T) {
 		"Median of the same calendar month across complete history",
 		"months when that calendar month has no history.",
 		"Basis: ",
-		"History 2024-07-01 to 2026-01-01 (exclusive)",
-		"18 complete months",
-		"24 purchase orders",
-		"as of 2026-01-04.",
+		"History 2024-07-01 to 2025-12-01 (exclusive)",
+		"17 complete months",
+		"34 purchase orders",
+		"as of 2025-12-20.",
 		"Same calendar month across complete history [same_calendar_month]",
 		"Trailing twelve complete months [trailing_twelve_complete_months]",
 	)
@@ -174,7 +174,7 @@ func TestUnavailableProjectionPrintsReasonInsteadOfNumbers(t *testing.T) {
 		"Unavailable",
 		"REASON  insufficient_history",
 		"Not enough complete history: the monthly forecast needs six complete months and six POs",
-		"No complete history window is available; as of 2026-01-04.",
+		"No complete history window is available; as of 2025-12-20.",
 	)
 	if strings.Contains(text, "Projected range") {
 		t.Errorf("an unavailable projection printed a projected range table")

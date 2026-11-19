@@ -81,6 +81,16 @@
       "name": "negative",
       "value": -2857,
       "expected": "-28.57%"
+    },
+    {
+      "name": "synthetic widest exact",
+      "value": 9007199254740991,
+      "expected": "90071992547409.91%"
+    },
+    {
+      "name": "synthetic negative widest exact",
+      "value": -9007199254740991,
+      "expected": "-90071992547409.91%"
     }
   ],
   "count": [

@@ -33,23 +33,25 @@ function reportFixture(): poreport.Report {
       amountMinor: 900,
       costedMinor: 600,
       uncostedMinor: 300,
-      capitalMinor: 450,
-      marginMinor: 150,
+      capitalMinor: 600,
+      marginMinor: 0,
       marginBps: 0,
-      coverageBps: null,
+      coverageBps: 6667,
     },
     periods: [
       {
         periodStart: "2026-03-01",
+        // The fixture range starts in January and the as-of date is in
+        // November, so March is neither clipped nor the open bucket.
         partial: false,
-        inProgress: true,
+        inProgress: false,
         poCount: 1,
         amountMinor: 300,
         costedMinor: 200,
         uncostedMinor: 100,
-        capitalMinor: 150,
-        marginMinor: 50,
-        marginBps: null,
+        capitalMinor: 200,
+        marginMinor: 0,
+        marginBps: 0,
         coverageBps: 6667,
       },
     ],
@@ -61,9 +63,9 @@ function reportFixture(): poreport.Report {
         amountMinor: 300,
         costedMinor: 200,
         uncostedMinor: 100,
-        capitalMinor: 150,
-        marginMinor: 50,
-        marginBps: null,
+        capitalMinor: 200,
+        marginMinor: 0,
+        marginBps: 0,
         coverageBps: 6667,
       },
     ],
@@ -137,7 +139,7 @@ describe("normalizePurchaseOrderReport (issue #629)", () => {
     const report = normalizePurchaseOrderReport(input);
 
     expect(report.totals.marginBps).toBe(0);
-    expect(report.totals.coverageBps).toBeNull();
+    expect(report.totals.coverageBps).toBe(6667);
     expect(report.periods[0].marginBps).toBeNull();
     expect(report.periods[0].coverageBps).toBe(6667);
     expect(report.categories[0].coverageBps).toBeNull();

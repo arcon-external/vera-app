@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"vera-app/backend/poreport"
 )
 
 func TestRenderSampleReportIsAPDF(t *testing.T) {
@@ -95,12 +97,18 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		"Internal report",
 		"PPN is excluded",
 		"Rp1.234.567.890",
+		"Rp910.000.000",
+		"Rp810.000.000",
+		"Rp100.000.000",
+		"12.35%",
+		"73.71%",
 		"Facility",
 		"Management",
 		"(FM)",
 		"Unassigned",
 		"(UNASSIGNED)",
 		"Rp-30.000.000",
+		"—",
 		"Definitions",
 	)
 }
@@ -119,6 +127,26 @@ func TestBinaryPDFTextKeepsTheLongTableComplete(t *testing.T) {
 	}
 	if len(pages) < 6 {
 		t.Errorf("120-period report is %d pages; expected the table and charts to paginate", len(pages))
+	}
+}
+
+// TestBinaryPDFTextPrintsTheDerivedLongMarginPercentage is the regression
+// guard for the fixture defect: 120 periods carry Rp960.000.000 of capital and
+// Rp120.000.000 of margin, which is 12.50%, not the costed-denominator 11.11%.
+// The extracted text is the finished PDF's, so the number a reader sees is what
+// fails if the fixture regresses.
+func TestBinaryPDFTextPrintsTheDerivedLongMarginPercentage(t *testing.T) {
+	pdf, err := Render(longReport(poreport.MaxPeriods), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render 120 periods: %v", err)
+	}
+	text := strings.Join(binaryPDFText(t, pdf), "\n")
+	requireText(t, text, "Rp1.200.000.000", "Rp960.000.000", "Rp120.000.000", "12.50%")
+	if got := strings.Count(text, "12.50%"); got < 2 {
+		t.Errorf("extracted text carries 12.50%% %d times; want at least the KPI and the table total", got)
+	}
+	if strings.Contains(text, "11.11%") {
+		t.Errorf("extracted text still carries the costed-denominator percentage 11.11%%")
 	}
 }
 

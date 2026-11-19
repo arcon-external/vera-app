@@ -161,15 +161,13 @@ func (r *reportRenderer) drawTableRow(columns []tableColumn, row tableRow, total
 	c.y += height
 }
 
-func (r *reportRenderer) drawCategoryTable() {
-	if len(r.snapshot.Categories) == 0 {
-		r.sectionTitle("By business category", "")
-		r.emptyState("No category rows",
-			"The selected range has no saved purchase orders to break down.")
-		return
-	}
-	columns := []tableColumn{
-		{title: "CATEGORY", width: 86, align: alignLeft},
+// actualTableColumns is the one definition of the actual-table geometry. The
+// category and period tables share every width and differ only in the first
+// column's label; the width guard reads the same definition, so a column can
+// never be narrowed without the guard seeing the new width.
+func actualTableColumns(labelTitle string) []tableColumn {
+	return []tableColumn{
+		{title: labelTitle, width: 86, align: alignLeft},
 		{title: "POs", width: 28, align: alignRight},
 		{title: "AMOUNT", width: 88, align: alignRight},
 		{title: "COSTED", width: 86, align: alignRight},
@@ -177,6 +175,32 @@ func (r *reportRenderer) drawCategoryTable() {
 		{title: "MARGIN", width: 78, align: alignRight},
 		{title: "MARGIN %", width: contentWidth - 444, align: alignRight},
 	}
+}
+
+// projectionTableColumns is the one definition of the projected-range table
+// geometry. The 68pt capital/margin and 45pt margin-percentage columns are as
+// real as the wider actual-table columns and are covered by the same guard.
+func projectionTableColumns() []tableColumn {
+	return []tableColumn{
+		{title: "PERIOD", width: 62, align: alignLeft},
+		{title: "LOW", width: 76, align: alignRight},
+		{title: "BASE", width: 76, align: alignRight},
+		{title: "HIGH", width: 76, align: alignRight},
+		{title: "CAPITAL", width: 68, align: alignRight},
+		{title: "MARGIN", width: 68, align: alignRight},
+		{title: "MARGIN %", width: 45, align: alignRight},
+		{title: "n", width: contentWidth - 471, align: alignRight},
+	}
+}
+
+func (r *reportRenderer) drawCategoryTable() {
+	if len(r.snapshot.Categories) == 0 {
+		r.sectionTitle("By business category", "")
+		r.emptyState("No category rows",
+			"The selected range has no saved purchase orders to break down.")
+		return
+	}
+	columns := actualTableColumns("CATEGORY")
 	rows := make([]tableRow, 0, len(r.snapshot.Categories))
 	for index, category := range r.snapshot.Categories {
 		var fill *rgb
@@ -201,15 +225,7 @@ func (r *reportRenderer) drawCategoryTable() {
 }
 
 func (r *reportRenderer) drawPeriodTable() {
-	columns := []tableColumn{
-		{title: "PERIOD", width: 86, align: alignLeft},
-		{title: "POs", width: 28, align: alignRight},
-		{title: "AMOUNT", width: 88, align: alignRight},
-		{title: "COSTED", width: 86, align: alignRight},
-		{title: "CAPITAL", width: 78, align: alignRight},
-		{title: "MARGIN", width: 78, align: alignRight},
-		{title: "MARGIN %", width: contentWidth - 444, align: alignRight},
-	}
+	columns := actualTableColumns("PERIOD")
 	rows := make([]tableRow, 0, len(r.snapshot.Periods))
 	for index, period := range r.snapshot.Periods {
 		var fill *rgb
@@ -251,16 +267,7 @@ func (r *reportRenderer) totalRow(label string) tableRow {
 }
 
 func (r *reportRenderer) drawProjectionTable(series poreport.ProjectionSeries, bucket string) {
-	columns := []tableColumn{
-		{title: "PERIOD", width: 62, align: alignLeft},
-		{title: "LOW", width: 76, align: alignRight},
-		{title: "BASE", width: 76, align: alignRight},
-		{title: "HIGH", width: 76, align: alignRight},
-		{title: "CAPITAL", width: 68, align: alignRight},
-		{title: "MARGIN", width: 68, align: alignRight},
-		{title: "MARGIN %", width: 45, align: alignRight},
-		{title: "n", width: contentWidth - 471, align: alignRight},
-	}
+	columns := projectionTableColumns()
 	rows := make([]tableRow, 0, len(series.Buckets))
 	for index, projected := range series.Buckets {
 		var fill *rgb

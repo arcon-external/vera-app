@@ -82,7 +82,9 @@ func TestValidateSnapshotRefusesShapesTheRendererCannotPrint(t *testing.T) {
 			r.Categories = append(r.Categories, poreport.Category{BusinessCategory: "SIX", Label: "Six"})
 		}, "category rows"},
 		{"too many category series", func(r *poreport.Report) {
-			r.CategorySeries = append(r.CategorySeries, poreport.CategorySeries{BusinessCategory: "SIX"})
+			for len(r.CategorySeries) <= 5 {
+				r.CategorySeries = append(r.CategorySeries, r.CategorySeries[0])
+			}
 		}, "category series"},
 		{"too many monthly buckets", func(r *poreport.Report) {
 			r.Projection.Monthly.Buckets = append(r.Projection.Monthly.Buckets, r.Projection.Monthly.Buckets[0])

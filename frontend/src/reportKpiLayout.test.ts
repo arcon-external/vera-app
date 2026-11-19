@@ -22,6 +22,11 @@ import {
 // Inter/digits average below 0.56em per character, so a string that passes
 // here has room in the browser as well. The assembled screenshots are the
 // visual half of the same evidence.
+//
+// The maximum-percentage candidate below is synthetic width evidence only: the
+// assembled max fixture carries the honest 0.00% of a near-zero margin against
+// capital near MAX_SAFE_INTEGER. A synthetic figure may be used to measure the
+// cell, never to stand in for a server calculation.
 
 const MAX = Number.MAX_SAFE_INTEGER;
 const MAX_GLYPH_EM = 0.56;
@@ -155,7 +160,7 @@ describe("Reports KPI width guard (issue #630)", () => {
       })
     );
     expect(markup).toContain("Rp9.007.199.254.740.991");
-    expect(markup).toContain("90071992547409.91%");
+    expect(markup).toContain("0.00%");
     expect(markup).toContain("9,007,199,254,740,991");
   });
 });

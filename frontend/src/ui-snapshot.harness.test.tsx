@@ -1651,11 +1651,11 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderReportsView
         filters={{
-          // The fixture is a 2026 calendar-year snapshot, so the evidence case
-          // uses Custom rather than claiming "Last year" while showing 2026.
-          preset: "custom",
+          // The fixture is the "this year to today" snapshot on 19 Nov 2026,
+          // so the controls name the same inclusive range the report covers.
+          preset: "this-year",
           from: "2026-01-01",
-          to: "2026-12-31",
+          to: "2026-11-19",
           bucket: "month",
           category: "all",
           currency: "IDR",
@@ -1708,9 +1708,9 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderReportsView
         filters={{
-          preset: "custom",
+          preset: "this-year",
           from: "2026-01-01",
-          to: "2026-12-31",
+          to: "2026-11-19",
           bucket: "month",
           category: "all",
           currency: "IDR",

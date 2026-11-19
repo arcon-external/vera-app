@@ -11,47 +11,48 @@ import (
 	"vera-app/backend/poreport"
 )
 
+// extremeMoneyRow is the widest accepted money row that still obeys the
+// domain identities: amount is the exact maximum, all of it except one minor
+// unit is uncosted, capital is the exact maximum, and the margin is the signed
+// difference. The percentage and coverage are therefore derived, not the
+// synthetic ±MaxExactMinor placeholders this fixture used to carry. Only the
+// standalone formatting/width guard below uses a maximum percentage string.
+func extremeMoneyRow() poreport.Metrics {
+	costed := int64(1)
+	capital := poreport.MaxExactMinor
+	margin := costed - capital
+	return poreport.Metrics{
+		PoCount:       poreport.MaxExactMinor,
+		AmountMinor:   poreport.MaxExactMinor,
+		CostedMinor:   costed,
+		UncostedMinor: poreport.MaxExactMinor - costed,
+		CapitalMinor:  capital,
+		MarginMinor:   margin,
+		MarginBps:     fixtureRatio(margin, capital),
+		CoverageBps:   fixtureRatio(costed, poreport.MaxExactMinor),
+	}
+}
+
 func extremeReport() poreport.Report {
 	snapshot := sampleReport()
 	snapshot.Company.Name = strings.Repeat("W", 256)
 	snapshot.Company.Address = strings.Repeat("A", 1024)
 	snapshot.Filter.Currency = "IDR"
-	snapshot.Totals = poreport.Metrics{
-		PoCount:       poreport.MaxExactMinor,
-		AmountMinor:   poreport.MaxExactMinor,
-		CostedMinor:   poreport.MaxExactMinor - 1,
-		UncostedMinor: 1,
-		CapitalMinor:  poreport.MaxExactMinor,
-		MarginMinor:   -poreport.MaxExactMinor,
-		MarginBps:     pointer(-poreport.MaxExactMinor),
-		CoverageBps:   pointer(poreport.MaxExactMinor),
-	}
+	snapshot.Totals = extremeMoneyRow()
 	snapshot.Categories[0].Label = strings.Repeat("W", 128)
 	for index := range snapshot.Categories {
-		snapshot.Categories[index].PoCount = poreport.MaxExactMinor
-		snapshot.Categories[index].AmountMinor = poreport.MaxExactMinor
-		snapshot.Categories[index].CostedMinor = poreport.MaxExactMinor
-		snapshot.Categories[index].UncostedMinor = 0
-		snapshot.Categories[index].CapitalMinor = poreport.MaxExactMinor
-		snapshot.Categories[index].MarginMinor = -poreport.MaxExactMinor
-		snapshot.Categories[index].MarginBps = pointer(-poreport.MaxExactMinor)
+		snapshot.Categories[index].Metrics = extremeMoneyRow()
 	}
 	for index := range snapshot.Periods {
-		snapshot.Periods[index].PoCount = poreport.MaxExactMinor
-		snapshot.Periods[index].AmountMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].CostedMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].UncostedMinor = 0
-		snapshot.Periods[index].CapitalMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].MarginMinor = -poreport.MaxExactMinor
-		snapshot.Periods[index].MarginBps = pointer(-poreport.MaxExactMinor)
+		snapshot.Periods[index].Metrics = extremeMoneyRow()
 	}
 	if len(snapshot.Projection.Monthly.Buckets) > 0 {
 		snapshot.Projection.Monthly.Buckets[0].AmountLowMinor = -poreport.MaxExactMinor
 		snapshot.Projection.Monthly.Buckets[0].AmountBaseMinor = 0
 		snapshot.Projection.Monthly.Buckets[0].AmountHighMinor = poreport.MaxExactMinor
-		snapshot.Projection.Monthly.Buckets[0].CapitalMinor = -poreport.MaxExactMinor
+		snapshot.Projection.Monthly.Buckets[0].CapitalMinor = poreport.MaxExactMinor
 		snapshot.Projection.Monthly.Buckets[0].MarginMinor = -poreport.MaxExactMinor
-		snapshot.Projection.Monthly.Buckets[0].MarginBps = pointer(-poreport.MaxExactMinor)
+		snapshot.Projection.Monthly.Buckets[0].MarginBps = fixtureRatio(-poreport.MaxExactMinor, poreport.MaxExactMinor)
 	}
 	return snapshot
 }
@@ -97,24 +98,69 @@ func TestWrapCellKeepsEveryCharacterAndFits(t *testing.T) {
 	}
 }
 
+// productionTableColumns is every column the report tables actually draw,
+// including the 68pt projected capital/margin columns and the 45pt projected
+// percentage column. Reading the shared definitions means a new production
+// width cannot be added without this guard seeing it.
+func productionTableColumns() []tableColumn {
+	columns := append([]tableColumn{}, actualTableColumns("CATEGORY")...)
+	return append(columns, projectionTableColumns()...)
+}
+
 // TestEveryAcceptedTableAmountFitsItsColumn pins the width half of the extreme
-// snapshot contract: for every supported currency, the largest exact amount is
-// split into lines that each fit a table cell. No figure is truncated and no
-// line crosses into the next column.
+// snapshot contract: for every supported currency and every production column
+// width, the largest exact amount is split into lines that each fit a table
+// cell. No figure is truncated and no line crosses into the next column.
 func TestEveryAcceptedTableAmountFitsItsColumn(t *testing.T) {
 	faces := testFonts()
-	columns := []float64{28, 88, 86, 78, 78, 67.3}
 	for _, code := range currency.Codes() {
 		for _, minor := range []int64{poreport.MaxExactMinor, -poreport.MaxExactMinor} {
 			text := formatMoney(code, minor)
-			for _, width := range columns {
-				lines := faces.wrapCell(text, tableBodySize, width-2*tableCellPadX, true)
-				assertLinesFit(t, code, lines, tableBodySize, width-2*tableCellPadX, true)
+			for _, column := range productionTableColumns() {
+				width := column.width - 2*tableCellPadX
+				lines := faces.wrapCell(text, tableBodySize, width, true)
+				assertLinesFit(t, code, lines, tableBodySize, width, true)
 				joined := strings.Join(strings.Fields(strings.Join(lines, "")), "")
 				want := strings.Join(strings.Fields(text), "")
 				if joined != want {
-					t.Errorf("%s amount split lost characters: %q from %q", code, joined, want)
+					t.Errorf("%s amount split lost characters in %s: %q from %q",
+						code, column.title, joined, want)
 				}
+			}
+		}
+	}
+}
+
+// TestEveryAcceptedPercentageFitsItsColumn covers the second narrow column
+// family: the actual tables' MARGIN % column and the projection's 45pt MARGIN %
+// column. The maximum percentage text is the synthetic widest case for this
+// width guard; the assembled reports themselves carry derived percentages.
+func TestEveryAcceptedPercentageFitsItsColumn(t *testing.T) {
+	faces := testFonts()
+	widths := []float64{}
+	for _, column := range productionTableColumns() {
+		if column.title == "MARGIN %" {
+			widths = append(widths, column.width)
+		}
+	}
+	if len(widths) != 2 {
+		t.Fatalf("MARGIN %% columns = %v; want the actual and projected widths", widths)
+	}
+	for _, value := range []*int64{
+		pointer(poreport.MaxExactMinor),
+		pointer(-poreport.MaxExactMinor),
+		nil,
+	} {
+		text := formatPct(value)
+		for _, width := range widths {
+			available := width - 2*tableCellPadX
+			lines := faces.wrapCell(text, tableBodySize, available, true)
+			assertLinesFit(t, "pct "+text, lines, tableBodySize, available, true)
+			joined := strings.Join(strings.Fields(strings.Join(lines, "")), "")
+			want := strings.Join(strings.Fields(text), "")
+			if joined != want {
+				t.Errorf("percentage split lost characters at %.2fpt: %q from %q",
+					width, joined, want)
 			}
 		}
 	}
@@ -171,12 +217,7 @@ func TestExtremeAcceptedSnapshotRenders(t *testing.T) {
 func TestExtremeLongReportKeepsEveryPeriod(t *testing.T) {
 	snapshot := longReport(poreport.MaxPeriods)
 	for index := range snapshot.Periods {
-		snapshot.Periods[index].AmountMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].CostedMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].UncostedMinor = 0
-		snapshot.Periods[index].CapitalMinor = poreport.MaxExactMinor
-		snapshot.Periods[index].MarginMinor = -poreport.MaxExactMinor
-		snapshot.Periods[index].MarginBps = pointer(-poreport.MaxExactMinor)
+		snapshot.Periods[index].Metrics = extremeMoneyRow()
 	}
 	renderer, err := testReportRenderer(snapshot)
 	if err != nil {

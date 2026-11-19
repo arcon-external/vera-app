@@ -9,6 +9,7 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 	t.Parallel()
 
 	marginBps := int64(0)
+	coverageBps := int64(10000)
 	report := Report{
 		GeneratedAt: "2026-11-19T10:00:00Z",
 		AsOf:        "2026-11-19",
@@ -25,21 +26,30 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 		Totals: Metrics{
 			PoCount:       2,
 			AmountMinor:   300,
-			CostedMinor:   200,
-			UncostedMinor: 100,
-			CapitalMinor:  0,
-			MarginMinor:   200,
+			CostedMinor:   300,
+			UncostedMinor: 0,
+			CapitalMinor:  300,
+			MarginMinor:   0,
 			MarginBps:     &marginBps,
+			CoverageBps:   &coverageBps,
 		},
 		Periods: []Period{{
 			PeriodStart: "2026-01-01",
-			Partial:     true,
-			Metrics:     Metrics{PoCount: 2, AmountMinor: 300},
+			// The range starts on this bucket's first day and the as-of date is
+			// later in the same year, so neither flag is true.
+			Partial: false,
+			Metrics: Metrics{
+				PoCount: 2, AmountMinor: 300, CostedMinor: 300, UncostedMinor: 0,
+				CapitalMinor: 300, MarginMinor: 0, MarginBps: &marginBps, CoverageBps: &coverageBps,
+			},
 		}},
 		Categories: []Category{{
 			BusinessCategory: CategoryFm,
 			Label:            "Facility Management",
-			Metrics:          Metrics{PoCount: 1},
+			Metrics: Metrics{
+				PoCount: 1, AmountMinor: 300, CostedMinor: 300, UncostedMinor: 0,
+				CapitalMinor: 300, MarginMinor: 0, MarginBps: &marginBps, CoverageBps: &coverageBps,
+			},
 		}},
 		CategorySeries: []CategorySeries{{
 			BusinessCategory: CategoryFm,
@@ -89,11 +99,15 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 			t.Errorf("totals JSON is missing %q", key)
 		}
 	}
-	if totals["coverageBps"] != nil {
-		t.Errorf("coverageBps = %v; want null when capital is zero", totals["coverageBps"])
+	if totals["coverageBps"] != float64(10000) {
+		t.Errorf("coverageBps = %v; want the exact 10000 pointer", totals["coverageBps"])
 	}
 	if totals["marginBps"] != float64(0) {
 		t.Errorf("marginBps = %v; want the exact zero pointer", totals["marginBps"])
+	}
+	series := decoded["categorySeries"].([]any)[0].(map[string]any)["marginBps"].([]any)
+	if series[0] != nil {
+		t.Errorf("category series marginBps[0] = %v; want null for a gap", series[0])
 	}
 
 	period := decoded["periods"].([]any)[0].(map[string]any)
