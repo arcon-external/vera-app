@@ -91,9 +91,15 @@ func (r *reportRenderer) drawHeader() {
 
 	leftWidth := 300.0
 	companyBaseline := top + 60
-	c.text(r.snapshot.Company.Name, marginX, companyBaseline, 10.5, true, pal.emphasis)
-	addressBaseline := companyBaseline + 12
-	addressLines := r.faces.wrap(r.snapshot.Company.Address, 8, leftWidth, false)
+	companyLines := r.faces.wrapCell(r.snapshot.Company.Name, 10.5, leftWidth, true)
+	if len(companyLines) == 0 {
+		companyLines = []string{""}
+	}
+	for index, line := range companyLines {
+		c.text(line, marginX, companyBaseline+float64(index)*12, 10.5, true, pal.emphasis)
+	}
+	addressBaseline := companyBaseline + float64(len(companyLines))*12
+	addressLines := r.faces.wrapCell(r.snapshot.Company.Address, 8, leftWidth, false)
 	if len(addressLines) == 0 {
 		addressLines = []string{"Company address not recorded"}
 	}
@@ -132,13 +138,13 @@ func (r *reportRenderer) drawHeader() {
 	c.y = noteTop + 36
 }
 
+const kpiValueSize = 8.5
+
 func (r *reportRenderer) drawKPIs() {
 	c := r.canvas
 	pal := r.pal
-	c.ensure(95)
 	gap := 8.0
 	width := (contentWidth - 4*gap) / 5
-	top := c.y
 	totals := r.snapshot.Totals
 
 	kpis := []struct {
@@ -152,14 +158,34 @@ func (r *reportRenderer) drawKPIs() {
 		{"PO MARGIN", r.signedMoney(totals.MarginMinor), marginColor(pal, totals.MarginMinor)},
 		{"PO MARGIN %", formatPct(totals.MarginBps), marginColor(pal, totals.MarginMinor)},
 	}
+	linesByKPI := make([][]string, len(kpis))
+	maxLines := 1
+	for index, kpi := range kpis {
+		linesByKPI[index] = r.faces.wrapCell(kpi.value, kpiValueSize, width-16, true)
+		if count := len(linesByKPI[index]); count > maxLines {
+			maxLines = count
+		}
+	}
+	cardHeight := 54.0
+	if maxLines > 1 {
+		cardHeight = 30 + float64(maxLines)*12.5 + 6
+	}
+	c.ensure(cardHeight + 10)
+	top := c.y
 	for index, kpi := range kpis {
 		x := marginX + float64(index)*(width+gap)
-		c.rect(x, top, width, 54, &pal.surface, &pal.edge, 0.5)
+		c.rect(x, top, width, cardHeight, &pal.surface, &pal.edge, 0.5)
 		c.text(kpi.label, x+8, top+14, 6.1, true, pal.muted)
-		size := fittedSize(r.faces.width, kpi.value, width-16, 11.5, 6.2, true)
-		c.text(kpi.value, x+8, top+37, size, true, kpi.color)
+		lines := linesByKPI[index]
+		for lineIndex, line := range lines {
+			baseline := top + 37
+			if len(lines) > 1 {
+				baseline = top + 30 + float64(lineIndex)*12.5
+			}
+			c.text(line, x+8, baseline, kpiValueSize, true, kpi.color)
+		}
 	}
-	c.y = top + 64
+	c.y = top + cardHeight + 10
 
 	coverage := ""
 	if totals.UncostedMinor != 0 {
@@ -270,8 +296,20 @@ func (r *reportRenderer) drawFooters() {
 		r.canvas.current = pg
 		r.canvas.line(marginX, footerY-9, PageWidth-marginX, footerY-9, r.pal.rule, 0.4)
 		left := strings.TrimSpace(r.snapshot.Company.Name) + "  ·  Purchase Order Performance Report  ·  Internal"
-		size := fittedSize(r.faces.width, left, contentWidth-110, 6.6, 5.8, false)
-		r.canvas.text(left, marginX, footerY, size, false, r.pal.muted)
+		maxWidth := contentWidth - 110
+		lines := r.faces.wrapCell(left, 6.2, maxWidth, false)
+		if len(lines) > 2 {
+			joined := strings.Join(lines[2:], " ")
+			lines = lines[:2]
+			lines[1] = r.faces.truncateToWidth(lines[1]+" "+joined, 6.2, maxWidth, false)
+		}
+		if len(lines) == 0 {
+			lines = []string{""}
+		}
+		top := footerY - float64(len(lines)-1)*7
+		for lineIndex, line := range lines {
+			r.canvas.text(line, marginX, top+float64(lineIndex)*7, 6.2, false, r.pal.muted)
+		}
 		r.canvas.textRight(fmt.Sprintf("Page %d of %d", index+1, total),
 			PageWidth-marginX, footerY, 6.6, false, r.pal.muted)
 	}

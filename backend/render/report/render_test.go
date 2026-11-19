@@ -95,9 +95,12 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		"Internal report",
 		"PPN is excluded",
 		"Rp1.234.567.890",
-		"Facility Management (FM)",
-		"Unassigned (UNASSIGNED)",
-		"-Rp20.000.000",
+		"Facility",
+		"Management",
+		"(FM)",
+		"Unassigned",
+		"(UNASSIGNED)",
+		"Rp-30.000.000",
 		"Definitions",
 	)
 }
@@ -135,8 +138,8 @@ func pageText(pages []*page) string {
 // binaryPDFText extracts the rendered document's text with whichever external
 // reader this machine has. The repository's existing PDF tests use pdftotext
 // and skip when it is absent; PyMuPDF is the second reader because some
-// developer machines carry it without poppler. A test that cannot read a PDF
-// skips rather than failing for the missing tool.
+// developer machines carry it without poppler. CI installs poppler-utils and
+// must not skip: a check that cannot read the PDF has not verified the text.
 func binaryPDFText(t *testing.T, pdf []byte) []string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "report.pdf")
@@ -146,9 +149,15 @@ func binaryPDFText(t *testing.T, pdf []byte) []string {
 	if _, err := exec.LookPath("pdftotext"); err == nil {
 		out, err := exec.Command("pdftotext", "-layout", path, "-").Output()
 		if err != nil {
+			if os.Getenv("CI") != "" {
+				t.Fatalf("pdftotext failed in CI: %v", err)
+			}
 			t.Skipf("pdftotext failed: %v", err)
 		}
 		return strings.Split(string(out), "\f")
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatalf("pdftotext is required in CI; install poppler-utils")
 	}
 	python := "import fitz,sys\n" +
 		"doc=fitz.open(sys.argv[1])\n" +
@@ -158,4 +167,16 @@ func binaryPDFText(t *testing.T, pdf []byte) []string {
 		t.Skipf("no PDF text reader available (pdftotext and PyMuPDF both failed): %v", err)
 	}
 	return strings.Split(string(out), "\f")
+}
+
+// TestPDFTextReaderIsInstalledInCI makes the CI contract explicit: the
+// portable local skip is allowed, the CI skip is not. poppler-utils is
+// installed by the Go gates workflow before this package runs.
+func TestPDFTextReaderIsInstalledInCI(t *testing.T) {
+	if os.Getenv("CI") == "" {
+		t.Skip("portable local run: the PDF text-reader checks may use PyMuPDF or skip")
+	}
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Fatalf("CI must install poppler-utils so PDF text assertions actually run: %v", err)
+	}
 }

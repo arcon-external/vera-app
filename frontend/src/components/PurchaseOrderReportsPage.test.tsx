@@ -3,7 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PurchaseOrderReportsPage } from "./PurchaseOrderReportsPage";
-import { purchaseOrderReportFixture } from "../poReportFixtures";
+import {
+  purchaseOrderReportFixture,
+  purchaseOrderReportMaxFixture,
+} from "../poReportFixtures";
 import {
   addDaysIso,
   initialReportFilters,
@@ -308,6 +311,21 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("Rp48.000.000");
   });
 
+  it("renders the whole maximum exact amount and percentage", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = purchaseOrderReportMaxFixture();
+      report.filter = { ...query };
+      return report;
+    });
+    await renderPage();
+
+    // The complete strings, not a rounded or clipped stand-in. The separate
+    // width guard measures them against the real one-column mobile cell.
+    expect(document.body.textContent).toContain("Rp9.007.199.254.740.991");
+    expect(document.body.textContent).toContain("90071992547409.91%");
+    expect(document.body.textContent).toContain("9,007,199,254,740,991");
+  });
+
   it("formats the snapshot in the selected currency's own convention", async () => {
     await renderPage();
     await choose("Currency", "USD");
@@ -375,6 +393,13 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("High");
     expect(document.body.textContent).toContain("Apr 2026");
     expect(document.body.textContent).toContain("12 complete months");
+    expect(document.body.textContent).toContain("Method:");
+    expect(document.body.textContent).toContain(
+      "before the range's end month and the report's as-of month"
+    );
+    expect(document.body.textContent).not.toContain(
+      "before the selected range"
+    );
     expect(document.body.textContent).toContain("Not enough complete-month history");
   });
 

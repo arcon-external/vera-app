@@ -41,7 +41,10 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
-import { purchaseOrderReportFixture } from "./poReportFixtures";
+import {
+  purchaseOrderReportFixture,
+  purchaseOrderReportMaxFixture,
+} from "./poReportFixtures";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
@@ -1320,6 +1323,13 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
   },
 });
 
+// A second maximum-figure evidence case in the widest supported currency
+// spelling: AED is a spaced Latin code (26 characters for a negative value),
+// so the 360px one-column KPI cell is read against the longest accepted form,
+// not only the familiar Rp.
+const REPORTS_MAX_AED = purchaseOrderReportMaxFixture();
+REPORTS_MAX_AED.filter = { ...REPORTS_MAX_AED.filter, currency: "AED" };
+
 const CASES: SnapshotCase[] = [
   {
     // Ticket #536: the "Stay signed in" window, idle and with the last
@@ -1641,7 +1651,9 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderReportsView
         filters={{
-          preset: "last-year",
+          // The fixture is a 2026 calendar-year snapshot, so the evidence case
+          // uses Custom rather than claiming "Last year" while showing 2026.
+          preset: "custom",
           from: "2026-01-01",
           to: "2026-12-31",
           bucket: "month",
@@ -1671,6 +1683,113 @@ const CASES: SnapshotCase[] = [
             groupSep: ",",
             decimalSep: ".",
             symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #630 review: the same assembled screen at JavaScript's largest
+    // exact money figure. The 360 render is the evidence that the KPI strip
+    // uses one column and keeps the complete `Rp9.007.199.254.740.991` inside
+    // the card; 1280 is the five-column desktop read. The tables also carry
+    // maximum figures so a wide value cannot silently truncate.
+    name: "ReportsMaxAmounts",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          preset: "custom",
+          from: "2026-01-01",
+          to: "2026-12-31",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportMaxFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
+    ),
+  },
+  {
+    // The same maximum figures in the widest supported spelling (spaced AED).
+    // The 360 render is the different-currency half of the KPI evidence.
+    name: "ReportsMaxAed",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          preset: "custom",
+          from: "2026-01-01",
+          to: "2026-12-31",
+          bucket: "month",
+          category: "all",
+          currency: "AED",
+        }}
+        report={REPORTS_MAX_AED}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "AED",
+            exponent: 2,
+            symbol: "AED",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: true,
           },
         ]}
         exporting={false}

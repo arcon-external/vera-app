@@ -210,6 +210,17 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
 
+      - name: Install the PDF text reader
+        # The report renderer's text assertions run through pdftotext. Without
+        # this step they silently skip and a green tick would claim a text
+        # verification that never happened. Ubuntu 24.04 carries poppler-utils
+        # in its default archive; a failed install fails the job.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          sudo apt-get install -y -qq poppler-utils
+          command -v pdftotext
+          pdftotext -v 2>&1 | head -1
+
       - name: go test with race detector (DB-backed packages, serialized)
         # The Postgres-backed suites each apply the full migration chain per
         # test schema. Run together in one `go test ./...`, their concurrent

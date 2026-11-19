@@ -5,9 +5,12 @@ import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import {
   REPORT_BUCKET_OPTIONS,
+  REPORT_KPI_GRID_CLASS,
+  REPORT_KPI_VALUE_CLASS,
   REPORT_PRESET_OPTIONS,
   categoryFilterOptions,
   formatReportBps,
+  formatReportCount,
   formatReportDate,
   initialReportFilters,
   projectionReasonLabel,
@@ -84,10 +87,6 @@ function money(entry: CurrencyInfo | null, minor: number): string {
   return entry === null ? "—" : formatMoney(entry, minor);
 }
 
-function count(value: number): string {
-  return value.toLocaleString("en-US");
-}
-
 function negativeClass(value: number): string {
   return value < 0 ? "text-danger-700" : "text-ink-900";
 }
@@ -112,7 +111,7 @@ function MetricCells({
   return (
     <>
       <td className="tnum whitespace-nowrap py-3 pr-4 text-right align-middle text-ink-700">
-        {count(metrics.poCount)}
+        {formatReportCount(metrics.poCount)}
       </td>
       <td className="tnum whitespace-nowrap py-3 pr-4 text-right align-middle text-ink-700">
         {money(entry, metrics.amountMinor)}
@@ -267,6 +266,7 @@ function ProjectionTable({
         </Badge>
       </div>
       <p className="mt-1 max-w-3xl text-small leading-relaxed text-ink-500">
+        <span className="font-medium text-ink-700">Method:</span>{" "}
         {series.method}
       </p>
       <p className="mt-1 text-caption leading-relaxed text-ink-500">
@@ -332,7 +332,7 @@ function ProjectionTable({
                     className="tnum py-2 text-right align-middle text-ink-500"
                     title={projectionSourceLabel(row.source)}
                   >
-                    {row.sampleSize}
+                    {formatReportCount(row.sampleSize)}
                   </td>
                 </tr>
               ))}
@@ -358,8 +358,10 @@ function ProjectionSection({
         hint="Not included in actual totals"
       />
       <p className="mb-5 max-w-3xl text-small leading-relaxed text-ink-500">
-        Projected from complete months before the selected range. They are not
-        counted in the KPIs or the actual tables above.
+        Projected from complete months before the range's end month and the
+        report's as-of month. The history window can overlap the selected
+        range; projected buckets are never counted in the KPIs or the actual
+        tables above.
       </p>
       <div className="grid gap-5">
         <ProjectionTable
@@ -388,7 +390,7 @@ function KpiStrip({
 }) {
   const totals = report.totals;
   const kpis: { label: string; value: string; negative?: boolean }[] = [
-    { label: "PO count", value: count(totals.poCount) },
+    { label: "PO count", value: formatReportCount(totals.poCount) },
     { label: "PO amount", value: money(entry, totals.amountMinor) },
     { label: "Capital", value: money(entry, totals.capitalMinor) },
     {
@@ -402,7 +404,7 @@ function KpiStrip({
     <Card className="p-5">
       <dl
         aria-label="Report KPIs"
-        className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5"
+        className={REPORT_KPI_GRID_CLASS}
       >
         {kpis.map((kpi) => (
           <div key={kpi.label}>
@@ -410,7 +412,7 @@ function KpiStrip({
               {kpi.label}
             </dt>
             <dd
-              className={`tnum mt-1 whitespace-nowrap text-title font-semibold ${
+              className={`${REPORT_KPI_VALUE_CLASS} ${
                 kpi.negative ? "text-danger-700" : "text-ink-950"
               }`}
             >

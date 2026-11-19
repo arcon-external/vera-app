@@ -91,6 +91,10 @@ type palette struct {
 	category   [5]rgb
 }
 
+// defaultPalette is the built-in Vera brand palette, derived from
+// theme.DefaultTheme. It is not the company's live custom theme: the report
+// export reads no settings and never fetches one, so every PDF uses this
+// stable default until a separate API decision supplies live colours.
 func defaultPalette() palette {
 	resolved := theme.DefaultTheme().Resolve()
 	return palette{
@@ -160,7 +164,8 @@ func (f *faces) width(text string, size float64, bold bool) float64 {
 
 // wrap breaks at whitespace, exactly as the quotation engine wraps its one
 // description column. A single overlong word is left intact rather than split
-// mid-word; the address and method text are prose, not table cells.
+// mid-word; the address and method text are prose, not table cells. Table
+// cells and KPI values use wrapCell, which also splits an unbroken token.
 func (f *faces) wrap(text string, size, maxWidth float64, bold bool) []string {
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -183,6 +188,97 @@ func (f *faces) wrap(text string, size, maxWidth float64, bold bool) []string {
 		lines = append(lines, current)
 	}
 	return lines
+}
+
+// wrapCell wraps a table/KPI value to a measured cell width. It first uses
+// word wrapping; a token that is still wider than the cell (an exact maximum
+// amount, a 128-character label) is split at a readable separator, or between
+// runes as a last resort. Every rune survives: the lines joined back together
+// are the original text, never a truncated stand-in.
+func (f *faces) wrapCell(text string, size, maxWidth float64, bold bool) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if f.width(text, size, bold) <= maxWidth+0.01 {
+		return []string{text}
+	}
+	var lines []string
+	for _, line := range f.wrap(text, size, maxWidth, bold) {
+		if f.width(line, size, bold) <= maxWidth+0.01 {
+			lines = append(lines, line)
+			continue
+		}
+		lines = append(lines, f.splitOverlong(line, size, maxWidth, bold)...)
+	}
+	return lines
+}
+
+// splitOverlong breaks one unbroken token into measured lines. It prefers a
+// break after a separator (grouping dot/comma, space, hyphen) so a money
+// string stays readable; if none is available it breaks between runes.
+func (f *faces) splitOverlong(text string, size, maxWidth float64, bold bool) []string {
+	if maxWidth <= 0 {
+		return []string{text}
+	}
+	runes := []rune(text)
+	var lines []string
+	for len(runes) > 0 {
+		if f.width(string(runes), size, bold) <= maxWidth+0.01 {
+			lines = append(lines, string(runes))
+			break
+		}
+		fit := 0
+		for index := 1; index <= len(runes); index++ {
+			if f.width(string(runes[:index]), size, bold) > maxWidth+0.01 {
+				break
+			}
+			fit = index
+		}
+		if fit == 0 {
+			fit = 1
+		}
+		cut := fit
+		for index := fit; index > fit/2; index-- {
+			if isCellBreak(runes[index-1]) {
+				cut = index
+				break
+			}
+		}
+		if cut == 0 {
+			cut = fit
+		}
+		lines = append(lines, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	return lines
+}
+
+func isCellBreak(value rune) bool {
+	switch value {
+	case ' ', '.', ',', '-', '/', ':', ';', '(', ')':
+		return true
+	default:
+		return false
+	}
+}
+
+// truncateToWidth shortens one line to fit, appending an ellipsis. It is for
+// the footer's repeated company name, where the full name has already wrapped
+// in the header; table cells use wrapCell and never lose a character.
+func (f *faces) truncateToWidth(text string, size, maxWidth float64, bold bool) string {
+	if f.width(text, size, bold) <= maxWidth+0.01 {
+		return text
+	}
+	runes := []rune(text)
+	for len(runes) > 0 {
+		candidate := string(runes) + "…"
+		if f.width(candidate, size, bold) <= maxWidth+0.01 {
+			return candidate
+		}
+		runes = runes[:len(runes)-1]
+	}
+	return "…"
 }
 
 type textPrim struct {

@@ -36,6 +36,53 @@ export interface ReportOption<T extends string = string> {
   label: string;
 }
 
+/**
+ * The KPI strip's responsive geometry, named so the layout and its width guard
+ * cannot drift apart. `columns` is the number of KPI cells on one row at the
+ * named viewport and `valueFontPx` is the font size the money value uses
+ * there. The breakpoints are the AppShell/Card paddings plus Tailwind's
+ * sm/lg/xl stops; a viewport below the first entry is one column at 19px.
+ */
+export interface ReportKpiLayout {
+  viewport: number;
+  columns: number;
+  valueFontPx: number;
+}
+
+export const REPORT_KPI_LAYOUT: readonly ReportKpiLayout[] = [
+  { viewport: 360, columns: 1, valueFontPx: 19 },
+  { viewport: 390, columns: 1, valueFontPx: 19 },
+  { viewport: 640, columns: 2, valueFontPx: 17 },
+  { viewport: 1024, columns: 3, valueFontPx: 17 },
+  { viewport: 1280, columns: 5, valueFontPx: 15 },
+];
+
+/**
+ * The class strings the KPI strip renders with. They are exported so a width
+ * test can assert the named geometry above describes the real layout rather
+ * than a parallel guess. Tailwind scans this module and the component both.
+ */
+export const REPORT_KPI_GRID_CLASS =
+  "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
+export const REPORT_KPI_VALUE_CLASS =
+  "tnum mt-1 whitespace-nowrap text-title font-semibold sm:text-[17px] xl:text-lead";
+
+/**
+ * The usable width of one KPI cell at a viewport, after the page and card
+ * padding and the 16px grid gap. It mirrors AppShell's `px-5 lg:px-8`, the
+ * Card's `p-5`, and the strip's `gap-4`; the width guard uses it to prove the
+ * widest exact figure still fits at every named breakpoint.
+ */
+export function reportKpiCellWidth(viewport: number, columns: number): number {
+  const pagePadding = viewport >= 1024 ? 32 : 20;
+  const cardPadding = 20;
+  const gap = 16;
+  return (
+    (viewport - pagePadding * 2 - cardPadding * 2 - gap * (columns - 1)) /
+    columns
+  );
+}
+
 export const REPORT_PRESET_OPTIONS: readonly ReportOption<ReportPreset>[] = [
   { value: "this-year", label: "This year" },
   { value: "last-year", label: "Last year" },
@@ -282,6 +329,18 @@ export function reportPeriodLabel(periodStart: string, bucket: string): string {
     return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
   }
   return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+/**
+ * A count with en-US grouping, matching the PDF's formatCount exactly.
+ * `toLocaleString` is deliberately not used: ICU data varies by runtime, and
+ * the screen and the document must print the same bytes for 1,234.
+ */
+export function formatReportCount(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  const magnitude = Math.abs(Math.trunc(value));
+  const digits = String(magnitude).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return value < 0 ? `-${digits}` : digits;
 }
 
 /**
