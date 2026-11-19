@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Prepare,
   Export,
+  ExportPurchaseOrderReport,
   GetCustomerPreview,
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
@@ -51,6 +52,7 @@ import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
+import type { PurchaseOrderReportData } from "./poReport";
 import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
   applyQuotationCopy,
@@ -2404,6 +2406,15 @@ function App() {
     []
   );
 
+  // Issue #632: Reports owns busy/cancel/error and the visible snapshot; App
+  // only passes that exact snapshot to the native renderer. The binding never
+  // refetches, so the PDF cannot disagree with the screen.
+  const handleExportPurchaseOrderReport = useCallback(
+    (report: PurchaseOrderReportData) =>
+      ExportPurchaseOrderReport(JSON.stringify(report)),
+    []
+  );
+
   const handleExport = useCallback(async () => {
     // Issue #605: a signed revision cannot be unsent, and a practice one must
     // never be created. Refuse before the binding, exactly as Save and
@@ -3146,6 +3157,7 @@ function App() {
           <PurchaseOrderReportsPage
             defaultCurrency={companyCurrency}
             currencyCatalogue={currencyCatalogue}
+            onExport={handleExportPurchaseOrderReport}
           />
         </div>
       ) : null}
