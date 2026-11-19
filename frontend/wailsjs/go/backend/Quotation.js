@@ -102,6 +102,10 @@ export function GetPurchaseOrderHistory(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
 }
 
+export function GetPurchaseOrderReport(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderReport'](arg1);
+}
+
 export function GetPurchaseOrderReview(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderReview'](arg1);
 }
