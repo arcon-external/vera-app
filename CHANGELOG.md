@@ -4,6 +4,25 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.22.0] - 2026-11-20
+
+### Added
+
+- **Current-period projections in the report.** The Performance section now has
+  a Month/Year switch that sets the report period. Month view runs from the
+  first of the current month to the first of the next, day by day. Once enough
+  working days are recorded, the remaining days appear as a ghost copy of the
+  chart with a low-to-high range. Year view runs from January to January, month
+  by month, and includes the current month: its bar shows the month so far plus
+  a ghost remainder, and the remaining months are ghosted. Projections update as
+  new purchase orders arrive and are never counted in the totals. A Custom range
+  button returns to the historical date controls. (#638)
+
+### Changed
+
+- **No more em-dashes in the app or printed documents.** Empty values use a
+  simple dash and sentences use ordinary punctuation. (#637)
+
 ## [0.21.1] - 2026-11-20
 
 ### Fixed
