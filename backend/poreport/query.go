@@ -10,9 +10,10 @@ const reportDateLayout = "2006-01-02"
 
 // NormalizeQuery validates the report filter and returns its canonical form.
 // It requires half-open YYYY-MM-DD dates (from inclusive, to exclusive), one of
-// the three buckets, one of the six categories (empty means all), a nonempty
+// the four buckets, one of the six categories (empty means all), a nonempty
 // currency, and a range intersecting at most MaxPeriods actual calendar
-// buckets.
+// buckets. A day bucket is additionally confined to one calendar month and at
+// most MaxDayPeriods days.
 //
 // Currency catalogue membership is deliberately not checked here: the API and
 // the store own the currency list. Empty category is normalized to "all" so a
@@ -37,9 +38,9 @@ func NormalizeQuery(query Query) (Query, error) {
 	}
 
 	switch query.Bucket {
-	case BucketMonth, BucketQuarter, BucketYear:
+	case BucketDay, BucketMonth, BucketQuarter, BucketYear:
 	default:
-		return Query{}, fmt.Errorf("%w: bucket %q must be month, quarter or year", ErrInvalid, query.Bucket)
+		return Query{}, fmt.Errorf("%w: bucket %q must be day, month, quarter or year", ErrInvalid, query.Bucket)
 	}
 
 	if query.Category == "" {
@@ -55,6 +56,23 @@ func NormalizeQuery(query Query) (Query, error) {
 
 	if query.Currency == "" {
 		return Query{}, fmt.Errorf("%w: currency is required", ErrInvalid)
+	}
+
+	if query.Bucket == BucketDay {
+		lastIncluded := to.AddDate(0, 0, -1)
+		if from.Year() != lastIncluded.Year() || from.Month() != lastIncluded.Month() {
+			return Query{}, fmt.Errorf(
+				"%w: a day range must stay within one calendar month; %s..%s spans %s..%s",
+				ErrInvalid, query.From, query.To,
+				from.Format(reportDateLayout), lastIncluded.Format(reportDateLayout))
+		}
+		periods := intersectedPeriods(from, to, query.Bucket)
+		if periods > MaxDayPeriods {
+			return Query{}, fmt.Errorf(
+				"%w: %s..%s by day intersects %d days; the cap is %d",
+				ErrRangeTooLarge, query.From, query.To, periods, MaxDayPeriods)
+		}
+		return query, nil
 	}
 
 	periods := intersectedPeriods(from, to, query.Bucket)
@@ -90,6 +108,8 @@ func parseReportDate(value string) (time.Time, error) {
 func intersectedPeriods(from, to time.Time, bucket string) int64 {
 	lastIncluded := to.AddDate(0, 0, -1)
 	switch bucket {
+	case BucketDay:
+		return int64(lastIncluded.Sub(from)/(24*time.Hour)) + 1
 	case BucketMonth:
 		return monthIndex(lastIncluded) - monthIndex(from) + 1
 	case BucketQuarter:
