@@ -216,6 +216,24 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(svg().querySelector("[data-chart-latest-margin]")).not.toBeNull();
   });
 
+  it("places the latest margin label beside its real point, not at the clipped top", async () => {
+    const report = purchaseOrderReportFixture();
+    await render(report);
+    const points = svg().querySelectorAll("[data-chart-margin-point]");
+    const lastPoint = points[points.length - 1];
+    const label = svg().querySelector("[data-chart-latest-margin]");
+    if (lastPoint === undefined || label === null) {
+      throw new Error("expected the margin line and its latest label");
+    }
+    const cy = Number(lastPoint.getAttribute("cy"));
+    const y = Number(label.getAttribute("y"));
+    expect(Number.isFinite(cy)).toBe(true);
+    // 10.77% sits inside a 0-30% plot; a basis-point/percent mix put it at
+    // cy=-8148 and clamped the label to the top edge.
+    expect(cy).toBeGreaterThan(0);
+    expect(Math.abs(y - (cy - 6))).toBeLessThan(1);
+  });
+
   it("shows one overlay and one tooltip with every actual metric on hover", async () => {
     const report = purchaseOrderReportFixture();
     await render(report);
@@ -309,7 +327,7 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(svg().querySelector('[data-category-line="FM"]')).toBeNull();
   });
 
-  it("draws projected columns distinctly, with one amount band and a labelled divider", async () => {
+  it("draws projected columns distinctly, with one range whisker per projected period and a labelled divider", async () => {
     const report = purchaseOrderReportFixture();
     await render(report);
 
@@ -326,7 +344,12 @@ describe("Purchase order performance chart (issue #631)", () => {
         expect(bar.getAttribute("stroke-dasharray")).toBe("3 2");
       }
     }
-    expect(svg().querySelectorAll("[data-chart-band]")).toHaveLength(1);
+    const ranges = svg().querySelectorAll("[data-chart-band]");
+    expect(ranges).toHaveLength(2);
+    for (const range of Array.from(ranges)) {
+      expect(range.querySelectorAll("line")).toHaveLength(3);
+      expect(range.getAttribute("data-bucket-index")).not.toBeNull();
+    }
     expect(svg().querySelector("[data-chart-divider]")).not.toBeNull();
     expect(svg().querySelector("[data-chart-divider-label]")).not.toBeNull();
     expect(figure().textContent).toContain("never included in actual totals");

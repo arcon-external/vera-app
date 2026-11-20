@@ -290,6 +290,18 @@ describe("report chart model (issue #631)", () => {
     // Two separate runs: Jan-Mar and May-Nov. A gap is not a segment to zero.
     expect(layout.marginPath?.match(/M/g)).toHaveLength(2);
     expect(layout.marginPoints).toHaveLength(report.periods.length - 2);
+    for (const point of layout.marginPoints) {
+      expect(point.y).toBeGreaterThanOrEqual(layout.plot.y);
+      expect(point.y).toBeLessThanOrEqual(layout.plot.y + layout.plot.height);
+    }
+    const last = layout.marginPoints[layout.marginPoints.length - 1];
+    const lastBps = report.periods[last.index].marginBps;
+    expect(lastBps).not.toBeNull();
+    const tenPercent = layout.percentTicks.find((tick) => tick.value === 10);
+    if (tenPercent === undefined) throw new Error("expected a 10% tick");
+    // The fixture's latest margin is 10.77%; it must sit by the 10% line, not
+    // 100x higher from reading basis points as percent.
+    expect(Math.abs(last.y - tenPercent.y)).toBeLessThan(20);
     expect(layout.categoryPaths[0].path.match(/M/g)).toHaveLength(2);
   });
 

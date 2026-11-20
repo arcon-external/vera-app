@@ -130,7 +130,7 @@ function MetricCells({
       >
         {money(entry, metrics.marginMinor)}
       </td>
-      <td className="tnum whitespace-nowrap py-3 text-right align-middle text-ink-700">
+      <td className="tnum whitespace-nowrap py-3 pr-5 text-right align-middle text-ink-700">
         {formatReportBps(metrics.marginBps)}
       </td>
     </>
@@ -145,7 +145,7 @@ function CategoryTable({
   entry: CurrencyInfo | null;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="min-w-0 overflow-hidden">
       <div className="px-5 pt-5">
         <SectionTitle title="By category" />
       </div>
@@ -195,7 +195,7 @@ function PeriodTable({
   entry: CurrencyInfo | null;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="min-w-0 overflow-hidden">
       <div className="px-5 pt-5">
         <SectionTitle title="By period" />
       </div>
@@ -261,7 +261,7 @@ function ProjectionTable({
 }) {
   const basis = series.basis;
   return (
-    <div className="border-t border-rule pt-5 first:border-t-0 first:pt-0">
+    <div className="min-w-0 border-t border-rule pt-5 first:border-t-0 first:pt-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-lead font-medium text-ink-900">{title}</h3>
         <Badge tone={series.status === "available" ? "accent" : "neutral"}>
@@ -355,7 +355,7 @@ function ProjectionSection({
   entry: CurrencyInfo | null;
 }) {
   return (
-    <Card className="p-5">
+    <Card className="min-w-0 p-5">
       <SectionHeading
         title="Projection"
         hint="Not included in actual totals"
@@ -404,7 +404,7 @@ function KpiStrip({
     { label: "PO margin %", value: formatReportBps(totals.marginBps) },
   ];
   return (
-    <Card className="p-5">
+    <Card className="min-w-0 p-5">
       <dl
         aria-label="Report KPIs"
         className={REPORT_KPI_GRID_CLASS}
@@ -447,7 +447,7 @@ function LoadingSkeleton() {
 
 function EmptyReport({ report }: { report: PurchaseOrderReportData }) {
   return (
-    <Card className="p-8">
+    <Card className="min-w-0 p-8">
       <h2 className="text-title font-semibold text-ink-950">
         No purchase orders in this range
       </h2>
@@ -463,7 +463,7 @@ function EmptyReport({ report }: { report: PurchaseOrderReportData }) {
 
 function ErrorCard({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <Card className="p-8">
+    <Card className="min-w-0 p-8">
       <h2 className="text-title font-semibold text-ink-950">
         Report unavailable
       </h2>
@@ -555,7 +555,7 @@ export function PurchaseOrderReportsView({
         </div>
       </header>
 
-      <Card className="p-4">
+      <Card className="min-w-0 p-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <label className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">
@@ -686,7 +686,7 @@ export function PurchaseOrderReportsView({
           <PeriodTable report={report} entry={entry} />
           <ProjectionSection report={report} entry={entry} />
           {report.notes.length > 0 ? (
-            <Card className="p-5">
+            <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
               <ul className="grid gap-2 text-small leading-relaxed text-ink-600">
                 {report.notes.map((note) => (

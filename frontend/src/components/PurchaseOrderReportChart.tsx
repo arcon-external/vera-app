@@ -358,13 +358,15 @@ function ChartLegend({
           <li className="inline-flex items-center gap-1.5 text-caption text-ink-600">
             <span
               aria-hidden="true"
-              className="inline-block h-2.5 w-3.5 shrink-0 rounded-[2px] border border-dashed"
-              style={{
-                backgroundColor: SERIES.band,
-                borderColor: SERIES.bandEdge,
-              }}
-            />
-            Low-high amount
+              className="relative inline-block h-3 w-3.5 shrink-0"
+            >
+              <svg width="14" height="12" aria-hidden="true">
+                <line x1="7" y1="1" x2="7" y2="11" stroke={SERIES.bandEdge} strokeWidth="1.2" strokeDasharray="3 2" />
+                <line x1="3" y1="1" x2="11" y2="1" stroke={SERIES.bandEdge} strokeWidth="1.2" />
+                <line x1="3" y1="11" x2="11" y2="11" stroke={SERIES.bandEdge} strokeWidth="1.2" />
+              </svg>
+            </span>
+            Low-high range
           </li>
         ) : null}
         {model.percentScale !== null ? (
@@ -593,7 +595,7 @@ export function PurchaseOrderReportChart({
 
   if (currency === null) {
     return (
-      <Card className="p-5" data-report-chart="">
+      <Card className="min-w-0 p-5" data-report-chart="">
         <SectionHeading
           title="Performance"
           hint={bucketTitle(report.filter.bucket)}
@@ -699,7 +701,7 @@ export function PurchaseOrderReportChart({
     lastMarginPoint.x + 6 + latestLabelWidth > layout.plot.x + layout.plot.width;
 
   return (
-    <Card className="p-5" data-report-chart="">
+    <Card className="min-w-0 p-5" data-report-chart="">
       <SectionHeading
         title="Performance"
         hint={bucketTitle(report.filter.bucket)}
@@ -929,18 +931,40 @@ export function PurchaseOrderReportChart({
                   data-chart-marks
                   data-chart-motion={animate ? "run" : "static"}
                 >
-                  {layout.bandPath !== null ? (
-                    <path
+                  {layout.bandWhiskers.map((whisker, index) => (
+                    <g
+                      key={`range-${index}`}
                       data-chart-band
-                      d={layout.bandPath}
-                      fill={SERIES.band}
-                      fillOpacity={0.72}
-                      stroke={SERIES.bandEdge}
-                      strokeWidth={1}
-                      strokeDasharray="5 3"
+                      data-bucket-index={model.actualCount + index}
                       className={animate ? "report-chart-band-in" : undefined}
-                    />
-                  ) : null}
+                    >
+                      <line
+                        x1={whisker.x}
+                        x2={whisker.x}
+                        y1={whisker.highY}
+                        y2={whisker.lowY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                      />
+                      <line
+                        x1={whisker.x - 4}
+                        x2={whisker.x + 4}
+                        y1={whisker.highY}
+                        y2={whisker.highY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                      />
+                      <line
+                        x1={whisker.x - 4}
+                        x2={whisker.x + 4}
+                        y1={whisker.lowY}
+                        y2={whisker.lowY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                      />
+                    </g>
+                  ))}
 
                   {layout.columns.map((column) => {
                     const bucket = model.buckets[column.index];
