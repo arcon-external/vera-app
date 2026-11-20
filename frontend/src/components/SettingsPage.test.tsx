@@ -296,7 +296,7 @@ describe("the merged Quotation tab", () => {
         onFieldEnter={() => undefined}
       />
     );
-    expect(html).toContain("The Quotation Accent colour is not a complete hex — fix it before saving.");
+    expect(html).toContain("The Quotation Accent colour is not a complete hex. Fix it before saving.");
     expect(
       buttons(html).find((segment) =>
         segment.includes(`>${COMPANY_TAB_SAVES.quotation.button}</button>`)

@@ -70,6 +70,7 @@ describe("shared report snapshot parity (issue #632)", () => {
     const report = normalizePurchaseOrderReport(FIXTURE.report);
     const filters: ReportFilterState = {
       preset: "custom",
+      period: null,
       from: report.filter.from,
       to: addDaysIso(report.filter.to, -1),
       bucket: report.filter.bucket as ReportBucket,
@@ -89,6 +90,7 @@ describe("shared report snapshot parity (issue #632)", () => {
         exporting: false,
         canExport: false,
         onPresetChange: () => undefined,
+        onPeriodChange: () => undefined,
         onFromChange: () => undefined,
         onToChange: () => undefined,
         onBucketChange: () => undefined,

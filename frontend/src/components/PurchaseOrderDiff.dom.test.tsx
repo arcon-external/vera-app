@@ -308,7 +308,7 @@ describe("two-sided difference review (#582)", () => {
 
     render({ items, acknowledgedMissing: ["3"] });
     expect(document.body.textContent).toContain("ACKNOWLEDGED");
-    expect(document.body.textContent).toContain("Quotation line 3 — Spare");
+    expect(document.body.textContent).toContain("Quotation line 3: Spare");
   });
 
   it("acknowledges an extra line through the unchanged callback and then chips it", () => {

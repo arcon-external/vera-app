@@ -20,7 +20,7 @@ import (
 // surfaced by apiclient exactly as every other binding surfaces it.
 
 // GetPurchaseOrderReport fetches the complete report snapshot for one filter.
-// From is inclusive and To exclusive; Bucket is month, quarter or year;
+// From is inclusive and To exclusive; Bucket is day, month, quarter or year;
 // Category is all, FM, FAB, SUPPLY_GEN, OTHERS or UNASSIGNED; Currency is one
 // ISO code and is never converted.
 func (q *Quotation) GetPurchaseOrderReport(query poreport.Query) (poreport.Report, error) {

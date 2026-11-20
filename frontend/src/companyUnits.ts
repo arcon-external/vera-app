@@ -71,7 +71,7 @@ export function validateCompanyUnits(
       return `Unit ${position}: value "${value}" is too long (max ${UOM_VALUE_MAX} characters).`;
     }
     if (!unitValueShaped(value)) {
-      return `Unit ${position}: value "${value}" is not shaped like a unit label — use letters, digits, and - / . only.`;
+      return `Unit ${position}: value "${value}" is not shaped like a unit label. Use letters, digits, and - / . only.`;
     }
     const label = units[i].label.trim();
     if (label === "") return `Unit ${position}: label is required.`;

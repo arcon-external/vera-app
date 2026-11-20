@@ -116,7 +116,7 @@ describe("fetchLoginUpdateNotice is the silent mount check", () => {
     ).resolves.toBeNull();
   });
 
-  it("resolves null — silent — when the check rejects", async () => {
+  it("resolves null, silent, when the check rejects", async () => {
     // The rollout lock-out this issue exists for: the update service is
     // unreachable, and the sign-in screen must show no error for it.
     const check = vi.fn(async () => {
@@ -131,7 +131,7 @@ describe("LoginUpdateNotice markup", () => {
   it("prints both versions and a Download update button beside the copy", () => {
     const html = renderNotice(loginUpdateNotice(UPDATE_NEWER)!);
     expect(html).toContain(
-      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
+      "Vera v0.13.1 is available. You&#x27;re on v0.12.1."
     );
     expect(html).toContain(">Download update</button>");
     expect(html).toContain('role="status"');
@@ -143,7 +143,7 @@ describe("LoginUpdateNotice markup", () => {
     // the #546 regression ("Vera vv0.15.0") and fails here.
     const html = renderNotice(loginUpdateNotice(UPDATE_NEWER)!);
     expect(html).toContain(
-      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
+      "Vera v0.13.1 is available. You&#x27;re on v0.12.1."
     );
     expect(html).not.toContain("vv");
   });
@@ -167,7 +167,7 @@ describe("LoginUpdateNotice markup", () => {
       })!
     );
     expect(html).toContain(
-      "Vera v0.13.1 is available — you&#x27;re on v0.12.1."
+      "Vera v0.13.1 is available. You&#x27;re on v0.12.1."
     );
     expect(html).not.toContain("vv");
 
@@ -283,7 +283,7 @@ describe("the keep-me-signed-in checkbox", () => {
     expect(html).toContain('class="text-caption text-ink-500"');
   });
 
-  it("names the choice in the sign-in form only — the password field it follows exists only there", () => {
+  it("names the choice in the sign-in form only: the password field it follows exists only there", () => {
     // The checkbox lives inside the sign-in branch, after the password
     // label; setup mode renders no password field and no checkbox. The
     // ordering assertion above is what holds this true.

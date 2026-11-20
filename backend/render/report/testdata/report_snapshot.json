@@ -1,5 +1,5 @@
 {
-  "description": "The one full report snapshot shared by the Go PDF renderer and the TypeScript screen. The report itself is the single source of every figure; the expected block is the hand-checked formatting contract both surfaces must print. Negative money, a real measured zero, and a null percentage (em dash) are all present.",
+  "description": "The one full report snapshot shared by the Go PDF renderer and the TypeScript screen. The report itself is the single source of every figure; the expected block is the hand-checked formatting contract both surfaces must print. Negative money, a real measured zero, and a null percentage (hyphen placeholder) are all present.",
   "expected": {
     "metrics": [
       "24",
@@ -16,7 +16,7 @@
       "28.57%",
       "-25.00%",
       "-83.33%",
-      "—"
+      "-"
     ],
     "pdf": {
       "filterRange": "2025-01-01 → 2025-12-20 (exclusive)",
@@ -245,7 +245,7 @@
       },
       {
         "businessCategory": "SUPPLY_GEN",
-        "label": "Goods Supply & General",
+        "label": "Goods Supply \u0026 General",
         "poCount": 5,
         "amountMinor": 246913578,
         "costedMinor": 182000000,
@@ -542,6 +542,20 @@
           }
         ]
       }
+    },
+    "currentProjection": {
+      "mode": "none",
+      "status": "unavailable",
+      "reason": "not_current_period",
+      "method": "The report range is not exactly the current calendar month or year; no current-period projection is computed.",
+      "basis": {
+        "from": "",
+        "to": "",
+        "units": 0,
+        "poCount": 0,
+        "asOf": "2025-12-20"
+      },
+      "buckets": []
     },
     "notes": [
       {

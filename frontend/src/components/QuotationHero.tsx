@@ -97,7 +97,7 @@ export function QuotationHero({
         : "",
     ]
       .filter((part) => part !== "")
-      .join(" · ") || "—";
+      .join(" · ") || "-";
 
   const status =
     statusOverride ??
@@ -106,7 +106,7 @@ export function QuotationHero({
           currentRevision + 1
         )}.`
       : draftSavedLabel
-        ? `Draft saved ${draftSavedLabel} — save again to update it.`
+        ? `Draft saved ${draftSavedLabel}. Save again to update it.`
         : ready
           ? "Ready to export. Review the three stages, then export."
           : "Not saved yet. Save draft stores it so you can continue later.");
@@ -160,7 +160,7 @@ export function QuotationHero({
             data-testid="quotation-hero-total"
             className="tnum mt-1 block whitespace-nowrap text-metric font-semibold normal-case tracking-normal text-white"
           >
-            {currency === null ? "—" : formatMoney(currency, customerGrand)}
+            {currency === null ? "-" : formatMoney(currency, customerGrand)}
           </strong>
           {ppnAmount > 0 ? (
             <span className="mt-0.5 block text-micro-sm normal-case tracking-normal text-accent-200">
@@ -187,8 +187,8 @@ export function QuotationHero({
           <dt className="text-micro-xs uppercase tracking-[0.14em] text-accent-300">
             Terms
           </dt>
-          <dd>{`${incoterm.trim() !== "" ? incoterm : "—"} · ${
-            currencyCode.trim() !== "" ? currencyCode : "—"
+          <dd>{`${incoterm.trim() !== "" ? incoterm : "-"} · ${
+            currencyCode.trim() !== "" ? currencyCode : "-"
           }`}</dd>
         </div>
         <div>

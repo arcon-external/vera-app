@@ -666,7 +666,7 @@ function BulletsEditor({
       {lines.map((line, lineIndex) => (
         <div key={lineIndex} className="flex items-start gap-2">
           <span aria-hidden="true" className="mt-1 select-none text-ink-300">
-            —
+            ·
           </span>
           <WrappingLine
             ariaLabel={ariaLabel(lineIndex + 1)}
@@ -924,7 +924,7 @@ export function ItemRow({
       </Captioned>
       <Captioned label="Unit cost">
         <div className="flex h-10 items-center text-body text-ink-300">
-          —
+          -
         </div>
       </Captioned>
       {purchaseOrder ? null : (
@@ -938,14 +938,14 @@ export function ItemRow({
               {blendedMarginLabel(rollup.margin)}
             </span>
           ) : (
-            <span className="text-caption text-ink-400">—</span>
+            <span className="text-caption text-ink-400">-</span>
           )}
         </div>
       </Captioned>
       )}
       <Captioned label="Discount">
         <div className="flex h-10 items-center text-body text-ink-300">
-          —
+          -
         </div>
       </Captioned>
       <Captioned label="Sells for">
@@ -1180,7 +1180,7 @@ export function ItemRow({
             data-grid-row={index}
             data-grid-col={0}
             aria-label={`Description for line ${index + 1}`}
-            placeholder="Service or product description — paste from Excel for multiple lines"
+            placeholder="Service or product description, or paste from Excel for multiple lines"
             value={item.description}
             onChange={(event) =>
               onChange(item.key, "description", event.target.value)
@@ -1298,7 +1298,7 @@ export function ItemRow({
         <div className="mt-3 rounded-lg bg-paper-subtle/70 p-3 ring-1 ring-rule/60">
           <div className="-mx-3 -mt-3 mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-t-lg border-b border-rule/70 bg-white/70 px-3 py-3">
             <span className="text-micro font-semibold uppercase tracking-[0.1em] text-ink-600">
-              Sub-items — priced individually; the line totals their sum
+              Sub-items: priced individually; the line totals their sum
             </span>
             {mode === "quotation" ? (
             <div
@@ -1398,7 +1398,7 @@ export function ItemRow({
             onChange={() => undefined}
             rows={1}
             aria-label={`Paste sub-item rows for line ${index + 1}`}
-            placeholder="Or paste rows from Excel — description, qty, UoM, unit cost, margin %"
+            placeholder="Or paste rows from Excel: description, qty, UoM, unit cost, margin %"
             onPaste={(event) => onPasteSubRows(item.key, event)}
             className="mt-2 w-full resize-none rounded-md border border-dashed border-rule bg-white/70 px-2.5 py-2 text-caption text-ink-500 outline-hidden transition-colors duration-150 placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-400"
           />
@@ -1540,7 +1540,7 @@ function SubRow({
             <BulletsEditor
               lines={sub.bullets}
               addLabel="Add sub-sub-item"
-              placeholder="Sub-sub-item — what this includes"
+              placeholder="Sub-sub-item: what this includes"
               ariaLabel={(position) => `Sub-sub-item ${position} for ${label}`}
               onAdd={onAddBullet}
               onRemove={onRemoveBullet}

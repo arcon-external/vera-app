@@ -94,6 +94,10 @@ func TestNormalizeQueryRejectsMalformedInput(t *testing.T) {
 			name:  "year zero",
 			query: Query{From: "0000-01-01", To: "0000-02-01", Bucket: "month", Category: "all", Currency: "IDR"},
 		},
+		{
+			name:  "day range spans two months",
+			query: Query{From: "2026-01-31", To: "2026-02-02", Bucket: "day", Category: "all", Currency: "IDR"},
+		},
 	}
 
 	for _, test := range tests {
@@ -132,6 +136,11 @@ func TestNormalizeQueryAcceptsEveryCategoryAndBucket(t *testing.T) {
 			t.Errorf("NormalizeQuery(bucket=%q) error = %v", bucket, err)
 		}
 	}
+
+	day := Query{From: "2026-01-01", To: "2026-02-01", Bucket: BucketDay, Category: CategoryAll, Currency: "IDR"}
+	if _, err := NormalizeQuery(day); err != nil {
+		t.Errorf("NormalizeQuery(bucket=day) error = %v", err)
+	}
 }
 
 func TestNormalizeQueryCountsIntersectedCalendarBuckets(t *testing.T) {
@@ -154,6 +163,10 @@ func TestNormalizeQueryCountsIntersectedCalendarBuckets(t *testing.T) {
 		{name: "121 quarter buckets", from: "1995-10-01", to: "2026-01-01", bucket: "quarter", wantErr: ErrRangeTooLarge},
 		{name: "120 year buckets", from: "1906-01-01", to: "2026-01-01", bucket: "year"},
 		{name: "121 year buckets", from: "1905-01-01", to: "2026-01-01", bucket: "year", wantErr: ErrRangeTooLarge},
+		{name: "one day bucket", from: "2026-01-31", to: "2026-02-01", bucket: "day"},
+		{name: "31 day buckets", from: "2026-01-01", to: "2026-02-01", bucket: "day"},
+		{name: "day range into the next month", from: "2026-01-31", to: "2026-02-02", bucket: "day", wantErr: ErrInvalid},
+		{name: "day range across a year start", from: "2026-12-31", to: "2027-01-02", bucket: "day", wantErr: ErrInvalid},
 	}
 
 	for _, test := range tests {

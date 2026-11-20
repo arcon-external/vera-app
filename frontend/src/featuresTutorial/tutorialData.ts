@@ -42,7 +42,7 @@ export const TUTORIAL_INCOTERMS = "DAP";
  * the guard is that the data is practice -- not that the button is broken.
  */
 export const TUTORIAL_PRACTICE_COPY =
-  "Features Tutorial practice — nothing is saved to your workspace.";
+  "Features Tutorial practice: nothing is saved to your workspace.";
 
 const SOURCE_LINES: PurchaseOrderSourceLineDTO[] = [
   {

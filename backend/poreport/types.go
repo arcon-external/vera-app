@@ -20,6 +20,11 @@ import "errors"
 // to silently reduce this range.
 const MaxPeriods = 120
 
+// MaxDayPeriods is the approved ceiling on a day-bucketed report. A day range
+// is deliberately confined to one calendar month (at most 31 days) so the
+// screen never has to draw an open-ended daily axis.
+const MaxDayPeriods = 31
+
 // MaxExactMinor is the largest amount, ratio or count a report may emit:
 // 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER. int64 is wider, but every
 // figure crosses JSON into the desktop's JS runtime as a number, which cannot
@@ -44,6 +49,7 @@ var (
 // Report query enums. They are the wire vocabulary; a caller may not invent a
 // bucket or category.
 const (
+	BucketDay     = "day"
 	BucketMonth   = "month"
 	BucketQuarter = "quarter"
 	BucketYear    = "year"
@@ -69,9 +75,27 @@ const (
 	ReasonInsufficientHistory = "insufficient_history"
 	ReasonIncompleteCostBasis = "incomplete_cost_basis"
 	ReasonValueOutOfRange     = "value_out_of_range"
+	// ReasonNotCurrentPeriod means the report range is not exactly the current
+	// calendar month (day mode) or current calendar year (month mode), so no
+	// current-period forecast is computed.
+	ReasonNotCurrentPeriod = "not_current_period"
+	// Current-period reasons are the stable codes #638 names. They are
+	// deliberately distinct from the complete-history series' reasons: the
+	// screen needs to say whether it is short of days or short of months.
+	ReasonNoData             = "no_data"
+	ReasonInsufficientDays   = "insufficient_days"
+	ReasonInsufficientMonths = "insufficient_months"
 	// ReasonInvalidQuery is defensive only: a report endpoint normalizes its
 	// query before projection, so a client never receives this code.
 	ReasonInvalidQuery = "invalid_query"
+)
+
+// Current-period projection modes. A report that is not exactly the current
+// month or year is mode none with ReasonNotCurrentPeriod.
+const (
+	ProjectionModeDay   = "day"
+	ProjectionModeMonth = "month"
+	ProjectionModeNone  = "none"
 )
 
 // Projected bucket sources. They name the observations behind the base value.
@@ -79,13 +103,18 @@ const (
 	SourceSameCalendarMonth            = "same_calendar_month"
 	SourceTrailingThreeCompleteMonths  = "trailing_three_complete_months"
 	SourceTrailingTwelveCompleteMonths = "trailing_twelve_complete_months"
+	SourceElapsedDays                  = "elapsed_days"
+	SourceTrailingCompleteMonths       = "trailing_complete_months"
 )
 
 // Projection methods state how the series was built. They deliberately do not
 // call the band a confidence interval.
 const (
-	MethodMonthly = "Median of the same calendar month across complete history; P25-P75 range (min-max under four observations), trailing three complete months when that calendar month has no history."
-	MethodYearly  = "The last twelve complete months held flat; P25-P75 range of rolling twelve-month totals, widened only to include the base."
+	MethodMonthly      = "Median of the same calendar month across complete history; P25-P75 range (min-max under four observations), trailing three complete months when that calendar month has no history."
+	MethodYearly       = "The last twelve complete months held flat; P25-P75 range of rolling twelve-month totals, widened only to include the base."
+	MethodCurrentDay   = "Elapsed-day average of the current month; P25-P75 range of elapsed daily totals (min-max under four observations)."
+	MethodCurrentMonth = "Median of the complete months in trailing history; P25-P75 range of their monthly totals. The current month's remainder uses the elapsed-day average."
+	MethodCurrentNone  = "The report range is not exactly the current calendar month or year; no current-period projection is computed."
 )
 
 // Query is the validated report filter. From is inclusive and To exclusive.
@@ -173,7 +202,11 @@ type Report struct {
 	Categories     []Category       `json:"categories"`
 	CategorySeries []CategorySeries `json:"categorySeries"`
 	Projection     Projection       `json:"projection"`
-	Notes          []Note           `json:"notes"`
+	// CurrentProjection is the current-period forecast. It is a separate
+	// object so it can never be summed into totals or actual periods: a
+	// forecast is not evidence.
+	CurrentProjection CurrentProjection `json:"currentProjection"`
+	Notes             []Note            `json:"notes"`
 }
 
 // Projection holds the two independent forecast series. A quarterly actual
@@ -226,4 +259,67 @@ type ProjectedBucket struct {
 type HistoryMonth struct {
 	MonthStart string `json:"monthStart"`
 	Metrics
+}
+
+// HistoryDay is one elapsed day of the current month. Date is YYYY-MM-DD. The
+// store returns only days that have orders; the projection fills the elapsed
+// days in between with zeros so an average is over calendar days, not over the
+// days that happened to sell.
+type HistoryDay struct {
+	Date string `json:"date"`
+	Metrics
+}
+
+// CurrentProjection is the forecast for the period still in progress. Mode is
+// day when the report is exactly the current month bucketed by day, month when
+// it is exactly the current year, and none otherwise. It is independent of
+// Totals and Periods and is never added to either.
+//
+// In day mode Buckets are the remaining days of the month. In month mode they
+// are the remaining months after the current one, and CurrentMonth carries the
+// month-to-date actuals plus the remainder forecast for the rest of the month.
+// Status unavailable always states one stable reason; a forecast is never
+// invented when a guard or the cost basis fails.
+type CurrentProjection struct {
+	Mode         string                  `json:"mode"`
+	Status       string                  `json:"status"`
+	Reason       string                  `json:"reason,omitempty"`
+	Method       string                  `json:"method"`
+	Basis        CurrentProjectionBasis  `json:"basis"`
+	Buckets      []ProjectedBucket       `json:"buckets"`
+	CurrentMonth *CurrentMonthProjection `json:"currentMonth,omitempty"`
+}
+
+// CurrentProjectionBasis names the window and sample a current-period forecast
+// used. Units is elapsed days in day mode and complete months in month mode.
+// From is inclusive and To exclusive.
+type CurrentProjectionBasis struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Units   int    `json:"units"`
+	PoCount int64  `json:"poCount"`
+	AsOf    string `json:"asOf"`
+}
+
+// CurrentMonthProjection is present in month mode only. Actual is the
+// month-to-date population; Remainder is the rest of the month at the
+// elapsed-day average with its daily P25-P75 band.
+type CurrentMonthProjection struct {
+	Actual    Metrics                    `json:"actual"`
+	Remainder CurrentProjectionRemainder `json:"remainder"`
+}
+
+// CurrentProjectionRemainder is the projected rest of the current month. The
+// band is on the amount only; capital is a single derived figure and margin is
+// derived from the pair. Low, Base and High are totals for all remaining days,
+// not per-day figures.
+type CurrentProjectionRemainder struct {
+	LowMinor     int64  `json:"low"`
+	BaseMinor    int64  `json:"base"`
+	HighMinor    int64  `json:"high"`
+	CapitalMinor int64  `json:"capital"`
+	MarginMinor  int64  `json:"margin"`
+	MarginBps    *int64 `json:"marginBps"`
+	SampleSize   int    `json:"sampleSize"`
+	Source       string `json:"source"`
 }

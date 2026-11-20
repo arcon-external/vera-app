@@ -15,7 +15,7 @@ GENERATED
 05 Jan 2026 08:30:00 UTC
 AS OF
 2026-01-04
-Internal report — not a customer quotation. PPN is excluded from every figure.
+Internal report: not a customer quotation. PPN is excluded from every figure.
 PO COUNT
 120
 PO AMOUNT
@@ -99,7 +99,7 @@ Oct 18
 Nov 18
 Dec 18
 PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 1 of 7
+Page 1 of 6
 === page 2 ===
 Actual periods  ·  3 of 7
 Rp0
@@ -222,7 +222,7 @@ Oct 24
 Nov 24
 Dec 24
 PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 2 of 7
+Page 2 of 6
 === page 3 ===
 Actual periods  ·  7 of 7
 Rp0
@@ -248,36 +248,6 @@ Sep 25
 Oct 25
 Nov 25
 Dec 25
-PROJECTION  ·  ESTIMATES, NEVER INCLUDED IN ACTUAL TOTALS
-Monthly projection  ·  next 12 months
-Shaded band = low–high amount range  ·  line = base
-Rp0
-Rp5M
-Rp10M
-Rp15M
-Jan 26
-Feb 26
-Mar 26
-Apr 26
-May 26
-Jun 26
-Jul 26
-Aug 26
-Sep 26
-Oct 26
-Nov 26
-Dec 26
-Estimates from complete history; not actual evidence.
-Yearly projection  ·  next 3 years
-Shaded band = low–high amount range  ·  line = base
-Rp0
-Rp50M
-Rp100M
-Rp150M
-2026
-2027
-2028
-Estimates from complete history; not actual evidence.
 By business category
 All amounts in IDR. The category rows foot to the total for the selected filter.
 CATEGORY
@@ -325,7 +295,7 @@ Rp24.000.000
 Rp21.600.000
 Rp0
 Rp21.600.000
-—
+-
 Total
 120
 Rp1.200.000.000
@@ -333,9 +303,6 @@ Rp1.080.000.000
 Rp960.000.000
 Rp120.000.000
 12.50%
-PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 3 of 7
-=== page 4 ===
 By period
 All amounts in IDR. P = partial period; IP = period still in progress. Projected periods never appear in this table and never enter the total.
 PERIOD
@@ -492,6 +459,17 @@ Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 3 of 6
+=== page 4 ===
+By period (continued)
+PERIOD
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
 Oct 2017
 1
 Rp10.000.000
@@ -653,17 +631,6 @@ Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 4 of 7
-=== page 5 ===
-By period (continued)
-PERIOD
-POs
-AMOUNT
-COSTED
-CAPITAL
-MARGIN
-MARGIN %
 Sep 2019
 1
 Rp10.000.000
@@ -818,6 +785,17 @@ Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 4 of 6
+=== page 5 ===
+By period (continued)
+PERIOD
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
 Jul 2021
 1
 Rp10.000.000
@@ -979,17 +957,6 @@ Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 5 of 7
-=== page 6 ===
-By period (continued)
-PERIOD
-POs
-AMOUNT
-COSTED
-CAPITAL
-MARGIN
-MARGIN %
 Jun 2023
 1
 Rp10.000.000
@@ -1144,6 +1111,17 @@ Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 5 of 6
+=== page 6 ===
+By period (continued)
+PERIOD
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
 Apr 2025
 1
 Rp10.000.000
@@ -1214,178 +1192,18 @@ Rp1.080.000.000
 Rp960.000.000
 Rp120.000.000
 12.50%
-Projection detail
-The monthly and yearly forecasts are independent. Each states its method and the complete-month sample it was read from; an unavailable forecast
-states why rather than inventing a trend.
-Monthly projection  ·  next 12 months
-Available
-Projected range
-Estimates, not actuals. Low and high bound the amount band; the base is the single planning figure. n is the number of observations behind the range.
-PERIOD
-LOW
-BASE
-HIGH
-CAPITAL
-MARGIN
-MARGIN %
-n
-Jan 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Feb 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Mar 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Apr 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-May 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 6 of 7
-=== page 7 ===
-Projected range (continued)
-PERIOD
-LOW
-BASE
-HIGH
-CAPITAL
-MARGIN
-MARGIN %
-n
-Jun 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Jul 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Aug 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Sep 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Oct 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Nov 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Dec 2026
-Rp8.000.000
-Rp10.000.000
-Rp13.000.000
-Rp7.500.000
-Rp2.500.000
-33.33%
-6
-Method: 
-Median of the same calendar month across complete history; P25-P75 range (min-max under four observations), trailing three complete
-months when that calendar month has no history.
-Basis: 
-History 2016-01-01 to 2026-01-01 (exclusive) · 120 complete months · 120 purchase orders · as of 2026-01-04.
-Bucket sources: 
-Same calendar month across complete history [same_calendar_month]
-Yearly projection  ·  next 3 years
-Available
-Projected range
-Estimates, not actuals. Low and high bound the amount band; the base is the single planning figure. n is the number of observations behind the range.
-PERIOD
-LOW
-BASE
-HIGH
-CAPITAL
-MARGIN
-MARGIN %
-n
-2026
-Rp100.000.000
-Rp120.000.000
-Rp150.000.000
-Rp90.000.000
-Rp30.000.000
-33.33%
-12
-2027
-Rp100.000.000
-Rp120.000.000
-Rp150.000.000
-Rp90.000.000
-Rp30.000.000
-33.33%
-12
-2028
-Rp100.000.000
-Rp120.000.000
-Rp150.000.000
-Rp90.000.000
-Rp30.000.000
-33.33%
-12
-Method: 
-The last twelve complete months held flat; P25-P75 range of rolling twelve-month totals, widened only to include the base.
-Basis: 
-History 2016-01-01 to 2026-01-01 (exclusive) · 120 complete months · 120 purchase orders · as of 2026-01-04.
-Bucket sources: 
-Trailing twelve complete months [trailing_twelve_complete_months]
+Current-period projection
+A forecast for the period still in progress. It is drawn as a hatched ghost on the chart and never enters an actual table or total.
+Mode: None  ·  not the current month or year
+Unavailable
+REASON  not_current_period
+This range is not the current month or year. A projection applies to the current month or year.
+Method:
+The report range is not exactly the current calendar month or year; no current-period projection is computed.
+Basis:
+No sample window is stated; as of 4 Jan 2026.
+Updates:
+This forecast updates as data arrives. Projected figures never enter an actual table or total.
 Report notes
 •
 Some purchase orders in this range carry a retired whole-order discount or adjustment. The amount includes it, but it is not supplier cost and
@@ -1404,8 +1222,8 @@ profit. PPH23 is not subtracted: this is a PO margin, not the quotation's nett p
 Corrections are counted once at their current values. A correction can move a purchase order between periods, so this report reflects current
 records, not the values as they stood when each order was received.
 •
-Projected periods are estimates from complete history. They are drawn as a low–high range with a base, never styled as actuals, and never
-included in an actual total.
+Current-period projections are estimates from elapsed days or complete months. They are drawn as hatched ghosts with a low-high range,
+never styled as actuals, and never included in an actual table or total.
 •
 Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of
 time had passed.
@@ -1413,4 +1231,4 @@ time had passed.
 All money is in IDR and no figure is converted between currencies. Counts may combine currencies only within the selected one; money
 never does.
 PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 7 of 7
+Page 6 of 6

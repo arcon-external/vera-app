@@ -7,7 +7,11 @@ import type {
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
 } from "./poReport";
-import { purchaseOrderReportFixture } from "./poReportFixtures";
+import {
+  purchaseOrderReportFixture,
+  purchaseOrderReportMonthFixture,
+  purchaseOrderReportYearFixture,
+} from "./poReportFixtures";
 import {
   buildReportChart,
   chartPeriodLabel,
@@ -121,8 +125,6 @@ function emptyReport(): PurchaseOrderReportData {
   report.totals = metrics(0, 0, 0, 0, null);
   report.categories = [];
   report.categorySeries = [];
-  report.projection.monthly.buckets = [];
-  report.projection.yearly.buckets = [];
   return report;
 }
 
@@ -130,12 +132,6 @@ function oneBucketReport(): PurchaseOrderReportData {
   const report = purchaseOrderReportFixture();
   report.periods = [report.periods[5]];
   report.categorySeries = [];
-  report.projection.monthly.status = "unavailable";
-  report.projection.monthly.reason = "insufficient_history";
-  report.projection.monthly.buckets = [];
-  report.projection.yearly.status = "unavailable";
-  report.projection.yearly.reason = "insufficient_history";
-  report.projection.yearly.buckets = [];
   return report;
 }
 
@@ -153,19 +149,13 @@ function monthReport(count: number): PurchaseOrderReportData {
   });
   report.categories = [];
   report.categorySeries = [];
-  report.projection.monthly.status = "unavailable";
-  report.projection.monthly.reason = "insufficient_history";
-  report.projection.monthly.buckets = [];
-  report.projection.yearly.status = "unavailable";
-  report.projection.yearly.reason = "insufficient_history";
-  report.projection.yearly.buckets = [];
   return report;
 }
 
 function sharedReport(): PurchaseOrderReportData {
   const report = normalizePurchaseOrderReport(SHARED_SNAPSHOT.report);
-  // The shared snapshot's own filter is monthly; the chart tests choose the
-  // yearly view explicitly to prove which projection series it uses.
+  // The shared snapshot is a historical 2025 range, so it carries no
+  // current-period ghost; the chart tests use it for actual marks only.
   report.filter.bucket = "year";
   return report;
 }
@@ -240,7 +230,7 @@ describe("chart axes formatting (issue #631)", () => {
     expect(compactChartMoney(USD, 5)).toBe("$0.05");
     expect(compactChartMoney(USD, 123_456)).toBe("$1.2K");
     expect(compactChartMoney(EUR, 123_456)).toBe("1.2K €");
-    expect(compactChartMoney(null, 150_000_000)).toBe("—");
+    expect(compactChartMoney(null, 150_000_000)).toBe("-");
   });
 
   it("formats percent ticks as a percentage, compacting only extreme values", () => {
@@ -255,21 +245,36 @@ describe("chart axes formatting (issue #631)", () => {
     expect(chartPeriodLabel("2026-11-01", "month")).toBe("Nov 26");
     expect(chartPeriodLabel("2026-04-01", "quarter")).toBe("Q2 26");
     expect(chartPeriodLabel("2026-01-01", "year")).toBe("2026");
+    expect(chartPeriodLabel("2026-11-19", "day")).toBe("19");
     expect(chartPeriodLabel("not-a-date", "month")).toBe("not-a-date");
   });
 });
 
 describe("report chart model (issue #631)", () => {
-  it("includes actual money and every visible forecast bound in the money domain", () => {
-    const report = purchaseOrderReportFixture();
-    report.projection.monthly.buckets[0].amountHighMinor = 900_000_000;
-    report.projection.monthly.buckets[0].capitalMinor = 950_000_000;
-    report.projection.monthly.buckets[0].marginMinor = -200_000_000;
+  it("includes actual money and every ghost bound in the money domain", () => {
+    const report = purchaseOrderReportMonthFixture();
+    report.currentProjection.buckets[0].amountHighMinor = 900_000_000;
+    report.currentProjection.buckets[0].capitalMinor = 950_000_000;
+    report.currentProjection.buckets[0].marginMinor = -200_000_000;
     const model = buildReportChart(report, []);
     expect(model.moneyScale.min).toBeLessThanOrEqual(-200_000_000);
     expect(model.moneyScale.max).toBeGreaterThanOrEqual(950_000_000);
-    expect(model.projectedCount).toBe(2);
-    expect(model.dividerIndex).toBe(report.periods.length);
+    expect(model.projectedCount).toBe(11);
+    expect(model.actualCount).toBe(19);
+    expect(model.dividerIndex).toBe(19);
+  });
+
+  it("includes the current month's stacked remainder in the money domain", () => {
+    const report = purchaseOrderReportYearFixture();
+    report.currentProjection.currentMonth!.remainder.high = 900_000_000;
+    const model = buildReportChart(report, []);
+    const november = model.buckets.find(
+      (bucket) => bucket.periodStart === "2026-11-01"
+    )!;
+    expect(model.moneyScale.max).toBeGreaterThanOrEqual(
+      november.amountMinor + 900_000_000
+    );
+    expect(model.hasRemainder).toBe(true);
   });
 
   it("keeps null percentages as gaps and never turns them into a zero line", () => {
@@ -331,32 +336,110 @@ describe("report chart model (issue #631)", () => {
     expect(model.categoryFootnote).toContain("omitted");
   });
 
-  it("uses the monthly projection for months, yearly for years and none for quarters", () => {
-    const month = buildReportChart(purchaseOrderReportFixture(), []);
-    expect(month.projectionKind).toBe("monthly");
-    expect(month.projectedCount).toBe(2);
+  it("draws current-period ghosts for Month and Year, never for quarters or years", () => {
+    const month = buildReportChart(purchaseOrderReportMonthFixture(), []);
+    expect(month.projectionKind).toBe("day");
+    expect(month.projectedCount).toBe(11);
+    expect(month.actualCount).toBe(19);
 
-    const year = buildReportChart(sharedReport(), []);
-    expect(year.projectionKind).toBe("yearly");
-    expect(year.projectedCount).toBe(3);
-    expect(year.buckets.filter((bucket) => bucket.projected)).toHaveLength(3);
+    const year = buildReportChart(purchaseOrderReportYearFixture(), []);
+    expect(year.projectionKind).toBe("month");
+    expect(year.projectedCount).toBe(1);
+    expect(year.actualCount).toBe(11);
+    expect(year.hasRemainder).toBe(true);
 
-    const quarter = purchaseOrderReportFixture();
-    quarter.filter.bucket = "quarter";
-    const quarterly = buildReportChart(quarter, []);
-    expect(quarterly.projectedCount).toBe(0);
-    expect(quarterly.projectionKind).toBe("none");
-    expect(quarterly.projectionNote).toContain("No quarterly projection");
+    for (const bucket of ["quarter", "year"] as const) {
+      const report = purchaseOrderReportFixture();
+      report.filter.bucket = bucket;
+      const model = buildReportChart(report, []);
+      expect(model.projectedCount).toBe(0);
+      expect(model.projectionKind).toBe("none");
+      expect(model.projectionNote).toContain("Month and Year views");
+    }
   });
 
-  it("explains an unavailable projection instead of drawing a flat line", () => {
-    const report = purchaseOrderReportFixture();
-    report.projection.monthly.status = "unavailable";
-    report.projection.monthly.reason = "insufficient_history";
-    report.projection.monthly.buckets = [];
+  it("explains an unavailable current-period projection instead of drawing a flat line", () => {
+    const report = purchaseOrderReportMonthFixture();
+    report.currentProjection.status = "unavailable";
+    report.currentProjection.reason = "insufficient_days";
+    report.currentProjection.buckets = [];
     const model = buildReportChart(report, []);
     expect(model.projectedCount).toBe(0);
-    expect(model.projectionNote).toContain("Not enough complete-month history");
+    expect(model.projectionNote).toContain("Not enough elapsed days");
+    expect(model.hasRemainder).toBe(false);
+  });
+
+  it("draws month ghost days after the last elapsed day with day-number labels", () => {
+    const report = purchaseOrderReportMonthFixture();
+    const model = buildReportChart(report, []);
+    expect(model.actualCount).toBe(19);
+    expect(model.projectedCount).toBe(11);
+    expect(model.buckets[18].periodStart).toBe("2026-11-19");
+    expect(model.buckets[18].label).toBe("19");
+    expect(model.buckets[19].periodStart).toBe("2026-11-20");
+    expect(model.buckets[19].label).toBe("20");
+    expect(model.buckets.at(-1)?.periodStart).toBe("2026-11-30");
+    expect(model.buckets.at(-1)?.label).toBe("30");
+    expect(model.dividerIndex).toBe(19);
+
+    const layout = layoutReportChart(model, 960);
+    expect(layout.bandWhiskers).toHaveLength(11);
+    expect(layout.remainderWhisker).toBeNull();
+    expect(layout.xLabels[0]?.label).toBe("1");
+    expect(layout.xLabels.at(-1)?.label).toBe("30");
+    for (const whisker of layout.bandWhiskers) {
+      expect(Number.isFinite(whisker.lowY)).toBe(true);
+      expect(whisker.highY).toBeLessThan(whisker.lowY);
+    }
+  });
+
+  it("stacks the current month's remainder and ghosts later months in Year mode", () => {
+    const report = purchaseOrderReportYearFixture();
+    const model = buildReportChart(report, []);
+    expect(model.actualCount).toBe(11);
+    expect(model.projectedCount).toBe(1);
+    expect(model.buckets[10].periodStart).toBe("2026-11-01");
+    expect(model.buckets[10].amountMinor).toBe(
+      report.currentProjection.currentMonth!.actual.amountMinor
+    );
+    expect(model.buckets[10].remainder).toEqual(
+      report.currentProjection.currentMonth!.remainder
+    );
+    expect(model.buckets[11].periodStart).toBe("2026-12-01");
+    expect(model.buckets[11].label).toBe("Dec 26");
+
+    const layout = layoutReportChart(model, 960);
+    const november = layout.columns[10];
+    expect(november.remainder).not.toBeNull();
+    for (const segment of [
+      november.remainder!.amount,
+      november.remainder!.capital,
+      november.remainder!.margin,
+    ]) {
+      expect(segment.height).toBeGreaterThan(0);
+      expect(Number.isFinite(segment.y)).toBe(true);
+    }
+    // The stacked amount segment sits above the actual bar: its bottom is the
+    // actual amount's top, so it is a remainder, not a second full bar.
+    expect(november.remainder!.amount.y).toBeLessThan(november.amount.y);
+    expect(
+      november.remainder!.amount.y + november.remainder!.amount.height
+    ).toBeCloseTo(november.amount.y, 6);
+    expect(layout.remainderWhisker).not.toBeNull();
+    expect(layout.bandWhiskers).toHaveLength(1);
+    expect(layout.marginPoints).toHaveLength(11);
+  });
+
+  it("draws no ghost on a historical range and states why", () => {
+    const report = purchaseOrderReportFixture();
+    const model = buildReportChart(report, []);
+    expect(model.projectedCount).toBe(0);
+    expect(model.actualCount).toBe(report.periods.length);
+    expect(model.projectionNote).toContain("not the current month or year");
+    const layout = layoutReportChart(model, 960);
+    expect(layout.bandWhiskers).toEqual([]);
+    expect(layout.remainderWhisker).toBeNull();
+    expect(layout.dividerX).toBeNull();
   });
 
   it("orders category toggles by the workbook vocabulary and includes Unassigned when defined", () => {
@@ -396,11 +479,12 @@ describe("report chart model (issue #631)", () => {
     expect(reportChartDataKey(changed)).not.toBe(reportChartDataKey(report));
   });
 
-  it("ignores projections this view does not draw when deciding to animate", () => {
-    const report = purchaseOrderReportFixture();
+  it("ignores the retired projection series and follows the current-period ghost", () => {
+    const report = purchaseOrderReportMonthFixture();
     const base = reportChartDataKey(report);
 
-    report.projection.yearly.buckets = [
+    const clone = structuredClone(report);
+    clone.projection.monthly.buckets = [
       {
         periodStart: "2027-01-01",
         amountLowMinor: 1,
@@ -410,19 +494,19 @@ describe("report chart model (issue #631)", () => {
         marginMinor: 1,
         marginBps: 100,
         sampleSize: 1,
-        source: "trailing_twelve_complete_months",
+        source: "same_calendar_month",
       },
     ];
-    expect(reportChartDataKey(report)).toBe(base);
+    expect(reportChartDataKey(clone)).toBe(base);
 
-    report.projection.monthly.buckets[0].amountBaseMinor += 1;
-    expect(reportChartDataKey(report)).not.toBe(base);
+    clone.currentProjection.buckets[0].amountBaseMinor += 1;
+    expect(reportChartDataKey(clone)).not.toBe(base);
 
-    const quarter = purchaseOrderReportFixture();
-    quarter.filter.bucket = "quarter";
-    const quarterBase = reportChartDataKey(quarter);
-    quarter.projection.monthly.buckets[0].amountBaseMinor += 1;
-    expect(reportChartDataKey(quarter)).toBe(quarterBase);
+    const year = purchaseOrderReportYearFixture();
+    const yearBase = reportChartDataKey(year);
+    const yearClone = structuredClone(year);
+    yearClone.currentProjection.currentMonth!.remainder.base += 1;
+    expect(reportChartDataKey(yearClone)).not.toBe(yearBase);
   });
 
   it("never returns NaN geometry for empty, one-bucket or zero-capital data", () => {

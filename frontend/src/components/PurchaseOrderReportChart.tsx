@@ -34,8 +34,9 @@ import {
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import type {
+  PurchaseOrderReportCurrentProjection,
   PurchaseOrderReportData,
-  PurchaseOrderReportProjectionSeries,
+  PurchaseOrderReportCurrentProjectionBasis,
 } from "../poReport";
 import {
   buildReportChart,
@@ -47,12 +48,15 @@ import {
   type ReportChartLayout,
   type ReportChartModel,
 } from "../poReportChart";
+import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
+import { PurchaseOrderReportProjectionSummary } from "./PurchaseOrderReportProjectionSummary";
 import {
   formatReportBps,
   formatReportCount,
   formatReportDate,
   projectionSourceLabel,
   reportPeriodLabel,
+  type ReportPeriodMode,
 } from "../poReportPage";
 import { Badge, Card, SectionHeading } from "./ui";
 
@@ -60,6 +64,9 @@ export interface PurchaseOrderReportChartProps {
   report: PurchaseOrderReportData;
   /** Null when the app's catalogue cannot name the report currency. */
   currency: CurrencyInfo | null;
+  /** The active Month/Year current-period mode, or null for a custom range. */
+  period?: ReportPeriodMode | null;
+  onPeriodChange?: (period: ReportPeriodMode | null) => void;
 }
 
 const SERIES = {
@@ -136,11 +143,18 @@ function useMeasuredWidth(): {
 function bucketTitle(bucket: string): string {
   if (bucket === "year") return "Yearly";
   if (bucket === "quarter") return "Quarterly";
+  if (bucket === "day") return "Daily";
   return "Monthly";
 }
 
+function chartViewHint(bucket: string, period: ReportPeriodMode | null): string {
+  if (period === "month") return "Month view, daily";
+  if (period === "year") return "Year view, monthly";
+  return bucketTitle(bucket);
+}
+
 function money(currency: CurrencyInfo | null, minor: number): string {
-  return currency === null ? "—" : formatMoney(currency, minor);
+  return currency === null ? "-" : formatMoney(currency, minor);
 }
 
 function nearestBucket(layout: ReportChartLayout, contentX: number): number | null {
@@ -152,31 +166,40 @@ function nearestBucket(layout: ReportChartLayout, contentX: number): number | nu
   );
 }
 
-function projectionSeries(
-  report: PurchaseOrderReportData,
-  kind: ReportChartModel["projectionKind"]
-): PurchaseOrderReportProjectionSeries | null {
-  if (kind === "monthly") return report.projection.monthly;
-  if (kind === "yearly") return report.projection.yearly;
-  return null;
+function basisLine(
+  basis: PurchaseOrderReportCurrentProjectionBasis,
+  mode: string
+): string {
+  const units =
+    mode === "day"
+      ? `${formatReportCount(basis.units)} elapsed ${
+          basis.units === 1 ? "day" : "days"
+        }`
+      : `${formatReportCount(basis.units)} complete ${
+          basis.units === 1 ? "month" : "months"
+        }`;
+  return `${units} · ${formatReportCount(basis.poCount)} ${
+    basis.poCount === 1 ? "PO" : "POs"
+  } observed · as of ${formatReportDate(basis.asOf)}`;
 }
 
 function ChartTooltip({
   bucket,
   model,
-  series,
+  current,
   currency,
   left,
   width,
 }: {
   bucket: ReportChartBucket;
   model: ReportChartModel;
-  series: PurchaseOrderReportProjectionSeries | null;
+  current: PurchaseOrderReportCurrentProjection;
   currency: CurrencyInfo;
   left: number;
   width: number;
 }) {
   const projected = bucket.projected;
+  const remainder = bucket.remainder;
   const rows: Array<{ label: string; value: string; negative?: boolean }> =
     projected && bucket.projectedDetail !== null
       ? [
@@ -229,6 +252,14 @@ function ChartTooltip({
           { label: "Coverage", value: formatReportBps(bucket.coverageBps) },
         ];
 
+  if (remainder !== null && !projected) {
+    rows.push(
+      { label: "Remainder low", value: money(currency, remainder.low) },
+      { label: "Remainder base", value: money(currency, remainder.base) },
+      { label: "Remainder high", value: money(currency, remainder.high) }
+    );
+  }
+
   return (
     <div
       data-chart-tooltip
@@ -241,6 +272,9 @@ function ChartTooltip({
           {reportPeriodLabel(bucket.periodStart, model.bucket)}
         </p>
         {projected ? <Badge tone="accent">Projected</Badge> : null}
+        {remainder !== null ? (
+          <Badge tone="accent">Remainder projected</Badge>
+        ) : null}
         {bucket.inProgress ? <Badge tone="neutral">In progress</Badge> : null}
         {bucket.partial && !bucket.inProgress ? (
           <Badge tone="neutral">Partial</Badge>
@@ -260,12 +294,15 @@ function ChartTooltip({
           </div>
         ))}
       </dl>
-      {projected && series !== null ? (
+      {projected ? (
         <p className="mt-2 border-t border-rule pt-2 text-micro leading-relaxed text-ink-500">
-          Basis: {series.basis.completeMonths} complete months ·{" "}
-          {formatReportCount(series.basis.poCount)} POs observed · as of{" "}
-          {formatReportDate(series.basis.asOf)}. Estimate from complete
-          history, never actual evidence.
+          Basis: {basisLine(current.basis, current.mode)}. Estimate from the
+          current-period sample, never actual evidence.
+        </p>
+      ) : remainder !== null && current.mode !== "none" ? (
+        <p className="mt-2 border-t border-rule pt-2 text-micro leading-relaxed text-ink-500">
+          Basis: {basisLine(current.basis, current.mode)}. The remainder is an
+          estimate, never actual evidence.
         </p>
       ) : null}
     </div>
@@ -348,13 +385,13 @@ function ChartLegend({
             Uncosted
           </li>
         ) : null}
-        {model.projectedCount > 0 ? (
+        {model.projectedCount > 0 || model.hasRemainder ? (
           <li className="inline-flex items-center gap-1.5 text-caption text-ink-600">
             <LegendSwatch color={SERIES.accent} hatched outlined />
             Projected
           </li>
         ) : null}
-        {model.projectedCount > 0 ? (
+        {model.projectedCount > 0 || model.hasRemainder ? (
           <li className="inline-flex items-center gap-1.5 text-caption text-ink-600">
             <span
               aria-hidden="true"
@@ -410,6 +447,8 @@ function ChartLegend({
 export function PurchaseOrderReportChart({
   report,
   currency,
+  period = null,
+  onPeriodChange,
 }: PurchaseOrderReportChartProps) {
   const rawId = useId();
   const uid = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -504,7 +543,6 @@ export function PurchaseOrderReportChart({
 
   const activeBucket =
     activeIndex === null ? null : model.buckets[activeIndex] ?? null;
-  const activeSeries = projectionSeries(report, model.projectionKind);
   const tooltipWidth = Math.max(
     180,
     Math.min(320, Math.max(1, measuredWidth) - 16)
@@ -593,13 +631,26 @@ export function PurchaseOrderReportChart({
     }
   };
 
+  const periodControl =
+    onPeriodChange === undefined ? null : (
+      <PurchaseOrderReportPeriodToggle
+        period={period}
+        onPeriodChange={onPeriodChange}
+      />
+    );
+
   if (currency === null) {
     return (
       <Card className="min-w-0 p-5" data-report-chart="">
         <SectionHeading
           title="Performance"
-          hint={bucketTitle(report.filter.bucket)}
+          hint={chartViewHint(report.filter.bucket, period)}
         />
+        {periodControl !== null ? (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            {periodControl}
+          </div>
+        ) : null}
         <p className="max-w-3xl text-small leading-relaxed text-ink-600">
           {report.filter.currency} is not in this app's currency catalogue, so
           the money chart cannot be labelled honestly. The period table below
@@ -609,24 +660,24 @@ export function PurchaseOrderReportChart({
     );
   }
 
-  const series = projectionSeries(report, model.projectionKind);
+  const current = report.currentProjection;
   const notes: string[] = [];
   if (model.projectionNote !== null) notes.push(model.projectionNote);
   if (
     model.projectedCount === 0 &&
-    model.projectionKind !== "none" &&
-    series !== null &&
-    series.status !== "available"
+    current.mode !== "none" &&
+    current.status !== "available"
   ) {
-    notes.push(
-      `Basis: ${series.basis.completeMonths} complete months, ${formatReportCount(
-        series.basis.poCount
-      )} POs observed, as of ${formatReportDate(series.basis.asOf)}.`
-    );
+    notes.push(`Basis: ${basisLine(current.basis, current.mode)}.`);
   }
   if (model.projectedCount > 0) {
     notes.push(
-      "Projected periods follow the dashed divider: hatched, outlined and estimated from complete history. They are never included in actual totals; the margin % line and category lines cover actual periods only."
+      "Projected periods follow the dashed divider: hatched, outlined and estimated from the current-period sample. They are never included in actual totals; the margin % line and category lines cover actual periods only."
+    );
+  }
+  if (model.hasRemainder) {
+    notes.push(
+      "The current month's translucent stack is its projected remainder. It sits on the actual month-to-date bar and is never included in actual totals."
     );
   }
   if (model.hasUncosted) {
@@ -650,9 +701,12 @@ export function PurchaseOrderReportChart({
     (model.projectedCount > 0
       ? "Projected periods after the dashed divider are estimates and are never included in actual totals. "
       : "") +
+    (model.hasRemainder
+      ? "The current month's projected remainder is the translucent stack on its actual bar and is never included in actual totals. "
+      : "") +
     "Use the Left and Right Arrow keys to inspect one period; the period table after this chart lists every exact value.";
 
-  const announcement =
+  const announcementBase =
     activeBucket === null || !keyboardActive
       ? ""
       : activeBucket.projected && activeBucket.projectedDetail !== null
@@ -689,6 +743,16 @@ export function PurchaseOrderReportChart({
           )}, margin ${formatReportBps(
             activeBucket.marginBps
           )}, coverage ${formatReportBps(activeBucket.coverageBps)}.`;
+  const announcement =
+    announcementBase === "" || activeBucket?.remainder == null
+      ? announcementBase
+      : `${announcementBase} Projected remainder low ${money(
+          currency,
+          activeBucket.remainder.low
+        )}, base ${money(
+          currency,
+          activeBucket.remainder.base
+        )}, high ${money(currency, activeBucket.remainder.high)}.`;
 
   const lastMarginPoint = layout.marginPoints.at(-1);
   const latestBucket =
@@ -704,8 +768,13 @@ export function PurchaseOrderReportChart({
     <Card className="min-w-0 p-5" data-report-chart="">
       <SectionHeading
         title="Performance"
-        hint={bucketTitle(report.filter.bucket)}
+        hint={chartViewHint(report.filter.bucket, period)}
       />
+      {periodControl !== null ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          {periodControl}
+        </div>
+      ) : null}
       <figure className="m-0">
         <figcaption
           id={captionId}
@@ -966,6 +1035,39 @@ export function PurchaseOrderReportChart({
                     </g>
                   ))}
 
+                  {layout.remainderWhisker !== null ? (
+                    <g
+                      data-chart-remainder-band
+                      className={animate ? "report-chart-band-in" : undefined}
+                    >
+                      <line
+                        x1={layout.remainderWhisker.x}
+                        x2={layout.remainderWhisker.x}
+                        y1={layout.remainderWhisker.highY}
+                        y2={layout.remainderWhisker.lowY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                      />
+                      <line
+                        x1={layout.remainderWhisker.x - 4}
+                        x2={layout.remainderWhisker.x + 4}
+                        y1={layout.remainderWhisker.highY}
+                        y2={layout.remainderWhisker.highY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                      />
+                      <line
+                        x1={layout.remainderWhisker.x - 4}
+                        x2={layout.remainderWhisker.x + 4}
+                        y1={layout.remainderWhisker.lowY}
+                        y2={layout.remainderWhisker.lowY}
+                        stroke={SERIES.bandEdge}
+                        strokeWidth={1.2}
+                      />
+                    </g>
+                  ) : null}
+
                   {layout.columns.map((column) => {
                     const bucket = model.buckets[column.index];
                     const projected = bucket.projected;
@@ -984,6 +1086,7 @@ export function PurchaseOrderReportChart({
                         data-amount={bucket.amountMinor}
                         data-capital={bucket.capitalMinor}
                         data-margin={bucket.marginMinor}
+                        opacity={projected ? 0.85 : undefined}
                         className={
                           animate ? "report-chart-column-in" : undefined
                         }
@@ -1073,6 +1176,68 @@ export function PurchaseOrderReportChart({
                             strokeWidth={projected ? 1 : undefined}
                             strokeDasharray={projected ? "3 2" : undefined}
                           />
+                        ) : null}
+                        {column.remainder !== null && bucket.remainder !== null ? (
+                          <g
+                            data-chart-remainder=""
+                            data-remainder-low={bucket.remainder.low}
+                            data-remainder-base={bucket.remainder.base}
+                            data-remainder-high={bucket.remainder.high}
+                            data-remainder-capital={bucket.remainder.capital}
+                            data-remainder-margin={bucket.remainder.margin}
+                            opacity={0.8}
+                          >
+                            {showBar(column.remainder.amount.height) ? (
+                              <rect
+                                data-series-remainder="amount"
+                                x={column.remainder.amount.x}
+                                y={column.remainder.amount.y}
+                                width={column.remainder.amount.width}
+                                height={column.remainder.amount.height}
+                                rx={column.remainder.amount.width > 6 ? 1.5 : 0}
+                                fill={`url(#${projectedAmountId})`}
+                                stroke={SERIES.amount}
+                                strokeWidth={1}
+                                strokeDasharray="3 2"
+                              />
+                            ) : null}
+                            {showBar(column.remainder.capital.height) ? (
+                              <rect
+                                data-series-remainder="capital"
+                                x={column.remainder.capital.x}
+                                y={column.remainder.capital.y}
+                                width={column.remainder.capital.width}
+                                height={column.remainder.capital.height}
+                                rx={column.remainder.capital.width > 6 ? 1.5 : 0}
+                                fill={`url(#${projectedCapitalId})`}
+                                stroke={SERIES.capital}
+                                strokeWidth={1}
+                                strokeDasharray="3 2"
+                              />
+                            ) : null}
+                            {showBar(column.remainder.margin.height) ? (
+                              <rect
+                                data-series-remainder="margin"
+                                x={column.remainder.margin.x}
+                                y={column.remainder.margin.y}
+                                width={column.remainder.margin.width}
+                                height={column.remainder.margin.height}
+                                rx={column.remainder.margin.width > 6 ? 1.5 : 0}
+                                fill={`url(#${
+                                  bucket.remainder.margin < 0
+                                    ? projectedMarginNegId
+                                    : projectedMarginPosId
+                                })`}
+                                stroke={
+                                  bucket.remainder.margin < 0
+                                    ? SERIES.marginNegative
+                                    : SERIES.marginPositive
+                                }
+                                strokeWidth={1}
+                                strokeDasharray="3 2"
+                              />
+                            ) : null}
+                          </g>
                         ) : null}
                       </g>
                     );
@@ -1245,7 +1410,7 @@ export function PurchaseOrderReportChart({
             <ChartTooltip
               bucket={activeBucket}
               model={model}
-              series={activeSeries}
+              current={current}
               currency={currency}
               left={tooltipLeft}
               width={tooltipWidth}
@@ -1271,6 +1436,10 @@ export function PurchaseOrderReportChart({
           </ul>
         ) : null}
       </figure>
+      <PurchaseOrderReportProjectionSummary
+        report={report}
+        currency={currency}
+      />
     </Card>
   );
 }

@@ -3501,6 +3501,32 @@ export namespace poreport {
 	        this.address = source["address"];
 	    }
 	}
+	export class CurrentProjectionRemainder {
+	    low: number;
+	    base: number;
+	    high: number;
+	    capital: number;
+	    margin: number;
+	    marginBps?: number;
+	    sampleSize: number;
+	    source: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CurrentProjectionRemainder(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.low = source["low"];
+	        this.base = source["base"];
+	        this.high = source["high"];
+	        this.capital = source["capital"];
+	        this.margin = source["margin"];
+	        this.marginBps = source["marginBps"];
+	        this.sampleSize = source["sampleSize"];
+	        this.source = source["source"];
+	    }
+	}
 	export class Metrics {
 	    poCount: number;
 	    amountMinor: number;
@@ -3527,6 +3553,131 @@ export namespace poreport {
 	        this.coverageBps = source["coverageBps"];
 	    }
 	}
+	export class CurrentMonthProjection {
+	    actual: Metrics;
+	    remainder: CurrentProjectionRemainder;
+
+	    static createFrom(source: any = {}) {
+	        return new CurrentMonthProjection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.actual = this.convertValues(source["actual"], Metrics);
+	        this.remainder = this.convertValues(source["remainder"], CurrentProjectionRemainder);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ProjectedBucket {
+	    periodStart: string;
+	    amountLowMinor: number;
+	    amountBaseMinor: number;
+	    amountHighMinor: number;
+	    capitalMinor: number;
+	    marginMinor: number;
+	    marginBps?: number;
+	    sampleSize: number;
+	    source: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ProjectedBucket(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.periodStart = source["periodStart"];
+	        this.amountLowMinor = source["amountLowMinor"];
+	        this.amountBaseMinor = source["amountBaseMinor"];
+	        this.amountHighMinor = source["amountHighMinor"];
+	        this.capitalMinor = source["capitalMinor"];
+	        this.marginMinor = source["marginMinor"];
+	        this.marginBps = source["marginBps"];
+	        this.sampleSize = source["sampleSize"];
+	        this.source = source["source"];
+	    }
+	}
+	export class CurrentProjectionBasis {
+	    from: string;
+	    to: string;
+	    units: number;
+	    poCount: number;
+	    asOf: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CurrentProjectionBasis(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.units = source["units"];
+	        this.poCount = source["poCount"];
+	        this.asOf = source["asOf"];
+	    }
+	}
+	export class CurrentProjection {
+	    mode: string;
+	    status: string;
+	    reason?: string;
+	    method: string;
+	    basis: CurrentProjectionBasis;
+	    buckets: ProjectedBucket[];
+	    currentMonth?: CurrentMonthProjection;
+
+	    static createFrom(source: any = {}) {
+	        return new CurrentProjection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.status = source["status"];
+	        this.reason = source["reason"];
+	        this.method = source["method"];
+	        this.basis = this.convertValues(source["basis"], CurrentProjectionBasis);
+	        this.buckets = this.convertValues(source["buckets"], ProjectedBucket);
+	        this.currentMonth = this.convertValues(source["currentMonth"], CurrentMonthProjection);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+
 	export class Note {
 	    code: string;
 	    text: string;
@@ -3589,34 +3740,7 @@ export namespace poreport {
 	        this.sourceMissingPoCount = source["sourceMissingPoCount"];
 	    }
 	}
-	export class ProjectedBucket {
-	    periodStart: string;
-	    amountLowMinor: number;
-	    amountBaseMinor: number;
-	    amountHighMinor: number;
-	    capitalMinor: number;
-	    marginMinor: number;
-	    marginBps?: number;
-	    sampleSize: number;
-	    source: string;
 
-	    static createFrom(source: any = {}) {
-	        return new ProjectedBucket(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.periodStart = source["periodStart"];
-	        this.amountLowMinor = source["amountLowMinor"];
-	        this.amountBaseMinor = source["amountBaseMinor"];
-	        this.amountHighMinor = source["amountHighMinor"];
-	        this.capitalMinor = source["capitalMinor"];
-	        this.marginMinor = source["marginMinor"];
-	        this.marginBps = source["marginBps"];
-	        this.sampleSize = source["sampleSize"];
-	        this.source = source["source"];
-	    }
-	}
 	export class ProjectionBasis {
 	    historyFrom: string;
 	    historyTo: string;
@@ -3740,6 +3864,7 @@ export namespace poreport {
 	    categories: Category[];
 	    categorySeries: CategorySeries[];
 	    projection: Projection;
+	    currentProjection: CurrentProjection;
 	    notes: Note[];
 
 	    static createFrom(source: any = {}) {
@@ -3758,6 +3883,7 @@ export namespace poreport {
 	        this.categories = this.convertValues(source["categories"], Category);
 	        this.categorySeries = this.convertValues(source["categorySeries"], CategorySeries);
 	        this.projection = this.convertValues(source["projection"], Projection);
+	        this.currentProjection = this.convertValues(source["currentProjection"], CurrentProjection);
 	        this.notes = this.convertValues(source["notes"], Note);
 	    }
 

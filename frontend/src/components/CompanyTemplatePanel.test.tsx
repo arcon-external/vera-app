@@ -100,7 +100,7 @@ describe("CompanyTemplatePanel", () => {
     expect(html).not.toContain("save automatically");
   });
 
-  it("renders one field per served entry — all 26, each with a distinct name", () => {
+  it("renders one field per served entry: all 26, each with a distinct name", () => {
     const html = render();
     const names = inputs(html).map((tag) =>
       /aria-label="Document wording: ([^"]*)"/.exec(tag)?.[1]

@@ -13,31 +13,32 @@ import {
   formatReportCount,
   formatReportDate,
   initialReportFilters,
-  projectionReasonLabel,
-  projectionSourceLabel,
   reportCurrencyOptions,
   reportCategoryLabel,
   reportFilterKey,
   reportFilterValidation,
   reportMatchesFilter,
+  reportPeriodBucket,
   reportPeriodLabel,
+  reportPeriodRange,
   reportPresetRange,
   reportRangeLabel,
   toReportQuery,
   type ReportBucket,
   type ReportFilterState,
+  type ReportPeriodMode,
   type ReportPreset,
 } from "../poReportPage";
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
   type PurchaseOrderReportMetrics,
-  type PurchaseOrderReportProjectionSeries,
   type PurchaseOrderReportQuery,
 } from "../poReport";
 import { todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
 import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
+import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
 
@@ -54,7 +55,7 @@ import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from ".
 export interface PurchaseOrderReportsPageProps {
   /** The company currency, used for the first request only. */
   defaultCurrency: string;
-  /** App's catalogue. A code missing here renders "—", never a fake IDR. */
+  /** App's catalogue. A code missing here renders "-", never a fake IDR. */
   currencyCatalogue: readonly CurrencyInfo[] | null;
   /**
    * #632 owns the native PDF binding. Until App wires it after #630/#632
@@ -75,6 +76,7 @@ export interface PurchaseOrderReportsViewProps {
   exporting: boolean;
   canExport: boolean;
   onPresetChange: (preset: ReportPreset) => void;
+  onPeriodChange: (period: ReportPeriodMode | null) => void;
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
   onBucketChange: (value: ReportBucket) => void;
@@ -85,7 +87,7 @@ export interface PurchaseOrderReportsViewProps {
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
-  return entry === null ? "—" : formatMoney(entry, minor);
+  return entry === null ? "-" : formatMoney(entry, minor);
 }
 
 function negativeClass(value: number): string {
@@ -190,14 +192,23 @@ function CategoryTable({
 function PeriodTable({
   report,
   entry,
+  periods,
 }: {
   report: PurchaseOrderReportData;
   entry: CurrencyInfo | null;
+  periods: PurchaseOrderReportData["periods"];
 }) {
   return (
     <Card className="min-w-0 overflow-hidden">
       <div className="px-5 pt-5">
-        <SectionTitle title="By period" />
+        <SectionTitle
+          title="By period"
+          hint={
+            periods.length < report.periods.length
+              ? "Actual periods to date. Projections are in the chart."
+              : undefined
+          }
+        />
       </div>
       <div className="overflow-x-auto scroll-thin">
         <table
@@ -218,7 +229,7 @@ function PeriodTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-rule">
-            {report.periods.map((row) => (
+            {periods.map((row) => (
               <tr key={row.periodStart}>
                 <td className="px-5 py-3 align-middle font-medium text-ink-900">
                   <span className="tnum">
@@ -248,150 +259,22 @@ function PeriodTable({
   );
 }
 
-function ProjectionTable({
-  title,
-  series,
-  bucket,
-  entry,
-}: {
-  title: string;
-  series: PurchaseOrderReportProjectionSeries;
-  bucket: "month" | "year";
-  entry: CurrencyInfo | null;
-}) {
-  const basis = series.basis;
-  return (
-    <div className="min-w-0 border-t border-rule pt-5 first:border-t-0 first:pt-0">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-lead font-medium text-ink-900">{title}</h3>
-        <Badge tone={series.status === "available" ? "accent" : "neutral"}>
-          {series.status === "available" ? "Projected" : "Unavailable"}
-        </Badge>
-      </div>
-      <p className="mt-1 max-w-3xl text-small leading-relaxed text-ink-500">
-        <span className="font-medium text-ink-700">Method:</span>{" "}
-        {series.method}
-      </p>
-      <p className="mt-1 text-caption leading-relaxed text-ink-500">
-        Basis: {basis.completeMonths} complete months ({basis.historyFrom} to{" "}
-        {basis.historyTo}, exclusive), {basis.poCount} POs, as of{" "}
-        {formatReportDate(basis.asOf)}.
-      </p>
-      {series.status !== "available" ? (
-        <p className="mt-3 rounded-lg border border-rule bg-paper-subtle/60 px-4 py-3 text-small text-ink-600">
-          {projectionReasonLabel(series.reason)}
-        </p>
-      ) : series.buckets.length === 0 ? (
-        <p className="mt-3 text-small text-ink-500">
-          No projected buckets in this range.
-        </p>
-      ) : (
-        <div className="mt-3 overflow-x-auto scroll-thin">
-          <table
-            aria-label={`${title} projection`}
-            className="w-full min-w-[720px] text-left text-body"
-          >
-            <thead>
-              <tr className="border-b border-rule text-micro uppercase tracking-[0.1em] text-ink-500">
-                <th className="py-2 pr-4 font-medium">Period</th>
-                <th className="py-2 pr-4 text-right font-medium">Low</th>
-                <th className="py-2 pr-4 text-right font-medium">Base</th>
-                <th className="py-2 pr-4 text-right font-medium">High</th>
-                <th className="py-2 pr-4 text-right font-medium">Capital</th>
-                <th className="py-2 pr-4 text-right font-medium">Margin</th>
-                <th className="py-2 pr-4 text-right font-medium">Margin %</th>
-                <th className="py-2 text-right font-medium">n</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rule">
-              {series.buckets.map((row) => (
-                <tr key={row.periodStart}>
-                  <td className="tnum py-2 pr-4 align-middle text-ink-700">
-                    {reportPeriodLabel(row.periodStart, bucket)}
-                  </td>
-                  <td className="tnum whitespace-nowrap py-2 pr-4 text-right align-middle text-ink-700">
-                    {money(entry, row.amountLowMinor)}
-                  </td>
-                  <td className="tnum whitespace-nowrap py-2 pr-4 text-right align-middle font-medium text-ink-900">
-                    {money(entry, row.amountBaseMinor)}
-                  </td>
-                  <td className="tnum whitespace-nowrap py-2 pr-4 text-right align-middle text-ink-700">
-                    {money(entry, row.amountHighMinor)}
-                  </td>
-                  <td className="tnum whitespace-nowrap py-2 pr-4 text-right align-middle text-ink-700">
-                    {money(entry, row.capitalMinor)}
-                  </td>
-                  <td
-                    className={`tnum whitespace-nowrap py-2 pr-4 text-right align-middle ${negativeClass(
-                      row.marginMinor
-                    )}`}
-                  >
-                    {money(entry, row.marginMinor)}
-                  </td>
-                  <td className="tnum whitespace-nowrap py-2 pr-4 text-right align-middle text-ink-700">
-                    {formatReportBps(row.marginBps)}
-                  </td>
-                  <td
-                    className="tnum py-2 text-right align-middle text-ink-500"
-                    title={projectionSourceLabel(row.source)}
-                  >
-                    {formatReportCount(row.sampleSize)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectionSection({
-  report,
-  entry,
-}: {
-  report: PurchaseOrderReportData;
-  entry: CurrencyInfo | null;
-}) {
-  return (
-    <Card className="min-w-0 p-5">
-      <SectionHeading
-        title="Projection"
-        hint="Not included in actual totals"
-      />
-      <p className="mb-5 max-w-3xl text-small leading-relaxed text-ink-500">
-        Projected from complete months before the range's end month and the
-        report's as-of month. The history window can overlap the selected
-        range; projected buckets are never counted in the KPIs or the actual
-        tables above.
-      </p>
-      <div className="grid gap-5">
-        <ProjectionTable
-          title="Monthly"
-          series={report.projection.monthly}
-          bucket="month"
-          entry={entry}
-        />
-        <ProjectionTable
-          title="Yearly"
-          series={report.projection.yearly}
-          bucket="year"
-          entry={entry}
-        />
-      </div>
-    </Card>
-  );
-}
-
 function KpiStrip({
   report,
   entry,
+  period,
 }: {
   report: PurchaseOrderReportData;
   entry: CurrencyInfo | null;
+  period: ReportPeriodMode | null;
 }) {
   const totals = report.totals;
+  const periodContext =
+    period === "month"
+      ? "Current month to date"
+      : period === "year"
+        ? "Current year to date"
+        : "Selected range";
   const kpis: { label: string; value: string; negative?: boolean }[] = [
     { label: "PO count", value: formatReportCount(totals.poCount) },
     { label: "PO amount", value: money(entry, totals.amountMinor) },
@@ -405,6 +288,12 @@ function KpiStrip({
   ];
   return (
     <Card className="min-w-0 p-5">
+      <p
+        data-report-period-context={period ?? "custom"}
+        className="mb-3 text-caption font-medium uppercase tracking-[0.12em] text-ink-500"
+      >
+        {periodContext}
+      </p>
       <dl
         aria-label="Report KPIs"
         className={REPORT_KPI_GRID_CLASS}
@@ -445,9 +334,23 @@ function LoadingSkeleton() {
   );
 }
 
-function EmptyReport({ report }: { report: PurchaseOrderReportData }) {
+function EmptyReport({
+  report,
+  period,
+  onPeriodChange,
+}: {
+  report: PurchaseOrderReportData;
+  period: ReportPeriodMode | null;
+  onPeriodChange: (period: ReportPeriodMode | null) => void;
+}) {
   return (
     <Card className="min-w-0 p-8">
+      <div className="mb-4">
+        <PurchaseOrderReportPeriodToggle
+          period={period}
+          onPeriodChange={onPeriodChange}
+        />
+      </div>
       <h2 className="text-title font-semibold text-ink-950">
         No purchase orders in this range
       </h2>
@@ -495,6 +398,7 @@ export function PurchaseOrderReportsView({
   exporting,
   canExport,
   onPresetChange,
+  onPeriodChange,
   onFromChange,
   onToChange,
   onBucketChange,
@@ -518,6 +422,19 @@ export function PurchaseOrderReportsView({
   const showEmpty = report !== null && report.totals.poCount === 0;
   const showFigures = report !== null && report.totals.poCount > 0;
   const unresolvedCurrency = report !== null && entry === null;
+
+  // The report materializes the whole current month/year, including days and
+  // months that have not happened. Those are ghost territory, not actual table
+  // rows: the table stops at today and the chart carries the projection.
+  const asOfMonth = report === null ? "" : `${report.asOf.slice(0, 7)}-01`;
+  const displayedPeriods =
+    report === null
+      ? []
+      : filters.period === "month"
+        ? report.periods.filter((period) => period.periodStart <= report.asOf)
+        : filters.period === "year"
+          ? report.periods.filter((period) => period.periodStart <= asOfMonth)
+          : report.periods;
 
   return (
     <section aria-labelledby="reports-heading" className="flex flex-col gap-6">
@@ -557,50 +474,70 @@ export function PurchaseOrderReportsView({
 
       <Card className="min-w-0 p-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Date range
-            </span>
-            <Select
-              ariaLabel="Date range preset"
-              value={filters.preset}
-              options={REPORT_PRESET_OPTIONS}
-              onChange={(value) => onPresetChange(value as ReportPreset)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              From date
-            </span>
-            <input
-              type="date"
-              aria-label="From date"
-              className={fieldClass}
-              value={filters.from}
-              onChange={(event) => onFromChange(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              To date
-            </span>
-            <input
-              type="date"
-              aria-label="To date"
-              className={fieldClass}
-              value={filters.to}
-              onChange={(event) => onToChange(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">Bucket</span>
-            <Select
-              ariaLabel="Bucket"
-              value={filters.bucket}
-              options={REPORT_BUCKET_OPTIONS}
-              onChange={(value) => onBucketChange(value as ReportBucket)}
-            />
-          </label>
+          {filters.period === null ? (
+            <>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  Date range
+                </span>
+                <Select
+                  ariaLabel="Date range preset"
+                  value={filters.preset}
+                  options={REPORT_PRESET_OPTIONS}
+                  onChange={(value) => onPresetChange(value as ReportPreset)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  From date
+                </span>
+                <input
+                  type="date"
+                  aria-label="From date"
+                  className={fieldClass}
+                  value={filters.from}
+                  onChange={(event) => onFromChange(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  To date
+                </span>
+                <input
+                  type="date"
+                  aria-label="To date"
+                  className={fieldClass}
+                  value={filters.to}
+                  onChange={(event) => onToChange(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  Bucket
+                </span>
+                <Select
+                  ariaLabel="Bucket"
+                  value={filters.bucket}
+                  options={REPORT_BUCKET_OPTIONS}
+                  onChange={(value) => onBucketChange(value as ReportBucket)}
+                />
+              </label>
+            </>
+          ) : (
+            <div
+              data-report-current-period=""
+              className="rounded-md border border-rule bg-paper-subtle/60 px-3 py-2 sm:col-span-2 xl:col-span-3"
+            >
+              <span className="text-small font-semibold text-ink-900">
+                {filters.period === "month" ? "Current month" : "Current year"}
+              </span>
+              <span className="ml-2 text-small text-ink-600">
+                {formatReportDate(filters.from)} to {formatReportDate(filters.to)}
+                {" · "}
+                {filters.period === "month" ? "daily" : "monthly"}
+              </span>
+            </div>
+          )}
           <label className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">
               Category
@@ -633,7 +570,7 @@ export function PurchaseOrderReportsView({
                 Currency
               </span>
               <span className="tnum flex min-h-10 items-center rounded-md border border-rule bg-paper-subtle px-3 text-body text-ink-700">
-                {filters.currency || "—"}
+                {filters.currency || "-"}
               </span>
             </div>
           )}
@@ -672,19 +609,33 @@ export function PurchaseOrderReportsView({
       {unresolvedCurrency ? (
         <StatusBanner tone="info">
           {reportCurrency} is not in this app's currency catalogue, so monetary
-          figures are shown as “—” and no other currency is substituted.
+          figures are shown as “-” and no other currency is substituted.
         </StatusBanner>
       ) : null}
 
       {showSkeleton ? <LoadingSkeleton /> : null}
-      {showEmpty && report !== null ? <EmptyReport report={report} /> : null}
+      {showEmpty && report !== null ? (
+        <EmptyReport
+          report={report}
+          period={filters.period}
+          onPeriodChange={onPeriodChange}
+        />
+      ) : null}
       {showFigures && report !== null ? (
         <>
-          <KpiStrip report={report} entry={entry} />
-          <PurchaseOrderReportChart report={report} currency={entry} />
+          <KpiStrip report={report} entry={entry} period={filters.period} />
+          <PurchaseOrderReportChart
+            report={report}
+            currency={entry}
+            period={filters.period}
+            onPeriodChange={onPeriodChange}
+          />
           <CategoryTable report={report} entry={entry} />
-          <PeriodTable report={report} entry={entry} />
-          <ProjectionSection report={report} entry={entry} />
+          <PeriodTable
+            report={report}
+            entry={entry}
+            periods={displayedPeriods}
+          />
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -772,9 +723,28 @@ export function PurchaseOrderReportsPage({
 
   const changePreset = useCallback((preset: ReportPreset) => {
     setFilters((current) => {
-      if (preset === "custom") return { ...current, preset };
-      return { ...current, preset, ...reportPresetRange(preset, todayWIB()) };
+      if (preset === "custom") return { ...current, preset, period: null };
+      return {
+        ...current,
+        preset,
+        period: null,
+        ...reportPresetRange(preset, todayWIB()),
+      };
     });
+  }, []);
+
+  const changePeriod = useCallback((period: ReportPeriodMode | null) => {
+    setFilters((current) =>
+      period === null
+        ? { ...current, period: null, preset: "custom" }
+        : {
+            ...current,
+            period,
+            preset: "custom",
+            ...reportPeriodRange(period, todayWIB()),
+            bucket: reportPeriodBucket(period),
+          }
+    );
   }, []);
 
   const stale =
@@ -822,9 +792,16 @@ export function PurchaseOrderReportsPage({
       exporting={exporting}
       canExport={canExport}
       onPresetChange={changePreset}
-      onFromChange={(value) => changeFilters({ preset: "custom", from: value })}
-      onToChange={(value) => changeFilters({ preset: "custom", to: value })}
-      onBucketChange={(value) => changeFilters({ bucket: value })}
+      onPeriodChange={changePeriod}
+      onFromChange={(value) =>
+        changeFilters({ preset: "custom", period: null, from: value })
+      }
+      onToChange={(value) =>
+        changeFilters({ preset: "custom", period: null, to: value })
+      }
+      onBucketChange={(value) =>
+        changeFilters({ period: null, bucket: value })
+      }
       onCategoryChange={(value) => changeFilters({ category: value })}
       onCurrencyChange={(value) => changeFilters({ currency: value })}
       onRetry={() => setRetryToken((current) => current + 1)}

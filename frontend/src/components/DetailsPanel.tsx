@@ -182,7 +182,7 @@ function TaxSummaryCard({
       {services > 0 ? (
         <p className="mt-1 text-caption leading-relaxed text-ink-500">
           Services tax {taxRateLabel(taxZone, taxType, serviceCategory)} stays
-          internal — it never appears on the quotation.
+          internal. It never appears on the quotation.
         </p>
       ) : null}
       {ppn === 0 && services === 0 ? (
@@ -401,7 +401,7 @@ export function DetailsPanel({
               </div>
               <p className="mt-2 text-caption text-ink-500">
                 {value.taxType === "Services"
-                  ? "PPH23 stays internal — never on the quotation."
+                  ? "PPH23 stays internal, never on the quotation."
                   : value.taxZone === "NonFTZ"
                     ? "Goods PPN 11% is added to the quotation after discount."
                     : "FTZ goods carry no tax."}
@@ -417,9 +417,9 @@ export function DetailsPanel({
                     { value: "", label: "Select category" },
                     ...SERVICE_CATEGORY_OPTIONS.map((option) => ({
                       value: option.value,
-                      label: `${option.label} — ${
+                      label: `${option.label} (${
                         option.value === "Construction" ? "1,75%" : "2%"
-                      } PPh23`,
+                      } PPh23)`,
                     })),
                   ]}
                   onChange={(next) => onChange({ serviceCategory: String(next) })}

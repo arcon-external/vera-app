@@ -69,6 +69,24 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 				Buckets: []ProjectedBucket{},
 			},
 		},
+		CurrentProjection: CurrentProjection{
+			Mode:   ProjectionModeMonth,
+			Status: ProjectionStatusAvailable,
+			Method: MethodCurrentMonth,
+			Basis: CurrentProjectionBasis{
+				From: "2026-01-01", To: "2026-11-01",
+				Units: 10, PoCount: 12, AsOf: "2026-11-19",
+			},
+			Buckets: []ProjectedBucket{},
+			CurrentMonth: &CurrentMonthProjection{
+				Actual: Metrics{PoCount: 3, AmountMinor: 900, CostedMinor: 900, CapitalMinor: 300, MarginMinor: 600},
+				Remainder: CurrentProjectionRemainder{
+					LowMinor: 100, BaseMinor: 300, HighMinor: 500,
+					CapitalMinor: 100, MarginMinor: 200, MarginBps: &marginBps,
+					SampleSize: 19, Source: SourceElapsedDays,
+				},
+			},
+		},
 		Notes: []Note{{Code: "ppn_excluded", Text: "PPN is excluded."}},
 	}
 
@@ -83,7 +101,8 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 
 	for _, key := range []string{
 		"generatedAt", "asOf", "filter", "company", "population", "totals",
-		"periods", "categories", "categorySeries", "projection", "notes",
+		"periods", "categories", "categorySeries", "projection",
+		"currentProjection", "notes",
 	} {
 		if _, ok := decoded[key]; !ok {
 			t.Errorf("report JSON is missing %q", key)
@@ -129,5 +148,31 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 	yearly := projection["yearly"].(map[string]any)
 	if yearly["reason"] != ReasonInsufficientHistory {
 		t.Errorf("yearly reason = %v; want %s", yearly["reason"], ReasonInsufficientHistory)
+	}
+
+	current := decoded["currentProjection"].(map[string]any)
+	for _, key := range []string{"mode", "status", "method", "basis", "buckets", "currentMonth"} {
+		if _, ok := current[key]; !ok {
+			t.Errorf("currentProjection is missing %q", key)
+		}
+	}
+	if _, ok := current["reason"]; ok {
+		t.Errorf("available currentProjection carries reason %v; want omitted", current["reason"])
+	}
+	basis := current["basis"].(map[string]any)
+	for _, key := range []string{"from", "to", "units", "poCount", "asOf"} {
+		if _, ok := basis[key]; !ok {
+			t.Errorf("currentProjection basis is missing %q", key)
+		}
+	}
+	currentMonth := current["currentMonth"].(map[string]any)
+	remainder := currentMonth["remainder"].(map[string]any)
+	for _, key := range []string{"low", "base", "high", "capital", "margin", "marginBps", "sampleSize", "source"} {
+		if _, ok := remainder[key]; !ok {
+			t.Errorf("currentProjection remainder is missing %q", key)
+		}
+	}
+	if remainder["source"] != SourceElapsedDays {
+		t.Errorf("remainder source = %v; want %s", remainder["source"], SourceElapsedDays)
 	}
 }

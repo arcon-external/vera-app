@@ -137,9 +137,9 @@ func TestFormattingMatchesTheSharedCrossSurfaceFixture(t *testing.T) {
 	}
 }
 
-func TestUnknownPercentPrintsAnEmDashNeverZero(t *testing.T) {
-	if got := formatPct(nil); got != "—" {
-		t.Errorf("nil percent = %q, want an em dash", got)
+func TestUnknownPercentPrintsAPlaceholderNeverZero(t *testing.T) {
+	if got := formatPct(nil); got != "-" {
+		t.Errorf("nil percent = %q, want a placeholder hyphen", got)
 	}
 	if got := formatPct(pointer(0)); got != "0.00%" {
 		t.Errorf("measured zero percent = %q, want 0.00%%", got)
@@ -173,12 +173,41 @@ func TestPeriodLabelsFollowTheBucket(t *testing.T) {
 		{"2025-01-01", poreport.BucketMonth, "Jan 25", "Jan 2025"},
 		{"2025-04-01", poreport.BucketQuarter, "Q2 25", "Q2 2025"},
 		{"2025-01-01", poreport.BucketYear, "2025", "2025"},
+		{"2026-01-01", poreport.BucketDay, "1 Jan", "1 Jan 2026"},
+		{"2026-01-31", poreport.BucketDay, "31 Jan", "31 Jan 2026"},
+		{"2026-12-09", poreport.BucketDay, "9 Dec", "9 Dec 2026"},
 	} {
 		if got := periodLabel(tc.start, tc.bucket); got != tc.chart {
 			t.Errorf("periodLabel(%q, %q) = %q, want %q", tc.start, tc.bucket, got, tc.chart)
 		}
 		if got := periodTableLabel(tc.start, tc.bucket); got != tc.table {
 			t.Errorf("periodTableLabel(%q, %q) = %q, want %q", tc.start, tc.bucket, got, tc.table)
+		}
+	}
+}
+
+func TestBucketLabelNamesTheDayBucket(t *testing.T) {
+	for bucket, want := range map[string]string{
+		poreport.BucketDay:     "Daily",
+		poreport.BucketMonth:   "Monthly",
+		poreport.BucketQuarter: "Quarterly",
+		poreport.BucketYear:    "Yearly",
+	} {
+		if got := bucketLabel(bucket); got != want {
+			t.Errorf("bucketLabel(%q) = %q, want %q", bucket, got, want)
+		}
+	}
+}
+
+func TestCurrentProjectionReasonLabelsCoverEveryStableCode(t *testing.T) {
+	for _, reason := range []string{
+		poreport.ReasonNotCurrentPeriod, poreport.ReasonNoData,
+		poreport.ReasonInsufficientDays, poreport.ReasonInsufficientMonths,
+		poreport.ReasonIncompleteCostBasis, poreport.ReasonValueOutOfRange,
+		poreport.ReasonInvalidQuery,
+	} {
+		if got := projectionReasonLabel(reason); got == reason || got == "" {
+			t.Errorf("projectionReasonLabel(%q) = %q; every stable code needs prose", reason, got)
 		}
 	}
 }

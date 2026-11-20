@@ -92,6 +92,14 @@ type PurchaseOrderReportSnapshot struct {
 	// the forecast unavailable/value_out_of_range from HistoryBasis instead of
 	// projecting a corrupted sample.
 	HistoryOutOfRange bool
+	// Daily is the current month's observed days through the as-of date. It is
+	// the elapsed-day sample for the current-period projection. Days with no
+	// orders are absent and are filled as zeros by the domain; it is empty when
+	// DailyOutOfRange is true.
+	Daily []poreport.HistoryDay
+	// DailyOutOfRange reports that a current-month daily aggregate could not be
+	// represented exactly. Only the current-period projection is suppressed.
+	DailyOutOfRange bool
 	// HistoryBasis is the complete-month window and sample count behind the
 	// history. It is populated even when HistoryOutOfRange is true, so the
 	// unavailable forecast can state the sample it would have used.
@@ -166,7 +174,7 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	asOf := companyToday(now)
 	historyTo := reportHistoryCutoff(to, asOf)
 
-	var totalsRaw, periodsRaw, categoriesRaw, categoryPeriodsRaw, historyRaw, currenciesRaw []byte
+	var totalsRaw, periodsRaw, categoriesRaw, categoryPeriodsRaw, historyRaw, dailyRaw, currenciesRaw []byte
 	var hasUnassigned bool
 	if err := pool.QueryRow(ctx, purchaseOrderReportSQL(s.configSchema()),
 		org.ID,
@@ -176,12 +184,14 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 		query.Category,
 		historyTo.Format(time.DateOnly),
 		query.Bucket,
+		asOf.Format(time.DateOnly),
 	).Scan(
 		&totalsRaw,
 		&periodsRaw,
 		&categoriesRaw,
 		&categoryPeriodsRaw,
 		&historyRaw,
+		&dailyRaw,
 		&currenciesRaw,
 		&hasUnassigned,
 	); err != nil {
@@ -231,6 +241,10 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
 	}
+	daily, err := reportDaily(dailyRaw, asOf)
+	if err != nil {
+		return PurchaseOrderReportSnapshot{}, err
+	}
 	currencies, err := reportCurrencies(currenciesRaw, query.Currency)
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
@@ -245,6 +259,8 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 		History:                 history.months,
 		HistoryOutOfRange:       history.outOfRange,
 		HistoryBasis:            history.basis,
+		Daily:                   daily.days,
+		DailyOutOfRange:         daily.outOfRange,
 		AvailableCurrencies:     currencies,
 		HasUnassigned:           hasUnassigned,
 		SourceMissingPoCount:    totalsRow.SourceMissingPoCount,
@@ -652,6 +668,81 @@ func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, 
 	return reportHistorySample{months: history, basis: basis}, nil
 }
 
+// reportDailySample is the current month's observed days through the as-of
+// date. It is the elapsed-day input to the current-period projection; it is
+// deliberately not a wire object.
+type reportDailySample struct {
+	days       []poreport.HistoryDay
+	outOfRange bool
+}
+
+type reportDailyJSON struct {
+	Date         string      `json:"date"`
+	PoCount      int64       `json:"poCount"`
+	AmountMinor  json.Number `json:"amountMinor"`
+	CostedMinor  json.Number `json:"costedMinor"`
+	CapitalMinor json.Number `json:"capitalMinor"`
+}
+
+// reportDaily decodes the current month's daily rows. Days with no orders are
+// absent: the domain fills them as zero observations so an average is over
+// calendar days. A malformed or out-of-range value withholds the sample and
+// suppresses only the current-period forecast, never the actual report.
+func reportDaily(raw []byte, asOf time.Time) (reportDailySample, error) {
+	var rows []reportDailyJSON
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return reportDailySample{}, fmt.Errorf("decode purchase order report daily history: %w", err)
+	}
+	if len(rows) == 0 {
+		return reportDailySample{days: []poreport.HistoryDay{}}, nil
+	}
+	sort.Slice(rows, func(left, right int) bool { return rows[left].Date < rows[right].Date })
+	asOfKey := asOf.Format(time.DateOnly)
+	monthStart := time.Date(asOf.Year(), asOf.Month(), 1, 0, 0, 0, 0, time.UTC)
+	days := make([]poreport.HistoryDay, 0, len(rows))
+	for _, row := range rows {
+		date, err := time.Parse(time.DateOnly, row.Date)
+		if err != nil || date.Format(time.DateOnly) != row.Date {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		if date.Before(monthStart) || date.After(asOf) || row.Date > asOfKey {
+			continue
+		}
+		if err := poreport.CheckExact(row.PoCount); err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		amount, err := reportExactNumber(row.AmountMinor, "daily "+row.Date+" amount")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		costed, err := reportExactNumber(row.CostedMinor, "daily "+row.Date+" costed amount")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		capital, err := reportExactNumber(row.CapitalMinor, "daily "+row.Date+" capital")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		uncosted, err := reportExactBigInt(
+			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			"daily "+row.Date+" uncosted amount")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
+		days = append(days, poreport.HistoryDay{
+			Date: row.Date,
+			Metrics: poreport.Metrics{
+				PoCount:       row.PoCount,
+				AmountMinor:   amount,
+				CostedMinor:   costed,
+				UncostedMinor: uncosted,
+				CapitalMinor:  capital,
+			},
+		})
+	}
+	return reportDailySample{days: days}, nil
+}
+
 // reportCurrencies decodes the date-scoped facet and guarantees the selected
 // currency is offered even when no saved order in the range used it. The
 // selector must never lose the currency currently on screen.
@@ -705,18 +796,22 @@ func reportPeriodStarts(from, to time.Time, bucket string) []time.Time {
 }
 
 func reportBucketStart(date time.Time, bucket string) time.Time {
-	year, month := date.Year(), date.Month()
+	year, month, day := date.Year(), date.Month(), 1
 	switch bucket {
+	case poreport.BucketDay:
+		day = date.Day()
 	case poreport.BucketYear:
 		month = time.January
 	case poreport.BucketQuarter:
 		month = time.Month((int(month)-1)/3*3 + 1)
 	}
-	return time.Date(year, month, 1, 0, 0, 0, 0, time.UTC)
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
 func reportNextPeriod(start time.Time, bucket string) time.Time {
 	switch bucket {
+	case poreport.BucketDay:
+		return start.AddDate(0, 0, 1)
 	case poreport.BucketQuarter:
 		return start.AddDate(0, 3, 0)
 	case poreport.BucketYear:
@@ -727,11 +822,11 @@ func reportNextPeriod(start time.Time, bucket string) time.Time {
 }
 
 // purchaseOrderReportSQL is the one aggregate statement behind the report. It
-// returns seven values in one row: the exact totals object, the period,
-// category, category-period and history arrays, the date-scoped currency facet,
-// and the unassigned flag. Both the actual population and the projection
-// history share the same cost resolution, so the two can never disagree about
-// what a PO cost.
+// returns eight values in one row: the exact totals object, the period,
+// category, category-period, history and current-month daily arrays, the
+// date-scoped currency facet, and the unassigned flag. Both the actual
+// population and the projection samples share the same cost resolution, so the
+// two can never disagree about what a PO cost.
 //
 // The actual figures come from one CUBE pass: the grand total, the period rows,
 // the category rows and the category-period series are four grouping sets over
@@ -797,6 +892,7 @@ po_metrics AS (
 actual_rows AS (
     SELECT date_trunc(
                CASE $7
+                   WHEN 'day' THEN 'day'
                    WHEN 'month' THEN 'month'
                    WHEN 'quarter' THEN 'quarter'
                    ELSE 'year'
@@ -833,6 +929,19 @@ history_metrics AS (
            SUM(capital) AS capital
     FROM po_metrics
     WHERE received_date < $6::date
+    GROUP BY 1
+),
+daily_metrics AS (
+    -- The elapsed portion of the current month. Days without orders are
+    -- intentionally absent; the domain fills them as zero observations.
+    SELECT date_trunc('day', received_date)::date AS day_start,
+           COUNT(*) AS po_count,
+           SUM(amount) AS amount,
+           SUM(costed) AS costed,
+           SUM(capital) AS capital
+    FROM po_metrics
+    WHERE received_date >= date_trunc('month', $8::date)::date
+      AND received_date <= $8::date
     GROUP BY 1
 ),
 facet_rollup AS (
@@ -881,6 +990,13 @@ SELECT
         'costedMinor', costed,
         'capitalMinor', capital
      ) ORDER BY month_start), '[]'::jsonb) FROM history_metrics),
+    (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'date', to_char(day_start, 'YYYY-MM-DD'),
+        'poCount', po_count,
+        'amountMinor', amount,
+        'costedMinor', costed,
+        'capitalMinor', capital
+     ) ORDER BY day_start), '[]'::jsonb) FROM daily_metrics),
     (SELECT COALESCE(jsonb_agg(currency ORDER BY currency), '[]'::jsonb) FROM facet_rollup),
     (SELECT COALESCE((SELECT has_unassigned FROM facet_rollup WHERE currency = $2), false))
 `, schema)

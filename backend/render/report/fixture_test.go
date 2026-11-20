@@ -313,6 +313,12 @@ func sampleReport() poreport.Report {
 				Buckets: yearly,
 			},
 		},
+		// The sample is a custom January-December 2025 range, so the
+		// current-period projection is correctly none. The retired monthly and
+		// yearly series stay populated to prove the PDF no longer prints them.
+		CurrentProjection: unavailableCurrentProjection(
+			poreport.ProjectionModeNone, poreport.ReasonNotCurrentPeriod,
+			poreport.MethodCurrentNone, poreport.CurrentProjectionBasis{AsOf: "2025-12-20"}),
 		Notes: []poreport.Note{{
 			Code: "legacy_order_adjustment",
 			Text: "Some purchase orders in this range carry a retired whole-order discount or adjustment. " +
@@ -338,6 +344,189 @@ func unavailableProjectionReport() poreport.Report {
 			Basis:  basis,
 		},
 	}
+	return snapshot
+}
+
+func unavailableCurrentProjection(mode, reason, method string, basis poreport.CurrentProjectionBasis) poreport.CurrentProjection {
+	return poreport.CurrentProjection{
+		Mode:    mode,
+		Status:  poreport.ProjectionStatusUnavailable,
+		Reason:  reason,
+		Method:  method,
+		Basis:   basis,
+		Buckets: []poreport.ProjectedBucket{},
+	}
+}
+
+// dayReport is the current month bucketed by day: 30 daily actual periods
+// (19 elapsed with orders, the last 11 future zero placeholders), a day-mode
+// current projection for the 11 remaining days, and the retired projection
+// series still populated so the PDF can be checked for not printing them.
+//
+// The as-of date is 19 November 2026, matching the screen's Month fixture: the
+// PDF's period table must stop at 19 November, while the chart and the summary
+// still name 20 November and every later day as ghosts.
+func dayReport() poreport.Report {
+	snapshot := sampleReport()
+	snapshot.GeneratedAt = "2026-11-19T08:30:00Z"
+	snapshot.AsOf = "2026-11-19"
+	snapshot.Filter = poreport.Query{
+		From: "2026-11-01", To: "2026-12-01", Bucket: poreport.BucketDay,
+		Category: poreport.CategoryAll, Currency: "IDR",
+	}
+
+	base := make([]poreport.Metrics, 0, 30)
+	for day := 1; day <= 30; day++ {
+		metrics := poreport.Metrics{}
+		if day <= 19 {
+			metrics = poreport.Metrics{
+				PoCount:       1,
+				AmountMinor:   10_000_000,
+				CostedMinor:   9_000_000,
+				UncostedMinor: 1_000_000,
+				CapitalMinor:  8_000_000,
+				MarginMinor:   2_000_000,
+			}
+		}
+		base = append(base, metrics)
+	}
+	grid := fixtureGrid(base)
+	periods := make([]poreport.Period, 0, len(base))
+	for index, metrics := range base {
+		start := time.Date(2026, time.November, index+1, 0, 0, 0, 0, time.UTC)
+		periods = append(periods, poreport.Period{
+			PeriodStart: start.Format(time.DateOnly),
+			InProgress:  index == 18,
+			Metrics:     fixtureMetrics(metrics.PoCount, grid[index]),
+		})
+	}
+	snapshot.Periods = periods
+
+	categoryCounts := []int64{8, 5, 3, 2, 1}
+	snapshot.Categories = fixtureCategories(grid, categoryCounts)
+	snapshot.CategorySeries = fixtureCategorySeries(grid)
+
+	totalCells := make([]fixtureCell, 0, len(grid)*len(fixtureCategoryCodes))
+	for _, row := range grid {
+		totalCells = append(totalCells, row...)
+	}
+	snapshot.Totals = fixtureMetrics(19, totalCells)
+
+	future := make([]poreport.ProjectedBucket, 0, 11)
+	for day := 20; day <= 30; day++ {
+		future = append(future, poreport.ProjectedBucket{
+			PeriodStart:     time.Date(2026, time.November, day, 0, 0, 0, 0, time.UTC).Format(time.DateOnly),
+			AmountLowMinor:  8_000_000,
+			AmountBaseMinor: 10_000_000,
+			AmountHighMinor: 12_000_000,
+			CapitalMinor:    8_000_000,
+			MarginMinor:     2_000_000,
+			MarginBps:       fixtureRatio(2_000_000, 8_000_000),
+			SampleSize:      19,
+			Source:          poreport.SourceElapsedDays,
+		})
+	}
+	snapshot.CurrentProjection = poreport.CurrentProjection{
+		Mode:   poreport.ProjectionModeDay,
+		Status: poreport.ProjectionStatusAvailable,
+		Method: poreport.MethodCurrentDay,
+		Basis: poreport.CurrentProjectionBasis{
+			From: "2026-11-01", To: "2026-11-20", Units: 19, PoCount: 19, AsOf: "2026-11-19",
+		},
+		Buckets: future,
+	}
+	return snapshot
+}
+
+// currentYearReport is the current year bucketed by month: eleven actual
+// months, a December ghost, and November carrying a stacked month-to-date plus
+// remainder forecast.
+func currentYearReport() poreport.Report {
+	snapshot := sampleReport()
+	snapshot.GeneratedAt = "2026-11-19T08:30:00Z"
+	snapshot.AsOf = "2026-11-19"
+	snapshot.Filter = poreport.Query{
+		From: "2026-01-01", To: "2027-01-01", Bucket: poreport.BucketMonth,
+		Category: poreport.CategoryAll, Currency: "IDR",
+	}
+
+	base := make([]poreport.Metrics, 0, 12)
+	for month := 1; month <= 12; month++ {
+		metrics := poreport.Metrics{}
+		if month <= 11 {
+			metrics = poreport.Metrics{
+				PoCount:       2,
+				AmountMinor:   100_000_000,
+				CostedMinor:   90_000_000,
+				UncostedMinor: 10_000_000,
+				CapitalMinor:  70_000_000,
+				MarginMinor:   20_000_000,
+			}
+		}
+		base = append(base, metrics)
+	}
+	grid := fixtureGrid(base)
+	periods := make([]poreport.Period, 0, len(base))
+	for index, metrics := range base {
+		periods = append(periods, poreport.Period{
+			PeriodStart: monthStart(2026, time.Month(index+1)),
+			InProgress:  index == 10,
+			Metrics:     fixtureMetrics(metrics.PoCount, grid[index]),
+		})
+	}
+	snapshot.Periods = periods
+	snapshot.Categories = fixtureCategories(grid, []int64{8, 6, 4, 3, 1})
+	snapshot.CategorySeries = fixtureCategorySeries(grid)
+
+	totalCells := make([]fixtureCell, 0, len(grid)*len(fixtureCategoryCodes))
+	for _, row := range grid {
+		totalCells = append(totalCells, row...)
+	}
+	snapshot.Totals = fixtureMetrics(22, totalCells)
+
+	currentMonth := periods[10].Metrics
+	snapshot.CurrentProjection = poreport.CurrentProjection{
+		Mode:   poreport.ProjectionModeMonth,
+		Status: poreport.ProjectionStatusAvailable,
+		Method: poreport.MethodCurrentMonth,
+		Basis: poreport.CurrentProjectionBasis{
+			From: "2025-12-01", To: "2026-11-01", Units: 11, PoCount: 22, AsOf: "2026-11-19",
+		},
+		Buckets: []poreport.ProjectedBucket{{
+			PeriodStart:     "2026-12-01",
+			AmountLowMinor:  80_000_000,
+			AmountBaseMinor: 100_000_000,
+			AmountHighMinor: 120_000_000,
+			CapitalMinor:    70_000_000,
+			MarginMinor:     30_000_000,
+			MarginBps:       fixtureRatio(30_000_000, 70_000_000),
+			SampleSize:      11,
+			Source:          poreport.SourceTrailingCompleteMonths,
+		}},
+		CurrentMonth: &poreport.CurrentMonthProjection{
+			Actual: currentMonth,
+			Remainder: poreport.CurrentProjectionRemainder{
+				LowMinor:     44_000_000,
+				BaseMinor:    55_000_000,
+				HighMinor:    66_000_000,
+				CapitalMinor: 44_000_000,
+				MarginMinor:  11_000_000,
+				MarginBps:    fixtureRatio(11_000_000, 44_000_000),
+				SampleSize:   19,
+				Source:       poreport.SourceElapsedDays,
+			},
+		},
+	}
+	return snapshot
+}
+
+func unavailableCurrentReport() poreport.Report {
+	snapshot := dayReport()
+	snapshot.CurrentProjection = unavailableCurrentProjection(
+		poreport.ProjectionModeDay, poreport.ReasonInsufficientDays, poreport.MethodCurrentDay,
+		poreport.CurrentProjectionBasis{
+			From: "2026-11-01", To: "2026-11-20", Units: 3, PoCount: 2, AsOf: "2026-11-19",
+		})
 	return snapshot
 }
 
@@ -455,6 +644,9 @@ func longReport(months int) poreport.Report {
 			Buckets: yearly,
 		},
 	}
+	snapshot.CurrentProjection = unavailableCurrentProjection(
+		poreport.ProjectionModeNone, poreport.ReasonNotCurrentPeriod,
+		poreport.MethodCurrentNone, poreport.CurrentProjectionBasis{AsOf: "2026-01-04"})
 	return snapshot
 }
 
@@ -464,6 +656,15 @@ func TestSampleReportFixtureValidates(t *testing.T) {
 	}
 	if err := ValidateSnapshot(unavailableProjectionReport()); err != nil {
 		t.Fatalf("unavailable projection report does not validate: %v", err)
+	}
+	if err := ValidateSnapshot(dayReport()); err != nil {
+		t.Fatalf("day report does not validate: %v", err)
+	}
+	if err := ValidateSnapshot(currentYearReport()); err != nil {
+		t.Fatalf("current-year report does not validate: %v", err)
+	}
+	if err := ValidateSnapshot(unavailableCurrentReport()); err != nil {
+		t.Fatalf("unavailable current projection report does not validate: %v", err)
 	}
 	if err := ValidateSnapshot(longReport(poreport.MaxPeriods)); err != nil {
 		t.Fatalf("120-period report does not validate: %v", err)
@@ -541,6 +742,8 @@ func TestFixtureRatiosAreDerivedFromMoney(t *testing.T) {
 		snapshot poreport.Report
 	}{
 		{"sample", sampleReport()},
+		{"day", dayReport()},
+		{"currentYear", currentYearReport()},
 		{"long120", longReport(poreport.MaxPeriods)},
 		{"long1", longReport(1)},
 	} {
@@ -562,6 +765,23 @@ func TestFixtureRatiosAreDerivedFromMoney(t *testing.T) {
 					if got, want := bucket.MarginMinor, bucket.AmountBaseMinor-bucket.CapitalMinor; got != want {
 						t.Errorf("projection %s margin = %d; want base-capital = %d", bucket.PeriodStart, got, want)
 					}
+				}
+			}
+			current := tc.snapshot.CurrentProjection
+			for _, bucket := range current.Buckets {
+				assertDerivedRatio(t, "current projection "+bucket.PeriodStart, "marginBps",
+					bucket.MarginBps, bucket.MarginMinor, bucket.CapitalMinor)
+				if got, want := bucket.MarginMinor, bucket.AmountBaseMinor-bucket.CapitalMinor; got != want {
+					t.Errorf("current projection %s margin = %d; want base-capital = %d",
+						bucket.PeriodStart, got, want)
+				}
+			}
+			if current.CurrentMonth != nil {
+				remainder := current.CurrentMonth.Remainder
+				assertDerivedRatio(t, "current month remainder", "marginBps",
+					remainder.MarginBps, remainder.MarginMinor, remainder.CapitalMinor)
+				if got, want := remainder.MarginMinor, remainder.BaseMinor-remainder.CapitalMinor; got != want {
+					t.Errorf("current month remainder margin = %d; want base-capital = %d", got, want)
 				}
 			}
 
@@ -624,6 +844,8 @@ func TestFixturesFoot(t *testing.T) {
 		snapshot poreport.Report
 	}{
 		{"sample", sampleReport()},
+		{"day", dayReport()},
+		{"currentYear", currentYearReport()},
 		{"long120", longReport(poreport.MaxPeriods)},
 		{"long1", longReport(1)},
 	} {

@@ -39,7 +39,7 @@ func realisticItems(n int) []QuotationItemInput {
 	items := make([]QuotationItemInput, 0, n)
 	for i := 0; i < n; i++ {
 		items = append(items, QuotationItemInput{
-			Description:   fmt.Sprintf("Line item %03d — supply and installation of plant", i+1),
+			Description:   fmt.Sprintf("Line item %03d: supply and installation of plant", i+1),
 			Qty:           quantities[i%len(quantities)],
 			UoM:           units[i%len(units)],
 			UnitPrice:     basePrices[i%len(basePrices)],

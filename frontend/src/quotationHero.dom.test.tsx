@@ -480,7 +480,7 @@ describe("Quotation hero (issue #623)", () => {
     expect(heroText()).toContain("Includes PPN");
 
     pickRadio("Tax type", "Services");
-    pickOption("Service category", "Non-construction — 2% PPh23");
+    pickOption("Service category", "Non-construction (2% PPh23)");
 
     expect(heroText()).toContain("Non-FTZ · Services · Non-construction");
     expect(heroTotal()).toBe("Rp1.000.000");
@@ -525,7 +525,7 @@ describe("Quotation hero (issue #623)", () => {
 
     expect(mocks.saveDraft).toHaveBeenCalledTimes(1);
     expect(heroText()).toContain(
-      "Draft saved just now — save again to update it."
+      "Draft saved just now. Save again to update it."
     );
     expect(heroText()).toContain("DRAFT");
     expect(heroText()).toContain("New quotation");

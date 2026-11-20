@@ -29,8 +29,8 @@ func TestRenderSampleReportIsAPDF(t *testing.T) {
 	if len(pdf) < 10_000 {
 		t.Errorf("sample PDF is only %d bytes; the document is probably empty", len(pdf))
 	}
-	if len(renderer.canvas.pages) < 3 {
-		t.Errorf("sample report has %d pages; expected header, charts, tables and definitions to span several",
+	if len(renderer.canvas.pages) < 2 {
+		t.Errorf("sample report has %d pages; expected the header, charts, tables and definitions",
 			len(renderer.canvas.pages))
 	}
 }
@@ -88,8 +88,8 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	pages := binaryPDFText(t, pdf)
-	if len(pages) < 3 {
-		t.Errorf("extracted %d pages, want at least 3", len(pages))
+	if len(pages) < 2 {
+		t.Errorf("extracted %d pages, want at least 2", len(pages))
 	}
 	text := strings.Join(pages, "\n")
 	requireText(t, text,
@@ -108,9 +108,93 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		"Unassigned",
 		"(UNASSIGNED)",
 		"Rp-30.000.000",
-		"—",
+		"-",
 		"Definitions",
 	)
+}
+
+func TestBinaryPDFTextDayReportPrintsActualDaysAndTheGhostSummary(t *testing.T) {
+	pdf, err := Render(dayReport(), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render day report: %v", err)
+	}
+	pages := binaryPDFText(t, pdf)
+	assertReportPages(t, "binaryPDFText", pages)
+	text := strings.Join(pages, "\n")
+	requireText(t, text,
+		"Daily",
+		"1 Nov 2026",
+		"19 Nov 2026 IP",
+		"Actual and projected days  ·  November 2026",
+		"Projected (ghost)",
+		"Current-period projection",
+		"Mode: Day  ·  November 2026 day by day",
+		"20 Nov 2026 to 30 Nov 2026",
+		"updates as data arrives",
+	)
+	// The finished PDF's own text must prove both halves: the future day is not
+	// an actual table row, and the summary still names it as a ghost.
+	table := periodTableText(text)
+	requireText(t, table, "1 Nov 2026", "19 Nov 2026 IP")
+	requireNoText(t, "binaryPDFText's day period table", table,
+		"20 Nov 2026", "21 Nov 2026", "30 Nov 2026")
+	requireText(t, text, "20 Nov 2026 to 30 Nov 2026 · 11 days")
+	headers := strings.Count(text, "PERIOD")
+	if headers < 3 {
+		t.Errorf("extracted day report repeats the period header %d times; want the metadata and both table pages", headers)
+	}
+	for _, retired := range []string{"Monthly projection", "Yearly projection", "Projected range", "Projection detail"} {
+		if strings.Contains(text, retired) {
+			t.Errorf("day PDF still prints the retired projection section %q", retired)
+		}
+	}
+}
+
+func TestBinaryPDFTextCurrentYearPrintsTheStackedRemainder(t *testing.T) {
+	pdf, err := Render(currentYearReport(), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render current-year report: %v", err)
+	}
+	text := strings.Join(binaryPDFText(t, pdf), "\n")
+	requireText(t, text,
+		"Current-period projection",
+		"Mode: Month  ·  2026 month by month",
+		"Month to date",
+		"Current month remainder",
+		"Future months",
+		"December 2026",
+		"Actual and projected months  ·  2026",
+		"Future months are hatched ghosts",
+		"Projected (ghost)",
+	)
+	// December is a ghost on the chart and a line in the summary, not an actual
+	// row in the finished PDF's period table.
+	table := periodTableText(text)
+	requireText(t, table, "Jan 2026", "Nov 2026 IP")
+	requireNoText(t, "binaryPDFText's current-year period table", table, "Dec 2026")
+	requireText(t, text, "December 2026 · 1 ghost bar")
+	if strings.Contains(text, "Monthly projection") || strings.Contains(text, "Yearly projection") {
+		t.Errorf("current-year PDF still prints a retired projection table heading")
+	}
+}
+
+func TestRenderedReportsContainNoEmDash(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot poreport.Report
+	}{
+		{"sample", sampleReport()},
+		{"day", dayReport()},
+		{"currentYear", currentYearReport()},
+		{"unavailable", unavailableCurrentReport()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text := renderPageText(t, tc.snapshot)
+			if strings.Contains(text, "—") {
+				t.Errorf("%s report prints an em dash", tc.name)
+			}
+		})
+	}
 }
 
 func TestBinaryPDFTextKeepsTheLongTableComplete(t *testing.T) {

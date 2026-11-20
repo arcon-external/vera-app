@@ -468,7 +468,7 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       await flush();
 
       expect(document.body.textContent).toContain(
-        "Features Tutorial practice — nothing is saved to your workspace."
+        "Features Tutorial practice: nothing is saved to your workspace."
       );
       expect(mocks.saveDraft).not.toHaveBeenCalled();
       expect(mocks.prepare).not.toHaveBeenCalled();
@@ -610,7 +610,7 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
       await flush();
       expect(mocks.saveDraft).toHaveBeenCalledTimes(1);
       expect(document.body.textContent).toContain(
-        "Features Tutorial practice — nothing is saved to your workspace."
+        "Features Tutorial practice: nothing is saved to your workspace."
       );
 
       act(() => button("Skip Features Tutorial").click());
@@ -867,7 +867,7 @@ describe("Quotation tutorial practice (issues #605, #607)", () => {
         // The sandbox says so in the hero too: Save draft refuses in the tour,
         // so the hero must not promise that saving stores the work.
         expect(hero).toContain(
-          "Features Tutorial practice — nothing is saved to your workspace."
+          "Features Tutorial practice: nothing is saved to your workspace."
         );
         expect(hero).not.toContain("Save draft stores it");
 

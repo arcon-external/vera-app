@@ -30,3 +30,27 @@ func BenchmarkRender120PeriodReport(b *testing.B) {
 		}
 	}
 }
+
+// The two current-period shapes are the reports staff export most often: a
+// day-bucketed month and a 12-month year with the current month stacked.
+func BenchmarkRenderDayReport(b *testing.B) {
+	snapshot := dayReport()
+	fonts := os.DirFS("../../assets")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Render(snapshot, fonts); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRenderCurrentYearReport(b *testing.B) {
+	snapshot := currentYearReport()
+	fonts := os.DirFS("../../assets")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Render(snapshot, fonts); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

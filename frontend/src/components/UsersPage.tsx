@@ -222,7 +222,7 @@ export function UsersPage() {
           <span className="text-caption">
             {codeCopied ? "Copied." : "Click the code to copy. "}
           </span>
-          Share it once — a new code replaces this one, and it expires in an hour.
+          Share it once. A new code replaces this one, and it expires in an hour.
           <button
             type="button"
             onClick={() => setInvite(null)}
@@ -321,7 +321,7 @@ export function UsersPage() {
                       </Badge>
                     </td>
                     <td className="tnum px-4 py-3 text-body text-ink-600">
-                      {user.LastLoginAt ? user.LastLoginAt.slice(0, 10) : "—"}
+                      {user.LastLoginAt ? user.LastLoginAt.slice(0, 10) : "-"}
                     </td>
                     <td className="px-5 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -730,8 +730,8 @@ function CreateUserForm({
             value={role}
             ariaLabel="Role"
             options={[
-              { value: "staff", label: "Staff — quotations only" },
-              { value: "admin", label: "Admin — full access" },
+              { value: "staff", label: "Staff (quotations only)" },
+              { value: "admin", label: "Admin (full access)" },
             ]}
             onChange={(next) => setRole(String(next))}
           />
@@ -746,7 +746,7 @@ function CreateUserForm({
         </div>
       </form>
       <p className="mt-3 text-caption leading-relaxed text-ink-400">
-        The account starts locked without a password. Share the invite code once —
+        The account starts locked without a password. Share the invite code once:
         it expires in an hour and can only be used a single time.
       </p>
     </Card>

@@ -1387,6 +1387,10 @@ describe("Reports workspace (#630)", () => {
     await flush();
     expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
 
+    await act(async () => {
+      button("Custom date range").click();
+    });
+    await flush();
     await chooseFromSelect("Bucket", "Year");
     expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
     expect(button("Bucket").textContent).toContain("Year");

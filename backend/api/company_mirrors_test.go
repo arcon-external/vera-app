@@ -183,7 +183,7 @@ func TestCompanyDTOCarriesEveryField(t *testing.T) {
 	sort.Strings(extra)
 	if len(extra) > 0 {
 		t.Errorf("companyDTO carries [%s], which no CompanyProfile field maps to.\n\n"+
-			"The DTO drifted from the struct — check for a renamed field.",
+			"The DTO drifted from the struct. Check for a renamed field.",
 			strings.Join(extra, ", "))
 	}
 }
@@ -278,7 +278,7 @@ func TestUpdateCompanyProfileBindsEveryField(t *testing.T) {
 	sort.Strings(extra)
 	if len(extra) > 0 {
 		t.Errorf("the bind struct declares [%s], which no CompanyProfile field maps "+
-			"to.\n\nThe bind struct drifted from the struct — check for a renamed field.",
+			"to.\n\nThe bind struct drifted from the struct. Check for a renamed field.",
 			strings.Join(extra, ", "))
 	}
 

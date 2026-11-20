@@ -73,7 +73,7 @@ function HistoryField({
     <div className="min-w-0">
       <dt className="text-caption text-ink-500">{label}</dt>
       <dd className={`break-words text-ink-900 ${className}`.trim()}>
-        {value.trim() === "" ? "—" : value}
+        {value.trim() === "" ? "-" : value}
       </dd>
     </div>
   );
@@ -141,7 +141,7 @@ export function PurchaseOrderHistoryPanel({
                     <ul className="mt-1 grid gap-0.5 text-caption text-ink-600">
                       {entry.Repair.Decisions.map((decision) => (
                         <li key={decision.Key}>
-                          <span className="tnum">{decision.Key}</span> —{" "}
+                          <span className="tnum">{decision.Key}</span>:{" "}
                           {sourceRepairChoiceLabel(decision.Choice)}
                         </li>
                       ))}
@@ -236,20 +236,20 @@ export function PurchaseOrderHistoryPanel({
                                 {item.LineNumber}
                               </td>
                               <td className="py-2 pr-3 align-middle text-ink-900">
-                                {item.Description || "—"}
+                                {item.Description || "-"}
                               </td>
                               <td className="tnum py-2 pr-3 text-right align-middle text-ink-700">
                                 {formatQuantityScaled(item.QuantityScaled)}
                               </td>
                               <td className="py-2 pr-3 align-middle text-ink-700">
-                                {item.UoM || "—"}
+                                {item.UoM || "-"}
                               </td>
                               <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
                                 {formatMoney(currency, item.UnitPriceMinor)}
                               </td>
                               <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
                                 {item.DiscountMinor === 0
-                                  ? "—"
+                                  ? "-"
                                   : formatMoney(currency, -item.DiscountMinor)}
                               </td>
                               <td className="tnum whitespace-nowrap py-2 text-right align-middle text-ink-900">

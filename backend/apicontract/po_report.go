@@ -15,11 +15,13 @@ import "vera-app/backend/poreport"
 const PurchaseOrderReportPath = "/v1/reports/purchase-orders"
 
 // PurchaseOrderReport is the complete report snapshot: actual totals, period
-// and category rows, aligned category series, facet population, projections
-// and notes. Money is integer minor units and percentages are basis points.
+// and category rows, aligned category series, facet population, the monthly
+// and yearly projections, the current-period projection and notes. Money is
+// integer minor units and percentages are basis points.
 type PurchaseOrderReport = poreport.Report
 
 // PurchaseOrderReportQuery is the validated report filter. From is inclusive
-// and To exclusive; Category is one of all, FM, FAB, SUPPLY_GEN, OTHERS or
-// UNASSIGNED; the currency is a partition, never a conversion.
+// and To exclusive; Bucket is day, month, quarter or year; Category is one of
+// all, FM, FAB, SUPPLY_GEN, OTHERS or UNASSIGNED; the currency is a partition,
+// never a conversion.
 type PurchaseOrderReportQuery = poreport.Query

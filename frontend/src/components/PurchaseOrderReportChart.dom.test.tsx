@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import { normalizePurchaseOrderReport } from "../poReport";
 import type { PurchaseOrderReportData } from "../poReport";
-import { purchaseOrderReportFixture } from "../poReportFixtures";
+import { purchaseOrderReportFixture, purchaseOrderReportMonthFixture, purchaseOrderReportYearFixture } from "../poReportFixtures";
+import type { ReportPeriodMode } from "../poReportPage";
 import {
   buildReportChart,
   layoutReportChart,
@@ -89,10 +90,19 @@ function useReducedMotion(matches: boolean): void {
 
 async function render(
   report: PurchaseOrderReportData,
-  currency: CurrencyInfo | null = IDR
+  currency: CurrencyInfo | null = IDR,
+  period: ReportPeriodMode | null = null,
+  onPeriodChange: (period: ReportPeriodMode | null) => void = () => undefined
 ): Promise<void> {
   await act(async () => {
-    root.render(<PurchaseOrderReportChart report={report} currency={currency} />);
+    root.render(
+      <PurchaseOrderReportChart
+        report={report}
+        currency={currency}
+        period={period}
+        onPeriodChange={onPeriodChange}
+      />
+    );
   });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -327,14 +337,18 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(svg().querySelector('[data-category-line="FM"]')).toBeNull();
   });
 
-  it("draws projected columns distinctly, with one range whisker per projected period and a labelled divider", async () => {
-    const report = purchaseOrderReportFixture();
-    await render(report);
+  it("draws month ghost days distinctly after the last actual day, with a range whisker and divider", async () => {
+    const report = purchaseOrderReportMonthFixture();
+    await render(report, IDR, "month");
 
+    const actual = svg().querySelectorAll(
+      '[data-chart-bucket][data-projected="false"]'
+    );
+    expect(actual).toHaveLength(19);
     const projected = svg().querySelectorAll(
       '[data-chart-bucket][data-projected="true"]'
     );
-    expect(projected).toHaveLength(2);
+    expect(projected).toHaveLength(11);
     for (const bucket of Array.from(projected)) {
       expect(bucket.querySelector('[data-series="amount"]')).not.toBeNull();
       for (const bar of Array.from(
@@ -345,7 +359,7 @@ describe("Purchase order performance chart (issue #631)", () => {
       }
     }
     const ranges = svg().querySelectorAll("[data-chart-band]");
-    expect(ranges).toHaveLength(2);
+    expect(ranges).toHaveLength(11);
     for (const range of Array.from(ranges)) {
       expect(range.querySelectorAll("line")).toHaveLength(3);
       expect(range.getAttribute("data-bucket-index")).not.toBeNull();
@@ -353,11 +367,16 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(svg().querySelector("[data-chart-divider]")).not.toBeNull();
     expect(svg().querySelector("[data-chart-divider-label]")).not.toBeNull();
     expect(figure().textContent).toContain("never included in actual totals");
+    const labels = Array.from(
+      svg().querySelectorAll('[data-chart-axis="x"] text')
+    ).map((node) => node.textContent);
+    expect(labels[0]).toBe("1");
+    expect(labels.at(-1)).toBe("30");
   });
 
-  it("keeps the projected tooltip to low, base, high, sample and basis, never a PO count", async () => {
-    const report = purchaseOrderReportFixture();
-    await render(report);
+  it("keeps the ghost tooltip to low, base, high, sample and basis, never a PO count", async () => {
+    const report = purchaseOrderReportMonthFixture();
+    await render(report, IDR, "month");
     const chart = svg();
     act(() => {
       chart.focus();
@@ -378,30 +397,127 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(text).not.toContain("Coverage");
   });
 
-  it("shows an unavailable projection's reason and real history basis, with no flat line", async () => {
-    const report = purchaseOrderReportFixture();
-    report.projection.monthly.status = "unavailable";
-    report.projection.monthly.reason = "insufficient_history";
-    report.projection.monthly.buckets = [];
-    await render(report);
+  it("shows an unavailable current-period reason and its real sample, with no flat line", async () => {
+    const report = purchaseOrderReportMonthFixture();
+    report.currentProjection.status = "unavailable";
+    report.currentProjection.reason = "insufficient_days";
+    report.currentProjection.buckets = [];
+    await render(report, IDR, "month");
 
-    expect(figure().textContent).toContain(
-      "Not enough complete-month history"
-    );
-    expect(figure().textContent).toContain("complete months");
-    expect(figure().textContent).toContain("8 POs observed");
+    expect(figure().textContent).toContain("Not enough elapsed days");
+    expect(figure().textContent).toContain("19 elapsed days");
+    expect(figure().textContent).toContain("12 POs observed");
     expect(svg().querySelectorAll('[data-projected="true"]')).toHaveLength(0);
     expect(svg().querySelector("[data-chart-band]")).toBeNull();
+    expect(
+      container.querySelector("[data-report-projection-summary]")
+        ?.getAttribute("data-projection-status")
+    ).toBe("unavailable");
   });
 
-  it("names the missing quarterly projection instead of inventing a series", async () => {
+  it("names the current-period boundary instead of inventing a quarterly series", async () => {
     const report = purchaseOrderReportFixture();
     report.filter.bucket = "quarter";
     await render(report);
 
-    expect(figure().textContent).toContain("No quarterly projection");
+    expect(figure().textContent).toContain(
+      "Current-period projections appear in the Month and Year views"
+    );
     expect(svg().querySelectorAll('[data-projected="true"]')).toHaveLength(0);
     expect(svg().querySelector("[data-chart-divider]")).toBeNull();
+  });
+
+  it("stacks the current month's remainder as a translucent ghost segment and ghosts the later month", async () => {
+    const report = purchaseOrderReportYearFixture();
+    await render(report, IDR, "year");
+
+    const november = svg().querySelector(
+      '[data-chart-bucket][data-bucket-index="10"]'
+    );
+    expect(november).not.toBeNull();
+    const remainder = november?.querySelector("[data-chart-remainder]");
+    expect(remainder).not.toBeNull();
+    expect(remainder?.querySelector('[data-series-remainder="amount"]')).not.toBeNull();
+    expect(remainder?.querySelector('[data-series-remainder="capital"]')).not.toBeNull();
+    expect(remainder?.querySelector('[data-series-remainder="margin"]')).not.toBeNull();
+    expect(remainder?.getAttribute("opacity")).toBe("0.8");
+    expect(
+      remainder
+        ?.querySelector('[data-series-remainder="amount"]')
+        ?.getAttribute("fill")
+    ).toContain("url(#");
+    expect(svg().querySelector("[data-chart-remainder-band]")).not.toBeNull();
+    expect(
+      svg().querySelector('[data-chart-bucket][data-projected="true"]')
+        ?.getAttribute("data-bucket-index")
+    ).toBe("11");
+
+    const summary = container.querySelector(
+      "[data-report-projection-summary]"
+    );
+    expect(summary?.textContent).toContain("Rest of this month");
+    expect(summary?.textContent).toContain("Low");
+    expect(summary?.textContent).toContain("Base");
+    expect(summary?.textContent).toContain("High");
+    expect(summary?.textContent).toContain("Per remaining month");
+    expect(summary?.textContent).toContain("Updates as data arrives");
+  });
+
+  it("renders a Month/Year toggle that reports the chosen period", async () => {
+    const onPeriodChange = vi.fn();
+    const report = purchaseOrderReportMonthFixture();
+    await render(report, IDR, "month", onPeriodChange);
+
+    const monthButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Month view"]'
+    );
+    const yearButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Year view"]'
+    );
+    expect(monthButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(yearButton?.getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => {
+      yearButton?.click();
+    });
+    expect(onPeriodChange).toHaveBeenCalledWith("year");
+  });
+
+  it("shows the projection summary's low, base, high and basis for Month mode", async () => {
+    const report = purchaseOrderReportMonthFixture();
+    await render(report, IDR, "month");
+
+    const summary = container.querySelector(
+      "[data-report-projection-summary]"
+    );
+    const text = summary?.textContent ?? "";
+    expect(text).toContain("Month view, daily buckets");
+    expect(text).toContain("Per remaining day");
+    expect(text).toContain("Low");
+    expect(text).toContain("Base");
+    expect(text).toContain("High");
+    expect(text).toContain("19 elapsed days");
+    expect(text).toContain("12 POs observed");
+    expect(text).toContain("as of 19 Nov 2026");
+    expect(text).toContain("Updates as data arrives");
+    expect(text).toContain("never enter the KPIs");
+  });
+
+  it("states the reason instead of low, base or high when the projection is unavailable", async () => {
+    const report = purchaseOrderReportMonthFixture();
+    report.currentProjection.status = "unavailable";
+    report.currentProjection.reason = "insufficient_days";
+    report.currentProjection.buckets = [];
+    await render(report, IDR, "month");
+
+    const summary = container.querySelector(
+      "[data-report-projection-summary]"
+    );
+    expect(summary?.getAttribute("data-projection-reason")).toBe(
+      "insufficient_days"
+    );
+    expect(summary?.textContent).toContain("Not enough elapsed days");
+    expect(summary?.textContent).not.toContain("Per remaining day");
   });
 
   it("moves one keyboard cursor with the arrow keys and exposes the table link", async () => {
@@ -419,7 +535,7 @@ describe("Purchase order performance chart (issue #631)", () => {
     key(chart, "ArrowRight");
     expect(tooltip()?.textContent).toContain("Feb 2026");
     key(chart, "End");
-    expect(tooltip()?.textContent).toContain("Jan 2027");
+    expect(tooltip()?.textContent).toContain("Nov 2026");
     key(chart, "Escape");
     expect(tooltip()).toBeNull();
 

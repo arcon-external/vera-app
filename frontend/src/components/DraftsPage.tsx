@@ -167,7 +167,7 @@ export function DraftsPage({ onOpenDraft, onNewQuotation }: DraftsPageProps) {
                       ) : null}
                     </td>
                     <td className="px-4 py-3 align-middle text-body text-ink-700">
-                      {row.CustomerName || <span className="text-ink-400">—</span>}
+                      {row.CustomerName || <span className="text-ink-400">-</span>}
                     </td>
                     <td className="px-4 py-3 text-center align-middle text-body tnum text-ink-600">
                       {row.ItemCount}

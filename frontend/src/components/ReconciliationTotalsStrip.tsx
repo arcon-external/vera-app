@@ -89,9 +89,9 @@ export function ReconciliationTotalsStrip(props: TotalsStripProps) {
         <span className="text-small font-medium text-ink-900">Totals check</span>
         <span className="flex items-baseline gap-2 text-small">
           <span className="tnum text-ink-700">
-            {printed === null ? "—" : money(currency, calculated?.grandTotalMinor ?? null)}
+            {printed === null ? "-" : money(currency, calculated?.grandTotalMinor ?? null)}
             {" · "}
-            {printed === null ? "—" : formatMoney(currency, printed.grandTotalMinor)}
+            {printed === null ? "-" : formatMoney(currency, printed.grandTotalMinor)}
           </span>
           <span className={`text-caption font-medium ${statusClass}`}>{statusText}</span>
         </span>
@@ -112,7 +112,7 @@ export function ReconciliationTotalsStrip(props: TotalsStripProps) {
                 {money(currency, row.po)}
               </dd>
               <dd className={`tnum ${row.strong === true ? "font-semibold text-ink-900" : "text-ink-700"}`}>
-                {row.printed === null ? "—" : formatMoney(currency, row.printed)}
+                {row.printed === null ? "-" : formatMoney(currency, row.printed)}
               </dd>
             </div>
           ))}

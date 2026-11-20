@@ -17,7 +17,7 @@ import (
 // returns the complete snapshot the Reports screen and the later PDF render:
 // the filter, the population facets, actual totals, continuous calendar
 // buckets, the category breakdown, aligned category series, the monthly and
-// yearly projections, and any disclosure notes.
+// yearly projections, the current-period projection, and any disclosure notes.
 //
 // The endpoint is organization-scoped through the same context the PO archive
 // uses and adds no role restriction: staff who record the orders may read what
@@ -124,6 +124,14 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 		projection = poreport.Project(
 			snapshot.History, query, snapshot.AsOf, snapshot.Totals.PoCount)
 	}
+	currentProjection := poreport.ProjectCurrent(
+		snapshot.History,
+		snapshot.Daily,
+		query,
+		snapshot.AsOf,
+		snapshot.HistoryOutOfRange,
+		snapshot.DailyOutOfRange,
+	)
 	report := poreport.Report{
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 		AsOf:        snapshot.AsOf.Format(time.DateOnly),
@@ -137,12 +145,13 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 			HasUnassigned:        snapshot.HasUnassigned,
 			SourceMissingPoCount: snapshot.SourceMissingPoCount,
 		},
-		Totals:         snapshot.Totals,
-		Periods:        snapshot.Periods,
-		Categories:     snapshot.Categories,
-		CategorySeries: snapshot.CategorySeries,
-		Projection:     projection,
-		Notes:          notes,
+		Totals:            snapshot.Totals,
+		Periods:           snapshot.Periods,
+		Categories:        snapshot.Categories,
+		CategorySeries:    snapshot.CategorySeries,
+		Projection:        projection,
+		CurrentProjection: currentProjection,
+		Notes:             notes,
 	}
 	return context.JSON(http.StatusOK, apicontract.PurchaseOrderReport(report))
 }

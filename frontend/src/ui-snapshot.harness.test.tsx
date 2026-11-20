@@ -48,6 +48,8 @@ import {
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
+  purchaseOrderReportMonthFixture,
+  purchaseOrderReportYearFixture,
 } from "./poReportFixtures";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
@@ -1369,9 +1371,13 @@ const REPORT_CATALOGUE: CurrencyInfo[] = [
   },
 ];
 
-function reportChartFilters(report: PurchaseOrderReportData): ReportFilterState {
+function reportChartFilters(
+  report: PurchaseOrderReportData,
+  period: ReportFilterState["period"] = null
+): ReportFilterState {
   return {
     preset: "custom",
+    period,
     from: report.filter.from,
     to: addDaysIso(report.filter.to, -1),
     bucket: report.filter.bucket as ReportBucket,
@@ -1380,10 +1386,13 @@ function reportChartFilters(report: PurchaseOrderReportData): ReportFilterState 
   };
 }
 
-function reportChartView(report: PurchaseOrderReportData): ReactElement {
+function reportChartView(
+  report: PurchaseOrderReportData,
+  period: ReportFilterState["period"] = null
+): ReactElement {
   return (
     <PurchaseOrderReportsView
-      filters={reportChartFilters(report)}
+      filters={reportChartFilters(report, period)}
       report={report}
       loading={false}
       stale={false}
@@ -1393,6 +1402,7 @@ function reportChartView(report: PurchaseOrderReportData): ReactElement {
       exporting={false}
       canExport={false}
       onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
       onFromChange={() => undefined}
       onToChange={() => undefined}
       onBucketChange={() => undefined}
@@ -1752,6 +1762,7 @@ const CASES: SnapshotCase[] = [
           // The fixture is the "this year to today" snapshot on 19 Nov 2026,
           // so the controls name the same inclusive range the report covers.
           preset: "this-year",
+          period: null,
           from: "2026-01-01",
           to: "2026-11-19",
           bucket: "month",
@@ -1786,6 +1797,7 @@ const CASES: SnapshotCase[] = [
         exporting={false}
         canExport={false}
         onPresetChange={() => undefined}
+        onPeriodChange={() => undefined}
         onFromChange={() => undefined}
         onToChange={() => undefined}
         onBucketChange={() => undefined}
@@ -1805,13 +1817,42 @@ const CASES: SnapshotCase[] = [
     element: reportChartView(purchaseOrderReportFixture()),
   },
   {
-    // Issue #631, a real negative period (December) and the shared fixture's
-    // available monthly and yearly projections. The projected columns sit
-    // after the dashed divider inside the low-high amount band; they are never
-    // part of actual totals.
+    // A historical shared snapshot with a real negative period (December). It
+    // is not the current month or year, so it draws actuals only and states the
+    // no-ghost reason in the current-period summary.
     name: "ReportsChartForecastNegative",
     cropToHeading: "Performance",
     element: <SharedReportChartView />,
+  },
+  {
+    // Issue #638: the full Reports screen in Month mode. The KPI strip states
+    // "Current month to date", the range controls carry the same month and the
+    // chart below is the daily ghost view.
+    name: "ReportsCurrentMonth",
+    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+  },
+  {
+    // Issue #638: the full Reports screen in Year mode. The KPI strip states
+    // "Current year to date" and the chart shows November's remainder stack
+    // plus the December ghost month.
+    name: "ReportsCurrentYear",
+    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
+  },
+  {
+    // Issue #638: the current calendar month by day. Days 20 to 30 are the
+    // server's ghost buckets after the horizontal dashed divider; the summary
+    // under the chart states low, base, high and the elapsed-day basis.
+    name: "ReportsChartCurrentMonth",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+  },
+  {
+    // Issue #638: the current calendar year by month. November carries the
+    // stacked projected remainder; December is the one ghost month. Both are
+    // visibly outside the actual totals.
+    name: "ReportsChartCurrentYear",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
   },
   {
     // Issue #631, JavaScript's largest exact money range: the money axis must
@@ -1832,6 +1873,7 @@ const CASES: SnapshotCase[] = [
       <PurchaseOrderReportsView
         filters={{
           preset: "this-year",
+          period: null,
           from: "2026-01-01",
           to: "2026-11-19",
           bucket: "month",
@@ -1866,6 +1908,7 @@ const CASES: SnapshotCase[] = [
         exporting={false}
         canExport={false}
         onPresetChange={() => undefined}
+        onPeriodChange={() => undefined}
         onFromChange={() => undefined}
         onToChange={() => undefined}
         onBucketChange={() => undefined}
@@ -1884,6 +1927,7 @@ const CASES: SnapshotCase[] = [
       <PurchaseOrderReportsView
         filters={{
           preset: "custom",
+          period: null,
           from: "2026-01-01",
           to: "2026-12-31",
           bucket: "month",
@@ -1918,6 +1962,7 @@ const CASES: SnapshotCase[] = [
         exporting={false}
         canExport={false}
         onPresetChange={() => undefined}
+        onPeriodChange={() => undefined}
         onFromChange={() => undefined}
         onToChange={() => undefined}
         onBucketChange={() => undefined}
@@ -3191,7 +3236,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3216,7 +3261,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3241,7 +3286,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3473,12 +3518,12 @@ function buildPage(
     "<head>",
     '<meta charset="UTF-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
-    `<title>${name} — UI snapshot</title>`,
+    `<title>${name}: UI snapshot</title>`,
     "<!--",
     "  Local UI snapshot written by scripts/ui-snapshot.sh. Not committed.",
     "  The app's font stack is -apple-system / BlinkMacSystemFont / Segoe UI /",
-    "  system-ui, none of which exists inside the render container. Inter — the",
-    "  face the PDF template already bundles — is inlined here (base64) as the",
+    "  system-ui, none of which exists inside the render container. Inter, the",
+    "  face the PDF template already bundles, is inlined here (base64) as the",
     "  closest available approximation: it is not the app's real rendering font,",
     "  only its stand-in. The CSS and the root shell classes are the app's own.",
     "-->",

@@ -92,7 +92,7 @@ describe("CompanyUnitsPanel", () => {
 
   it("shows the printable label beside a value that differs from it", () => {
     const canonical = selects(render()).find((segment) => segment.includes('aria-label="Canonical unit"')) as string;
-    expect(canonical).toContain("m2 — m²");
+    expect(canonical).toContain("m2 (m²)");
   });
 
   it("renders a value and a label input for every unit, in order", () => {
@@ -228,8 +228,8 @@ describe("CompanyUnitsPanel", () => {
 describe("CompanyUnitsPanel unit rows", () => {
   it("captions each input visibly with the stored/printed meaning", () => {
     const html = render();
-    expect(html).toContain("Value — stored");
-    expect(html).toContain("Label — printed");
+    expect(html).toContain("Value (stored)");
+    expect(html).toContain("Label (printed)");
     expect(html).toContain('class="text-caption font-medium text-ink-600"');
     // The captions never replace the aria-labels: a screen reader hears
     // "Value for unit 2", which names the row the caption cannot.

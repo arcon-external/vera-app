@@ -273,7 +273,7 @@ function StepTwo({
         <>
           {state.revisions.length === 1 ? (
             <p className="text-small text-ink-500">
-              Only issued revision — selected automatically.
+              Only issued revision, selected automatically.
             </p>
           ) : (
             <p className="text-small text-ink-500">

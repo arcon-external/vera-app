@@ -104,8 +104,8 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 	b.ReportMetric(float64(reportQuantile(durations, 0.95).Microseconds())/1000, "p95_ms")
 
 	// The payload is measured on the same shape the screen receives, including
-	// the two projections. It is reported, not enforced: the approved range is
-	// not shortened to fit a byte target.
+	// the complete-history and current-period projections. It is reported, not
+	// enforced: the approved range is not shortened to fit a byte target.
 	report := poreport.Report{
 		GeneratedAt:    now.UTC().Format(time.RFC3339),
 		AsOf:           snapshot.AsOf.Format(time.DateOnly),
@@ -117,7 +117,10 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 		Categories:     snapshot.Categories,
 		CategorySeries: snapshot.CategorySeries,
 		Projection:     poreport.Project(snapshot.History, query, snapshot.AsOf, snapshot.Totals.PoCount),
-		Notes:          []poreport.Note{},
+		CurrentProjection: poreport.ProjectCurrent(
+			snapshot.History, snapshot.Daily, query, snapshot.AsOf,
+			snapshot.HistoryOutOfRange, snapshot.DailyOutOfRange),
+		Notes: []poreport.Note{},
 	}
 	payload, err := json.Marshal(report)
 	if err != nil {

@@ -127,7 +127,7 @@ func TestUpdateCompanyProfileSendsEveryField(t *testing.T) {
 	sort.Strings(extra)
 	if len(extra) > 0 {
 		t.Errorf("UpdateCompanyProfile sent unexpected wire keys [%s]; "+
-			"the map drifted from CompanyProfile — check for a renamed field.",
+			"the map drifted from CompanyProfile. Check for a renamed field.",
 			strings.Join(extra, ", "))
 	}
 
@@ -147,7 +147,7 @@ func TestUpdateCompanyProfileSendsEveryField(t *testing.T) {
 	// writes. If it ever appears on the wire, the contract changed and the
 	// comment on companyProfileWireKey must change with it.
 	if _, present := gotBody["hasLogo"]; present {
-		t.Error(`wire carries "hasLogo": UpdateCompanyProfile must not send it — ` +
+		t.Error(`wire carries "hasLogo": UpdateCompanyProfile must not send it. ` +
 			`the store recomputes HasLogo from logo_bytes`)
 	}
 }
