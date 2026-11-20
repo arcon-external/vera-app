@@ -41,10 +41,11 @@ func TestLongReportPaginationGolden(t *testing.T) {
 	assertPaginationGolden(t, "long_report_pagination.golden", renderer.canvas.pages)
 }
 
-// TestDayReportPaginationGolden pins the 31-row daily table's breaks and
-// repeated header. A day report is the densest table the report can print, so
-// the golden is the page-level proof that no day is dropped and the header
-// returns on the continuation page.
+// TestDayReportPaginationGolden pins the day table's breaks and repeated
+// header. A day report is the densest table the report can print, so the golden
+// is the page-level proof that every actual day is printed, that the future
+// zero-placeholder days are not, and that the header returns on the
+// continuation page.
 func TestDayReportPaginationGolden(t *testing.T) {
 	renderer, err := testReportRenderer(dayReport())
 	if err != nil {

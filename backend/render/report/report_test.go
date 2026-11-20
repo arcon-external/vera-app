@@ -43,15 +43,15 @@ func TestDecodeSnapshotAcceptsADayReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeSnapshot(day report): %v", err)
 	}
-	if len(got.Periods) != 31 {
-		t.Errorf("day report decoded %d periods; want 31", len(got.Periods))
+	if len(got.Periods) != 30 {
+		t.Errorf("day report decoded %d periods; want 30", len(got.Periods))
 	}
-	if got.Periods[0].PeriodStart != "2026-01-01" || got.Periods[30].PeriodStart != "2026-01-31" {
-		t.Errorf("day periods span %s..%s", got.Periods[0].PeriodStart, got.Periods[30].PeriodStart)
+	if got.Periods[0].PeriodStart != "2026-11-01" || got.Periods[29].PeriodStart != "2026-11-30" {
+		t.Errorf("day periods span %s..%s", got.Periods[0].PeriodStart, got.Periods[29].PeriodStart)
 	}
 	if got.CurrentProjection.Mode != poreport.ProjectionModeDay ||
-		len(got.CurrentProjection.Buckets) != 12 {
-		t.Errorf("decoded current projection = %+v; want 12 remaining days", got.CurrentProjection)
+		len(got.CurrentProjection.Buckets) != 11 {
+		t.Errorf("decoded current projection = %+v; want 11 remaining days", got.CurrentProjection)
 	}
 }
 
@@ -179,10 +179,21 @@ func TestValidateSnapshotAcceptsTheFullPeriodCap(t *testing.T) {
 		t.Fatalf("121-period report accepted")
 	}
 	if err := ValidateSnapshot(dayReport()); err != nil {
+		t.Fatalf("30-day report refused: %v", err)
+	}
+	full := dayReport()
+	full.Periods = append(full.Periods, poreport.Period{PeriodStart: "2026-12-01"})
+	for index := range full.CategorySeries {
+		full.CategorySeries[index].MarginBps = append(full.CategorySeries[index].MarginBps, nil)
+	}
+	if err := ValidateSnapshot(full); err != nil {
 		t.Fatalf("31-day report refused: %v", err)
 	}
-	over := dayReport()
-	over.Periods = append(over.Periods, poreport.Period{PeriodStart: "2026-02-01"})
+	over := full
+	over.Periods = append(over.Periods, poreport.Period{PeriodStart: "2026-12-02"})
+	for index := range over.CategorySeries {
+		over.CategorySeries[index].MarginBps = append(over.CategorySeries[index].MarginBps, nil)
+	}
 	if err := ValidateSnapshot(over); err == nil || !strings.Contains(err.Error(), "day periods") {
 		t.Fatalf("32-day report error = %v; want the 31-day cap", err)
 	}
@@ -196,6 +207,9 @@ func TestValidateSnapshotAcceptsALegacySnapshotWithoutCurrentProjection(t *testi
 	}
 	text := renderPageText(t, snapshot)
 	requireText(t, text, "Current-period projection", "No current-period projection is available in this snapshot.")
+	// A snapshot with no current projection is not current-period trimmed: it
+	// keeps every actual period.
+	requireText(t, periodTableText(text), "Jan 2025", "Dec 2025 IP")
 }
 
 func TestValidateSnapshotRefusesMalformedCurrentProjection(t *testing.T) {

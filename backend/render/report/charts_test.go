@@ -61,8 +61,8 @@ func TestCurrentChartBucketsPutEveryGhostAfterTheLastActualDay(t *testing.T) {
 	if !ok {
 		t.Fatal("day report did not build a ghost chart")
 	}
-	if len(buckets) != 31 {
-		t.Fatalf("day chart has %d groups; want 31 days", len(buckets))
+	if len(buckets) != 30 {
+		t.Fatalf("day chart has %d groups; want 30 days", len(buckets))
 	}
 	for index, bucket := range buckets {
 		day := index + 1
@@ -142,11 +142,11 @@ func TestGhostBarsAndWhiskersAreDrawn(t *testing.T) {
 			}
 		}
 	}
-	if ghostColumns < 12*3 {
-		t.Errorf("ghost columns = %d; want three ghost series for each of the 12 future days", ghostColumns)
+	if ghostColumns < 11*3 {
+		t.Errorf("ghost columns = %d; want three ghost series for each of the 11 future days", ghostColumns)
 	}
-	// Each of the 12 ghosts draws a vertical whisker plus two caps.
-	if whiskerLines < 12 {
+	// Each of the 11 ghosts draws a vertical whisker plus two caps.
+	if whiskerLines < 11 {
 		t.Errorf("vertical whisker lines = %d; want at least one per future day", whiskerLines)
 	}
 }
