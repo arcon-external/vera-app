@@ -92,7 +92,7 @@ async function render(
   report: PurchaseOrderReportData,
   currency: CurrencyInfo | null = IDR,
   period: ReportPeriodMode | null = null,
-  onPeriodChange: (period: ReportPeriodMode) => void = () => undefined
+  onPeriodChange: (period: ReportPeriodMode | null) => void = () => undefined
 ): Promise<void> {
   await act(async () => {
     root.render(

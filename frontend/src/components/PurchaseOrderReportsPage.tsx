@@ -76,7 +76,7 @@ export interface PurchaseOrderReportsViewProps {
   exporting: boolean;
   canExport: boolean;
   onPresetChange: (preset: ReportPreset) => void;
-  onPeriodChange: (period: ReportPeriodMode) => void;
+  onPeriodChange: (period: ReportPeriodMode | null) => void;
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
   onBucketChange: (value: ReportBucket) => void;
@@ -192,14 +192,23 @@ function CategoryTable({
 function PeriodTable({
   report,
   entry,
+  periods,
 }: {
   report: PurchaseOrderReportData;
   entry: CurrencyInfo | null;
+  periods: PurchaseOrderReportData["periods"];
 }) {
   return (
     <Card className="min-w-0 overflow-hidden">
       <div className="px-5 pt-5">
-        <SectionTitle title="By period" />
+        <SectionTitle
+          title="By period"
+          hint={
+            periods.length < report.periods.length
+              ? "Actual periods to date. Projections are in the chart."
+              : undefined
+          }
+        />
       </div>
       <div className="overflow-x-auto scroll-thin">
         <table
@@ -220,7 +229,7 @@ function PeriodTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-rule">
-            {report.periods.map((row) => (
+            {periods.map((row) => (
               <tr key={row.periodStart}>
                 <td className="px-5 py-3 align-middle font-medium text-ink-900">
                   <span className="tnum">
@@ -332,7 +341,7 @@ function EmptyReport({
 }: {
   report: PurchaseOrderReportData;
   period: ReportPeriodMode | null;
-  onPeriodChange: (period: ReportPeriodMode) => void;
+  onPeriodChange: (period: ReportPeriodMode | null) => void;
 }) {
   return (
     <Card className="min-w-0 p-8">
@@ -414,6 +423,19 @@ export function PurchaseOrderReportsView({
   const showFigures = report !== null && report.totals.poCount > 0;
   const unresolvedCurrency = report !== null && entry === null;
 
+  // The report materializes the whole current month/year, including days and
+  // months that have not happened. Those are ghost territory, not actual table
+  // rows: the table stops at today and the chart carries the projection.
+  const asOfMonth = report === null ? "" : `${report.asOf.slice(0, 7)}-01`;
+  const displayedPeriods =
+    report === null
+      ? []
+      : filters.period === "month"
+        ? report.periods.filter((period) => period.periodStart <= report.asOf)
+        : filters.period === "year"
+          ? report.periods.filter((period) => period.periodStart <= asOfMonth)
+          : report.periods;
+
   return (
     <section aria-labelledby="reports-heading" className="flex flex-col gap-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
@@ -452,50 +474,70 @@ export function PurchaseOrderReportsView({
 
       <Card className="min-w-0 p-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Date range
-            </span>
-            <Select
-              ariaLabel="Date range preset"
-              value={filters.preset}
-              options={REPORT_PRESET_OPTIONS}
-              onChange={(value) => onPresetChange(value as ReportPreset)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              From date
-            </span>
-            <input
-              type="date"
-              aria-label="From date"
-              className={fieldClass}
-              value={filters.from}
-              onChange={(event) => onFromChange(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              To date
-            </span>
-            <input
-              type="date"
-              aria-label="To date"
-              className={fieldClass}
-              value={filters.to}
-              onChange={(event) => onToChange(event.target.value)}
-            />
-          </label>
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">Bucket</span>
-            <Select
-              ariaLabel="Bucket"
-              value={filters.bucket}
-              options={REPORT_BUCKET_OPTIONS}
-              onChange={(value) => onBucketChange(value as ReportBucket)}
-            />
-          </label>
+          {filters.period === null ? (
+            <>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  Date range
+                </span>
+                <Select
+                  ariaLabel="Date range preset"
+                  value={filters.preset}
+                  options={REPORT_PRESET_OPTIONS}
+                  onChange={(value) => onPresetChange(value as ReportPreset)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  From date
+                </span>
+                <input
+                  type="date"
+                  aria-label="From date"
+                  className={fieldClass}
+                  value={filters.from}
+                  onChange={(event) => onFromChange(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  To date
+                </span>
+                <input
+                  type="date"
+                  aria-label="To date"
+                  className={fieldClass}
+                  value={filters.to}
+                  onChange={(event) => onToChange(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1.5">
+                <span className="text-small font-medium text-ink-700">
+                  Bucket
+                </span>
+                <Select
+                  ariaLabel="Bucket"
+                  value={filters.bucket}
+                  options={REPORT_BUCKET_OPTIONS}
+                  onChange={(value) => onBucketChange(value as ReportBucket)}
+                />
+              </label>
+            </>
+          ) : (
+            <div
+              data-report-current-period=""
+              className="rounded-md border border-rule bg-paper-subtle/60 px-3 py-2 sm:col-span-2 xl:col-span-3"
+            >
+              <span className="text-small font-semibold text-ink-900">
+                {filters.period === "month" ? "Current month" : "Current year"}
+              </span>
+              <span className="ml-2 text-small text-ink-600">
+                {formatReportDate(filters.from)} to {formatReportDate(filters.to)}
+                {" · "}
+                {filters.period === "month" ? "daily" : "monthly"}
+              </span>
+            </div>
+          )}
           <label className="grid gap-1.5">
             <span className="text-small font-medium text-ink-700">
               Category
@@ -589,7 +631,11 @@ export function PurchaseOrderReportsView({
             onPeriodChange={onPeriodChange}
           />
           <CategoryTable report={report} entry={entry} />
-          <PeriodTable report={report} entry={entry} />
+          <PeriodTable
+            report={report}
+            entry={entry}
+            periods={displayedPeriods}
+          />
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -687,14 +733,18 @@ export function PurchaseOrderReportsPage({
     });
   }, []);
 
-  const changePeriod = useCallback((period: ReportPeriodMode) => {
-    setFilters((current) => ({
-      ...current,
-      period,
-      preset: "custom",
-      ...reportPeriodRange(period, todayWIB()),
-      bucket: reportPeriodBucket(period),
-    }));
+  const changePeriod = useCallback((period: ReportPeriodMode | null) => {
+    setFilters((current) =>
+      period === null
+        ? { ...current, period: null, preset: "custom" }
+        : {
+            ...current,
+            period,
+            preset: "custom",
+            ...reportPeriodRange(period, todayWIB()),
+            bucket: reportPeriodBucket(period),
+          }
+    );
   }, []);
 
   const stale =

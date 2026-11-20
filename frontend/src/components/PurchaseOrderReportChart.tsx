@@ -66,7 +66,7 @@ export interface PurchaseOrderReportChartProps {
   currency: CurrencyInfo | null;
   /** The active Month/Year current-period mode, or null for a custom range. */
   period?: ReportPeriodMode | null;
-  onPeriodChange?: (period: ReportPeriodMode) => void;
+  onPeriodChange?: (period: ReportPeriodMode | null) => void;
 }
 
 const SERIES = {

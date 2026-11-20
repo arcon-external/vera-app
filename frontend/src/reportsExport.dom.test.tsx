@@ -398,6 +398,10 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     await flush();
     expect(button("Export PDF").disabled).toBe(false);
 
+    await act(async () => {
+      button("Custom date range").click();
+    });
+    await flush();
     await choose("Bucket", "Year");
 
     // The previous monthly snapshot is still visible but stale while the

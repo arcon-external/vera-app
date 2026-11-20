@@ -239,9 +239,14 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
   const elapsed = 19;
   const totalDays = 30;
   const counts = splitExact(12, elapsed);
-  const amounts = splitExact(190_000_000, elapsed);
-  const uncosted = splitExact(19_000_000, elapsed);
-  const capitals = amounts.map((amount) => Math.round(amount * 0.8));
+  // Revenue belongs only to a day that received an order. Splitting the money
+  // across all elapsed days produced "0 POs, Rp10M" rows: the totals footed but
+  // the table lied line by line.
+  const active = counts.filter((count) => count > 0).length;
+  const amounts = splitExact(190_000_000, active);
+  const uncosted = splitExact(19_000_000, active);
+  const capitals = splitExact(152_000_000, active);
+  let activeIndex = 0;
 
   const periods = Array.from({ length: totalDays }, (_, index) => {
     if (index >= elapsed) {
@@ -254,11 +259,25 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
         coverageBps: null,
       };
     }
+    if (counts[index] === 0) {
+      return {
+        periodStart: `2026-11-${String(index + 1).padStart(2, "0")}`,
+        partial: false,
+        inProgress: index === elapsed - 1,
+        ...metrics(0, 0, 0, 0),
+        marginBps: null,
+        coverageBps: null,
+      };
+    }
+    const amount = amounts[activeIndex] ?? 0;
+    const uncostedPart = uncosted[activeIndex] ?? 0;
+    const capital = capitals[activeIndex] ?? 0;
+    activeIndex += 1;
     return {
       periodStart: `2026-11-${String(index + 1).padStart(2, "0")}`,
       partial: false,
       inProgress: index === elapsed - 1,
-      ...metrics(counts[index], amounts[index], uncosted[index], capitals[index]),
+      ...metrics(counts[index], amount, uncostedPart, capital),
     };
   });
 

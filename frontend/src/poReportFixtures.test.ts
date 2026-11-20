@@ -57,6 +57,17 @@ function sumRows(rows: PurchaseOrderReportMetrics[]): PurchaseOrderReportMetrics
 }
 
 function assertFooting(report: PurchaseOrderReportData): void {
+  // A row with no purchase order cannot carry revenue. Totals can foot while
+  // this is false, which is exactly the lie the month fixture used to print.
+  for (const period of report.periods) {
+    if (period.poCount !== 0) continue;
+    expect(period.amountMinor, `${period.periodStart} empty amount`).toBe(0);
+    expect(period.costedMinor, `${period.periodStart} empty costed`).toBe(0);
+    expect(period.uncostedMinor, `${period.periodStart} empty uncosted`).toBe(0);
+    expect(period.capitalMinor, `${period.periodStart} empty capital`).toBe(0);
+    expect(period.marginMinor, `${period.periodStart} empty margin`).toBe(0);
+  }
+
   const periodSum = sumRows(report.periods);
   const categorySum = sumRows(report.categories);
   for (const [name, sum] of [

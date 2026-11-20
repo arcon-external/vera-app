@@ -100,7 +100,24 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+async function customRange(): Promise<void> {
+  const custom = document.querySelector<HTMLButtonElement>(
+    'button[data-report-period="custom"]'
+  );
+  if (custom === null || custom.getAttribute("aria-pressed") === "true") return;
+  await act(async () => {
+    custom.click();
+  });
+  await flush();
+}
+
 async function choose(control: string, option: string): Promise<void> {
+  if (
+    (control === "Bucket" || control === "Date range preset") &&
+    document.querySelector(`button[aria-label="${control}"]`) === null
+  ) {
+    await customRange();
+  }
   await act(async () => {
     button(control).click();
   });
@@ -114,7 +131,12 @@ async function choose(control: string, option: string): Promise<void> {
   await flush();
 }
 
-function typeDate(label: string, value: string): void {
+async function typeDate(label: string, value: string): Promise<void> {
+  if (
+    document.querySelector(`input[aria-label="${label}"]`) === null
+  ) {
+    await customRange();
+  }
   const input = document.querySelector<HTMLInputElement>(
     `input[aria-label="${label}"]`
   );
@@ -203,7 +225,7 @@ describe("Reports filters (issue #630)", () => {
     expect(reportMock).toHaveBeenCalledTimes(5);
     expect(calls()[4].bucket).toBe("year");
 
-    typeDate("From date", "2025-12-01");
+    await typeDate("From date", "2025-12-01");
     await flush();
     expect(reportMock).toHaveBeenCalledTimes(6);
     expect(calls()[5]).toMatchObject({
@@ -217,7 +239,7 @@ describe("Reports filters (issue #630)", () => {
 
   it("translates the inclusive end date into the API's exclusive to", async () => {
     await renderPage();
-    typeDate("To date", "2026-12-31");
+    await typeDate("To date", "2026-12-31");
     await flush();
 
     expect(calls().at(-1)?.to).toBe("2027-01-01");
@@ -249,10 +271,12 @@ describe("Reports filters (issue #630)", () => {
   });
 
   it("drops a late response from the previous filter", async () => {
+    await renderPage();
+    await customRange();
     const first = deferred<PurchaseOrderReportData>();
     reportMock.mockImplementationOnce(() => first.promise);
+    await typeDate("From date", "2026-01-02");
     reportMock.mockImplementationOnce(async (query: Query) => reportFor(query));
-    await renderPage();
 
     await choose("Bucket", "Year");
     expect(document.body.textContent).toContain("2026");
@@ -277,11 +301,11 @@ describe("Reports filters (issue #630)", () => {
 
   it("shows a validation alarm and sends no request for an invalid range", async () => {
     await renderPage();
-    typeDate("From date", "2026-12-31");
+    await typeDate("From date", "2026-12-31");
     await flush();
     const beforeInvalid = reportMock.mock.calls.length;
 
-    typeDate("To date", "2026-01-01");
+    await typeDate("To date", "2026-01-01");
     await flush();
 
     expect(reportMock).toHaveBeenCalledTimes(beforeInvalid);
@@ -671,7 +695,10 @@ describe("current period toggle (issue #638)", () => {
     const periodRows = document.querySelectorAll(
       'table[aria-label="Period totals"] tbody tr'
     );
-    expect(periodRows).toHaveLength(30);
+    expect(periodRows).toHaveLength(19);
+    expect(
+      document.querySelector('table[aria-label="Period totals"]')?.textContent
+    ).not.toContain("30 Nov");
     expect(document.querySelector("[data-chart-remainder]")).toBeNull();
     expect(
       document.querySelectorAll('[data-chart-bucket][data-projected="true"]')
@@ -702,6 +729,11 @@ describe("current period toggle (issue #638)", () => {
       document.querySelector('[aria-label="Report KPIs"]')?.textContent
     ).toContain("Rp480.000.000");
     expect(document.querySelector("[data-chart-remainder]")).not.toBeNull();
+    expect(
+      document.querySelectorAll(
+        'table[aria-label="Period totals"] tbody tr'
+      )
+    ).toHaveLength(11);
   });
 
   it("clears the toggle and draws no ghost for a historical preset", async () => {
