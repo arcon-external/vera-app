@@ -125,29 +125,93 @@ func TestRenderedTableTotalsMatchTheFootedFixture(t *testing.T) {
 	}
 }
 
-func TestSampleReportPrintsProjectionRangeBasisAndMethod(t *testing.T) {
+func TestHistoricalReportPrintsTheNoProjectionReason(t *testing.T) {
 	text := renderPageText(t, sampleReport())
 	requireText(t, text,
-		"PROJECTION  ·  ESTIMATES, NEVER INCLUDED IN ACTUAL TOTALS",
-		"Monthly projection  ·  next 12 months",
-		"Yearly projection  ·  next 3 years",
+		"Current-period projection",
+		"Mode: None  ·  not the current month or year",
+		"Unavailable",
+		"REASON  not_current_period",
+		"This range is not the current month or year.",
+		"A projection applies to the current month or year.",
+		"This forecast updates as data arrives.",
+		"Projected figures never enter an actual table or total.",
+	)
+	for _, retired := range []string{
+		"Monthly projection",
+		"Yearly projection",
 		"Projection detail",
 		"Projected range",
-		"LOW",
-		"BASE",
-		"HIGH",
+		"PROJECTION  ·  ESTIMATES",
+	} {
+		if strings.Contains(text, retired) {
+			t.Errorf("historical report still prints the retired projection section %q", retired)
+		}
+	}
+}
+
+func TestDayReportPrintsDailyRowsAndGhostSummary(t *testing.T) {
+	text := renderPageText(t, dayReport())
+	requireText(t, text,
+		"By period",
+		"1 Jan 2026",
+		"19 Jan 2026 IP",
+		"31 Jan 2026",
+		"Current-period projection",
+		"Mode: Day  ·  January 2026 day by day",
 		"Available",
-		"Method: ",
-		"Median of the same calendar month across complete history",
-		"months when that calendar month has no history.",
-		"Basis: ",
-		"History 2024-07-01 to 2025-12-01 (exclusive)",
-		"17 complete months",
-		"34 purchase orders",
-		"as of 2025-12-20.",
-		"Same calendar month across complete history [same_calendar_month]",
-		"Trailing twelve complete months [trailing_twelve_complete_months]",
+		"20 Jan 2026 to 31 Jan 2026 · 12 days",
+		"low Rp8.000.000",
+		"base Rp10.000.000",
+		"high Rp12.000.000",
+		"1 Jan 2026 to 20 Jan 2026 (exclusive) · 19 elapsed days",
+		"19 purchase orders",
+		"as of 19 Jan 2026.",
+		"Elapsed days of the current month [elapsed_days]",
+		"Actual and projected days  ·  January 2026",
+		"Projected (ghost)",
+		"Projected low-high",
+		"updates as data arrives",
 	)
+	for _, retired := range []string{"Monthly projection", "Yearly projection", "Projected range"} {
+		if strings.Contains(text, retired) {
+			t.Errorf("day report still prints the retired projection section %q", retired)
+		}
+	}
+	if !strings.Contains(text, "Rp190.000.000") {
+		t.Errorf("day report total does not print the 19 actual days")
+	}
+	if strings.Contains(text, "Rp310.000.000") {
+		t.Errorf("day report total includes the 12 ghost days; projections must not enter a total")
+	}
+}
+
+func TestCurrentYearReportPrintsTheStackedMonthRemainder(t *testing.T) {
+	text := renderPageText(t, currentYearReport())
+	requireText(t, text,
+		"Current-period projection",
+		"Mode: Month  ·  2026 month by month",
+		"Available",
+		"Rp100.000.000 amount",
+		"Rp70.000.000 capital",
+		"Rp20.000.000 margin",
+		"Current month remainder:",
+		"low Rp44.000.000",
+		"base Rp55.000.000",
+		"high Rp66.000.000",
+		"December 2026 · 1 ghost bar",
+		"low Rp80.000.000",
+		"1 Dec 2025 to 1 Nov 2026 (exclusive) · 11 complete months",
+		"Actual and projected months  ·  2026",
+		"Future months are hatched ghosts; the current month stacks its actual columns with the ghost remainder.",
+		"Projected (ghost)",
+	)
+	if !strings.Contains(text, "Rp1.100.000.000") {
+		t.Errorf("current-year report total does not print the eleven actual months")
+	}
+	if strings.Contains(text, "Rp1.200.000.000") {
+		t.Errorf("current-year report total includes the December ghost; projections must not enter a total")
+	}
 }
 
 func TestSampleReportPrintsDefinitionsAndNotes(t *testing.T) {
@@ -162,22 +226,40 @@ func TestSampleReportPrintsDefinitionsAndNotes(t *testing.T) {
 		"PO margin is costed amount minus capital.",
 		"PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.",
 		"Corrections are counted once at their current values.",
-		"Projected periods are estimates from complete history.",
+		"Current-period projections are estimates from elapsed days or complete months.",
 		"Partial and in-progress periods are marked in the period table.",
 		"All money is in IDR and no figure is converted between currencies.",
 	)
 }
 
-func TestUnavailableProjectionPrintsReasonInsteadOfNumbers(t *testing.T) {
-	text := renderPageText(t, unavailableProjectionReport())
+func TestUnavailableCurrentProjectionPrintsReasonInsteadOfNumbers(t *testing.T) {
+	text := renderPageText(t, unavailableCurrentReport())
 	requireText(t, text,
+		"Current-period projection",
 		"Unavailable",
-		"REASON  insufficient_history",
-		"Not enough complete history: the monthly forecast needs six complete months and six POs",
-		"No complete history window is available; as of 2025-12-20.",
+		"REASON  insufficient_days",
+		"Not enough elapsed days: the current month needs five elapsed days and three purchase orders.",
+		"1 Jan 2026 to 20 Jan 2026 (exclusive) · 3 elapsed days · 2 purchase orders · as of 19 Jan 2026.",
+		"updates as data arrives",
 	)
-	if strings.Contains(text, "Projected range") {
-		t.Errorf("an unavailable projection printed a projected range table")
+	if strings.Contains(text, "Per remaining day") {
+		t.Errorf("an unavailable projection printed per-day projected figures")
+	}
+}
+
+func TestUnavailableProjectionIgnoresSuppliedBuckets(t *testing.T) {
+	snapshot := dayReport()
+	snapshot.CurrentProjection.Status = poreport.ProjectionStatusUnavailable
+	snapshot.CurrentProjection.Reason = poreport.ReasonInsufficientDays
+	if err := ValidateSnapshot(snapshot); err != nil {
+		t.Fatalf("unavailable snapshot with stale buckets is refused: %v", err)
+	}
+	text := renderPageText(t, snapshot)
+	requireText(t, text, "Unavailable", "REASON  insufficient_days")
+	for _, forbidden := range []string{"Per remaining day", "Projected (ghost)", "Actual and projected days"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("an unavailable forecast still printed %q", forbidden)
+		}
 	}
 }
 

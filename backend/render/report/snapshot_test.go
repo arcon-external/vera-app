@@ -59,7 +59,11 @@ func TestSharedSnapshotIsTheSampleFixture(t *testing.T) {
 		t.Fatalf("decode shared snapshot: %v", err)
 	}
 	if os.Getenv("UPDATE_REPORT_SNAPSHOT") != "" {
-		raw, err := json.MarshalIndent(snapshot, "", "  ")
+		// Regenerate from sampleReport, the single source of the fixture. The
+		// decoded copy is deliberately not the source: it cannot add a field
+		// the committed file predates, which is exactly what a new projection
+		// shape needs.
+		raw, err := json.MarshalIndent(sampleReport(), "", "  ")
 		if err != nil {
 			t.Fatalf("marshal shared snapshot: %v", err)
 		}
@@ -116,7 +120,8 @@ func TestSharedSnapshotPDFPrintsTheSameMetricsAsTheScreen(t *testing.T) {
 	}
 
 	// The in-memory page text is the same layout before PDF encoding. It is the
-	// stricter read for the em dash, which some external readers transliterate.
+	// stricter read for the unknown-percentage placeholder, which some external
+	// readers transliterate.
 	renderer, err := testReportRenderer(snapshot)
 	if err != nil {
 		t.Fatalf("layout shared snapshot: %v", err)

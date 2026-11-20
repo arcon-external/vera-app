@@ -56,6 +56,8 @@ func categoryFilterLabel(code string) string {
 
 func bucketLabel(bucket string) string {
 	switch bucket {
+	case poreport.BucketDay:
+		return "Daily"
 	case poreport.BucketMonth:
 		return "Monthly"
 	case poreport.BucketQuarter:
@@ -73,10 +75,18 @@ func projectionReasonLabel(reason string) string {
 		return "No completed purchase orders in the selected range, so there is nothing to forecast."
 	case poreport.ReasonInsufficientHistory:
 		return "Not enough complete history: the monthly forecast needs six complete months and six POs; the yearly forecast needs twelve complete months."
+	case poreport.ReasonNoData:
+		return "No purchase orders in the current period yet, so there is nothing to project."
+	case poreport.ReasonInsufficientDays:
+		return "Not enough elapsed days: the current month needs five elapsed days and three purchase orders."
+	case poreport.ReasonInsufficientMonths:
+		return "Not enough complete months: the current year needs three complete months and five purchase orders."
 	case poreport.ReasonIncompleteCostBasis:
-		return "The history is not fully costed, so no projection is produced. Uncosted amount is never treated as profit."
+		return "The history is not fully costed, so no margin-bearing projection is produced. Uncosted amount is never treated as profit."
 	case poreport.ReasonValueOutOfRange:
 		return "The forecast cannot be named exactly, so it is withheld rather than rounded."
+	case poreport.ReasonNotCurrentPeriod:
+		return "This range is not the current month or year. A projection applies to the current month or year."
 	case poreport.ReasonInvalidQuery:
 		return "The report query was invalid, so no projection is produced."
 	default:
@@ -95,6 +105,10 @@ func projectionSourceLabel(source string) string {
 		return "Trailing three complete months"
 	case poreport.SourceTrailingTwelveCompleteMonths:
 		return "Trailing twelve complete months"
+	case poreport.SourceElapsedDays:
+		return "Elapsed days of the current month"
+	case poreport.SourceTrailingCompleteMonths:
+		return "Trailing complete months"
 	default:
 		return source
 	}
@@ -244,6 +258,8 @@ func periodLabel(periodStart, bucket string) string {
 		return periodStart
 	}
 	switch bucket {
+	case poreport.BucketDay:
+		return date.Format("2 Jan")
 	case poreport.BucketMonth:
 		return date.Format("Jan 06")
 	case poreport.BucketQuarter:
@@ -256,13 +272,16 @@ func periodLabel(periodStart, bucket string) string {
 }
 
 // periodTableLabel is the long form used in the period table, where there is
-// room for the year and the reader is looking up an exact bucket.
+// room for the year and the reader is looking up an exact bucket. A day bucket
+// prints the full date because 1 Jan 2026 and 1 Dec 2026 are different rows.
 func periodTableLabel(periodStart, bucket string) string {
 	date, err := time.Parse(time.DateOnly, periodStart)
 	if err != nil {
 		return periodStart
 	}
 	switch bucket {
+	case poreport.BucketDay:
+		return date.Format("2 Jan 2006")
 	case poreport.BucketMonth:
 		return date.Format("Jan 2006")
 	case poreport.BucketQuarter:
@@ -272,6 +291,42 @@ func periodTableLabel(periodStart, bucket string) string {
 	default:
 		return periodStart
 	}
+}
+
+// humanDate renders a wire date for prose, where the ISO spelling would read
+// like an identifier rather than a day. An unparseable value is passed through
+// unchanged so the renderer never invents a date.
+func humanDate(value string) string {
+	date, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return value
+	}
+	return date.Format("2 Jan 2006")
+}
+
+// monthYear renders the calendar month a period belongs to, for a chart
+// subtitle such as "November 2026".
+func monthYear(value string) string {
+	date, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return ""
+	}
+	return date.Format("January 2006")
+}
+
+func yearLabel(value string) string {
+	date, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", date.Year())
+}
+
+func plural(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
 
 func periodMarker(period poreport.Period) string {

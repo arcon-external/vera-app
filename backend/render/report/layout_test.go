@@ -98,13 +98,12 @@ func TestWrapCellKeepsEveryCharacterAndFits(t *testing.T) {
 	}
 }
 
-// productionTableColumns is every column the report tables actually draw,
-// including the 68pt projected capital/margin columns and the 45pt projected
-// percentage column. Reading the shared definitions means a new production
-// width cannot be added without this guard seeing it.
+// productionTableColumns is every column the report tables actually draw. The
+// retired projection table is gone, so the actual tables' definitions are the
+// whole set; a new table added to the renderer must join this list or the width
+// guard cannot see it.
 func productionTableColumns() []tableColumn {
-	columns := append([]tableColumn{}, actualTableColumns("CATEGORY")...)
-	return append(columns, projectionTableColumns()...)
+	return actualTableColumns("CATEGORY")
 }
 
 // TestEveryAcceptedTableAmountFitsItsColumn pins the width half of the extreme
@@ -131,8 +130,7 @@ func TestEveryAcceptedTableAmountFitsItsColumn(t *testing.T) {
 	}
 }
 
-// TestEveryAcceptedPercentageFitsItsColumn covers the second narrow column
-// family: the actual tables' MARGIN % column and the projection's 45pt MARGIN %
+// TestEveryAcceptedPercentageFitsItsColumn covers the actual tables' MARGIN %
 // column. The maximum percentage text is the synthetic widest case for this
 // width guard; the assembled reports themselves carry derived percentages.
 func TestEveryAcceptedPercentageFitsItsColumn(t *testing.T) {
@@ -143,8 +141,8 @@ func TestEveryAcceptedPercentageFitsItsColumn(t *testing.T) {
 			widths = append(widths, column.width)
 		}
 	}
-	if len(widths) != 2 {
-		t.Fatalf("MARGIN %% columns = %v; want the actual and projected widths", widths)
+	if len(widths) != 1 {
+		t.Fatalf("MARGIN %% columns = %v; want the actual-table width", widths)
 	}
 	for _, value := range []*int64{
 		pointer(poreport.MaxExactMinor),
@@ -166,14 +164,14 @@ func TestEveryAcceptedPercentageFitsItsColumn(t *testing.T) {
 	}
 }
 
-func TestUnknownPercentageFitsTheProjectedMarginColumn(t *testing.T) {
+func TestUnknownPercentageFitsTheActualMarginColumn(t *testing.T) {
 	faces := testFonts()
 	text := formatPct(nil)
-	width := 45 - 2*tableCellPadX
+	width := contentWidth - 444 - 2*tableCellPadX
 	lines := faces.wrapCell(text, tableBodySize, width, true)
 	assertLinesFit(t, "unknown pct "+text, lines, tableBodySize, width, true)
 	if len(lines) != 1 {
-		t.Errorf("unknown percentage wrapped into %d lines in a 45pt column: %q", len(lines), lines)
+		t.Errorf("unknown percentage wrapped into %d lines in the margin column: %q", len(lines), lines)
 	}
 }
 
@@ -222,6 +220,52 @@ func TestExtremeAcceptedSnapshotRenders(t *testing.T) {
 	}
 	if !bytes.HasPrefix(pdf, []byte("%PDF")) || len(pdf) < 10_000 {
 		t.Errorf("extreme render is not a plausible PDF (%d bytes)", len(pdf))
+	}
+}
+
+func extremeCurrentProjectionReport() poreport.Report {
+	snapshot := currentYearReport()
+	for index := range snapshot.CurrentProjection.Buckets {
+		bucket := &snapshot.CurrentProjection.Buckets[index]
+		bucket.AmountLowMinor = -poreport.MaxExactMinor
+		bucket.AmountBaseMinor = 0
+		bucket.AmountHighMinor = poreport.MaxExactMinor
+		bucket.CapitalMinor = poreport.MaxExactMinor
+		bucket.MarginMinor = -poreport.MaxExactMinor
+		bucket.MarginBps = fixtureRatio(-poreport.MaxExactMinor, poreport.MaxExactMinor)
+	}
+	remainder := &snapshot.CurrentProjection.CurrentMonth.Remainder
+	remainder.LowMinor = -poreport.MaxExactMinor
+	remainder.BaseMinor = 0
+	remainder.HighMinor = poreport.MaxExactMinor
+	remainder.CapitalMinor = poreport.MaxExactMinor
+	remainder.MarginMinor = -poreport.MaxExactMinor
+	remainder.MarginBps = fixtureRatio(-poreport.MaxExactMinor, poreport.MaxExactMinor)
+	return snapshot
+}
+
+func TestExtremeCurrentProjectionSummaryAndGhostRender(t *testing.T) {
+	snapshot := extremeCurrentProjectionReport()
+	if err := ValidateSnapshot(snapshot); err != nil {
+		t.Fatalf("extreme current projection is refused: %v", err)
+	}
+	renderer, err := testReportRenderer(snapshot)
+	if err != nil {
+		t.Fatalf("layout extreme current projection: %v", err)
+	}
+	text := pageText(renderer.canvas.pages)
+	requireText(t, text,
+		"Current-period projection",
+		"Rp9.007.199.254.740.991",
+		"Rp-9.007.199.254.740.991",
+		"Actual and projected months  ·  2026",
+	)
+	pdf, err := renderer.canvas.render("Purchase Order Performance Report")
+	if err != nil {
+		t.Fatalf("render extreme current projection PDF: %v", err)
+	}
+	if !bytes.HasPrefix(pdf, []byte("%PDF")) {
+		t.Fatalf("extreme current projection did not produce a PDF")
 	}
 }
 

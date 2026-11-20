@@ -1,7 +1,5 @@
 package report
 
-import "vera-app/backend/poreport"
-
 type tableAlign int
 
 const (
@@ -177,22 +175,6 @@ func actualTableColumns(labelTitle string) []tableColumn {
 	}
 }
 
-// projectionTableColumns is the one definition of the projected-range table
-// geometry. The 68pt capital/margin and 45pt margin-percentage columns are as
-// real as the wider actual-table columns and are covered by the same guard.
-func projectionTableColumns() []tableColumn {
-	return []tableColumn{
-		{title: "PERIOD", width: 62, align: alignLeft},
-		{title: "LOW", width: 76, align: alignRight},
-		{title: "BASE", width: 76, align: alignRight},
-		{title: "HIGH", width: 76, align: alignRight},
-		{title: "CAPITAL", width: 68, align: alignRight},
-		{title: "MARGIN", width: 68, align: alignRight},
-		{title: "MARGIN %", width: 45, align: alignRight},
-		{title: "n", width: contentWidth - 471, align: alignRight},
-	}
-}
-
 func (r *reportRenderer) drawCategoryTable() {
 	if len(r.snapshot.Categories) == 0 {
 		r.sectionTitle("By business category", "")
@@ -264,30 +246,4 @@ func (r *reportRenderer) totalRow(label string) tableRow {
 		r.signedMoney(r.snapshot.Totals.MarginMinor),
 		formatPct(r.snapshot.Totals.MarginBps),
 	}}
-}
-
-func (r *reportRenderer) drawProjectionTable(series poreport.ProjectionSeries, bucket string) {
-	columns := projectionTableColumns()
-	rows := make([]tableRow, 0, len(series.Buckets))
-	for index, projected := range series.Buckets {
-		var fill *rgb
-		if index%2 == 1 {
-			surface := r.pal.surface
-			fill = &surface
-		}
-		rows = append(rows, tableRow{fill: fill, cells: []string{
-			periodTableLabel(projected.PeriodStart, bucket),
-			r.money(projected.AmountLowMinor),
-			r.money(projected.AmountBaseMinor),
-			r.money(projected.AmountHighMinor),
-			r.money(projected.CapitalMinor),
-			r.signedMoney(projected.MarginMinor),
-			formatPct(projected.MarginBps),
-			formatCount(int64(projected.SampleSize)),
-		}})
-	}
-	r.drawTable("Projected range",
-		"Estimates, not actuals. Low and high bound the amount band; the base is the single planning figure. "+
-			"n is the number of observations behind the range.",
-		columns, rows, nil)
 }

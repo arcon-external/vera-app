@@ -1,0 +1,415 @@
+=== page 1 ===
+INTERNAL REPORT  ·  PURCHASE ORDERS
+Purchase Order Performance Report
+PT. Arcon Penta Persada
+Komp. Ruko Legenda Gemilang, Blok D. No. 12, Baloi Permai, Batam
+PERIOD
+2026-01-01 → 2026-02-01 (exclusive)
+BUCKET
+Daily
+CATEGORY
+All categories (all)
+CURRENCY
+IDR
+GENERATED
+19 Jan 2026 08:30:00 UTC
+AS OF
+2026-01-19
+Internal report: not a customer quotation. PPN is excluded from every figure.
+PO COUNT
+19
+PO AMOUNT
+Rp190.000.000
+CAPITAL
+Rp152.000.000
+PO MARGIN
+Rp19.000.000
+PO MARGIN %
+12.50%
+Costed Rp171.000.000 of Rp190.000.000 (90.00%) · Uncosted Rp19.000.000
+2 purchase order(s) in this range have a deleted source quotation; their amount is uncosted.
+Performance chart
+All amounts in IDR. Columns start at zero; the margin % line uses the right-hand percentage axis. An uncosted part of the amount is hatched, so the
+amount column still foots.
+KEY
+Amount
+Capital
+Margin
+Negative margin
+Margin % (right axis)
+Uncosted part of amount
+Projected (ghost)
+Projected low-high
+Actual and projected days  ·  January 2026
+Days after the last actual day are hatched ghosts with a daily low-high amount whisker.
+Rp0
+Rp5M
+Rp10M
+Rp15M
+0%
+5%
+10%
+15%
+12.5%
+1 Jan
+3 Jan
+5 Jan
+7 Jan
+9 Jan
+11 Jan
+13 Jan
+15 Jan
+17 Jan
+19 Jan
+21 Jan
+23 Jan
+25 Jan
+27 Jan
+29 Jan
+31 Jan
+By business category
+All amounts in IDR. The category rows foot to the total for the selected filter.
+CATEGORY
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
+Facility
+Management (FM)
+8
+Rp76.000.000
+Rp68.400.000
+Rp54.720.000
+Rp13.680.000
+25.00%
+Fabrication (FAB)
+5
+Rp57.000.000
+Rp51.300.000
+Rp47.120.000
+Rp4.180.000
+8.87%
+Goods Supply &
+General
+(SUPPLY_GEN)
+3
+Rp38.000.000
+Rp34.200.000
+Rp31.920.000
+Rp2.280.000
+7.14%
+Others (OTHERS)
+2
+Rp15.200.000
+Rp13.680.000
+Rp18.240.000
+Rp-4.560.000
+-25.00%
+Unassigned
+(UNASSIGNED)
+1
+Rp3.800.000
+Rp3.420.000
+Rp0
+Rp3.420.000
+-
+Total
+19
+Rp190.000.000
+Rp171.000.000
+Rp152.000.000
+Rp19.000.000
+12.50%
+By period
+All amounts in IDR. P = partial period; IP = period still in progress. Projected periods never appear in this table and never enter the total.
+PERIOD
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
+1 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+2 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 1 of 3
+=== page 2 ===
+By period (continued)
+PERIOD
+POs
+AMOUNT
+COSTED
+CAPITAL
+MARGIN
+MARGIN %
+3 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+4 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+5 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+6 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+7 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+8 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+9 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+10 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+11 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+12 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+13 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+14 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+15 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+16 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+17 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+18 Jan 2026
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+19 Jan 2026 IP
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
+20 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+21 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+22 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+23 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+24 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+25 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+26 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+27 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+28 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+29 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+30 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+31 Jan 2026
+0
+Rp0
+Rp0
+Rp0
+Rp0
+-
+Total
+19
+Rp190.000.000
+Rp171.000.000
+Rp152.000.000
+Rp19.000.000
+12.50%
+Current-period projection
+A forecast for the period still in progress. It is drawn as a hatched ghost on the chart and never enters an actual table or total.
+Mode: Day  ·  January 2026 day by day
+Available
+Remaining days:
+20 Jan 2026 to 31 Jan 2026 · 12 days
+Per remaining day:
+low Rp8.000.000 · base Rp10.000.000 · high Rp12.000.000 · capital Rp8.000.000 · margin Rp2.000.000
+Method:
+Elapsed-day average of the current month; P25-P75 range of elapsed daily totals (min-max under four observations).
+Basis:
+1 Jan 2026 to 20 Jan 2026 (exclusive) · 19 elapsed days · 19 purchase orders · as of 19 Jan 2026.
+Sources:
+Elapsed days of the current month [elapsed_days]
+Updates:
+This forecast updates as data arrives. Projected figures never enter an actual table or total.
+Report notes
+•
+Some purchase orders in this range carry a retired whole-order discount or adjustment. The amount includes it, but it is not supplier cost and
+no margin is inferred from it.
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 2 of 3
+=== page 3 ===
+Definitions
+•
+PPN is excluded from every amount, costed amount, capital and margin figure in this report. The customer pays PPN on top of a quotation; it
+is collected for the state and is never profit.
+•
+Capital is the pinned source revision's pre-margin unit cost at the purchase order's quantity, rounded once per purchase order. It is not the
+quotation's sell price and it is not the latest revision's cost.
+•
+PO margin is costed amount minus capital. It covers only purchase orders whose source cost resolved; uncosted amount is never counted as
+profit. PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.
+•
+Corrections are counted once at their current values. A correction can move a purchase order between periods, so this report reflects current
+records, not the values as they stood when each order was received.
+•
+Current-period projections are estimates from elapsed days or complete months. They are drawn as hatched ghosts with a low-high range,
+never styled as actuals, and never included in an actual table or total.
+•
+Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of
+time had passed.
+•
+All money is in IDR and no figure is converted between currencies. Counts may combine currencies only within the selected one; money
+never does.
+PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
+Page 3 of 3

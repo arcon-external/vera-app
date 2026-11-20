@@ -29,8 +29,8 @@ func TestRenderSampleReportIsAPDF(t *testing.T) {
 	if len(pdf) < 10_000 {
 		t.Errorf("sample PDF is only %d bytes; the document is probably empty", len(pdf))
 	}
-	if len(renderer.canvas.pages) < 3 {
-		t.Errorf("sample report has %d pages; expected header, charts, tables and definitions to span several",
+	if len(renderer.canvas.pages) < 2 {
+		t.Errorf("sample report has %d pages; expected the header, charts, tables and definitions",
 			len(renderer.canvas.pages))
 	}
 }
@@ -88,8 +88,8 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		t.Fatalf("Render: %v", err)
 	}
 	pages := binaryPDFText(t, pdf)
-	if len(pages) < 3 {
-		t.Errorf("extracted %d pages, want at least 3", len(pages))
+	if len(pages) < 2 {
+		t.Errorf("extracted %d pages, want at least 2", len(pages))
 	}
 	text := strings.Join(pages, "\n")
 	requireText(t, text,
@@ -111,6 +111,79 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		"-",
 		"Definitions",
 	)
+}
+
+func TestBinaryPDFTextDayReportPrintsEveryDayAndTheGhostSummary(t *testing.T) {
+	pdf, err := Render(dayReport(), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render day report: %v", err)
+	}
+	pages := binaryPDFText(t, pdf)
+	assertReportPages(t, "binaryPDFText", pages)
+	text := strings.Join(pages, "\n")
+	requireText(t, text,
+		"Daily",
+		"1 Jan 2026",
+		"19 Jan 2026 IP",
+		"20 Jan 2026",
+		"31 Jan 2026",
+		"Actual and projected days  ·  January 2026",
+		"Projected (ghost)",
+		"Current-period projection",
+		"Mode: Day  ·  January 2026 day by day",
+		"20 Jan 2026 to 31 Jan 2026",
+		"updates as data arrives",
+	)
+	headers := strings.Count(text, "PERIOD")
+	if headers < 3 {
+		t.Errorf("extracted day report repeats the period header %d times; want the metadata and both table pages", headers)
+	}
+	for _, retired := range []string{"Monthly projection", "Yearly projection", "Projected range", "Projection detail"} {
+		if strings.Contains(text, retired) {
+			t.Errorf("day PDF still prints the retired projection section %q", retired)
+		}
+	}
+}
+
+func TestBinaryPDFTextCurrentYearPrintsTheStackedRemainder(t *testing.T) {
+	pdf, err := Render(currentYearReport(), os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render current-year report: %v", err)
+	}
+	text := strings.Join(binaryPDFText(t, pdf), "\n")
+	requireText(t, text,
+		"Current-period projection",
+		"Mode: Month  ·  2026 month by month",
+		"Month to date",
+		"Current month remainder",
+		"Future months",
+		"December 2026",
+		"Actual and projected months  ·  2026",
+		"Future months are hatched ghosts",
+		"Projected (ghost)",
+	)
+	if strings.Contains(text, "Monthly projection") || strings.Contains(text, "Yearly projection") {
+		t.Errorf("current-year PDF still prints a retired projection table heading")
+	}
+}
+
+func TestRenderedReportsContainNoEmDash(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot poreport.Report
+	}{
+		{"sample", sampleReport()},
+		{"day", dayReport()},
+		{"currentYear", currentYearReport()},
+		{"unavailable", unavailableCurrentReport()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			text := renderPageText(t, tc.snapshot)
+			if strings.Contains(text, "—") {
+				t.Errorf("%s report prints an em dash", tc.name)
+			}
+		})
+	}
 }
 
 func TestBinaryPDFTextKeepsTheLongTableComplete(t *testing.T) {

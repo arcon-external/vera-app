@@ -44,7 +44,7 @@ func (r *reportRenderer) draw() {
 	r.drawCharts()
 	r.drawCategoryTable()
 	r.drawPeriodTable()
-	r.drawProjectionDetails()
+	r.drawProjectionSummary()
 	r.drawReportNotes()
 	r.drawDefinitions()
 	r.drawFooters()
@@ -231,9 +231,12 @@ func (r *reportRenderer) drawCharts() {
 			"The report still prints its filter, its definitions and the projection status so the empty result is unambiguous.")
 	} else {
 		r.drawLegend()
-		r.drawActualChartPanels()
+		if buckets, ok := currentChartBuckets(r.snapshot); ok {
+			r.drawCurrentChartPanel(buckets)
+		} else {
+			r.drawActualChartPanels()
+		}
 	}
-	r.drawProjectionCharts()
 	r.canvas.y += 8
 }
 
@@ -250,6 +253,7 @@ func (r *reportRenderer) drawReportNotes() {
 	if len(r.snapshot.Notes) == 0 {
 		return
 	}
+	r.canvas.ensure(42)
 	r.sectionTitle("Report notes", "")
 	for _, note := range r.snapshot.Notes {
 		lines := r.faces.wrap(note.Text, 7.5, contentWidth-10, false)
@@ -267,13 +271,16 @@ func (r *reportRenderer) drawReportNotes() {
 }
 
 func (r *reportRenderer) drawDefinitions() {
+	// Keep the heading with the first definition instead of leaving an orphan
+	// title at the foot of the previous page.
+	r.canvas.ensure(70)
 	r.sectionTitle("Definitions", "")
 	definitions := []string{
 		"PPN is excluded from every amount, costed amount, capital and margin figure in this report. The customer pays PPN on top of a quotation; it is collected for the state and is never profit.",
 		"Capital is the pinned source revision's pre-margin unit cost at the purchase order's quantity, rounded once per purchase order. It is not the quotation's sell price and it is not the latest revision's cost.",
 		"PO margin is costed amount minus capital. It covers only purchase orders whose source cost resolved; uncosted amount is never counted as profit. PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.",
 		"Corrections are counted once at their current values. A correction can move a purchase order between periods, so this report reflects current records, not the values as they stood when each order was received.",
-		"Projected periods are estimates from complete history. They are drawn as a low–high range with a base, never styled as actuals, and never included in an actual total.",
+		"Current-period projections are estimates from elapsed days or complete months. They are drawn as hatched ghosts with a low-high range, never styled as actuals, and never included in an actual table or total.",
 		"Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of time had passed.",
 		"All money is in " + r.currency() + " and no figure is converted between currencies. Counts may combine currencies only within the selected one; money never does.",
 	}

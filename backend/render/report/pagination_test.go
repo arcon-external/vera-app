@@ -38,8 +38,25 @@ func TestLongReportPaginationGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("layout 120-period report: %v", err)
 	}
-	got := paginationManifest(renderer.canvas.pages)
-	path := filepath.Join("testdata", "long_report_pagination.golden")
+	assertPaginationGolden(t, "long_report_pagination.golden", renderer.canvas.pages)
+}
+
+// TestDayReportPaginationGolden pins the 31-row daily table's breaks and
+// repeated header. A day report is the densest table the report can print, so
+// the golden is the page-level proof that no day is dropped and the header
+// returns on the continuation page.
+func TestDayReportPaginationGolden(t *testing.T) {
+	renderer, err := testReportRenderer(dayReport())
+	if err != nil {
+		t.Fatalf("layout day report: %v", err)
+	}
+	assertPaginationGolden(t, "day_report_pagination.golden", renderer.canvas.pages)
+}
+
+func assertPaginationGolden(t *testing.T, name string, pages []*page) {
+	t.Helper()
+	got := paginationManifest(pages)
+	path := filepath.Join("testdata", name)
 	if os.Getenv("UPDATE_REPORT_GOLDEN") != "" {
 		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
 			t.Fatalf("write %s: %v", path, err)
