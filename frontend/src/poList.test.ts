@@ -406,8 +406,8 @@ describe("source copy (issue #496)", () => {
       CustomerName: "",
       CustomerID: 0,
     });
-    expect(quotationCellLabel(never)).toBe("—");
-    expect(customerCellLabel(never)).toBe("—");
+    expect(quotationCellLabel(never)).toBe("-");
+    expect(customerCellLabel(never)).toBe("-");
     // A live row keeps its real number and customer.
     expect(quotationCellLabel(row())).toBe("1502260001");
     expect(customerCellLabel(row())).toBe("PT. Alpha");

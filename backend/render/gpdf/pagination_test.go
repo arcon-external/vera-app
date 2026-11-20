@@ -84,7 +84,7 @@ func oversizedInput(n int) Input {
 		Qty:       "7",
 		UoM:       "Lot",
 		UnitPrice: "9.999",
-		Disc:      "—",
+		Disc:      "-",
 		Total:     "9.999",
 	}}
 	in.QRPNG = nil
@@ -349,7 +349,7 @@ func TestSingleLongBulletSurvivesFragmentation(t *testing.T) {
 	in.Items = []Item{{
 		No: 1, DescMain: "Maintenance scope",
 		SubItems: []string{bullet},
-		Qty:      "1", UoM: "Lot", UnitPrice: "1", Disc: "—", Total: "1",
+		Qty:      "1", UoM: "Lot", UnitPrice: "1", Disc: "-", Total: "1",
 	}}
 	in.QRPNG = nil
 
@@ -499,7 +499,7 @@ func TestContinuationKeepsNumericsOnTheHead(t *testing.T) {
 
 	// The numeric cells belong to the head fragment only: each prints once
 	// in the whole document and never past the first page.
-	for _, cell := range []string{"1", "7", "Lot", "9.999", "—"} {
+	for _, cell := range []string{"1", "7", "Lot", "9.999", "-"} {
 		if got := countRuns(all, cell); got != countRuns(perPage[0], cell) {
 			t.Errorf("cell %q appears %d times overall but %d on the first page",
 				cell, got, countRuns(perPage[0], cell))

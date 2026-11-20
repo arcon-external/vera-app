@@ -90,7 +90,7 @@ describe("QuotationHero", () => {
 
     expect(html).toContain("DRAFT");
     expect(html).toContain("New quotation");
-    expect(html).toContain("Draft saved just now — save again to update it.");
+    expect(html).toContain("Draft saved just now. Save again to update it.");
     expect(html).not.toContain("Not saved yet");
   });
 
@@ -105,10 +105,10 @@ describe("QuotationHero", () => {
     // The practice tutorial's draft is never saved, so it must not promise
     // that Save draft stores the work (issue #624).
     const html = markup({
-      statusOverride: "Practice — nothing is saved to your workspace.",
+      statusOverride: "Practice: nothing is saved to your workspace.",
     });
 
-    expect(html).toContain("Practice — nothing is saved to your workspace.");
+    expect(html).toContain("Practice: nothing is saved to your workspace.");
     expect(html).not.toContain("Not saved yet");
     // The override changes the sentence, never the state it describes.
     expect(html).toContain("DRAFT");
@@ -183,7 +183,7 @@ describe("QuotationHero", () => {
       ppnAmount: 110_000,
     });
 
-    expect(totalOf(html)).toBe("—");
+    expect(totalOf(html)).toBe("-");
     expect(html).not.toContain("Rp");
     expect(html).toContain("EXW · IDR");
   });

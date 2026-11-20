@@ -40,7 +40,7 @@ func TestExtractionRoutesAreGone(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			server.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusNotFound {
-				t.Fatalf("%s %s = %d; want 404 — the extraction surface is deleted (#504)",
+				t.Fatalf("%s %s = %d; want 404; the extraction surface is deleted (#504)",
 					route.method, route.path, recorder.Code)
 			}
 		})

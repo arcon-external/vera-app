@@ -166,6 +166,17 @@ func TestEveryAcceptedPercentageFitsItsColumn(t *testing.T) {
 	}
 }
 
+func TestUnknownPercentageFitsTheProjectedMarginColumn(t *testing.T) {
+	faces := testFonts()
+	text := formatPct(nil)
+	width := 45 - 2*tableCellPadX
+	lines := faces.wrapCell(text, tableBodySize, width, true)
+	assertLinesFit(t, "unknown pct "+text, lines, tableBodySize, width, true)
+	if len(lines) != 1 {
+		t.Errorf("unknown percentage wrapped into %d lines in a 45pt column: %q", len(lines), lines)
+	}
+}
+
 func TestTableRowHeightGrowsForWrappedCells(t *testing.T) {
 	renderer := &reportRenderer{faces: testFonts()}
 	columns := []tableColumn{

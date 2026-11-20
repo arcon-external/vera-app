@@ -54,7 +54,7 @@ import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from ".
 export interface PurchaseOrderReportsPageProps {
   /** The company currency, used for the first request only. */
   defaultCurrency: string;
-  /** App's catalogue. A code missing here renders "—", never a fake IDR. */
+  /** App's catalogue. A code missing here renders "-", never a fake IDR. */
   currencyCatalogue: readonly CurrencyInfo[] | null;
   /**
    * #632 owns the native PDF binding. Until App wires it after #630/#632
@@ -85,7 +85,7 @@ export interface PurchaseOrderReportsViewProps {
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
-  return entry === null ? "—" : formatMoney(entry, minor);
+  return entry === null ? "-" : formatMoney(entry, minor);
 }
 
 function negativeClass(value: number): string {
@@ -633,7 +633,7 @@ export function PurchaseOrderReportsView({
                 Currency
               </span>
               <span className="tnum flex min-h-10 items-center rounded-md border border-rule bg-paper-subtle px-3 text-body text-ink-700">
-                {filters.currency || "—"}
+                {filters.currency || "-"}
               </span>
             </div>
           )}
@@ -672,7 +672,7 @@ export function PurchaseOrderReportsView({
       {unresolvedCurrency ? (
         <StatusBanner tone="info">
           {reportCurrency} is not in this app's currency catalogue, so monetary
-          figures are shown as “—” and no other currency is substituted.
+          figures are shown as “-” and no other currency is substituted.
         </StatusBanner>
       ) : null}
 

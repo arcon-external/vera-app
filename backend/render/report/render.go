@@ -133,7 +133,7 @@ func (r *reportRenderer) drawHeader() {
 	noteTop += 6
 	c.rect(marginX, noteTop, contentWidth, 24, &pal.surface, &pal.edge, 0.5)
 	c.rect(marginX, noteTop, 3, 24, &pal.accent, nil, 0)
-	c.text("Internal report — not a customer quotation. PPN is excluded from every figure.",
+	c.text("Internal report: not a customer quotation. PPN is excluded from every figure.",
 		marginX+10, noteTop+15.5, 7.8, true, pal.emphasis)
 	c.y = noteTop + 36
 }

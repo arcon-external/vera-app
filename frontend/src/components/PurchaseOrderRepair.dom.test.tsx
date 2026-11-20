@@ -327,7 +327,7 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
     });
     expect(dirty).toEqual([]);
 
-    await chooseMatch(1, "2 — Revised widget");
+    await chooseMatch(1, "2: Revised widget");
 
     expect(dirty).toEqual([true]);
   });
@@ -338,7 +338,7 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
     });
     await renderPage({ review: mismatchedReview() });
 
-    await chooseMatch(1, "2 — Revised widget");
+    await chooseMatch(1, "2: Revised widget");
     // The corrected match moves the comparison to the candidate's own line:
     // only its description, price, payment terms and Incoterms differ now.
     expect(document.body.textContent).toContain("Currently quotation line 2");

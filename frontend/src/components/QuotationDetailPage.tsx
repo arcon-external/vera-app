@@ -220,7 +220,7 @@ export function QuotationDetailHeader({
         </div>
       </div>
       <p className="mt-2 max-w-3xl text-body text-ink-500">
-        {quotation.CustomerName} — {quotation.Subject}
+        {quotation.CustomerName}: {quotation.Subject}
       </p>
     </header>
   );
@@ -368,7 +368,7 @@ export function QuotationDetailPage({
       value,
       label:
         index === 0
-          ? `Revision ${padRevision(value)} — latest`
+          ? `Revision ${padRevision(value)} (latest)`
           : `Revision ${padRevision(value)}`,
     }));
   }, [quotation?.AvailableRevisions, activeRevision]);
@@ -596,7 +596,7 @@ export function QuotationDetailPage({
               ) : null}
               {quotation.TaxAmount > 0 ? (
                 <DetailRow
-                  label={`Services tax, internal — ${taxDetailLabel(quotation)}`}
+                  label={`Services tax, internal: ${taxDetailLabel(quotation)}`}
                   value={quotation.DisplayTax}
                   currency={entry}
                 />

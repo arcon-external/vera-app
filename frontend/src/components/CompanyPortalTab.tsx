@@ -49,8 +49,8 @@ export function CompanyPortalTab(props: {
       />
       <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
         These four colours paint the page around the verdict. The verdict
-        colours stay fixed — green valid, amber superseded, red mismatch, grey
-        not-found — so no rebrand can make one verdict look like another.
+        colours stay fixed (green valid, amber superseded, red mismatch, grey
+        not-found), so no rebrand can make one verdict look like another.
       </p>
     </div>
   );

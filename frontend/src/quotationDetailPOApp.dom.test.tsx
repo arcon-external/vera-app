@@ -552,7 +552,7 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     await flush();
 
     expect(button("Quotation revision").textContent).toContain(
-      "Revision 02 — latest"
+      "Revision 02 (latest)"
     );
     expect(button("Quotation revision").textContent).not.toContain("Revision 00");
     expect(document.body.textContent).toContain("Edit revision 02");

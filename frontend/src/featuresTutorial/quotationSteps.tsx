@@ -64,8 +64,8 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     title: "Paste the details from Excel",
     body: (
       <p>
-        The subject prints above the lines. Focus it, or paste a row from Excel
-        — in the real editor one paste fills the subject, recipient and the
+        The subject prints above the lines. Focus it, or paste a row from Excel.
+        In the real editor one paste fills the subject, recipient and the
         rest of the details in a single step.
       </p>
     ),
@@ -80,7 +80,7 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       <p>
         The customer drives the printed details. Recipient, subject, validity,
         payment terms and tax sit around it, and all of them become a snapshot
-        on the issued revision — later customer edits cannot rewrite an old
+        on the issued revision. Later customer edits cannot rewrite an old
         quotation.
       </p>
     ),
@@ -93,7 +93,7 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         The first line is a practice service. Type any cost into{" "}
-        <strong>Unit cost</strong> — try 7500000 — and the line's sell price
+        <strong>Unit cost</strong> (try 7500000) and the line's sell price
         updates beside it as you type. Then press <strong>Next</strong> to keep
         going. Nothing leaves this workspace.
       </p>
@@ -122,8 +122,8 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         This line carries a 15% margin. Click its switch to turn the margin
-        off: the sell price drops at once. Turn it back on whenever you like —
-        one line's margin never applies to another.
+        off: the sell price drops at once. Turn it back on whenever you like.
+        One line's margin never applies to another.
       </p>
     ),
     advance: "click",
@@ -136,7 +136,7 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         Cost plus margin is the list price, and a row discount then comes off
-        it. Click the switch — this line has 10% ready — and the sell price
+        it. Click the switch (this line has 10% ready) and the sell price
         drops while what we pay the supplier stays the same.
       </p>
     ),
@@ -151,7 +151,7 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       <p>
         <strong>Split into sub-items</strong> turns the line into a package.
         The parent price moves out, so enter each part&rsquo;s cost, margin and
-        discount — the line becomes their sum at quantity 1. The rail follows
+        discount. The line becomes their sum at quantity 1. The rail follows
         along.
       </p>
     ),

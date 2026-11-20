@@ -285,7 +285,7 @@ function compactMagnitude(value: number): string {
 
 /** One compact axis number: K/M/B/T with one decimal, trimmed. */
 export function compactChartNumber(value: number): string {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return "-";
   return (value < 0 ? "-" : "") + compactMagnitude(value);
 }
 
@@ -298,13 +298,13 @@ function currencyExponent(entry: CurrencyInfo): number {
 /**
  * A compact money tick in the currency's own convention. The minor-unit value
  * is converted to major units first, so USD 123456 reads "$1.2K", not "$123.5K".
- * A null catalogue entry renders "—": no symbol is invented.
+ * A null catalogue entry renders "-": no symbol is invented.
  */
 export function compactChartMoney(
   entry: CurrencyInfo | null,
   value: number
 ): string {
-  if (entry === null || !Number.isFinite(value)) return "—";
+  if (entry === null || !Number.isFinite(value)) return "-";
   const divisor = Math.pow(10, currencyExponent(entry));
   const bare = compactMagnitude(value / divisor);
   const negative = value < 0;
@@ -319,7 +319,7 @@ export function compactChartMoney(
 
 /** A percentage-axis tick, matching the PDF's compact extreme-value rule. */
 export function formatPercentTick(value: number): string {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return "-";
   const negative = value < 0;
   const magnitude = Math.abs(value);
   const body =

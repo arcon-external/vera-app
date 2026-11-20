@@ -72,7 +72,7 @@ func TestAfterDiscDrawsTheNetPrice(t *testing.T) {
 
 	// The percentage line is gone: nothing prints a "%" in the item table.
 	for _, r := range runs {
-		if r.text == "10%" || r.text == "0%" || r.text == "—" {
+		if r.text == "10%" || r.text == "0%" || r.text == "-" {
 			t.Errorf("second-line run %q still drawn in the After Disc. cell", r.text)
 		}
 	}

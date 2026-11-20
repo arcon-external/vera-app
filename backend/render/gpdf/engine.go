@@ -124,7 +124,7 @@ type Item struct {
 	UoM       string
 	UnitPrice string
 	Total     string
-	// Disc is this row's own discount as it prints ("10%" or "—"), already
+	// Disc is this row's own discount as it prints ("10%" or "-"), already
 	// formatted by the application so both renderers show the same string.
 	Disc      string
 	SubItems  []string

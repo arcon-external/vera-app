@@ -363,7 +363,7 @@ describe("Reports figures (issue #630)", () => {
     );
     expect(fabrication?.textContent).toContain("Rp-30.000.000");
     expect(fabrication?.textContent).toContain("-20.00%");
-    expect(unassigned?.textContent).toContain("—");
+    expect(unassigned?.textContent).toContain("-");
     expect(unassigned?.textContent).not.toContain("0.00%");
   });
 
@@ -484,7 +484,7 @@ describe("Reports figures (issue #630)", () => {
     expect(document.querySelector('[aria-label="Loading report"]')).not.toBeNull();
   });
 
-  it("renders — rather than a fake IDR figure when the currency is unknown", async () => {
+  it("renders - rather than a fake IDR figure when the currency is unknown", async () => {
     await renderPage({ catalogue: [USD] });
 
     // The catalogue has no IDR entry, so every money figure is unknown.
@@ -492,7 +492,7 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain(
       "IDR is not in this app's currency catalogue"
     );
-    expect(document.body.textContent).toContain("—");
+    expect(document.body.textContent).toContain("-");
   });
 });
 

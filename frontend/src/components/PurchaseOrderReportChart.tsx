@@ -140,7 +140,7 @@ function bucketTitle(bucket: string): string {
 }
 
 function money(currency: CurrencyInfo | null, minor: number): string {
-  return currency === null ? "—" : formatMoney(currency, minor);
+  return currency === null ? "-" : formatMoney(currency, minor);
 }
 
 function nearestBucket(layout: ReportChartLayout, contentX: number): number | null {

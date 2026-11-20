@@ -320,7 +320,7 @@ export function QuotationTutorialWorkspace({
       <StatusBanner tone="info">
         <span>
           <strong>Practice quotation.</strong> This is a sandbox with made-up
-          lines — type, price and split anything here. Nothing is saved to your
+          lines. Type, price and split anything here. Nothing is saved to your
           workspace.
         </span>
       </StatusBanner>

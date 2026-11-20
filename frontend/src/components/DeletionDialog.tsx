@@ -311,7 +311,7 @@ export function DeletionDialogView({
                       <li key={change.Field}>
                         <span className="font-medium">{change.Label}: </span>
                         <span className="tnum">
-                          {change.Before || "—"} → {change.After || "—"}
+                          {change.Before || "-"} → {change.After || "-"}
                         </span>
                       </li>
                     ))}

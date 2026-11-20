@@ -44,7 +44,7 @@ export class ErrorBoundary extends Component<
           </h1>
           <p className="mt-2 text-small leading-relaxed text-ink-600">
             Vera hit an unexpected error while drawing this page. Your
-            quotation is still held in memory — reloading is safe, and anything
+            quotation is still held in memory, so reloading is safe, and anything
             you had saved as a draft is untouched.
           </p>
           <pre className="mt-4 max-h-40 overflow-auto rounded-lg bg-paper-subtle p-3 text-caption text-ink-700">

@@ -337,19 +337,19 @@ export function reportPeriodLabel(periodStart: string, bucket: string): string {
  * the screen and the document must print the same bytes for 1,234.
  */
 export function formatReportCount(value: number): string {
-  if (!Number.isFinite(value)) return "—";
+  if (!Number.isFinite(value)) return "-";
   const magnitude = Math.abs(Math.trunc(value));
   const digits = String(magnitude).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return value < 0 ? `-${digits}` : digits;
 }
 
 /**
- * Basis points as an exact percentage. Null is unknown and prints "—", while
+ * Basis points as an exact percentage. Null is unknown and prints "-", while
  * zero prints "0.00%": a measured zero is real evidence. Integer math keeps
  * 1250 from ever rendering as 12.5% spelled by a float.
  */
 export function formatReportBps(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
   const negative = value < 0;
   const magnitude = Math.abs(Math.trunc(value));
   const whole = Math.trunc(magnitude / 100);

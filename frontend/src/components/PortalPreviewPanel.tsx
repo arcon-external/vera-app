@@ -144,7 +144,7 @@ export function PortalPreviewPanel(props: {
           <div className="h-48 animate-pulse rounded-xl bg-paper-subtle" aria-label="Loading portal preview" />
         ) : (
           <iframe
-            title={`Verification page preview — ${verdict}`}
+            title={`Verification page preview: ${verdict}`}
             srcDoc={previewHtml}
             // No scripts, no forms, no same-origin access: the preview is a
             // picture of a page, not the page.
@@ -154,7 +154,7 @@ export function PortalPreviewPanel(props: {
         )}
       </div>
       <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
-        The wording of the portal is fixed on purpose — “this document does not
+        The wording of the portal is fixed on purpose: “this document does not
         match our records” is a security statement, and softening it would weaken
         the one message that has to be unambiguous. Only the four colours are
         editable.

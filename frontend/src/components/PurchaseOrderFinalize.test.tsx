@@ -830,8 +830,8 @@ describe("PurchaseOrderDifferenceReviewView split lines (#575)", () => {
     const html = markup(reviewElement(state));
     expect(html).toContain("Mounting package");
     expect(html).toContain("2 sub-items");
-    expect(html).toContain("Line 1.1 — Mounting and cable termination");
-    expect(html).toContain("Line 1.2 — Cable termination and labelling");
+    expect(html).toContain("Line 1.1: Mounting and cable termination");
+    expect(html).toContain("Line 1.2: Cable termination and labelling");
   });
 
   it("keeps the flat line number in the receipt action labels", () => {
@@ -968,6 +968,6 @@ describe("PurchaseOrderDifferenceReviewView two-sided diff (#582)", () => {
       />
     );
     expect(html).toContain("ACKNOWLEDGED");
-    expect(html).toContain("Quotation line 3 — Spare");
+    expect(html).toContain("Quotation line 3: Spare");
   });
 });

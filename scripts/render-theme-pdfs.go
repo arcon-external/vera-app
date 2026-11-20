@@ -95,11 +95,11 @@ func sample() gpdf.Input {
 					"6 sensors at Front AHU and 6 sensors at Rear AHU",
 					"6-units batten fixtures with guard (2x 1200mm LED tubes)",
 				},
-				Qty: "1", UoM: "Lot", UnitPrice: "133.083.750", Total: "133.083.750", Disc: "—",
+				Qty: "1", UoM: "Lot", UnitPrice: "133.083.750", Total: "133.083.750", Disc: "-",
 			},
 			{
 				No: 2, DescMain: "Monthly preventive maintenance for HVAC system",
-				Qty: "12", UoM: "Lot", UnitPrice: "9.180.000", Total: "110.160.000", Disc: "—",
+				Qty: "12", UoM: "Lot", UnitPrice: "9.180.000", Total: "110.160.000", Disc: "-",
 			},
 		},
 		DisplaySubTotal:   "243.243.750",

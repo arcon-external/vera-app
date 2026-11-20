@@ -42,8 +42,8 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         Every purchase order follows one issued quotation revision. Click{" "}
-        <strong>Link a Quotation</strong> to choose the practice quotation —
-        nothing is written to your real quotation or purchase-order lists.
+        <strong>Link a Quotation</strong> to choose the practice quotation.
+        Nothing is written to your real quotation or purchase-order lists.
       </p>
     ),
     advance: "click",
@@ -211,8 +211,8 @@ export const PURCHASE_ORDER_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
       <>
         <p>
           This split ghost shows its <strong>parent</strong>, both{" "}
-          <strong>priced parts</strong> and their <strong>scope lines</strong> —
-          exactly what the quotation carries.
+          <strong>priced parts</strong> and their <strong>scope lines</strong>.
+          Exactly what the quotation carries.
         </p>
         <p className="mt-2">
           It waits here because your line&rsquo;s values differ from it. The

@@ -86,14 +86,14 @@ export function sourceRevisionLabel(row: POListRowDTO): string {
 
 /** The quotation number cell. A never-linked row has no number yet. */
 export function quotationCellLabel(row: POListRowDTO): string {
-  if (sourceStateOfRow(row) === "never") return "—";
+  if (sourceStateOfRow(row) === "never") return "-";
   return row.QuoteNumber;
 }
 
 /** The customer cell. A never-linked row has no Customer identity yet. */
 export function customerCellLabel(row: POListRowDTO): string {
   if (row.CustomerName.trim() !== "") return row.CustomerName;
-  return sourceStateOfRow(row) === "never" ? "—" : "";
+  return sourceStateOfRow(row) === "never" ? "-" : "";
 }
 
 /** One page plus the org-wide customer facet. */

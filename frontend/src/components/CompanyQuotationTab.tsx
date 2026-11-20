@@ -82,7 +82,7 @@ export function CompanyQuotationTab(props: {
   // button that teaches people to distrust the save.
   const badHex = templatePreviewColorError(theme);
   const colourRefusal =
-    badHex === null ? null : `The Quotation ${badHex} colour is not a complete hex — fix it before saving.`;
+    badHex === null ? null : `The Quotation ${badHex} colour is not a complete hex. Fix it before saving.`;
   const refusal = invalid ?? colourRefusal;
   return (
     <div className="grid gap-6">
@@ -116,7 +116,7 @@ export function CompanyQuotationTab(props: {
         turn a discount into a warning.
       </p>
       <p className="max-w-2xl text-caption leading-relaxed text-ink-400">
-        The preview above shows the draft — wording and colours together —
+        The preview above shows the draft, wording and colours together,
         before either is saved.
       </p>
     </div>

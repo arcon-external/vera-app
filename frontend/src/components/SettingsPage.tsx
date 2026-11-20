@@ -334,7 +334,7 @@ function AdminEmailChanger({ user }: { user: SignedInUser }) {
       setConfirming(false);
       pushToast(
         "success",
-        `Sign-in email is now ${result.Email}. All sessions ended — sign in again with the new address.`
+        `Sign-in email is now ${result.Email}. All sessions ended. Sign in again with the new address.`
       );
     } catch (err: unknown) {
       const message = errorMessage(err, "We couldn't change this email.");
@@ -350,7 +350,7 @@ function AdminEmailChanger({ user }: { user: SignedInUser }) {
       <SectionHeading title="Email address" />
       <p className="max-w-2xl text-body text-ink-600">
         Signed in as <span className="font-medium text-ink-900">{user.Email}</span>.
-        As an admin you can change it immediately — every session, including
+        As an admin you can change it immediately. Every session, including
         this one, ends at once.
       </p>
       {!confirming ? (
@@ -451,7 +451,7 @@ function StaffEmailRequest({ user }: { user: SignedInUser }) {
       <SectionHeading title="Email address" />
       <p className="max-w-2xl text-body text-ink-600">
         Signed in as <span className="font-medium text-ink-900">{user.Email}</span>.
-        Changing it needs an admin's approval — you stay signed in until then.
+        Changing it needs an admin's approval. You stay signed in until then.
       </p>
       <form onSubmit={submit} className="mt-4 grid max-w-xl gap-3">
         {error ? <StatusBanner tone="danger">{error}</StatusBanner> : null}
@@ -1214,7 +1214,7 @@ export function BackupCard() {
       <SectionHeading title="Database backup" />
       <p className="max-w-2xl text-body text-ink-600">
         Download the newest nightly database backup to this machine. To
-        restore one, use the restore section below — it takes a safety
+        restore one, use the restore section below. It takes a safety
         snapshot first and signs everyone out.
       </p>
       <div className="mt-4">
@@ -1249,7 +1249,7 @@ export function RestoreCard() {
       setConfirmText("");
       pushToast(
         "success",
-        `Restore complete: ${result.Quotations} quotations, ${result.Revisions} revisions. Everyone has been signed out — sign in again.`
+        `Restore complete: ${result.Quotations} quotations, ${result.Revisions} revisions. Everyone has been signed out. Sign in again.`
       );
     } catch (err: unknown) {
       pushToast("error", errorMessage(err, "We couldn't restore the backup."));
@@ -1264,8 +1264,8 @@ export function RestoreCard() {
       <StatusBanner tone="danger">
         Restoring replaces the entire database with the selected backup. A
         safety snapshot of the current state is taken first, and{" "}
-        <span className="font-semibold">everyone is signed out immediately</span>{" "}
-        — including you. Coordinate with the team before proceeding.
+        <span className="font-semibold">everyone is signed out immediately</span>,{" "}
+        including you. Coordinate with the team before proceeding.
       </StatusBanner>
       <div className="mt-4 grid max-w-xl gap-3">
         <label className="flex flex-col gap-1.5">
@@ -1414,7 +1414,7 @@ function UpdateCard() {
               <dd className="text-right font-medium text-ink-900">
                 {info.UpdateAvailable
                   ? info.Required
-                    ? `Update required — ${info.Latest} is the minimum supported.`
+                    ? `Update required: ${info.Latest} is the minimum supported.`
                     : `${info.Latest} is available.`
                   : "You're up to date."}
               </dd>
@@ -1438,8 +1438,8 @@ function UpdateCard() {
         ) : null}
       </div>
       <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
-        Vera checks once per launch. Download the installer for your system —
-        it handles the rest.
+        Vera checks once per launch. Download the installer for your system.
+        It handles the rest.
       </p>
     </Card>
   );
@@ -1701,8 +1701,8 @@ function DeletionCard() {  const [confirming, setConfirming] = useState(false);
       ) : (
         <>
           <p className="max-w-2xl text-body text-ink-600">
-            Request deletion of your account. An admin reviews and approves it —
-            nothing is deleted automatically, and your past quotations are kept
+            Request deletion of your account. An admin reviews and approves it.
+            Nothing is deleted automatically, and your past quotations are kept
             for the archive.
           </p>
           <div className="mt-4">

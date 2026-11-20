@@ -122,7 +122,7 @@ export function CompanyGeneralPanel(props: {  /** The two edited profile fields.
               ) : (
                 catalogue.map((entry) => (
                   <option key={entry.code} value={entry.code}>
-                    {entry.code} — {entry.symbol}
+                    {entry.code} ({entry.symbol})
                   </option>
                 ))
               )}

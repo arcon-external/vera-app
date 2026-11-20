@@ -403,7 +403,7 @@ describe("saveQuotationTab", () => {
     expect(result).toEqual({ labelsError: null, themeError: null, saved: true, refreshFailed: false });
   });
 
-  it("sends only the dirty half — a colour-only edit never rewrites the wording", async () => {
+  it("sends only the dirty half: a colour-only edit never rewrites the wording", async () => {
     const fake = deps();
     const result = await saveQuotationTab(
       { labels: LABELS, labelsDirty: false, theme: THEME, themeDirty: true },
@@ -415,7 +415,7 @@ describe("saveQuotationTab", () => {
     expect(result.saved).toBe(true);
   });
 
-  it("sends only the dirty half — a reworded document never touches the colours", async () => {
+  it("sends only the dirty half: a reworded document never touches the colours", async () => {
     const fake = deps();
     const result = await saveQuotationTab(
       { labels: patchCompanyLabel(LABELS, "docTitle", "OFFER"), labelsDirty: true, theme: THEME, themeDirty: false },
