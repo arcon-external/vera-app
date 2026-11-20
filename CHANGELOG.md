@@ -4,6 +4,21 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.21.1] - 2026-11-20
+
+### Fixed
+
+- **Report cards keep their contents inside the card.** A long saved-file path
+  wraps in the notification instead of running past it, the Margin % column
+  keeps its right padding, and the Reports page no longer scrolls sideways on a
+  phone. (#634)
+- **The margin percentage line is drawn at the right height.** It was plotted
+  one hundred times too high, so the line disappeared above the chart and its
+  label sat on the Projected marker. (#634)
+- **A projected period's low-to-high range is shown as its own whisker**,
+  instead of a floating shape that did not say which period it belonged to.
+  (#634)
+
 ## [0.21.0] - 2026-11-20
 
 ### Added
