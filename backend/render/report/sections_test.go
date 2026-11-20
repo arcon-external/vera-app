@@ -16,10 +16,18 @@ func renderPageText(t *testing.T, snapshot poreport.Report) string {
 	return pageText(renderer.canvas.pages)
 }
 
+// pdfText collapses whitespace runs. pdftotext -layout collapses the double
+// spaces the renderer draws around a separator, while PyMuPDF preserves them;
+// the document's words are what the test owns, not an extractor's spacing.
+func pdfText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func requireText(t *testing.T, text string, wants ...string) {
 	t.Helper()
+	haystack := pdfText(text)
 	for _, want := range wants {
-		if !strings.Contains(text, want) {
+		if !strings.Contains(haystack, pdfText(want)) {
 			t.Errorf("rendered report does not print %q", want)
 		}
 	}
@@ -27,8 +35,9 @@ func requireText(t *testing.T, text string, wants ...string) {
 
 func requireNoText(t *testing.T, name, text string, unwanted ...string) {
 	t.Helper()
+	haystack := pdfText(text)
 	for _, value := range unwanted {
-		if strings.Contains(text, value) {
+		if strings.Contains(haystack, pdfText(value)) {
 			t.Errorf("%s prints %q; it must not appear there", name, value)
 		}
 	}
