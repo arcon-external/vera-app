@@ -69,7 +69,7 @@ func TestCatalogueExponentsMatchTheApplicationContract(t *testing.T) {
 	if info, ok := Lookup("IDR"); !ok {
 		t.Errorf("code IDR has no entry")
 	} else if info.Exponent != 0 {
-		t.Errorf("code IDR exponent = %d; want 0 (whole rupiah stored, sen defunct — not ISO 4217 minor unit 2)",
+		t.Errorf("code IDR exponent = %d; want 0 (whole rupiah stored, sen defunct, not ISO 4217 minor unit 2)",
 			info.Exponent)
 	}
 }

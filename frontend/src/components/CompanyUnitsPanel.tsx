@@ -83,7 +83,7 @@ export function CompanyUnitsPanel(props: {
     <Card className="p-5">
       <SectionHeading title="Units of measure" />
       <p className="max-w-2xl text-body text-ink-600">
-        These are the units staff pick in the line-item editor — square meters
+        These are the units staff pick in the line-item editor: square meters
         can store as <span className="tnum">m2</span> and print as{" "}
         <span className="tnum">m²</span>. Units already on saved quotations
         keep whatever they were issued with.
@@ -101,7 +101,7 @@ export function CompanyUnitsPanel(props: {
           {canonicalOptions.map((unit) => (
             <option key={unit.value} value={unit.value}>
               {unit.label && unit.label !== unit.value
-                ? `${unit.value} — ${unit.label}`
+                ? `${unit.value} (${unit.label})`
                 : unit.value}
             </option>
           ))}
@@ -144,7 +144,7 @@ export function CompanyUnitsPanel(props: {
                 <div className="grid min-w-0 flex-1 grid-cols-1 items-center gap-2 sm:grid-cols-2">
                   <label className="flex flex-col gap-1.5">
                     <span className="text-caption font-medium text-ink-600">
-                      Value — stored
+                      Value (stored)
                     </span>
                     <input
                       type="text"
@@ -162,7 +162,7 @@ export function CompanyUnitsPanel(props: {
                   </label>
                   <label className="flex flex-col gap-1.5">
                     <span className="text-caption font-medium text-ink-600">
-                      Label — printed
+                      Label (printed)
                     </span>
                     <input
                       type="text"

@@ -58,7 +58,7 @@ export function tutorialQuotationDetails(): DetailsState {
     taxZone: "FTZ",
     taxType: "Goods",
     serviceCategory: "",
-    note: "Practice note (MOCK) — safe to edit and format.",
+    note: "Practice note (MOCK). Safe to edit and format.",
   };
 }
 

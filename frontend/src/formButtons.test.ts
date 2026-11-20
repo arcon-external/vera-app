@@ -150,7 +150,7 @@ export function scanFile(file: string, src: string): { forms: FormRegion[]; viol
     if (kind === "<form") {
       if (open !== null) {
         throw new Error(
-          `${file}:${lineOf(src, match.index)}: nested <form> inside the form opened at line ${open.line} — ` +
+          `${file}:${lineOf(src, match.index)}: nested <form> inside the form opened at line ${open.line}: ` +
             "this scanner pairs each <form> with the next </form> and cannot see through nesting"
         );
       }
@@ -262,7 +262,7 @@ describe("no bare button inside a form (issue #342)", () => {
     expect(forms.length, "expected the scan to find at least one <form>").toBeGreaterThan(0);
     expect(buttonsChecked, "expected the scan to find buttons inside forms").toBeGreaterThan(0);
     expect(
-      violations.map((v) => `${v.file}:${v.line}: bare button in form opened at line ${v.formLine} — ${v.tag}`),
+      violations.map((v) => `${v.file}:${v.line}: bare button in form opened at line ${v.formLine}: ${v.tag}`),
       "every Button/button inside a <form> must say type=\"button\" or type=\"submit\" explicitly; nothing may rely on the implicit submit default"
     ).toEqual([]);
   });

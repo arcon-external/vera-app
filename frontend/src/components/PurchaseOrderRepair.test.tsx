@@ -270,7 +270,7 @@ describe("PurchaseOrderSourceChange (issue #475)", () => {
     );
     expect(plain(html)).toContain("Quotation 1502260001 · revision 0");
     expect(plain(html)).toContain("Quotation 1502260009 · revision 1");
-    expect(html).toContain("2302260001 — kept unchanged by a same-customer repair.");
+    expect(html).toContain("2302260001, kept unchanged by a same-customer repair.");
   });
 
   it("warns when the record would move to another customer", () => {

@@ -133,7 +133,7 @@ func TestManyDescriptionLinesFragment(t *testing.T) {
 	}
 	in.Items = []Item{{
 		No: 1, DescMain: "Maintenance scope", DescLines: lines,
-		Qty: "7", UoM: "Lot", UnitPrice: "9.999", Disc: "—", Total: "9.999",
+		Qty: "7", UoM: "Lot", UnitPrice: "9.999", Disc: "-", Total: "9.999",
 	}}
 	in.QRPNG = nil
 

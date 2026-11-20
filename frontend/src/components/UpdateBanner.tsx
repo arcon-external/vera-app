@@ -126,7 +126,7 @@ export function UpdateBanner({
             )}{" "}
             {state.offline ? "Last checked while offline. " : ""}
             {state.DownloadURL
-              ? "Download the installer for your system — it handles the rest."
+              ? "Download the installer for your system. It handles the rest."
               : "See the release notes to download it."}
           </span>
           <span className="flex items-center gap-2">

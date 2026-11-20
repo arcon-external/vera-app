@@ -137,9 +137,9 @@ func TestFormattingMatchesTheSharedCrossSurfaceFixture(t *testing.T) {
 	}
 }
 
-func TestUnknownPercentPrintsAnEmDashNeverZero(t *testing.T) {
-	if got := formatPct(nil); got != "—" {
-		t.Errorf("nil percent = %q, want an em dash", got)
+func TestUnknownPercentPrintsAPlaceholderNeverZero(t *testing.T) {
+	if got := formatPct(nil); got != "-" {
+		t.Errorf("nil percent = %q, want a placeholder hyphen", got)
 	}
 	if got := formatPct(pointer(0)); got != "0.00%" {
 		t.Errorf("measured zero percent = %q, want 0.00%%", got)

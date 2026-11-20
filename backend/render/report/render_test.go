@@ -108,7 +108,7 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 		"Unassigned",
 		"(UNASSIGNED)",
 		"Rp-30.000.000",
-		"—",
+		"-",
 		"Definitions",
 	)
 }

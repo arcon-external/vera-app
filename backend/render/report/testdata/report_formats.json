@@ -60,7 +60,7 @@
     {
       "name": "unknown",
       "value": null,
-      "expected": "—"
+      "expected": "-"
     },
     {
       "name": "zero",

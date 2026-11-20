@@ -103,7 +103,7 @@ func TestExportMockQuotation(t *testing.T) {
 		}
 	}
 	input := mockMixedInput()
-	input.Subject = "{TEST} MEP and controls package — lighting, HVAC automation, exhaust and preventive maintenance"
+	input.Subject = "{TEST} MEP and controls package: lighting, HVAC automation, exhaust and preventive maintenance"
 	input.CustomerID = uint8(customer.Code)
 
 	if err := q.Prepare(input); err != nil {

@@ -186,10 +186,10 @@ func TestLoginUnrememberedSetsMemoryAndDeletesTheStoredToken(t *testing.T) {
 		t.Error("the login body asked to be remembered on an unchecked sign-in")
 	}
 	if keyring.saveCount() != 0 {
-		t.Errorf("keychain saves = %v; want none — the session must not survive a restart", keyring.saves)
+		t.Errorf("keychain saves = %v; want none; the session must not survive a restart", keyring.saves)
 	}
 	if keyring.deleteCount() != 1 {
-		t.Errorf("keychain deletes = %d; want 1 — the remembered token from the previous sign-in is stale now", keyring.deleteCount())
+		t.Errorf("keychain deletes = %d; want 1; the remembered token from the previous sign-in is stale now", keyring.deleteCount())
 	}
 	if keyring.storedToken() != "" {
 		t.Errorf("keychain still holds %q; want empty", keyring.storedToken())

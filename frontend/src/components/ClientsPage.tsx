@@ -106,7 +106,7 @@ export function ClientsPage() {
           </h1>
           <p className="mt-1.5 max-w-3xl text-body text-ink-500">
             Who quotations are made for. New clients appear in the editor
-            immediately — no rebuild. Only admins see this page.
+            immediately. No rebuild. Only admins see this page.
           </p>
         </div>
         <Button variant="primary" onClick={() => setShowCreate((open) => !open)}>
@@ -225,7 +225,7 @@ export function ClientsPage() {
                           <p className="text-small text-ink-800">
                             Editing <span className="font-medium">{client.Name}</span>.
                             The code ({String(client.Code).padStart(2, "0")}) cannot be
-                            changed — quotation cycles are keyed by it.
+                            changed: quotation cycles are keyed by it.
                           </p>
                           <div className="mt-2 grid max-w-2xl gap-2">
                             <input
@@ -269,7 +269,7 @@ export function ClientsPage() {
                               <span className="font-medium">{client.Name}</span> has{" "}
                               <span className="tnum font-medium">{client.QuotationCount}</span>{" "}
                               quotation{client.QuotationCount === 1 ? "" : "s"} and cannot be
-                              deleted — archive history must keep pointing at it.
+                              deleted. Archive history must keep pointing at it.
                             </p>
                           ) : (
                             <>
@@ -423,7 +423,7 @@ function CreateClientForm({
         </div>
       </form>
       <p className="mt-3 text-caption leading-relaxed text-ink-400">
-        The code feeds quotation numbers and can never change — leave it empty
+        The code feeds quotation numbers and can never change. Leave it empty
         to take the next free one.
       </p>
     </Card>

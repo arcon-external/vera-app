@@ -238,7 +238,7 @@ export function LoginUpdateNotice({
               </>
             ) : (
               <>
-                Vera {displayVersion(latest)} is available — you're on{" "}
+                Vera {displayVersion(latest)} is available. You're on{" "}
                 {displayVersion(current)}.
               </>
             )}
@@ -484,7 +484,7 @@ export function LoginPage({
               </div>
             ) : null}
             <Button variant="dark" onClick={() => switchMode("signin")} className="w-full">
-              Finish — back to sign in
+              Finish and return to sign in
             </Button>
           </div>
           ) : (

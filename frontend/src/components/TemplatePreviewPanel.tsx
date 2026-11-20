@@ -167,7 +167,7 @@ export function TemplatePreviewPanel(props: {
       // A field error, and the last good preview stays: the invalid value
       // never reaches the binding, so the document on screen is always one
       // the engine actually rendered.
-      setError(`The Quotation ${bad} colour is not a complete hex — fix it to refresh the preview.`);
+      setError(`The Quotation ${bad} colour is not a complete hex. Fix it to refresh the preview.`);
       setLoading(false);
       return;
     }
@@ -234,7 +234,7 @@ export function TemplatePreviewPanel(props: {
       <p className="max-w-2xl text-body text-ink-600">
         The sample quotation as it prints right now, with the wording and
         colours below typed but not yet saved. It re-renders when you leave a
-        field or press Enter — never while you type.
+        field or press Enter, never while you type.
       </p>
       {error ? (
         <div className="mt-4">
@@ -260,7 +260,7 @@ export function TemplatePreviewPanel(props: {
         that does not verify, so it can never be mistaken for a document.
       </p>
       <p className="mt-3 max-w-2xl text-caption leading-relaxed text-ink-400">
-        The preview is the document's own HTML — the template the print engine
+        The preview is the document's own HTML: the template the print engine
         runs, shown as it executes. Download sample saves the real PDF bytes
         for the same draft.
       </p>

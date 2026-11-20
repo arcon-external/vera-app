@@ -269,7 +269,7 @@ describe("report labels and exact percentages", () => {
   });
 
   it("renders basis points exactly and null as unknown", () => {
-    expect(formatReportBps(null)).toBe("—");
+    expect(formatReportBps(null)).toBe("-");
     expect(formatReportBps(0)).toBe("0.00%");
     expect(formatReportBps(1250)).toBe("12.50%");
     expect(formatReportBps(6667)).toBe("66.67%");

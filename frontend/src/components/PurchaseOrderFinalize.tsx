@@ -324,7 +324,7 @@ export function PurchaseOrderDifferenceReviewView({
       <div key={line.key} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2">
         <LineMatchRow
           status={extra ? "extra" : "matched"}
-          title={`Line ${displayNumber} — ${line.description || "(no description)"}`}
+          title={`Line ${displayNumber}: ${line.description || "(no description)"}`}
           detail={
             extra
               ? showReceipt
@@ -382,7 +382,7 @@ export function PurchaseOrderDifferenceReviewView({
       <LineMatchRow
         key={line.LineLabel}
         status="missing"
-        title={`Quotation line ${line.LineLabel} — ${line.Description || "(no description)"}`}
+        title={`Quotation line ${line.LineLabel}: ${line.Description || "(no description)"}`}
         detail="On the quotation, not on this purchase order"
         po={<EmptyValue />}
         quotation={
@@ -428,7 +428,7 @@ export function PurchaseOrderDifferenceReviewView({
             <p className="mt-1 max-w-3xl text-body text-ink-500">
               {repairing
                 ? "Repairing the link moves this saved purchase order to another issued revision. Its current values are the starting point; every value that differs needs an explicit choice before the repair can be saved."
-                : "Finalizing records this purchase order's data so later documents can use it. It is not a business approval — the customer's order was already accepted before entry."}
+                : "Finalizing records this purchase order's data so later documents can use it. It is not a business approval: the customer's order was already accepted before entry."}
             </p>
           </div>
         <Badge tone="accent">{repairing ? "Source repair" : "Final save"}</Badge>
@@ -664,7 +664,7 @@ export function PurchaseOrderDifferenceReviewView({
             <span>This purchase order</span>
             <span className="tnum whitespace-nowrap font-medium text-ink-900">
               {evaluation.totals === null
-                ? "—"
+                ? "-"
                 : formatMoney(currency, evaluation.totals.grandTotalMinor)}
             </span>
           </p>
@@ -672,7 +672,7 @@ export function PurchaseOrderDifferenceReviewView({
             <span>Difference to the printed document</span>
             <span className="tnum whitespace-nowrap font-medium text-ink-900">
               {evaluation.printedDifferenceMinor === null
-                ? "—"
+                ? "-"
                 : formatMoney(currency, evaluation.printedDifferenceMinor)}
             </span>
           </p>
@@ -809,7 +809,7 @@ export function PurchaseOrderFinalConfirmationView({
           </div>
           <div>
             <dt className="text-caption text-ink-500">Customer PO date</dt>
-            <dd className="tnum font-medium text-ink-900">{payload.PODate || "—"}</dd>
+            <dd className="tnum font-medium text-ink-900">{payload.PODate || "-"}</dd>
           </div>
           <div>
             <dt className="text-caption text-ink-500">Received date</dt>
@@ -818,7 +818,7 @@ export function PurchaseOrderFinalConfirmationView({
           <div>
             <dt className="text-caption text-ink-500">Requested delivery</dt>
             <dd className="tnum font-medium text-ink-900">
-              {payload.RequestedDeliveryDate || "—"}
+              {payload.RequestedDeliveryDate || "-"}
             </dd>
           </div>
           <div>
@@ -829,11 +829,11 @@ export function PurchaseOrderFinalConfirmationView({
           </div>
           <div>
             <dt className="text-caption text-ink-500">Payment terms</dt>
-            <dd className="font-medium text-ink-900">{payload.PaymentTerms || "—"}</dd>
+            <dd className="font-medium text-ink-900">{payload.PaymentTerms || "-"}</dd>
           </div>
           <div>
             <dt className="text-caption text-ink-500">Incoterms</dt>
-            <dd className="font-medium text-ink-900">{payload.Incoterms || "—"}</dd>
+            <dd className="font-medium text-ink-900">{payload.Incoterms || "-"}</dd>
           </div>
           <div>
             <dt className="text-caption text-ink-500">Lines</dt>
@@ -843,7 +843,7 @@ export function PurchaseOrderFinalConfirmationView({
             <dt className="text-caption text-ink-500">Total</dt>
             <dd className="tnum font-medium text-ink-900">
               {evaluation.totals === null
-                ? "—"
+                ? "-"
                 : formatMoney(currency, evaluation.totals.grandTotalMinor)}
             </dd>
           </div>
@@ -1037,8 +1037,8 @@ function SavedDescriptionLines({ lines }: { lines: string[] }) {
     <ul className="mt-1 space-y-0.5 text-caption text-ink-500">
       {lines.map((line, index) => (
         <li key={index} className="flex gap-1.5">
-          <span aria-hidden="true" className="text-ink-300">—</span>
-          <span>{line || "—"}</span>
+          <span aria-hidden="true" className="text-ink-300">·</span>
+          <span>{line || "-"}</span>
         </li>
       ))}
     </ul>
@@ -1475,7 +1475,7 @@ export function PurchaseOrderSavedView({
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Customer PO date</dt>
-                <dd className="tnum text-ink-900">{order.PODate ?? "—"}</dd>
+                <dd className="tnum text-ink-900">{order.PODate ?? "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Received date</dt>
@@ -1483,11 +1483,11 @@ export function PurchaseOrderSavedView({
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Requested delivery</dt>
-                <dd className="tnum text-ink-900">{order.RequestedDeliveryDate ?? "—"}</dd>
+                <dd className="tnum text-ink-900">{order.RequestedDeliveryDate ?? "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Payment terms</dt>
-                <dd className="text-ink-900">{order.PaymentTerms || "—"}</dd>
+                <dd className="text-ink-900">{order.PaymentTerms || "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Business category</dt>
@@ -1497,25 +1497,25 @@ export function PurchaseOrderSavedView({
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Incoterms</dt>
-                <dd className="text-ink-900">{order.Incoterms || "—"}</dd>
+                <dd className="text-ink-900">{order.Incoterms || "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Billing address</dt>
-                <dd className="text-ink-900">{order.BillingAddress || "—"}</dd>
+                <dd className="text-ink-900">{order.BillingAddress || "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Delivery address</dt>
-                <dd className="text-ink-900">{order.DeliveryAddress || "—"}</dd>
+                <dd className="text-ink-900">{order.DeliveryAddress || "-"}</dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Contact</dt>
                 <dd className="text-ink-900">
-                  {[order.ContactEmail, order.ContactPhone].filter((value) => value !== "").join(" · ") || "—"}
+                  {[order.ContactEmail, order.ContactPhone].filter((value) => value !== "").join(" · ") || "-"}
                 </dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Ship-to code</dt>
-                <dd className="text-ink-900">{order.ShipToCode || "—"}</dd>
+                <dd className="text-ink-900">{order.ShipToCode || "-"}</dd>
               </div>
             </dl>
           </Card>
@@ -1545,7 +1545,7 @@ export function PurchaseOrderSavedView({
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-small font-medium text-ink-900">
-                            {line.description || "—"}
+                            {line.description || "-"}
                           </p>
                           <p className="mt-0.5 text-caption text-ink-500">
                             Line {groupIndex + 1} · {savedMatch(line)}
@@ -1568,7 +1568,7 @@ export function PurchaseOrderSavedView({
                         <div className="min-w-0">
                           <dt className="text-ink-500">Discount</dt>
                           <dd className="tnum truncate text-ink-700">
-                            {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                            {line.discountEnabled ? `${line.discountPercent}%` : "-"}
                           </dd>
                         </div>
                       </dl>
@@ -1601,7 +1601,7 @@ export function PurchaseOrderSavedView({
                                 <span className="tnum mr-1 text-caption text-ink-400">
                                   {groupIndex + 1}.{subIndex + 1}
                                 </span>
-                                {line.description || "—"}
+                                {line.description || "-"}
                               </p>
                               <p className="mt-0.5 text-caption text-ink-500">
                                 {savedMatch(line)}
@@ -1624,7 +1624,7 @@ export function PurchaseOrderSavedView({
                             <div className="min-w-0">
                               <dt className="text-ink-500">Discount</dt>
                               <dd className="tnum truncate text-ink-700">
-                                {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                                {line.discountEnabled ? `${line.discountPercent}%` : "-"}
                               </dd>
                             </div>
                           </dl>
@@ -1664,7 +1664,7 @@ export function PurchaseOrderSavedView({
                             {groupIndex + 1}
                           </td>
                           <td className="px-4 py-3 align-middle text-ink-900">
-                            {line.description || "—"}
+                            {line.description || "-"}
                             <SavedDescriptionLines lines={line.descriptionLines} />
                           </td>
                           <td className="px-4 py-3 align-middle text-ink-700">
@@ -1677,7 +1677,7 @@ export function PurchaseOrderSavedView({
                             {line.unitPrice}
                           </td>
                           <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                            {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                            {line.discountEnabled ? `${line.discountPercent}%` : "-"}
                           </td>
                           <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
                             {formatMoney(currency, groupNet)}
@@ -1705,9 +1705,9 @@ export function PurchaseOrderSavedView({
                               ? `Quotation ${group.lines[0].quotationItemNo}`
                               : "Split line"}
                           </td>
-                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
-                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
-                          <td className="px-4 py-3 text-right align-middle text-ink-400">—</td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">-</td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">-</td>
+                          <td className="px-4 py-3 text-right align-middle text-ink-400">-</td>
                           <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle font-semibold text-ink-900">
                             {formatMoney(currency, groupNet)}
                           </td>
@@ -1718,7 +1718,7 @@ export function PurchaseOrderSavedView({
                               {groupIndex + 1}.{subIndex + 1}
                             </td>
                             <td className="px-4 py-3 align-middle text-ink-900">
-                              {line.description || "—"}
+                              {line.description || "-"}
                               <SavedDescriptionLines lines={line.descriptionLines} />
                             </td>
                             <td className="px-4 py-3 align-middle text-ink-700">
@@ -1731,7 +1731,7 @@ export function PurchaseOrderSavedView({
                               {line.unitPrice}
                             </td>
                             <td className="tnum px-4 py-3 text-right align-middle text-ink-700">
-                              {line.discountEnabled ? `${line.discountPercent}%` : "—"}
+                              {line.discountEnabled ? `${line.discountPercent}%` : "-"}
                             </td>
                             <td className="tnum whitespace-nowrap px-4 py-3 text-right align-middle text-ink-900">
                               {formatMoney(currency, savedNetByKey.get(line.key) ?? 0)}

@@ -80,7 +80,7 @@ function renderHeader(
     <QuotationDetailHeader
       quotation={QUOTATION}
       activeRevision={1}
-      revisionOptions={[{ value: 1, label: "Revision 01 — latest" }]}
+      revisionOptions={[{ value: 1, label: "Revision 01 (latest)" }]}
       onRevisionChange={noop}
       onBack={noop}
       onEdit={noop}

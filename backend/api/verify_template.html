@@ -8,7 +8,7 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<meta name="robots" content="noindex, nofollow">
-	<title>Document verification — {{if .Issuer}}{{.Issuer}}{{else}}PT Arcon Penta Persada{{end}}</title>
+	<title>Document verification: {{if .Issuer}}{{.Issuer}}{{else}}PT Arcon Penta Persada{{end}}</title>
 	<style>
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		:root {
@@ -199,7 +199,7 @@
 
 			<div class="verdict {{if .IsVerified}}verdict-valid{{else if .IsSuperseded}}verdict-superseded{{else if .IsMismatch}}verdict-mismatch{{else if .IsUnavailable}}verdict-unavailable{{else}}verdict-notfound{{end}}">
 				<div class="mark">
-					{{if .IsVerified}}&#10003; Verified{{else if .IsSuperseded}}&#8635; Superseded{{else if .IsMismatch}}&#10007; Mismatch{{else if .IsUnavailable}}&#9888; Unavailable{{else}}&#8212; Not found{{end}}
+					{{if .IsVerified}}&#10003; Verified{{else if .IsSuperseded}}&#8635; Superseded{{else if .IsMismatch}}&#10007; Mismatch{{else if .IsUnavailable}}&#9888; Unavailable{{else}}Not found{{end}}
 				</div>
 				<h1>{{.Headline}}</h1>
 				<p>{{.Detail}}</p>

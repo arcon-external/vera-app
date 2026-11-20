@@ -556,7 +556,7 @@ function TextAreaField({
  *  ISO value because that is what the date input and the payload use. */
 function displayPurchaseOrderDate(raw: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-  if (match === null) return raw.trim() === "" ? "—" : raw;
+  if (match === null) return raw.trim() === "" ? "-" : raw;
   const date = new Date(
     Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
   );
@@ -1226,11 +1226,11 @@ export function PurchaseOrderEditorView({
           </span>
           <span>
             <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Terms</span>
-            {state.header.incoterms || "—"} · {state.currency.toUpperCase()}
+            {state.header.incoterms || "-"} · {state.currency.toUpperCase()}
           </span>
           <span>
             <span className="block text-[9px] uppercase tracking-[0.14em] text-accent-300">Tax</span>
-            {basisLabel || "—"}
+            {basisLabel || "-"}
           </span>
         </div>
         <p className="relative z-10 mt-3 text-caption text-accent-200">
@@ -1489,7 +1489,7 @@ export function PurchaseOrderEditorView({
           <div className="mt-3 grid gap-1 text-caption text-ink-500">
             <p>
               <span className="font-medium text-ink-700">Customer PO number:</span>{" "}
-              <span className="tnum">{state.header.poNumber || "—"}</span>
+              <span className="tnum">{state.header.poNumber || "-"}</span>
             </p>
             <p>
               <span className="font-medium text-ink-700">Confirmation number:</span>{" "}

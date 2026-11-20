@@ -708,7 +708,7 @@ describe("final-save payload", () => {
   });
 
   it("labels a source line for the match picker", () => {
-    expect(sourceLineLabel(SOURCE.Lines[0])).toBe("1 — Widget");
+    expect(sourceLineLabel(SOURCE.Lines[0])).toBe("1: Widget");
   });
 });
 

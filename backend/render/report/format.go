@@ -162,12 +162,12 @@ func formatCount(value int64) string {
 
 // formatPct renders basis points as an exact two-decimal percentage using
 // integer arithmetic, matching the screen's formatReportBps. A nil ratio is
-// unknown and prints an em dash, never "0.00%": the report's whole point is
-// that a margin with no capital is unknowable, not zero. No floating-point
-// division is involved, so 1077 is always 10.77%, never a rounded 10.8%.
+// unknown and prints "-", never "0.00%": the report's whole point is that a
+// margin with no capital is unknowable, not zero. No floating-point division
+// is involved, so 1077 is always 10.77%, never a rounded 10.8%.
 func formatPct(bps *int64) string {
 	if bps == nil {
-		return "—"
+		return "-"
 	}
 	value := *bps
 	negative := value < 0

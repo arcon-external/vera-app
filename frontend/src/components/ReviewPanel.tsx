@@ -124,7 +124,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
 
       <Card className="overflow-hidden">
         <StageHeader
-          step="01 — Initial preview"
+          step="01: Initial preview"
           title="Original prices before margin"
           description="The unit price input used to build this quotation. No profit margin and no tax are included here."
           badge={<Badge tone="neutral">Reference</Badge>}
@@ -190,10 +190,10 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
 
       <Card className="overflow-hidden border-internal-200">
         <StageHeader
-          step="02 — Internal breakdown"
+          step="02: Internal breakdown"
           title="Margin and tax calculation"
           description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation and is never profit; PPH23 stays internal and is never allocated to individual lines."
-          badge={<Badge tone="internal">Internal only — never exported</Badge>}
+          badge={<Badge tone="internal">Internal only, never exported</Badge>}
         />
         <div className="p-5 lg:p-6">
           <TableFrame>
@@ -270,7 +270,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
                             <ul className="mt-0.5 space-y-0.5">
                               {details.map((detail, detailIndex) => (
                                 <li key={detailIndex} className="text-ink-400">
-                                  — {detail}
+                                  · {detail}
                                 </li>
                               ))}
                             </ul>
@@ -341,7 +341,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
                 ) : null}
                 {internal.TaxAmount > 0 ? (
                   <SummaryRow
-                    label={`Services tax, internal — ${internal.TaxLabel}`}
+                    label={`Services tax, internal: ${internal.TaxLabel}`}
                     value={`−${internal.DisplayTax}`}
                     currency={currency}
                   />
@@ -388,7 +388,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
 
       <Card className="overflow-hidden">
         <StageHeader
-          step="03 — Quotation preview"
+          step="03: Quotation preview"
           title="Customer-facing quotation"
           description="The exact template used for the exported PDF: marginalized prices before tax, with all internal calculations hidden."
           badge={<Badge tone="success">Ready to export</Badge>}

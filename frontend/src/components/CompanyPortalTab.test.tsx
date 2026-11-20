@@ -75,7 +75,7 @@ describe("CompanyPortalTab", () => {
     const html = render();
     expect(html).toContain("These four colours paint the page around the verdict.");
     expect(html).toContain(
-      "The verdict colours stay fixed — green valid, amber superseded, red mismatch, grey not-found"
+      "The verdict colours stay fixed (green valid, amber superseded, red mismatch, grey not-found)"
     );
     // The old caption promised the colours rode the profile save, which they no
     // longer do.

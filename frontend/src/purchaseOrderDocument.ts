@@ -228,7 +228,7 @@ export function documentErrorMessage(error: unknown): string {
  * arithmetic and no locale-dependent formatting.
  */
 export function formatDocumentSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  if (!Number.isFinite(bytes) || bytes < 0) return "-";
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   const scale = bytes < 1024 * 1024 ? 1024 : 1024 * 1024;
   const unit = scale === 1024 ? "KB" : "MB";

@@ -220,7 +220,7 @@ describe("ItemEditor purchase-order mode (#573)", () => {
   it("hides margin but keeps sub-items and sub-sub lines", () => {
     const html = render({ items: [split], mode: "purchase-order", currency: USD });
     expect(html).not.toContain(">Margin<");
-    expect(html).toContain("Sub-items — priced individually; the line totals their sum");
+    expect(html).toContain("Sub-items: priced individually; the line totals their sum");
     expect(html).toContain("Add sub-sub-item");
     expect(html).toContain("IP54 enclosure");
     expect(html).toContain("Two technicians");

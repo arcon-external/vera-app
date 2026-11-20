@@ -55,7 +55,7 @@ func TestUnitColumnListCoversEveryField(t *testing.T) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		t.Errorf("unitColumnList is missing [%s].\n\n"+
-			"A struct field with no column in the list is never persisted — loss, "+
+			"A struct field with no column in the list is never persisted: loss, "+
 			"not a wipe, and nobody notices until the field reads back empty. Add "+
 			"the column to the const (and to migration SQL if the table needs it).",
 			strings.Join(missing, ", "))
@@ -77,7 +77,7 @@ func TestUnitColumnListCoversEveryField(t *testing.T) {
 	sort.Strings(extra)
 	if len(extra) > 0 {
 		t.Errorf("unitColumnList declares [%s], which no CompanyUnit field maps to.\n\n"+
-			"A column that names no field persists data nobody reads — check for a "+
+			"A column that names no field persists data nobody reads. Check for a "+
 			"renamed field whose column the const still keeps.", strings.Join(extra, ", "))
 	}
 }

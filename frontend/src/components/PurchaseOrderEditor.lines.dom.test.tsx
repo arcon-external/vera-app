@@ -654,7 +654,7 @@ describe("split lines in the PO editor (#573)", () => {
     await flush();
 
     expect(document.body.textContent).toContain("2 sub-items");
-    expect(document.body.textContent).toContain("Sub-items — priced individually");
+    expect(document.body.textContent).toContain("Sub-items: priced individually");
     expect(input("Description for line 1").value).toBe("Widget");
     expect(input("Description for sub-item 1 of line 1").value).toBe("Widget");
     expect(input("Description for sub-item 2 of line 1").value).toBe("");

@@ -631,7 +631,7 @@ export function buildFinalizeInput(
 
 /** A compact label for one source line, used by the reviewer's match picker. */
 export function sourceLineLabel(line: PurchaseOrderSourceLineDTO): string {
-  return `${sourceLabel(line)} — ${line.Description || "(no description)"}`;
+  return `${sourceLabel(line)}: ${line.Description || "(no description)"}`;
 }
 
 /** The editor state a saved record opens in (#471 read-only view). */

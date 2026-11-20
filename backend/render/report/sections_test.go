@@ -46,7 +46,7 @@ func TestSampleReportPrintsTheFrozenSnapshot(t *testing.T) {
 	requireText(t, text,
 		"Purchase Order Performance Report",
 		"INTERNAL REPORT",
-		"Internal report — not a customer quotation. PPN is excluded from every figure.",
+		"Internal report: not a customer quotation. PPN is excluded from every figure.",
 		"PT. Arcon Penta Persada",
 		"2025-01-01 → 2025-12-20 (exclusive)",
 		"Monthly",
@@ -90,7 +90,7 @@ func TestSampleReportPrintsCategoryAndPeriodTables(t *testing.T) {
 		"Jan 2025",
 		"Dec 2025 IP",
 		"Rp-30.000.000",
-		"—",
+		"-",
 		"Total",
 		"P = partial period; IP = period still in progress.",
 	)

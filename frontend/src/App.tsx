@@ -2980,7 +2980,7 @@ function App() {
                 <span className="truncate text-caption text-ink-500">
                   Draft saved{" "}
                   <span className="text-ink-400">
-                    {relativeSavedAt(draftSavedAt)} — save again to update it
+                    {relativeSavedAt(draftSavedAt)}. Save again to update it
                   </span>
                 </span>
               ) : (

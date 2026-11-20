@@ -157,7 +157,7 @@ func TestPackageDiscountPrintsDerivedRate(t *testing.T) {
 	assertPriceRow(t, page, "2.000.000", "1.900.000", "1.900.000")
 	assertPriceRow(t, page, "300.000", "300.000", "300.000")
 	assertPriceRow(t, page, "50.000", "50.000", "150.000")
-	if strings.Contains(page, "<div class=\"after-pct\">—</div>") {
+	if strings.Contains(page, "<div class=\"after-pct\">") {
 		t.Error("em-dash second line still printed on the customer document; every row must state a percentage")
 	}
 

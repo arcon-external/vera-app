@@ -3191,7 +3191,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3216,7 +3216,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3241,7 +3241,7 @@ const CASES: SnapshotCase[] = [
         quotation={DETAIL_QUOTATION}
         activeRevision={2}
         revisionOptions={[
-          { value: 2, label: "Revision 02 — latest" },
+          { value: 2, label: "Revision 02 (latest)" },
           { value: 1, label: "Revision 01" },
           { value: 0, label: "Revision 00" },
         ]}
@@ -3473,12 +3473,12 @@ function buildPage(
     "<head>",
     '<meta charset="UTF-8" />',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
-    `<title>${name} — UI snapshot</title>`,
+    `<title>${name}: UI snapshot</title>`,
     "<!--",
     "  Local UI snapshot written by scripts/ui-snapshot.sh. Not committed.",
     "  The app's font stack is -apple-system / BlinkMacSystemFont / Segoe UI /",
-    "  system-ui, none of which exists inside the render container. Inter — the",
-    "  face the PDF template already bundles — is inlined here (base64) as the",
+    "  system-ui, none of which exists inside the render container. Inter, the",
+    "  face the PDF template already bundles, is inlined here (base64) as the",
     "  closest available approximation: it is not the app's real rendering font,",
     "  only its stand-in. The CSS and the root shell classes are the app's own.",
     "-->",

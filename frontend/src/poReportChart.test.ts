@@ -240,7 +240,7 @@ describe("chart axes formatting (issue #631)", () => {
     expect(compactChartMoney(USD, 5)).toBe("$0.05");
     expect(compactChartMoney(USD, 123_456)).toBe("$1.2K");
     expect(compactChartMoney(EUR, 123_456)).toBe("1.2K €");
-    expect(compactChartMoney(null, 150_000_000)).toBe("—");
+    expect(compactChartMoney(null, 150_000_000)).toBe("-");
   });
 
   it("formats percent ticks as a percentage, compacting only extreme values", () => {

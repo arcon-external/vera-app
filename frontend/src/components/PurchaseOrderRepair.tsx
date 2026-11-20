@@ -104,7 +104,7 @@ export function PurchaseOrderSourceChange({
           <span className="font-medium text-ink-900">Confirmation number: </span>
           {confirmationNumber === null || confirmationNumber === ""
             ? "Not assigned"
-            : `${confirmationNumber} — kept unchanged by a same-customer repair.`}
+            : `${confirmationNumber}, kept unchanged by a same-customer repair.`}
         </p>
         {customerChanged ? (
           <p>
@@ -223,7 +223,7 @@ export function PurchaseOrderRepairConfirmationView({
         <p className="mt-2 text-small text-ink-700">
           <span className="font-medium text-ink-900">Calculated total: </span>
           <span className="tnum whitespace-nowrap">
-            {total === null ? "—" : formatMoney(currency, total)}
+            {total === null ? "-" : formatMoney(currency, total)}
           </span>
         </p>
         {/* #518: the full comparison's line acknowledgements, restated. */}
