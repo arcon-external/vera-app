@@ -25,6 +25,32 @@ func requireText(t *testing.T, text string, wants ...string) {
 	}
 }
 
+func requireNoText(t *testing.T, name, text string, unwanted ...string) {
+	t.Helper()
+	for _, value := range unwanted {
+		if strings.Contains(text, value) {
+			t.Errorf("%s prints %q; it must not appear there", name, value)
+		}
+	}
+}
+
+// periodTableText isolates the printed period table from the chart and the
+// projection summary. The same date can legitimately name a ghost in the chart
+// or a remaining day in the summary, so a row assertion has to read the table
+// alone: the slice runs from the "By period" heading to the projection heading
+// that follows the total.
+func periodTableText(text string) string {
+	start := strings.Index(text, "By period")
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(text[start:], "Current-period projection")
+	if end < 0 {
+		return text[start:]
+	}
+	return text[start : start+end]
+}
+
 func requireInOrder(t *testing.T, text string, wants ...string) {
 	t.Helper()
 	at := 0
@@ -94,6 +120,9 @@ func TestSampleReportPrintsCategoryAndPeriodTables(t *testing.T) {
 		"Total",
 		"P = partial period; IP = period still in progress.",
 	)
+	// A historical range keeps every actual period: mode none withholds no row.
+	table := periodTableText(text)
+	requireText(t, table, "Jan 2025", "Dec 2025 IP", "Total")
 }
 
 func TestRenderedTableTotalsMatchTheFootedFixture(t *testing.T) {
@@ -154,25 +183,31 @@ func TestDayReportPrintsDailyRowsAndGhostSummary(t *testing.T) {
 	text := renderPageText(t, dayReport())
 	requireText(t, text,
 		"By period",
-		"1 Jan 2026",
-		"19 Jan 2026 IP",
-		"31 Jan 2026",
+		"1 Nov 2026",
+		"19 Nov 2026 IP",
 		"Current-period projection",
-		"Mode: Day  ·  January 2026 day by day",
+		"Mode: Day  ·  November 2026 day by day",
 		"Available",
-		"20 Jan 2026 to 31 Jan 2026 · 12 days",
+		"20 Nov 2026 to 30 Nov 2026 · 11 days",
 		"low Rp8.000.000",
 		"base Rp10.000.000",
 		"high Rp12.000.000",
-		"1 Jan 2026 to 20 Jan 2026 (exclusive) · 19 elapsed days",
+		"1 Nov 2026 to 20 Nov 2026 (exclusive) · 19 elapsed days",
 		"19 purchase orders",
-		"as of 19 Jan 2026.",
+		"as of 19 Nov 2026.",
 		"Elapsed days of the current month [elapsed_days]",
-		"Actual and projected days  ·  January 2026",
+		"Actual and projected days  ·  November 2026",
 		"Projected (ghost)",
 		"Projected low-high",
 		"updates as data arrives",
 	)
+	// The actual table stops at the as-of date. Every later day is ghost
+	// territory: named by the summary and drawn on the chart, never a zero row.
+	table := periodTableText(text)
+	requireText(t, table, "1 Nov 2026", "19 Nov 2026 IP")
+	requireNoText(t, "the day report's period table", table,
+		"20 Nov 2026", "21 Nov 2026", "30 Nov 2026")
+	requireText(t, text, "20 Nov 2026 to 30 Nov 2026 · 11 days")
 	for _, retired := range []string{"Monthly projection", "Yearly projection", "Projected range"} {
 		if strings.Contains(text, retired) {
 			t.Errorf("day report still prints the retired projection section %q", retired)
@@ -181,8 +216,8 @@ func TestDayReportPrintsDailyRowsAndGhostSummary(t *testing.T) {
 	if !strings.Contains(text, "Rp190.000.000") {
 		t.Errorf("day report total does not print the 19 actual days")
 	}
-	if strings.Contains(text, "Rp310.000.000") {
-		t.Errorf("day report total includes the 12 ghost days; projections must not enter a total")
+	if strings.Contains(text, "Rp300.000.000") {
+		t.Errorf("day report total includes the 11 ghost days; projections must not enter a total")
 	}
 }
 
@@ -206,6 +241,12 @@ func TestCurrentYearReportPrintsTheStackedMonthRemainder(t *testing.T) {
 		"Future months are hatched ghosts; the current month stacks its actual columns with the ghost remainder.",
 		"Projected (ghost)",
 	)
+	// The table stops at the current month. December is a ghost on the chart and
+	// a line in the summary, never a zero actual row.
+	table := periodTableText(text)
+	requireText(t, table, "Jan 2026", "Nov 2026 IP")
+	requireNoText(t, "the current-year period table", table, "Dec 2026")
+	requireText(t, text, "December 2026 · 1 ghost bar")
 	if !strings.Contains(text, "Rp1.100.000.000") {
 		t.Errorf("current-year report total does not print the eleven actual months")
 	}
@@ -239,12 +280,17 @@ func TestUnavailableCurrentProjectionPrintsReasonInsteadOfNumbers(t *testing.T) 
 		"Unavailable",
 		"REASON  insufficient_days",
 		"Not enough elapsed days: the current month needs five elapsed days and three purchase orders.",
-		"1 Jan 2026 to 20 Jan 2026 (exclusive) · 3 elapsed days · 2 purchase orders · as of 19 Jan 2026.",
+		"1 Nov 2026 to 20 Nov 2026 (exclusive) · 3 elapsed days · 2 purchase orders · as of 19 Nov 2026.",
 		"updates as data arrives",
 	)
 	if strings.Contains(text, "Per remaining day") {
 		t.Errorf("an unavailable projection printed per-day projected figures")
 	}
+	// No ghost is drawn, but the month-bucketed day range still stops its actual
+	// table at the as-of date: the trim follows the mode, not the status.
+	table := periodTableText(text)
+	requireText(t, table, "19 Nov 2026 IP")
+	requireNoText(t, "an unavailable day report's period table", table, "20 Nov 2026", "30 Nov 2026")
 }
 
 func TestUnavailableProjectionIgnoresSuppliedBuckets(t *testing.T) {

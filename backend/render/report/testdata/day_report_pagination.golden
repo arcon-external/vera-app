@@ -4,7 +4,7 @@ Purchase Order Performance Report
 PT. Arcon Penta Persada
 Komp. Ruko Legenda Gemilang, Blok D. No. 12, Baloi Permai, Batam
 PERIOD
-2026-01-01 → 2026-02-01 (exclusive)
+2026-11-01 → 2026-12-01 (exclusive)
 BUCKET
 Daily
 CATEGORY
@@ -12,9 +12,9 @@ All categories (all)
 CURRENCY
 IDR
 GENERATED
-19 Jan 2026 08:30:00 UTC
+19 Nov 2026 08:30:00 UTC
 AS OF
-2026-01-19
+2026-11-19
 Internal report: not a customer quotation. PPN is excluded from every figure.
 PO COUNT
 19
@@ -40,7 +40,7 @@ Margin % (right axis)
 Uncosted part of amount
 Projected (ghost)
 Projected low-high
-Actual and projected days  ·  January 2026
+Actual and projected days  ·  November 2026
 Days after the last actual day are hatched ghosts with a daily low-high amount whisker.
 Rp0
 Rp5M
@@ -51,22 +51,21 @@ Rp15M
 10%
 15%
 12.5%
-1 Jan
-3 Jan
-5 Jan
-7 Jan
-9 Jan
-11 Jan
-13 Jan
-15 Jan
-17 Jan
-19 Jan
-21 Jan
-23 Jan
-25 Jan
-27 Jan
-29 Jan
-31 Jan
+1 Nov
+3 Nov
+5 Nov
+7 Nov
+9 Nov
+11 Nov
+13 Nov
+15 Nov
+17 Nov
+19 Nov
+21 Nov
+23 Nov
+25 Nov
+27 Nov
+30 Nov
 By business category
 All amounts in IDR. The category rows foot to the total for the selected filter.
 CATEGORY
@@ -123,7 +122,8 @@ Rp152.000.000
 Rp19.000.000
 12.50%
 By period
-All amounts in IDR. P = partial period; IP = period still in progress. Projected periods never appear in this table and never enter the total.
+All amounts in IDR. P = partial period; IP = period still in progress. Projected periods never appear in this table and never enter the total. The table stops at
+the period containing the as-of date.
 PERIOD
 POs
 AMOUNT
@@ -131,14 +131,7 @@ COSTED
 CAPITAL
 MARGIN
 MARGIN %
-1 Jan 2026
-1
-Rp10.000.000
-Rp9.000.000
-Rp8.000.000
-Rp1.000.000
-12.50%
-2 Jan 2026
+1 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
@@ -146,7 +139,7 @@ Rp8.000.000
 Rp1.000.000
 12.50%
 PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 1 of 3
+Page 1 of 2
 === page 2 ===
 By period (continued)
 PERIOD
@@ -156,209 +149,132 @@ COSTED
 CAPITAL
 MARGIN
 MARGIN %
-3 Jan 2026
+2 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-4 Jan 2026
+3 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-5 Jan 2026
+4 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-6 Jan 2026
+5 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-7 Jan 2026
+6 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-8 Jan 2026
+7 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-9 Jan 2026
+8 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-10 Jan 2026
+9 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-11 Jan 2026
+10 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-12 Jan 2026
+11 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-13 Jan 2026
+12 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-14 Jan 2026
+13 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-15 Jan 2026
+14 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-16 Jan 2026
+15 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-17 Jan 2026
+16 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-18 Jan 2026
+17 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-19 Jan 2026 IP
+18 Nov 2026
 1
 Rp10.000.000
 Rp9.000.000
 Rp8.000.000
 Rp1.000.000
 12.50%
-20 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-21 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-22 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-23 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-24 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-25 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-26 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-27 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-28 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-29 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-30 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
-31 Jan 2026
-0
-Rp0
-Rp0
-Rp0
-Rp0
--
+19 Nov 2026 IP
+1
+Rp10.000.000
+Rp9.000.000
+Rp8.000.000
+Rp1.000.000
+12.50%
 Total
 19
 Rp190.000.000
@@ -368,16 +284,16 @@ Rp19.000.000
 12.50%
 Current-period projection
 A forecast for the period still in progress. It is drawn as a hatched ghost on the chart and never enters an actual table or total.
-Mode: Day  ·  January 2026 day by day
+Mode: Day  ·  November 2026 day by day
 Available
 Remaining days:
-20 Jan 2026 to 31 Jan 2026 · 12 days
+20 Nov 2026 to 30 Nov 2026 · 11 days
 Per remaining day:
 low Rp8.000.000 · base Rp10.000.000 · high Rp12.000.000 · capital Rp8.000.000 · margin Rp2.000.000
 Method:
 Elapsed-day average of the current month; P25-P75 range of elapsed daily totals (min-max under four observations).
 Basis:
-1 Jan 2026 to 20 Jan 2026 (exclusive) · 19 elapsed days · 19 purchase orders · as of 19 Jan 2026.
+1 Nov 2026 to 20 Nov 2026 (exclusive) · 19 elapsed days · 19 purchase orders · as of 19 Nov 2026.
 Sources:
 Elapsed days of the current month [elapsed_days]
 Updates:
@@ -386,9 +302,6 @@ Report notes
 •
 Some purchase orders in this range carry a retired whole-order discount or adjustment. The amount includes it, but it is not supplier cost and
 no margin is inferred from it.
-PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 2 of 3
-=== page 3 ===
 Definitions
 •
 PPN is excluded from every amount, costed amount, capital and margin figure in this report. The customer pays PPN on top of a quotation; it
@@ -412,4 +325,4 @@ time had passed.
 All money is in IDR and no figure is converted between currencies. Counts may combine currencies only within the selected one; money
 never does.
 PT. Arcon Penta Persada  ·  Purchase Order Performance Report  ·  Internal
-Page 3 of 3
+Page 2 of 2

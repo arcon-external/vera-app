@@ -358,21 +358,25 @@ func unavailableCurrentProjection(mode, reason, method string, basis poreport.Cu
 	}
 }
 
-// dayReport is the current month bucketed by day: 31 daily actual periods
-// (19 elapsed with orders, the rest future zero placeholders), a day-mode
-// current projection for the 12 remaining days, and the retired projection
+// dayReport is the current month bucketed by day: 30 daily actual periods
+// (19 elapsed with orders, the last 11 future zero placeholders), a day-mode
+// current projection for the 11 remaining days, and the retired projection
 // series still populated so the PDF can be checked for not printing them.
+//
+// The as-of date is 19 November 2026, matching the screen's Month fixture: the
+// PDF's period table must stop at 19 November, while the chart and the summary
+// still name 20 November and every later day as ghosts.
 func dayReport() poreport.Report {
 	snapshot := sampleReport()
-	snapshot.GeneratedAt = "2026-01-19T08:30:00Z"
-	snapshot.AsOf = "2026-01-19"
+	snapshot.GeneratedAt = "2026-11-19T08:30:00Z"
+	snapshot.AsOf = "2026-11-19"
 	snapshot.Filter = poreport.Query{
-		From: "2026-01-01", To: "2026-02-01", Bucket: poreport.BucketDay,
+		From: "2026-11-01", To: "2026-12-01", Bucket: poreport.BucketDay,
 		Category: poreport.CategoryAll, Currency: "IDR",
 	}
 
-	base := make([]poreport.Metrics, 0, 31)
-	for day := 1; day <= 31; day++ {
+	base := make([]poreport.Metrics, 0, 30)
+	for day := 1; day <= 30; day++ {
 		metrics := poreport.Metrics{}
 		if day <= 19 {
 			metrics = poreport.Metrics{
@@ -389,7 +393,7 @@ func dayReport() poreport.Report {
 	grid := fixtureGrid(base)
 	periods := make([]poreport.Period, 0, len(base))
 	for index, metrics := range base {
-		start := time.Date(2026, time.January, index+1, 0, 0, 0, 0, time.UTC)
+		start := time.Date(2026, time.November, index+1, 0, 0, 0, 0, time.UTC)
 		periods = append(periods, poreport.Period{
 			PeriodStart: start.Format(time.DateOnly),
 			InProgress:  index == 18,
@@ -408,10 +412,10 @@ func dayReport() poreport.Report {
 	}
 	snapshot.Totals = fixtureMetrics(19, totalCells)
 
-	future := make([]poreport.ProjectedBucket, 0, 12)
-	for day := 20; day <= 31; day++ {
+	future := make([]poreport.ProjectedBucket, 0, 11)
+	for day := 20; day <= 30; day++ {
 		future = append(future, poreport.ProjectedBucket{
-			PeriodStart:     time.Date(2026, time.January, day, 0, 0, 0, 0, time.UTC).Format(time.DateOnly),
+			PeriodStart:     time.Date(2026, time.November, day, 0, 0, 0, 0, time.UTC).Format(time.DateOnly),
 			AmountLowMinor:  8_000_000,
 			AmountBaseMinor: 10_000_000,
 			AmountHighMinor: 12_000_000,
@@ -427,7 +431,7 @@ func dayReport() poreport.Report {
 		Status: poreport.ProjectionStatusAvailable,
 		Method: poreport.MethodCurrentDay,
 		Basis: poreport.CurrentProjectionBasis{
-			From: "2026-01-01", To: "2026-01-20", Units: 19, PoCount: 19, AsOf: "2026-01-19",
+			From: "2026-11-01", To: "2026-11-20", Units: 19, PoCount: 19, AsOf: "2026-11-19",
 		},
 		Buckets: future,
 	}
@@ -521,7 +525,7 @@ func unavailableCurrentReport() poreport.Report {
 	snapshot.CurrentProjection = unavailableCurrentProjection(
 		poreport.ProjectionModeDay, poreport.ReasonInsufficientDays, poreport.MethodCurrentDay,
 		poreport.CurrentProjectionBasis{
-			From: "2026-01-01", To: "2026-01-20", Units: 3, PoCount: 2, AsOf: "2026-01-19",
+			From: "2026-11-01", To: "2026-11-20", Units: 3, PoCount: 2, AsOf: "2026-11-19",
 		})
 	return snapshot
 }

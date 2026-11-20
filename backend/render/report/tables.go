@@ -1,5 +1,11 @@
 package report
 
+import (
+	"time"
+
+	"vera-app/backend/poreport"
+)
+
 type tableAlign int
 
 const (
@@ -206,10 +212,61 @@ func (r *reportRenderer) drawCategoryTable() {
 		columns, rows, &total)
 }
 
+// periodTableLimit is the last period start the actual period table may print.
+// A current-period report materializes the whole month or year, including
+// buckets that have not happened yet; those are ghost territory. The screen
+// stops the same table at today (day mode) or at the current month (month
+// mode), and the PDF must print the same actual rows. Mode none, a historical
+// range and a snapshot without a current projection keep every period.
+func (r *reportRenderer) periodTableLimit() (time.Time, bool) {
+	current := r.snapshot.CurrentProjection
+	if current.Mode != poreport.ProjectionModeDay && current.Mode != poreport.ProjectionModeMonth {
+		return time.Time{}, false
+	}
+	asOf, err := time.Parse(time.DateOnly, r.snapshot.AsOf)
+	if err != nil {
+		// ValidateSnapshot requires this date. If an unvalidated snapshot still
+		// reaches the layout, print every supplied period rather than hide rows.
+		return time.Time{}, false
+	}
+	if current.Mode == poreport.ProjectionModeMonth {
+		return firstOfMonthDate(asOf), true
+	}
+	return asOf, true
+}
+
+// periodTablePeriods is the row set the actual period table prints. The chart
+// and the projection summary keep reading the full snapshot: only the table's
+// rows are trimmed, and the totals still come from snapshot.Totals.
+func (r *reportRenderer) periodTablePeriods() []poreport.Period {
+	limit, limited := r.periodTableLimit()
+	if !limited {
+		return r.snapshot.Periods
+	}
+	periods := make([]poreport.Period, 0, len(r.snapshot.Periods))
+	for _, period := range r.snapshot.Periods {
+		start, err := time.Parse(time.DateOnly, period.PeriodStart)
+		if err != nil || !start.After(limit) {
+			periods = append(periods, period)
+		}
+	}
+	return periods
+}
+
+func (r *reportRenderer) periodTableNote() string {
+	note := "All amounts in " + r.currency() + ". P = partial period; IP = period still in progress. " +
+		"Projected periods never appear in this table and never enter the total."
+	if _, limited := r.periodTableLimit(); limited {
+		note += " The table stops at the period containing the as-of date."
+	}
+	return note
+}
+
 func (r *reportRenderer) drawPeriodTable() {
 	columns := actualTableColumns("PERIOD")
-	rows := make([]tableRow, 0, len(r.snapshot.Periods))
-	for index, period := range r.snapshot.Periods {
+	periods := r.periodTablePeriods()
+	rows := make([]tableRow, 0, len(periods))
+	for index, period := range periods {
 		var fill *rgb
 		if index%2 == 1 {
 			surface := r.pal.surface
@@ -230,10 +287,7 @@ func (r *reportRenderer) drawPeriodTable() {
 		}})
 	}
 	total := r.totalRow("Total")
-	r.drawTable("By period",
-		"All amounts in "+r.currency()+". P = partial period; IP = period still in progress. "+
-			"Projected periods never appear in this table and never enter the total.",
-		columns, rows, &total)
+	r.drawTable("By period", r.periodTableNote(), columns, rows, &total)
 }
 
 func (r *reportRenderer) totalRow(label string) tableRow {

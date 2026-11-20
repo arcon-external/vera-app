@@ -113,7 +113,7 @@ func TestBinaryPDFTextMatchesTheLayout(t *testing.T) {
 	)
 }
 
-func TestBinaryPDFTextDayReportPrintsEveryDayAndTheGhostSummary(t *testing.T) {
+func TestBinaryPDFTextDayReportPrintsActualDaysAndTheGhostSummary(t *testing.T) {
 	pdf, err := Render(dayReport(), os.DirFS("../../assets"))
 	if err != nil {
 		t.Fatalf("Render day report: %v", err)
@@ -123,17 +123,22 @@ func TestBinaryPDFTextDayReportPrintsEveryDayAndTheGhostSummary(t *testing.T) {
 	text := strings.Join(pages, "\n")
 	requireText(t, text,
 		"Daily",
-		"1 Jan 2026",
-		"19 Jan 2026 IP",
-		"20 Jan 2026",
-		"31 Jan 2026",
-		"Actual and projected days  ·  January 2026",
+		"1 Nov 2026",
+		"19 Nov 2026 IP",
+		"Actual and projected days  ·  November 2026",
 		"Projected (ghost)",
 		"Current-period projection",
-		"Mode: Day  ·  January 2026 day by day",
-		"20 Jan 2026 to 31 Jan 2026",
+		"Mode: Day  ·  November 2026 day by day",
+		"20 Nov 2026 to 30 Nov 2026",
 		"updates as data arrives",
 	)
+	// The finished PDF's own text must prove both halves: the future day is not
+	// an actual table row, and the summary still names it as a ghost.
+	table := periodTableText(text)
+	requireText(t, table, "1 Nov 2026", "19 Nov 2026 IP")
+	requireNoText(t, "binaryPDFText's day period table", table,
+		"20 Nov 2026", "21 Nov 2026", "30 Nov 2026")
+	requireText(t, text, "20 Nov 2026 to 30 Nov 2026 · 11 days")
 	headers := strings.Count(text, "PERIOD")
 	if headers < 3 {
 		t.Errorf("extracted day report repeats the period header %d times; want the metadata and both table pages", headers)
@@ -162,6 +167,12 @@ func TestBinaryPDFTextCurrentYearPrintsTheStackedRemainder(t *testing.T) {
 		"Future months are hatched ghosts",
 		"Projected (ghost)",
 	)
+	// December is a ghost on the chart and a line in the summary, not an actual
+	// row in the finished PDF's period table.
+	table := periodTableText(text)
+	requireText(t, table, "Jan 2026", "Nov 2026 IP")
+	requireNoText(t, "binaryPDFText's current-year period table", table, "Dec 2026")
+	requireText(t, text, "December 2026 · 1 ghost bar")
 	if strings.Contains(text, "Monthly projection") || strings.Contains(text, "Yearly projection") {
 		t.Errorf("current-year PDF still prints a retired projection table heading")
 	}
