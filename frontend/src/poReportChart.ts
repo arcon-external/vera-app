@@ -767,7 +767,7 @@ export function buildReportChart(
       `${projected.length} projected ${bucketWord(
         projected.length,
         bucket
-      )} follow the dashed divider and are never included in actual totals.`
+      )} ${projected.length === 1 ? "follows" : "follow"} the dashed divider and are never included in actual totals.`
     );
   }
   if (hasRemainder) {
