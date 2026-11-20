@@ -6,6 +6,11 @@
 // overwriting a newer one. No totals, fulfilment or payment status exists --
 // the stored entry state is draft or saved, and nothing else is invented.
 
+import {
+  isPurchaseOrderBusinessCategory,
+  type PurchaseOrderBusinessCategory,
+} from "./purchaseOrder";
+
 /** The server's fixed page size when no size is requested (issue #469). */
 export const PO_LIST_PAGE_SIZE = 15;
 
@@ -30,6 +35,8 @@ export interface POListRowDTO {
   CustomerName: string;
   ReceivedDate: string;
   Currency: string;
+  /** #628: the reporting category; empty is Unassigned. */
+  BusinessCategory?: string;
   ID: number;
   CustomerID: number;
   SourceRevision: number;
@@ -107,12 +114,21 @@ export interface POListQuery {
   ReceivedFrom: string;
   ReceivedTo: string;
   SourceMissing: string;
+  /** #628: one category code, or "" for All. */
+  Category: string;
   Page: number;
   /** Issue #492: the requested rows per page (1..100). */
   PageSize: number;
 }
 
 export type POListStateFilter = "" | "draft" | "saved";
+
+/**
+ * One business category (#628) or "" for All. All includes the Unassigned
+ * records saved before the category existed, so no revenue disappears from the
+ * archive. The union is the editor's one definition, not a second list.
+ */
+export type POListCategoryFilter = PurchaseOrderBusinessCategory;
 
 /**
  * Source missing is an independent predicate, not a third state. "any" is the
@@ -129,6 +145,8 @@ export interface POListFilters {
   receivedTo: string;
   state: POListStateFilter;
   sourceMissing: POListSourceMissingFilter;
+  /** #628: one business category, or "" for All. */
+  category: POListCategoryFilter;
 }
 
 export interface POListState {
@@ -166,6 +184,7 @@ export function resetPOListFilters(state: POListStateFilter = ""): POListFilters
     receivedTo: "",
     state,
     sourceMissing: "any",
+    category: "",
   };
 }
 
@@ -259,6 +278,12 @@ export function buildPOListQuery(
   ) {
     return { query: null, error: "Source missing must be any, only or exclude." };
   }
+  if (
+    filters.category !== "" &&
+    !isPurchaseOrderBusinessCategory(filters.category)
+  ) {
+    return { query: null, error: "Business category must be All, FM, FAB, SUPPLY_GEN or OTHERS." };
+  }
   if (!validFilterDate(filters.receivedFrom)) {
     return { query: null, error: "Received from must be a YYYY-MM-DD date." };
   }
@@ -284,6 +309,7 @@ export function buildPOListQuery(
       ReceivedFrom: from,
       ReceivedTo: to,
       SourceMissing: filters.sourceMissing,
+      Category: filters.category,
       Page: page,
       PageSize: pageSize,
     },
@@ -300,6 +326,7 @@ export function activeFilterCount(filters: POListFilters): number {
   if (filters.receivedTo.trim() !== "") count += 1;
   if (filters.state !== "") count += 1;
   if (filters.sourceMissing !== "any") count += 1;
+  if (filters.category !== "") count += 1;
   return count;
 }
 

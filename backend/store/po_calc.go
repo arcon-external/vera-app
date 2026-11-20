@@ -9,7 +9,7 @@ import (
 // Issue #470: the exact customer-facing calculation of a Purchase Order.
 //
 // The PO is entered against a customer document, so every figure here is a
-// customer-facing one. Supplier cost, margin, PPH22 and profit have no place in
+// customer-facing one. Supplier cost, margin, PPH23 and profit have no place in
 // this file: a PO is compared against the quotation's customer prices,
 // discounts and PPN only (parent story 42).
 //
@@ -200,7 +200,7 @@ func CalculatePurchaseOrder(input PurchaseOrderCalcInput) (PurchaseOrderCalc, er
 
 // PurchaseOrderPPNBps resolves the customer-facing PPN rate a PO carries from
 // the frozen source's tax basis. It follows the quotation's tax model exactly:
-// 11% for Non-FTZ goods, zero for FTZ and for services. PPH22 (2% / 1.75%,
+// 11% for Non-FTZ goods, zero for FTZ and for services. PPH23 (2% / 1.75%,
 // internal only) never applies here, which is why services resolve to zero
 // rather than to their internal rate.
 //
@@ -244,7 +244,7 @@ func PurchaseOrderPPNBps(zone, taxType, serviceCategory, legacyCategory string) 
 	case "Services":
 		switch serviceCategory {
 		case "NonConstruction", "Construction":
-			// Services tax is PPH22, internal only, so a PO prints no PPN.
+			// Services tax is PPH23, internal only, so a PO prints no PPN.
 			return 0, nil
 		default:
 			return 0, fmt.Errorf("%w: services need a service category",

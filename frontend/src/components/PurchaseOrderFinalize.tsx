@@ -25,6 +25,7 @@ import {
   confirmationNumberOf,
   initialPurchaseOrderEditorState,
   MAX_EXACT_MINOR,
+  purchaseOrderBusinessCategoryLabel,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
@@ -821,6 +822,12 @@ export function PurchaseOrderFinalConfirmationView({
             </dd>
           </div>
           <div>
+            <dt className="text-caption text-ink-500">Business category</dt>
+            <dd className="font-medium text-ink-900">
+              {purchaseOrderBusinessCategoryLabel(payload.BusinessCategory)}
+            </dd>
+          </div>
+          <div>
             <dt className="text-caption text-ink-500">Payment terms</dt>
             <dd className="font-medium text-ink-900">{payload.PaymentTerms || "—"}</dd>
           </div>
@@ -1481,6 +1488,12 @@ export function PurchaseOrderSavedView({
               <div>
                 <dt className="text-caption text-ink-500">Payment terms</dt>
                 <dd className="text-ink-900">{order.PaymentTerms || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-caption text-ink-500">Business category</dt>
+                <dd className="text-ink-900">
+                  {purchaseOrderBusinessCategoryLabel(order.BusinessCategory)}
+                </dd>
               </div>
               <div>
                 <dt className="text-caption text-ink-500">Incoterms</dt>

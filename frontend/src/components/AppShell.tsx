@@ -20,6 +20,7 @@ import type { AppPage } from "../poLeaveGuard";
 export type WorkspaceId =
   | "quotation"
   | "purchase-order"
+  | "reports"
   | "admin"
   | "account"
   | "quotation-settings"
@@ -68,6 +69,7 @@ export function workspaceForPage(page: AppPage): WorkspaceId | null {
   if (page === "settings") return "account";
   if (page === "quotation-settings") return "quotation-settings";
   if (page === "po-settings") return "purchase-order-settings";
+  if (page === "reports") return "reports";
   if (page.startsWith("admin-")) return "admin";
   if (page === "po" || page === "po-drafts" || page === "po-archive") {
     return "purchase-order";
@@ -77,7 +79,7 @@ export function workspaceForPage(page: AppPage): WorkspaceId | null {
 
 function pageMotionWorkspace(
   page: AppPage
-): "quotation" | "purchase-order" | "admin" | null {
+): "quotation" | "purchase-order" | "reports" | "admin" | null {
   if (
     page === "create" ||
     page === "drafts" ||
@@ -89,6 +91,7 @@ function pageMotionWorkspace(
   if (page === "po" || page === "po-drafts" || page === "po-archive") {
     return "purchase-order";
   }
+  if (page === "reports") return "reports";
   if (page.startsWith("admin-")) return "admin";
   return null;
 }
@@ -123,6 +126,8 @@ export function workspaceName(workspace: WorkspaceId | null): string {
       return "Quotation";
     case "purchase-order":
       return "Purchase Orders";
+    case "reports":
+      return "Reports";
     case "admin":
       return "Admin Dashboard";
     case "account":

@@ -15,7 +15,7 @@ import { Card, SectionHeading } from "./ui";
 // The whole-PO discount and the signed adjustment were retired in #573; they
 // appear nowhere in this panel.
 //
-// Internal cost, margin, PPH22 and profit are absent by construction: the
+// Internal cost, margin, PPH23 and profit are absent by construction: the
 // calculation that feeds this component carries no such field.
 
 export interface PurchaseOrderTotalsProps {

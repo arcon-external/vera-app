@@ -128,6 +128,38 @@ describe("PurchaseOrderListPage source-missing filter (issue #481)", () => {
     expect(container.textContent).toContain("No filters");
   });
 
+  it("queries All categories first, then exactly the chosen category", async () => {
+    await act(async () => {
+      root.render(
+        <PurchaseOrderListPage onOpen={() => undefined} onAdd={() => undefined} />
+      );
+    });
+    await flush();
+    expect(listMock.mock.calls[0][0].Category).toBe("");
+
+    click(button("Business category"));
+    const options = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="option"]')
+    );
+    expect(options.map((option) => option.textContent)).toEqual([
+      "All categories",
+      "Facility Management",
+      "Fabrication",
+      "Goods Supply & General",
+      "Others",
+    ]);
+    const fabrication = options.find(
+      (option) => option.textContent === "Fabrication"
+    );
+    if (fabrication === undefined) throw new Error("no Fabrication option");
+    click(fabrication);
+    await flush();
+    expect(listMock).toHaveBeenCalledTimes(2);
+    expect(listMock.mock.calls[1][0].Category).toBe("FAB");
+    expect(container.textContent).toContain("Category: Fabrication");
+    expect(container.textContent).toContain("1 filter active");
+  });
+
   it("sends the remembered page size, and the answer's size stays authoritative", async () => {
     // A real server echoes the requested size. One request proves the page
     // sends the remembered size and adopts the answer's size without re-asking.
@@ -206,6 +238,25 @@ describe("PurchaseOrderListView dockets (ticket 03)", () => {
     });
     await flush();
   }
+
+  it("shows each row's business category and reads empty as Unassigned", async () => {
+    await renderView({
+      state: viewState({
+        rows: [
+          docketRow({ ID: 7, BusinessCategory: "FM" }),
+          docketRow({ ID: 8, PONumber: "PO-2", BusinessCategory: "" }),
+          docketRow({ ID: 9, PONumber: "PO-3", BusinessCategory: undefined }),
+          docketRow({ ID: 10, PONumber: "PO-4", BusinessCategory: "LEGACY_CODE" }),
+        ],
+      }),
+    });
+    expect(viewContainer.textContent).toContain("Facility Management");
+    expect(viewContainer.textContent).toContain("Unassigned");
+    // A code this build does not know is shown as stored, never folded into
+    // Unassigned.
+    expect(viewContainer.textContent).toContain("LEGACY_CODE");
+    expect(viewContainer.textContent).not.toContain("FAB");
+  });
 
   it("opens only through the Open button, never through the row body", async () => {
     const onOpen = vi.fn();
@@ -314,6 +365,7 @@ describe("PurchaseOrderListView dockets (ticket 03)", () => {
           receivedTo: "",
           state: "draft",
           sourceMissing: "any",
+          category: "",
         },
       }),
     });

@@ -114,6 +114,12 @@ var (
 	// until a source is linked. The wording is deliberately neutral because a
 	// never-linked draft was not deleted.
 	ErrPurchaseOrderSourceMissing = errors.New("purchase order has no live source quotation; link a quotation before this action")
+	// ErrPurchaseOrderBusinessCategoryRequired is the #628 saved-record rule: a
+	// final save or a correction cannot store a purchase order without the
+	// business category it is reported under. A draft may stay Unassigned, and
+	// the refusal leaves it editable. The wording is shared by both writes, so
+	// it never names one button.
+	ErrPurchaseOrderBusinessCategoryRequired = errors.New("a business category is required to save a purchase order")
 )
 
 // PurchaseOrderDecision is one explicit difference-review choice for a review
@@ -246,6 +252,12 @@ type PurchaseOrder struct {
 	// (#581). It allocates nothing; the final save's checkbox remains the
 	// authority. Existing rows read false.
 	ConfirmationRequested bool
+
+	// BusinessCategory is the #628 reporting category. Empty means Unassigned:
+	// a draft that has not chosen one, or a record saved before the column
+	// existed. It is required by the final save and never inferred from the
+	// subject or the customer.
+	BusinessCategory string
 }
 
 // PurchaseOrderReview is one draft or saved record beside the exact source
@@ -292,7 +304,10 @@ type PurchaseOrderCreate struct {
 	ReceivedDate   *time.Time
 	QuotationID    int64
 	RevisionNumber int16
-	CreatedBy      int64
+	// BusinessCategory is optional at creation; a draft may start Unassigned.
+	// A supplied value must be one of the four codes.
+	BusinessCategory string
+	CreatedBy        int64
 }
 
 // PurchaseOrderBlankCreate starts a draft with no source and no Customer
@@ -305,7 +320,10 @@ type PurchaseOrderBlankCreate struct {
 	TaxType         string
 	ServiceCategory string
 	TaxCategory     string
-	CreatedBy       int64
+	// BusinessCategory is optional at creation, exactly as it is for a linked
+	// draft: the editor chooses it before Final Save.
+	BusinessCategory string
+	CreatedBy        int64
 }
 
 // PurchaseOrderUpdate replaces the editable draft header, the whole-order
@@ -341,6 +359,10 @@ type PurchaseOrderUpdate struct {
 	TaxType         string
 	ServiceCategory string
 	TaxCategory     string
+	// BusinessCategory is the #628 reporting category. Empty means "keep what
+	// the row already carries" only for a source repair, which is not a
+	// category edit; every other saved-record write must name a code.
+	BusinessCategory string
 	// ExpectedVersion is the version the editor loaded (#473). It is required:
 	// a missing base is refused rather than treated as "no check".
 	ExpectedVersion int64
@@ -371,6 +393,11 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if input.RevisionNumber < 0 {
 		return PurchaseOrder{}, fmt.Errorf("%w: revision must not be negative", ErrPurchaseOrderInvalid)
 	}
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
 	pool, err := s.poolOrError()
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -423,12 +450,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 			discount_minor, ppn_bps, ppn_minor, adjustment_minor,
 			adjustment_reason, grand_total_minor, printed_subtotal_minor,
 			printed_discount_minor, printed_ppn_minor, printed_grand_total_minor,
-			created_by, updated_by, tax_type, service_category
+			created_by, updated_by, tax_type, service_category, business_category
 		) VALUES (
 			$1,$2,$3,$4,$5,$6,$7,$8,'','','',NULL,NULL,$9,NULL,
 			$10,$11,$12,$13,$14,
 			$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,
-			$27,$27,$28,$29)
+			$27,$27,$28,$29,$30)
 		RETURNING id, uuid::text`, schema),
 		org.ID, input.QuotationID, input.RevisionNumber, PurchaseOrderStateDraft,
 		source.CustomerID, source.CustomerName, source.BillingAddress,
@@ -440,7 +467,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		calculation.GrandTotalMinor, source.PrintedSubtotalMinor,
 		source.PrintedDiscountMinor, source.PrintedPpnMinor,
 		source.PrintedGrandTotalMinor, input.CreatedBy,
-		source.TaxType, source.ServiceCategory,
+		source.TaxType, source.ServiceCategory, input.BusinessCategory,
 	).Scan(&id, &uuid)
 	if err != nil {
 		if isActivePurchaseOrderConflict(err) {
@@ -499,6 +526,11 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 	if input.CreatedBy < 1 {
 		return PurchaseOrder{}, fmt.Errorf("%w: the creator is required", ErrPurchaseOrderInvalid)
 	}
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
 	pool, err := s.poolOrError()
 	if err != nil {
 		return PurchaseOrder{}, err
@@ -537,7 +569,7 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 			discount_minor, ppn_bps, ppn_minor, adjustment_minor,
 			adjustment_reason, grand_total_minor, printed_subtotal_minor,
 			printed_discount_minor, printed_ppn_minor, printed_grand_total_minor,
-			created_by, updated_by, tax_type, service_category
+			created_by, updated_by, tax_type, service_category, business_category
 		) VALUES (
 			$1,NULL,NULL,$2,NULL,
 			'','','','','','',NULL,NULL,$3,
@@ -545,11 +577,12 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 			$5,$10,0,0,
 			0,$6,0,0,
 			'',0,0,0,0,0,
-			$7,$7,$8,$9)
+			$7,$7,$8,$9,$11)
 		RETURNING id, uuid::text`, schema),
 		org.ID, PurchaseOrderStateDraft, received, basis.Currency,
 		basis.TaxZone, basis.PpnBps, input.CreatedBy,
 		basis.TaxType, basis.ServiceCategory, basis.TaxCategory,
+		input.BusinessCategory,
 	).Scan(&id, &uuid)
 	if err != nil {
 		return PurchaseOrder{}, fmt.Errorf("insert blank purchase order: %w", err)
@@ -867,6 +900,11 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	input.PONumber = strings.TrimSpace(input.PONumber)
 	input.PaymentTerms = strings.TrimSpace(input.PaymentTerms)
+	category, err := NormalizePurchaseOrderBusinessCategory(input.BusinessCategory)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	input.BusinessCategory = category
 	if err := validatePurchaseOrderUpdateInput(input); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -1798,7 +1836,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       COALESCE(po.po_number, ''), po.po_date, po.received_date,
 		       po.requested_delivery_date, po.payment_terms, po.incoterms,
 		       po.currency, po.tax_zone, po.tax_type, po.service_category,
-		       po.tax_category, po.created_by,
+		       po.tax_category, po.business_category, po.created_by,
 		       po.updated_by, po.created_at, po.updated_at,
 		       po.subtotal_minor, po.discount_minor, po.ppn_bps, po.ppn_minor,
 		       po.adjustment_minor, po.adjustment_reason, po.grand_total_minor,
@@ -1843,6 +1881,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		&order.TaxType,
 		&order.ServiceCategory,
 		&order.TaxCategory,
+		&order.BusinessCategory,
 		&order.CreatedBy,
 		&order.UpdatedBy,
 		&order.CreatedAt,

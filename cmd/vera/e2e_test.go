@@ -380,7 +380,7 @@ func TestEndToEndThroughTheCLI(t *testing.T) {
 	}
 	// Labels first. "margin" on its own is not on this list: it is a CSS
 	// property, and the snapshot carries its own stylesheet.
-	for _, forbidden := range []string{"Nett", "nett", "PPH22", "Profit", "profit"} {
+	for _, forbidden := range []string{"Nett", "nett", "PPH23", "Profit", "profit"} {
 		if strings.Contains(customerHTML, forbidden) {
 			t.Errorf("the customer document contains %q, which must never reach a customer", forbidden)
 		}

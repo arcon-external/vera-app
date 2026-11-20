@@ -45,6 +45,7 @@ func correctionInput(draft PurchaseOrder, user AuthUser, reason string, expected
 			RequestedDeliveryDate: draft.RequestedDeliveryDate,
 			PaymentTerms:          draft.PaymentTerms,
 			Incoterms:             draft.Incoterms,
+			BusinessCategory:      draft.BusinessCategory,
 			UpdatedBy:             user.ID,
 			ExpectedVersion:       expectedVersion,
 			Items:                 draft.Items,

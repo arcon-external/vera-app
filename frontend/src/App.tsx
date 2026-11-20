@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Prepare,
   Export,
+  ExportPurchaseOrderReport,
   GetCustomerPreview,
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
@@ -51,6 +52,7 @@ import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
+import type { PurchaseOrderReportData } from "./poReport";
 import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
   applyQuotationCopy,
@@ -73,6 +75,7 @@ import {
 import { LoginPage } from "./components/LoginPage";
 import type { SignedInUser } from "./components/LoginPage";
 import { DocumentHomePage } from "./components/DocumentHomePage";
+import { PurchaseOrderReportsPage } from "./components/PurchaseOrderReportsPage";
 import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
@@ -615,6 +618,11 @@ function App() {
   // from anywhere in a workspace returns Home rather than the previous tab.
   // No new global store: the existing shell state holds the stack.
   const [pageHistoryStack, setPageHistoryStack] = useState<AppPage[]>([]);
+  // #630: Reports is a standalone global workspace. Once visited it stays
+  // mounted (hidden on other pages), so its filters and last snapshot survive
+  // navigation while the workspace remains mounted. Opening it only changes
+  // this page state; it never touches the PO workspace or a document draft.
+  const [reportsOpened, setReportsOpened] = useState(false);
   // Ticket 02: the PO editor's primary actions as the shell action bar
   // renders them. Reported by the editor's entry view; null everywhere else.
   const [poShellActions, setPoShellActions] = useState<POEditorShellActions | null>(null);
@@ -645,6 +653,10 @@ function App() {
       ) {
         closePurchaseOrder();
       }
+      // #630: the Reports workspace is mounted from its first visit onward.
+      // Marking it here means a navigation refused by the leave guard never
+      // creates a hidden report page.
+      if (next === "reports") setReportsOpened(true);
       // Issue #494: a successful return to Home ends the remembered workspace
       // context. Only the allowed navigation reaches here; a refused one has
       // no way to clear it.
@@ -1007,6 +1019,8 @@ function App() {
         // Issue #492: the received date is a PO fact the source revision never
         // supplies. Blank means the server stores today in WIB.
         ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+        // #628: the category is chosen in the editor; a new draft is Unassigned.
+        BusinessCategory: "",
       });
       // The cross-workspace move still asks the leave guard. The detail page
       // holds no editable state, so it answers at once today; routing through
@@ -1446,6 +1460,7 @@ function App() {
     setPageHistoryStack([]);
     setPoShellActions(null);
     scrollPositions.current.clear();
+    setReportsOpened(false);
     setPage("home");
   }, [closePurchaseOrder, resetForm]);
 
@@ -2391,6 +2406,15 @@ function App() {
     []
   );
 
+  // Issue #632: Reports owns busy/cancel/error and the visible snapshot; App
+  // only passes that exact snapshot to the native renderer. The binding never
+  // refetches, so the PDF cannot disagree with the screen.
+  const handleExportPurchaseOrderReport = useCallback(
+    (report: PurchaseOrderReportData) =>
+      ExportPurchaseOrderReport(JSON.stringify(report)),
+    []
+  );
+
   const handleExport = useCallback(async () => {
     // Issue #605: a signed revision cannot be unsent, and a practice one must
     // never be created. Refuse before the binding, exactly as Save and
@@ -2818,6 +2842,8 @@ function App() {
             // Issue #492: the received date is a PO fact the source revision
             // never supplies. Blank means the server stores today in WIB.
             ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+            // #628: the category is chosen in the editor; a new draft is Unassigned.
+            BusinessCategory: "",
           });
           adoptCreatedPurchaseOrder(draft);
           closePOSourceSelector();
@@ -3121,8 +3147,19 @@ function App() {
           isAdmin={isAdmin}
           onOpenQuotation={() => poLeave.request("create")}
           onOpenPurchaseOrder={() => poLeave.request("po")}
+          onOpenReports={() => poLeave.request("reports")}
           onOpenAdmin={() => poLeave.request("admin-clients")}
         />
+      ) : null}
+
+      {reportsOpened ? (
+        <div hidden={visiblePage !== "reports"}>
+          <PurchaseOrderReportsPage
+            defaultCurrency={companyCurrency}
+            currencyCatalogue={currencyCatalogue}
+            onExport={handleExportPurchaseOrderReport}
+          />
+        </div>
       ) : null}
 
       {(isPurchaseOrderPage(visiblePage) || preservedPOPage !== null) ? (
@@ -3240,23 +3277,10 @@ function App() {
           hidden={visiblePage !== "create"}
           onPasteCapture={handleCopyPasteCapture}
         >
-          {/* Issue #623: the same dark hero the PO editor opens with, mirroring
-              the editor state above the form + rail and capped with them. */}
-          <QuotationHero
-            customerName={selectedCustomerName}
-            details={details}
-            currencyCode={liveEntry?.code ?? companyCurrency}
-            currency={liveEntry}
-            customerGrand={quotationPricing.customerGrand}
-            ppnAmount={quotationPricing.ppnAmount}
-            quoteNumber={editingQuote?.number ?? null}
-            nextRevision={editingQuote?.revision ?? null}
-            draftSavedLabel={
-              draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
-            }
-            ready={ready}
-          />
-
+          {/* Issue #627: the PO editor's banners sit above its grid, full
+              width, and its header card is the left column's first child.
+              The Quotation editor mirrors that so both workspaces read as one
+              product. */}
           {status.type !== "idle" ? (
             <StatusBanner tone={status.type === "error" ? "danger" : "info"}>
               {loading ? (
@@ -3270,8 +3294,27 @@ function App() {
             </StatusBanner>
           ) : null}
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="flex min-w-0 flex-col gap-6">
+              {/* Issue #623: the same dark hero the PO editor opens with,
+                  mirroring the editor state. Issue #627: it is the left
+                  column's first child, level with the Summary rail, exactly
+                  as the PO editor's header card is. */}
+              <QuotationHero
+                customerName={selectedCustomerName}
+                details={details}
+                currencyCode={liveEntry?.code ?? companyCurrency}
+                currency={liveEntry}
+                customerGrand={quotationPricing.customerGrand}
+                ppnAmount={quotationPricing.ppnAmount}
+                quoteNumber={editingQuote?.number ?? null}
+                nextRevision={editingQuote?.revision ?? null}
+                draftSavedLabel={
+                  draftSavedAt === null ? null : relativeSavedAt(draftSavedAt)
+                }
+                ready={ready}
+              />
+
               <DetailsPanel
                 value={details}
                 customerId={customerId}

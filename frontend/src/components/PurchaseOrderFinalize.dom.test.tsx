@@ -108,6 +108,7 @@ const ORDER: PurchaseOrderDTO = {
   Currency: "USD",
   TaxZone: "FTZ",
   TaxCategory: "",
+  BusinessCategory: "OTHERS",
   AdjustmentReason: "",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",
@@ -419,6 +420,9 @@ describe("final save from the inline editor", () => {
     const payload = finalizeMock.mock.calls[0][0] as Record<string, unknown>;
     expect(payload.PONumber).toBe("PO-471");
     expect(payload.PaymentTerms).toBe("30 days");
+    // #628: the stored category is declared on the finalize input and reaches
+    // the binding on a successful save, not only the confirmation markup.
+    expect(payload.BusinessCategory).toBe("OTHERS");
     expect(payload.DocumentConfirmed).toBe(true);
     expect(payload.Decisions).toEqual([
       { Key: "header:paymentTerms", Choice: "po" },

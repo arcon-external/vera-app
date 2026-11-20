@@ -156,9 +156,10 @@ func createPurchaseOrder(
 	}
 	revision := source.Record.RevisionNumber
 	order, err := database.CreatePurchaseOrderDraft(ctx, store.PurchaseOrderCreate{
-		QuotationID:    source.Record.ID,
-		RevisionNumber: revision,
-		CreatedBy:      actor.ID,
+		QuotationID:      source.Record.ID,
+		RevisionNumber:   revision,
+		BusinessCategory: store.PurchaseOrderBusinessCategoryFab,
+		CreatedBy:        actor.ID,
 	})
 	if err != nil {
 		return store.PurchaseOrder{}, err
@@ -245,10 +246,11 @@ func createNeverLinkedPurchaseOrder(
 	actor store.AuthUser,
 ) (store.PurchaseOrder, error) {
 	order, err := database.CreatePurchaseOrderBlankDraft(ctx, store.PurchaseOrderBlankCreate{
-		TaxZone:     "NonFTZ",
-		TaxType:     "Goods",
-		TaxCategory: "SupplyOnly",
-		CreatedBy:   actor.ID,
+		TaxZone:          "NonFTZ",
+		TaxType:          "Goods",
+		TaxCategory:      "SupplyOnly",
+		BusinessCategory: store.PurchaseOrderBusinessCategoryOthers,
+		CreatedBy:        actor.ID,
 	})
 	if err != nil {
 		return store.PurchaseOrder{}, err
@@ -386,6 +388,7 @@ func baseUpdate(order store.PurchaseOrder, actorID int64) store.PurchaseOrderUpd
 		PODate:                order.PODate,
 		ReceivedDate:          &received,
 		RequestedDeliveryDate: order.RequestedDeliveryDate,
+		BusinessCategory:      order.BusinessCategory,
 		Items:                 items,
 		DiscountPercent:       order.DiscountPercent,
 		AdjustmentMinor:       order.AdjustmentMinor,

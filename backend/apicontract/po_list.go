@@ -17,16 +17,19 @@ const PurchaseOrderListPageSizeParam = "page_size"
 // source Quotation, or the former one when SourceMissing is true. Deletion
 // (#480) may remove the Quotation while the retained PO survives.
 type PurchaseOrderListRow struct {
-	UUID           string `json:"uuid"`
-	State          string `json:"state"`
-	PONumber       string `json:"poNumber"`
-	QuoteNumber    string `json:"quoteNumber"`
-	CustomerName   string `json:"customerName"`
-	ReceivedDate   string `json:"receivedDate"`
-	Currency       string `json:"currency"`
-	ID             int64  `json:"id"`
-	CustomerID     int64  `json:"customerId"`
-	SourceRevision int16  `json:"sourceRevision"`
+	UUID         string `json:"uuid"`
+	State        string `json:"state"`
+	PONumber     string `json:"poNumber"`
+	QuoteNumber  string `json:"quoteNumber"`
+	CustomerName string `json:"customerName"`
+	ReceivedDate string `json:"receivedDate"`
+	Currency     string `json:"currency"`
+	// BusinessCategory is the #628 reporting category. Empty is Unassigned and
+	// must render as such; nothing infers a category.
+	BusinessCategory string `json:"businessCategory"`
+	ID               int64  `json:"id"`
+	CustomerID       int64  `json:"customerId"`
+	SourceRevision   int16  `json:"sourceRevision"`
 	// SourceMissing is independent of the stored draft/saved state: true when
 	// the followed Quotation was permanently deleted (#480) or the draft was
 	// never linked at all (#496), and the row carries either a former-source

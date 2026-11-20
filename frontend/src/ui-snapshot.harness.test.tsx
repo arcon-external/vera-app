@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import type { ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { backend } from "@backend/models";
+import type { backend, poreport } from "@backend/models";
 import { DetailsPanel } from "./components/DetailsPanel";
 import type { DetailsState } from "./components/DetailsPanel";
 import { QuotationHero } from "./components/QuotationHero";
@@ -40,6 +40,15 @@ import { SessionRenewBanner } from "./components/SessionRenewBanner";
 import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import {
+  normalizePurchaseOrderReport,
+  type PurchaseOrderReportData,
+} from "./poReport";
+import {
+  purchaseOrderReportFixture,
+  purchaseOrderReportMaxFixture,
+} from "./poReportFixtures";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
@@ -109,6 +118,11 @@ import type { CompanyLabelEntry } from "./companyLabels";
 import { DEFAULT_THEME, EMPTY_THEME } from "./company";
 import { TAX_TYPE_OPTIONS, TAX_ZONE_OPTIONS } from "./tax";
 import { UPDATE_NEWER, UPDATE_REQUIRED } from "./updateFixture";
+import {
+  addDaysIso,
+  type ReportBucket,
+  type ReportFilterState,
+} from "./poReportPage";
 
 // frontend/src -> frontend -> repo root. Resolved from this file, not cwd, so
 // the harness behaves the same however it is invoked.
@@ -268,6 +282,7 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
   Currency: "USD",
   TaxZone: "NonFTZ",
   TaxCategory: "SupplyOnly",
+  BusinessCategory: "FAB",
   AdjustmentReason: "",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",
@@ -735,6 +750,7 @@ const PO_LIST_ROWS: POListRowDTO[] = [
     CustomerName: "PT. Infineon Technologies Batam",
     ReceivedDate: "2026-10-02",
     Currency: "USD",
+    BusinessCategory: "FAB",
     ID: 9,
     CustomerID: 2,
     SourceRevision: 2,
@@ -748,6 +764,7 @@ const PO_LIST_ROWS: POListRowDTO[] = [
     CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
     ReceivedDate: "2026-09-30",
     Currency: "IDR",
+    BusinessCategory: "SUPPLY_GEN",
     ID: 8,
     CustomerID: 3,
     SourceRevision: 0,
@@ -761,6 +778,7 @@ const PO_LIST_ROWS: POListRowDTO[] = [
     CustomerName: "PT. Datalec Global Solution",
     ReceivedDate: "2026-09-24",
     Currency: "IDR",
+    BusinessCategory: "FM",
     ID: 7,
     CustomerID: 4,
     SourceRevision: 1,
@@ -774,6 +792,7 @@ const PO_LIST_ROWS: POListRowDTO[] = [
     CustomerName: "PT. H-Tech Oilfield Equipment, NOV XL Systems",
     ReceivedDate: "2026-09-18",
     Currency: "IDR",
+    BusinessCategory: "",
     ID: 6,
     CustomerID: 3,
     SourceRevision: 2,
@@ -1313,6 +1332,101 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
   },
 });
 
+// A second maximum-figure evidence case in the widest supported currency
+// spelling: AED is a spaced Latin code (26 characters for a negative value),
+// so the 360px one-column KPI cell is read against the longest accepted form,
+// not only the familiar Rp.
+const REPORTS_MAX_AED = purchaseOrderReportMaxFixture();
+REPORTS_MAX_AED.filter = { ...REPORTS_MAX_AED.filter, currency: "AED" };
+
+// Issue #631: the chart snapshot cases share the Reports view's real props and
+// the same normalized server snapshot the screen consumes. The harness renders
+// to a string and screenshots at 360 and 1280 only (there is no 390 viewport).
+//
+// What the static render cannot show: the chart's measured container width is a
+// client effect. The SSR fallback is 960px, so the 360 screenshot shows the
+// scroll container and the first columns rather than the measured 360 layout;
+// the real browser measures and reflows. The 1280 read is the desktop chart.
+// Hover, keyboard and entry motion remain hand-driven/DOM-tested.
+const REPORT_CATALOGUE: CurrencyInfo[] = [
+  {
+    code: "IDR",
+    exponent: 0,
+    symbol: "Rp",
+    position: "before",
+    groupSep: ".",
+    decimalSep: ",",
+    symbolSpaced: false,
+  },
+  {
+    code: "USD",
+    exponent: 2,
+    symbol: "$",
+    position: "before",
+    groupSep: ",",
+    decimalSep: ".",
+    symbolSpaced: false,
+  },
+];
+
+function reportChartFilters(report: PurchaseOrderReportData): ReportFilterState {
+  return {
+    preset: "custom",
+    from: report.filter.from,
+    to: addDaysIso(report.filter.to, -1),
+    bucket: report.filter.bucket as ReportBucket,
+    category: report.filter.category,
+    currency: report.filter.currency,
+  };
+}
+
+function reportChartView(report: PurchaseOrderReportData): ReactElement {
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(report)}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+    />
+  );
+}
+
+function sharedReportSnapshot(): PurchaseOrderReportData {
+  const raw = JSON.parse(
+    readFileSync(
+      path.join(
+        REPO_ROOT,
+        "backend",
+        "render",
+        "report",
+        "testdata",
+        "report_snapshot.json"
+      ),
+      "utf8"
+    )
+  ) as { report: poreport.Report };
+  return normalizePurchaseOrderReport(raw.report);
+}
+
+// The shared fixture is read only when this case renders, never at module load:
+// the harness is collected by every test run even when UI_SNAPSHOT is unset.
+function SharedReportChartView(): ReactElement {
+  return reportChartView(sharedReportSnapshot());
+}
+
 const CASES: SnapshotCase[] = [
   {
     // Ticket #536: the "Stay signed in" window, idle and with the last
@@ -1543,9 +1657,10 @@ const CASES: SnapshotCase[] = [
   },
   {
     // The document home (issue #466, now the global workspace dashboard in
-    // #491): five destinations for an admin. Quotation, Purchase Order and
-    // Admin are enabled; Delivery Order and Invoice render disabled with their
-    // Coming later badges.
+    // #491/#630): six destinations for an admin. Quotation, Purchase Order,
+    // Reports and Admin are enabled; Delivery Order and Invoice render
+    // disabled with their Coming later badges. Reports and Admin both use the
+    // wide two-column pattern and stack at 360.
     //
     // What this case cannot show, stated so it is not assumed: the clicks
     // behind the enabled buttons, keyboard order, and focus visibility
@@ -1556,18 +1671,21 @@ const CASES: SnapshotCase[] = [
         isAdmin
         onOpenQuotation={() => undefined}
         onOpenPurchaseOrder={() => undefined}
+        onOpenReports={() => undefined}
         onOpenAdmin={() => undefined}
       />
     ),
   },
   {
-    // Issue #491: Home for a staff member. The Admin card is absent, so the
-    // screenshot proves the gate is visual as well as logical.
+    // Issue #630: Home for a staff member. The Admin card is absent and the
+    // Reports card is still present, so the screenshot proves both the gate
+    // and Reports' independent availability.
     name: "DocumentHomeStaff",
     element: (
       <DocumentHomePage
         onOpenQuotation={() => undefined}
         onOpenPurchaseOrder={() => undefined}
+        onOpenReports={() => undefined}
       />
     ),
   },
@@ -1606,6 +1724,208 @@ const CASES: SnapshotCase[] = [
       <AppShell page="admin-company" onNavigate={() => undefined}>
         <p className="text-body text-ink-500">Company settings body.</p>
       </AppShell>
+    ),
+  },
+  {
+    // Issue #630: Reports is its own global workspace. The shell names it,
+    // offers Back to Home, and renders no PO tabs.
+    name: "AppShellReports",
+    element: (
+      <AppShell page="reports" onNavigate={() => undefined}>
+        <p className="text-body text-ink-500">Report filters sit here.</p>
+      </AppShell>
+    ),
+  },
+  {
+    // Issue #630: the assembled Reports page with a stable normalized fixture.
+    // It is the presentational View, so renderToString shows the loaded screen
+    // without effects. The same figures foot in the category and period
+    // tables; the projection is visibly marked as not part of actual totals.
+    //
+    // What this case cannot show: loading, error and empty states (covered by
+    // the DOM suite), filter interactions, and the chart's measured width and
+    // motion (covered by the DOM suite; the static chart uses its 960 fallback).
+    name: "Reports",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          // The fixture is the "this year to today" snapshot on 19 Nov 2026,
+          // so the controls name the same inclusive range the report covers.
+          preset: "this-year",
+          from: "2026-01-01",
+          to: "2026-11-19",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
+    ),
+  },
+  {
+    // Issue #631, normal actual data: the chart cropped to its own heading so
+    // the grouped money columns, zero baseline, margin % line and legend are
+    // legible without scrolling past the KPI strip.
+    name: "ReportsChartActual",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportFixture()),
+  },
+  {
+    // Issue #631, a real negative period (December) and the shared fixture's
+    // available monthly and yearly projections. The projected columns sit
+    // after the dashed divider inside the low-high amount band; they are never
+    // part of actual totals.
+    name: "ReportsChartForecastNegative",
+    cropToHeading: "Performance",
+    element: <SharedReportChartView />,
+  },
+  {
+    // Issue #631, JavaScript's largest exact money range: the money axis must
+    // keep a finite compact domain at this magnitude, and the negative margin
+    // space must remain below zero.
+    name: "ReportsChartMaxRange",
+    cropToHeading: "Performance",
+    element: reportChartView(purchaseOrderReportMaxFixture()),
+  },
+  {
+    // Issue #630 review: the same assembled screen at JavaScript's largest
+    // exact money figure. The 360 render is the evidence that the KPI strip
+    // uses one column and keeps the complete `Rp9.007.199.254.740.991` inside
+    // the card; 1280 is the five-column desktop read. The tables also carry
+    // maximum figures so a wide value cannot silently truncate.
+    name: "ReportsMaxAmounts",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          preset: "this-year",
+          from: "2026-01-01",
+          to: "2026-11-19",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportMaxFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
+    ),
+  },
+  {
+    // The same maximum figures in the widest supported spelling (spaced AED).
+    // The 360 render is the different-currency half of the KPI evidence.
+    name: "ReportsMaxAed",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          preset: "custom",
+          from: "2026-01-01",
+          to: "2026-12-31",
+          bucket: "month",
+          category: "all",
+          currency: "AED",
+        }}
+        report={REPORTS_MAX_AED}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "AED",
+            exponent: 2,
+            symbol: "AED",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: true,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+      />
     ),
   },
   {
@@ -2001,9 +2321,10 @@ const CASES: SnapshotCase[] = [
   {
     // Issue #624: the Features Tutorial's practice Quotation workspace, hero
     // included, so the tour can be compared with the real editor at both
-    // widths. The workspace caps its content at the editor's 1280px inside the
-    // shell, and the hero spans it above the practice details, lines and
-    // summary; the practice quotation is always a draft.
+    // widths. The workspace caps its content at the editor's 1280px in the
+    // shell, the notice spans it above the grid, and the hero is the left
+    // column's first child above the practice details, lines and summary; the
+    // practice quotation is always a draft.
     //
     // What this case cannot show: live typing (the tutorial DOM suite drives
     // it) and the guide overlay, which mounts only in the running app.

@@ -7,7 +7,7 @@ import {
   type PurchaseOrderHistoryEntry,
 } from "../poCorrection";
 import { sourceRepairChoiceLabel, sourceRepairSummary } from "../poRepair";
-import { formatQuantityScaled } from "../purchaseOrder";
+import { formatQuantityScaled, purchaseOrderBusinessCategoryLabel } from "../purchaseOrder";
 import { Badge, Card, SectionHeading, StatusBanner } from "./ui";
 
 // Issue #473: the readable correction history. Every entry is an immutable
@@ -180,6 +180,10 @@ export function PurchaseOrderHistoryPanel({
                       <HistoryField label="Currency" value={entry.Currency} className="tnum" />
                       <HistoryField label="Tax zone" value={entry.TaxZone} />
                       <HistoryField label="Tax category" value={entry.TaxCategory} />
+                      <HistoryField
+                        label="Business category"
+                        value={purchaseOrderBusinessCategoryLabel(entry.BusinessCategory)}
+                      />
                       <HistoryField label="Customer PO number" value={entry.PONumber} className="tnum" />
                     </HistoryFields>
                   </HistoryGroup>

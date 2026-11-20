@@ -45,6 +45,7 @@ const ORDER: PurchaseOrderDTO = {
   Currency: "USD",
   TaxZone: "FTZ",
   TaxCategory: "",
+  BusinessCategory: "OTHERS",
   AdjustmentReason: "",
   CreatedAt: "2026-10-02T10:00:00Z",
   UpdatedAt: "2026-10-02T10:00:00Z",

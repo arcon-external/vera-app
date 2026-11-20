@@ -54,6 +54,60 @@ export interface PurchaseOrderPrintedTotals {
 }
 
 /**
+ * The four business category codes (#628), the client's own reporting
+ * vocabulary. The empty string is Unassigned: a draft that has not chosen one,
+ * or a record saved before the category existed. It is never inferred.
+ */
+export type PurchaseOrderBusinessCategory = "" | "FM" | "FAB" | "SUPPLY_GEN" | "OTHERS";
+
+/** One category option and the label staff read. */
+export interface PurchaseOrderBusinessCategoryOption {
+  value: PurchaseOrderBusinessCategory;
+  label: string;
+}
+
+/**
+ * The category picker's options, in the client's workbook order. Unassigned is
+ * first so an empty draft is visibly empty rather than defaulting to a
+ * business line, and so a pre-category record reads truthfully.
+ */
+export const PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS: readonly PurchaseOrderBusinessCategoryOption[] =
+  [
+    { value: "", label: "Unassigned" },
+    { value: "FM", label: "Facility Management" },
+    { value: "FAB", label: "Fabrication" },
+    { value: "SUPPLY_GEN", label: "Goods Supply & General" },
+    { value: "OTHERS", label: "Others" },
+  ];
+
+/**
+ * The label for a stored category. Only an empty value is Unassigned; a code
+ * this build does not know is shown as stored, because recasting it as
+ * Unassigned would silently erase a category someone else recorded.
+ */
+export function purchaseOrderBusinessCategoryLabel(
+  value: string | undefined
+): string {
+  if (value === undefined || value.trim() === "") return "Unassigned";
+  const option = PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS.find(
+    (entry) => entry.value === value
+  );
+  return option?.label ?? value;
+}
+
+/** Whether a stored value is one of the four codes (empty is not a category). */
+export function isPurchaseOrderBusinessCategory(
+  value: string
+): value is Exclude<PurchaseOrderBusinessCategory, ""> {
+  return (
+    value === "FM" ||
+    value === "FAB" ||
+    value === "SUPPLY_GEN" ||
+    value === "OTHERS"
+  );
+}
+
+/**
  * The three live source states (#496). Machine logic keys off this, never off
  * a zero id: a linked revision 00 is a real link with SourceState "live".
  */
@@ -80,6 +134,11 @@ export interface PurchaseOrderDTO {
   TaxType?: string;
   ServiceCategory?: string;
   TaxCategory: string;
+  /**
+   * The #628 reporting category. Older payloads omit it; an absent value is
+   * Unassigned, never inferred.
+   */
+  BusinessCategory?: string;
   AdjustmentReason: string;
   CreatedAt: string;
   UpdatedAt: string;
@@ -197,6 +256,8 @@ export interface PurchaseOrderHeader {
   requestedDeliveryDate: string;
   paymentTerms: string;
   incoterms: string;
+  /** The #628 reporting category; empty while a draft may be Unassigned. */
+  businessCategory: PurchaseOrderBusinessCategory;
   /** The draft's confirmation-number request (#581); off by default. */
   confirmationRequested: boolean;
 }
@@ -312,6 +373,8 @@ export interface PurchaseOrderUpdateInput {
   Incoterms: string;
   PaymentTerms: string;
   AdjustmentReason: string;
+  /** The #628 reporting category. Empty is Unassigned on a draft. */
+  BusinessCategory: PurchaseOrderBusinessCategory;
   /** The draft's confirmation-number request (#581). Allocates nothing. */
   ConfirmationRequested: boolean;
   Items: PurchaseOrderItemInput[];
@@ -531,6 +594,7 @@ export function blankPurchaseOrderDraft(
     TaxType: options.taxType,
     ServiceCategory: options.serviceCategory,
     TaxCategory: taxCategory,
+    BusinessCategory: "",
     AdjustmentReason: "",
     CreatedAt: "",
     UpdatedAt: "",
@@ -728,7 +792,7 @@ function basisPointsMinor(amount: number, bps: number): number | null {
  *   5. grand total   subtotal + PPN
  *
  * The whole-PO discount and the signed adjustment are retired (#573); the
- * store keeps their dormant columns at zero. Internal cost, margin, PPH22 and
+ * store keeps their dormant columns at zero. Internal cost, margin, PPH23 and
  * profit have no place in this module: a PO is compared against
  * customer-facing figures only.
  */
@@ -885,6 +949,10 @@ function headerFromOrder(
     requestedDeliveryDate: order.RequestedDeliveryDate ?? "",
     paymentTerms: order.PaymentTerms,
     incoterms: order.Incoterms,
+    // An older payload has no category; that is Unassigned, not a guess.
+    businessCategory: isPurchaseOrderBusinessCategory(order.BusinessCategory ?? "")
+      ? (order.BusinessCategory as Exclude<PurchaseOrderBusinessCategory, "">)
+      : "",
     confirmationRequested: order.ConfirmationRequested ?? false,
   };
 }
@@ -1154,6 +1222,7 @@ export function buildPurchaseOrderUpdate(
       RequestedDeliveryDate: state.header.requestedDeliveryDate,
       Incoterms: state.header.incoterms,
       PaymentTerms: paymentTerms,
+      BusinessCategory: state.header.businessCategory,
       // The whole-PO discount and adjustment are retired (#573). The columns
       // stay dormant; every write pins them to zero so no new record carries a
       // value the editor can no longer show or explain.
@@ -1234,6 +1303,10 @@ export function listValidationBlockers(
       fieldLabel: "Payment terms",
     });
   }
+  // #628: the category is a Final Save requirement, not a draft-save field
+  // rule. It is deliberately absent from this list so Save draft is never
+  // blocked by it; the editor's Final Save gate and the select's required hint
+  // enforce it, and buildFinalizeInput repeats the server's refusal.
   state.lines.forEach((line, index) => {
     const display = `Line ${index + 1}`;
     if (parseQuantityScaled(line.quantity) === null) {

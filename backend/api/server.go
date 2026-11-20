@@ -11,6 +11,7 @@ import (
 	echoMiddleware "github.com/labstack/echo/v4/middleware"
 
 	"vera-app/backend"
+	"vera-app/backend/apicontract"
 	"vera-app/backend/auth"
 	"vera-app/backend/store"
 )
@@ -128,6 +129,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// The archive (issue #469) is the one GET collection route: 15 rows per
 	// page, org-scoped, with search and filters.
 	server.echo.GET("/v1/purchase-orders", server.listPurchaseOrders, server.requireSession)
+	// #629: the purchase-order performance report. One authenticated read
+	// returns the complete snapshot the Reports screen and its PDF render; it
+	// is read-only and adds no role restriction beyond a session.
+	server.echo.GET(apicontract.PurchaseOrderReportPath, server.getPurchaseOrderReport, server.requireSession)
 	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
 	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)

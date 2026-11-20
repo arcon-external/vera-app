@@ -136,6 +136,7 @@ function linkedOrder(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDT
     Currency: "IDR",
     TaxZone: "FTZ",
     TaxCategory: "SupplyOnly",
+    BusinessCategory: "OTHERS",
     TaxType: "Goods",
     ServiceCategory: "",
     AdjustmentReason: "",

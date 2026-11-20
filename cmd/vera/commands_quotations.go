@@ -125,7 +125,7 @@ func (a *app) printInternalTotals(internal backend.InternalBreakdown) {
 		rows = append(rows, []string{"PPN 11% (collected for the state)", internal.DisplayPpn})
 	}
 	if internal.DisplayTax != "" {
-		rows = append(rows, []string{"PPH22 (internal, never printed)", internal.DisplayTax})
+		rows = append(rows, []string{"PPH23 (internal, never printed)", internal.DisplayTax})
 	}
 	rows = append(rows,
 		[]string{"Nett after tax", internal.DisplayMarginalizedAfterTax},

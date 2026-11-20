@@ -156,6 +156,7 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  Element.prototype.scrollIntoView = () => undefined;
   attachMock.mockReset();
   documentStateMock.mockReset();
   documentStateMock.mockResolvedValue(attachedDocumentState());
@@ -410,6 +411,48 @@ describe("PO discard is one modal decision (issue #468, wave 3)", () => {
     expect(document.activeElement).toBe(keep);
     expect(dialogCount()).toBe(1);
     expect(prompt()?.contains(document.activeElement)).toBe(true);
+  });
+});
+
+describe("PO business category (#628)", () => {
+  it("shows Unassigned as required, then records the chosen category", async () => {
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    expect(button("Business category").textContent).toContain("Unassigned");
+    expect(document.body.textContent).toContain(
+      "Required before Final Save or a correction."
+    );
+
+    click(button("Business category"));
+    const fabrication = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="option"]')
+    ).find((option) => option.textContent === "Fabrication");
+    if (fabrication === undefined) throw new Error("no Fabrication option");
+    click(fabrication);
+
+    expect(button("Business category").textContent).toContain("Fabrication");
+    expect(document.body.textContent).toContain("Used in purchase order reports.");
+    expect(document.body.textContent).not.toContain(
+      "Required before Final Save or a correction."
+    );
+  });
+
+  it("refuses Final Save with a message naming the field, leaving the draft editable", async () => {
+    act(() => root.render(<Workspace />));
+    await flush();
+
+    click(button("Final Save"));
+
+    const alerts = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="alert"]')
+    ).map((alert) => alert.textContent ?? "");
+    expect(alerts.join(" ")).toContain(
+      "Business category is required to save a purchase order."
+    );
+    // Still the editor, still editable: no review opened and no save happened.
+    expect(inputValue("Customer PO number")).toBe("PO-1");
+    expect(document.querySelector('[aria-label="Business category"]')).not.toBeNull();
   });
 });
 

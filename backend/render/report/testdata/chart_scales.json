@@ -1,0 +1,77 @@
+{
+  "algorithm": "nice-1-2-5",
+  "description": "Zero-inclusive axis domain rounded outward to a step of 1, 2 or 5 times a power of ten. Both domain bounds are ticks. Go and TypeScript must return the same domain and ticks for every case. The targetTicks 4 and 5 cases are the production margin and money axes; targetTicks 6 cases remain for compatibility with the original contract.",
+  "tolerance": 1e-9,
+  "cases": [
+    {
+      "name": "zero",
+      "input": {"min": 0, "max": 0, "targetTicks": 6},
+      "expected": {"min": 0, "max": 1, "step": 0.2, "ticks": [0, 0.2, 0.4, 0.6, 0.8, 1]}
+    },
+    {
+      "name": "zero-target-4",
+      "input": {"min": 0, "max": 0, "targetTicks": 4},
+      "expected": {"min": 0, "max": 1, "step": 0.5, "ticks": [0, 0.5, 1]}
+    },
+    {
+      "name": "zero-target-5",
+      "input": {"min": 0, "max": 0, "targetTicks": 5},
+      "expected": {"min": 0, "max": 1, "step": 0.2, "ticks": [0, 0.2, 0.4, 0.6, 0.8, 1]}
+    },
+    {
+      "name": "negative",
+      "input": {"min": -1250000, "max": 0, "targetTicks": 6},
+      "expected": {"min": -1400000, "max": 0, "step": 200000, "ticks": [-1400000, -1200000, -1000000, -800000, -600000, -400000, -200000, 0]}
+    },
+    {
+      "name": "negative-target-4",
+      "input": {"min": -1250000, "max": 0, "targetTicks": 4},
+      "expected": {"min": -1500000, "max": 0, "step": 500000, "ticks": [-1500000, -1000000, -500000, 0]}
+    },
+    {
+      "name": "negative-target-5",
+      "input": {"min": -1250000, "max": 0, "targetTicks": 5},
+      "expected": {"min": -1500000, "max": 0, "step": 500000, "ticks": [-1500000, -1000000, -500000, 0]}
+    },
+    {
+      "name": "single",
+      "input": {"min": 0, "max": 4200000, "targetTicks": 6},
+      "expected": {"min": 0, "max": 5000000, "step": 1000000, "ticks": [0, 1000000, 2000000, 3000000, 4000000, 5000000]}
+    },
+    {
+      "name": "normal",
+      "input": {"min": 0, "max": 1234, "targetTicks": 6},
+      "expected": {"min": 0, "max": 1400, "step": 200, "ticks": [0, 200, 400, 600, 800, 1000, 1200, 1400]}
+    },
+    {
+      "name": "normal-target-4",
+      "input": {"min": 0, "max": 1234, "targetTicks": 4},
+      "expected": {"min": 0, "max": 1500, "step": 500, "ticks": [0, 500, 1000, 1500]}
+    },
+    {
+      "name": "normal-target-5",
+      "input": {"min": 0, "max": 1234, "targetTicks": 5},
+      "expected": {"min": 0, "max": 1500, "step": 500, "ticks": [0, 500, 1000, 1500]}
+    },
+    {
+      "name": "mixed",
+      "input": {"min": -750000, "max": 3250000, "targetTicks": 6},
+      "expected": {"min": -1000000, "max": 4000000, "step": 1000000, "ticks": [-1000000, 0, 1000000, 2000000, 3000000, 4000000]}
+    },
+    {
+      "name": "extreme",
+      "input": {"min": -9000000000000, "max": 9000000000000, "targetTicks": 6},
+      "expected": {"min": -10000000000000, "max": 10000000000000, "step": 5000000000000, "ticks": [-10000000000000, -5000000000000, 0, 5000000000000, 10000000000000]}
+    },
+    {
+      "name": "extreme-target-4",
+      "input": {"min": -9000000000000, "max": 9000000000000, "targetTicks": 4},
+      "expected": {"min": -10000000000000, "max": 10000000000000, "step": 5000000000000, "ticks": [-10000000000000, -5000000000000, 0, 5000000000000, 10000000000000]}
+    },
+    {
+      "name": "extreme-target-5",
+      "input": {"min": -9000000000000, "max": 9000000000000, "targetTicks": 5},
+      "expected": {"min": -10000000000000, "max": 10000000000000, "step": 5000000000000, "ticks": [-10000000000000, -5000000000000, 0, 5000000000000, 10000000000000]}
+    }
+  ]
+}

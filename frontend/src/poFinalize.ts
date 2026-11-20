@@ -19,6 +19,7 @@ import {
   finalSaveSendsAbsenceConfirmation,
 } from "./purchaseOrderDocument";
 import type {
+  PurchaseOrderBusinessCategory,
   PurchaseOrderDTO,
   PurchaseOrderEditorState,
   PurchaseOrderItemInput,
@@ -29,6 +30,7 @@ import {
   calculatePurchaseOrder,
   formatQuantityScaled,
   formatUnitPriceMinor,
+  isPurchaseOrderBusinessCategory,
   parseDiscountPercent,
   parseQuantityScaled,
   parseUnitPriceMinor,
@@ -531,6 +533,8 @@ export interface PurchaseOrderFinalizeInput {
   Incoterms: string;
   PaymentTerms: string;
   AdjustmentReason: string;
+  /** The #628 reporting category; a saved record always names one. */
+  BusinessCategory: PurchaseOrderBusinessCategory;
   Items: PurchaseOrderItemInput[];
   Decisions: Array<{ Key: string; Choice: POReviewChoice }>;
   AcknowledgedMissing: string[];
@@ -566,6 +570,15 @@ export function buildFinalizeInput(
 ): { input: PurchaseOrderFinalizeInput | null; error: string | null } {
   if (state.header.poNumber.trim() === "") {
     return { input: null, error: "A customer PO number is required before the PO can be saved." };
+  }
+  // #628: a draft may stay Unassigned; a saved record may not. The editor
+  // gate names the same field, so a draft left open here can still be saved
+  // as a draft and finalised once a category is chosen.
+  if (!isPurchaseOrderBusinessCategory(state.header.businessCategory)) {
+    return {
+      input: null,
+      error: "Business category is required to save a purchase order.",
+    };
   }
   // An unknown branch is treated as "none": asking for the confirmation again
   // is safe, while silently assuming a PDF exists is not.

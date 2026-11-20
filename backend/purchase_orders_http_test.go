@@ -405,10 +405,10 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 
 // TestPurchaseOrderSurfacesCarryNoInternalEconomics mirrors
 // TestCustomerPreviewCarriesNoInternalEconomics for the PO: supplier cost,
-// margin, PPH22 and profit must never appear on any PO surface a customer
+// margin, PPH23 and profit must never appear on any PO surface a customer
 // comparison could read. A field added with one of those names fails here.
 func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
-	forbidden := []string{"cost", "margin", "pph22", "profit", "nett"}
+	forbidden := []string{"cost", "margin", "pph23", "profit", "nett"}
 	surfaces := []reflect.Type{
 		reflect.TypeOf(store.PurchaseOrder{}),
 		reflect.TypeOf(store.PurchaseOrderItem{}),

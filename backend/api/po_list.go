@@ -64,6 +64,13 @@ func (s *Server) listPurchaseOrders(context echo.Context) error {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid state"})
 	}
 
+	// #628: the category filter is one of the four codes, or absent for All.
+	// An unknown value is a 400, never an empty page that silently means All.
+	category := strings.TrimSpace(context.QueryParam("category"))
+	if _, err := store.NormalizePurchaseOrderBusinessCategory(category); err != nil {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid category"})
+	}
+
 	sourceMissing := strings.TrimSpace(context.QueryParam("sourceMissing"))
 	if sourceMissing == "" {
 		sourceMissing = store.PurchaseOrderSourceMissingAny
@@ -95,14 +102,15 @@ func (s *Server) listPurchaseOrders(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
 	}
 	result, err := s.database.ListPurchaseOrders(requestContext, store.PurchaseOrderListQuery{
-		Search:        context.QueryParam("search"),
-		State:         state,
-		CustomerIDs:   customerIDs,
-		ReceivedFrom:  receivedFrom,
-		ReceivedTo:    receivedTo,
-		SourceMissing: sourceMissing,
-		Page:          page,
-		PageSize:      pageSize,
+		Search:           context.QueryParam("search"),
+		State:            state,
+		CustomerIDs:      customerIDs,
+		ReceivedFrom:     receivedFrom,
+		ReceivedTo:       receivedTo,
+		SourceMissing:    sourceMissing,
+		BusinessCategory: category,
+		Page:             page,
+		PageSize:         pageSize,
 	})
 	if errors.Is(err, store.ErrPurchaseOrderInvalid) {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -134,17 +142,18 @@ func (s *Server) listPurchaseOrders(context echo.Context) error {
 
 func mapPurchaseOrderListRow(row store.PurchaseOrderListRow) apicontract.PurchaseOrderListRow {
 	return apicontract.PurchaseOrderListRow{
-		ID:             row.ID,
-		UUID:           row.UUID,
-		State:          row.State,
-		PONumber:       row.PONumber,
-		QuoteNumber:    row.QuoteNumber,
-		SourceRevision: row.SourceRevision,
-		CustomerID:     row.CustomerID,
-		CustomerName:   row.CustomerName,
-		ReceivedDate:   row.ReceivedDate.Format(time.DateOnly),
-		Currency:       row.Currency,
-		SourceMissing:  row.SourceMissing,
-		SourceState:    row.SourceState,
+		ID:               row.ID,
+		UUID:             row.UUID,
+		State:            row.State,
+		PONumber:         row.PONumber,
+		QuoteNumber:      row.QuoteNumber,
+		SourceRevision:   row.SourceRevision,
+		CustomerID:       row.CustomerID,
+		CustomerName:     row.CustomerName,
+		ReceivedDate:     row.ReceivedDate.Format(time.DateOnly),
+		Currency:         row.Currency,
+		BusinessCategory: row.BusinessCategory,
+		SourceMissing:    row.SourceMissing,
+		SourceState:      row.SourceState,
 	}
 }

@@ -15,7 +15,7 @@ import (
 //
 //	margin first, then the row discount; a package is the sum of its parts;
 //	the cost side never moves; the whole-quotation discount applies to the
-//	summed post-row subtotal; PPN is added on top for Non-FTZ goods and PPH22
+//	summed post-row subtotal; PPN is added on top for Non-FTZ goods and PPH23
 //	is internal only.
 //
 // The seed is fixture data, not a second pricing implementation: no production

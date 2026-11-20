@@ -315,21 +315,8 @@ export function QuotationTutorialWorkspace({
       className="mx-auto flex w-full max-w-[1280px] flex-col gap-6"
       data-tutorial-practice="quotation"
     >
-      {/* Issue #624: the real editor's hero, over the practice values. The
-          practice quotation is never issued, so it is always a draft: no
-          quotation number, no revision pair, and the sandbox status line in
-          place of "Save draft stores it". It is read-only; every control on
-          this surface stays in the form below. */}
-      <QuotationHero
-        customerName={customerName}
-        details={details}
-        currencyCode={currency.code}
-        currency={currency}
-        customerGrand={pricing.customerGrand}
-        ppnAmount={pricing.ppnAmount}
-        statusOverride={TUTORIAL_PRACTICE_COPY}
-      />
-
+      {/* Issue #627: the practice notice sits above the grid, full width, as
+          the PO editor's banners do. */}
       <StatusBanner tone="info">
         <span>
           <strong>Practice quotation.</strong> This is a sandbox with made-up
@@ -338,8 +325,25 @@ export function QuotationTutorialWorkspace({
         </span>
       </StatusBanner>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-6">
+          {/* Issue #624: the real editor's hero, over the practice values. The
+              practice quotation is never issued, so it is always a draft: no
+              quotation number, no revision pair, and the sandbox status line in
+              place of "Save draft stores it". It is read-only; every control on
+              this surface stays in the form below. Issue #627: it is the left
+              column's first child, level with the Summary rail, exactly as the
+              real editor's hero is. */}
+          <QuotationHero
+            customerName={customerName}
+            details={details}
+            currencyCode={currency.code}
+            currency={currency}
+            customerGrand={pricing.customerGrand}
+            ppnAmount={pricing.ppnAmount}
+            statusOverride={TUTORIAL_PRACTICE_COPY}
+          />
+
           <DetailsPanel
             value={details}
             customerId={customerId}

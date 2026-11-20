@@ -43,12 +43,13 @@ func (s *Server) createPurchaseOrderDraft(context echo.Context) error {
 			return context.JSON(http.StatusBadRequest, map[string]string{"error": "a revision needs a quotation source"})
 		}
 		order, err := s.database.CreatePurchaseOrderBlankDraft(requestContext, store.PurchaseOrderBlankCreate{
-			ReceivedDate:    received,
-			TaxZone:         request.TaxZone,
-			TaxType:         request.TaxType,
-			ServiceCategory: request.ServiceCategory,
-			TaxCategory:     request.TaxCategory,
-			CreatedBy:       user.ID,
+			ReceivedDate:     received,
+			TaxZone:          request.TaxZone,
+			TaxType:          request.TaxType,
+			ServiceCategory:  request.ServiceCategory,
+			TaxCategory:      request.TaxCategory,
+			BusinessCategory: request.BusinessCategory,
+			CreatedBy:        user.ID,
 		})
 		if err != nil {
 			return purchaseOrderError(context, err)
@@ -59,10 +60,11 @@ func (s *Server) createPurchaseOrderDraft(context echo.Context) error {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation source"})
 	}
 	order, err := s.database.CreatePurchaseOrderDraft(requestContext, store.PurchaseOrderCreate{
-		QuotationID:    request.QuotationID,
-		RevisionNumber: *request.RevisionNumber,
-		ReceivedDate:   received,
-		CreatedBy:      user.ID,
+		QuotationID:      request.QuotationID,
+		RevisionNumber:   *request.RevisionNumber,
+		ReceivedDate:     received,
+		BusinessCategory: request.BusinessCategory,
+		CreatedBy:        user.ID,
 	})
 	if err != nil {
 		return purchaseOrderError(context, err)
@@ -502,6 +504,11 @@ func purchaseOrderError(context echo.Context, err error) error {
 		})
 	case errors.Is(err, store.ErrPurchaseOrderBadReference):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrPurchaseOrderBusinessCategoryRequired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_business_category_required",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderIncomplete):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": err.Error(),
@@ -601,6 +608,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		TaxType:                order.TaxType,
 		ServiceCategory:        order.ServiceCategory,
 		TaxCategory:            order.TaxCategory,
+		BusinessCategory:       order.BusinessCategory,
 		DiscountPercent:        order.DiscountPercent,
 		SubtotalMinor:          order.SubtotalMinor,
 		DiscountMinor:          order.DiscountMinor,
@@ -730,6 +738,7 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableReq
 		TaxType:               stringOrEmpty(request.TaxType),
 		ServiceCategory:       stringOrEmpty(request.ServiceCategory),
 		TaxCategory:           stringOrEmpty(request.TaxCategory),
+		BusinessCategory:      request.BusinessCategory,
 		UpdatedBy:             updatedBy,
 		Items:                 items,
 		DiscountPercent:       request.DiscountPercent,
@@ -784,6 +793,7 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 		Currency:              entry.Currency,
 		TaxZone:               entry.TaxZone,
 		TaxCategory:           entry.TaxCategory,
+		BusinessCategory:      entry.BusinessCategory,
 		BillingAddress:        entry.BillingAddress,
 		DeliveryAddress:       entry.DeliveryAddress,
 		ShipToCode:            entry.ShipToCode,
@@ -865,7 +875,7 @@ func formatPurchaseOrderDate(value *time.Time) *string {
 }
 
 // mapPurchaseOrderReview exposes the exact source beside the stored record. The
-// source is the customer-facing composition, so internal cost, margin, PPH22
+// source is the customer-facing composition, so internal cost, margin, PPH23
 // and profit never cross this boundary (parent story 42).
 // mapPurchaseOrderDraftLinkReview exposes the draft-link review: the same
 // record/source/document shape a final save reads, plus the two tax bases and

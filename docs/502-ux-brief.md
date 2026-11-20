@@ -128,7 +128,7 @@ Wireframes in this brief use example values (`BP-1042`, `QT-2026-018`, `PT Maju 
 
 **Why split Order details from Commercial terms:** billing address and the other PO-only fields must not sit beside compared fields where staff will assume a check exists. The split makes the comparable set visible without putting a tag on every input.
 
-**Nothing internal appears here.** Cost, margin, PPH22 and profit are absent from the workbench, the pane, the totals check and the list, by construction. Do not add an internal-only badge or a cost column to this feature.
+**Nothing internal appears here.** Cost, margin, PPH23 and profit are absent from the workbench, the pane, the totals check and the list, by construction. Do not add an internal-only badge or a cost column to this feature.
 
 **Field grid:** short fields are two columns when the form column is at least 560px; the two address textareas are full width below 720px of form width (1024) and side by side at 720px and above (1280). At 360 everything is one column. Use the form column's width, not the viewport.
 

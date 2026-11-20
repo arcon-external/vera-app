@@ -16,6 +16,7 @@ import {
   sourceRevisionLabel,
   toggleCustomerFilter,
   type POListAction,
+  type POListFilters,
   type POListMode,
   type POListPageDTO,
   type POListRowDTO,
@@ -26,6 +27,10 @@ import {
 import { DeletionDialog } from "./DeletionDialog";
 import { Select } from "./Select";
 import { Badge, Button, Card, fieldClass } from "./ui";
+import {
+  PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS,
+  purchaseOrderBusinessCategoryLabel,
+} from "../purchaseOrder";
 
 // Issue #469: the Purchase Order archive. Staff find a PO by its customer
 // number, its source Quotation number, or its customer, then open the exact
@@ -88,6 +93,16 @@ const SOURCE_OPTIONS = [
   { value: "any", label: "Any source" },
   { value: "only", label: "Source missing only" },
   { value: "exclude", label: "Source present only" },
+];
+
+// #628: the archive filter. All is first and is the default; the four codes
+// are the client's reporting vocabulary. Unassigned rows still appear under
+// All, so a pre-category record never disappears from the archive.
+const CATEGORY_OPTIONS = [
+  { value: "", label: "All categories" },
+  ...PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS.filter(
+    (option) => option.value !== ""
+  ),
 ];
 
 function SourceMissingBadge() {
@@ -321,6 +336,17 @@ export function PurchaseOrderListView({
         }),
     });
   }
+  if (state.filters.category !== "") {
+    chips.push({
+      key: "category",
+      label: `Category: ${purchaseOrderBusinessCategoryLabel(state.filters.category)}`,
+      clear: () =>
+        dispatch({
+          type: "filtersChanged",
+          patch: { category: "" },
+        }),
+    });
+  }
   for (const customerId of state.filters.customerIds) {
     const customer = state.customers.find((entry) => entry.ID === customerId);
     chips.push({
@@ -521,22 +547,40 @@ export function PurchaseOrderListView({
         </fieldset>
 
         <div className="mt-4 flex flex-wrap items-start justify-between gap-3 border-t border-rule pt-3">
-          <div className="grid min-w-44 gap-1.5">
-            <span className="text-small font-medium text-ink-700">Source</span>
-            <Select
-              ariaLabel="Source"
-              value={state.filters.sourceMissing}
-              options={SOURCE_OPTIONS}
-              onChange={(value) =>
-                dispatch({
-                  type: "filtersChanged",
-                  patch: { sourceMissing: value as POListSourceMissingFilter },
-                })
-              }
-            />
-            <p className="max-w-xs text-caption text-ink-400">
-              Source missing is independent of Draft/Saved.
-            </p>
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="grid min-w-44 gap-1.5">
+              <span className="text-small font-medium text-ink-700">
+                Business category
+              </span>
+              <Select
+                ariaLabel="Business category"
+                value={state.filters.category}
+                options={CATEGORY_OPTIONS}
+                onChange={(value) =>
+                  dispatch({
+                    type: "filtersChanged",
+                    patch: { category: value as POListFilters["category"] },
+                  })
+                }
+              />
+            </div>
+            <div className="grid min-w-44 gap-1.5">
+              <span className="text-small font-medium text-ink-700">Source</span>
+              <Select
+                ariaLabel="Source"
+                value={state.filters.sourceMissing}
+                options={SOURCE_OPTIONS}
+                onChange={(value) =>
+                  dispatch({
+                    type: "filtersChanged",
+                    patch: { sourceMissing: value as POListSourceMissingFilter },
+                  })
+                }
+              />
+              <p className="max-w-xs text-caption text-ink-400">
+                Source missing is independent of Draft/Saved.
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2.5">
             <span className="text-caption text-ink-500">
@@ -639,15 +683,18 @@ export function PurchaseOrderListView({
                 <caption className="sr-only">Purchase orders</caption>
                 <thead>
                   <tr className="h-10 border-b border-rule bg-paper-subtle text-micro uppercase tracking-[0.1em] text-ink-500">
-                    <th className="w-[24%] px-5 py-3 font-medium">
+                    <th className="w-[22%] px-5 py-3 font-medium">
                       Customer PO
                     </th>
-                    <th className="w-[26%] px-4 py-3 font-medium">
+                    <th className="w-[23%] px-4 py-3 font-medium">
                       Quotation
                     </th>
-                    <th className="w-[22%] px-4 py-3 font-medium">Customer</th>
-                    <th className="w-[14%] px-4 py-3 font-medium">Received</th>
-                    <th className="w-[9%] px-4 py-3 font-medium">State</th>
+                    <th className="w-[17%] px-4 py-3 font-medium">Customer</th>
+                    <th className="w-[17%] px-4 py-3 font-medium">
+                      Category
+                    </th>
+                    <th className="w-[12%] px-4 py-3 font-medium">Received</th>
+                    <th className="w-[8%] px-4 py-3 font-medium">State</th>
                     <th className="w-20 px-4 py-3">
                       <span className="sr-only">Open</span>
                     </th>
@@ -693,6 +740,23 @@ export function PurchaseOrderListView({
                         <td className="px-4 py-3 align-middle text-body text-ink-700">
                           <span className="block max-w-full truncate">
                             {customerCellLabel(row)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 align-middle">
+                          <span
+                            title={purchaseOrderBusinessCategoryLabel(
+                              row.BusinessCategory
+                            )}
+                            className={`block truncate text-body ${
+                              row.BusinessCategory === undefined ||
+                              row.BusinessCategory === ""
+                                ? "text-ink-400"
+                                : "text-ink-700"
+                            }`}
+                          >
+                            {purchaseOrderBusinessCategoryLabel(
+                              row.BusinessCategory
+                            )}
                           </span>
                         </td>
                         <td className="tnum whitespace-nowrap px-4 py-3 align-middle text-body text-ink-700">
@@ -782,6 +846,11 @@ export function PurchaseOrderListView({
                       </div>
                       <p className="mt-1.5 text-body text-ink-700">
                         {customerCellLabel(row)}
+                      </p>
+                      <p className="mt-0.5 text-small text-ink-500">
+                        {purchaseOrderBusinessCategoryLabel(
+                          row.BusinessCategory
+                        )}
                       </p>
                       <p className="mt-0.5 text-small text-ink-700">
                         <span className="tnum">{quotationCellLabel(row)}</span>

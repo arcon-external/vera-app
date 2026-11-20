@@ -398,17 +398,33 @@ describe("Quotation hero (issue #623)", () => {
     );
     expect(heroTotal()).toBe("Rp0");
 
-    // The editor content is capped at the PO editor's 1280px, and the hero is
-    // a full-width sibling above the form + Summary rail grid.
-    const wrapper = hero().parentElement;
-    const grid = document
-      .querySelector('[data-tutorial="quotation-details"]')
-      ?.closest(".grid");
-    expect(wrapper?.className).toContain("max-w-[1280px]");
-    expect(grid?.parentElement).toBe(wrapper);
-    expect(
-      hero().compareDocumentPosition(grid!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).not.toBe(0);
+    // Issue #627: the hero sits in the left column of the PO editor's grid,
+    // not above it. It is the column's first child, the details and lines
+    // follow it, and the Summary rail is the grid's second column, so the rail
+    // starts level with the hero from lg rather than under the whole form.
+    const heroColumn = hero().parentElement;
+    const grid = heroColumn?.parentElement;
+    const details = document.querySelector<HTMLElement>(
+      '[data-tutorial="quotation-details"]'
+    );
+    const rail = document.querySelector<HTMLElement>(
+      '[data-tutorial="quotation-totals"]'
+    )?.parentElement;
+    expect(heroColumn?.className).toContain("flex");
+    expect(heroColumn?.firstElementChild).toBe(hero());
+    expect(details?.parentElement).toBe(heroColumn);
+    expect(grid?.className).toContain(
+      "lg:grid-cols-[minmax(0,1fr)_320px]"
+    );
+    expect(grid?.className).toContain(
+      "xl:grid-cols-[minmax(0,1fr)_340px]"
+    );
+    expect(grid?.children[0]).toBe(heroColumn);
+    expect(grid?.children[1]).toBe(rail);
+    expect(rail?.contains(document.querySelector('[data-tutorial="quotation-totals"]'))).toBe(
+      true
+    );
+    expect(grid?.parentElement?.className).toContain("max-w-[1280px]");
 
     pickOption("Customer", SECOND_CUSTOMER);
     typeInto(input("Validity"), "45");
@@ -424,6 +440,34 @@ describe("Quotation hero (issue #623)", () => {
     expect(heroText()).toContain("Non-FTZ · Goods");
   });
 
+  it("keeps the Prepare status banner above the grid, full width", async () => {
+    // Issue #627: the PO editor's banners sit above its grid, full width; the
+    // Quotation editor's Prepare status now does the same, so a failure is not
+    // squeezed into the left column beside the rail.
+    await openQuotationEditor();
+
+    // Prepare is gated on a renderable line, and a refused Prepare is the
+    // only status that stays on screen long enough to read its placement.
+    typeInto(input("Description for line 1"), "Banner layout");
+    mocks.prepare.mockRejectedValueOnce(new Error("server said no"));
+    act(() => textButton("Prepare").click());
+
+    const grid = hero().parentElement?.parentElement;
+    const wrapper = grid?.parentElement;
+    await waitFor(
+      () => wrapper?.querySelector('[role="alert"]') != null,
+      "the Prepare banner"
+    );
+    const banner = wrapper?.querySelector<HTMLElement>('[role="alert"]');
+    expect(banner?.textContent).toContain("server said no");
+    expect(banner?.parentElement).toBe(wrapper);
+    expect(grid?.parentElement).toBe(wrapper);
+    expect(grid?.contains(banner!)).toBe(false);
+    expect(
+      banner!.compareDocumentPosition(grid!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0);
+  });
+
   it("prices the live customer total through computePricing, PPN included", async () => {
     await openQuotationEditor();
 
@@ -436,7 +480,7 @@ describe("Quotation hero (issue #623)", () => {
     expect(heroText()).toContain("Includes PPN");
 
     pickRadio("Tax type", "Services");
-    pickOption("Service category", "Non-construction — 2% PPh22");
+    pickOption("Service category", "Non-construction — 2% PPh23");
 
     expect(heroText()).toContain("Non-FTZ · Services · Non-construction");
     expect(heroTotal()).toBe("Rp1.000.000");

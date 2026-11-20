@@ -204,10 +204,10 @@ export function SummaryRail({
         </div>
         <div className="mt-3 space-y-2">
           {pricing.taxAmount > 0 ? (
-            <AmountRow label="PPH22 (internal)" value={-pricing.taxAmount} currency={currency} />
+            <AmountRow label="PPH23 (internal)" value={-pricing.taxAmount} currency={currency} />
           ) : null}
           {/* PPN is collected for the state, so it has to be shown
-              leaving the figure the way PPH22 is -- otherwise the grand
+              leaving the figure the way PPH23 is -- otherwise the grand
               total and the nett below it look unrelated on a goods
               quotation. It comes off the customer total, not out of the
               sale: the bridge is Grand total - PPN = Nett after Tax. */}

@@ -294,7 +294,7 @@ a rounding bug into a pricing system.
 | `leadTimeDays` | `60` by default. |
 | `taxZone` | `FTZ` (default) or `NonFTZ`. |
 | `taxType` | `Goods` (default) or `Services`. |
-| `serviceCategory` | Services only: `NonConstruction` (2% PPH22) or `Construction` (1.75%). Sending one with `Goods` is an error, so it is dropped rather than passed on. |
+| `serviceCategory` | Services only: `NonConstruction` (2% PPH23) or `Construction` (1.75%). Sending one with `Goods` is an error, so it is dropped rather than passed on. |
 | `discountPercent` | Whole-quotation discount. Retired from the editor in favour of per-row discounts; still accepted so older payloads load. |
 | `items[]` | At least one line. |
 
@@ -335,7 +335,7 @@ through unchanged — but knowing them makes an input file predictable:
   row discounts.
 - **PPN** (11%, non-FTZ goods) is added on top of the price. The customer pays it;
   it is collected for the state and is never profit.
-- **PPH22** (2% non-construction, 1.75% construction, services only, any zone) is
+- **PPH23** (2% non-construction, 1.75% construction, services only, any zone) is
   internal. It is calculated once on the sell grand after discount, is never
   allocated per line, and is never printed. Which rate applies is chosen by
   `serviceCategory` above, and those are the only two values it accepts.
@@ -569,8 +569,8 @@ are returned:
 
 - `customer` — the document the customer receives, plus the cost side the review
   panel shows beside it (its "before margin" table). It carries **no margin,
-  no PPH22 and no profit**: those are the operator's alone.
-- `internal` — the operator's economics: what each line earned, the PPH22
+  no PPH23 and no profit**: those are the operator's alone.
+- `internal` — the operator's economics: what each line earned, the PPH23
   withheld, and the nett profit. This is the view that must never be exported.
 
 ### `vera quotations render`
@@ -964,7 +964,7 @@ input file.
 
 ```bash
 vera quotations show 12 --html > customer.html
-grep -i -e nett -e pph22 -e profit customer.html   # must print nothing
+grep -i -e nett -e pph23 -e profit customer.html   # must print nothing
 ```
 
 ---

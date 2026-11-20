@@ -2,9 +2,9 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DocumentHomePage } from "./DocumentHomePage";
 
-// Issue #491: Home is the global workspace dashboard. Five cards at admin
-// (Quotation, Purchase Order, Delivery Order disabled, Invoice disabled,
-// Admin Dashboard) and four for staff; each carries an inline-SVG icon.
+// Issue #491: Home is the global workspace dashboard. Issue #630 adds Reports
+// as a sixth destination: a wide card after the four document workspaces and
+// before Admin Dashboard, available to staff and admins.
 //
 // The suite runs in node with no DOM (see vitest.config.ts), so the page is
 // rendered to a string and asserted on as markup -- the same house pattern as
@@ -34,6 +34,7 @@ function renderHome(isAdmin = true): string {
       isAdmin={isAdmin}
       onOpenQuotation={() => {}}
       onOpenPurchaseOrder={() => {}}
+      onOpenReports={() => {}}
       onOpenAdmin={() => {}}
     />
   ).replace(/<!-- -->/g, "");
@@ -44,24 +45,26 @@ describe("DocumentHomePage workspaces (issue #491)", () => {
     expect(renderHome()).toContain(">Workspaces<");
   });
 
-  it("shows all five workspaces to an admin", () => {
+  it("shows all six workspaces to an admin", () => {
     const html = renderHome();
     for (const label of [
       "Open Quotation",
       "Open Purchase Orders",
       "Delivery Order (coming later)",
       "Invoice (coming later)",
+      "Open Reports",
       "Open Admin Dashboard",
     ]) {
       expect(buttonTagFor(html, label)).toContain(label);
     }
   });
 
-  it("keeps Quotation, Purchase Orders and Admin enabled", () => {
+  it("keeps Quotation, Purchase Orders, Reports and Admin enabled", () => {
     const html = renderHome();
     for (const label of [
       "Open Quotation",
       "Open Purchase Orders",
+      "Open Reports",
       "Open Admin Dashboard",
     ]) {
       expect(buttonTagFor(html, label)).not.toContain(" disabled=");
@@ -83,23 +86,44 @@ describe("DocumentHomePage workspaces (issue #491)", () => {
 
   it("gives every card an inline-SVG icon", () => {
     const html = renderHome();
-    // Five cards, five 24×24 inline icons; the house Button draws none.
-    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(5);
+    // Six cards, six 24×24 inline icons; the house Button draws none.
+    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(6);
   });
 
-  it("lays out two columns at wide with Admin full-width, one at 360", () => {
+  it("places Reports after the four document workspaces and before Admin", () => {
+    const html = renderHome();
+    const order = [
+      "Open Quotation",
+      "Open Purchase Orders",
+      "Delivery Order (coming later)",
+      "Invoice (coming later)",
+      "Open Reports",
+      "Open Admin Dashboard",
+    ].map((label) => html.indexOf(`aria-label="${label}"`));
+    for (let index = 1; index < order.length; index += 1) {
+      expect(order[index]).toBeGreaterThan(order[index - 1]);
+    }
+  });
+
+  it("lays out two columns at wide with Reports and Admin full-width, one at 360", () => {
     const html = renderHome();
     expect(html).toContain("sm:grid-cols-2");
-    expect(html).toContain("sm:col-span-2");
+    // The Reports card and the Admin card use the same wide pattern.
+    expect(html.split("sm:col-span-2").length - 1).toBe(2);
+    expect(html).toContain("sm:grid-cols-2");
   });
 
-  it("hides the Admin card for a non-admin", () => {
+  it("hides the Admin card for a non-admin but still offers Reports", () => {
     const html = renderHome(false);
     expect(html).not.toContain("Open Admin Dashboard");
     expect(html).not.toContain(">Admin Dashboard<");
-    // Four cards, four icons; the other destinations are untouched.
-    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(4);
+    // Five cards, five icons; Reports is independently available.
+    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(5);
+    expect(html.split("sm:col-span-2").length - 1).toBe(1);
     expect(buttonTagFor(html, "Open Quotation")).toBeDefined();
     expect(buttonTagFor(html, "Open Purchase Orders")).toBeDefined();
+    expect(buttonTagFor(html, "Open Reports")).not.toContain(" disabled=");
+    // The wide-card class belongs to Reports, never to a hidden Admin card.
+    expect(html).toContain("sm:col-span-2");
   });
 });

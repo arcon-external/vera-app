@@ -192,7 +192,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
         <StageHeader
           step="02 — Internal breakdown"
           title="Margin and tax calculation"
-          description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation and is never profit; PPH22 stays internal and is never allocated to individual lines."
+          description="Margin is applied per unit. PPN (non-FTZ goods only) joins the customer quotation and is never profit; PPH23 stays internal and is never allocated to individual lines."
           badge={<Badge tone="internal">Internal only — never exported</Badge>}
         />
         <div className="p-5 lg:p-6">
@@ -365,7 +365,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
                   value={internal.DisplayOriginalGrand}
                   currency={currency}
                 />
-                <SummaryRow label="Profit before PPH22" value={internal.DisplayProfit} currency={currency} />
+                <SummaryRow label="Profit before PPH23" value={internal.DisplayProfit} currency={currency} />
               </div>
               <div className="mt-3 rounded-lg bg-success-700 px-4 py-3.5">
                 <div className="flex items-baseline justify-between gap-4">
@@ -377,7 +377,7 @@ export function ReviewPanel({ customer, internal, quotationHTML, currency = IDR_
                   </span>
                 </div>
                 <p className="mt-1 text-caption text-success-100">
-                  Sell total after discount minus cost, less PPH22. PPN is
+                  Sell total after discount minus cost, less PPH23. PPN is
                   collected for the state and is not profit.
                 </p>
               </div>

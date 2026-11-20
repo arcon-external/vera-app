@@ -45,6 +45,7 @@ func correctionBody(row purchaseOrderRow, reason string) map[string]any {
 		"receivedDate":     row.ReceivedDate,
 		"paymentTerms":     row.PaymentTerms,
 		"incoterms":        row.Incoterms,
+		"businessCategory": businessCategoryOrDefault(row.BusinessCategory),
 		"items":            items,
 		"discountPercent":  row.DiscountPercent,
 		"adjustmentMinor":  row.AdjustmentMinor,
@@ -74,6 +75,7 @@ type purchaseOrderCorrectionRow struct {
 	QuoteNumber      string `json:"quoteNumber"`
 	CustomerName     string `json:"customerName"`
 	Currency         string `json:"currency"`
+	BusinessCategory string `json:"businessCategory"`
 	DeliveryAddress  string `json:"deliveryAddress"`
 	PONumber         string `json:"poNumber"`
 	PaymentTerms     string `json:"paymentTerms"`

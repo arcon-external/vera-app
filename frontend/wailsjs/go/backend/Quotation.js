@@ -58,6 +58,10 @@ export function Export(arg1) {
   return window['go']['backend']['Quotation']['Export'](arg1);
 }
 
+export function ExportPurchaseOrderReport(arg1) {
+  return window['go']['backend']['Quotation']['ExportPurchaseOrderReport'](arg1);
+}
+
 export function ExportTo(arg1) {
   return window['go']['backend']['Quotation']['ExportTo'](arg1);
 }
@@ -100,6 +104,10 @@ export function GetPurchaseOrderDocumentVersionContent(arg1, arg2) {
 
 export function GetPurchaseOrderHistory(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
+}
+
+export function GetPurchaseOrderReport(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderReport'](arg1);
 }
 
 export function GetPurchaseOrderReview(arg1) {

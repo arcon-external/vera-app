@@ -1816,6 +1816,7 @@ export namespace backend {
 	    TaxZone: string;
 	    TaxType: string;
 	    ServiceCategory: string;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderBlankCreateInput(source);
@@ -1827,6 +1828,7 @@ export namespace backend {
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderConflictDTO {
@@ -2011,6 +2013,7 @@ export namespace backend {
 	    PpnMinor: number;
 	    AdjustmentMinor: number;
 	    GrandTotalMinor: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionDTO(source);
@@ -2059,6 +2062,7 @@ export namespace backend {
 	        this.PpnMinor = source["PpnMinor"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.GrandTotalMinor = source["GrandTotalMinor"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2128,6 +2132,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
@@ -2154,6 +2159,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
@@ -2186,6 +2192,7 @@ export namespace backend {
 	    ReceivedDate: string;
 	    QuotationID: number;
 	    RevisionNumber: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCreateInput(source);
@@ -2196,6 +2203,7 @@ export namespace backend {
 	        this.ReceivedDate = source["ReceivedDate"];
 	        this.QuotationID = source["QuotationID"];
 	        this.RevisionNumber = source["RevisionNumber"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderItemDTO {
@@ -2293,6 +2301,7 @@ export namespace backend {
 	    ConfirmationWarn: boolean;
 	    ConfirmationRequested: boolean;
 	    Version: number;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderDTO(source);
@@ -2350,6 +2359,7 @@ export namespace backend {
 	        this.ConfirmationWarn = source["ConfirmationWarn"];
 	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Version = source["Version"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2702,6 +2712,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Items: PurchaseOrderItemInput[];
 	    Decisions: PurchaseOrderDecisionInput[];
@@ -2732,6 +2743,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
 	        this.Decisions = this.convertValues(source["Decisions"], PurchaseOrderDecisionInput);
@@ -2792,6 +2804,7 @@ export namespace backend {
 	    SourceRevision: number;
 	    SourceMissing: boolean;
 	    SourceState: string;
+	    BusinessCategory: string;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderListRowDTO(source);
@@ -2811,6 +2824,7 @@ export namespace backend {
 	        this.SourceRevision = source["SourceRevision"];
 	        this.SourceMissing = source["SourceMissing"];
 	        this.SourceState = source["SourceState"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	    }
 	}
 	export class PurchaseOrderListPageDTO {
@@ -2860,6 +2874,7 @@ export namespace backend {
 	    ReceivedFrom: string;
 	    ReceivedTo: string;
 	    SourceMissing: string;
+	    Category: string;
 	    Page: number;
 	    PageSize: number;
 
@@ -2875,6 +2890,7 @@ export namespace backend {
 	        this.ReceivedFrom = source["ReceivedFrom"];
 	        this.ReceivedTo = source["ReceivedTo"];
 	        this.SourceMissing = source["SourceMissing"];
+	        this.Category = source["Category"];
 	        this.Page = source["Page"];
 	        this.PageSize = source["PageSize"];
 	    }
@@ -2933,6 +2949,7 @@ export namespace backend {
 	    RequestedDeliveryDate: string;
 	    Incoterms: string;
 	    PaymentTerms: string;
+	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
@@ -2963,6 +2980,7 @@ export namespace backend {
 	        this.RequestedDeliveryDate = source["RequestedDeliveryDate"];
 	        this.Incoterms = source["Incoterms"];
 	        this.PaymentTerms = source["PaymentTerms"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
@@ -3030,6 +3048,7 @@ export namespace backend {
 	    TaxZone: string;
 	    TaxType: string;
 	    ServiceCategory: string;
+	    BusinessCategory: string;
 	    ExpectedVersion: number;
 	    Overwrite: boolean;
 
@@ -3060,6 +3079,7 @@ export namespace backend {
 	        this.TaxZone = source["TaxZone"];
 	        this.TaxType = source["TaxType"];
 	        this.ServiceCategory = source["ServiceCategory"];
+	        this.BusinessCategory = source["BusinessCategory"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
 	        this.Overwrite = source["Overwrite"];
 	    }
@@ -3417,6 +3437,347 @@ export namespace currency {
 	        this.decimalSep = source["decimalSep"];
 	        this.symbolSpaced = source["symbolSpaced"];
 	    }
+	}
+
+}
+
+export namespace poreport {
+
+	export class Category {
+	    businessCategory: string;
+	    label: string;
+	    poCount: number;
+	    amountMinor: number;
+	    costedMinor: number;
+	    uncostedMinor: number;
+	    capitalMinor: number;
+	    marginMinor: number;
+	    marginBps?: number;
+	    coverageBps?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Category(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.businessCategory = source["businessCategory"];
+	        this.label = source["label"];
+	        this.poCount = source["poCount"];
+	        this.amountMinor = source["amountMinor"];
+	        this.costedMinor = source["costedMinor"];
+	        this.uncostedMinor = source["uncostedMinor"];
+	        this.capitalMinor = source["capitalMinor"];
+	        this.marginMinor = source["marginMinor"];
+	        this.marginBps = source["marginBps"];
+	        this.coverageBps = source["coverageBps"];
+	    }
+	}
+	export class CategorySeries {
+	    businessCategory: string;
+	    marginBps: number[];
+
+	    static createFrom(source: any = {}) {
+	        return new CategorySeries(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.businessCategory = source["businessCategory"];
+	        this.marginBps = source["marginBps"];
+	    }
+	}
+	export class Company {
+	    name: string;
+	    address: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Company(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.address = source["address"];
+	    }
+	}
+	export class Metrics {
+	    poCount: number;
+	    amountMinor: number;
+	    costedMinor: number;
+	    uncostedMinor: number;
+	    capitalMinor: number;
+	    marginMinor: number;
+	    marginBps?: number;
+	    coverageBps?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Metrics(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.poCount = source["poCount"];
+	        this.amountMinor = source["amountMinor"];
+	        this.costedMinor = source["costedMinor"];
+	        this.uncostedMinor = source["uncostedMinor"];
+	        this.capitalMinor = source["capitalMinor"];
+	        this.marginMinor = source["marginMinor"];
+	        this.marginBps = source["marginBps"];
+	        this.coverageBps = source["coverageBps"];
+	    }
+	}
+	export class Note {
+	    code: string;
+	    text: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Note(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.text = source["text"];
+	    }
+	}
+	export class Period {
+	    periodStart: string;
+	    partial: boolean;
+	    inProgress: boolean;
+	    poCount: number;
+	    amountMinor: number;
+	    costedMinor: number;
+	    uncostedMinor: number;
+	    capitalMinor: number;
+	    marginMinor: number;
+	    marginBps?: number;
+	    coverageBps?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Period(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.periodStart = source["periodStart"];
+	        this.partial = source["partial"];
+	        this.inProgress = source["inProgress"];
+	        this.poCount = source["poCount"];
+	        this.amountMinor = source["amountMinor"];
+	        this.costedMinor = source["costedMinor"];
+	        this.uncostedMinor = source["uncostedMinor"];
+	        this.capitalMinor = source["capitalMinor"];
+	        this.marginMinor = source["marginMinor"];
+	        this.marginBps = source["marginBps"];
+	        this.coverageBps = source["coverageBps"];
+	    }
+	}
+	export class Population {
+	    availableCurrencies: string[];
+	    hasUnassigned: boolean;
+	    sourceMissingPoCount: number;
+
+	    static createFrom(source: any = {}) {
+	        return new Population(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.availableCurrencies = source["availableCurrencies"];
+	        this.hasUnassigned = source["hasUnassigned"];
+	        this.sourceMissingPoCount = source["sourceMissingPoCount"];
+	    }
+	}
+	export class ProjectedBucket {
+	    periodStart: string;
+	    amountLowMinor: number;
+	    amountBaseMinor: number;
+	    amountHighMinor: number;
+	    capitalMinor: number;
+	    marginMinor: number;
+	    marginBps?: number;
+	    sampleSize: number;
+	    source: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ProjectedBucket(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.periodStart = source["periodStart"];
+	        this.amountLowMinor = source["amountLowMinor"];
+	        this.amountBaseMinor = source["amountBaseMinor"];
+	        this.amountHighMinor = source["amountHighMinor"];
+	        this.capitalMinor = source["capitalMinor"];
+	        this.marginMinor = source["marginMinor"];
+	        this.marginBps = source["marginBps"];
+	        this.sampleSize = source["sampleSize"];
+	        this.source = source["source"];
+	    }
+	}
+	export class ProjectionBasis {
+	    historyFrom: string;
+	    historyTo: string;
+	    completeMonths: number;
+	    poCount: number;
+	    asOf: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ProjectionBasis(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.historyFrom = source["historyFrom"];
+	        this.historyTo = source["historyTo"];
+	        this.completeMonths = source["completeMonths"];
+	        this.poCount = source["poCount"];
+	        this.asOf = source["asOf"];
+	    }
+	}
+	export class ProjectionSeries {
+	    status: string;
+	    reason?: string;
+	    method: string;
+	    basis: ProjectionBasis;
+	    buckets: ProjectedBucket[];
+
+	    static createFrom(source: any = {}) {
+	        return new ProjectionSeries(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.reason = source["reason"];
+	        this.method = source["method"];
+	        this.basis = this.convertValues(source["basis"], ProjectionBasis);
+	        this.buckets = this.convertValues(source["buckets"], ProjectedBucket);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Projection {
+	    monthly: ProjectionSeries;
+	    yearly: ProjectionSeries;
+
+	    static createFrom(source: any = {}) {
+	        return new Projection(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.monthly = this.convertValues(source["monthly"], ProjectionSeries);
+	        this.yearly = this.convertValues(source["yearly"], ProjectionSeries);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
+	export class Query {
+	    from: string;
+	    to: string;
+	    bucket: string;
+	    category: string;
+	    currency: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Query(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.from = source["from"];
+	        this.to = source["to"];
+	        this.bucket = source["bucket"];
+	        this.category = source["category"];
+	        this.currency = source["currency"];
+	    }
+	}
+	export class Report {
+	    generatedAt: string;
+	    asOf: string;
+	    filter: Query;
+	    company: Company;
+	    population: Population;
+	    totals: Metrics;
+	    periods: Period[];
+	    categories: Category[];
+	    categorySeries: CategorySeries[];
+	    projection: Projection;
+	    notes: Note[];
+
+	    static createFrom(source: any = {}) {
+	        return new Report(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.generatedAt = source["generatedAt"];
+	        this.asOf = source["asOf"];
+	        this.filter = this.convertValues(source["filter"], Query);
+	        this.company = this.convertValues(source["company"], Company);
+	        this.population = this.convertValues(source["population"], Population);
+	        this.totals = this.convertValues(source["totals"], Metrics);
+	        this.periods = this.convertValues(source["periods"], Period);
+	        this.categories = this.convertValues(source["categories"], Category);
+	        this.categorySeries = this.convertValues(source["categorySeries"], CategorySeries);
+	        this.projection = this.convertValues(source["projection"], Projection);
+	        this.notes = this.convertValues(source["notes"], Note);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 
 }

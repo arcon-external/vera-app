@@ -79,7 +79,7 @@ They retain their existing validation; “not comparable” does not mean option
 
 Customer snapshot, currency, Quotation identity and source revision are
 source-owned identity/constraints, not keep/use differences. A currency or
-customer mismatch is refused, with no conversion. Cost, margin, PPH22 and
+customer mismatch is refused, with no conversion. Cost, margin, PPH23 and
 profit are absent from this interface and customer output.
 
 Printed subtotal/discount/PPN/grand total are immutable source evidence, not

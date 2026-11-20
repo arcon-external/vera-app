@@ -16,7 +16,7 @@ import (
 //
 // DescriptionLines are the plain item's "- " bullet lines, numbered X.Y
 // after the item's No. They are customer-safe -- number and text only, no
-// margin, no PPH22, no profit -- because the review panel reads the same
+// margin, no PPH23, no profit -- because the review panel reads the same
 // lines the document prints.
 type CustomerPreviewItem struct {
 	Description              string
@@ -43,7 +43,7 @@ type CustomerPreviewItem struct {
 // The cost side is here on purpose: ReviewPanel renders its "before margin"
 // table from Items, and those figures are what staff check the margin against.
 // What must never appear here is the internal economics -- what a line earned,
-// the PPH22 withheld, the nett profit. Those belong to InternalBreakdown, which
+// the PPH23 withheld, the nett profit. Those belong to InternalBreakdown, which
 // is where the one caller that wants them reads them from.
 //
 // This struct has been wrong before. It was written in #28 with none of those

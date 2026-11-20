@@ -4,7 +4,7 @@
 -- those entries produce. A PO is a customer document, so only customer-facing
 -- figures live here: row and whole-PO discounts, the PPN that will be printed
 -- on the order, a signed adjustment with its reason, and the calculated
--- totals. Internal cost, margin, PPH22 and profit are deliberately absent --
+-- totals. Internal cost, margin, PPH23 and profit are deliberately absent --
 -- they must never become a PO comparison or a PO price.
 --
 -- The calculated figures are stored beside their inputs rather than recomputed
@@ -34,7 +34,7 @@ ALTER TABLE {{schema}}.purchase_orders
     ADD COLUMN IF NOT EXISTS discount_minor BIGINT NOT NULL DEFAULT 0
         CHECK (discount_minor >= 0),
     -- The rate is a snapshot: a later legislative change must not rewrite an
-    -- entered PO. 0 for FTZ and for services, 1100 for Non-FTZ goods. PPH22
+    -- entered PO. 0 for FTZ and for services, 1100 for Non-FTZ goods. PPH23
     -- (services, internal) never appears here.
     ADD COLUMN IF NOT EXISTS ppn_bps SMALLINT NOT NULL DEFAULT 0
         CHECK (ppn_bps BETWEEN 0 AND 10000),
