@@ -69,21 +69,6 @@ func ProjectCurrent(
 	return projectCurrentMonth(history, daily, normalized, asOfDate)
 }
 
-// UnavailableCurrentProjection states one reason for a current projection whose
-// input could not be represented exactly. The actual report is never suppressed
-// by this; only the forecast is.
-func UnavailableCurrentProjection(mode, reason string, asOf time.Time) CurrentProjection {
-	method := MethodCurrentNone
-	switch mode {
-	case ProjectionModeDay:
-		method = MethodCurrentDay
-	case ProjectionModeMonth:
-		method = MethodCurrentMonth
-	}
-	return unavailableCurrent(mode, reason, method,
-		CurrentProjectionBasis{AsOf: companyDateString(asOf)})
-}
-
 // currentProjectionMode names the only two ranges that earn a current-period
 // forecast. A day-bucketed report must be the whole current month; a non-day
 // report must be the whole current year. A current-month report bucketed by
