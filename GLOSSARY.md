@@ -141,7 +141,7 @@ The rendered customer document for an issued revision.
 _Avoid_: Printout, document (alone)
 
 **Internal breakdown**:
-The staff-only view of cost, margin, PPH22 and nett profit.
+The staff-only view of cost, margin, PPH23 and nett profit.
 _Avoid_: Review (the step), breakdown (the customer document)
 
 **Validity**:
@@ -192,7 +192,7 @@ _Avoid_: Markup
 
 **Margin amount**:
 The sell total minus the cost total; it is signed and can be negative when a discount cuts below cost.
-_Avoid_: Profit (the nett profit is after PPH22)
+_Avoid_: Profit (the nett profit is after PPH23)
 
 **List price**:
 The price a customer sees for a line before any discount; cost plus margin.
@@ -235,19 +235,19 @@ The sum of the line costs; discounts never reduce it.
 _Avoid_: Original total
 
 **Nett profit**:
-The sell total minus PPH22 and the cost total; it is signed and never includes PPN.
+The sell total minus PPH23 and the cost total; it is signed and never includes PPN.
 _Avoid_: Profit, net income
 
 **PPN**:
 The Indonesian value-added tax (currently 11%) added on top of the customer price for non-FTZ goods; it is printed on the quotation and is never company profit.
 _Avoid_: VAT, sales tax
 
-**PPH22**:
+**PPH23**:
 The Indonesian final income tax on services (currently 2% for non-construction and 1.75% for construction), calculated on the sell total and kept internal; it never prints.
 _Avoid_: Income tax, withholding tax
 
 **Tax basis**:
-The tax zone, tax type and service category that determine PPN and PPH22.
+The tax zone, tax type and service category that determine PPN and PPH23.
 _Avoid_: Tax profile, tax settings
 
 **Tax zone**:
@@ -259,7 +259,7 @@ Goods or Services; the two categories of quotation line for tax.
 _Avoid_: Tax category
 
 **Service category**:
-Construction or Non-construction; it sets the PPH22 rate for services.
+Construction or Non-construction; it sets the PPH23 rate for services.
 _Avoid_: Service type, construction class
 
 **FTZ**:
@@ -513,7 +513,7 @@ The pinned source revision's cost for the PO's ordered quantity: a line's origin
 _Avoid_: Cost total, quotation cost, supplier value
 
 **PO margin**:
-The costed amount minus Capital; it is signed and can be negative when a discount cuts below cost. PPH22 is not subtracted because this is a purchase-order margin, not the quotation's nett profit.
+The costed amount minus Capital; it is signed and can be negative when a discount cuts below cost. PPH23 is not subtracted because this is a purchase-order margin, not the quotation's nett profit.
 _Avoid_: Nett profit, gross profit, quotation margin
 
 **PO margin %**:

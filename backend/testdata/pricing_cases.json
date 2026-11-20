@@ -129,7 +129,7 @@
       }
     },
     {
-      "name": "PPH22 is withheld on services, and is internal",
+      "name": "PPH23 is withheld on services, and is internal",
       "why": "it is never printed, and nett profit is computed from the sell grand, not the customer total",
       "lines": [
         {
@@ -159,7 +159,7 @@
       }
     },
     {
-      "name": "FTZ goods carry no PPN and no PPH22, so nett equals the profit",
+      "name": "FTZ goods carry no PPN and no PPH23, so nett equals the profit",
       "why": "the baseline: nothing withheld, nothing added",
       "lines": [
         {

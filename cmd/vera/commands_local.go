@@ -141,7 +141,7 @@ func inputReference() string {
                     conversion between them.
   taxZone           FTZ (default) or NonFTZ.
   taxType           Goods (default) or Services.
-  serviceCategory   services only, and only then: NonConstruction (2% PPH22) or
+  serviceCategory   services only, and only then: NonConstruction (2% PPH23) or
                     Construction (1.75%). Any other value is refused.
   discountPercent   whole-quotation discount. Retired from the editor in favour
                     of per-row discounts; still accepted for older payloads.
@@ -169,7 +169,7 @@ Rules the server enforces, so this tool does not have to guess
   - A discount never reduces what we pay: a row sold below cost shows a negative
     margin, and nett profit is signed.
   - PPN (11%, non-FTZ goods) is added on top, and is collected for the state --
-    it is never profit. PPH22 (services) is internal and never printed.
+    it is never profit. PPH23 (services) is internal and never printed.
   - Money only ever moves as integers of rupiah.
 
 Reading the file

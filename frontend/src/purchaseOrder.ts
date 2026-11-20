@@ -792,7 +792,7 @@ function basisPointsMinor(amount: number, bps: number): number | null {
  *   5. grand total   subtotal + PPN
  *
  * The whole-PO discount and the signed adjustment are retired (#573); the
- * store keeps their dormant columns at zero. Internal cost, margin, PPH22 and
+ * store keeps their dormant columns at zero. Internal cost, margin, PPH23 and
  * profit have no place in this module: a PO is compared against
  * customer-facing figures only.
  */

@@ -327,9 +327,9 @@ func TestRenderedQuotationPPN(t *testing.T) {
 		if !strings.Contains(rendered, "299.700") {
 			t.Error("non-FTZ goods quotation missing PPN-inclusive grand 299.700")
 		}
-		// PPh22 is the internal service rate. It must never print: the customer
+		// PPh23 is the internal service rate. It must never print: the customer
 		// sees the price and, for non-FTZ goods, PPN -- nothing else.
-		for _, forbidden := range []string{"Nett", "Margin", "Profit", "Internal", "withholding", "final", "PPh22", "PPH22"} {
+		for _, forbidden := range []string{"Nett", "Margin", "Profit", "Internal", "withholding", "final", "PPh23", "PPH23"} {
 			if strings.Contains(rendered, forbidden) {
 				t.Errorf("rendered quotation leaks internal concept %q", forbidden)
 			}
@@ -487,7 +487,7 @@ func TestPreviewNoNilFieldsOnTheWire(t *testing.T) {
 }
 
 // internalEconomics are the field names that describe what a quotation earns the
-// company: per-line margin, the PPH22 withheld, and the nett profit.
+// company: per-line margin, the PPH23 withheld, and the nett profit.
 //
 // The list is spelled out rather than derived from InternalBreakdown, because
 // the two structs legitimately share names -- GrandTotal, Items, DiscountPercent
@@ -514,7 +514,7 @@ var internalEconomics = []string{
 //
 // PPN is deliberately absent from the list above. It is charged on top and
 // printed on the customer's quotation, so PpnAmount is customer-facing, while
-// TaxAmount (PPH22) is not. That distinction is the whole point of the rule.
+// TaxAmount (PPH23) is not. That distinction is the whole point of the rule.
 func TestCustomerPreviewCarriesNoInternalEconomics(t *testing.T) {
 	for _, target := range []any{CustomerPreview{}, CustomerPreviewItem{}} {
 		typ := reflect.TypeOf(target)

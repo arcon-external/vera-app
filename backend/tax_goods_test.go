@@ -158,7 +158,7 @@ func TestLegacyCategoryCompat(t *testing.T) {
 //     profit: the customer pays 9.990 and our profit is 9.000 - 10.000.
 //   - FTZ goods carry no tax at all, so the customer pays 9.000 and the loss
 //     is the same 1.000.
-//   - Services carry a PPh22 withholding instead: the customer pays 9.000,
+//   - Services carry a PPh23 withholding instead: the customer pays 9.000,
 //     2% comes off internally, and the loss is 1.180.
 //
 // The discount cutting only the price is what makes the goods cases a loss
@@ -175,7 +175,7 @@ func TestProfitFollowsConfirmedTaxFlow(t *testing.T) {
 	}{
 		{"goods non-FTZ pays PPN on top", TaxZoneNonFTZ, TaxTypeGoods, "", 990, 9990, -1000},
 		{"goods FTZ pays no tax", TaxZoneFTZ, TaxTypeGoods, "", 0, 9000, -1000},
-		{"services withhold PPh22", TaxZoneNonFTZ, TaxTypeServices, ServiceCategoryNonConstruction, 0, 9000, -1180},
+		{"services withhold PPh23", TaxZoneNonFTZ, TaxTypeServices, ServiceCategoryNonConstruction, 0, 9000, -1180},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

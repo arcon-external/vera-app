@@ -875,7 +875,7 @@ func formatPurchaseOrderDate(value *time.Time) *string {
 }
 
 // mapPurchaseOrderReview exposes the exact source beside the stored record. The
-// source is the customer-facing composition, so internal cost, margin, PPH22
+// source is the customer-facing composition, so internal cost, margin, PPH23
 // and profit never cross this boundary (parent story 42).
 // mapPurchaseOrderDraftLinkReview exposes the draft-link review: the same
 // record/source/document shape a final save reads, plus the two tax bases and

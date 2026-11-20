@@ -337,3 +337,24 @@ func TestPDFTextReaderIsInstalledInCI(t *testing.T) {
 		t.Fatalf("CI must install poppler-utils so PDF text assertions actually run: %v", err)
 	}
 }
+
+// TestBinaryPDFUSDAxisAppliesTheCurrencyExponent pins the axis/table agreement
+// for a two-decimal currency. The axis takes minor-unit ticks like the table, so
+// compacting before applying the exponent printed "$150M" for $1.5M on the same
+// page whose table said "$12,345,678.90": a 100x contradiction.
+func TestBinaryPDFUSDAxisAppliesTheCurrencyExponent(t *testing.T) {
+	snapshot := sampleReport()
+	snapshot.Filter.Currency = "USD"
+	pdf, err := Render(snapshot, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("Render USD: %v", err)
+	}
+	text := strings.Join(binaryPDFText(t, pdf), "\n")
+	requireText(t, text, "$12,345,678.90", "$1.5M", "$500K")
+	if strings.Contains(text, "Rp") {
+		t.Errorf("USD report prints a rupiah amount")
+	}
+	if strings.Contains(text, "$150M") {
+		t.Errorf("USD axis compacted minor units without the currency exponent: $150M for $1.5M")
+	}
+}

@@ -480,7 +480,7 @@ describe("Quotation hero (issue #623)", () => {
     expect(heroText()).toContain("Includes PPN");
 
     pickRadio("Tax type", "Services");
-    pickOption("Service category", "Non-construction — 2% PPh22");
+    pickOption("Service category", "Non-construction — 2% PPh23");
 
     expect(heroText()).toContain("Non-FTZ · Services · Non-construction");
     expect(heroTotal()).toBe("Rp1.000.000");

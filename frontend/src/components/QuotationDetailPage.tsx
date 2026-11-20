@@ -37,10 +37,10 @@ function signedMoney(currency: CurrencyInfo, value: number): string {
 
 function taxDetailLabel(quotation: ArchivedQuotation): string {
   if (quotation.ServiceCategory === "Construction") {
-    return "Construction 1,75% PPh22";
+    return "Construction 1,75% PPh23";
   }
   if (quotation.ServiceCategory === "NonConstruction") {
-    return "Non-construction 2% PPh22";
+    return "Non-construction 2% PPh23";
   }
   return quotation.TaxCategory || quotation.TaxZone;
 }

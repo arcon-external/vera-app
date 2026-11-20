@@ -244,7 +244,7 @@ describe("Purchase order performance chart (issue #631)", () => {
   it("taps a point on touch, keeps the tooltip and leaves vertical panning alone", async () => {
     const report = purchaseOrderReportFixture();
     await render(report);
-    expect(surface().style.touchAction).toBe("pan-y");
+    expect(surface().style.touchAction).toBe("pan-x pan-y");
     const model = buildReportChart(report, []);
     const layout = layoutReportChart(model, 960);
 
@@ -486,7 +486,7 @@ describe("Purchase order performance chart (issue #631)", () => {
     expect(labels.length).toBeLessThan(120);
     expect(labels.length).toBeGreaterThan(4);
     expect(labels[labels.length - 1]?.textContent).toBe("Dec 14");
-    expect(surface().style.touchAction).toBe("pan-y");
+    expect(surface().style.touchAction).toBe("pan-x pan-y");
   });
 
   it("states plainly when the report currency is not in the catalogue", async () => {
@@ -517,5 +517,15 @@ describe("Purchase order performance chart (issue #631)", () => {
 
     expect(svg().innerHTML).not.toContain("NaN");
     expect(svg().innerHTML).not.toContain("Infinity");
+    // A real zero is a measured value, not a missing one: no column rect is
+    // drawn for a zero bar, and the money axis still prints its zero tick.
+    expect(svg().querySelectorAll("rect[data-series]")).toHaveLength(0);
+    const moneyLabels = [...svg().querySelectorAll('[data-chart-axis="money"] text')].map(
+      (node) => node.textContent
+    );
+    expect(moneyLabels).toContain("Rp0");
+    // No capital means no defined margin percentage: the line is absent rather
+    // than drawn on the zero baseline.
+    expect(svg().querySelector("[data-chart-margin-line]")).toBeNull();
   });
 });

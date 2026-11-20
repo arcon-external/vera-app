@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -186,7 +187,17 @@ func formatPct(bps *int64) string {
 // compactMoney is the axis label form: one significant decimal and K/M/B/T,
 // with the currency's own symbol placement. The KPI strip and the tables print
 // exact figures; an axis tick does not need every rupiah.
+//
+// Axis values arrive in minor units, exactly like the table's money. A currency
+// with an exponent must be converted to major units before compacting, or USD
+// 10,000 minor would print "$10K" beside a $100 table figure -- a 100x lie on
+// the same page. IDR's exponent is zero, so this is invisible there and easy to
+// miss; the currency catalogue owns the exponent, never a hard-coded 100.
 func compactMoney(code string, value float64) string {
+	info, ok := currency.Lookup(code)
+	if ok && info.Exponent > 0 {
+		value /= math.Pow10(info.Exponent)
+	}
 	negative := value < 0
 	if negative {
 		value = -value
@@ -204,6 +215,8 @@ func compactNumber(value float64) string {
 		divisor float64
 		suffix  string
 	}{
+		{1e18, "E"},
+		{1e15, "P"},
 		{1e12, "T"},
 		{1e9, "B"},
 		{1e6, "M"},

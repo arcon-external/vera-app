@@ -45,7 +45,7 @@ func fourTerms() []string {
 	}
 }
 
-// noPPNInput is the PPH22 / FTZ shape: services carry no PPN row, so the
+// noPPNInput is the PPH23 / FTZ shape: services carry no PPN row, so the
 // totals card is two rows (Sub Total, Grand Total) beside a taller terms card.
 func noPPNInput() Input {
 	in := sampleInput()

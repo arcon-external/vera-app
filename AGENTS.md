@@ -235,13 +235,13 @@ server fails (`unrecognized configuration parameter "transaction_timeout"`).
   - **PPN** (11%, non-FTZ goods only) is charged **on top of the price**. The customer
     pays `SellGrand + PPN`; it is collected for the state and is **never profit**.
     It prints on the customer quotation and on the verification page.
-  - **PPH22** (2% non-construction, 1.75% construction, services only, any zone) is
+  - **PPH23** (2% non-construction, 1.75% construction, services only, any zone) is
     **internal**: calculated once on the sell grand after discount
     (`Tax = Grand * bps / 10000`), never allocated per line, never printed.
-- **Nett profit** = sell grand after discount − PPH22 − cost (signed). It must never be
+- **Nett profit** = sell grand after discount − PPH23 − cost (signed). It must never be
   computed from the customer total, or the PPN we collected counts as our profit.
 - **The customer PDF/template shows marginalized prices, plus PPN when charged.**
-  Margin percentage, PPH22, and nett profit must never appear in the customer output.
+  Margin percentage, PPH23, and nett profit must never appear in the customer output.
   There is a test asserting this (`TestRenderedQuotationHidesInternalValues`) — keep it
   green.
 - **Revisions are immutable:** first export is revision `00`; each edit creates the
@@ -969,12 +969,12 @@ found`). `gh release create` creates the tag as well, so there is no
 - **Split presentation:** `GetCustomerPreview` is separated from
   `GetInternalBreakdown` (never exported). The customer view carries the
   document plus the cost side the review panel renders — but **never margin,
-  PPH22 or profit**: `TestCustomerPreviewCarriesNoInternalEconomics` fails if
+  PPH23 or profit**: `TestCustomerPreviewCarriesNoInternalEconomics` fails if
   any of those names reappear on `CustomerPreview` or `CustomerPreviewItem`.
   They were added once as collateral in #48 and nothing read them for a month,
   so the rule is enforced by a test rather than by a comment. PPN is the
   deliberate exception: it is charged on top and printed, so it is customer-
-  facing while PPH22 is not.
+  facing while PPH23 is not.
 - **Normalized persistence:** customers, quotations, immutable revisions, revision
   items, revision totals, and rendered documents. Referential integrity via foreign
   keys; money as `BIGINT` minor units of the company currency; rates as basis points.

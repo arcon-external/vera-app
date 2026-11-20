@@ -89,6 +89,24 @@ func TestMoneyFormattingFollowsTheFilterCurrency(t *testing.T) {
 	if got := compactMoney("IDR", -150_000_000); got != "Rp-150M" {
 		t.Errorf("negative compact money = %q", got)
 	}
+	// A two-decimal currency arrives in minor units, exactly like the tables.
+	// Compacting before applying the exponent prints "$10K" for $100: a 100x
+	// error between the axis and the same page's table.
+	if got := compactMoney("USD", 10_000); got != "$100" {
+		t.Errorf("USD compact money = %q; want $100 (10000 minor)", got)
+	}
+	if got := compactMoney("USD", 12_345_600); got != "$123.5K" {
+		t.Errorf("USD compact money = %q; want $123.5K", got)
+	}
+	if got := compactMoney("USD", -12_345_600); got != "$-123.5K" {
+		t.Errorf("negative USD compact money = %q; want $-123.5K", got)
+	}
+	if got := compactMoney("EUR", 10_000); got != "100 €" {
+		t.Errorf("EUR compact money = %q; want 100 €", got)
+	}
+	if got := compactMoney("IDR", 10_000); got != "Rp10K" {
+		t.Errorf("IDR compact money = %q; want Rp10K", got)
+	}
 }
 
 func TestFormattingMatchesTheSharedCrossSurfaceFixture(t *testing.T) {

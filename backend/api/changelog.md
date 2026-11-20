@@ -575,7 +575,7 @@ per version: Added, Changed, Fixed, Security.
 ### Fixed
 
 - **The totals box on a quotation no longer stretches to match the terms beside
-  it.** When no PPN was charged — services under PPH22, or a free-trade-zone
+  it.** When no PPN was charged — services under PPH23, or a free-trade-zone
   quotation — the box ended well above the bottom of its frame and left a block
   of empty space. It now ends where its figures end, and the rest of the height is
   filled with the same tinted bar that sits below the quotation details.
@@ -736,7 +736,7 @@ per version: Added, Changed, Fixed, Security.
 ### Added
 
 - The internal panel now shows **PPN collected (not profit)** above the nett
-  figure, the way it already showed PPH22. PPN is money held for the state, so
+  figure, the way it already showed PPH23. PPN is money held for the state, so
   it is shown leaving the total: **Grand total − PPN = Nett after Tax**. On a
   goods quotation the totals and the nett no longer look unrelated.
 
@@ -854,7 +854,7 @@ Quotations already exported are untouched by all of this.
 
 ### Changed
 
-- The two service tax rates are now labelled **2% PPh22** and **1.75% PPh22**
+- The two service tax rates are now labelled **2% PPh23** and **1.75% PPh23**
   everywhere, replacing "2% withholding" and "1.75% final". Same rates, the name
   staff actually use on the paperwork.
 

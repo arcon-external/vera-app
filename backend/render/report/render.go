@@ -271,7 +271,7 @@ func (r *reportRenderer) drawDefinitions() {
 	definitions := []string{
 		"PPN is excluded from every amount, costed amount, capital and margin figure in this report. The customer pays PPN on top of a quotation; it is collected for the state and is never profit.",
 		"Capital is the pinned source revision's pre-margin unit cost at the purchase order's quantity, rounded once per purchase order. It is not the quotation's sell price and it is not the latest revision's cost.",
-		"PO margin is costed amount minus capital. It covers only purchase orders whose source cost resolved; uncosted amount is never counted as profit. PPH22 is not subtracted: this is a PO margin, not the quotation's nett profit.",
+		"PO margin is costed amount minus capital. It covers only purchase orders whose source cost resolved; uncosted amount is never counted as profit. PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.",
 		"Corrections are counted once at their current values. A correction can move a purchase order between periods, so this report reflects current records, not the values as they stood when each order was received.",
 		"Projected periods are estimates from complete history. They are drawn as a low–high range with a base, never styled as actuals, and never included in an actual total.",
 		"Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of time had passed.",

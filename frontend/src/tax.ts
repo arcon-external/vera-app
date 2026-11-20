@@ -105,6 +105,6 @@ export function taxRateLabel(zone: string, taxType: string, serviceCategory: str
   const ppn = ppnRateBps(zone, taxType);
   if (ppn > 0) return `PPN ${formatBps(ppn)}`;
   const services = servicesRateBps(taxType, serviceCategory);
-  if (services > 0) return `${formatBps(services)} PPh22`;
+  if (services > 0) return `${formatBps(services)} PPh23`;
   return "0%";
 }

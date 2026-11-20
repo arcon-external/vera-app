@@ -416,8 +416,6 @@ export function reportChartDataKey(report: PurchaseOrderReportData): string {
     report.filter.bucket,
     report.filter.category,
     report.filter.currency,
-    report.generatedAt,
-    report.asOf,
     report.totals.poCount,
     report.totals.amountMinor,
     report.totals.costedMinor,

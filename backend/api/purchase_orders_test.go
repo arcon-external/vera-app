@@ -680,7 +680,7 @@ func TestPurchaseOrderPPNIsCustomerFacingOnlyOverTheAPI(t *testing.T) {
 			draft.PrintedGrandTotalMinor)
 	}
 
-	// PPH22 never reaches a PO: services carry no customer-facing tax at all.
+	// PPH23 never reaches a PO: services carry no customer-facing tax at all.
 	services := poSourceInput("Installation services", "Installation")
 	services["TaxZone"] = "NonFTZ"
 	services["TaxCategory"] = "SupplyInstall"

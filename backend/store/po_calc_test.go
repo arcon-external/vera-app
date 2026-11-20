@@ -368,11 +368,11 @@ func TestPurchaseOrderPPNFollowsQuotationTaxSemantics(t *testing.T) {
 }
 
 // TestPurchaseOrderCalculationCarriesNoInternalEconomics mirrors
-// TestCustomerPreviewCarriesNoInternalEconomics: supplier cost, margin, PPH22
+// TestCustomerPreviewCarriesNoInternalEconomics: supplier cost, margin, PPH23
 // and profit must never have a home in this calculation, because a customer
 // PO is compared against customer-facing figures only.
 func TestPurchaseOrderCalculationCarriesNoInternalEconomics(t *testing.T) {
-	forbidden := []string{"cost", "margin", "pph22", "profit", "nett"}
+	forbidden := []string{"cost", "margin", "pph23", "profit", "nett"}
 	var inspect func(reflect.Type)
 	inspect = func(structType reflect.Type) {
 		for index := 0; index < structType.NumField(); index++ {

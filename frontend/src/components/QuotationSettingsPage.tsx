@@ -100,7 +100,7 @@ export function QuotationSettingsPage({
           {settings.taxType === "Services" ? (
             <SettingsField
               label="Service category"
-              hint="Sets the internal PPh22 rate; it never prints on the quotation."
+              hint="Sets the internal PPh23 rate; it never prints on the quotation."
             >
               <Select
                 ariaLabel="Default service category"

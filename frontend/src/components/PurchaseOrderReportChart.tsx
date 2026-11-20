@@ -481,6 +481,17 @@ export function PurchaseOrderReportChart({
     }
   }, [activeIndex, keyboardActive, layout, surfaceRef]);
 
+  // A width change moves every bucket centre. A stationary pointer must still
+  // point at the bucket under it, not at the index that used to be there.
+  // Scrolling is handled by the surface; the resize case is this effect's job.
+  useEffect(() => {
+    if (pointerX === null) return;
+    const node = surfaceRef.current;
+    if (node === null) return;
+    const index = nearestBucket(layout, pointerX + node.scrollLeft);
+    setActiveIndex((current) => (current === index ? current : index));
+  }, [layout, pointerX, surfaceRef]);
+
   const toggleCategory = (code: string) => {
     setVisibleCategories((current) =>
       current.includes(code)
@@ -506,7 +517,7 @@ export function PurchaseOrderReportChart({
     Math.max(8, measuredWidth - tooltipWidth - 8)
   );
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const selectAt = (event: ReactPointerEvent<HTMLDivElement>) => {
     const node = event.currentTarget;
     const rect = node.getBoundingClientRect();
     const contentX = event.clientX - rect.left + node.scrollLeft;
@@ -516,9 +527,17 @@ export function PurchaseOrderReportChart({
     setKeyboardActive(false);
   };
 
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // A touch drag pans a long chart horizontally. Selecting while the finger
+    // moves would fight the scroll, so a touch reads the value on touch-down
+    // and leaves movement to the surface.
+    if (event.pointerType === "touch") return;
+    selectAt(event);
+  };
+
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    handlePointerMove(event);
+    selectAt(event);
   };
 
   const handlePointerLeave = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -716,7 +735,7 @@ export function PurchaseOrderReportChart({
             ref={surfaceRef}
             data-chart-surface
             className="overflow-x-auto scroll-thin"
-            style={{ touchAction: "pan-y" }}
+            style={{ touchAction: "pan-x pan-y" }}
             onPointerMove={handlePointerMove}
             onPointerDown={handlePointerDown}
             onPointerLeave={handlePointerLeave}

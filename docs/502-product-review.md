@@ -71,7 +71,7 @@ Spec §Comparable-field contract direction is **correct** on Q14/Q15/Q16, but th
 5. **Line discount `Enabled` semantics — spec is silent, code comment is wrong.** Both comparators distinguish disabled vs enabled 0% (contract §8; brief §4.5: `No discount` vs `0%`); the Go comment claims they match. **Recommend:** freeze "disabled 0% ≠ enabled 0%; canonical dormant value `Percent: 0` with `Enabled` retained in the value (contract §5)" and fix the Go comment in implementation, not here.
 6. **PO-only list — one over-broad entry.** "Line number" is PO-only as a comparable (correct — identity is the stable key, number is a label), but the displayed number still appears in every item label (`Line {n} …`). **Recommend:** "displayed line number is a label only, never an item key" (contract §2–3). Contact email/phone as PO-only is correct per glossary (customer contact ≠ recipient) — keep, but do not let a future "compare contacts" slip in without a spec change.
 7. **Missing from the comparable/excluded lists.** Customer name, currency, customer snapshot, source identity/revision are neither comparable nor listed as PO-only — they are **refusal guards** (contract §2, §7). **Recommend:** add one line: "Customer/currency mismatch is refused with a blocking banner; no comparison items are produced and no conversion is performed."
-8. **PPH22/cost/margin/profit — correctly absent.** Keep the explicit exclusion; brief §3.1 "nothing internal appears" is the right guard. No change, just do not let totals-check rows reintroduce them.
+8. **PPH23/cost/margin/profit — correctly absent.** Keep the explicit exclusion; brief §3.1 "nothing internal appears" is the right guard. No change, just do not let totals-check rows reintroduce them.
 
 ---
 

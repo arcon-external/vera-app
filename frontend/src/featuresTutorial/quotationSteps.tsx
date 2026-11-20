@@ -168,7 +168,7 @@ export const QUOTATION_TUTORIAL_STEPS: FeaturesTutorialStep[] = [
     body: (
       <p>
         The rail separates the customer subtotal and PPN from the internal
-        margin, PPh22 and nett profit. Internal economics never print on the
+        margin, PPh23 and nett profit. Internal economics never print on the
         customer document.
       </p>
     ),

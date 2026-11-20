@@ -160,7 +160,7 @@ func TestSampleReportPrintsDefinitionsAndNotes(t *testing.T) {
 		"PPN is excluded from every amount, costed amount, capital and margin figure in this report.",
 		"Capital is the pinned source revision's pre-margin unit cost at the purchase order's quantity",
 		"PO margin is costed amount minus capital.",
-		"PPH22 is not subtracted: this is a PO margin, not the quotation's nett profit.",
+		"PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.",
 		"Corrections are counted once at their current values.",
 		"Projected periods are estimates from complete history.",
 		"Partial and in-progress periods are marked in the period table.",

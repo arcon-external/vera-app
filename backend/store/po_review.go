@@ -18,7 +18,7 @@ import (
 //
 // The comparison is deliberately narrow and customer-facing: descriptions,
 // quantities, units, list prices, row discounts, payment terms and Incoterms.
-// Supplier cost, margin, PPH22 and profit never appear here (parent story 42).
+// Supplier cost, margin, PPH23 and profit never appear here (parent story 42).
 //
 // Matching is by the stored item/sub reference, never by line position. A
 // customer may reorder or flatten the printed table, so position says nothing

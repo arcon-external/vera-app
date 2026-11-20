@@ -154,8 +154,8 @@ func TestPricingFixtureCoversTheRulesThatWereWrong(t *testing.T) {
 	wanted := map[string]string{
 		"a row discounted below cost earns a negative margin":                                  "the signed-margin rule",
 		"PPN is charged on top of the price for non-FTZ goods":                                 "PPN on top, never profit",
-		"PPH22 is withheld on services, and is internal":                                       "PPH22 withheld, never printed",
-		"FTZ goods carry no PPN and no PPH22, so nett equals the profit":                       "the no-tax baseline",
+		"PPH23 is withheld on services, and is internal":                                       "PPH23 withheld, never printed",
+		"FTZ goods carry no PPN and no PPH23, so nett equals the profit":                       "the no-tax baseline",
 		"the whole-quotation discount applies to the summed subtotal, on top of row discounts": "discount ordering",
 		"a split line prices through its parts, not itself":                                    "the sub-item rollup",
 		"truncation lands in the same place on both sides":                                     "truncation, not rounding",
