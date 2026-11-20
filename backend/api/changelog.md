@@ -4,6 +4,29 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.21.0] - 2026-11-20
+
+### Added
+
+- **Purchase order reports.** A new Reports workspace on Home shows how the
+  business is performing from the purchase orders you have recorded. Choose a
+  date range, a category or all categories, how to group the periods, and the
+  currency; see how many orders arrived, what they were worth, what they cost,
+  what they earned and the margin percentage. The report includes a chart,
+  tables for every category and period, a projection of the next 12 months and
+  the next 3 years shown as a range, and a PDF export. (#626)
+- **A business category on every purchase order.** Each order is classified as
+  FM, FAB, SUPPLY_GEN or OTHERS before it is saved for good. The category is
+  kept in correction history and can be filtered in the archive and in reports.
+  (#628)
+
+### Changed
+
+- **The Quotation header card now sits beside its summary rail**, in the same
+  position as the purchase order header, so both workspaces read the same.
+  (#627)
+- **PPH22 is now called PPH23** throughout the app.
+
 ## [0.20.1] - 2026-11-17
 
 ### Changed
