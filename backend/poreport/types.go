@@ -79,6 +79,12 @@ const (
 	// calendar month (day mode) or current calendar year (month mode), so no
 	// current-period forecast is computed.
 	ReasonNotCurrentPeriod = "not_current_period"
+	// Current-period reasons are the stable codes #638 names. They are
+	// deliberately distinct from the complete-history series' reasons: the
+	// screen needs to say whether it is short of days or short of months.
+	ReasonNoData             = "no_data"
+	ReasonInsufficientDays   = "insufficient_days"
+	ReasonInsufficientMonths = "insufficient_months"
 	// ReasonInvalidQuery is defensive only: a report endpoint normalizes its
 	// query before projection, so a client never receives this code.
 	ReasonInvalidQuery = "invalid_query"

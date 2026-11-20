@@ -109,8 +109,11 @@ func projectCurrentDay(daily []HistoryDay, asOfDate time.Time) CurrentProjection
 		PoCount: sample.poCount,
 		AsOf:    asOfDate.Format(reportDateLayout),
 	}
+	if sample.poCount == 0 {
+		return unavailableCurrent(ProjectionModeDay, ReasonNoData, MethodCurrentDay, basis)
+	}
 	if sample.elapsed < MinCurrentDayElapsedDays || sample.poCount < MinCurrentDayPoCount {
-		return unavailableCurrent(ProjectionModeDay, ReasonInsufficientHistory, MethodCurrentDay, basis)
+		return unavailableCurrent(ProjectionModeDay, ReasonInsufficientDays, MethodCurrentDay, basis)
 	}
 	if sample.incomplete {
 		return unavailableCurrent(ProjectionModeDay, ReasonIncompleteCostBasis, MethodCurrentDay, basis)
@@ -164,9 +167,14 @@ func projectCurrentMonth(history []HistoryMonth, daily []HistoryDay, query Query
 		PoCount: sample.basis.PoCount,
 		AsOf:    asOfDate.Format(reportDateLayout),
 	}
-	if basis.Units < MinCurrentMonthComplete || basis.PoCount < MinCurrentMonthPoCount ||
-		day.elapsed < MinCurrentDayElapsedDays || day.poCount < MinCurrentDayPoCount {
-		return unavailableCurrent(ProjectionModeMonth, ReasonInsufficientHistory, MethodCurrentMonth, basis)
+	if basis.PoCount == 0 && day.poCount == 0 {
+		return unavailableCurrent(ProjectionModeMonth, ReasonNoData, MethodCurrentMonth, basis)
+	}
+	if basis.Units < MinCurrentMonthComplete || basis.PoCount < MinCurrentMonthPoCount {
+		return unavailableCurrent(ProjectionModeMonth, ReasonInsufficientMonths, MethodCurrentMonth, basis)
+	}
+	if day.elapsed < MinCurrentDayElapsedDays || day.poCount < MinCurrentDayPoCount {
+		return unavailableCurrent(ProjectionModeMonth, ReasonInsufficientDays, MethodCurrentMonth, basis)
 	}
 	if sample.incomplete || day.incomplete {
 		return unavailableCurrent(ProjectionModeMonth, ReasonIncompleteCostBasis, MethodCurrentMonth, basis)

@@ -248,12 +248,48 @@ func TestPurchaseOrderReportCurrentProjectionThresholds(t *testing.T) {
 	current := decodeReport(t, body).CurrentProjection
 	if current.Mode != poreport.ProjectionModeDay ||
 		current.Status != poreport.ProjectionStatusUnavailable ||
-		current.Reason != poreport.ReasonInsufficientHistory {
+		current.Reason != poreport.ReasonInsufficientDays {
 		t.Fatalf("current projection = %s/%s/%s; want day/unavailable/%s",
-			current.Mode, current.Status, current.Reason, poreport.ReasonInsufficientHistory)
+			current.Mode, current.Status, current.Reason, poreport.ReasonInsufficientDays)
 	}
 	if len(current.Buckets) != 0 {
 		t.Errorf("threshold failure carries %d buckets; want none", len(current.Buckets))
+	}
+}
+
+func TestPurchaseOrderReportCurrentProjectionNoData(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_report_current_no_data")
+	today := apiReportToday()
+	from, to := apiReportCurrentMonthRange(today)
+
+	code, body := doJSON(t, server, http.MethodGet,
+		reportURL(reportQueryParams(from, to, "day", "", "IDR")), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("empty day report = %d (%v); want 200", code, body)
+	}
+	day := decodeReport(t, body).CurrentProjection
+	if day.Mode != poreport.ProjectionModeDay || day.Reason != poreport.ReasonNoData {
+		t.Errorf("empty day projection = %s/%s; want day/%s",
+			day.Mode, day.Reason, poreport.ReasonNoData)
+	}
+	if len(day.Buckets) != 0 {
+		t.Errorf("empty day projection carries %d buckets; want none", len(day.Buckets))
+	}
+
+	yearFrom := time.Date(today.Year(), time.January, 1, 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
+	yearTo := time.Date(today.Year()+1, time.January, 1, 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
+	code, body = doJSON(t, server, http.MethodGet,
+		reportURL(reportQueryParams(yearFrom, yearTo, "month", "", "IDR")), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("empty year report = %d (%v); want 200", code, body)
+	}
+	month := decodeReport(t, body).CurrentProjection
+	if month.Mode != poreport.ProjectionModeMonth || month.Reason != poreport.ReasonNoData {
+		t.Errorf("empty year projection = %s/%s; want month/%s",
+			month.Mode, month.Reason, poreport.ReasonNoData)
+	}
+	if month.CurrentMonth != nil {
+		t.Errorf("empty year projection carries currentMonth: %+v", month.CurrentMonth)
 	}
 }
 

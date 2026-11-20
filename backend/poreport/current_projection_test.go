@@ -169,9 +169,10 @@ func TestProjectCurrentDayGuardsElapsedDaysAndPurchaseOrders(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		days []HistoryDay
-		day  int
+		name   string
+		days   []HistoryDay
+		day    int
+		reason string
 	}{
 		{
 			name: "four elapsed days",
@@ -181,7 +182,8 @@ func TestProjectCurrentDayGuardsElapsedDaysAndPurchaseOrders(t *testing.T) {
 				hd("2026-11-03", 1, 100, 100, 10),
 				hd("2026-11-04", 1, 100, 100, 10),
 			},
-			day: 4,
+			day:    4,
+			reason: ReasonInsufficientDays,
 		},
 		{
 			name: "two purchase orders on five days",
@@ -189,7 +191,14 @@ func TestProjectCurrentDayGuardsElapsedDaysAndPurchaseOrders(t *testing.T) {
 				hd("2026-11-01", 1, 100, 100, 10),
 				hd("2026-11-02", 1, 100, 100, 10),
 			},
-			day: 5,
+			day:    5,
+			reason: ReasonInsufficientDays,
+		},
+		{
+			name:   "no purchase orders",
+			days:   nil,
+			day:    19,
+			reason: ReasonNoData,
 		},
 	}
 	for _, test := range cases {
@@ -198,9 +207,9 @@ func TestProjectCurrentDayGuardsElapsedDaysAndPurchaseOrders(t *testing.T) {
 			t.Parallel()
 			projection := ProjectCurrent(nil, test.days, dayQuery(), at(2026, 11, test.day), false, false)
 			if projection.Status != ProjectionStatusUnavailable ||
-				projection.Reason != ReasonInsufficientHistory {
+				projection.Reason != test.reason {
 				t.Fatalf("projection = %s/%s; want unavailable/%s",
-					projection.Status, projection.Reason, ReasonInsufficientHistory)
+					projection.Status, projection.Reason, test.reason)
 			}
 			if len(projection.Buckets) != 0 {
 				t.Errorf("buckets = %d; want none below the guard", len(projection.Buckets))
@@ -286,12 +295,14 @@ func TestProjectCurrentMonthGuardsBothSamples(t *testing.T) {
 		history []HistoryMonth
 		daily   []HistoryDay
 		day     int
+		reason  string
 	}{
 		{
 			name:    "two complete months",
 			history: monthHistory()[:2],
 			daily:   juneElapsedDays(),
 			day:     10,
+			reason:  ReasonInsufficientMonths,
 		},
 		{
 			name: "three months but four POs",
@@ -300,14 +311,23 @@ func TestProjectCurrentMonthGuardsBothSamples(t *testing.T) {
 				hm("2026-02-01", 1, 2000, 2000, 200),
 				hm("2026-03-01", 2, 3000, 3000, 300),
 			},
-			daily: juneElapsedDays(),
-			day:   10,
+			daily:  juneElapsedDays(),
+			day:    10,
+			reason: ReasonInsufficientMonths,
 		},
 		{
 			name:    "history passes but the daily sample is short",
 			history: monthHistory(),
 			daily:   juneElapsedDays(),
 			day:     4,
+			reason:  ReasonInsufficientDays,
+		},
+		{
+			name:    "no history and no current month",
+			history: nil,
+			daily:   nil,
+			day:     10,
+			reason:  ReasonNoData,
 		},
 	}
 	for _, test := range cases {
@@ -316,9 +336,9 @@ func TestProjectCurrentMonthGuardsBothSamples(t *testing.T) {
 			t.Parallel()
 			projection := ProjectCurrent(test.history, test.daily, monthQuery(), at(2026, 6, test.day), false, false)
 			if projection.Status != ProjectionStatusUnavailable ||
-				projection.Reason != ReasonInsufficientHistory {
+				projection.Reason != test.reason {
 				t.Fatalf("projection = %s/%s; want unavailable/%s",
-					projection.Status, projection.Reason, ReasonInsufficientHistory)
+					projection.Status, projection.Reason, test.reason)
 			}
 			if len(projection.Buckets) != 0 || projection.CurrentMonth != nil {
 				t.Errorf("unavailable projection carries buckets/currentMonth: %+v", projection)
