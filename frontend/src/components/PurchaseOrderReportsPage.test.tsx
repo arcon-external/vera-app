@@ -385,6 +385,19 @@ describe("Reports figures (issue #630)", () => {
     }
   });
 
+  it("keeps the last column's body values inside the same right inset as its header", async () => {
+    await renderPage();
+
+    for (const label of ["Category totals", "Period totals"]) {
+      const table = document.querySelector(`table[aria-label="${label}"]`);
+      if (table === null) throw new Error(`expected the ${label} table`);
+      const header = table.querySelector("thead th:last-child");
+      const cell = table.querySelector("tbody td:last-child");
+      expect(header?.className).toContain("pr-5");
+      expect(cell?.className).toContain("pr-5");
+    }
+  });
+
   it("shows projection basis, low/base/high rows and the unavailable reason", async () => {
     await renderPage();
 

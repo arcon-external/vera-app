@@ -177,7 +177,8 @@ export interface ReportChartLayout {
   percentTicks: Array<{ value: number; y: number }>;
   xLabels: ReportChartXLabel[];
   dividerX: number | null;
-  bandPath: string | null;
+  /** One low-high amount window per projected bucket, at the amount column. */
+  bandWhiskers: Array<{ x: number; lowY: number; highY: number }>;
   columns: ReportChartBucketGeometry[];
   marginPath: string | null;
   marginPoints: Array<{ index: number; x: number; y: number }>;
@@ -878,60 +879,42 @@ export function layoutReportChart(
     }
   );
 
-  let bandPath: string | null = null;
-  if (model.projectedCount > 0) {
-    const projected = model.buckets.slice(model.actualCount);
-    const low = projected.map((entry, index) => ({
-      x: centers[model.actualCount + index],
-      y: scaleY(
-        model.moneyScale,
-        entry.projectedDetail?.amountLowMinor ?? 0,
-        plot.y,
-        plot.height
-      ),
-    }));
-    const high = projected.map((entry, index) => ({
-      x: centers[model.actualCount + index],
-      y: scaleY(
-        model.moneyScale,
-        entry.projectedDetail?.amountHighMinor ?? 0,
-        plot.y,
-        plot.height
-      ),
-    }));
-    if (projected.length === 1) {
-      const half = Math.max(3, groupWidth * 0.3);
-      bandPath = `M ${(low[0].x - half).toFixed(2)} ${low[0].y.toFixed(
-        2
-      )} L ${(low[0].x + half).toFixed(2)} ${low[0].y.toFixed(2)} L ${(
-        high[0].x + half
-      ).toFixed(2)} ${high[0].y.toFixed(2)} L ${(
-        high[0].x - half
-      ).toFixed(2)} ${high[0].y.toFixed(2)} Z`;
-    } else if (projected.length > 1) {
-      const points = [
-        ...low,
-        ...[...high].reverse(),
-      ];
-      bandPath =
-        points
-          .map(
-            (point, index) =>
-              `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(
-                2
-              )}`
-          )
-          .join(" ") + " Z";
-    }
-  }
+  // A projected amount is a range, not a single number. One vertical whisker
+  // per projected bucket states that range at the period it belongs to; a
+  // filled polygon across buckets read as a floating object and hid which
+  // month a low/high belonged to.
+  const bandWhiskers =
+    model.projectedCount === 0
+      ? []
+      : model.buckets.slice(model.actualCount).map((entry, index) => {
+          const x = centers[model.actualCount + index];
+          const lowY = scaleY(
+            model.moneyScale,
+            entry.projectedDetail?.amountLowMinor ?? 0,
+            plot.y,
+            plot.height
+          );
+          const highY = scaleY(
+            model.moneyScale,
+            entry.projectedDetail?.amountHighMinor ?? 0,
+            plot.y,
+            plot.height
+          );
+          return { x, lowY, highY };
+        });
 
+  // marginBps is basis points; the percentage axis is in percent. Mapping the
+  // raw bps value put every point 100x above the plot and clamped the latest
+  // label to the top edge, where it collided with the projection divider label.
   const marginPoints =
     model.percentScale === null
       ? []
       : percentPoints(
           model.buckets
             .slice(0, model.actualCount)
-            .map((entry) => entry.marginBps),
+            .map((entry) =>
+              entry.marginBps === null ? null : entry.marginBps / 100
+            ),
           model.actualCount,
           centers,
           model.percentScale,
@@ -975,7 +958,7 @@ export function layoutReportChart(
       model.dividerIndex === null
         ? null
         : plot.x + model.dividerIndex * groupWidth,
-    bandPath,
+    bandWhiskers,
     columns,
     marginPath,
     marginPoints,

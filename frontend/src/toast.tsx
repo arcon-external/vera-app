@@ -145,7 +145,7 @@ function ToastItem({
       onMouseLeave={() => {
         if (timer.current === null && remaining.current > 0) startTimer();
       }}
-      className={`pointer-events-auto flex min-h-11 animate-toast-in items-center gap-3 rounded-lg border px-4 py-3 text-small shadow-pop ${styles[toast.type]}`}
+      className={`pointer-events-auto flex min-h-11 animate-toast-in items-start gap-3 rounded-lg border px-4 py-3 text-small shadow-pop ${styles[toast.type]}`}
     >
       <span
         aria-hidden="true"
@@ -159,7 +159,7 @@ function ToastItem({
       >
         {icons[toast.type]}
       </span>
-      <span className="flex-1 leading-snug">{toast.message}</span>
+      <span className="min-w-0 flex-1 leading-snug [overflow-wrap:anywhere]">{toast.message}</span>
       <button
         type="button"
         aria-label="Dismiss notification"
