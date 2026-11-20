@@ -2,7 +2,9 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"vera-app/backend/poreport"
 )
@@ -117,5 +119,21 @@ func TestPurchaseOrderReportDailyHistoryRecomputesAsPOsArrive(t *testing.T) {
 	}
 	if after.Totals.PoCount != 2 || after.Totals.AmountMinor != 1500 {
 		t.Errorf("after totals = %+v; want two POs at 1500", after.Totals)
+	}
+}
+
+func TestPurchaseOrderReportDailyRefusesAnOutOfRangeAggregate(t *testing.T) {
+	raw := []byte(fmt.Sprintf(
+		`[{"date":"2026-11-02","poCount":1,"amountMinor":%d,"costedMinor":0,"capitalMinor":0}]`,
+		poreport.MaxExactMinor+1))
+	sample, err := reportDaily(raw, time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("reportDaily() error = %v", err)
+	}
+	if !sample.outOfRange {
+		t.Fatal("daily sample with an inexact aggregate = in range; want it withheld")
+	}
+	if len(sample.days) != 0 {
+		t.Errorf("daily sample kept %d days; want none from a truncated aggregate", len(sample.days))
 	}
 }
