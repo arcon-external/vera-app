@@ -16,11 +16,19 @@ export type ReportPreset =
   | "last-5-years"
   | "custom";
 
-export type ReportBucket = "year" | "quarter" | "month";
+export type ReportBucket = "day" | "year" | "quarter" | "month";
+
+/** The two current-period windows the Performance toggle can select. */
+export type ReportPeriodMode = "month" | "year";
 
 /** The filter as the controls hold it: an inclusive calendar range. */
 export interface ReportFilterState {
   preset: ReportPreset;
+  /**
+   * The selected current-period window, or null when the range is historical
+   * or custom. The toggle owns from/to/bucket while a mode is active.
+   */
+  period: ReportPeriodMode | null;
   /** Inclusive first day, YYYY-MM-DD. */
   from: string;
   /** Inclusive last day, YYYY-MM-DD; the API receives the next day. */
@@ -95,7 +103,11 @@ export const REPORT_BUCKET_OPTIONS: readonly ReportOption<ReportBucket>[] = [
   { value: "year", label: "Year" },
   { value: "quarter", label: "Quarter" },
   { value: "month", label: "Month" },
+  { value: "day", label: "Day" },
 ];
+
+/** The maximum number of day buckets a valid report may request. */
+export const REPORT_MAX_DAY_PERIODS = 31;
 
 /**
  * The filter vocabulary in the client's workbook order. Unassigned is absent
@@ -121,7 +133,7 @@ const REPORT_CATEGORY_CODES = new Set([
   REPORT_CATEGORY_UNASSIGNED,
 ]);
 
-const REPORT_BUCKET_CODES = new Set(["year", "quarter", "month"]);
+const REPORT_BUCKET_CODES = new Set(["day", "year", "quarter", "month"]);
 
 const MONTHS = [
   "Jan",
@@ -200,15 +212,59 @@ export function reportPresetRange(
   }
 }
 
+/**
+ * The inclusive range a Month or Year toggle means on `today` (WIB date), so
+ * the API receives exactly one current calendar month or the current year.
+ * Month mode is daily; Year mode is monthly.
+ */
+export function reportPeriodRange(
+  period: ReportPeriodMode,
+  today: string
+): { from: string; to: string } {
+  const date = parseIsoDate(today);
+  if (date === null) {
+    return { from: today, to: today };
+  }
+  const year = date.getUTCFullYear();
+  if (period === "year") {
+    return { from: `${year}-01-01`, to: `${year}-12-31` };
+  }
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const next = new Date(Date.UTC(year, date.getUTCMonth() + 1, 1));
+  return {
+    from: `${year}-${month}-01`,
+    to: addDaysIso(isoDate(next), -1),
+  };
+}
+
+/** The bucket a period mode pins the report to. */
+export function reportPeriodBucket(period: ReportPeriodMode): ReportBucket {
+  return period === "month" ? "day" : "month";
+}
+
+/** The number of days a day range touches, or null when it spans two months. */
+export function reportDaySpan(from: string, to: string): number | null {
+  const start = parseIsoDate(from);
+  const end = parseIsoDate(to);
+  if (start === null || end === null || start > end) return null;
+  if (
+    start.getUTCFullYear() !== end.getUTCFullYear() ||
+    start.getUTCMonth() !== end.getUTCMonth()
+  ) {
+    return null;
+  }
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+}
+
 /** The initial filter for a newly opened Reports workspace. */
 export function initialReportFilters(
   today: string,
   currency: string
 ): ReportFilterState {
-  const range = reportPresetRange("this-year", today);
   return {
-    preset: "this-year",
-    ...range,
+    preset: "custom",
+    period: "year",
+    ...reportPeriodRange("year", today),
     bucket: "month",
     category: "all",
     currency: currency.trim().toUpperCase(),
@@ -232,6 +288,15 @@ export function reportFilterValidation(filters: ReportFilterState): string {
   }
   if (!REPORT_BUCKET_CODES.has(filters.bucket)) {
     return "Choose a valid bucket.";
+  }
+  if (filters.bucket === "day") {
+    const span = reportDaySpan(filters.from, filters.to);
+    if (span === null) {
+      return "A day report must stay within one calendar month.";
+    }
+    if (span > REPORT_MAX_DAY_PERIODS) {
+      return `A day report can cover at most ${REPORT_MAX_DAY_PERIODS} days.`;
+    }
   }
   if (!REPORT_CATEGORY_CODES.has(filters.category)) {
     return "Choose a valid category.";
@@ -328,6 +393,9 @@ export function reportPeriodLabel(periodStart: string, bucket: string): string {
   if (bucket === "quarter") {
     return `Q${Math.floor(date.getUTCMonth() / 3) + 1} ${date.getUTCFullYear()}`;
   }
+  if (bucket === "day") {
+    return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+  }
   return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
 
@@ -360,6 +428,14 @@ export function formatReportBps(value: number | null | undefined): string {
 /** The sentence a projection's stable reason code stands for. */
 export function projectionReasonLabel(reason: string | undefined): string {
   switch (reason) {
+    case "not_current_period":
+      return "This range is not the current month or year, so no current-period projection is shown.";
+    case "no_data":
+      return "No purchase orders in the current period to forecast from.";
+    case "insufficient_days":
+      return "Not enough elapsed days and purchase orders in the current month to forecast from.";
+    case "insufficient_months":
+      return "Not enough complete months in trailing history to forecast from.";
     case "no_data_in_range":
       return "No purchase orders in this range to forecast from.";
     case "insufficient_history":
@@ -372,7 +448,7 @@ export function projectionReasonLabel(reason: string | undefined): string {
       return "The filter was not valid for a projection.";
     default:
       return reason === undefined || reason === ""
-        ? "Not enough complete-month history to forecast from."
+        ? "Not enough history to forecast from."
         : `Projection unavailable (${reason}).`;
   }
 }
@@ -380,6 +456,10 @@ export function projectionReasonLabel(reason: string | undefined): string {
 /** The method label for a projected bucket's observations. */
 export function projectionSourceLabel(source: string): string {
   switch (source) {
+    case "elapsed_days":
+      return "elapsed days of the current month";
+    case "trailing_complete_months":
+      return "trailing complete months";
     case "same_calendar_month":
       return "same calendar month";
     case "trailing_three_complete_months":

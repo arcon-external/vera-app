@@ -3,6 +3,8 @@ import {
   fixtureRatioBps,
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
+  purchaseOrderReportMonthFixture,
+  purchaseOrderReportYearFixture,
 } from "./poReportFixtures";
 import type {
   PurchaseOrderReportData,
@@ -145,6 +147,57 @@ describe("purchase order report fixtures (issue #632)", () => {
     expect(marked[0].periodStart).toBe("2026-11-01");
     expect(marked[0].partial).toBe(true);
     expect(marked[0].inProgress).toBe(true);
+  });
+
+  it("carries the current-period contract in the month and year fixtures", () => {
+    const month = purchaseOrderReportMonthFixture();
+    expect(month.currentProjection.mode).toBe("day");
+    expect(month.currentProjection.status).toBe("available");
+    expect(month.periods).toHaveLength(30);
+    expect(month.periods.filter((period) => period.periodStart <= month.asOf)).toHaveLength(19);
+    expect(month.currentProjection.buckets).toHaveLength(11);
+    expect(month.currentProjection.buckets[0].periodStart).toBe("2026-11-20");
+    expect(month.currentProjection.currentMonth).toBeUndefined();
+    assertFooting(month);
+    for (const bucket of month.currentProjection.buckets) {
+      expect(bucket.amountLowMinor).toBeLessThanOrEqual(bucket.amountBaseMinor);
+      expect(bucket.amountBaseMinor).toBeLessThanOrEqual(bucket.amountHighMinor);
+      expect(bucket.marginMinor).toBe(bucket.amountBaseMinor - bucket.capitalMinor);
+      expect(bucket.marginBps).toBe(
+        fixtureRatioBps(bucket.marginMinor, bucket.capitalMinor)
+      );
+    }
+
+    const year = purchaseOrderReportYearFixture();
+    expect(year.currentProjection.mode).toBe("month");
+    expect(year.currentProjection.status).toBe("available");
+    expect(year.periods).toHaveLength(12);
+    expect(year.periods.filter((period) => period.periodStart <= "2026-11-01")).toHaveLength(11);
+    assertFooting(year);
+    expect(year.currentProjection.buckets).toHaveLength(1);
+    expect(year.currentProjection.buckets[0].periodStart).toBe("2026-12-01");
+    const currentMonth = year.currentProjection.currentMonth;
+    expect(currentMonth).toBeDefined();
+    const november = year.periods.find(
+      (period) => period.periodStart === "2026-11-01"
+    )!;
+    expect(currentMonth!.actual).toEqual({
+      poCount: november.poCount,
+      amountMinor: november.amountMinor,
+      costedMinor: november.costedMinor,
+      uncostedMinor: november.uncostedMinor,
+      capitalMinor: november.capitalMinor,
+      marginMinor: november.marginMinor,
+      marginBps: november.marginBps,
+      coverageBps: november.coverageBps,
+    });
+    const remainder = currentMonth!.remainder;
+    expect(remainder.low).toBeLessThanOrEqual(remainder.base);
+    expect(remainder.base).toBeLessThanOrEqual(remainder.high);
+    expect(remainder.margin).toBe(remainder.base - remainder.capital);
+    expect(remainder.marginBps).toBe(
+      fixtureRatioBps(remainder.margin, remainder.capital)
+    );
   });
 
   it("keeps the maximum exact fixture footed with derived ratios", () => {

@@ -7,14 +7,15 @@
 // testdata/chart_scales.json fixture), and lays out marks for a measured
 // container width.
 //
-// Projections are drawn from projection.monthly for a monthly view and
-// projection.yearly for a yearly view. A quarterly view gets no forecast:
-// there is no quarterly projection in the payload, and inventing one here
-// would be a number the server never produced.
+// Issue #638 replaces the old monthly/yearly forecast tables with one
+// current-period ghost: remaining days in Month mode, or the current month's
+// remainder plus the remaining months in Year mode. Projected buckets never
+// enter an actual period, total or margin line.
 
 import type { CurrencyInfo } from "./format";
 import { formatReportCount, projectionReasonLabel } from "./poReportPage";
 import type {
+  PurchaseOrderReportCurrentProjectionRemainder,
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
   PurchaseOrderReportProjectedBucket,
@@ -104,6 +105,11 @@ export interface ReportChartBucket {
   /** Present for an actual bucket; null for a projected bucket. */
   coverageBps: number | null;
   projectedDetail: PurchaseOrderReportProjectedBucket | null;
+  /**
+   * Year view only: the current month's projected remainder, stacked on the
+   * actual bar. Null for every other bucket.
+   */
+  remainder: PurchaseOrderReportCurrentProjectionRemainder | null;
 }
 
 export interface ReportChartCategory {
@@ -128,9 +134,12 @@ export interface ReportChartModel {
   percentScale: ChartScale | null;
   categories: ReportChartCategory[];
   categoryFootnote: string | null;
-  /** Quarter/unavailable/empty explanation; null when a projection is drawn. */
+  /** The current-period explanation; null when a ghost is drawn. */
   projectionNote: string | null;
-  projectionKind: "monthly" | "yearly" | "none";
+  /** "day" for the current month, "month" for the current year. */
+  projectionKind: "day" | "month" | "none";
+  /** True when the current month carries a projected remainder stack. */
+  hasRemainder: boolean;
   hasNegativeMargin: boolean;
   hasUncosted: boolean;
   hasPartial: boolean;
@@ -153,6 +162,12 @@ export interface ReportChartBucketGeometry {
   amount: ChartColumn;
   capital: ChartColumn;
   margin: ChartColumn;
+  /** The translucent projected remainder stacked on an actual month. */
+  remainder: {
+    amount: ChartColumn;
+    capital: ChartColumn;
+    margin: ChartColumn;
+  } | null;
   uncosted: { x: number; y: number; width: number; height: number } | null;
 }
 
@@ -179,6 +194,11 @@ export interface ReportChartLayout {
   dividerX: number | null;
   /** One low-high amount window per projected bucket, at the amount column. */
   bandWhiskers: Array<{ x: number; lowY: number; highY: number }>;
+  /**
+   * Year view: the low-high range of the current month's remainder, drawn on
+   * top of its actual amount column.
+   */
+  remainderWhisker: { x: number; lowY: number; highY: number } | null;
   columns: ReportChartBucketGeometry[];
   marginPath: string | null;
   marginPoints: Array<{ index: number; x: number; y: number }>;
@@ -331,7 +351,7 @@ export function formatPercentTick(value: number): string {
   return (negative ? "-" : "") + body + "%";
 }
 
-/** A period's short chart label: "Nov 26", "Q2 26" or "2026". */
+/** A period's short chart label: "19", "Nov 26", "Q2 26" or "2026". */
 export function chartPeriodLabel(periodStart: string, bucket: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(periodStart.trim());
   if (match === null) return periodStart;
@@ -347,6 +367,7 @@ export function chartPeriodLabel(periodStart: string, bucket: string): string {
     return periodStart;
   }
   if (bucket === "year") return String(year);
+  if (bucket === "day") return String(day);
   const shortYear = String(year % 100).padStart(2, "0");
   if (bucket === "quarter") {
     return `Q${Math.floor((month - 1) / 3) + 1} ${shortYear}`;
@@ -382,36 +403,55 @@ export function reportChartDataKey(report: PurchaseOrderReportData): string {
           ...entry.marginBps,
         ])
       : [];
-  // Only the projection this view draws is part of the motion identity. A
-  // yearly series changing under a monthly view (or any series under a
-  // quarterly view) is not visible here and must not replay the marks.
-  const projectionKinds =
-    report.filter.bucket === "month"
-      ? (["monthly"] as const)
-      : report.filter.bucket === "year"
-        ? (["yearly"] as const)
-        : ([] as const);
-  const projection = projectionKinds.map((kind) => {
-    const value =
-      kind === "monthly" ? report.projection.monthly : report.projection.yearly;
-    return [
-      kind,
-      value.status,
-      value.reason ?? "",
-      value.buckets.map((bucket) => [
-        bucket.periodStart,
-        bucket.amountLowMinor,
-        bucket.amountBaseMinor,
-        bucket.amountHighMinor,
-        bucket.capitalMinor,
-        bucket.marginMinor,
-        bucket.marginBps,
-        bucket.sampleSize,
-        bucket.source,
-      ]),
-    ];
-  });
+  // The current-period projection is the only forecast this view draws. Its
+  // mode, status, buckets and remainder are part of the motion identity so a
+  // recomputed ghost replays once, while the old monthly/yearly series (never
+  // drawn now) cannot replay the marks.
+  const current = report.currentProjection;
+  const currentSeries = [
+    current.mode,
+    current.status,
+    current.reason ?? "",
+    current.method,
+    current.basis.from,
+    current.basis.to,
+    current.basis.units,
+    current.basis.poCount,
+    current.basis.asOf,
+    current.buckets.map((bucket) => [
+      bucket.periodStart,
+      bucket.amountLowMinor,
+      bucket.amountBaseMinor,
+      bucket.amountHighMinor,
+      bucket.capitalMinor,
+      bucket.marginMinor,
+      bucket.marginBps,
+      bucket.sampleSize,
+      bucket.source,
+    ]),
+    current.currentMonth === undefined
+      ? null
+      : [
+          current.currentMonth.actual.poCount,
+          current.currentMonth.actual.amountMinor,
+          current.currentMonth.actual.costedMinor,
+          current.currentMonth.actual.uncostedMinor,
+          current.currentMonth.actual.capitalMinor,
+          current.currentMonth.actual.marginMinor,
+          current.currentMonth.actual.marginBps,
+          current.currentMonth.actual.coverageBps,
+          current.currentMonth.remainder.low,
+          current.currentMonth.remainder.base,
+          current.currentMonth.remainder.high,
+          current.currentMonth.remainder.capital,
+          current.currentMonth.remainder.margin,
+          current.currentMonth.remainder.marginBps,
+          current.currentMonth.remainder.sampleSize,
+          current.currentMonth.remainder.source,
+        ],
+  ];
   return JSON.stringify([
+    report.asOf,
     report.filter.from,
     report.filter.to,
     report.filter.bucket,
@@ -427,7 +467,7 @@ export function reportChartDataKey(report: PurchaseOrderReportData): string {
     report.totals.coverageBps,
     periods,
     series,
-    projection,
+    currentSeries,
   ]);
 }
 
@@ -437,6 +477,8 @@ function bucketWord(count: number, bucket: string): string {
       return count === 1 ? "year" : "years";
     case "quarter":
       return count === 1 ? "quarter" : "quarters";
+    case "day":
+      return count === 1 ? "day" : "days";
     default:
       return count === 1 ? "monthly period" : "monthly periods";
   }
@@ -469,6 +511,7 @@ function actualBucket(
     marginBps: period.marginBps,
     coverageBps: period.coverageBps,
     projectedDetail: null,
+    remainder: null,
   };
 }
 
@@ -492,12 +535,14 @@ function projectedBucket(
     marginBps: bucket.marginBps,
     coverageBps: null,
     projectedDetail: bucket,
+    remainder: null,
   };
 }
 
 function categoryModel(
   report: PurchaseOrderReportData,
-  visible: ReadonlySet<string>
+  visible: ReadonlySet<string>,
+  actualCount: number
 ): Pick<ReportChartModel, "categories" | "categoryFootnote"> {
   if (report.filter.category !== "all") {
     return {
@@ -519,7 +564,9 @@ function categoryModel(
     const series = present.get(code);
     return (
       series !== undefined &&
-      series.marginBps.some((value) => value !== null)
+      series.marginBps
+        .slice(0, actualCount)
+        .some((value) => value !== null)
     );
   });
   const categories: ReportChartCategory[] = available.map((code) => {
@@ -530,9 +577,9 @@ function categoryModel(
       label: categoryRowLabel(report, code),
       color: style.color,
       dash: style.dash,
-      values: series.marginBps.map((value) =>
-        value === null ? null : value / 100
-      ),
+      values: series.marginBps
+        .slice(0, actualCount)
+        .map((value) => (value === null ? null : value / 100)),
       visible: visible.has(code),
     };
   });
@@ -554,6 +601,12 @@ function categoryModel(
   return { categories, categoryFootnote: footnote };
 }
 
+/** The first day of the calendar month an ISO date belongs to. */
+function monthStartOf(value: string): string {
+  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(value.trim());
+  return match === null ? "" : `${match[1]}-${match[2]}-01`;
+}
+
 /** Maps the normalized report to chart buckets and both axis domains. */
 export function buildReportChart(
   report: PurchaseOrderReportData,
@@ -561,52 +614,127 @@ export function buildReportChart(
 ): ReportChartModel {
   const bucket = report.filter.bucket;
   const visible = new Set(visibleCategories);
-  const actual = report.periods.map((period) => actualBucket(period, bucket));
+  const current = report.currentProjection;
+  const currentDayView = current.mode === "day" && bucket === "day";
+  const currentMonthView = current.mode === "month" && bucket === "month";
+  const asOfMonth = monthStartOf(report.asOf);
 
-  let projectionKind: ReportChartModel["projectionKind"] = "none";
-  let projectionNote: string | null = null;
-  let projected: ReportChartBucket[] = [];
+  // A day or month report materializes the whole calendar period, including
+  // days and months that have not happened yet. Those are not actual evidence:
+  // the current-period view stops at the as-of day and the server's ghost
+  // buckets continue the axis.
+  let periods = report.periods;
+  if (currentDayView) {
+    periods = periods.filter((period) => period.periodStart <= report.asOf);
+  } else if (currentMonthView) {
+    periods = periods.filter((period) => period.periodStart <= asOfMonth);
+  }
+  const actual = periods.map((period) => actualBucket(period, bucket));
 
-  if (bucket === "quarter") {
-    projectionNote =
-      "No quarterly projection is produced; the monthly and yearly forecasts remain in the Projection section below.";
-  } else if (bucket === "month" || bucket === "year") {
-    projectionKind = bucket === "month" ? "monthly" : "yearly";
-    const series =
-      bucket === "month" ? report.projection.monthly : report.projection.yearly;
-    if (series.status !== "available") {
-      projectionNote = `No projection is drawn: ${projectionReasonLabel(
-        series.reason
-      )}`;
-    } else if (series.buckets.length === 0) {
-      projectionNote = "No projected periods are available in this range.";
-    } else {
-      projected = series.buckets.map((entry) => projectedBucket(entry, bucket));
+  if (
+    currentMonthView &&
+    current.status === "available" &&
+    current.currentMonth !== undefined
+  ) {
+    const index = actual.findIndex(
+      (entry) => entry.periodStart === asOfMonth
+    );
+    if (index >= 0) {
+      // The server returns the current month twice: as a period row and as
+      // currentMonth.actual. The latter is the one the current-period
+      // contract names for this bar, so the stacked remainder sits on exactly
+      // the month-to-date figures the forecast was derived from.
+      const monthToDate = current.currentMonth.actual;
+      actual[index] = {
+        ...actual[index],
+        poCount: monthToDate.poCount,
+        amountMinor: monthToDate.amountMinor,
+        costedMinor: monthToDate.costedMinor,
+        uncostedMinor: monthToDate.uncostedMinor,
+        capitalMinor: monthToDate.capitalMinor,
+        marginMinor: monthToDate.marginMinor,
+        marginBps: monthToDate.marginBps,
+        coverageBps: monthToDate.coverageBps,
+        remainder: current.currentMonth.remainder,
+      };
     }
   }
 
+  const projectionKind: ReportChartModel["projectionKind"] =
+    bucket === "day" ? "day" : bucket === "month" ? "month" : "none";
+  let projectionNote: string | null = null;
+  let projected: ReportChartBucket[] = [];
+
+  if (currentDayView || currentMonthView) {
+    if (current.status !== "available") {
+      projectionNote = `No current-period projection is drawn: ${projectionReasonLabel(
+        current.reason
+      )}`;
+    } else if (
+      bucket === "day" &&
+      current.buckets.length === 0
+    ) {
+      projectionNote = "No remaining days to project in this month.";
+    } else if (
+      bucket === "month" &&
+      current.buckets.length === 0 &&
+      current.currentMonth === undefined
+    ) {
+      projectionNote = "No remaining months to project in this year.";
+    } else {
+      projected = current.buckets.map((entry) =>
+        projectedBucket(entry, bucket)
+      );
+    }
+  } else if (bucket === "quarter" || bucket === "year") {
+    projectionNote =
+      "Current-period projections appear in the Month and Year views.";
+  } else {
+    projectionNote =
+      current.mode === "none"
+        ? `No current-period projection is drawn: ${projectionReasonLabel(
+            current.reason
+          )}`
+        : "No current-period projection is drawn for this view.";
+  }
+
   const buckets = [...actual, ...projected];
-  const moneyValues = buckets.flatMap((entry) => {
-    if (entry.projected && entry.projectedDetail !== null) {
-      return [
+  const moneyValues: number[] = [0];
+  for (const entry of actual) {
+    moneyValues.push(entry.amountMinor, entry.capitalMinor, entry.marginMinor);
+    if (entry.remainder !== null) {
+      moneyValues.push(
+        entry.amountMinor + entry.remainder.low,
+        entry.amountMinor + entry.remainder.base,
+        entry.amountMinor + entry.remainder.high,
+        entry.capitalMinor + entry.remainder.capital,
+        entry.marginMinor + entry.remainder.margin
+      );
+    }
+  }
+  for (const entry of projected) {
+    if (entry.projectedDetail !== null) {
+      moneyValues.push(
         entry.projectedDetail.amountLowMinor,
         entry.projectedDetail.amountBaseMinor,
-        entry.projectedDetail.amountHighMinor,
-        entry.capitalMinor,
-        entry.marginMinor,
-      ];
+        entry.projectedDetail.amountHighMinor
+      );
     }
-    return [entry.amountMinor, entry.capitalMinor, entry.marginMinor];
-  });
+    moneyValues.push(entry.capitalMinor, entry.marginMinor);
+  }
   const moneyScale = niceScale(
     moneyValues.reduce((min, value) => Math.min(min, value), 0),
     moneyValues.reduce((max, value) => Math.max(max, value), 0),
     CHART_TARGET_MONEY_TICKS
   );
 
-  const { categories, categoryFootnote } = categoryModel(report, visible);
-  const percentValues = buckets
-    .filter((entry) => !entry.projected && entry.marginBps !== null)
+  const { categories, categoryFootnote } = categoryModel(
+    report,
+    visible,
+    actual.length
+  );
+  const percentValues = actual
+    .filter((entry) => entry.marginBps !== null)
     .map((entry) => entry.marginBps! / 100);
   for (const category of categories) {
     if (!category.visible) continue;
@@ -623,7 +751,10 @@ export function buildReportChart(
           CHART_TARGET_PERCENT_TICKS
         );
 
-  const hasNegativeMargin = buckets.some((entry) => entry.marginMinor < 0);
+  const hasRemainder = actual.some((entry) => entry.remainder !== null);
+  const hasNegativeMargin =
+    buckets.some((entry) => entry.marginMinor < 0) ||
+    actual.some((entry) => (entry.remainder?.margin ?? 0) < 0);
   const hasUncosted = actual.some((entry) => (entry.uncostedMinor ?? 0) > 0);
   const hasPartial = actual.some((entry) => entry.partial || entry.inProgress);
   const summaryParts = [
@@ -637,6 +768,11 @@ export function buildReportChart(
         projected.length,
         bucket
       )} follow the dashed divider and are never included in actual totals.`
+    );
+  }
+  if (hasRemainder) {
+    summaryParts.push(
+      "The current month's projected remainder is stacked on its actual bar and is never included in actual totals."
     );
   }
 
@@ -654,6 +790,7 @@ export function buildReportChart(
     categoryFootnote,
     projectionNote,
     projectionKind,
+    hasRemainder,
     hasNegativeMargin,
     hasUncosted,
     hasPartial,
@@ -678,6 +815,32 @@ function moneyColumn(
     height: Math.abs(y - zeroY),
     negative: value < 0,
     value,
+  };
+}
+
+/**
+ * A segment stacked on an actual value: it starts at the actual bar's top and
+ * ends at actual + projected. The segment's own value is the projected part,
+ * so its tooltip and data attributes can never be mistaken for the actual.
+ */
+function stackedColumn(
+  baseValue: number,
+  delta: number,
+  x: number,
+  width: number,
+  scale: ChartScale,
+  plotY: number,
+  plotHeight: number
+): ChartColumn {
+  const startY = scaleY(scale, baseValue, plotY, plotHeight);
+  const endY = scaleY(scale, baseValue + delta, plotY, plotHeight);
+  return {
+    x,
+    y: Math.min(startY, endY),
+    width,
+    height: Math.abs(endY - startY),
+    negative: delta < 0,
+    value: delta,
   };
 }
 
@@ -842,6 +1005,39 @@ export function layoutReportChart(
         plot.height
       );
 
+      const remainder =
+        entry.remainder === null
+          ? null
+          : {
+              amount: stackedColumn(
+                entry.amountMinor,
+                entry.remainder.base,
+                amountX,
+                barWidth,
+                model.moneyScale,
+                plot.y,
+                plot.height
+              ),
+              capital: stackedColumn(
+                entry.capitalMinor,
+                entry.remainder.capital,
+                capitalX,
+                barWidth,
+                model.moneyScale,
+                plot.y,
+                plot.height
+              ),
+              margin: stackedColumn(
+                entry.marginMinor,
+                entry.remainder.margin,
+                marginX,
+                barWidth,
+                model.moneyScale,
+                plot.y,
+                plot.height
+              ),
+            };
+
       let uncosted: ReportChartBucketGeometry["uncosted"] = null;
       if (
         !entry.projected &&
@@ -874,6 +1070,7 @@ export function layoutReportChart(
         amount,
         capital,
         margin,
+        remainder,
         uncosted,
       };
     }
@@ -902,6 +1099,33 @@ export function layoutReportChart(
           );
           return { x, lowY, highY };
         });
+
+  const remainderIndex = model.buckets.findIndex(
+    (entry) => entry.remainder !== null
+  );
+  const remainderWhisker =
+    remainderIndex < 0
+      ? null
+      : (() => {
+          const entry = model.buckets[remainderIndex];
+          const column = columns[remainderIndex];
+          const remainder = entry.remainder!;
+          return {
+            x: column.amount.x + column.amount.width / 2,
+            lowY: scaleY(
+              model.moneyScale,
+              entry.amountMinor + remainder.low,
+              plot.y,
+              plot.height
+            ),
+            highY: scaleY(
+              model.moneyScale,
+              entry.amountMinor + remainder.high,
+              plot.y,
+              plot.height
+            ),
+          };
+        })();
 
   // marginBps is basis points; the percentage axis is in percent. Mapping the
   // raw bps value put every point 100x above the plot and clamped the latest
@@ -959,6 +1183,7 @@ export function layoutReportChart(
         ? null
         : plot.x + model.dividerIndex * groupWidth,
     bandWhiskers,
+    remainderWhisker,
     columns,
     marginPath,
     marginPoints,

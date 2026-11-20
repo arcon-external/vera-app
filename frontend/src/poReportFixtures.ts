@@ -201,12 +201,297 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
         buckets: [],
       },
     },
+    // The fixture is "this year to 19 November 2026", not exactly the current
+    // year, so the current-period contract says: no ghost, with a stated
+    // reason. The Month and Year fixtures below carry an available forecast.
+    currentProjection: {
+      mode: "none",
+      status: "unavailable",
+      reason: "not_current_period",
+      method:
+        "The report range is not exactly the current calendar month or year; no current-period projection is computed.",
+      basis: {
+        from: "",
+        to: "",
+        units: 0,
+        poCount: 0,
+        asOf: "2026-11-19",
+      },
+      buckets: [],
+    },
     notes: [
       {
         code: "legacy_order_adjustment",
         text: "One purchase order in this range carries a retired whole-order adjustment. The amount includes it; no margin is inferred from it.",
       },
     ],
+  };
+}
+
+/**
+ * Issue #638: the current calendar month, bucketed by day. Nineteen days have
+ * elapsed, eleven are still to come; the fixture materializes all thirty
+ * server periods (the store fills empty days with zero) and the current-period
+ * projection supplies the ghost days after the as-of date. The figures foot:
+ * period rows sum to totals, and every category row derives its own ratios.
+ */
+export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
+  const elapsed = 19;
+  const totalDays = 30;
+  const counts = splitExact(12, elapsed);
+  const amounts = splitExact(190_000_000, elapsed);
+  const uncosted = splitExact(19_000_000, elapsed);
+  const capitals = amounts.map((amount) => Math.round(amount * 0.8));
+
+  const periods = Array.from({ length: totalDays }, (_, index) => {
+    if (index >= elapsed) {
+      return {
+        periodStart: `2026-11-${String(index + 1).padStart(2, "0")}`,
+        partial: false,
+        inProgress: false,
+        ...metrics(0, 0, 0, 0),
+        marginBps: null,
+        coverageBps: null,
+      };
+    }
+    return {
+      periodStart: `2026-11-${String(index + 1).padStart(2, "0")}`,
+      partial: false,
+      inProgress: index === elapsed - 1,
+      ...metrics(counts[index], amounts[index], uncosted[index], capitals[index]),
+    };
+  });
+
+  const totalCount = periods.reduce((sum, period) => sum + period.poCount, 0);
+  const totalAmount = periods.reduce((sum, period) => sum + period.amountMinor, 0);
+  const totalUncosted = periods.reduce(
+    (sum, period) => sum + period.uncostedMinor,
+    0
+  );
+  const totalCapital = periods.reduce(
+    (sum, period) => sum + period.capitalMinor,
+    0
+  );
+  const totals = metrics(totalCount, totalAmount, totalUncosted, totalCapital);
+
+  const categoryAmounts = splitExact(totalAmount, 3);
+  const categoryUncosted = splitExact(totalUncosted, 3);
+  const categoryCapital = splitExact(totalCapital, 3);
+  const categoryCounts = splitExact(totalCount, 3);
+  const categoryRows = [
+    { businessCategory: "FM", label: "Facility Management" },
+    { businessCategory: "FAB", label: "Fabrication" },
+    { businessCategory: "OTHERS", label: "Others" },
+  ].map((row, index) => ({
+    ...row,
+    ...metrics(
+      categoryCounts[index],
+      categoryAmounts[index],
+      categoryUncosted[index],
+      categoryCapital[index]
+    ),
+  }));
+
+  const low = 8_000_000;
+  const base = 10_000_000;
+  const high = 12_000_000;
+  const capital = 8_000_000;
+  const margin = base - capital;
+  const buckets = Array.from({ length: totalDays - elapsed }, (_, index) => ({
+    periodStart: `2026-11-${String(elapsed + index + 1).padStart(2, "0")}`,
+    amountLowMinor: low,
+    amountBaseMinor: base,
+    amountHighMinor: high,
+    capitalMinor: capital,
+    marginMinor: margin,
+    marginBps: fixtureRatioBps(margin, capital),
+    sampleSize: elapsed,
+    source: "elapsed_days",
+  }));
+
+  return {
+    generatedAt: "2026-11-19T05:00:00Z",
+    asOf: "2026-11-19",
+    filter: {
+      from: "2026-11-01",
+      to: "2026-12-01",
+      bucket: "day",
+      category: "all",
+      currency: "IDR",
+    },
+    company: {
+      name: "PT Arcon Penta Persada",
+      address: "Batamindo Industrial Park, Lot 317, Mukakuning, Batam",
+    },
+    population: {
+      availableCurrencies: ["IDR", "USD"],
+      hasUnassigned: false,
+      sourceMissingPoCount: 0,
+    },
+    totals,
+    periods,
+    categories: categoryRows,
+    categorySeries: [],
+    projection: {
+      monthly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: {
+          historyFrom: "",
+          historyTo: "",
+          completeMonths: 0,
+          poCount: 0,
+          asOf: "2026-11-19",
+        },
+        buckets: [],
+      },
+      yearly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: {
+          historyFrom: "",
+          historyTo: "",
+          completeMonths: 0,
+          poCount: 0,
+          asOf: "2026-11-19",
+        },
+        buckets: [],
+      },
+    },
+    currentProjection: {
+      mode: "day",
+      status: "available",
+      method:
+        "Elapsed-day average of the current month; P25-P75 range of elapsed daily totals (min-max under four observations).",
+      basis: {
+        from: "2026-11-01",
+        to: "2026-11-20",
+        units: elapsed,
+        poCount: totalCount,
+        asOf: "2026-11-19",
+      },
+      buckets,
+    },
+    notes: [],
+  };
+}
+
+/**
+ * Issue #638: the current calendar year, bucketed by month. January to
+ * November are actual (November is month-to-date), December is the ghost
+ * month, and the current month's remainder is the stacked projection. It
+ * reuses the historical fixture's footed actual rows so the KPI strip and both
+ * tables keep agreeing with the chart.
+ */
+export function purchaseOrderReportYearFixture(): PurchaseOrderReportData {
+  const base = purchaseOrderReportFixture();
+  const periods = base.periods.map((period) =>
+    period.periodStart === "2026-11-01"
+      ? { ...period, partial: false, inProgress: true }
+      : { ...period, partial: false, inProgress: false }
+  );
+  periods.push({
+    periodStart: "2026-12-01",
+    partial: false,
+    inProgress: false,
+    ...metrics(0, 0, 0, 0),
+    marginBps: null,
+    coverageBps: null,
+  });
+  const currentMonth = periods.find(
+    (period) => period.periodStart === "2026-11-01"
+  )!;
+
+  const remainder = {
+    low: 15_000_000,
+    base: 20_000_000,
+    high: 25_000_000,
+    capital: 16_000_000,
+    margin: 4_000_000,
+    marginBps: fixtureRatioBps(4_000_000, 16_000_000),
+    sampleSize: 19,
+    source: "elapsed_days",
+  };
+
+  return {
+    ...base,
+    filter: {
+      from: "2026-01-01",
+      to: "2027-01-01",
+      bucket: "month",
+      category: "all",
+      currency: "IDR",
+    },
+    periods,
+    projection: {
+      monthly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: {
+          historyFrom: "",
+          historyTo: "",
+          completeMonths: 0,
+          poCount: 0,
+          asOf: "2026-11-19",
+        },
+        buckets: [],
+      },
+      yearly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: {
+          historyFrom: "",
+          historyTo: "",
+          completeMonths: 0,
+          poCount: 0,
+          asOf: "2026-11-19",
+        },
+        buckets: [],
+      },
+    },
+    currentProjection: {
+      mode: "month",
+      status: "available",
+      method:
+        "Median of the complete months in trailing history; P25-P75 range of their monthly totals. The current month's remainder uses the elapsed-day average.",
+      basis: {
+        from: "2026-08-01",
+        to: "2026-11-01",
+        units: 3,
+        poCount: 5,
+        asOf: "2026-11-19",
+      },
+      buckets: [
+        {
+          periodStart: "2026-12-01",
+          amountLowMinor: 40_000_000,
+          amountBaseMinor: 50_000_000,
+          amountHighMinor: 60_000_000,
+          capitalMinor: 40_000_000,
+          marginMinor: 10_000_000,
+          marginBps: fixtureRatioBps(10_000_000, 40_000_000),
+          sampleSize: 3,
+          source: "trailing_complete_months",
+        },
+      ],
+      currentMonth: {
+        actual: {
+          poCount: currentMonth.poCount,
+          amountMinor: currentMonth.amountMinor,
+          costedMinor: currentMonth.costedMinor,
+          uncostedMinor: currentMonth.uncostedMinor,
+          capitalMinor: currentMonth.capitalMinor,
+          marginMinor: currentMonth.marginMinor,
+          marginBps: currentMonth.marginBps,
+          coverageBps: currentMonth.coverageBps,
+        },
+        remainder,
+      },
+    },
   };
 }
 

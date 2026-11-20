@@ -135,6 +135,7 @@ describe("Reports KPI width guard (issue #630)", () => {
       createElement(PurchaseOrderReportsView, {
         filters: {
           preset: "custom",
+          period: null,
           from: "2026-01-01",
           to: "2026-12-31",
           bucket: "month",
@@ -150,6 +151,7 @@ describe("Reports KPI width guard (issue #630)", () => {
         exporting: false,
         canExport: false,
         onPresetChange: () => undefined,
+        onPeriodChange: () => undefined,
         onFromChange: () => undefined,
         onToChange: () => undefined,
         onBucketChange: () => undefined,
