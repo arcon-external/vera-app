@@ -5,6 +5,7 @@ import { formatMoney } from "./format";
 import {
   REPORT_BUCKET_OPTIONS,
   REPORT_CATEGORY_OPTIONS,
+  REPORT_MAX_DAY_PERIODS,
   REPORT_PRESET_OPTIONS,
   addDaysIso,
   categoryFilterOptions,
@@ -15,9 +16,12 @@ import {
   projectionReasonLabel,
   reportCategoryLabel,
   reportCurrencyOptions,
+  reportDaySpan,
   reportFilterKey,
   reportFilterValidation,
+  reportPeriodBucket,
   reportPeriodLabel,
+  reportPeriodRange,
   reportPresetRange,
   reportRangeLabel,
   toReportQuery,
@@ -83,6 +87,7 @@ const FORMAT_CURRENCIES: Record<string, CurrencyInfo> = {
 function filters(overrides: Partial<ReportFilterState> = {}): ReportFilterState {
   return {
     preset: "this-year",
+    period: null,
     from: "2026-01-01",
     to: "2026-11-19",
     bucket: "month",
@@ -112,6 +117,7 @@ describe("report filter catalogue", () => {
       "year",
       "quarter",
       "month",
+      "day",
     ]);
     expect(REPORT_CATEGORY_OPTIONS).toEqual([
       { value: "all", label: "All categories" },
@@ -197,15 +203,59 @@ describe("presets and exclusive dates", () => {
     expect(toReportQuery(filters({ to: "2028-02-29" })).to).toBe("2028-03-01");
   });
 
-  it("starts the workspace on the current year to date", () => {
+  it("starts the workspace on the current year, monthly", () => {
     expect(initialReportFilters("2026-11-19", "usd")).toMatchObject({
-      preset: "this-year",
+      preset: "custom",
+      period: "year",
       from: "2026-01-01",
-      to: "2026-11-19",
+      to: "2026-12-31",
       bucket: "month",
       category: "all",
       currency: "USD",
     });
+  });
+
+  it("turns the Month and Year toggle into exactly one current period", () => {
+    expect(reportPeriodRange("month", "2026-11-19")).toEqual({
+      from: "2026-11-01",
+      to: "2026-11-30",
+    });
+    expect(reportPeriodRange("month", "2026-02-10")).toEqual({
+      from: "2026-02-01",
+      to: "2026-02-28",
+    });
+    expect(reportPeriodRange("month", "2028-02-10")).toEqual({
+      from: "2028-02-01",
+      to: "2028-02-29",
+    });
+    expect(reportPeriodRange("year", "2026-11-19")).toEqual({
+      from: "2026-01-01",
+      to: "2026-12-31",
+    });
+    expect(reportPeriodBucket("month")).toBe("day");
+    expect(reportPeriodBucket("year")).toBe("month");
+    expect(
+      toReportQuery({
+        preset: "custom",
+        period: "month",
+        from: "2026-11-01",
+        to: "2026-11-30",
+        bucket: "day",
+        category: "all",
+        currency: "IDR",
+      })
+    ).toMatchObject({ from: "2026-11-01", to: "2026-12-01", bucket: "day" });
+    expect(
+      toReportQuery({
+        preset: "custom",
+        period: "year",
+        from: "2026-01-01",
+        to: "2026-12-31",
+        bucket: "month",
+        category: "all",
+        currency: "IDR",
+      })
+    ).toMatchObject({ from: "2026-01-01", to: "2027-01-01", bucket: "month" });
   });
 });
 
@@ -235,6 +285,22 @@ describe("filter validation", () => {
     );
   });
 
+  it("keeps a day report inside one calendar month and the 31-day cap", () => {
+    expect(
+      reportFilterValidation(
+        filters({ bucket: "day", from: "2026-11-01", to: "2026-11-30" })
+      )
+    ).toBe("");
+    expect(reportDaySpan("2026-11-01", "2026-11-30")).toBe(30);
+    expect(reportDaySpan("2026-11-30", "2026-12-01")).toBeNull();
+    expect(
+      reportFilterValidation(
+        filters({ bucket: "day", from: "2026-11-30", to: "2026-12-01" })
+      )
+    ).toContain("one calendar month");
+    expect(REPORT_MAX_DAY_PERIODS).toBe(31);
+  });
+
   it("keeps a stable key for the exact API query", () => {
     const query = toReportQuery(filters({ category: "UNASSIGNED" }));
     expect(reportFilterKey(query)).toBe(
@@ -251,6 +317,7 @@ describe("report labels and exact percentages", () => {
     expect(reportPeriodLabel("2026-01-01", "month")).toBe("Jan 2026");
     expect(reportPeriodLabel("2026-04-01", "quarter")).toBe("Q2 2026");
     expect(reportPeriodLabel("2026-01-01", "year")).toBe("2026");
+    expect(reportPeriodLabel("2026-11-19", "day")).toBe("19 Nov 2026");
     expect(reportPeriodLabel("garbage", "month")).toBe("garbage");
   });
 
@@ -277,11 +344,13 @@ describe("report labels and exact percentages", () => {
   });
 
   it("renders stable projection reasons without inventing a forecast", () => {
-    expect(projectionReasonLabel("no_data_in_range")).toContain(
-      "No purchase orders"
+    expect(projectionReasonLabel("not_current_period")).toContain(
+      "not the current month or year"
     );
-    expect(projectionReasonLabel("insufficient_history")).toContain(
-      "Not enough"
+    expect(projectionReasonLabel("no_data")).toContain("No purchase orders");
+    expect(projectionReasonLabel("insufficient_days")).toContain("elapsed days");
+    expect(projectionReasonLabel("insufficient_months")).toContain(
+      "complete months"
     );
     expect(projectionReasonLabel("incomplete_cost_basis")).toContain("cost");
     expect(projectionReasonLabel("value_out_of_range")).toContain("exact");

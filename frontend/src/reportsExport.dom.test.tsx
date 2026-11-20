@@ -168,11 +168,6 @@ function reportWire(): poreport.Report {
   return purchaseOrderReportFixture() as unknown as poreport.Report;
 }
 
-function visibleSnapshot(): PurchaseOrderReportData {
-  return normalizePurchaseOrderReport(reportWire());
-}
-
-/** A response for one exact request, so a filter change has a matching report. */
 function reportFor(query: PurchaseOrderReportQuery): poreport.Report {
   const wire = reportWire();
   wire.filter = { ...query };
@@ -210,7 +205,9 @@ beforeEach(() => {
   mocks.getCompany.mockResolvedValue(PROFILE);
   mocks.listDrafts.mockResolvedValue([]);
   mocks.listCustomers.mockResolvedValue([]);
-  mocks.getPurchaseOrderReport.mockImplementation(async () => reportWire());
+  mocks.getPurchaseOrderReport.mockImplementation(
+    async (query: unknown) => reportFor(query as PurchaseOrderReportQuery)
+  );
   mocks.exportPurchaseOrderReport.mockResolvedValue("/tmp/opencode/report.pdf");
   mocks.checkForUpdates.mockResolvedValue({ UpdateAvailable: false });
   Element.prototype.scrollIntoView = () => undefined;
@@ -304,7 +301,7 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     expect(reportCalls()[0]).toEqual(toReportQuery(initialFilter));
     expect(button("Export PDF").disabled).toBe(true);
 
-    pending.resolve(reportWire());
+    pending.resolve(reportFor(reportCalls()[0]));
     await flush();
 
     // The snapshot the server returned is now the visible one.
@@ -320,7 +317,9 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     // the API again, so it cannot use a filter newer than the document.
     expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
 
-    const expected = visibleSnapshot();
+    const expected = normalizePurchaseOrderReport(
+      reportFor(reportCalls()[0])
+    );
     const sent = mocks.exportPurchaseOrderReport.mock.calls[0][0] as string;
     expect(sent).toBe(JSON.stringify(expected));
 
@@ -331,6 +330,10 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     expect(parsed.asOf).toBe(expected.asOf);
     expect(parsed.generatedAt).not.toBe("");
     expect(parsed.asOf).not.toBe("");
+    // The current-period forecast is part of the exported snapshot, not only
+    // of the screen state, so the PDF renderer can draw the same ghost.
+    expect(parsed.currentProjection).toEqual(expected.currentProjection);
+    expect(parsed.currentProjection.mode).toBe("none");
     // The fixture carries the two values a lossy serializer would flatten.
     expect(
       parsed.categories.find(
@@ -391,7 +394,7 @@ describe("Reports export wiring through the real App (issue #632)", () => {
 
     await openReports();
     expect(button("Export PDF").disabled).toBe(true);
-    first.resolve(reportWire());
+    first.resolve(reportFor(reportCalls()[0]));
     await flush();
     expect(button("Export PDF").disabled).toBe(false);
 

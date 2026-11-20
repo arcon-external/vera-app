@@ -102,6 +102,60 @@ export interface PurchaseOrderReportProjection {
   yearly: PurchaseOrderReportProjectionSeries;
 }
 
+/** The window and sample a current-period forecast used. */
+export interface PurchaseOrderReportCurrentProjectionBasis {
+  /** Inclusive first day (day mode) or first complete month (month mode). */
+  from: string;
+  /** Exclusive first day after the sample. */
+  to: string;
+  /** Elapsed days in day mode, complete months in month mode. */
+  units: number;
+  poCount: number;
+  asOf: string;
+}
+
+/**
+ * The projected rest of the current month, as totals for all remaining days.
+ * The band is on the amount only; capital is a single derived figure and
+ * margin is derived from the pair.
+ */
+export interface PurchaseOrderReportCurrentProjectionRemainder {
+  low: number;
+  base: number;
+  high: number;
+  capital: number;
+  margin: number;
+  /** Null when capital is zero; 0 is a real measured percentage. */
+  marginBps: number | null;
+  sampleSize: number;
+  source: string;
+}
+
+/** The current month's month-to-date actuals beside its projected remainder. */
+export interface PurchaseOrderReportCurrentMonthProjection {
+  actual: PurchaseOrderReportMetrics;
+  remainder: PurchaseOrderReportCurrentProjectionRemainder;
+}
+
+/**
+ * The forecast for the period still in progress. `mode` is "day" when the
+ * report is exactly the current month bucketed by day, "month" when it is
+ * exactly the current year, and "none" otherwise. Buckets are future days
+ * (day mode) or future months after the current month (month mode); no bucket
+ * is ever added to totals or actual periods.
+ */
+export interface PurchaseOrderReportCurrentProjection {
+  mode: string;
+  status: string;
+  /** Absent when available; a stable reason code otherwise. */
+  reason?: string;
+  method: string;
+  basis: PurchaseOrderReportCurrentProjectionBasis;
+  buckets: PurchaseOrderReportProjectedBucket[];
+  /** Present in month mode only, and only when the forecast is available. */
+  currentMonth?: PurchaseOrderReportCurrentMonthProjection;
+}
+
 export interface PurchaseOrderReportNote {
   code: string;
   text: string;
@@ -118,6 +172,11 @@ export interface PurchaseOrderReportData {
   categories: PurchaseOrderReportCategory[];
   categorySeries: PurchaseOrderReportCategorySeries[];
   projection: PurchaseOrderReportProjection;
+  /**
+   * The current-period forecast. It is separate from every actual figure so it
+   * can never be summed into totals or period rows.
+   */
+  currentProjection: PurchaseOrderReportCurrentProjection;
   notes: PurchaseOrderReportNote[];
 }
 
@@ -202,6 +261,110 @@ function normalizeProjectionSeries(series: poreport.ProjectionSeries): PurchaseO
   return normalized;
 }
 
+function normalizeCurrentBasis(
+  basis: poreport.CurrentProjectionBasis | null | undefined,
+  asOf: string
+): PurchaseOrderReportCurrentProjectionBasis {
+  if (basis === null || basis === undefined) {
+    return { from: "", to: "", units: 0, poCount: 0, asOf };
+  }
+  return {
+    from: typeof basis.from === "string" ? basis.from : "",
+    to: typeof basis.to === "string" ? basis.to : "",
+    units:
+      typeof basis.units === "number" && Number.isFinite(basis.units)
+        ? basis.units
+        : 0,
+    poCount:
+      typeof basis.poCount === "number" && Number.isFinite(basis.poCount)
+        ? basis.poCount
+        : 0,
+    asOf: typeof basis.asOf === "string" ? basis.asOf : asOf,
+  };
+}
+
+function normalizeCurrentRemainder(
+  input: poreport.CurrentProjectionRemainder | null | undefined
+): PurchaseOrderReportCurrentProjectionRemainder | null {
+  if (input === null || input === undefined || typeof input !== "object") {
+    return null;
+  }
+  const numbers = [input.low, input.base, input.high, input.capital, input.margin];
+  if (!numbers.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    // A malformed remainder is not a zero-padded forecast. Dropping it keeps
+    // the chart from drawing an invented stack.
+    return null;
+  }
+  return {
+    low: input.low,
+    base: input.base,
+    high: input.high,
+    capital: input.capital,
+    margin: input.margin,
+    marginBps: nullableRatio(input.marginBps),
+    sampleSize:
+      typeof input.sampleSize === "number" && Number.isFinite(input.sampleSize)
+        ? input.sampleSize
+        : 0,
+    source: typeof input.source === "string" ? input.source : "",
+  };
+}
+
+function normalizeCurrentMonth(
+  input: poreport.CurrentMonthProjection | null | undefined
+): PurchaseOrderReportCurrentMonthProjection | null {
+  if (input === null || input === undefined || typeof input !== "object") {
+    return null;
+  }
+  const remainder = normalizeCurrentRemainder(input.remainder);
+  if (remainder === null || input.actual === null || input.actual === undefined) {
+    return null;
+  }
+  return {
+    actual: normalizeMetrics(input.actual),
+    remainder,
+  };
+}
+
+/**
+ * The current-period forecast, normalized even when the server omitted it (an
+ * older API, or a hand-built fixture). A missing object is mode none and
+ * unavailable with the stable not-current-period reason; it is never treated as
+ * an available forecast with zero buckets.
+ */
+function normalizeCurrentProjection(
+  input: poreport.CurrentProjection | null | undefined,
+  asOf: string
+): PurchaseOrderReportCurrentProjection {
+  if (input === null || input === undefined || typeof input !== "object") {
+    return {
+      mode: "none",
+      status: "unavailable",
+      reason: "not_current_period",
+      method: "",
+      basis: normalizeCurrentBasis(null, asOf),
+      buckets: [],
+    };
+  }
+  const normalized: PurchaseOrderReportCurrentProjection = {
+    mode: typeof input.mode === "string" ? input.mode : "none",
+    status: typeof input.status === "string" ? input.status : "unavailable",
+    method: typeof input.method === "string" ? input.method : "",
+    basis: normalizeCurrentBasis(input.basis, asOf),
+    buckets: Array.isArray(input.buckets)
+      ? input.buckets.map(normalizeBucket)
+      : [],
+  };
+  if (typeof input.reason === "string") {
+    normalized.reason = input.reason;
+  }
+  const currentMonth = normalizeCurrentMonth(input.currentMonth);
+  if (currentMonth !== null) {
+    normalized.currentMonth = currentMonth;
+  }
+  return normalized;
+}
+
 /**
  * Maps the generated Wails report to the desktop contract. Every field is
  * copied, nullable percentages stay null, and absent optional fields stay
@@ -226,6 +389,13 @@ export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOr
       monthly: normalizeProjectionSeries(input.projection.monthly),
       yearly: normalizeProjectionSeries(input.projection.yearly),
     },
+    currentProjection: normalizeCurrentProjection(
+      input.currentProjection as
+        | poreport.CurrentProjection
+        | null
+        | undefined,
+      input.asOf
+    ),
     notes: input.notes.map((note) => ({ code: note.code, text: note.text })),
   };
 }

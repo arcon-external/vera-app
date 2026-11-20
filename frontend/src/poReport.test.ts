@@ -115,6 +115,31 @@ function reportFixture(): poreport.Report {
         buckets: [],
       },
     },
+    currentProjection: {
+      mode: "day",
+      status: "available",
+      method: "Elapsed-day average of the current month.",
+      basis: {
+        from: "2026-11-01",
+        to: "2026-11-20",
+        units: 19,
+        poCount: 3,
+        asOf: "2026-11-19",
+      },
+      buckets: [
+        {
+          periodStart: "2026-11-20",
+          amountLowMinor: 100,
+          amountBaseMinor: 200,
+          amountHighMinor: 300,
+          capitalMinor: 0,
+          marginMinor: 200,
+          marginBps: null,
+          sampleSize: 19,
+          source: "elapsed_days",
+        },
+      ],
+    },
     notes: [{ code: "legacy_order_adjustment", text: "A disclosed residual." }],
   };
   return wire as unknown as poreport.Report;
@@ -153,6 +178,83 @@ describe("normalizePurchaseOrderReport (issue #629)", () => {
     expect(report).toEqual(input);
     expect(JSON.parse(JSON.stringify(report))).toEqual(JSON.parse(JSON.stringify(input)));
     expect("reason" in report.projection.monthly).toBe(false);
+    expect("reason" in report.currentProjection).toBe(false);
     expect(report.projection.yearly.reason).toBe("insufficient_history");
+  });
+
+  it("normalizes a missing current projection as unavailable, never as an empty forecast", () => {
+    const input = reportFixture();
+    delete (input as unknown as Record<string, unknown>).currentProjection;
+
+    const report = normalizePurchaseOrderReport(input);
+
+    expect(report.currentProjection.mode).toBe("none");
+    expect(report.currentProjection.status).toBe("unavailable");
+    expect(report.currentProjection.reason).toBe("not_current_period");
+    expect(report.currentProjection.buckets).toEqual([]);
+    expect(report.currentProjection.currentMonth).toBeUndefined();
+    expect(report.currentProjection.basis.asOf).toBe("2026-11-19");
+  });
+
+  it("normalizes the current month's actual and remainder without recomputing them", () => {
+    const input = reportFixture();
+    input.currentProjection.mode = "month";
+    input.currentProjection.currentMonth = {
+      actual: input.periods[0],
+      remainder: {
+        low: 100,
+        base: 200,
+        high: 300,
+        capital: 80,
+        margin: 120,
+        marginBps: 15_000,
+        sampleSize: 19,
+        source: "elapsed_days",
+      },
+    } as unknown as poreport.CurrentMonthProjection;
+
+    const report = normalizePurchaseOrderReport(input);
+
+    expect(report.currentProjection.mode).toBe("month");
+    expect(report.currentProjection.currentMonth?.actual.amountMinor).toBe(
+      input.periods[0].amountMinor
+    );
+    expect(report.currentProjection.currentMonth?.remainder).toEqual({
+      low: 100,
+      base: 200,
+      high: 300,
+      capital: 80,
+      margin: 120,
+      marginBps: 15_000,
+      sampleSize: 19,
+      source: "elapsed_days",
+    });
+  });
+
+  it("drops a malformed current-month remainder instead of inventing zeros", () => {
+    const input = reportFixture();
+    input.currentProjection.mode = "month";
+    input.currentProjection.currentMonth = {
+      actual: input.totals,
+      remainder: {
+        low: 100,
+        base: 200,
+        high: 300,
+        capital: 0,
+        margin: 200,
+        marginBps: null,
+        sampleSize: 19,
+        source: "elapsed_days",
+      },
+    } as unknown as poreport.CurrentMonthProjection;
+    // The generated type says these numbers are required; the wire is not
+    // trusted to have sent them, and a partial remainder must not print as 0.
+    (input.currentProjection.currentMonth.remainder as unknown as Record<string, unknown>).base =
+      undefined;
+
+    const report = normalizePurchaseOrderReport(input);
+
+    expect(report.currentProjection.currentMonth).toBeUndefined();
+    expect(report.currentProjection.buckets).toHaveLength(1);
   });
 });
