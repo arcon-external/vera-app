@@ -461,8 +461,8 @@ Work is run by an **orchestrator** — the assistant in this session — acting 
 **chief of staff**. The orchestrator does not write the implementation. It
 decomposes the problem, briefs the people who do the work, validates what comes
 back, runs the gates, commits and reports. Two of those people are **persistent
-Antigravity sessions** (Gemini 4 Neon High) driven through tmux: the **Planner**
-and the **Judge**. **Workers** are OpenCode subagents on
+Antigravity sessions** driven through tmux: the **Planner** (Claude Opus 5.5)
+and the **Judge** (Gemini 4 Neon High). **Workers** are OpenCode subagents on
 `opencode-go/deepseek-v4.1-flash#max`. No implementation starts without a plan the
 user has approved, and nothing merges without a Judge verdict.
 
@@ -471,13 +471,15 @@ user has approved, and nothing merges without a Judge verdict.
 | Role             | Who                                                        | Job                                                                                       |
 | ---------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **Orchestrator** | this OpenCode session (chief of staff)                     | decompose, brief, dispatch, validate, run gates, commit, merge, report. No IC coding.      |
-| **Planner**      | persistent agy TUI, Gemini 4 Neon High                     | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
+| **Planner**      | persistent agy TUI, Claude Opus 5.5                        | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
 | **Worker**       | `subagent` with `opencode-go/deepseek-v4.1-flash#max`      | implement one closed slice, with its test, and stop                                        |
 | **Judge**        | persistent agy TUI, Gemini 4 Neon High                     | independently verify a finished ticket/PR and return PASS/NOT PASS                        |
 
 The Planner and Judge are **not** OpenCode subagents: they are the two agy panes
-below, and their model is `agy --model gemini-4-neon-high --effort high`. Workers
-never use a fallback model; the requested `#max` variant is part of the dispatch.
+below. The Planner runs Claude Opus 5.5 (`agy --model claude-opus-5-5-medium
+--effort medium` at the time of writing); the Judge runs Gemini 4 Neon High
+(`agy --model gemini-4-neon-high --effort high`). Workers never use a fallback
+model; the requested `#max` variant is part of the dispatch.
 
 #### 12.1.1 The session contract (tmux)
 
@@ -632,7 +634,7 @@ Judge is the exception, not the habit.
 ```
 Problem / feature / revision
       |
-Planner (agy, Gemini 4 Neon High) -> plan artifact
+Planner (agy, Claude Opus 5.5) -> plan artifact
       |
 Orchestrator validates evidence -> explains plan in simple terms -> user approves
       |
