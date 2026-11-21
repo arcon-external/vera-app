@@ -516,11 +516,27 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
 5. Read the artifact from disk. The pane transcript is status, never the
    deliverable. Planner ends with `PLAN-READY <path>`; Judge ends with
    `VERDICT PASS|NOT PASS <path>`.
+6. **Completion ping.** As soon as the artifact is written, the Planner/Judge
+   enqueues one short line into the orchestrator session so it wakes and reads the
+   artifact on its next step:
+
+   ```bash
+   $HOME/.local/bin/opencode api POST \
+     /api/session/ses_f13c0a26dffel94rbZI4jwKnL8/prompt \
+     -d '{"text":"PING <planner|judge> DONE <artifact path>","delivery":"queue"}'
+   ```
+
+   This returns immediately (it enqueues, it does not wait for a reply) and must
+   not be replaced by a blocking `opencode run`. The ping is a trigger, never the
+   deliverable; it must not replace or summarize the artifact. If the command is
+   blocked or unavailable, the role still stops and the artifact stands — the
+   orchestrator will read it on the next capture.
 
 Planner and Judge are read-only on the repository: they may read anything and write
-only their own report file. They never edit source, never commit, never send into
-another pane unless the orchestrator explicitly asks for a communication check, and
-never start another agent session.
+only their own report file. They never edit source, never commit, and never send
+into another pane except for the completion ping above or an explicit
+communication check the orchestrator asks for. They never start another agent
+session.
 
 #### 12.1.3 Workers
 

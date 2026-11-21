@@ -72,3 +72,7 @@ doc/
 brag-output-*/
 ui-screens-*/
 
+# --- Local agent links ---
+# Antigravity skill symlinks and local customization; machine-specific, never commit.
+.agents/
+
