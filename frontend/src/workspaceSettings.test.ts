@@ -10,6 +10,7 @@ import {
   clearPurchaseOrderSettings,
   clearQuotationSettings,
   purchaseOrderSettingsKey,
+  msUntilNextWIBMidnight,
   quotationDefaultsFromSettings,
   quotationSettingsKey,
   readWorkspaceSettings,
@@ -332,6 +333,50 @@ describe("todayWIB", () => {
     // 18:30 UTC is 01:30 the next day in Jakarta (UTC+7, no DST).
     expect(todayWIB(new Date("2026-10-21T18:30:00Z"))).toBe("2026-10-22");
     expect(todayWIB(new Date("2026-10-21T16:59:59Z"))).toBe("2026-10-21");
+  });
+});
+
+describe("msUntilNextWIBMidnight", () => {
+  const DAY_MS = 86_400_000;
+
+  it("returns the remaining WIB day at an ordinary hour", () => {
+    // 12:00 UTC is 19:00 WIB, so five hours remain until 00:00 WIB (17:00Z).
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T12:00:00Z"))).toBe(
+      5 * 60 * 60 * 1000
+    );
+  });
+
+  it("returns 1ms immediately before midnight and a full day at midnight", () => {
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T16:59:59.999Z"))).toBe(1);
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T16:59:59Z"))).toBe(1000);
+    // Exactly 00:00:00 WIB must wait for tomorrow, never re-arm at 0ms.
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T17:00:00Z"))).toBe(
+      DAY_MS
+    );
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T17:00:00.001Z"))).toBe(
+      DAY_MS - 1
+    );
+  });
+
+  it("uses the WIB date, not the UTC date, around the boundary", () => {
+    // 20:00 UTC on the 19th is already 03:00 WIB on the 20th: 21 hours remain.
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T20:00:00Z"))).toBe(
+      21 * 60 * 60 * 1000
+    );
+    // 23:00 UTC on the 19th is 06:00 WIB on the 20th: 18 hours remain.
+    expect(msUntilNextWIBMidnight(new Date("2026-11-19T23:00:00Z"))).toBe(
+      18 * 60 * 60 * 1000
+    );
+  });
+
+  it("always answers at least one millisecond across every minute of a day", () => {
+    for (let offset = 0; offset < DAY_MS; offset += 60_000) {
+      const now = new Date(Date.UTC(2026, 10, 19) + offset);
+      const remaining = msUntilNextWIBMidnight(now);
+      expect(Number.isInteger(remaining)).toBe(true);
+      expect(remaining).toBeGreaterThanOrEqual(1);
+      expect(remaining).toBeLessThanOrEqual(DAY_MS);
+    }
   });
 });
 

@@ -9,7 +9,9 @@ import {
 } from "./purchaseOrder";
 import type { PurchaseOrderReviewDTO } from "./poFinalize";
 import { purchaseOrderReportFixture } from "./poReportFixtures";
+import { initialReportFilters, toReportQuery } from "./poReportPage";
 import { ToastProvider } from "./toast";
+import { todayWIB } from "./workspaceSettings";
 
 // Ticket 02: the page-history stack for Home → workspace → settings.
 //
@@ -1391,8 +1393,22 @@ describe("Reports workspace (#630)", () => {
       button("Custom date range").click();
     });
     await flush();
+    const initialQuery = toReportQuery(initialReportFilters(todayWIB(), "IDR"));
+    const yearlyQuery = { ...initialQuery, bucket: "year" };
     await chooseFromSelect("Bucket", "Year");
-    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+
+    // Two reads only: the new year-bucketed Performance overview and the exact
+    // monthly snapshot the browser already holds from the initial Year view.
+    // The year-bucketed overview never substitutes for that monthly source; it
+    // is reused by exact query identity rather than fetched a second time.
+    expect(
+      mocks.getPurchaseOrderReport.mock.calls.map((call) => call[0])
+    ).toEqual([initialQuery, yearlyQuery]);
+    expect(
+      (mocks.getPurchaseOrderReport.mock.calls as unknown[][]).filter(
+        (call) => (call[0] as { bucket: string }).bucket === "month"
+      )
+    ).toHaveLength(1);
     expect(button("Bucket").textContent).toContain("Year");
 
     await openMenuItem("Account settings");
@@ -1405,7 +1421,19 @@ describe("Reports workspace (#630)", () => {
 
     expect(workspace()).toBe("reports");
     expect(button("Bucket").textContent).toContain("Year");
-    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+    // Issue #645 Q645-4: returning revalidates the currently required visible
+    // scopes exactly once — the year-bucketed Performance overview and the
+    // exact monthly snapshot By period still shows — while the filters and
+    // local selections survive. It is never a silent stale-cache return, and
+    // never a background sweep of scopes the screen does not require.
+    expect(
+      mocks.getPurchaseOrderReport.mock.calls.map((call) => call[0])
+    ).toEqual([initialQuery, yearlyQuery, yearlyQuery, initialQuery]);
+    expect(
+      (mocks.getPurchaseOrderReport.mock.calls as unknown[][]).filter(
+        (call) => (call[0] as { bucket: string }).bucket === "month"
+      )
+    ).toHaveLength(2);
   });
 
   it("keeps the existing unsaved-document guard after a Reports visit", async () => {

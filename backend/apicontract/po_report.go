@@ -16,8 +16,9 @@ const PurchaseOrderReportPath = "/v1/reports/purchase-orders"
 
 // PurchaseOrderReport is the complete report snapshot: actual totals, period
 // and category rows, aligned category series, facet population, the monthly
-// and yearly projections, the current-period projection and notes. Money is
-// integer minor units and percentages are basis points.
+// and yearly projections, the current-period projection, the current-month
+// readout and notes. Money is integer minor units and percentages are basis
+// points.
 type PurchaseOrderReport = poreport.Report
 
 // PurchaseOrderReportQuery is the validated report filter. From is inclusive

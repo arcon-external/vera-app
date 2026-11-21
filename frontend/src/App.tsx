@@ -52,7 +52,7 @@ import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
-import type { PurchaseOrderReportData } from "./poReport";
+import type { PurchaseOrderReportView } from "./poReportExport";
 import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
   applyQuotationCopy,
@@ -623,6 +623,14 @@ function App() {
   // navigation while the workspace remains mounted. Opening it only changes
   // this page state; it never touches the PO workspace or a document draft.
   const [reportsOpened, setReportsOpened] = useState(false);
+  // #645: a monotonic freshness epoch. Every successful mutation that can
+  // change report evidence bumps it; the Reports page marks its cached sources
+  // stale without fetching while hidden, and revalidates only the visible
+  // required scopes when it is active again.
+  const [reportMutationEpoch, setReportMutationEpoch] = useState(0);
+  const invalidateReports = useCallback(() => {
+    setReportMutationEpoch((current) => current + 1);
+  }, []);
   // Ticket 02: the PO editor's primary actions as the shell action bar
   // renders them. Reported by the editor's entry view; null everywhere else.
   const [poShellActions, setPoShellActions] = useState<POEditorShellActions | null>(null);
@@ -1461,8 +1469,24 @@ function App() {
     setPoShellActions(null);
     scrollPositions.current.clear();
     setReportsOpened(false);
+    setReportMutationEpoch(0);
     setPage("home");
   }, [closePurchaseOrder, resetForm]);
+
+  // #645 Q645-1: a poll or renewal that reports a *different* account is a
+  // workspace transition, not a same-user token refresh. Clear every cached
+  // business surface (including the mounted Reports registry) before adopting
+  // it; a same-user answer keeps the workspace, its filters and its local
+  // selections exactly where they are.
+  const adoptActiveUser = useCallback(
+    (next: SignedInUser) => {
+      if (userRef.current !== null && !sameUser(userRef.current, next)) {
+        clearWorkspace();
+      }
+      setUser(next);
+    },
+    [clearWorkspace]
+  );
 
   const handleSignOut = useCallback(async () => {
     try {
@@ -1520,7 +1544,7 @@ function App() {
           // shape is the subset this poll acts on.
           const status = (await CheckSession()) as SessionStatus;
           if (status.State === "active") {
-            if (status.User) setUser(status.User as SignedInUser);
+            if (status.User) adoptActiveUser(status.User as SignedInUser);
             setSessionExpiresAt(status.ExpiresAt || null);
             setSessionCanRenew(Boolean(status.CanRenew));
             return;
@@ -1541,7 +1565,7 @@ function App() {
       })();
     }, 60000);
     return () => window.clearInterval(timer);
-  }, [signedIn, pushToast]);
+  }, [adoptActiveUser, signedIn, pushToast]);
 
   // "Stay signed in" (ticket #536). A successful renewal moves the idle
   // deadline; a real session end takes #531's preservation path; anything
@@ -1553,7 +1577,7 @@ function App() {
       const status = (await RenewSession()) as SessionStatus;
       setSessionNow(Date.now());
       if (status.State === "active") {
-        if (status.User) setUser(status.User as SignedInUser);
+        if (status.User) adoptActiveUser(status.User as SignedInUser);
         setSessionExpiresAt(status.ExpiresAt || null);
         setSessionCanRenew(Boolean(status.CanRenew));
         pushToast("success", "Your session was extended.");
@@ -1583,7 +1607,7 @@ function App() {
     } finally {
       setRenewingSession(false);
     }
-  }, [pushToast]);
+  }, [adoptActiveUser, pushToast]);
 
   const handleNewQuotation = useCallback(() => {
     void ClearRevisionContext().catch(() => undefined);
@@ -2410,8 +2434,8 @@ function App() {
   // only passes that exact snapshot to the native renderer. The binding never
   // refetches, so the PDF cannot disagree with the screen.
   const handleExportPurchaseOrderReport = useCallback(
-    (report: PurchaseOrderReportData) =>
-      ExportPurchaseOrderReport(JSON.stringify(report)),
+    (view: PurchaseOrderReportView) =>
+      ExportPurchaseOrderReport(JSON.stringify(view)),
     []
   );
 
@@ -3155,6 +3179,9 @@ function App() {
       {reportsOpened ? (
         <div hidden={visiblePage !== "reports"}>
           <PurchaseOrderReportsPage
+            key={user?.ID ?? 0}
+            active={visiblePage === "reports"}
+            mutationEpoch={reportMutationEpoch}
             defaultCurrency={companyCurrency}
             currencyCatalogue={currencyCatalogue}
             onExport={handleExportPurchaseOrderReport}
@@ -3192,6 +3219,9 @@ function App() {
             // The workspace adopts the server's linked record so the editor
             // remounts on its stored source instead of the transient draft.
             poWorkspace.saved(updated);
+            // #645: a saved record's linked source changes its cost evidence;
+            // a draft link is invisible to the report's saved-only scope.
+            if (updated.State === "saved") invalidateReports();
             pushToast(
               "success",
               `Linked to quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}. Your entered values were kept.`
@@ -3207,6 +3237,11 @@ function App() {
           onRepairSource={openSourceRepair}
           onOpen={(id) => void openPurchaseOrder(id)}
           onSaved={(updated, corrected) => {
+            // #645 Q645-2: a saved/finalized or corrected purchase order can
+            // move money, dates, category or currency. Invalidate the whole
+            // report cache conservatively; a draft save is outside the
+            // server's saved-only evidence.
+            if (corrected || updated.State === "saved") invalidateReports();
             pushToast(
               "success",
               corrected
@@ -3219,11 +3254,15 @@ function App() {
             );
           }}
           onRepaired={(updated) => {
+            // #645: repairing a source link rewrites the costed/capital/margin
+            // evidence of a saved record.
+            invalidateReports();
             pushToast(
               "success",
               `Source link repaired. The purchase order now follows quotation ${updated.QuoteNumber}, revision ${updated.SourceRevision}.`
             );
           }}
+          onDeleted={invalidateReports}
           onBack={() => {
             poLeave.setDirty(false);
             poWorkspace.close();
@@ -3461,6 +3500,7 @@ function App() {
                 isAdmin={user?.Role === "admin"}
                 onNewQuotation={handleNewQuotation}
                 onOpenQuotation={handleOpenQuotation}
+                onDeleted={invalidateReports}
               />
             )
           }

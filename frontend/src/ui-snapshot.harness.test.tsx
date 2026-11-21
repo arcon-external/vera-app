@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ReactElement } from "react";
+import { createRef, type ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { backend, poreport } from "@backend/models";
@@ -41,16 +41,30 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import { PurchaseOrderReportPickerView } from "./components/PurchaseOrderReportPicker";
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
+  type PurchaseOrderReportMetrics,
 } from "./poReport";
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
   purchaseOrderReportYearFixture,
+  purchaseOrderReportYearWithRecordedFutureFixture,
 } from "./poReportFixtures";
+import {
+  allMonthsOfYear,
+  allYearForMonths,
+  monthLabel,
+  resolveCategoryReadout,
+  resolveMonthAggregate,
+  resolveMonthReadout,
+  type PurchaseOrderMonthReadout,
+  type ReportComparisonLayout,
+  type ReportMonthLayout,
+} from "./poReportComparison";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
@@ -1341,6 +1355,213 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
 const REPORTS_MAX_AED = purchaseOrderReportMaxFixture();
 REPORTS_MAX_AED.filter = { ...REPORTS_MAX_AED.filter, currency: "AED" };
 
+function cloneReport(report: PurchaseOrderReportData): PurchaseOrderReportData {
+  return structuredClone(report);
+}
+
+function periodMetrics(
+  period: PurchaseOrderReportData["periods"][number]
+): PurchaseOrderReportMetrics {
+  return {
+    poCount: period.poCount,
+    amountMinor: period.amountMinor,
+    costedMinor: period.costedMinor,
+    uncostedMinor: period.uncostedMinor,
+    capitalMinor: period.capitalMinor,
+    marginMinor: period.marginMinor,
+    marginBps: period.marginBps,
+    coverageBps: period.coverageBps,
+  };
+}
+
+function zeroMonthMetrics() {
+  return {
+    poCount: 0,
+    amountMinor: 0,
+    costedMinor: 0,
+    uncostedMinor: 0,
+    capitalMinor: 0,
+    marginMinor: 0,
+    marginBps: null,
+    coverageBps: null,
+  };
+}
+
+// Issue #641: the static Reports evidence must include the real month browser,
+// not the old fallback period table. These readouts are the same pure selection
+// the live hook passes; no financial figure is recomputed here.
+const REPORT_MONTH_ANNUAL = purchaseOrderReportYearWithRecordedFutureFixture();
+const REPORT_MONTH_CURRENT_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportFixture(),
+  month: "2026-11",
+  annualSource: REPORT_MONTH_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+// Issue #644: the full-page current Month/Year evidence now runs through the
+// same Overview + independent month browser the live page renders. These
+// readouts select the current month from the coherent #641 day/year fixtures;
+// no figure is recomputed.
+const REPORT_DAY_PAGE_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportMonthFixture(),
+  month: "2026-11",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+const REPORT_YEAR_PAGE_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportYearFixture(),
+  month: "2026-11",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MONTH_PAST_ZERO = cloneReport(purchaseOrderReportYearFixture());
+REPORT_MONTH_PAST_ZERO.periods[0] = {
+  ...REPORT_MONTH_PAST_ZERO.periods[0],
+  ...zeroMonthMetrics(),
+};
+const REPORT_MONTH_PAST_ZERO_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_PAST_ZERO,
+  month: "2026-01",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MONTH_FUTURE = purchaseOrderReportYearFixture();
+const REPORT_MONTH_FUTURE_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_FUTURE,
+  month: "2026-12",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MONTH_FUTURE_UNAVAILABLE = cloneReport(
+  purchaseOrderReportYearFixture()
+);
+REPORT_MONTH_FUTURE_UNAVAILABLE.currentProjection = {
+  ...REPORT_MONTH_FUTURE_UNAVAILABLE.currentProjection,
+  status: "unavailable",
+  reason: "insufficient_days",
+  buckets: [],
+  currentMonth: undefined,
+};
+const REPORT_MONTH_FUTURE_UNAVAILABLE_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_FUTURE_UNAVAILABLE,
+  month: "2026-12",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MAX_CURRENT = purchaseOrderReportMaxFixture();
+REPORT_MAX_CURRENT.monthSummary = {
+  month: "2026-11",
+  from: "2026-11-01",
+  to: "2026-12-01",
+  asOf: REPORT_MAX_CURRENT.asOf,
+  mode: "month",
+  actual: periodMetrics(REPORT_MAX_CURRENT.periods[10]),
+  projection: {
+    status: "unavailable",
+    reason: "insufficient_months",
+    method: "No current-year forecast in this fixture.",
+  },
+};
+const REPORT_MAX_ANNUAL = cloneReport(REPORT_MAX_CURRENT);
+REPORT_MAX_ANNUAL.filter = {
+  from: "2026-01-01",
+  to: "2027-01-01",
+  bucket: "month",
+  category: "all",
+  currency: "IDR",
+};
+const REPORT_MAX_CURRENT_READOUT = resolveMonthReadout({
+  overview: REPORT_MAX_CURRENT,
+  month: "2026-11",
+  annualSource: REPORT_MAX_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+const REPORT_MAX_AED_CURRENT = cloneReport(REPORTS_MAX_AED);
+REPORT_MAX_AED_CURRENT.monthSummary = {
+  month: "2026-11",
+  from: "2026-11-01",
+  to: "2026-12-01",
+  asOf: REPORT_MAX_AED_CURRENT.asOf,
+  mode: "month",
+  actual: periodMetrics(REPORT_MAX_AED_CURRENT.periods[10]),
+  projection: {
+    status: "unavailable",
+    reason: "insufficient_months",
+    method: "No current-year forecast in this fixture.",
+  },
+};
+const REPORT_MAX_AED_ANNUAL = cloneReport(REPORT_MAX_AED_CURRENT);
+REPORT_MAX_AED_ANNUAL.filter = {
+  from: "2026-01-01",
+  to: "2027-01-01",
+  bucket: "month",
+  category: "all",
+  currency: "AED",
+};
+const REPORT_MAX_AED_CURRENT_READOUT = resolveMonthReadout({
+  overview: REPORT_MAX_AED_CURRENT,
+  month: "2026-11",
+  annualSource: REPORT_MAX_AED_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+function monthReportView(
+  report: PurchaseOrderReportData,
+  readout: PurchaseOrderMonthReadout,
+  filters: ReportFilterState = reportChartFilters(report)
+): ReactElement {
+  return (
+    <PurchaseOrderReportsView
+      filters={filters}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      monthBrowser={{
+        months: readout.month === "" ? [] : [readout.month],
+        activeMonth: readout.month === "" ? null : readout.month,
+        allYear: null,
+        layout: "individual",
+        notice: "",
+        readouts: [readout],
+        aggregate: null,
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetryMonth: () => undefined,
+      }}
+    />
+  );
+}
+
 // Issue #631: the chart snapshot cases share the Reports view's real props and
 // the same normalized server snapshot the screen consumes. The harness renders
 // to a string and screenshots at 360 and 1280 only (there is no 390 viewport).
@@ -1388,7 +1609,8 @@ function reportChartFilters(
 
 function reportChartView(
   report: PurchaseOrderReportData,
-  period: ReportFilterState["period"] = null
+  period: ReportFilterState["period"] = null,
+  monthReadout?: PurchaseOrderMonthReadout
 ): ReactElement {
   return (
     <PurchaseOrderReportsView
@@ -1410,9 +1632,211 @@ function reportChartView(
       onCurrencyChange={() => undefined}
       onRetry={() => undefined}
       onExport={() => undefined}
+      monthReadout={monthReadout}
+      onPreviousMonth={() => undefined}
+      onNextMonth={() => undefined}
+      onRetryMonth={() => undefined}
     />
   );
 }
+
+// Issue #642: static evidence for the live month comparison. The readouts and
+// the aggregate are the same pure selection results the hook passes; every
+// figure is read from a supplied server snapshot. These cases cannot show the
+// live modal, focus restoration, paging or request counts — the DOM suites own
+// those.
+function monthComparisonSource(
+  report: PurchaseOrderReportData,
+  months: readonly string[],
+  annualSource: PurchaseOrderReportData | null = null
+): PurchaseOrderMonthReadout[] {
+  return months.map((month) =>
+    resolveMonthReadout({
+      overview: report,
+      month,
+      annualSource,
+      annualStatus: annualSource === null ? "loading" : "ready",
+      annualError: "",
+    })
+  );
+}
+
+function zeroAnnualMonthSource(year: string): PurchaseOrderReportData {
+  const source = cloneReport(purchaseOrderReportYearFixture());
+  source.filter = {
+    from: `${year}-01-01`,
+    to: `${Number(year) + 1}-01-01`,
+    bucket: "month",
+    category: "all",
+    currency: "IDR",
+  };
+  source.periods = allMonthsOfYear(year).map((month) => ({
+    periodStart: `${month}-01`,
+    partial: false,
+    inProgress: false,
+    ...zeroMonthMetrics(),
+  }));
+  source.totals = zeroMonthMetrics();
+  source.categories = source.categories.map((category) => ({
+    ...category,
+    ...zeroMonthMetrics(),
+  }));
+  source.currentProjection = {
+    ...source.currentProjection,
+    mode: "none",
+    status: "unavailable",
+    reason: "not_current_period",
+    buckets: [],
+    currentMonth: undefined,
+  };
+  source.monthSummary = undefined;
+  return source;
+}
+
+function monthComparisonView(
+  report: PurchaseOrderReportData,
+  months: readonly string[],
+  layout: ReportMonthLayout,
+  annualSource: PurchaseOrderReportData | null = null
+): ReactElement {
+  const allYear = allYearForMonths(months);
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(report)}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      monthBrowser={{
+        months,
+        activeMonth: months[0] ?? null,
+        allYear,
+        layout,
+        notice: "",
+        readouts: monthComparisonSource(report, months, annualSource),
+        aggregate:
+          allYear === null
+            ? null
+            : resolveMonthAggregate({
+                overview: report,
+                year: allYear,
+                annualSource: null,
+                annualStatus: "loading",
+                annualError: "",
+              }),
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetryMonth: () => undefined,
+      }}
+    />
+  );
+}
+
+// Issue #643: static evidence for the independent By category comparison. The
+// readout is the same pure selection result the hook passes; every figure is
+// read from a supplied all-category snapshot. These cases cannot show the live
+// modal, focus restoration or request counts — the DOM suites own those.
+function categoryComparisonView(
+  overview: PurchaseOrderReportData,
+  source: PurchaseOrderReportData,
+  explicitCodes: readonly string[] | null,
+  layout: ReportComparisonLayout
+): ReactElement {
+  const readout = resolveCategoryReadout({
+    overview,
+    source,
+    status: "ready",
+    error: "",
+    explicitCodes,
+  });
+  const codes = readout.selected.map((item) => item.code);
+  const allSelected =
+    readout.supplied.length > 0 &&
+    codes.length === readout.supplied.length &&
+    readout.supplied.every((item) => codes.includes(item.code));
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(overview)}
+      report={overview}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      categoryBrowser={{
+        codes,
+        activeCode: codes[0] ?? null,
+        allSelected,
+        layout,
+        readout,
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetry: () => undefined,
+      }}
+    />
+  );
+}
+
+// The restricted Performance case: an FM snapshot with no purchase orders
+// above a genuine all-category section whose source is the unrestricted
+// fixture at the same range and currency.
+const REPORT_CATEGORY_RESTRICTED = cloneReport(purchaseOrderReportFixture());
+REPORT_CATEGORY_RESTRICTED.filter = {
+  ...REPORT_CATEGORY_RESTRICTED.filter,
+  category: "FM",
+};
+REPORT_CATEGORY_RESTRICTED.totals = zeroMonthMetrics();
+REPORT_CATEGORY_RESTRICTED.periods = [];
+REPORT_CATEGORY_RESTRICTED.categories = [];
+REPORT_CATEGORY_RESTRICTED.categorySeries = [];
+REPORT_CATEGORY_RESTRICTED.currentProjection = {
+  ...REPORT_CATEGORY_RESTRICTED.currentProjection,
+  mode: "none",
+  status: "unavailable",
+  reason: "not_current_period",
+  buckets: [],
+  currentMonth: undefined,
+};
+REPORT_CATEGORY_RESTRICTED.monthSummary = undefined;
+const REPORT_CATEGORY_ALL = purchaseOrderReportFixture();
+const REPORT_CATEGORY_FAB_READOUT = resolveCategoryReadout({
+  overview: REPORT_CATEGORY_ALL,
+  source: REPORT_CATEGORY_ALL,
+  status: "ready",
+  error: "",
+  explicitCodes: ["FAB"],
+});
+
 
 function sharedReportSnapshot(): PurchaseOrderReportData {
   const raw = JSON.parse(
@@ -1747,10 +2171,13 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // Issue #630: the assembled Reports page with a stable normalized fixture.
-    // It is the presentational View, so renderToString shows the loaded screen
-    // without effects. The same figures foot in the category and period
-    // tables; the projection is visibly marked as not part of actual totals.
+    // Issue #630/#644: the assembled Reports page with a stable normalized
+    // fixture. It is the presentational View, so renderToString shows the
+    // loaded screen without effects. The Overview owns the controls, actual
+    // KPIs, coverage and embedded chart; the category table and independent
+    // month browser stay outside it. The detailed method/range prose is in the
+    // closed Details region, so the default screenshot shows the compact
+    // forecast status rather than repeated paragraphs.
     //
     // What this case cannot show: loading, error and empty states (covered by
     // the DOM suite), filter interactions, and the chart's measured width and
@@ -1805,54 +2232,279 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthBrowser={{
+          months: ["2026-11"],
+          activeMonth: "2026-11",
+          allYear: null,
+          layout: "individual",
+          notice: "",
+          readouts: [REPORT_MONTH_CURRENT_READOUT],
+          aggregate: null,
+          triggerRef: createRef<HTMLButtonElement>(),
+          onOpenPicker: () => undefined,
+          onLayoutChange: () => undefined,
+          onPrevious: () => undefined,
+          onNext: () => undefined,
+          onRetryMonth: () => undefined,
+        }}
       />
     ),
   },
   {
-    // Issue #631, normal actual data: the chart cropped to its own heading so
-    // the grouped money columns, zero baseline, margin % line and legend are
-    // legible without scrolling past the KPI strip.
+    // Issue #641: a loaded past month with no orders is genuine zero evidence,
+    // not a hidden section. The year KPI strip stays its own actual figures.
+    name: "ReportsMonthPastZero",
+    element: monthReportView(
+      REPORT_MONTH_PAST_ZERO,
+      REPORT_MONTH_PAST_ZERO_READOUT,
+      reportChartFilters(REPORT_MONTH_PAST_ZERO, "year")
+    ),
+  },
+  {
+    // Issue #641: a future month inside the current year reads only the
+    // current-year projection bucket. POs and Costed amount are not forecast.
+    name: "ReportsMonthFutureAvailable",
+    element: monthReportView(
+      REPORT_MONTH_FUTURE,
+      REPORT_MONTH_FUTURE_READOUT,
+      reportChartFilters(REPORT_MONTH_FUTURE, "year")
+    ),
+  },
+  {
+    // Issue #641: an unavailable future forecast states its stable reason and
+    // never invents zeros. The month table remains visible.
+    name: "ReportsMonthFutureUnavailable",
+    element: monthReportView(
+      REPORT_MONTH_FUTURE_UNAVAILABLE,
+      REPORT_MONTH_FUTURE_UNAVAILABLE_READOUT,
+      reportChartFilters(REPORT_MONTH_FUTURE_UNAVAILABLE, "year")
+    ),
+  },
+  {
+    // Issue #642: three selected months, chronological, with the odd final card
+    // spanning the last row above the lg breakpoint. The same vertical metric
+    // table is used as the single-month table. Cropped to its heading so the
+    // screenshot frames the section, not the report's top.
+    name: "ReportsMonthComparisonGrid",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      ["2026-01", "2026-06", "2026-11"],
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: December 2025 before January 2026, with each card naming its
+    // own snapshot/as-of. The 2025 source is a loaded zero year, so the card is
+    // genuine zero evidence rather than an unfetched guess.
+    name: "ReportsMonthCrossYear",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      ["2025-12", "2026-01"],
+      "individual",
+      zeroAnnualMonthSource("2025")
+    ),
+  },
+  {
+    // Issue #642: the default All presentation: one wide twelve-row table and
+    // the annual server snapshot's Recorded total, with December's forecast as
+    // a separate marked line below the table.
+    name: "ReportsMonthAllAggregate",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      allMonthsOfYear("2026"),
+      "aggregate"
+    ),
+  },
+  {
+    // Issue #642: the remembered All/Individual display: the year's twelve
+    // vertical cards in the two-column comparison grid.
+    name: "ReportsMonthAllIndividual",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      allMonthsOfYear("2026"),
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: the explicit choose-months state. It is not a zero-valued
+    // financial report; the picker trigger stays available above it.
+    name: "ReportsMonthEmpty",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      [],
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: the real open picker surface (the same controller surface,
+    // statically rendered) over the report. Item clicks and paging are DOM
+    // behaviour and are covered by the page suite; this case is the 360/1280
+    // visual read of labels, checks, count and the conspicuous X.
+    name: "ReportsMonthPickerOpen",
+    element: (
+      <div>
+        {monthComparisonView(
+          purchaseOrderReportYearFixture(),
+          ["2026-11"],
+          "individual"
+        )}
+        <PurchaseOrderReportPickerView
+          title="Choose months"
+          items={allMonthsOfYear("2026").map((month) => ({
+            key: month,
+            label: monthLabel(month),
+          }))}
+          selectedKeys={["2026-11"]}
+          allLabel="All months in 2026"
+          allSelected={false}
+          onSelectAll={() => undefined}
+          onToggle={() => undefined}
+          onClose={() => undefined}
+          pageLabel="2026"
+          onPreviousPage={() => undefined}
+          onNextPage={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // Issue #643: three independently selected Business categories: the
+    // two-column grid's pair plus the full-width odd final card. Cropped to the
+    // section heading so the screenshot frames By category, not the report top.
+    name: "ReportsCategoryComparisonGrid",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_ALL,
+      REPORT_CATEGORY_ALL,
+      ["FM", "FAB", "SUPPLY_GEN"],
+      "individual"
+    ),
+  },
+  {
+    // Issue #643: All categories in the remembered Individual display: five
+    // vertical cards, two pairs and the full-width fifth card. The 360 render
+    // is the narrow-window read of the one-column grid and exact money.
+    name: "ReportsCategoryAllIndividual",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_ALL,
+      REPORT_CATEGORY_ALL,
+      null,
+      "individual"
+    ),
+  },
+  {
+    // Issue #643: the real open category picker surface (the same controller
+    // surface, statically rendered) over the report. Item clicks, background
+    // updates and focus restoration are DOM behaviour in the page suite; this is
+    // the 360/1280 visual read of supplied labels, the visible check and count,
+    // and the conspicuous X.
+    name: "ReportsCategoryPickerOpen",
+    element: (
+      <div>
+        {categoryComparisonView(
+          REPORT_CATEGORY_ALL,
+          REPORT_CATEGORY_ALL,
+          ["FAB"],
+          "aggregate"
+        )}
+        <PurchaseOrderReportPickerView
+          title="Choose categories"
+          items={REPORT_CATEGORY_FAB_READOUT.supplied.map((item) => ({
+            key: item.code,
+            label: item.label,
+          }))}
+          selectedKeys={["FAB"]}
+          allLabel="All categories"
+          allSelected={false}
+          onSelectAll={() => undefined}
+          onToggle={() => undefined}
+          onClose={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // Issue #643: Performance is restricted to FM and has no purchase orders,
+    // while By category still shows the genuine all-category universe. The scope
+    // caption names the inherited range/currency/business date and the local All
+    // selection, never FM as if it filtered this section.
+    name: "ReportsCategoryRestrictedPerformance",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_RESTRICTED,
+      REPORT_CATEGORY_ALL,
+      null,
+      "aggregate"
+    ),
+  },
+  {
+    // Issue #631/#644, normal actual data: the Overview cropped to its
+    // Performance heading so the grouped money columns, zero baseline, margin %
+    // line, compact legend and one forecast status are legible.
     name: "ReportsChartActual",
     cropToHeading: "Performance",
     element: reportChartView(purchaseOrderReportFixture()),
   },
   {
     // A historical shared snapshot with a real negative period (December). It
-    // is not the current month or year, so it draws actuals only and states the
-    // no-ghost reason in the current-period summary.
+    // is not the current month or year, so it draws actuals only and the
+    // compact forecast status states the no-ghost reason.
     name: "ReportsChartForecastNegative",
     cropToHeading: "Performance",
     element: <SharedReportChartView />,
   },
   {
-    // Issue #638: the full Reports screen in Month mode. The KPI strip states
-    // "Current month to date", the range controls carry the same month and the
-    // chart below is the daily ghost view.
+    // Issue #638/#644: the full Reports screen in Month mode. The Overview
+    // states "Current month to date", keeps one period toggle and draws the
+    // daily ghost view; the independent month browser sits below it.
     name: "ReportsCurrentMonth",
-    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+    element: reportChartView(
+      purchaseOrderReportMonthFixture(),
+      "month",
+      REPORT_DAY_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the full Reports screen in Year mode. The KPI strip states
-    // "Current year to date" and the chart shows November's remainder stack
-    // plus the December ghost month.
+    // Issue #638/#644: the full Reports screen in Year mode. The Overview
+    // states "Current year to date" and the chart shows November's remainder
+    // stack plus the December ghost month.
     name: "ReportsCurrentYear",
-    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
+    element: reportChartView(
+      purchaseOrderReportYearFixture(),
+      "year",
+      REPORT_YEAR_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the current calendar month by day. Days 20 to 30 are the
-    // server's ghost buckets after the horizontal dashed divider; the summary
-    // under the chart states low, base, high and the elapsed-day basis.
+    // Issue #638/#644: the current calendar month by day. Days 20 to 30 are the
+    // server's ghost buckets after the horizontal dashed divider; the one
+    // compact forecast status is visible and the full basis/range prose is in
+    // the closed Details region.
     name: "ReportsChartCurrentMonth",
     cropToHeading: "Performance",
-    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+    element: reportChartView(
+      purchaseOrderReportMonthFixture(),
+      "month",
+      REPORT_DAY_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the current calendar year by month. November carries the
+    // Issue #638/#644: the current calendar year by month. November carries the
     // stacked projected remainder; December is the one ghost month. Both are
     // visibly outside the actual totals.
     name: "ReportsChartCurrentYear",
     cropToHeading: "Performance",
-    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
+    element: reportChartView(
+      purchaseOrderReportYearFixture(),
+      "year",
+      REPORT_YEAR_PAGE_READOUT
+    ),
   },
   {
     // Issue #631, JavaScript's largest exact money range: the money axis must
@@ -1880,7 +2532,7 @@ const CASES: SnapshotCase[] = [
           category: "all",
           currency: "IDR",
         }}
-        report={purchaseOrderReportMaxFixture()}
+        report={REPORT_MAX_CURRENT}
         loading={false}
         stale={false}
         error=""
@@ -1916,6 +2568,10 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthReadout={REPORT_MAX_CURRENT_READOUT}
+        onPreviousMonth={() => undefined}
+        onNextMonth={() => undefined}
+        onRetryMonth={() => undefined}
       />
     ),
   },
@@ -1934,7 +2590,7 @@ const CASES: SnapshotCase[] = [
           category: "all",
           currency: "AED",
         }}
-        report={REPORTS_MAX_AED}
+        report={REPORT_MAX_AED_CURRENT}
         loading={false}
         stale={false}
         error=""
@@ -1970,6 +2626,10 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthReadout={REPORT_MAX_AED_CURRENT_READOUT}
+        onPreviousMonth={() => undefined}
+        onNextMonth={() => undefined}
+        onRetryMonth={() => undefined}
       />
     ),
   },

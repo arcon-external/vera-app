@@ -67,6 +67,11 @@ export interface PurchaseOrderWorkspacePageProps {
   onSaved?: (order: PurchaseOrderDTO, corrected?: boolean) => void;
   /** A source repair committed; App words its success message. */
   onRepaired?: (order: PurchaseOrderDTO) => void;
+  /**
+   * Issue #645: a confirmed permanent deletion changed report evidence. The
+   * list page decides which deletions qualify (saved records only).
+   */
+  onDeleted?: () => void;
   /** App's discard guard on the way out of the saved view. */
   onBack: () => void;
   /** The editor's Cancel, delegating to the workspace controller. */
@@ -153,6 +158,7 @@ export function PurchaseOrderWorkspacePage({
   onRepairSource,
   onSaved,
   onRepaired,
+  onDeleted,
   onBack,
   onCancel,
   onDirtyChange,
@@ -266,6 +272,7 @@ export function PurchaseOrderWorkspacePage({
             onAdd={onAdd}
             onOpen={onOpen}
             isAdmin={isAdmin}
+            onDeleted={onDeleted}
           />
         </div>
       );
@@ -280,6 +287,7 @@ export function PurchaseOrderWorkspacePage({
             onAdd={onAdd}
             onOpen={onOpen}
             isAdmin={isAdmin}
+            onDeleted={onDeleted}
           />
         </div>
       );

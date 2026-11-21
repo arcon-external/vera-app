@@ -1,46 +1,61 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GetPurchaseOrderReport } from "@backend/backend/Quotation";
 import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import {
-  REPORT_BUCKET_OPTIONS,
-  REPORT_KPI_GRID_CLASS,
-  REPORT_KPI_VALUE_CLASS,
-  REPORT_PRESET_OPTIONS,
-  categoryFilterOptions,
   formatReportBps,
   formatReportCount,
-  formatReportDate,
   initialReportFilters,
-  reportCurrencyOptions,
-  reportCategoryLabel,
   reportFilterKey,
   reportFilterValidation,
-  reportMatchesFilter,
   reportPeriodBucket,
   reportPeriodLabel,
   reportPeriodRange,
   reportPresetRange,
-  reportRangeLabel,
   toReportQuery,
   type ReportBucket,
   type ReportFilterState,
   type ReportPeriodMode,
   type ReportPreset,
 } from "../poReportPage";
-import {
-  normalizePurchaseOrderReport,
-  type PurchaseOrderReportData,
-  type PurchaseOrderReportMetrics,
-  type PurchaseOrderReportQuery,
+import type {
+  PurchaseOrderReportData,
+  PurchaseOrderReportMetrics,
+  PurchaseOrderReportQuery,
 } from "../poReport";
-import { todayWIB } from "../workspaceSettings";
+import { msUntilNextWIBMidnight, todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
-import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
-import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
-import { Select } from "./Select";
-import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import {
+  usePOReportCategoryComparison,
+  usePOReportMonthComparison,
+  usePOReportOverviewSource,
+  usePOReportSourceRegistry,
+} from "../usePOReportSources";
+import {
+  buildPurchaseOrderReportView,
+  type PurchaseOrderReportView,
+} from "../poReportExport";
+import {
+  allMonthsOfYear,
+  annualMonthRequest,
+  categorySourceRequest,
+  monthLabel,
+  overviewCanSupplyCurrentMonth,
+  overviewIsAnnualForMonth,
+  type PurchaseOrderMonthReadout,
+} from "../poReportComparison";
+import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
+import {
+  PurchaseOrderReportMonthBrowser,
+  type PurchaseOrderReportMonthBrowserProps,
+} from "./PurchaseOrderReportMonthBrowser";
+import {
+  PurchaseOrderReportCategoryBrowser,
+  type PurchaseOrderReportCategoryBrowserProps,
+} from "./PurchaseOrderReportCategoryBrowser";
+import { PurchaseOrderReportOverview } from "./PurchaseOrderReportOverview";
+import { PurchaseOrderReportPicker } from "./PurchaseOrderReportPicker";
+import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 // Issue #630: the global Reports workspace. It turns the #629 report endpoint
 // into a screen and nothing more: one normalized snapshot is fetched per
@@ -62,7 +77,19 @@ export interface PurchaseOrderReportsPageProps {
    * merge, the export button stays disabled and this page never guesses a
    * file path or success.
    */
-  onExport?: (report: PurchaseOrderReportData) => Promise<string>;
+  onExport?: (view: PurchaseOrderReportView) => Promise<string>;
+  /**
+   * Issue #645: true while Reports is the visible workspace. A hidden page
+   * fetches nothing; each false → true return revalidates the currently
+   * required scopes once. Defaults to true for standalone tests.
+   */
+  active?: boolean;
+  /**
+   * Issue #645: App bumps this after a relevant successful mutation (saved PO,
+   * correction, repair, link, deletion). It marks every cached snapshot stale
+   * without fetching while hidden.
+   */
+  mutationEpoch?: number;
 }
 
 export interface PurchaseOrderReportsViewProps {
@@ -84,6 +111,22 @@ export interface PurchaseOrderReportsViewProps {
   onCurrencyChange: (value: string) => void;
   onRetry: () => void;
   onExport: () => void;
+  /** Issue #645: revalidates the currently visible required scopes. */
+  onRefresh?: () => void;
+  /** True while a visible required source is re-reading. */
+  refreshing?: boolean;
+  /** Optional so direct fixture/harness callers keep the pre-#641 table. */
+  monthReadout?: PurchaseOrderMonthReadout | null;
+  onPreviousMonth?: () => void;
+  onNextMonth?: () => void;
+  onRetryMonth?: () => void;
+  /** The live #642 comparison; absent for direct fixture/harness callers. */
+  monthBrowser?: Omit<PurchaseOrderReportMonthBrowserProps, "entry"> | null;
+  /** The live #643 comparison; absent for direct fixture/harness callers. */
+  categoryBrowser?: Omit<
+    PurchaseOrderReportCategoryBrowserProps,
+    "entry"
+  > | null;
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
@@ -259,111 +302,6 @@ function PeriodTable({
   );
 }
 
-function KpiStrip({
-  report,
-  entry,
-  period,
-}: {
-  report: PurchaseOrderReportData;
-  entry: CurrencyInfo | null;
-  period: ReportPeriodMode | null;
-}) {
-  const totals = report.totals;
-  const periodContext =
-    period === "month"
-      ? "Current month to date"
-      : period === "year"
-        ? "Current year to date"
-        : "Selected range";
-  const kpis: { label: string; value: string; negative?: boolean }[] = [
-    { label: "PO count", value: formatReportCount(totals.poCount) },
-    { label: "PO amount", value: money(entry, totals.amountMinor) },
-    { label: "Capital", value: money(entry, totals.capitalMinor) },
-    {
-      label: "PO margin",
-      value: money(entry, totals.marginMinor),
-      negative: totals.marginMinor < 0,
-    },
-    { label: "PO margin %", value: formatReportBps(totals.marginBps) },
-  ];
-  return (
-    <Card className="min-w-0 p-5">
-      <p
-        data-report-period-context={period ?? "custom"}
-        className="mb-3 text-caption font-medium uppercase tracking-[0.12em] text-ink-500"
-      >
-        {periodContext}
-      </p>
-      <dl
-        aria-label="Report KPIs"
-        className={REPORT_KPI_GRID_CLASS}
-      >
-        {kpis.map((kpi) => (
-          <div key={kpi.label}>
-            <dt className="text-caption font-medium uppercase tracking-[0.12em] text-ink-500">
-              {kpi.label}
-            </dt>
-            <dd
-              className={`${REPORT_KPI_VALUE_CLASS} ${
-                kpi.negative ? "text-danger-700" : "text-ink-950"
-              }`}
-            >
-              {kpi.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {totals.uncostedMinor > 0 ? (
-        <p className="mt-4 border-t border-rule pt-3 text-small leading-relaxed text-ink-600">
-          Coverage: {formatReportBps(totals.coverageBps)} of the amount is
-          costed; {money(entry, totals.uncostedMinor)} of{" "}
-          {money(entry, totals.amountMinor)} is uncosted.
-        </p>
-      ) : null}
-    </Card>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4" aria-label="Loading report">
-      <div className="h-32 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-      <div className="h-64 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-      <div className="h-64 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-    </div>
-  );
-}
-
-function EmptyReport({
-  report,
-  period,
-  onPeriodChange,
-}: {
-  report: PurchaseOrderReportData;
-  period: ReportPeriodMode | null;
-  onPeriodChange: (period: ReportPeriodMode | null) => void;
-}) {
-  return (
-    <Card className="min-w-0 p-8">
-      <div className="mb-4">
-        <PurchaseOrderReportPeriodToggle
-          period={period}
-          onPeriodChange={onPeriodChange}
-        />
-      </div>
-      <h2 className="text-title font-semibold text-ink-950">
-        No purchase orders in this range
-      </h2>
-      <p className="mt-1.5 max-w-2xl text-body leading-relaxed text-ink-500">
-        {reportRangeLabel(report.filter)} ·{" "}
-        {reportCategoryLabel(report.filter.category)} ·{" "}
-        {report.filter.currency}. Choose a wider date range or a different
-        category.
-      </p>
-    </Card>
-  );
-}
-
 function ErrorCard({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <Card className="min-w-0 p-8">
@@ -406,26 +344,25 @@ export function PurchaseOrderReportsView({
   onCurrencyChange,
   onRetry,
   onExport,
+  onRefresh,
+  refreshing = false,
+  monthReadout,
+  onPreviousMonth,
+  onNextMonth,
+  onRetryMonth,
+  monthBrowser,
+  categoryBrowser,
 }: PurchaseOrderReportsViewProps) {
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
     catalogue?.find((item) => item.code === reportCurrency) ?? null;
-  const categoryOptions = categoryFilterOptions(
-    report?.population.hasUnassigned ?? false,
-    filters.category
-  );
-  const currencyOptions = reportCurrencyOptions(
-    report?.population.availableCurrencies ?? [],
-    filters.currency
-  );
-  const showSkeleton = report === null && error === "" && validation === "";
   const showEmpty = report !== null && report.totals.poCount === 0;
   const showFigures = report !== null && report.totals.poCount > 0;
-  const unresolvedCurrency = report !== null && entry === null;
-
   // The report materializes the whole current month/year, including days and
   // months that have not happened. Those are ghost territory, not actual table
-  // rows: the table stops at today and the chart carries the projection.
+  // rows: the table stops at today and the chart carries the projection. This
+  // fallback period table is used only by direct fixture/harness callers that
+  // do not supply an independent month section.
   const asOfMonth = report === null ? "" : `${report.asOf.slice(0, 7)}-01`;
   const displayedPeriods =
     report === null
@@ -435,6 +372,67 @@ export function PurchaseOrderReportsView({
         : filters.period === "year"
           ? report.periods.filter((period) => period.periodStart <= asOfMonth)
           : report.periods;
+  // Issue #644 F5: the embedded chart's "Selected month" anchor always names
+  // #report-period-table, but the section owns that id only on its ready
+  // branch. A stable wrapper carries the id (and the fragment focus/scroll
+  // contract) while the selected month is loading or errored, so a fetch or
+  // month switch can never leave the anchor dead. The ready branch keeps the
+  // table's own id, so the document never has two.
+  const monthSectionReady = monthReadout?.status === "ready";
+  const monthTable =
+    monthReadout === undefined || monthReadout === null ? null : (
+      <div
+        id={monthSectionReady ? undefined : "report-period-table"}
+        tabIndex={monthSectionReady ? undefined : -1}
+        className={
+          monthSectionReady ? "min-w-0" : "min-w-0 scroll-mt-6"
+        }
+      >
+        <PurchaseOrderReportMonthTable
+          readout={monthReadout}
+          entry={entry}
+          onPrevious={onPreviousMonth ?? (() => undefined)}
+          onNext={onNextMonth ?? (() => undefined)}
+          onRetry={onRetryMonth ?? onRetry}
+        />
+      </div>
+    );
+  // The #642 browser anchors its own table in the empty state, the single
+  // card, the first grid card or the aggregate. Its loading and error cards
+  // render no table, so the same stable wrapper carries the anchor there.
+  const monthBrowserPresent = monthBrowser !== undefined && monthBrowser !== null;
+  const monthBrowserOwnsAnchor =
+    monthBrowserPresent &&
+    (monthBrowser.months.length === 0 ||
+      (monthBrowser.months.length === 1
+        ? monthBrowser.readouts[0]?.status === "ready"
+        : monthBrowser.allYear !== null &&
+            monthBrowser.layout === "aggregate"
+          ? monthBrowser.aggregate?.status === "ready"
+          : monthBrowser.readouts[0]?.status === "ready"));
+  const monthBrowserSection =
+    monthBrowser === undefined || monthBrowser === null ? null : (
+      <div
+        id={monthBrowserOwnsAnchor ? undefined : "report-period-table"}
+        tabIndex={monthBrowserOwnsAnchor ? undefined : -1}
+        className={monthBrowserOwnsAnchor ? "min-w-0" : "min-w-0 scroll-mt-6"}
+      >
+        <PurchaseOrderReportMonthBrowser {...monthBrowser} entry={entry} />
+      </div>
+    );
+  const monthSection = monthBrowserSection ?? monthTable;
+  // #643: the category browser is its own section. It renders inside the
+  // figures branch and is deliberately outside Performance's empty gate, so a
+  // restricted overview with no orders still shows the all-category evidence.
+  // Direct fixture/harness callers that pass no categoryBrowser keep the
+  // pre-#643 CategoryTable exactly as it was.
+  const categorySection =
+    categoryBrowser === undefined || categoryBrowser === null ? null : (
+      <PurchaseOrderReportCategoryBrowser
+        {...categoryBrowser}
+        entry={entry}
+      />
+    );
 
   return (
     <section aria-labelledby="reports-heading" className="flex flex-col gap-6">
@@ -452,11 +450,17 @@ export function PurchaseOrderReportsView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {report !== null ? (
-            <span className="tnum text-caption text-ink-500">
-              As of {formatReportDate(report.asOf)}
-            </span>
-          ) : null}
+          {onRefresh === undefined ? null : (
+            <Button
+              aria-label="Refresh report"
+              data-report-refresh=""
+              disabled={refreshing}
+              title="Re-read the report scopes this screen is showing"
+              onClick={onRefresh}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+          )}
           <Button
             aria-label="Export PDF"
             disabled={!canExport || exporting}
@@ -472,170 +476,55 @@ export function PurchaseOrderReportsView({
         </div>
       </header>
 
-      <Card className="min-w-0 p-4">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          {filters.period === null ? (
-            <>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  Date range
-                </span>
-                <Select
-                  ariaLabel="Date range preset"
-                  value={filters.preset}
-                  options={REPORT_PRESET_OPTIONS}
-                  onChange={(value) => onPresetChange(value as ReportPreset)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  From date
-                </span>
-                <input
-                  type="date"
-                  aria-label="From date"
-                  className={fieldClass}
-                  value={filters.from}
-                  onChange={(event) => onFromChange(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  To date
-                </span>
-                <input
-                  type="date"
-                  aria-label="To date"
-                  className={fieldClass}
-                  value={filters.to}
-                  onChange={(event) => onToChange(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  Bucket
-                </span>
-                <Select
-                  ariaLabel="Bucket"
-                  value={filters.bucket}
-                  options={REPORT_BUCKET_OPTIONS}
-                  onChange={(value) => onBucketChange(value as ReportBucket)}
-                />
-              </label>
-            </>
-          ) : (
-            <div
-              data-report-current-period=""
-              className="rounded-md border border-rule bg-paper-subtle/60 px-3 py-2 sm:col-span-2 xl:col-span-3"
-            >
-              <span className="text-small font-semibold text-ink-900">
-                {filters.period === "month" ? "Current month" : "Current year"}
-              </span>
-              <span className="ml-2 text-small text-ink-600">
-                {formatReportDate(filters.from)} to {formatReportDate(filters.to)}
-                {" · "}
-                {filters.period === "month" ? "daily" : "monthly"}
-              </span>
-            </div>
-          )}
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Category
-            </span>
-            <Select
-              ariaLabel="Category"
-              value={filters.category}
-              options={categoryOptions}
-              onChange={(value) => onCategoryChange(String(value))}
-            />
-          </label>
-          {currencyOptions.length > 1 ? (
-            <label className="grid gap-1.5">
-              <span className="text-small font-medium text-ink-700">
-                Currency
-              </span>
-              <Select
-                ariaLabel="Currency"
-                value={filters.currency}
-                options={currencyOptions.map((code) => ({
-                  value: code,
-                  label: code,
-                }))}
-                onChange={(value) => onCurrencyChange(String(value))}
-              />
-            </label>
-          ) : (
-            <div className="grid gap-1.5">
-              <span className="text-small font-medium text-ink-700">
-                Currency
-              </span>
-              <span className="tnum flex min-h-10 items-center rounded-md border border-rule bg-paper-subtle px-3 text-body text-ink-700">
-                {filters.currency || "-"}
-              </span>
-            </div>
-          )}
-        </div>
-        {validation !== "" ? (
-          <div className="mt-3">
-            <StatusBanner tone="danger">{validation}</StatusBanner>
+      {/*
+        Root-owned notices keep a stable slot so a refresh error appearing or
+        clearing cannot remount the Overview or its chart.
+      */}
+      <div
+        className={error === "" ? "hidden" : ""}
+        data-report-root-error=""
+      >
+        {error !== "" && report === null ? (
+          <ErrorCard error={error} onRetry={onRetry} />
+        ) : error !== "" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <StatusBanner tone="danger">
+              The report could not be refreshed: {error} Showing the previous
+              figures.
+            </StatusBanner>
+            <Button aria-label="Retry report" onClick={onRetry}>
+              Retry
+            </Button>
           </div>
         ) : null}
-      </Card>
+      </div>
 
-      {loading && report !== null ? (
-        <p role="status" className="text-small text-ink-500">
-          Updating the report…
-        </p>
-      ) : null}
-      {!loading && stale && error === "" && validation === "" ? (
-        <StatusBanner tone="info">
-          Showing the previous filter's figures while this one has no report.
-        </StatusBanner>
-      ) : null}
-      {error !== "" && report === null ? (
-        <ErrorCard error={error} onRetry={onRetry} />
-      ) : error !== "" ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <StatusBanner tone="danger">
-            The report could not be refreshed: {error} Showing the previous
-            figures.
-          </StatusBanner>
-          <Button aria-label="Retry report" onClick={onRetry}>
-            Retry
-          </Button>
-        </div>
-      ) : null}
+      <PurchaseOrderReportOverview
+        filters={filters}
+        report={report}
+        catalogue={catalogue}
+        loading={loading}
+        stale={stale}
+        validation={validation}
+        onPresetChange={onPresetChange}
+        onPeriodChange={onPeriodChange}
+        onFromChange={onFromChange}
+        onToChange={onToChange}
+        onBucketChange={onBucketChange}
+        onCategoryChange={onCategoryChange}
+        onCurrencyChange={onCurrencyChange}
+      />
 
-      {unresolvedCurrency ? (
-        <StatusBanner tone="info">
-          {reportCurrency} is not in this app's currency catalogue, so monetary
-          figures are shown as “-” and no other currency is substituted.
-        </StatusBanner>
-      ) : null}
-
-      {showSkeleton ? <LoadingSkeleton /> : null}
-      {showEmpty && report !== null ? (
-        <EmptyReport
-          report={report}
-          period={filters.period}
-          onPeriodChange={onPeriodChange}
-        />
-      ) : null}
       {showFigures && report !== null ? (
         <>
-          <KpiStrip report={report} entry={entry} period={filters.period} />
-          <PurchaseOrderReportChart
-            report={report}
-            currency={entry}
-            period={filters.period}
-            onPeriodChange={onPeriodChange}
-          />
-          <CategoryTable report={report} entry={entry} />
-          <PeriodTable
-            report={report}
-            entry={entry}
-            periods={displayedPeriods}
-          />
+          {monthSection ?? (
+            <PeriodTable
+              report={report}
+              entry={entry}
+              periods={displayedPeriods}
+            />
+          )}
+          {categorySection ?? <CategoryTable report={report} entry={entry} />}
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -648,74 +537,199 @@ export function PurchaseOrderReportsView({
           ) : null}
         </>
       ) : null}
+
+      {showEmpty && report !== null ? (
+        <>
+          {monthSection}
+          {categorySection}
+        </>
+      ) : null}
     </section>
   );
 }
 
 /**
- * The live page. It owns exactly one request per filter change and keeps the
- * last successful snapshot visible while the new one is loading; a response
- * from a superseded request is ignored.
+ * The live page. Performance, By period and By category share one bounded
+ * source registry (#645): identical scopes reuse a cached snapshot, identical
+ * in-flight reads are deduplicated, and a hidden page fetches nothing. The
+ * page keeps the last successful overview visible while a new one loads; a
+ * response from a superseded generation or scope is ignored.
  */
 export function PurchaseOrderReportsPage({
   defaultCurrency,
   currencyCatalogue,
   onExport,
+  active: activeProp = true,
+  mutationEpoch = 0,
 }: PurchaseOrderReportsPageProps) {
   const { pushToast } = useToast();
+  const active = activeProp;
   const [filters, setFilters] = useState<ReportFilterState>(() =>
     initialReportFilters(todayWIB(), defaultCurrency)
   );
-  const [report, setReport] = useState<PurchaseOrderReportData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [retryToken, setRetryToken] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState("");
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const validation = reportFilterValidation(filters);
   const query = useMemo<PurchaseOrderReportQuery | null>(
     () => (validation === "" ? toReportQuery(filters) : null),
-    [filters.from, filters.to, filters.bucket, filters.category, filters.currency, validation]
+    [
+      filters.from,
+      filters.to,
+      filters.bucket,
+      filters.category,
+      filters.currency,
+      validation,
+    ]
   );
   const queryKey = query === null ? null : reportFilterKey(query);
-  const requestSeq = useRef(0);
-  const inFlightKey = useRef<string | null>(null);
+
+  // The registry lives with this authenticated page mount. Reports unmounts on
+  // sign-out (App keys it by user id), so no source survives a different
+  // session. One registry serves Performance and both comparisons, which is
+  // what lets a category selection reuse the overview's own all-category
+  // snapshot instead of issuing a second read.
+  const sourceRegistry = usePOReportSourceRegistry({ active });
+  const overview = usePOReportOverviewSource(query, sourceRegistry, active);
+  const report = overview.report;
+  const monthComparison = usePOReportMonthComparison(report, sourceRegistry, {
+    active,
+  });
+  const categoryComparison = usePOReportCategoryComparison(
+    report,
+    sourceRegistry,
+    { active }
+  );
+  const { invalidateAll, pinExport, pinVisible } = sourceRegistry;
+
+  // Visible pinning: the scopes this screen is showing cannot be evicted by
+  // the bounded cache while they are on screen (Q645-7).
+  const monthSourceKeys = useMemo(() => {
+    if (report === null) return [];
+    const keys = new Set<string>();
+    for (const month of monthComparison.months) {
+      if (overviewCanSupplyCurrentMonth(report, month)) continue;
+      if (overviewIsAnnualForMonth(report, month)) continue;
+      const request = annualMonthRequest(
+        month,
+        report.filter.category,
+        report.filter.currency,
+        report.asOf
+      );
+      if (request === null) continue;
+      keys.add(reportFilterKey(request.query));
+    }
+    return Array.from(keys);
+  }, [monthComparison.months, report]);
+  const categorySourceKey = useMemo(() => {
+    if (report === null) return null;
+    const request = categorySourceRequest(report);
+    return reportFilterKey(request.query);
+  }, [report]);
+
+  // Issue #645: a month (or the annual aggregate) whose figures are the
+  // displayed overview's own snapshot is not a separate registry source. While
+  // that overview is stale or re-reading, the card's retained figures are
+  // stale too, and the surface must say so rather than wait for a source it
+  // does not own. The export gates below stay the hook's stricter ones.
+  const viewReadouts = useMemo(() => {
+    if (report === null) return monthComparison.readouts;
+    return monthComparison.readouts.map((readout) => {
+      if (readout.month === "" || readout.stale === true) return readout;
+      const fromOverview =
+        overviewCanSupplyCurrentMonth(report, readout.month) ||
+        overviewIsAnnualForMonth(report, readout.month);
+      if (!fromOverview) return readout;
+      return { ...readout, stale: overview.stale, refreshing: overview.loading };
+    });
+  }, [
+    monthComparison.readouts,
+    overview.loading,
+    overview.stale,
+    report,
+  ]);
+  const viewAggregate = useMemo(() => {
+    const aggregate = monthComparison.aggregate;
+    if (aggregate === null || report === null || aggregate.stale === true) {
+      return aggregate;
+    }
+    // The annual aggregate is its own registry source; only an exact annual
+    // overview owns it. A current-month/day overview owning January (the
+    // aggregate's first month) says nothing about the other eleven months
+    // (NB1), so it must not label the aggregate stale.
+    const fromOverview = overviewIsAnnualForMonth(
+      report,
+      `${aggregate.year}-01`
+    );
+    if (!fromOverview) return aggregate;
+    return { ...aggregate, stale: overview.stale, refreshing: overview.loading };
+  }, [
+    monthComparison.aggregate,
+    overview.loading,
+    overview.stale,
+    report,
+  ]);
 
   useEffect(() => {
-    if (query === null || queryKey === null) {
-      // An invalid range invalidates any late response; it must not repaint a
-      // snapshot the controls no longer describe. Clearing the in-flight key
-      // also lets a corrected filter re-request the same key.
-      requestSeq.current += 1;
-      inFlightKey.current = null;
-      setLoading(false);
-      return;
-    }
-    const key = `${queryKey}#${retryToken}`;
-    if (inFlightKey.current === key) return;
-    inFlightKey.current = key;
-    const seq = ++requestSeq.current;
-    setLoading(true);
-    setError("");
-    void (async () => {
-      try {
-        const raw = await GetPurchaseOrderReport(query);
-        if (seq !== requestSeq.current) return;
-        setReport(normalizePurchaseOrderReport(raw));
-      } catch (caught) {
-        if (seq !== requestSeq.current) return;
-        setError(
-          errorMessage(
-            caught,
-            "The purchase order report could not be loaded. Check the API connection and try again."
-          )
-        );
-      } finally {
-        if (inFlightKey.current === key) inFlightKey.current = null;
-        if (seq === requestSeq.current) setLoading(false);
-      }
-    })();
-  }, [queryKey, retryToken, query]);
+    pinVisible("overview", queryKey === null ? [] : [queryKey]);
+  }, [pinVisible, queryKey]);
+  useEffect(() => {
+    pinVisible("months", monthSourceKeys);
+  }, [monthSourceKeys, pinVisible]);
+  useEffect(() => {
+    pinVisible(
+      "categories",
+      categorySourceKey === null ? [] : [categorySourceKey]
+    );
+  }, [categorySourceKey, pinVisible]);
+
+  const openPicker = useCallback(() => {
+    setCategoryPickerOpen(false);
+    setPickerYear(monthComparison.pickerStartYear());
+    setPickerOpen(true);
+  }, [monthComparison.pickerStartYear]);
+
+  const openCategoryPicker = useCallback(() => {
+    // Only one picker modal may stand at a time. Inertness already prevents
+    // opening the second while the first is up; this keeps the invariant even
+    // if both handlers are ever called in the same tick.
+    setPickerOpen(false);
+    setCategoryPickerOpen(true);
+  }, []);
+
+  const shiftPickerYear = useCallback((delta: number) => {
+    setPickerYear((current) => {
+      const year = Number(current);
+      if (!Number.isInteger(year) || year < 1) return current;
+      const next = year + delta;
+      if (next < 1 || next > 9998) return current;
+      return String(next);
+    });
+  }, []);
+
+  const pickerItems = useMemo(
+    () =>
+      allMonthsOfYear(pickerYear).map((month) => ({
+        key: month,
+        label: monthLabel(month),
+      })),
+    [pickerYear]
+  );
+
+  // Category options come strictly from the ready all-category snapshot in its
+  // supplied order; the picker never invents a value from the static filter map.
+  const categoryPickerItems = useMemo(
+    () =>
+      categoryComparison.readout.supplied.map((item) => ({
+        key: item.code,
+        label: item.label,
+      })),
+    [categoryComparison.readout.supplied]
+  );
 
   const changeFilters = useCallback((patch: Partial<ReportFilterState>) => {
     setFilters((current) => ({ ...current, ...patch }));
@@ -747,22 +761,153 @@ export function PurchaseOrderReportsPage({
     );
   }, []);
 
-  const stale =
-    report !== null && (query === null || !reportMatchesFilter(report, query));
+  // Issue #645 Q645-5: one WIB date observer drives the midnight timeout, the
+  // focus/visibility check and the hidden → active return. Only a changed WIB
+  // date rebases the relative controls; explicit dates, month selections and
+  // category selections are never rewritten.
+  const observedWIBDate = useRef(todayWIB());
+  const previousActive = useRef(active);
+  const hasBeenActive = useRef(active);
+  const invalidatedWhileHidden = useRef(false);
+  const observedMutationEpoch = useRef(mutationEpoch);
+
+  const rebaseRelativeFilters = useCallback((today: string) => {
+    setFilters((current) => {
+      if (current.period !== null) {
+        return {
+          ...current,
+          ...reportPeriodRange(current.period, today),
+          bucket: reportPeriodBucket(current.period),
+        };
+      }
+      if (current.preset !== "custom") {
+        return { ...current, ...reportPresetRange(current.preset, today) };
+      }
+      // A custom range is the user's own dates. Midnight never edits them.
+      return current;
+    });
+  }, []);
+
+  /** Returns true when the WIB date moved since the last observation. */
+  const observeWIBDate = useCallback((): boolean => {
+    const today = todayWIB();
+    if (today === observedWIBDate.current) return false;
+    observedWIBDate.current = today;
+    rebaseRelativeFilters(today);
+    return true;
+  }, [rebaseRelativeFilters]);
+
+  // A relevant mutation invalidates every cached evidence but never fetches:
+  // the ensure effects revalidate only the currently required scopes while
+  // active, and a hidden page waits for its return.
+  useEffect(() => {
+    if (mutationEpoch === observedMutationEpoch.current) return;
+    observedMutationEpoch.current = mutationEpoch;
+    invalidateAll();
+    if (!active) invalidatedWhileHidden.current = true;
+  }, [active, invalidateAll, mutationEpoch]);
+
+  // One revalidation pass per false → true return, deduplicated with any
+  // invalidation a hidden mutation already performed. A page mounted hidden
+  // loads once on its first activation; the registry has nothing to refresh
+  // yet, so it must not invalidate the read it just started.
+  useEffect(() => {
+    const wasActive = previousActive.current;
+    previousActive.current = active;
+    if (!active || wasActive) return;
+    observeWIBDate();
+    const firstActivation = !hasBeenActive.current;
+    hasBeenActive.current = true;
+    const alreadyInvalidated = invalidatedWhileHidden.current;
+    invalidatedWhileHidden.current = false;
+    if (firstActivation || alreadyInvalidated) return;
+    invalidateAll();
+  }, [active, invalidateAll, observeWIBDate]);
+
+  // A single next-WIB-midnight timeout while active, never a polling interval.
+  useEffect(() => {
+    if (!active) return;
+    let timer = 0;
+    const arm = () => {
+      timer = window.setTimeout(() => {
+        if (observeWIBDate()) invalidateAll();
+        arm();
+      }, msUntilNextWIBMidnight());
+    };
+    arm();
+    return () => window.clearTimeout(timer);
+  }, [active, invalidateAll, observeWIBDate]);
+
+  // Laptop sleep and a restored window do not fire the timeout; focus and a
+  // visible tab compare the WIB date themselves.
+  useEffect(() => {
+    if (!active) return;
+    const check = () => {
+      if (observeWIBDate()) invalidateAll();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [active, invalidateAll, observeWIBDate]);
+
+  const refreshing =
+    overview.loading ||
+    monthComparison.readouts.some((readout) => readout.refreshing === true) ||
+    monthComparison.aggregate?.refreshing === true ||
+    categoryComparison.readout.refreshing === true;
+
   const canExport =
     onExport !== undefined &&
     report !== null &&
-    !loading &&
-    !stale &&
-    !exporting;
+    !overview.loading &&
+    !overview.stale &&
+    overview.error === "" &&
+    !exporting &&
+    monthComparison.canExport &&
+    categoryComparison.canExport;
+
+  const refresh = useCallback(() => {
+    invalidateAll();
+  }, [invalidateAll]);
 
   const handleExport = useCallback(() => {
-    if (!onExport || report === null || exporting || loading || stale) return;
-    const snapshot = report;
+    // Defense in depth: the button is disabled while `canExport` is false, but
+    // an explicit empty month/category selection can keep both selection
+    // objects resolvable while the overview is stale or re-reading. Refuse at
+    // the handler too, so a programmatic call can never export old evidence.
+    if (!onExport || !canExport || report === null || exporting) return;
+    const monthSelection = monthComparison.exportSelection;
+    const categorySelection = categoryComparison.exportSelection;
+    if (monthSelection === null || categorySelection === null) return;
+    // Freeze the whole v1 envelope before the binding call. A later month,
+    // category, layout, filter or Refresh cannot alter the document already
+    // being saved; its sources stay pinned until the save settles.
+    let view: PurchaseOrderReportView;
+    try {
+      view = buildPurchaseOrderReportView(report, {
+        ...monthSelection,
+        categories: categorySelection,
+      });
+    } catch (caught) {
+      pushToast(
+        "error",
+        errorMessage(caught, "The selected comparison cannot be exported.")
+      );
+      return;
+    }
+    const releasePin = pinExport(
+      view.sources.map((source) => reportFilterKey(source.filter))
+    );
     setExporting(true);
     void (async () => {
       try {
-        const path = await onExport(snapshot);
+        const path = await onExport(view);
         if (path.trim() !== "") {
           pushToast("success", `Report saved to ${path}`);
         }
@@ -775,37 +920,112 @@ export function PurchaseOrderReportsPage({
           )
         );
       } finally {
+        releasePin();
         setExporting(false);
       }
     })();
-  }, [exporting, loading, onExport, pushToast, report, stale]);
+  }, [
+    canExport,
+    categoryComparison.exportSelection,
+    exporting,
+    monthComparison.exportSelection,
+    onExport,
+    pinExport,
+    pushToast,
+    report,
+  ]);
 
   return (
-    <PurchaseOrderReportsView
-      filters={filters}
-      report={report}
-      loading={loading}
-      stale={stale}
-      error={error}
-      validation={validation}
-      catalogue={currencyCatalogue}
-      exporting={exporting}
-      canExport={canExport}
-      onPresetChange={changePreset}
-      onPeriodChange={changePeriod}
-      onFromChange={(value) =>
-        changeFilters({ preset: "custom", period: null, from: value })
-      }
-      onToChange={(value) =>
-        changeFilters({ preset: "custom", period: null, to: value })
-      }
-      onBucketChange={(value) =>
-        changeFilters({ period: null, bucket: value })
-      }
-      onCategoryChange={(value) => changeFilters({ category: value })}
-      onCurrencyChange={(value) => changeFilters({ currency: value })}
-      onRetry={() => setRetryToken((current) => current + 1)}
-      onExport={handleExport}
-    />
+    <>
+      <PurchaseOrderReportsView
+        filters={filters}
+        report={report}
+        loading={overview.loading}
+        stale={overview.stale}
+        error={overview.error}
+        validation={validation}
+        catalogue={currencyCatalogue}
+        exporting={exporting}
+        canExport={canExport}
+        onPresetChange={changePreset}
+        onPeriodChange={changePeriod}
+        onFromChange={(value) =>
+          changeFilters({ preset: "custom", period: null, from: value })
+        }
+        onToChange={(value) =>
+          changeFilters({ preset: "custom", period: null, to: value })
+        }
+        onBucketChange={(value) =>
+          changeFilters({ period: null, bucket: value })
+        }
+        onCategoryChange={(value) => changeFilters({ category: value })}
+        onCurrencyChange={(value) => changeFilters({ currency: value })}
+        onRetry={overview.retry}
+        onRefresh={refresh}
+        refreshing={refreshing}
+        onExport={handleExport}
+        monthBrowser={{
+          months: monthComparison.months,
+          activeMonth: monthComparison.activeMonth,
+          allYear: monthComparison.allYear,
+          layout: monthComparison.layout,
+          notice: monthComparison.notice,
+          readouts: viewReadouts,
+          aggregate: viewAggregate,
+          triggerRef: pickerTriggerRef,
+          onOpenPicker: openPicker,
+          onLayoutChange: monthComparison.setLayout,
+          onPrevious: monthComparison.selectPrevious,
+          onNext: monthComparison.selectNext,
+          onRetryMonth: monthComparison.retryMonth,
+        }}
+        categoryBrowser={{
+          codes: categoryComparison.codes,
+          activeCode: categoryComparison.activeCode,
+          allSelected: categoryComparison.allSelected,
+          layout: categoryComparison.layout,
+          readout: categoryComparison.readout,
+          triggerRef: categoryTriggerRef,
+          onOpenPicker: openCategoryPicker,
+          onLayoutChange: categoryComparison.setLayout,
+          onPrevious: categoryComparison.selectPrevious,
+          onNext: categoryComparison.selectNext,
+          onRetry: categoryComparison.retry,
+        }}
+      />
+      <PurchaseOrderReportPicker
+        title={
+          monthComparison.notice === ""
+            ? "Choose months"
+            : `Choose months — ${monthComparison.notice}`
+        }
+        open={pickerOpen}
+        items={pickerItems}
+        selectedKeys={monthComparison.months}
+        allLabel={`All months in ${pickerYear}`}
+        allSelected={
+          pickerYear !== "" && monthComparison.allYear === pickerYear
+        }
+        onSelectAll={() => monthComparison.selectAll(pickerYear)}
+        onToggle={monthComparison.toggleMonth}
+        onClose={() => setPickerOpen(false)}
+        returnFocusRef={pickerTriggerRef}
+        pageLabel={pickerYear}
+        onPreviousPage={() => shiftPickerYear(-1)}
+        onNextPage={() => shiftPickerYear(1)}
+      />
+      <PurchaseOrderReportPicker
+        title="Choose categories"
+        open={categoryPickerOpen}
+        items={categoryPickerItems}
+        selectedKeys={categoryComparison.codes}
+        allLabel="All categories"
+        allSelected={categoryComparison.allSelected}
+        onSelectAll={categoryComparison.selectAll}
+        onToggle={categoryComparison.toggleCategory}
+        onClose={() => setCategoryPickerOpen(false)}
+        returnFocusRef={categoryTriggerRef}
+      />
+    </>
   );
 }

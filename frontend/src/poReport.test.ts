@@ -258,3 +258,118 @@ describe("normalizePurchaseOrderReport (issue #629)", () => {
     expect(report.currentProjection.buckets).toHaveLength(1);
   });
 });
+
+describe("monthSummary normalization (issue #641)", () => {
+  it("copies the server-owned current-month readout without arithmetic", () => {
+    const input = reportFixture();
+    input.monthSummary = {
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: "2026-11-19",
+      mode: "day",
+      actual: input.totals,
+      recordedFuture: {
+        poCount: 1,
+        amountMinor: 500,
+        costedMinor: 450,
+        uncostedMinor: 50,
+        capitalMinor: 400,
+        marginMinor: 50,
+        marginBps: 1250,
+        coverageBps: 9000,
+      },
+      projection: {
+        status: "available",
+        method: "Elapsed-day average",
+        remainder: {
+          low: 100,
+          base: 200,
+          high: 300,
+          capital: 150,
+          margin: 50,
+          marginBps: 3333,
+          sampleSize: 19,
+          source: "elapsed_days",
+        },
+      },
+    } as unknown as poreport.MonthSummary;
+
+    const report = normalizePurchaseOrderReport(input);
+    expect(report.monthSummary).toEqual({
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: "2026-11-19",
+      mode: "day",
+      actual: normalizePurchaseOrderReport(input).totals,
+      recordedFuture: {
+        poCount: 1,
+        amountMinor: 500,
+        costedMinor: 450,
+        uncostedMinor: 50,
+        capitalMinor: 400,
+        marginMinor: 50,
+        marginBps: 1250,
+        coverageBps: 9000,
+      },
+      projection: {
+        status: "available",
+        method: "Elapsed-day average",
+        remainder: {
+          low: 100,
+          base: 200,
+          high: 300,
+          capital: 150,
+          margin: 50,
+          marginBps: 3333,
+          sampleSize: 19,
+          source: "elapsed_days",
+        },
+      },
+    });
+  });
+
+  it("drops an unavailable summary instead of inventing a zero one", () => {
+    const input = reportFixture();
+    input.monthSummary = {
+      month: "2026-11",
+    } as unknown as poreport.MonthSummary;
+
+    const report = normalizePurchaseOrderReport(input);
+    expect(report.monthSummary).toBeUndefined();
+  });
+
+  it("keeps a null remainder percentage null and absent reasons absent", () => {
+    const input = reportFixture();
+    input.monthSummary = {
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: "2026-11-19",
+      mode: "month",
+      actual: { ...input.totals, marginBps: null, coverageBps: null },
+      projection: {
+        status: "available",
+        method: "Month view",
+        remainder: {
+          low: 0,
+          base: 0,
+          high: 0,
+          capital: 0,
+          margin: 0,
+          marginBps: null,
+          sampleSize: 19,
+          source: "elapsed_days",
+        },
+      },
+    } as unknown as poreport.MonthSummary;
+
+    const summary = normalizePurchaseOrderReport(input).monthSummary!;
+    expect(summary.actual.marginBps).toBeNull();
+    expect(summary.actual.coverageBps).toBeNull();
+    expect(summary.projection.remainder?.marginBps).toBeNull();
+    expect("reason" in summary.projection).toBe(false);
+    expect("recordedFuture" in summary).toBe(false);
+  });
+});

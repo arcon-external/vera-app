@@ -49,7 +49,10 @@ import {
   type ReportChartModel,
 } from "../poReportChart";
 import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
-import { PurchaseOrderReportProjectionSummary } from "./PurchaseOrderReportProjectionSummary";
+import {
+  PurchaseOrderReportProjectionStatus,
+  PurchaseOrderReportProjectionSummary,
+} from "./PurchaseOrderReportProjectionSummary";
 import {
   formatReportBps,
   formatReportCount,
@@ -67,6 +70,14 @@ export interface PurchaseOrderReportChartProps {
   /** The active Month/Year current-period mode, or null for a custom range. */
   period?: ReportPeriodMode | null;
   onPeriodChange?: (period: ReportPeriodMode | null) => void;
+  /**
+   * Issue #644: the Reports overview owns the heading, period toggle and card.
+   * Embedded mode therefore drops those three pieces and moves the detailed
+   * method/notes into one native Details region, while keeping the exact report
+   * reference, chart geometry and accessible description. The default keeps
+   * every existing standalone caller unchanged.
+   */
+  embedded?: boolean;
 }
 
 const SERIES = {
@@ -449,6 +460,7 @@ export function PurchaseOrderReportChart({
   currency,
   period = null,
   onPeriodChange,
+  embedded = false,
 }: PurchaseOrderReportChartProps) {
   const rawId = useId();
   const uid = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -632,7 +644,7 @@ export function PurchaseOrderReportChart({
   };
 
   const periodControl =
-    onPeriodChange === undefined ? null : (
+    embedded || onPeriodChange === undefined ? null : (
       <PurchaseOrderReportPeriodToggle
         period={period}
         onPeriodChange={onPeriodChange}
@@ -640,6 +652,24 @@ export function PurchaseOrderReportChart({
     );
 
   if (currency === null) {
+    const message = (
+      <p className="max-w-3xl text-small leading-relaxed text-ink-600">
+        {report.filter.currency} is not in this app's currency catalogue, so
+        the money chart cannot be labelled honestly. The period table below
+        still lists the server's exact figures.
+      </p>
+    );
+    if (embedded) {
+      return (
+        <div
+          className="min-w-0"
+          data-report-chart=""
+          data-report-chart-embedded=""
+        >
+          {message}
+        </div>
+      );
+    }
     return (
       <Card className="min-w-0 p-5" data-report-chart="">
         <SectionHeading
@@ -651,11 +681,7 @@ export function PurchaseOrderReportChart({
             {periodControl}
           </div>
         ) : null}
-        <p className="max-w-3xl text-small leading-relaxed text-ink-600">
-          {report.filter.currency} is not in this app's currency catalogue, so
-          the money chart cannot be labelled honestly. The period table below
-          still lists the server's exact figures.
-        </p>
+        {message}
       </Card>
     );
   }
@@ -704,7 +730,9 @@ export function PurchaseOrderReportChart({
     (model.hasRemainder
       ? "The current month's projected remainder is the translucent stack on its actual bar and is never included in actual totals. "
       : "") +
-    "Use the Left and Right Arrow keys to inspect one period; the period table after this chart lists every exact value.";
+    (embedded
+      ? "Use the Left and Right Arrow keys to inspect one period; the selected month section after this chart lists every exact value once it loads."
+      : "Use the Left and Right Arrow keys to inspect one period; the period table after this chart lists every exact value.");
 
   const announcementBase =
     activeBucket === null || !keyboardActive
@@ -764,33 +792,46 @@ export function PurchaseOrderReportChart({
     lastMarginPoint !== undefined &&
     lastMarginPoint.x + 6 + latestLabelWidth > layout.plot.x + layout.plot.width;
 
-  return (
-    <Card className="min-w-0 p-5" data-report-chart="">
-      <SectionHeading
-        title="Performance"
-        hint={chartViewHint(report.filter.bucket, period)}
-      />
-      {periodControl !== null ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          {periodControl}
-        </div>
-      ) : null}
+  const content = (
+    <>
+      {embedded ? null : (
+        <>
+          <SectionHeading
+            title="Performance"
+            hint={chartViewHint(report.filter.bucket, period)}
+          />
+          {periodControl !== null ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              {periodControl}
+            </div>
+          ) : null}
+        </>
+      )}
       <figure className="m-0">
         <figcaption
           id={captionId}
-          className="max-w-4xl text-small leading-relaxed text-ink-600"
+          className={
+            embedded
+              ? "sr-only"
+              : "max-w-4xl text-small leading-relaxed text-ink-600"
+          }
         >
           <span className="block">{model.summary}</span>
-          <span className="mt-1 block text-caption text-ink-500">
-            Money columns use the left axis; margin % uses the right. The hatch
-            inside an amount column is uncosted, outlined and hatched periods
-            are projected, and the dashed divider separates them from actuals.
-          </span>
+          {embedded ? null : (
+            <span className="mt-1 block text-caption text-ink-500">
+              Money columns use the left axis; margin % uses the right. The hatch
+              inside an amount column is uncosted, outlined and hatched periods
+              are projected, and the dashed divider separates them from actuals.
+            </span>
+          )}
         </figcaption>
         <ChartLegend
           model={model}
           onToggle={toggleCategory}
         />
+        {embedded ? (
+          <PurchaseOrderReportProjectionStatus report={report} />
+        ) : null}
         <div className="mb-1 flex items-baseline justify-between gap-3 text-caption text-ink-600">
           <span>
             <span className="font-medium text-ink-700">Money</span> ·{" "}
@@ -1425,10 +1466,43 @@ export function PurchaseOrderReportChart({
             href="#report-period-table"
             className="text-small font-medium text-accent-700 underline decoration-accent-300 underline-offset-2 hover:text-accent-800"
           >
-            Period table: every exact value
+            {embedded
+              ? "Selected month: every exact value"
+              : "Period table: every exact value"}
           </a>
         </div>
-        {notes.length > 0 ? (
+        {embedded ? (
+          <details
+            data-report-chart-details=""
+            className="mt-3 border-t border-rule pt-3"
+          >
+            <summary className="w-fit cursor-pointer select-none py-1 text-small font-medium text-ink-700 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500/40">
+              Method and chart details
+            </summary>
+            <div className="mt-2 grid gap-2">
+              <p className="max-w-4xl text-caption leading-relaxed text-ink-500">
+                Money columns use the left axis; margin % uses the right when
+                available. The hatch inside an amount column is uncosted;
+                outlined and hatched periods after the dashed divider are
+                projected. A dot under the axis marks a partial or in-progress
+                period. The right axis is omitted when no margin percentage is
+                available in this range.
+              </p>
+              {notes.length > 0 ? (
+                <ul className="grid gap-1 text-caption leading-relaxed text-ink-500">
+                  {notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <PurchaseOrderReportProjectionSummary
+                report={report}
+                currency={currency}
+                plain
+              />
+            </div>
+          </details>
+        ) : notes.length > 0 ? (
           <ul className="mt-2 grid gap-1 text-caption leading-relaxed text-ink-500">
             {notes.map((note) => (
               <li key={note}>{note}</li>
@@ -1436,10 +1510,29 @@ export function PurchaseOrderReportChart({
           </ul>
         ) : null}
       </figure>
-      <PurchaseOrderReportProjectionSummary
-        report={report}
-        currency={currency}
-      />
+      {embedded ? null : (
+        <PurchaseOrderReportProjectionSummary
+          report={report}
+          currency={currency}
+        />
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div
+        className="min-w-0"
+        data-report-chart=""
+        data-report-chart-embedded=""
+      >
+        {content}
+      </div>
+    );
+  }
+  return (
+    <Card className="min-w-0 p-5" data-report-chart="">
+      {content}
     </Card>
   );
 }

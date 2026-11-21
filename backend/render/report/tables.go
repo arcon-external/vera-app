@@ -182,15 +182,16 @@ func actualTableColumns(labelTitle string) []tableColumn {
 }
 
 func (r *reportRenderer) drawCategoryTable() {
-	if len(r.snapshot.Categories) == 0 {
+	source := r.snapshot
+	if len(source.Categories) == 0 {
 		r.sectionTitle("By business category", "")
 		r.emptyState("No category rows",
 			"The selected range has no saved purchase orders to break down.")
 		return
 	}
 	columns := actualTableColumns("CATEGORY")
-	rows := make([]tableRow, 0, len(r.snapshot.Categories))
-	for index, category := range r.snapshot.Categories {
+	rows := make([]tableRow, 0, len(source.Categories))
+	for index, category := range source.Categories {
 		var fill *rgb
 		if index%2 == 1 {
 			surface := r.pal.surface
@@ -206,10 +207,9 @@ func (r *reportRenderer) drawCategoryTable() {
 			formatPct(category.MarginBps),
 		}})
 	}
-	total := r.totalRow("Total")
-	r.drawTable("By business category",
-		"All amounts in "+r.currency()+". The category rows foot to the total for the selected filter.",
-		columns, rows, &total)
+	total := r.totalRowFor(source, "Total")
+	note := "All amounts in " + r.currency() + ". The category rows foot to the total for the selected filter."
+	r.drawTable("By business category", note, columns, rows, &total)
 }
 
 // periodTableLimit is the last period start the actual period table may print.
@@ -291,13 +291,17 @@ func (r *reportRenderer) drawPeriodTable() {
 }
 
 func (r *reportRenderer) totalRow(label string) tableRow {
+	return r.totalRowFor(r.snapshot, label)
+}
+
+func (r *reportRenderer) totalRowFor(source poreport.Report, label string) tableRow {
 	return tableRow{bold: true, cells: []string{
 		label,
-		formatCount(r.snapshot.Totals.PoCount),
-		r.money(r.snapshot.Totals.AmountMinor),
-		r.money(r.snapshot.Totals.CostedMinor),
-		r.money(r.snapshot.Totals.CapitalMinor),
-		r.signedMoney(r.snapshot.Totals.MarginMinor),
-		formatPct(r.snapshot.Totals.MarginBps),
+		formatCount(source.Totals.PoCount),
+		r.money(source.Totals.AmountMinor),
+		r.money(source.Totals.CostedMinor),
+		r.money(source.Totals.CapitalMinor),
+		r.signedMoney(source.Totals.MarginMinor),
+		formatPct(source.Totals.MarginBps),
 	}}
 }

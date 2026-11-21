@@ -32,6 +32,12 @@ interface ArchivePageProps {
   currency?: CurrencyInfo;
   /** Whether the signed-in user may permanently delete a quotation. */
   isAdmin?: boolean;
+  /**
+   * Issue #645: a confirmed quotation deletion changed report evidence. A
+   * record deletion leaves a linked purchase order as Source missing; a chain
+   * deletion removes it entirely -- both change cost and margin.
+   */
+  onDeleted?: () => void;
 }
 
 export function ArchivePage({
@@ -39,6 +45,7 @@ export function ArchivePage({
   onOpenQuotation,
   currency = IDR_ENTRY,
   isAdmin = false,
+  onDeleted,
 }: ArchivePageProps) {
   const [rows, setRows] = useState<ArchivedQuotationSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -294,6 +301,9 @@ export function ArchivePage({
             );
             setDeletionTarget(null);
             pushToast("success", "Quotation deleted.");
+            // The dialog calls this only after the server confirmed the
+            // deletion; a cancel or a failure never reaches here.
+            onDeleted?.();
           }}
         />
       ) : null}

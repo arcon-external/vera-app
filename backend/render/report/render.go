@@ -17,12 +17,48 @@ func Render(snapshot poreport.Report, fonts fs.FS) ([]byte, error) {
 	if err := ValidateSnapshot(snapshot); err != nil {
 		return nil, err
 	}
+	return renderDocument(snapshot, nil, nil, fonts)
+}
+
+// RenderView prints one versioned export view. The overview source owns the
+// header, KPI strip, chart, category table and notes; the selected month
+// section replaces the legacy bucket-following period table. Every figure is
+// read from a frozen source snapshot: this function makes no network call,
+// reads no clock and computes no financial result.
+func RenderView(view ViewEnvelope, fonts fs.FS) ([]byte, error) {
+	if err := ValidateView(view); err != nil {
+		return nil, err
+	}
+	resolved, err := resolveView(view)
+	if err != nil {
+		return nil, err
+	}
+	return renderDocument(resolved.Overview, &view, &resolved, fonts)
+}
+
+// RenderExport prints either accepted export payload through its own
+// composition. Legacy is never upgraded into a view; a view never falls back to
+// the legacy period table.
+func RenderExport(document ExportDocument, fonts fs.FS) ([]byte, error) {
+	switch {
+	case document.Legacy != nil:
+		return Render(*document.Legacy, fonts)
+	case document.View != nil:
+		return RenderView(*document.View, fonts)
+	default:
+		return nil, fmt.Errorf("purchase order report export has no document")
+	}
+}
+
+func renderDocument(snapshot poreport.Report, view *ViewEnvelope, resolved *resolvedView, fonts fs.FS) ([]byte, error) {
 	loaded, err := loadFaces(fonts)
 	if err != nil {
 		return nil, err
 	}
 	r := &reportRenderer{
 		snapshot: snapshot,
+		view:     view,
+		resolved: resolved,
 		faces:    loaded,
 		pal:      defaultPalette(),
 		canvas:   newCanvas(loaded),
@@ -33,17 +69,34 @@ func Render(snapshot poreport.Report, fonts fs.FS) ([]byte, error) {
 
 type reportRenderer struct {
 	snapshot poreport.Report
+	view     *ViewEnvelope
+	resolved *resolvedView
 	faces    *faces
 	pal      palette
 	canvas   *canvas
+	// cards records the comparison-card boxes the layout drew. It is evidence
+	// for the geometry tests (pair widths, odd full-width final card, one page
+	// per card); it carries no financial value and is never printed.
+	cards []cardBox
+	// categoryCards records the same boxes for the selected-category section,
+	// kept separate so #642's month geometry stays independently verifiable.
+	categoryCards []cardBox
 }
 
 func (r *reportRenderer) draw() {
 	r.drawHeader()
 	r.drawKPIs()
 	r.drawCharts()
-	r.drawCategoryTable()
-	r.drawPeriodTable()
+	if r.view != nil {
+		r.drawSelectedCategorySection()
+	} else {
+		r.drawCategoryTable()
+	}
+	if r.view != nil {
+		r.drawSelectedMonthSections()
+	} else {
+		r.drawPeriodTable()
+	}
 	r.drawProjectionSummary()
 	r.drawReportNotes()
 	r.drawDefinitions()
@@ -275,13 +328,20 @@ func (r *reportRenderer) drawDefinitions() {
 	// title at the foot of the previous page.
 	r.canvas.ensure(70)
 	r.sectionTitle("Definitions", "")
+	// A view replaces the legacy bucket-following period table with selected
+	// month rows, so the legacy partial/in-progress marker sentence would be
+	// false there. The legacy composition keeps it unchanged.
+	periodDefinition := "Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of time had passed."
+	if r.view != nil {
+		periodDefinition = "Selected-month rows are not marked partial or in progress. The current month is actual to date (month-to-date); a future month is recorded evidence or a forecast, not a complete month."
+	}
 	definitions := []string{
 		"PPN is excluded from every amount, costed amount, capital and margin figure in this report. The customer pays PPN on top of a quotation; it is collected for the state and is never profit.",
 		"Capital is the pinned source revision's pre-margin unit cost at the purchase order's quantity, rounded once per purchase order. It is not the quotation's sell price and it is not the latest revision's cost.",
 		"PO margin is costed amount minus capital. It covers only purchase orders whose source cost resolved; uncosted amount is never counted as profit. PPH23 is not subtracted: this is a PO margin, not the quotation's nett profit.",
 		"Corrections are counted once at their current values. A correction can move a purchase order between periods, so this report reflects current records, not the values as they stood when each order was received.",
 		"Current-period projections are estimates from elapsed days or complete months. They are drawn as hatched ghosts with a low-high range, never styled as actuals, and never included in an actual table or total.",
-		"Partial and in-progress periods are marked in the period table. They should not be compared with complete periods as if the same amount of time had passed.",
+		periodDefinition,
 		"All money is in " + r.currency() + " and no figure is converted between currencies. Counts may combine currencies only within the selected one; money never does.",
 	}
 	for _, definition := range definitions {
