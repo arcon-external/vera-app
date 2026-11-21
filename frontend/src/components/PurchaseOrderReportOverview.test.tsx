@@ -7,6 +7,7 @@ import type { PurchaseOrderReportData } from "../poReport";
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
+  purchaseOrderReportMonthFixture,
   purchaseOrderReportYearFixture,
 } from "../poReportFixtures";
 import {
@@ -71,6 +72,15 @@ const HISTORICAL_FILTERS: ReportFilterState = {
   period: null,
   from: "2025-01-01",
   to: "2025-12-31",
+  bucket: "month",
+  category: "all",
+  currency: "IDR",
+};
+const BASE_FILTERS: ReportFilterState = {
+  preset: "custom",
+  period: null,
+  from: "2026-01-01",
+  to: "2026-11-19",
   bucket: "month",
   category: "all",
   currency: "IDR",
@@ -286,10 +296,10 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     ]) {
       expect(kpi?.textContent).toContain(label);
     }
-    expect(kpi?.textContent).toContain("Rp480.000.000");
-    expect(kpi?.textContent).toContain("Rp390.000.000");
-    expect(kpi?.textContent).toContain("Rp42.000.000");
-    expect(kpi?.textContent).toContain("10.77%");
+    expect(kpi?.textContent).toContain("Rp641.200.000");
+    expect(kpi?.textContent).toContain("Rp518.600.000");
+    expect(kpi?.textContent).toContain("Rp122.600.000");
+    expect(kpi?.textContent).toContain("23.64%");
     expect(
       view.querySelector("[data-report-period-context]")?.textContent
     ).toBe("Current year to date");
@@ -312,11 +322,10 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(view.querySelectorAll('[aria-label="Chart legend"]')).toHaveLength(1);
     expect(view.querySelector("[data-chart-svg]")).not.toBeNull();
 
-    const coverage = view.querySelector("[data-report-coverage]");
-    expect(coverage?.textContent).toContain("Coverage");
-    expect(coverage?.textContent).toContain("90.00%");
-    expect(coverage?.textContent).toContain("Rp48.000.000");
-    expect(coverage?.closest("details")).toBeNull();
+    // This coherent year fixture is fully costed: no denominator-less or
+    // invented 0% coverage sentence is allowed here. The visible-coverage case
+    // is exercised against the month fixture below.
+    expect(view.querySelector("[data-report-coverage]")).toBeNull();
 
     const details = view.querySelector<HTMLDetailsElement>("details");
     expect(details).not.toBeNull();
@@ -387,7 +396,7 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(marks?.getAttribute("data-chart-motion")).toBe(motion);
     expect(
       view.querySelector('[aria-label="Report KPIs"]')?.textContent
-    ).toContain("Rp480.000.000");
+    ).toContain("Rp641.200.000");
     expect(view.querySelector("[data-report-overview-stale]")).not.toBeNull();
     expect(reportMock).not.toHaveBeenCalled();
   });
@@ -449,7 +458,10 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
   });
 
   it("keeps cost coverage visible outside Details only when the amount is uncosted", async () => {
-    await render();
+    await render({
+      filters: BASE_FILTERS,
+      report: purchaseOrderReportFixture(),
+    });
     let view = overview();
     const coverage = view.querySelector("[data-report-coverage]");
     expect(coverage).not.toBeNull();
@@ -459,25 +471,6 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(coverage?.textContent).toContain("Rp480.000.000");
 
     const fullyCosted = purchaseOrderReportYearFixture();
-    fullyCosted.totals = {
-      ...fullyCosted.totals,
-      costedMinor: fullyCosted.totals.amountMinor,
-      uncostedMinor: 0,
-      marginMinor:
-        fullyCosted.totals.amountMinor - fullyCosted.totals.capitalMinor,
-      coverageBps: 10_000,
-    };
-    fullyCosted.periods = fullyCosted.periods.map((period) => {
-      const costedMinor = period.amountMinor;
-      return {
-        ...period,
-        costedMinor,
-        uncostedMinor: 0,
-        marginMinor: costedMinor - period.capitalMinor,
-        coverageBps: period.amountMinor > 0 ? 10_000 : null,
-      };
-    });
-
     await render({ report: fullyCosted });
     view = overview();
     expect(view.querySelector("[data-report-coverage]")).toBeNull();
@@ -510,7 +503,7 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     ).toContain("Updating the report");
     expect(
       view.querySelector('[aria-label="Report KPIs"]')?.textContent
-    ).toContain("Rp480.000.000");
+    ).toContain("Rp641.200.000");
     expect(
       view.querySelector('[aria-label="Report KPIs"]')?.textContent
     ).not.toContain("Rp190.000.000");
@@ -558,7 +551,11 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
   });
 
   it("keeps unresolved currency honest: no substituted amount, coverage still readable", async () => {
-    await render({ catalogue: [USD] });
+    await render({
+      filters: BASE_FILTERS,
+      report: purchaseOrderReportFixture(),
+      catalogue: [USD],
+    });
     const view = overview();
 
     const kpi = view.querySelector('[aria-label="Report KPIs"]');

@@ -1391,6 +1391,25 @@ const REPORT_MONTH_CURRENT_READOUT = resolveMonthReadout({
   annualError: "",
 });
 
+// Issue #644: the full-page current Month/Year evidence now runs through the
+// same Overview + independent month browser the live page renders. These
+// readouts select the current month from the coherent #641 day/year fixtures;
+// no figure is recomputed.
+const REPORT_DAY_PAGE_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportMonthFixture(),
+  month: "2026-11",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+const REPORT_YEAR_PAGE_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportYearFixture(),
+  month: "2026-11",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
 const REPORT_MONTH_PAST_ZERO = cloneReport(purchaseOrderReportYearFixture());
 REPORT_MONTH_PAST_ZERO.periods[0] = {
   ...REPORT_MONTH_PAST_ZERO.periods[0],
@@ -1571,7 +1590,8 @@ function reportChartFilters(
 
 function reportChartView(
   report: PurchaseOrderReportData,
-  period: ReportFilterState["period"] = null
+  period: ReportFilterState["period"] = null,
+  monthReadout?: PurchaseOrderMonthReadout
 ): ReactElement {
   return (
     <PurchaseOrderReportsView
@@ -1593,6 +1613,10 @@ function reportChartView(
       onCurrencyChange={() => undefined}
       onRetry={() => undefined}
       onExport={() => undefined}
+      monthReadout={monthReadout}
+      onPreviousMonth={() => undefined}
+      onNextMonth={() => undefined}
+      onRetryMonth={() => undefined}
     />
   );
 }
@@ -1930,10 +1954,13 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // Issue #630: the assembled Reports page with a stable normalized fixture.
-    // It is the presentational View, so renderToString shows the loaded screen
-    // without effects. The same figures foot in the category and period
-    // tables; the projection is visibly marked as not part of actual totals.
+    // Issue #630/#644: the assembled Reports page with a stable normalized
+    // fixture. It is the presentational View, so renderToString shows the
+    // loaded screen without effects. The Overview owns the controls, actual
+    // KPIs, coverage and embedded chart; the category table and independent
+    // month browser stay outside it. The detailed method/range prose is in the
+    // closed Details region, so the default screenshot shows the compact
+    // forecast status rather than repeated paragraphs.
     //
     // What this case cannot show: loading, error and empty states (covered by
     // the DOM suite), filter interactions, and the chart's measured width and
@@ -2026,50 +2053,67 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // Issue #631, normal actual data: the chart cropped to its own heading so
-    // the grouped money columns, zero baseline, margin % line and legend are
-    // legible without scrolling past the KPI strip.
+    // Issue #631/#644, normal actual data: the Overview cropped to its
+    // Performance heading so the grouped money columns, zero baseline, margin %
+    // line, compact legend and one forecast status are legible.
     name: "ReportsChartActual",
     cropToHeading: "Performance",
     element: reportChartView(purchaseOrderReportFixture()),
   },
   {
     // A historical shared snapshot with a real negative period (December). It
-    // is not the current month or year, so it draws actuals only and states the
-    // no-ghost reason in the current-period summary.
+    // is not the current month or year, so it draws actuals only and the
+    // compact forecast status states the no-ghost reason.
     name: "ReportsChartForecastNegative",
     cropToHeading: "Performance",
     element: <SharedReportChartView />,
   },
   {
-    // Issue #638: the full Reports screen in Month mode. The KPI strip states
-    // "Current month to date", the range controls carry the same month and the
-    // chart below is the daily ghost view.
+    // Issue #638/#644: the full Reports screen in Month mode. The Overview
+    // states "Current month to date", keeps one period toggle and draws the
+    // daily ghost view; the independent month browser sits below it.
     name: "ReportsCurrentMonth",
-    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+    element: reportChartView(
+      purchaseOrderReportMonthFixture(),
+      "month",
+      REPORT_DAY_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the full Reports screen in Year mode. The KPI strip states
-    // "Current year to date" and the chart shows November's remainder stack
-    // plus the December ghost month.
+    // Issue #638/#644: the full Reports screen in Year mode. The Overview
+    // states "Current year to date" and the chart shows November's remainder
+    // stack plus the December ghost month.
     name: "ReportsCurrentYear",
-    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
+    element: reportChartView(
+      purchaseOrderReportYearFixture(),
+      "year",
+      REPORT_YEAR_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the current calendar month by day. Days 20 to 30 are the
-    // server's ghost buckets after the horizontal dashed divider; the summary
-    // under the chart states low, base, high and the elapsed-day basis.
+    // Issue #638/#644: the current calendar month by day. Days 20 to 30 are the
+    // server's ghost buckets after the horizontal dashed divider; the one
+    // compact forecast status is visible and the full basis/range prose is in
+    // the closed Details region.
     name: "ReportsChartCurrentMonth",
     cropToHeading: "Performance",
-    element: reportChartView(purchaseOrderReportMonthFixture(), "month"),
+    element: reportChartView(
+      purchaseOrderReportMonthFixture(),
+      "month",
+      REPORT_DAY_PAGE_READOUT
+    ),
   },
   {
-    // Issue #638: the current calendar year by month. November carries the
+    // Issue #638/#644: the current calendar year by month. November carries the
     // stacked projected remainder; December is the one ghost month. Both are
     // visibly outside the actual totals.
     name: "ReportsChartCurrentYear",
     cropToHeading: "Performance",
-    element: reportChartView(purchaseOrderReportYearFixture(), "year"),
+    element: reportChartView(
+      purchaseOrderReportYearFixture(),
+      "year",
+      REPORT_YEAR_PAGE_READOUT
+    ),
   },
   {
     // Issue #631, JavaScript's largest exact money range: the money axis must

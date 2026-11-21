@@ -140,9 +140,11 @@ describe("embedded Purchase order performance chart (issue #644)", () => {
     expect(details?.querySelector("summary")?.textContent).toContain(
       "Method and chart details"
     );
-    expect(
-      container.querySelector('a[href="#report-period-table"]')
-    ).not.toBeNull();
+    const link = container.querySelector<HTMLAnchorElement>(
+      'a[href="#report-period-table"]'
+    );
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toContain("Selected month");
   });
 
   it("does not render its own toggle even when a callback is supplied", async () => {
@@ -180,7 +182,7 @@ describe("embedded Purchase order performance chart (issue #644)", () => {
 
     const caption = document.getElementById(labelledBy.split(/\s+/)[1] ?? "");
     expect(caption?.className).toContain("sr-only");
-    expect(caption?.textContent).toContain("12 POs across 11 actual monthly periods");
+    expect(caption?.textContent).toContain("23 POs across 11 actual monthly periods");
     expect(svg().querySelector("title")?.textContent).toBe(
       "Purchase order performance chart"
     );
@@ -190,6 +192,9 @@ describe("embedded Purchase order performance chart (issue #644)", () => {
     );
     expect(description?.textContent).toContain(
       "never included in actual totals"
+    );
+    expect(description?.textContent).toContain(
+      "the selected month section after this chart lists every exact value once it loads"
     );
     expect(details?.contains(description ?? null)).toBe(false);
   });
@@ -215,7 +220,7 @@ describe("embedded Purchase order performance chart (issue #644)", () => {
     expect(text).toContain("never enter the KPIs");
     expect(text).toContain("Rest of this month");
     expect(text).toContain("Per remaining month");
-    expect(text).toContain("The hatched part of an amount column is uncosted");
+    expect(text).toContain("The hatch inside an amount column is uncosted");
     expect(text).toContain("A dot under the axis");
     expect(text).toContain("category margin lines are omitted");
     expect(svg().querySelector("[data-chart-marks]")).toBe(marks);

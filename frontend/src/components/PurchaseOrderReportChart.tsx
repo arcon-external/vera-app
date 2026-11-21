@@ -730,7 +730,9 @@ export function PurchaseOrderReportChart({
     (model.hasRemainder
       ? "The current month's projected remainder is the translucent stack on its actual bar and is never included in actual totals. "
       : "") +
-    "Use the Left and Right Arrow keys to inspect one period; the period table after this chart lists every exact value.";
+    (embedded
+      ? "Use the Left and Right Arrow keys to inspect one period; the selected month section after this chart lists every exact value once it loads."
+      : "Use the Left and Right Arrow keys to inspect one period; the period table after this chart lists every exact value.");
 
   const announcementBase =
     activeBucket === null || !keyboardActive
@@ -1464,7 +1466,9 @@ export function PurchaseOrderReportChart({
             href="#report-period-table"
             className="text-small font-medium text-accent-700 underline decoration-accent-300 underline-offset-2 hover:text-accent-800"
           >
-            Period table: every exact value
+            {embedded
+              ? "Selected month: every exact value"
+              : "Period table: every exact value"}
           </a>
         </div>
         {embedded ? (
