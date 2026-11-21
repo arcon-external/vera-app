@@ -526,3 +526,83 @@ describe("category card and aggregate direct exports (issue #643)", () => {
     ).not.toBeNull();
   });
 });
+
+// Issue #645: the category surface must say when its retained snapshot is no
+// longer current, keep the same-scope rows while a re-read is in flight or has
+// failed, and never show old money under a new scope.
+describe("category freshness states (issue #645)", () => {
+  it("labels a refreshing snapshot and keeps the same-scope rows", () => {
+    const source = purchaseOrderReportFixture();
+    const readout = resolveCategoryReadout({
+      overview: source,
+      source,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+      stale: true,
+      refreshing: true,
+    });
+    renderBrowser({ readout });
+
+    const badge = document.querySelector("[data-category-stale]");
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("data-category-refreshing")).toBe("true");
+    expect(badge?.textContent).toContain("Updating…");
+    expect(
+      document.querySelector('[data-category-row="FAB"]')?.textContent
+    ).toContain("Rp120.000.000");
+    expect(
+      document.querySelector<HTMLButtonElement>("[data-category-picker-trigger]")
+        ?.disabled
+    ).toBe(false);
+  });
+
+  it("keeps the previous rows with an inline refresh error and Retry", () => {
+    const source = purchaseOrderReportFixture();
+    const readout = resolveCategoryReadout({
+      overview: source,
+      source,
+      status: "ready",
+      error: "The all-category API is unreachable.",
+      explicitCodes: null,
+      stale: true,
+    });
+    renderBrowser({ readout });
+
+    const badge = document.querySelector("[data-category-stale]");
+    expect(badge?.getAttribute("data-category-refreshing")).toBe("false");
+    expect(badge?.textContent).toContain("Stale");
+    expect(document.body.textContent).toContain(
+      "The categories could not be refreshed: The all-category API is unreachable."
+    );
+    expect(document.body.textContent).toContain("Showing the previous figures.");
+    expect(
+      document.querySelector('button[aria-label="Retry categories"]')
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-category-row="FAB"]')?.textContent
+    ).toContain("Rp120.000.000");
+    expect(document.body.textContent).toContain("Rp120.000.000");
+  });
+
+  it("shows pure loading with no old money for a different scope", () => {
+    const readout = resolveCategoryReadout({
+      overview: purchaseOrderReportFixture(),
+      source: null,
+      status: "loading",
+      error: "",
+      explicitCodes: ["FAB"],
+    });
+    renderBrowser({ readout, codes: ["FAB"] });
+
+    expect(document.body.textContent).toContain("Loading categories…");
+    expect(document.querySelector("[data-category-stale]")).toBeNull();
+    expect(document.querySelector("[data-category-row]")).toBeNull();
+    expect(document.querySelector("[data-category-card]")).toBeNull();
+    expect(document.body.textContent).not.toContain("Rp");
+    expect(
+      document.querySelector<HTMLButtonElement>("[data-category-picker-trigger]")
+        ?.disabled
+    ).toBe(true);
+  });
+});

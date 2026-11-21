@@ -14,18 +14,24 @@ import type { POListQuery } from "../poList";
 // back to "any" when the filters reset. The SSR suite owns the markup; this one
 // owns the decision that reaches the binding.
 
-const { listMock } = vi.hoisted(() => ({
+const { listMock, previewMock, challengeMock, confirmMock } = vi.hoisted(() => ({
   listMock: vi.fn<(query: POListQuery) => Promise<unknown>>(),
+  previewMock: vi.fn(),
+  challengeMock: vi.fn(),
+  confirmMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   ListPurchaseOrders: (query: POListQuery) => listMock(query),
+  PreviewDeletion: (...args: unknown[]) => previewMock(...args),
+  CreateDeletionChallenge: (...args: unknown[]) => challengeMock(...args),
+  ConfirmDeletion: (...args: unknown[]) => confirmMock(...args),
 }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
   .IS_REACT_ACT_ENVIRONMENT = true;
 
-function page(overrides: { PageSize?: number } = {}) {
+function page(overrides: Record<string, unknown> = {}) {
   return {
     PurchaseOrders: [],
     Customers: [],
@@ -386,5 +392,235 @@ describe("PurchaseOrderListView dockets (ticket 03)", () => {
     expect(document.querySelector(".opacity-60")).not.toBeNull();
     expect(button("Previous page").hasAttribute("disabled")).toBe(true);
     expect(button("Next page").hasAttribute("disabled")).toBe(true);
+  });
+});
+
+// Issue #645: the report workspace needs a success signal for a confirmed,
+// permanent deletion. The list page already owns the dialog, so the callback is
+// decided here -- and only for a record whose deletion changes report evidence
+// (a saved PO). A draft, a cancel and a failed confirmation must stay silent.
+describe("deletion success callback (issue #645)", () => {
+  let root: Root;
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = () => undefined;
+    listMock.mockReset();
+    previewMock.mockReset();
+    challengeMock.mockReset();
+    confirmMock.mockReset();
+    previewMock.mockResolvedValue(deletionPreview());
+    confirmMock.mockResolvedValue({
+      Outcome: { Removed: [deletionRecord()], AuditIDs: [1] },
+    });
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    document.body.innerHTML = "";
+  });
+
+  function deletionRecord(overrides: Record<string, unknown> = {}) {
+    return {
+      Type: "purchase_order",
+      ID: 7,
+      UUID: "uuid-7",
+      DocumentNumber: "PO-645",
+      SourceReference: "1502260045",
+      Label: "Purchase order PO-645",
+      State: "saved",
+      Version: 3,
+      Revisions: [] as number[],
+      DocumentVersions: 0,
+      HistoryEntries: 0,
+      ...overrides,
+    };
+  }
+
+  function deletionPreview(overrides: Record<string, unknown> = {}) {
+    return {
+      TargetType: "purchase_order",
+      TargetID: 7,
+      TargetUUID: "uuid-7",
+      DocumentNumber: "PO-645",
+      DocumentNumberLabel: "Customer PO number",
+      QuoteNumber: "1502260045",
+      PONumber: "PO-645",
+      CustomerName: "PT. Buyer",
+      State: "saved",
+      SourceMissing: false,
+      Version: 3,
+      Fingerprint: "v1;target=purchase_order;purchase_order_id=7",
+      Scopes: [
+        {
+          Scope: "record",
+          Available: true,
+          UnavailableReason: "",
+          RequiresChallenge: false,
+          Removes: [deletionRecord()],
+          Preserves: [
+            deletionRecord({
+              Type: "quotation",
+              ID: 4,
+              Label: "Quotation 1502260045",
+            }),
+          ],
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  function savedRow(overrides: Record<string, unknown> = {}) {
+    return {
+      UUID: "uuid-7",
+      State: "saved",
+      PONumber: "PO-645",
+      QuoteNumber: "1502260045",
+      CustomerName: "PT. Buyer",
+      ReceivedDate: "2026-10-02",
+      Currency: "IDR",
+      ID: 7,
+      CustomerID: 2,
+      SourceRevision: 1,
+      SourceMissing: false,
+      ...overrides,
+    };
+  }
+
+  function typeField(label: string, value: string) {
+    const field = document.querySelector<
+      HTMLInputElement | HTMLTextAreaElement
+    >(`input[aria-label="${label}"], textarea[aria-label="${label}"]`);
+    if (field === null) throw new Error(`no field labelled ${label}`);
+    const prototype =
+      field instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    act(() => {
+      Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  function buttonWithText(text: string): HTMLButtonElement {
+    const found = Array.from(document.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === text
+    );
+    if (found === undefined) throw new Error(`no button reading ${text}`);
+    return found;
+  }
+
+  async function renderList(
+    props: {
+      mode?: "drafts" | "archive";
+      onDeleted?: () => void;
+    } = {}
+  ) {
+    await act(async () => {
+      root.render(
+        <PurchaseOrderListPage
+          mode={props.mode}
+          isAdmin
+          onOpen={() => undefined}
+          onAdd={() => undefined}
+          onDeleted={props.onDeleted}
+        />
+      );
+    });
+    await flush();
+  }
+
+  async function openDeletionDialog() {
+    click(button("More actions for purchase order PO-645"));
+    click(button("Delete purchase order PO-645"));
+    await flush();
+  }
+
+  async function confirmDeletion() {
+    typeField("Deletion reason", "duplicate entry");
+    typeField("Type PO-645 to confirm", "PO-645");
+    click(button("Delete permanently"));
+    await flush();
+  }
+
+  it("fires once after a confirmed saved purchase-order deletion", async () => {
+    listMock.mockResolvedValue(page({ PurchaseOrders: [savedRow()] }));
+    const onDeleted = vi.fn();
+    await renderList({ mode: "archive", onDeleted });
+
+    await openDeletionDialog();
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(onDeleted).not.toHaveBeenCalled();
+
+    await confirmDeletion();
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays silent when the dialog is cancelled", async () => {
+    listMock.mockResolvedValue(page({ PurchaseOrders: [savedRow()] }));
+    const onDeleted = vi.fn();
+    await renderList({ mode: "archive", onDeleted });
+
+    await openDeletionDialog();
+    act(() => buttonWithText("Cancel").click());
+    await flush();
+
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the confirmation fails", async () => {
+    listMock.mockResolvedValue(page({ PurchaseOrders: [savedRow()] }));
+    confirmMock.mockRejectedValue(new Error("the record is locked"));
+    const onDeleted = vi.fn();
+    await renderList({ mode: "archive", onDeleted });
+
+    await openDeletionDialog();
+    await confirmDeletion();
+
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("the record is locked");
+  });
+
+  it("stays silent when a draft purchase order is deleted", async () => {
+    listMock.mockResolvedValue(
+      page({ PurchaseOrders: [savedRow({ State: "draft" })] })
+    );
+    // The server's confirmed preview is the authority: a genuinely draft
+    // record stays silent even when the list row was captured as a draft.
+    previewMock.mockResolvedValue(deletionPreview({ State: "draft" }));
+    const onDeleted = vi.fn();
+    await renderList({ mode: "drafts", onDeleted });
+
+    await openDeletionDialog();
+    await confirmDeletion();
+
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(onDeleted).not.toHaveBeenCalled();
+  });
+
+  it("fires when the server confirms a row captured as draft is now saved", async () => {
+    listMock.mockResolvedValue(
+      page({ PurchaseOrders: [savedRow({ State: "draft" })] })
+    );
+    // Another user finalized the draft between the list read and the
+    // confirmation. The list row still says draft; the server's preview says
+    // saved, so the deletion is report evidence and must invalidate.
+    previewMock.mockResolvedValue(deletionPreview({ State: "saved" }));
+    const onDeleted = vi.fn();
+    await renderList({ mode: "drafts", onDeleted });
+
+    await openDeletionDialog();
+    await confirmDeletion();
+
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,7 +21,7 @@ import {
   reportCategoryLabel,
 } from "../poReportPage";
 import type { PurchaseOrderReportMetrics } from "../poReport";
-import { Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 import { PurchaseOrderReportMetricTable } from "./PurchaseOrderReportMetricTable";
 
 export interface PurchaseOrderReportMonthTableProps {
@@ -264,6 +264,38 @@ function MonthReadoutBody({
       ) : null}
       {readout.status === "ready" ? (
         <div className="grid gap-4">
+          {readout.stale ? (
+            <p className="flex flex-wrap items-center gap-2 text-small leading-relaxed text-ink-500">
+              <span
+                data-month-stale=""
+                data-month-refreshing={
+                  readout.refreshing ? "true" : "false"
+                }
+                className="inline-flex items-center"
+              >
+                <Badge tone="neutral">
+                  {readout.refreshing ? "Updating…" : "Stale"}
+                </Badge>
+              </span>
+              <span>
+                Showing this month's previous snapshot until the new one
+                arrives.
+              </span>
+            </p>
+          ) : null}
+          {readout.error === "" ? null : (
+            <div className="grid gap-3">
+              <StatusBanner tone="danger">
+                This month could not be refreshed: {readout.error} Showing the
+                previous figures.
+              </StatusBanner>
+              <div>
+                <Button aria-label="Retry month" onClick={onRetry}>
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
           {readout.scopeMatchesOverview ? null : (
             <StatusBanner tone="info">
               This month's snapshot has a different business date from the

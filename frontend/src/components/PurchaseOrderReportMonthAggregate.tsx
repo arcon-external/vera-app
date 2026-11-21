@@ -19,7 +19,7 @@ import {
   reportCategoryLabel,
 } from "../poReportPage";
 import type { PurchaseOrderReportMetrics } from "../poReport";
-import { Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 export interface PurchaseOrderReportMonthAggregateProps {
   aggregate: PurchaseOrderMonthAggregate;
@@ -118,6 +118,38 @@ export function PurchaseOrderReportMonthAggregate({
         ) : null}
         {aggregate.status === "ready" ? (
           <div className="grid gap-4">
+            {aggregate.stale ? (
+              <p className="flex flex-wrap items-center gap-2 text-small leading-relaxed text-ink-500">
+                <span
+                  data-month-aggregate-stale=""
+                  data-month-aggregate-refreshing={
+                    aggregate.refreshing ? "true" : "false"
+                  }
+                  className="inline-flex items-center"
+                >
+                  <Badge tone="neutral">
+                    {aggregate.refreshing ? "Updating…" : "Stale"}
+                  </Badge>
+                </span>
+                <span>
+                  Showing the previous {aggregate.year} annual snapshot until
+                  the new one arrives.
+                </span>
+              </p>
+            ) : null}
+            {aggregate.error === "" ? null : (
+              <div className="grid gap-3">
+                <StatusBanner tone="danger">
+                  This annual snapshot could not be refreshed:{" "}
+                  {aggregate.error} Showing the previous figures.
+                </StatusBanner>
+                <div>
+                  <Button aria-label="Retry month" onClick={onRetry}>
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            )}
             {aggregate.scopeMatchesOverview ? null : (
               <StatusBanner tone="info">
                 This annual snapshot has a different business date from the

@@ -21,7 +21,7 @@ import { formatReportBps, formatReportCount, formatReportDate } from "../poRepor
 import type { PurchaseOrderReportMetrics } from "../poReport";
 import { PurchaseOrderReportComparisonGrid } from "./PurchaseOrderReportComparisonGrid";
 import { PurchaseOrderReportMetricTable } from "./PurchaseOrderReportMetricTable";
-import { Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 export interface PurchaseOrderReportCategoryBrowserProps {
   codes: readonly string[];
@@ -351,6 +351,17 @@ export function PurchaseOrderReportCategoryBrowser({
             {readout.generatedAt === "" ? null : (
               <span className="tnum"> · snapshot {readout.generatedAt}</span>
             )}
+            {readout.stale ? (
+              <span
+                data-category-stale=""
+                data-category-refreshing={readout.refreshing ? "true" : "false"}
+                className="ml-2 inline-flex align-middle"
+              >
+                <Badge tone="neutral">
+                  {readout.refreshing ? "Updating…" : "Stale"}
+                </Badge>
+              </span>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -437,6 +448,26 @@ export function PurchaseOrderReportCategoryBrowser({
         ) : null}
         {ready ? (
           <div className="grid gap-3">
+            {readout.stale ? (
+              <p
+                data-category-stale-note=""
+                className="text-small leading-relaxed text-ink-500"
+              >
+                Showing the previous all-category snapshot until the new one
+                arrives.
+              </p>
+            ) : null}
+            {readout.error === "" ? null : (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <StatusBanner tone="danger">
+                  The categories could not be refreshed: {readout.error}{" "}
+                  Showing the previous figures.
+                </StatusBanner>
+                <Button aria-label="Retry categories" onClick={onRetry}>
+                  Retry
+                </Button>
+              </div>
+            )}
             {readout.scopeMatchesOverview ? null : (
               <StatusBanner tone="info">
                 This all-category snapshot has a different business date from

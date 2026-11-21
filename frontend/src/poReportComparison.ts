@@ -463,6 +463,10 @@ export interface PurchaseOrderMonthReadout {
   month: string;
   status: MonthSourceStatus;
   error: string;
+  /** The last-known snapshot is no longer current evidence for this scope. */
+  stale?: boolean;
+  /** A re-read is in flight while the last-known snapshot stays visible. */
+  refreshing?: boolean;
   /** The source's own WIB business date; "" while loading or failed. */
   asOf: string;
   generatedAt: string;
@@ -567,6 +571,8 @@ export function resolveMonthReadout(input: {
   annualSource: PurchaseOrderReportData | null;
   annualStatus: MonthSourceStatus;
   annualError: string;
+  stale?: boolean;
+  refreshing?: boolean;
 }): PurchaseOrderMonthReadout {
   const resolution = resolveMonthSource(input);
   const { overview, month } = input;
@@ -574,6 +580,8 @@ export function resolveMonthReadout(input: {
     month,
     status: resolution.status,
     error: resolution.error,
+    stale: input.stale ?? false,
+    refreshing: input.refreshing ?? false,
     asOf: "",
     generatedAt: "",
     category: overview.filter.category,
@@ -710,6 +718,8 @@ export function monthReadoutExportable(
 ): boolean {
   if (
     readout.status !== "ready" ||
+    readout.stale === true ||
+    readout.refreshing === true ||
     !readout.scopeMatchesOverview ||
     readout.month === ""
   ) {
@@ -791,6 +801,10 @@ export interface PurchaseOrderMonthAggregate {
   year: string;
   status: MonthSourceStatus;
   error: string;
+  /** The retained annual snapshot is no longer current evidence. */
+  stale?: boolean;
+  /** A re-read is in flight while the retained annual snapshot stays visible. */
+  refreshing?: boolean;
   asOf: string;
   generatedAt: string;
   category: string;
@@ -852,12 +866,16 @@ export function resolveMonthAggregate(input: {
   annualSource: PurchaseOrderReportData | null;
   annualStatus: MonthSourceStatus;
   annualError: string;
+  stale?: boolean;
+  refreshing?: boolean;
 }): PurchaseOrderMonthAggregate {
   const { overview, year, annualSource, annualStatus, annualError } = input;
   const aggregate: PurchaseOrderMonthAggregate = {
     year,
     status: "loading",
     error: "",
+    stale: input.stale ?? false,
+    refreshing: input.refreshing ?? false,
     asOf: "",
     generatedAt: "",
     category: overview.filter.category,
@@ -1011,6 +1029,10 @@ export interface PurchaseOrderCategoryItem {
 export interface PurchaseOrderCategoryReadout {
   status: CategorySourceStatus;
   error: string;
+  /** The retained all-category snapshot is no longer current evidence. */
+  stale?: boolean;
+  /** A re-read is in flight while the retained snapshot stays visible. */
+  refreshing?: boolean;
   /** The inherited overview range label (from-to inclusive). */
   rangeLabel: string;
   currency: string;
@@ -1253,6 +1275,8 @@ export function resolveCategoryReadout(input: {
   status: CategorySourceStatus;
   error: string;
   explicitCodes: readonly string[] | null;
+  stale?: boolean;
+  refreshing?: boolean;
 }): PurchaseOrderCategoryReadout {
   const { overview, source, status, error, explicitCodes } = input;
   const inheritedLabel: CategorySourceLabel = overviewSuppliesAllCategories(
@@ -1263,6 +1287,8 @@ export function resolveCategoryReadout(input: {
   const readout: PurchaseOrderCategoryReadout = {
     status,
     error,
+    stale: input.stale ?? false,
+    refreshing: input.refreshing ?? false,
     rangeLabel: reportRangeLabel(overview.filter),
     currency: overview.filter.currency,
     asOf: "",

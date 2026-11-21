@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GetPurchaseOrderReport } from "@backend/backend/Quotation";
 import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
@@ -9,7 +8,6 @@ import {
   initialReportFilters,
   reportFilterKey,
   reportFilterValidation,
-  reportMatchesFilter,
   reportPeriodBucket,
   reportPeriodLabel,
   reportPeriodRange,
@@ -20,17 +18,17 @@ import {
   type ReportPeriodMode,
   type ReportPreset,
 } from "../poReportPage";
-import {
-  normalizePurchaseOrderReport,
-  type PurchaseOrderReportData,
-  type PurchaseOrderReportMetrics,
-  type PurchaseOrderReportQuery,
+import type {
+  PurchaseOrderReportData,
+  PurchaseOrderReportMetrics,
+  PurchaseOrderReportQuery,
 } from "../poReport";
-import { todayWIB } from "../workspaceSettings";
+import { msUntilNextWIBMidnight, todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
 import {
   usePOReportCategoryComparison,
   usePOReportMonthComparison,
+  usePOReportOverviewSource,
   usePOReportSourceRegistry,
 } from "../usePOReportSources";
 import {
@@ -39,7 +37,11 @@ import {
 } from "../poReportExport";
 import {
   allMonthsOfYear,
+  annualMonthRequest,
+  categorySourceRequest,
   monthLabel,
+  overviewCanSupplyCurrentMonth,
+  overviewIsAnnualForMonth,
   type PurchaseOrderMonthReadout,
 } from "../poReportComparison";
 import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
@@ -76,6 +78,18 @@ export interface PurchaseOrderReportsPageProps {
    * file path or success.
    */
   onExport?: (view: PurchaseOrderReportView) => Promise<string>;
+  /**
+   * Issue #645: true while Reports is the visible workspace. A hidden page
+   * fetches nothing; each false → true return revalidates the currently
+   * required scopes once. Defaults to true for standalone tests.
+   */
+  active?: boolean;
+  /**
+   * Issue #645: App bumps this after a relevant successful mutation (saved PO,
+   * correction, repair, link, deletion). It marks every cached snapshot stale
+   * without fetching while hidden.
+   */
+  mutationEpoch?: number;
 }
 
 export interface PurchaseOrderReportsViewProps {
@@ -97,6 +111,10 @@ export interface PurchaseOrderReportsViewProps {
   onCurrencyChange: (value: string) => void;
   onRetry: () => void;
   onExport: () => void;
+  /** Issue #645: revalidates the currently visible required scopes. */
+  onRefresh?: () => void;
+  /** True while a visible required source is re-reading. */
+  refreshing?: boolean;
   /** Optional so direct fixture/harness callers keep the pre-#641 table. */
   monthReadout?: PurchaseOrderMonthReadout | null;
   onPreviousMonth?: () => void;
@@ -326,6 +344,8 @@ export function PurchaseOrderReportsView({
   onCurrencyChange,
   onRetry,
   onExport,
+  onRefresh,
+  refreshing = false,
   monthReadout,
   onPreviousMonth,
   onNextMonth,
@@ -430,6 +450,17 @@ export function PurchaseOrderReportsView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {onRefresh === undefined ? null : (
+            <Button
+              aria-label="Refresh report"
+              data-report-refresh=""
+              disabled={refreshing}
+              title="Re-read the report scopes this screen is showing"
+              onClick={onRefresh}
+            >
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+          )}
           <Button
             aria-label="Export PDF"
             disabled={!canExport || exporting}
@@ -518,39 +549,143 @@ export function PurchaseOrderReportsView({
 }
 
 /**
- * The live page. It owns exactly one request per filter change and keeps the
- * last successful snapshot visible while the new one is loading; a response
- * from a superseded request is ignored.
+ * The live page. Performance, By period and By category share one bounded
+ * source registry (#645): identical scopes reuse a cached snapshot, identical
+ * in-flight reads are deduplicated, and a hidden page fetches nothing. The
+ * page keeps the last successful overview visible while a new one loads; a
+ * response from a superseded generation or scope is ignored.
  */
 export function PurchaseOrderReportsPage({
   defaultCurrency,
   currencyCatalogue,
   onExport,
+  active: activeProp = true,
+  mutationEpoch = 0,
 }: PurchaseOrderReportsPageProps) {
   const { pushToast } = useToast();
+  const active = activeProp;
   const [filters, setFilters] = useState<ReportFilterState>(() =>
     initialReportFilters(todayWIB(), defaultCurrency)
   );
-  const [report, setReport] = useState<PurchaseOrderReportData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [retryToken, setRetryToken] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState("");
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // The independent month and category registries live with this authenticated
-  // page mount. Reports unmounts on sign-out, so no source survives a different
-  // session. One registry serves both comparisons, which is what lets a
-  // category selection reuse the overview's own all-category snapshot.
-  const sourceRegistry = usePOReportSourceRegistry(report);
-  const monthComparison = usePOReportMonthComparison(report, sourceRegistry);
+
+  const validation = reportFilterValidation(filters);
+  const query = useMemo<PurchaseOrderReportQuery | null>(
+    () => (validation === "" ? toReportQuery(filters) : null),
+    [
+      filters.from,
+      filters.to,
+      filters.bucket,
+      filters.category,
+      filters.currency,
+      validation,
+    ]
+  );
+  const queryKey = query === null ? null : reportFilterKey(query);
+
+  // The registry lives with this authenticated page mount. Reports unmounts on
+  // sign-out (App keys it by user id), so no source survives a different
+  // session. One registry serves Performance and both comparisons, which is
+  // what lets a category selection reuse the overview's own all-category
+  // snapshot instead of issuing a second read.
+  const sourceRegistry = usePOReportSourceRegistry({ active });
+  const overview = usePOReportOverviewSource(query, sourceRegistry, active);
+  const report = overview.report;
+  const monthComparison = usePOReportMonthComparison(report, sourceRegistry, {
+    active,
+  });
   const categoryComparison = usePOReportCategoryComparison(
     report,
-    sourceRegistry
+    sourceRegistry,
+    { active }
   );
+  const { invalidateAll, pinExport, pinVisible } = sourceRegistry;
+
+  // Visible pinning: the scopes this screen is showing cannot be evicted by
+  // the bounded cache while they are on screen (Q645-7).
+  const monthSourceKeys = useMemo(() => {
+    if (report === null) return [];
+    const keys = new Set<string>();
+    for (const month of monthComparison.months) {
+      if (overviewCanSupplyCurrentMonth(report, month)) continue;
+      if (overviewIsAnnualForMonth(report, month)) continue;
+      const request = annualMonthRequest(
+        month,
+        report.filter.category,
+        report.filter.currency,
+        report.asOf
+      );
+      if (request === null) continue;
+      keys.add(reportFilterKey(request.query));
+    }
+    return Array.from(keys);
+  }, [monthComparison.months, report]);
+  const categorySourceKey = useMemo(() => {
+    if (report === null) return null;
+    const request = categorySourceRequest(report);
+    return reportFilterKey(request.query);
+  }, [report]);
+
+  // Issue #645: a month (or the annual aggregate) whose figures are the
+  // displayed overview's own snapshot is not a separate registry source. While
+  // that overview is stale or re-reading, the card's retained figures are
+  // stale too, and the surface must say so rather than wait for a source it
+  // does not own. The export gates below stay the hook's stricter ones.
+  const viewReadouts = useMemo(() => {
+    if (report === null) return monthComparison.readouts;
+    return monthComparison.readouts.map((readout) => {
+      if (readout.month === "" || readout.stale === true) return readout;
+      const fromOverview =
+        overviewCanSupplyCurrentMonth(report, readout.month) ||
+        overviewIsAnnualForMonth(report, readout.month);
+      if (!fromOverview) return readout;
+      return { ...readout, stale: overview.stale, refreshing: overview.loading };
+    });
+  }, [
+    monthComparison.readouts,
+    overview.loading,
+    overview.stale,
+    report,
+  ]);
+  const viewAggregate = useMemo(() => {
+    const aggregate = monthComparison.aggregate;
+    if (aggregate === null || report === null || aggregate.stale === true) {
+      return aggregate;
+    }
+    // The annual aggregate is its own registry source; only an exact annual
+    // overview owns it. A current-month/day overview owning January (the
+    // aggregate's first month) says nothing about the other eleven months
+    // (NB1), so it must not label the aggregate stale.
+    const fromOverview = overviewIsAnnualForMonth(
+      report,
+      `${aggregate.year}-01`
+    );
+    if (!fromOverview) return aggregate;
+    return { ...aggregate, stale: overview.stale, refreshing: overview.loading };
+  }, [
+    monthComparison.aggregate,
+    overview.loading,
+    overview.stale,
+    report,
+  ]);
+
+  useEffect(() => {
+    pinVisible("overview", queryKey === null ? [] : [queryKey]);
+  }, [pinVisible, queryKey]);
+  useEffect(() => {
+    pinVisible("months", monthSourceKeys);
+  }, [monthSourceKeys, pinVisible]);
+  useEffect(() => {
+    pinVisible(
+      "categories",
+      categorySourceKey === null ? [] : [categorySourceKey]
+    );
+  }, [categorySourceKey, pinVisible]);
 
   const openPicker = useCallback(() => {
     setCategoryPickerOpen(false);
@@ -596,51 +731,6 @@ export function PurchaseOrderReportsPage({
     [categoryComparison.readout.supplied]
   );
 
-  const validation = reportFilterValidation(filters);
-  const query = useMemo<PurchaseOrderReportQuery | null>(
-    () => (validation === "" ? toReportQuery(filters) : null),
-    [filters.from, filters.to, filters.bucket, filters.category, filters.currency, validation]
-  );
-  const queryKey = query === null ? null : reportFilterKey(query);
-  const requestSeq = useRef(0);
-  const inFlightKey = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (query === null || queryKey === null) {
-      // An invalid range invalidates any late response; it must not repaint a
-      // snapshot the controls no longer describe. Clearing the in-flight key
-      // also lets a corrected filter re-request the same key.
-      requestSeq.current += 1;
-      inFlightKey.current = null;
-      setLoading(false);
-      return;
-    }
-    const key = `${queryKey}#${retryToken}`;
-    if (inFlightKey.current === key) return;
-    inFlightKey.current = key;
-    const seq = ++requestSeq.current;
-    setLoading(true);
-    setError("");
-    void (async () => {
-      try {
-        const raw = await GetPurchaseOrderReport(query);
-        if (seq !== requestSeq.current) return;
-        setReport(normalizePurchaseOrderReport(raw));
-      } catch (caught) {
-        if (seq !== requestSeq.current) return;
-        setError(
-          errorMessage(
-            caught,
-            "The purchase order report could not be loaded. Check the API connection and try again."
-          )
-        );
-      } finally {
-        if (inFlightKey.current === key) inFlightKey.current = null;
-        if (seq === requestSeq.current) setLoading(false);
-      }
-    })();
-  }, [queryKey, retryToken, query]);
-
   const changeFilters = useCallback((patch: Partial<ReportFilterState>) => {
     setFilters((current) => ({ ...current, ...patch }));
   }, []);
@@ -671,25 +761,133 @@ export function PurchaseOrderReportsPage({
     );
   }, []);
 
-  const stale =
-    report !== null && (query === null || !reportMatchesFilter(report, query));
+  // Issue #645 Q645-5: one WIB date observer drives the midnight timeout, the
+  // focus/visibility check and the hidden → active return. Only a changed WIB
+  // date rebases the relative controls; explicit dates, month selections and
+  // category selections are never rewritten.
+  const observedWIBDate = useRef(todayWIB());
+  const previousActive = useRef(active);
+  const hasBeenActive = useRef(active);
+  const invalidatedWhileHidden = useRef(false);
+  const observedMutationEpoch = useRef(mutationEpoch);
+
+  const rebaseRelativeFilters = useCallback((today: string) => {
+    setFilters((current) => {
+      if (current.period !== null) {
+        return {
+          ...current,
+          ...reportPeriodRange(current.period, today),
+          bucket: reportPeriodBucket(current.period),
+        };
+      }
+      if (current.preset !== "custom") {
+        return { ...current, ...reportPresetRange(current.preset, today) };
+      }
+      // A custom range is the user's own dates. Midnight never edits them.
+      return current;
+    });
+  }, []);
+
+  /** Returns true when the WIB date moved since the last observation. */
+  const observeWIBDate = useCallback((): boolean => {
+    const today = todayWIB();
+    if (today === observedWIBDate.current) return false;
+    observedWIBDate.current = today;
+    rebaseRelativeFilters(today);
+    return true;
+  }, [rebaseRelativeFilters]);
+
+  // A relevant mutation invalidates every cached evidence but never fetches:
+  // the ensure effects revalidate only the currently required scopes while
+  // active, and a hidden page waits for its return.
+  useEffect(() => {
+    if (mutationEpoch === observedMutationEpoch.current) return;
+    observedMutationEpoch.current = mutationEpoch;
+    invalidateAll();
+    if (!active) invalidatedWhileHidden.current = true;
+  }, [active, invalidateAll, mutationEpoch]);
+
+  // One revalidation pass per false → true return, deduplicated with any
+  // invalidation a hidden mutation already performed. A page mounted hidden
+  // loads once on its first activation; the registry has nothing to refresh
+  // yet, so it must not invalidate the read it just started.
+  useEffect(() => {
+    const wasActive = previousActive.current;
+    previousActive.current = active;
+    if (!active || wasActive) return;
+    observeWIBDate();
+    const firstActivation = !hasBeenActive.current;
+    hasBeenActive.current = true;
+    const alreadyInvalidated = invalidatedWhileHidden.current;
+    invalidatedWhileHidden.current = false;
+    if (firstActivation || alreadyInvalidated) return;
+    invalidateAll();
+  }, [active, invalidateAll, observeWIBDate]);
+
+  // A single next-WIB-midnight timeout while active, never a polling interval.
+  useEffect(() => {
+    if (!active) return;
+    let timer = 0;
+    const arm = () => {
+      timer = window.setTimeout(() => {
+        if (observeWIBDate()) invalidateAll();
+        arm();
+      }, msUntilNextWIBMidnight());
+    };
+    arm();
+    return () => window.clearTimeout(timer);
+  }, [active, invalidateAll, observeWIBDate]);
+
+  // Laptop sleep and a restored window do not fire the timeout; focus and a
+  // visible tab compare the WIB date themselves.
+  useEffect(() => {
+    if (!active) return;
+    const check = () => {
+      if (observeWIBDate()) invalidateAll();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [active, invalidateAll, observeWIBDate]);
+
+  const refreshing =
+    overview.loading ||
+    monthComparison.readouts.some((readout) => readout.refreshing === true) ||
+    monthComparison.aggregate?.refreshing === true ||
+    categoryComparison.readout.refreshing === true;
+
   const canExport =
     onExport !== undefined &&
     report !== null &&
-    !loading &&
-    !stale &&
+    !overview.loading &&
+    !overview.stale &&
+    overview.error === "" &&
     !exporting &&
     monthComparison.canExport &&
     categoryComparison.canExport;
 
+  const refresh = useCallback(() => {
+    invalidateAll();
+  }, [invalidateAll]);
+
   const handleExport = useCallback(() => {
-    if (!onExport || report === null || exporting || loading || stale) return;
+    // Defense in depth: the button is disabled while `canExport` is false, but
+    // an explicit empty month/category selection can keep both selection
+    // objects resolvable while the overview is stale or re-reading. Refuse at
+    // the handler too, so a programmatic call can never export old evidence.
+    if (!onExport || !canExport || report === null || exporting) return;
     const monthSelection = monthComparison.exportSelection;
     const categorySelection = categoryComparison.exportSelection;
     if (monthSelection === null || categorySelection === null) return;
     // Freeze the whole v1 envelope before the binding call. A later month,
-    // category, layout or filter change cannot alter the document already
-    // being saved.
+    // category, layout, filter or Refresh cannot alter the document already
+    // being saved; its sources stay pinned until the save settles.
     let view: PurchaseOrderReportView;
     try {
       view = buildPurchaseOrderReportView(report, {
@@ -703,6 +901,9 @@ export function PurchaseOrderReportsPage({
       );
       return;
     }
+    const releasePin = pinExport(
+      view.sources.map((source) => reportFilterKey(source.filter))
+    );
     setExporting(true);
     void (async () => {
       try {
@@ -719,18 +920,19 @@ export function PurchaseOrderReportsPage({
           )
         );
       } finally {
+        releasePin();
         setExporting(false);
       }
     })();
   }, [
+    canExport,
     categoryComparison.exportSelection,
     exporting,
-    loading,
     monthComparison.exportSelection,
     onExport,
+    pinExport,
     pushToast,
     report,
-    stale,
   ]);
 
   return (
@@ -738,9 +940,9 @@ export function PurchaseOrderReportsPage({
       <PurchaseOrderReportsView
         filters={filters}
         report={report}
-        loading={loading}
-        stale={stale}
-        error={error}
+        loading={overview.loading}
+        stale={overview.stale}
+        error={overview.error}
         validation={validation}
         catalogue={currencyCatalogue}
         exporting={exporting}
@@ -758,7 +960,9 @@ export function PurchaseOrderReportsPage({
         }
         onCategoryChange={(value) => changeFilters({ category: value })}
         onCurrencyChange={(value) => changeFilters({ currency: value })}
-        onRetry={() => setRetryToken((current) => current + 1)}
+        onRetry={overview.retry}
+        onRefresh={refresh}
+        refreshing={refreshing}
         onExport={handleExport}
         monthBrowser={{
           months: monthComparison.months,
@@ -766,8 +970,8 @@ export function PurchaseOrderReportsPage({
           allYear: monthComparison.allYear,
           layout: monthComparison.layout,
           notice: monthComparison.notice,
-          readouts: monthComparison.readouts,
-          aggregate: monthComparison.aggregate,
+          readouts: viewReadouts,
+          aggregate: viewAggregate,
           triggerRef: pickerTriggerRef,
           onOpenPicker: openPicker,
           onLayoutChange: monthComparison.setLayout,

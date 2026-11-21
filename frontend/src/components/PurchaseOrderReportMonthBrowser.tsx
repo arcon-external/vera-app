@@ -73,6 +73,25 @@ export function PurchaseOrderReportMonthBrowser({
   // exist beside it (the day-snapshot current month), but they are not what it
   // displays.
   const showProvenanceNote = !aggregateMode && snapshotStamps.size > 1;
+  // Issue #645: the browser owns no source itself; it surfaces the state the
+  // cards and the aggregate already carry. The attributes name the section's
+  // aggregate freshness without adding a second banner or changing the
+  // trigger/navigation/grid structure.
+  const staleEvidence =
+    aggregate?.stale === true ||
+    readouts.some(
+      (readout) => readout.status === "ready" && readout.stale === true
+    );
+  const refreshingEvidence =
+    aggregate?.refreshing === true ||
+    readouts.some((readout) => readout.refreshing === true);
+  const refreshError =
+    (aggregate !== null &&
+      aggregate.status === "ready" &&
+      aggregate.error !== "") ||
+    readouts.some(
+      (readout) => readout.status === "ready" && readout.error !== ""
+    );
 
   // Subset/All-Individual arrows move focus and scroll; they never change
   // membership. Aggregate and empty have no card target, so they get no nav.
@@ -85,7 +104,14 @@ export function PurchaseOrderReportMonthBrowser({
   }, [activeMonth, layout, months, showNavigation]);
 
   return (
-    <section data-month-browser="" aria-label="Month comparison" className="min-w-0">
+    <section
+      data-month-browser=""
+      data-month-browser-stale={staleEvidence ? "true" : "false"}
+      data-month-browser-refreshing={refreshingEvidence ? "true" : "false"}
+      data-month-browser-error={refreshError ? "true" : "false"}
+      aria-label="Month comparison"
+      className="min-w-0"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <SectionHeading

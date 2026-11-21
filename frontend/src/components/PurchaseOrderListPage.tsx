@@ -61,6 +61,12 @@ export interface PurchaseOrderListPageProps {
    * state. The server's own page size is authoritative once a page loads.
    */
   pageSize?: number;
+  /**
+   * Issue #645: a permanent deletion was confirmed. Reports listens for this to
+   * mark its cached evidence stale. Only a saved record changes report
+   * evidence, so a deleted draft stays silent.
+   */
+  onDeleted?: () => void;
 }
 
 export interface PurchaseOrderListViewProps {
@@ -929,6 +935,7 @@ export function PurchaseOrderListPage({
   isAdmin = false,
   mode,
   pageSize,
+  onDeleted,
 }: PurchaseOrderListPageProps) {
   const [state, dispatch] = useReducer(poListReducer, undefined, () =>
     mode === undefined
@@ -940,9 +947,12 @@ export function PurchaseOrderListPage({
   const requestSeq = useRef(0);
   const lastSearch = useRef(state.filters.search);
   const [reload, setReload] = useState(0);
+  // #645: the row's stored state is kept with the target because the deletion
+  // callback is a report-freshness signal: a draft is not report evidence.
   const [deletionTarget, setDeletionTarget] = useState<{
     id: number;
     label: string;
+    state: string;
   } | null>(null);
 
   useEffect(() => {
@@ -1008,6 +1018,7 @@ export function PurchaseOrderListPage({
                   label: row.PONumber.trim() === ""
                     ? `purchase order #${row.ID}`
                     : `purchase order ${row.PONumber}`,
+                  state: row.State,
                 })
             : undefined
         }
@@ -1018,9 +1029,17 @@ export function PurchaseOrderListPage({
           targetId={deletionTarget.id}
           targetLabel={deletionTarget.label}
           onClose={() => setDeletionTarget(null)}
-          onDeleted={() => {
+          onDeleted={(preview) => {
+            // Only a saved record is report evidence: deleting a draft never
+            // changes the reports. The list row's state is captured when
+            // Delete is clicked; the server's confirmed preview is the
+            // authority, because another user may have finalized the draft
+            // before this confirmation (issue #645 NB2).
+            const invalidatesReports =
+              deletionTarget.state !== "draft" || preview.State !== "draft";
             setDeletionTarget(null);
             setReload((current) => current + 1);
+            if (invalidatesReports) onDeleted?.();
           }}
         />
       ) : null}

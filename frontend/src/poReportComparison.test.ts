@@ -17,6 +17,7 @@ import {
   isAllCategoriesSelected,
   monthKeyFromDate,
   monthLabel,
+  monthReadoutExportable,
   monthSelectionSummary,
   monthSpanCount,
   monthStart,
@@ -473,6 +474,99 @@ describe("month export eligibility (issue #641)", () => {
     });
     mismatched.scopeMatchesOverview = false;
     expect(monthReadoutExportable(mismatched, overview)).toBe(false);
+  });
+});
+
+describe("stale evidence (issue #645)", () => {
+  it("carries stale and refreshing flags through a month readout", () => {
+    const overview = purchaseOrderReportMonthFixture();
+    const fresh = resolveMonthReadout({
+      overview,
+      month: "2026-11",
+      annualSource: null,
+      annualStatus: "loading",
+      annualError: "",
+    });
+    // Callers that omit the new inputs keep the historical fresh behaviour.
+    expect(fresh.stale).toBe(false);
+    expect(fresh.refreshing).toBe(false);
+
+    const stale = resolveMonthReadout({
+      overview,
+      month: "2026-11",
+      annualSource: null,
+      annualStatus: "loading",
+      annualError: "",
+      stale: true,
+      refreshing: true,
+    });
+    expect(stale.stale).toBe(true);
+    expect(stale.refreshing).toBe(true);
+    expect(stale.status).toBe("ready");
+    expect(monthReadoutExportable(stale, overview)).toBe(false);
+
+    const refreshingOnly = resolveMonthReadout({
+      overview,
+      month: "2026-11",
+      annualSource: null,
+      annualStatus: "loading",
+      annualError: "",
+      refreshing: true,
+    });
+    expect(refreshingOnly.stale).toBe(false);
+    expect(monthReadoutExportable(refreshingOnly, overview)).toBe(false);
+  });
+
+  it("carries stale and refreshing flags through the annual aggregate", () => {
+    const overview = purchaseOrderReportYearFixture();
+    const fresh = resolveMonthAggregate({
+      overview,
+      year: "2026",
+      annualSource: overview,
+      annualStatus: "ready",
+      annualError: "",
+    });
+    expect(fresh.stale).toBe(false);
+    expect(fresh.refreshing).toBe(false);
+
+    const stale = resolveMonthAggregate({
+      overview,
+      year: "2026",
+      annualSource: overview,
+      annualStatus: "loading",
+      annualError: "The annual snapshot could not be refreshed.",
+      stale: true,
+      refreshing: true,
+    });
+    expect(stale.status).toBe("ready");
+    expect(stale.stale).toBe(true);
+    expect(stale.refreshing).toBe(true);
+    expect(stale.rows).toHaveLength(12);
+  });
+
+  it("carries stale and refreshing flags through the category readout", () => {
+    const overview = purchaseOrderReportFixture();
+    const fresh = resolveCategoryReadout({
+      overview,
+      source: overview,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(fresh.stale).toBe(false);
+    expect(fresh.refreshing).toBe(false);
+
+    const stale = resolveCategoryReadout({
+      overview,
+      source: overview,
+      status: "ready",
+      error: "",
+      explicitCodes: ["FM"],
+      stale: true,
+    });
+    expect(stale.stale).toBe(true);
+    expect(stale.refreshing).toBe(false);
+    expect(stale.supplied.length).toBeGreaterThan(0);
   });
 });
 

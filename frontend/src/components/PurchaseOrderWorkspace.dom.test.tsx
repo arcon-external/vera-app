@@ -22,12 +22,24 @@ import { PurchaseOrderWorkspacePage } from "./PurchaseOrderWorkspace";
 // Bindings are replaced at their module boundary, which is what the desktop
 // provides; everything above it is production code.
 
-const { getMock, updateMock, correctMock, documentStateMock, repairMock } = vi.hoisted(() => ({
+const {
+  getMock,
+  updateMock,
+  correctMock,
+  documentStateMock,
+  repairMock,
+  listMock,
+  previewDeletionMock,
+  confirmDeletionMock,
+} = vi.hoisted(() => ({
   getMock: vi.fn(),
   updateMock: vi.fn(),
   correctMock: vi.fn(),
   documentStateMock: vi.fn(),
   repairMock: vi.fn(),
+  listMock: vi.fn(),
+  previewDeletionMock: vi.fn(),
+  confirmDeletionMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
@@ -49,13 +61,10 @@ vi.mock("@backend/backend/Quotation", () => ({
   GetActivePurchaseOrderDocumentContent: vi.fn(),
   GetPurchaseOrderDocumentVersionContent: vi.fn(),
   RemovePurchaseOrderDocument: vi.fn(),
-  ListPurchaseOrders: vi.fn(async () => ({
-    Orders: [],
-    Total: 0,
-    Page: 1,
-    PageSize: 15,
-    Customers: [],
-  })),
+  ListPurchaseOrders: (...args: unknown[]) => listMock(...args),
+  PreviewDeletion: (...args: unknown[]) => previewDeletionMock(...args),
+  CreateDeletionChallenge: vi.fn(),
+  ConfirmDeletion: (...args: unknown[]) => confirmDeletionMock(...args),
 }));
 
 vi.mock("@backend/models", () => ({
@@ -170,6 +179,18 @@ const CONFLICT = {
   UpdatedAt: "2026-10-21T10:15:00+07:00",
 };
 
+/** The list page's page DTO; an empty archive unless a test supplies rows. */
+function emptyListPage() {
+  return {
+    PurchaseOrders: [] as Record<string, unknown>[],
+    Customers: [] as { ID: number; Name: string }[],
+    Page: 1,
+    PageSize: 15,
+    Total: 0,
+    TotalPages: 1,
+  };
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -179,6 +200,10 @@ beforeEach(() => {
   correctMock.mockReset();
   documentStateMock.mockReset();
   documentStateMock.mockResolvedValue({ Document: null, Versions: [] });
+  listMock.mockReset();
+  listMock.mockResolvedValue(emptyListPage());
+  previewDeletionMock.mockReset();
+  confirmDeletionMock.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -660,5 +685,188 @@ describe("source-missing record repair from the saved view (issue #481)", () => 
       "The quotation this purchase order followed was permanently deleted"
     );
     expect(document.body.textContent).toContain("quotation 1502260019 revision 1");
+  });
+});
+
+// Issue #645: the report workspace listens to the PO archive's confirmed
+// deletions. The workspace owns the tab composition, so the callback must pass
+// through it untouched -- and a cancelled dialog must not reach the caller.
+describe("deletion callback forwarding (issue #645)", () => {
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function archiveRow(overrides: Record<string, unknown> = {}) {
+    return {
+      UUID: "uuid-7",
+      State: "saved",
+      PONumber: "PO-645",
+      QuoteNumber: "1502260045",
+      CustomerName: "PT. Buyer",
+      ReceivedDate: "2026-10-02",
+      Currency: "USD",
+      ID: 7,
+      CustomerID: 2,
+      SourceRevision: 1,
+      SourceMissing: false,
+      ...overrides,
+    };
+  }
+
+  function deletionRecord(overrides: Record<string, unknown> = {}) {
+    return {
+      Type: "purchase_order",
+      ID: 7,
+      UUID: "uuid-7",
+      DocumentNumber: "PO-645",
+      SourceReference: "1502260045",
+      Label: "Purchase order PO-645",
+      State: "saved",
+      Version: 3,
+      Revisions: [] as number[],
+      DocumentVersions: 0,
+      HistoryEntries: 0,
+      ...overrides,
+    };
+  }
+
+  function deletionPreview() {
+    return {
+      TargetType: "purchase_order",
+      TargetID: 7,
+      TargetUUID: "uuid-7",
+      DocumentNumber: "PO-645",
+      DocumentNumberLabel: "Customer PO number",
+      QuoteNumber: "1502260045",
+      PONumber: "PO-645",
+      CustomerName: "PT. Buyer",
+      State: "saved",
+      SourceMissing: false,
+      Version: 3,
+      Fingerprint: "v1;target=purchase_order;purchase_order_id=7",
+      Scopes: [
+        {
+          Scope: "record",
+          Available: true,
+          UnavailableReason: "",
+          RequiresChallenge: false,
+          Removes: [deletionRecord()],
+          Preserves: [],
+        },
+      ],
+    };
+  }
+
+  function ArchiveHarness({ onDeleted }: { onDeleted: () => void }) {
+    const workspace = usePurchaseOrderWorkspace();
+    return (
+      <PurchaseOrderWorkspacePage
+        workspace={workspace}
+        currency={USD}
+        uomOptions={[]}
+        incotermOptions={[]}
+        tab="archive"
+        onAdd={() => undefined}
+        isAdmin
+        onRepairSource={() => undefined}
+        onOpen={() => undefined}
+        onDeleted={onDeleted}
+        onBack={() => undefined}
+        onCancel={() => undefined}
+        onDirtyChange={() => undefined}
+      />
+    );
+  }
+
+  async function renderArchive(onDeleted: () => void) {
+    await act(async () => {
+      root.render(<ArchiveHarness onDeleted={onDeleted} />);
+    });
+    await flush();
+  }
+
+  function typeField(label: string, value: string) {
+    const field = document.querySelector<
+      HTMLInputElement | HTMLTextAreaElement
+    >(`input[aria-label="${label}"], textarea[aria-label="${label}"]`);
+    if (field === null) throw new Error(`no field labelled ${label}`);
+    const prototype =
+      field instanceof HTMLTextAreaElement
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    act(() => {
+      Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(field, value);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  function buttonWithText(text: string): HTMLButtonElement {
+    const found = Array.from(document.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent?.trim() === text
+    );
+    if (found === undefined) throw new Error(`no button reading ${text}`);
+    return found;
+  }
+
+  it("forwards a confirmed archive deletion to the workspace caller", async () => {
+    listMock.mockResolvedValue({
+      ...emptyListPage(),
+      PurchaseOrders: [archiveRow()],
+      Total: 1,
+    });
+    previewDeletionMock.mockResolvedValue(deletionPreview());
+    confirmDeletionMock.mockResolvedValue({
+      Outcome: { Removed: [deletionRecord()], AuditIDs: [1] },
+    });
+    const onDeleted = vi.fn();
+    await renderArchive(onDeleted);
+
+    await act(async () => {
+      button("More actions for purchase order PO-645").click();
+    });
+    await act(async () => {
+      button("Delete purchase order PO-645").click();
+    });
+    await flush();
+    expect(onDeleted).not.toHaveBeenCalled();
+
+    typeField("Deletion reason", "duplicate entry");
+    typeField("Type PO-645 to confirm", "PO-645");
+    await act(async () => {
+      button("Delete permanently").click();
+    });
+    await flush();
+
+    expect(confirmDeletionMock).toHaveBeenCalledTimes(1);
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not forward a cancelled deletion", async () => {
+    listMock.mockResolvedValue({
+      ...emptyListPage(),
+      PurchaseOrders: [archiveRow()],
+      Total: 1,
+    });
+    previewDeletionMock.mockResolvedValue(deletionPreview());
+    const onDeleted = vi.fn();
+    await renderArchive(onDeleted);
+
+    await act(async () => {
+      button("More actions for purchase order PO-645").click();
+    });
+    await act(async () => {
+      button("Delete purchase order PO-645").click();
+    });
+    await flush();
+
+    await act(async () => {
+      buttonWithText("Cancel").click();
+    });
+    await flush();
+
+    expect(confirmDeletionMock).not.toHaveBeenCalled();
+    expect(onDeleted).not.toHaveBeenCalled();
   });
 });

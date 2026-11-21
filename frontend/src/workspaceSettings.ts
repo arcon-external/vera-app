@@ -397,6 +397,23 @@ export function todayWIB(now: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+const DAY_MS = 86_400_000;
+
+/**
+ * Milliseconds from `now` until the next 00:00:00.000 in WIB (UTC+7, no DST).
+ *
+ * The reports workspace arms one wake-up from this, so the answer is always at
+ * least one millisecond: exactly at midnight it waits a full day instead of
+ * returning 0 and re-arming a timer that spins. WIB has no daylight saving, so
+ * a shifted modulo is exact and never consults the machine's local zone.
+ */
+export function msUntilNextWIBMidnight(now: Date = new Date()): number {
+  const shifted = now.getTime() + WIB_OFFSET_MS;
+  const elapsed = ((shifted % DAY_MS) + DAY_MS) % DAY_MS;
+  return elapsed === 0 ? DAY_MS : DAY_MS - elapsed;
+}
+
 /**
  * Fills a newly created PO draft from the saved defaults, without ever
  * replacing a value the quotation revision supplied.

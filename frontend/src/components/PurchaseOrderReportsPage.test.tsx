@@ -304,7 +304,7 @@ describe("Reports filters (issue #630)", () => {
     expect(reportMock).toHaveBeenCalledTimes(1);
   });
 
-  it("sends every filter exactly, one fetch per change, including All and Unassigned", async () => {
+  it("sends every filter exactly, one fetch per new scope, including All and Unassigned", async () => {
     await renderPage();
     expect(reportMock).toHaveBeenCalledTimes(1);
 
@@ -312,25 +312,27 @@ describe("Reports filters (issue #630)", () => {
     expect(reportMock).toHaveBeenCalledTimes(2);
     expect(calls()[1].category).toBe("UNASSIGNED");
 
+    // Issue #645: returning to an exact scope this mount already loaded is a
+    // cache read, not a fetch. The controls still read "All categories".
     await choose("Category", "All categories");
-    expect(reportMock).toHaveBeenCalledTimes(3);
-    expect(calls()[2].category).toBe("all");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(button("Category").textContent).toContain("All categories");
 
     await choose("Currency", "USD");
-    expect(reportMock).toHaveBeenCalledTimes(4);
-    expect(calls()[3].currency).toBe("USD");
+    expect(reportMock).toHaveBeenCalledTimes(3);
+    expect(calls()[2].currency).toBe("USD");
 
     await choose("Bucket", "Year");
     // The year-bucketed overview is a new read, but the month browser reuses
     // the exact annual snapshot the initial Year view already loaded.
-    expect(reportMock).toHaveBeenCalledTimes(5);
-    expect(calls()[4].bucket).toBe("year");
-    expect(calls()[3].bucket).toBe("month");
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(calls()[3].bucket).toBe("year");
+    expect(calls()[2].bucket).toBe("month");
 
     await typeDate("From date", "2025-12-01");
     await flush();
-    expect(reportMock).toHaveBeenCalledTimes(6);
-    expect(calls()[5]).toMatchObject({
+    expect(reportMock).toHaveBeenCalledTimes(5);
+    expect(calls()[4]).toMatchObject({
       from: "2025-12-01",
       to: "2027-01-01",
       bucket: "year",
@@ -849,16 +851,20 @@ describe("current period toggle (issue #638)", () => {
     });
     await flush();
 
+    // Issue #645: the initial Year view already loaded this exact annual
+    // scope, so returning to it is a cache read. The last *request* is still
+    // the month read; the screen must still show the year snapshot.
     expect(calls().at(-1)).toEqual(
       toReportQuery({
         preset: "custom",
-        period: "year",
-        ...reportPeriodRange("year", PINNED_TODAY),
-        bucket: "month",
+        period: "month",
+        ...reportPeriodRange("month", PINNED_TODAY),
+        bucket: "day",
         category: "all",
         currency: "IDR",
       })
     );
+    expect(reportMock).toHaveBeenCalledTimes(2);
     expect(button("Year view").getAttribute("aria-pressed")).toBe("true");
     expect(
       document.querySelector('[aria-label="Report KPIs"]')?.textContent
@@ -3770,5 +3776,1103 @@ describe("category comparison (issue #643)", () => {
     // The whole journey is the initial overview only: every category action is
     // local state over the already loaded all-category snapshot.
     expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Issue #645: report freshness, bounded lifecycle and safe export.
+//
+// One shared source registry serves Performance and both comparison browsers.
+// These tests pin the user-visible contract: a hidden page fetches nothing, a
+// return revalidates only the scopes the screen needs, Refresh keeps every
+// local selection, same-scope failures retain honestly-stale figures, a late
+// old-scope reply never repaints a newer one, a WIB midnight (or a focus after
+// sleep) revalidates without a polling interval, and an export freezes its
+// envelope before the save starts.
+describe("report freshness lifecycle (issue #645)", () => {
+  const PINNED_TODAY = "2026-11-19";
+  const ZERO = {
+    poCount: 0,
+    amountMinor: 0,
+    costedMinor: 0,
+    uncostedMinor: 0,
+    capitalMinor: 0,
+    marginMinor: 0,
+    marginBps: null,
+    coverageBps: null,
+  } as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${PINNED_TODAY}T03:00:00Z`));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function annualYear(query: Query): number | null {
+    if (query.bucket !== "month") return null;
+    const match = /^(\d{4})-01-01$/.exec(query.from);
+    if (match === null) return null;
+    const year = Number(match[1]);
+    return query.to === `${year + 1}-01-01` ? year : null;
+  }
+
+  function zeroAnnual(year: number, query: Query): PurchaseOrderReportData {
+    const source = purchaseOrderReportYearFixture();
+    source.filter = {
+      from: `${year}-01-01`,
+      to: `${year + 1}-01-01`,
+      bucket: "month",
+      category: query.category,
+      currency: query.currency,
+    };
+    source.periods = Array.from({ length: 12 }, (_, index) => ({
+      periodStart: `${year}-${String(index + 1).padStart(2, "0")}-01`,
+      partial: false,
+      inProgress: false,
+      ...ZERO,
+    }));
+    source.totals = { ...ZERO };
+    source.categories = source.categories.map((category) => ({
+      ...category,
+      ...ZERO,
+    }));
+    source.currentProjection = {
+      ...source.currentProjection,
+      mode: "none",
+      status: "unavailable",
+      reason: "not_current_period",
+      buckets: [],
+      currentMonth: undefined,
+    };
+    source.monthSummary = undefined;
+    return source;
+  }
+
+  function respond(query: Query): PurchaseOrderReportData {
+    if (
+      query.bucket === "day" &&
+      query.from === "2026-11-01" &&
+      query.to === "2026-12-01"
+    ) {
+      const report = purchaseOrderReportMonthFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    const year = annualYear(query);
+    if (year === 2026) {
+      const report = purchaseOrderReportYearFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    if (year !== null) return zeroAnnual(year, query);
+    return reportFor(query);
+  }
+
+  const initial = toReportQuery(initialReportFilters(PINNED_TODAY, "IDR"));
+  const thisYear = toReportQuery({
+    ...initialReportFilters(PINNED_TODAY, "IDR"),
+    preset: "this-year",
+    period: null,
+    ...reportPresetRange("this-year", PINNED_TODAY),
+  });
+  const thisYearFM: Query = { ...thisYear, category: "FM" };
+  const annual2026FM: Query = {
+    from: "2026-01-01",
+    to: "2027-01-01",
+    bucket: "month",
+    category: "FM",
+    currency: "IDR",
+  };
+  const annual2025All: Query = {
+    from: "2025-01-01",
+    to: "2026-01-01",
+    bucket: "month",
+    category: "all",
+    currency: "IDR",
+  };
+
+  interface LifecycleOptions {
+    active?: boolean;
+    mutationEpoch?: number;
+    onExport?: (view: PurchaseOrderReportView) => Promise<string>;
+  }
+
+  async function renderLifecycle(options: LifecycleOptions = {}): Promise<void> {
+    await act(async () => {
+      root.render(
+        <ToastProvider>
+          <PurchaseOrderReportsPage
+            defaultCurrency="IDR"
+            currencyCatalogue={CATALOGUE}
+            onExport={options.onExport}
+            active={options.active}
+            mutationEpoch={options.mutationEpoch}
+          />
+        </ToastProvider>
+      );
+    });
+    await flush();
+  }
+
+  function monthTrigger(): HTMLButtonElement {
+    return button("Choose months");
+  }
+
+  function categoryTrigger(): HTMLButtonElement {
+    return button("Choose categories");
+  }
+
+  function pickerNode(selector: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(selector);
+    if (found === null) throw new Error(`no picker node ${selector}`);
+    return found;
+  }
+
+  async function clickNode(node: HTMLElement): Promise<void> {
+    await act(async () => {
+      node.click();
+    });
+    await flush();
+  }
+
+  async function selectMonth(
+    month: string,
+    previousPages = 0
+  ): Promise<void> {
+    await clickNode(monthTrigger());
+    for (let index = 0; index < previousPages; index += 1) {
+      await clickNode(button("Previous page"));
+    }
+    await clickNode(pickerNode(`[data-picker-key="${month}"]`));
+    await clickNode(pickerNode("[data-picker-close]"));
+  }
+
+  async function selectCategory(code: string): Promise<void> {
+    await clickNode(categoryTrigger());
+    await clickNode(pickerNode(`[data-picker-key="${code}"]`));
+    await clickNode(pickerNode("[data-picker-close]"));
+  }
+
+  function monthCard(month: string): HTMLElement {
+    const found = document.querySelector<HTMLElement>(
+      `[data-month-card][data-month-key="${month}"]`
+    );
+    if (found === null) throw new Error(`no month card ${month}`);
+    return found;
+  }
+
+  function chartNodes(): Element[] {
+    return [
+      ...document.querySelectorAll("[data-chart-svg]"),
+      ...document.querySelectorAll("[data-chart-svg] rect"),
+      ...document.querySelectorAll("[data-chart-svg] path"),
+      ...document.querySelectorAll("[data-chart-svg] text"),
+    ];
+  }
+
+  it("makes one request on mount and none for cached selections, layout or pickers", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle();
+    expect(calls()).toEqual([initial]);
+
+    // An ordinary parent re-render is not a scope change.
+    await renderLifecycle();
+    expect(calls()).toEqual([initial]);
+
+    const nodesBefore = chartNodes();
+    const svgBefore = document.querySelector("[data-chart-svg]");
+    expect(nodesBefore.length).toBeGreaterThan(0);
+
+    await selectMonth("2026-10");
+    await selectCategory("FAB");
+
+    expect(calls()).toEqual([initial]);
+    // Both local selections took effect without a read.
+    expect(monthTrigger().getAttribute("data-month-selection-summary")).toBe(
+      "2 months · 2026"
+    );
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+    // The chart is the same SVG and the same geometry nodes.
+    expect(document.querySelector("[data-chart-svg]")).toBe(svgBefore);
+    const nodesAfter = chartNodes();
+    expect(nodesAfter).toHaveLength(nodesBefore.length);
+    nodesAfter.forEach((node, index) => {
+      expect(node).toBe(nodesBefore[index]);
+    });
+  });
+
+  it("Refresh revalidates exactly the visible required scopes once and keeps both selections", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+    await choose("Date range preset", "This year");
+    await choose("Category", "Facility Management");
+    await selectMonth("2026-10");
+    await selectCategory("FAB");
+
+    // Four distinct scopes were already read: the initial annual overview,
+    // the this-year overview, the restricted overview and its annual source.
+    expect(calls()).toEqual([initial, thisYear, thisYearFM, annual2026FM]);
+    const beforeRefresh = calls().length;
+
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+
+    // Exactly the three scopes this screen needs: Performance, the annual
+    // source By period still shows, and the unrestricted all-category source.
+    // Each appears once even though two cards and both surfaces share them.
+    expect(calls().slice(beforeRefresh)).toEqual([
+      thisYearFM,
+      annual2026FM,
+      thisYear,
+    ]);
+    expect(monthTrigger().getAttribute("data-month-selection-summary")).toBe(
+      "2 months · 2026"
+    );
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+    expect(button("Refresh report").disabled).toBe(false);
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("a hidden page fetches nothing and a return revalidates once, deduplicated with a hidden mutation", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+
+    // active=false at mount: no request at all.
+    await renderLifecycle({ active: false });
+    expect(reportMock).not.toHaveBeenCalled();
+
+    await renderLifecycle({ active: true });
+    expect(calls()).toEqual([initial]);
+
+    // Give the screen a second required scope: a month outside the overview's
+    // calendar year needs its own annual source.
+    await selectMonth("2025-01", 1);
+    expect(calls()).toEqual([initial, annual2025All]);
+    const monthSummary = monthTrigger().getAttribute(
+      "data-month-selection-summary"
+    );
+
+    // Hide and return with no mutation: one revalidation pass, no more.
+    await renderLifecycle({ active: false });
+    expect(calls()).toHaveLength(2);
+    await renderLifecycle({ active: true });
+    expect(calls().slice(2)).toEqual([initial, annual2025All]);
+    expect(calls()).toHaveLength(4);
+
+    // Hide, mutate, return: still one pass per required scope, never two.
+    await renderLifecycle({ active: false });
+    await renderLifecycle({ active: false, mutationEpoch: 1 });
+    expect(calls()).toHaveLength(4);
+    await renderLifecycle({ active: true, mutationEpoch: 1 });
+    expect(calls().slice(4)).toEqual([initial, annual2025All]);
+    expect(calls()).toHaveLength(6);
+    expect(monthTrigger().getAttribute("data-month-selection-summary")).toBe(
+      monthSummary
+    );
+  });
+
+  it("marks a month card served by the shared overview as stale while it refreshes", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+    const card = monthCard("2026-11");
+    expect(card.querySelector("[data-month-stale]")).toBeNull();
+
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(() => pending.promise);
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+
+    const badge = card.querySelector("[data-month-stale]");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toContain("Updating…");
+    expect(
+      document
+        .querySelector("[data-month-browser]")
+        ?.getAttribute("data-month-browser-stale")
+    ).toBe("true");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    act(() => {
+      pending.resolve(respond(initial));
+    });
+    await flush();
+    expect(card.querySelector("[data-month-stale]")).toBeNull();
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("a same-scope revalidation keeps each surface's figures labelled stale and offers its own Retry", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+    await choose("Date range preset", "This year");
+    await choose("Category", "Facility Management");
+    expect(document.body.textContent).toContain("Rp480.000.000");
+
+    type Pending = {
+      promise: Promise<PurchaseOrderReportData>;
+      resolve: (value: PurchaseOrderReportData) => void;
+      reject: (error: unknown) => void;
+    };
+    const scopeKey = (query: Query): string =>
+      [query.from, query.to, query.bucket, query.category, query.currency].join(
+        "|"
+      );
+    const replies = new Map<string, Pending>();
+    reportMock.mockImplementation((query: Query) => {
+      const pending = deferred<PurchaseOrderReportData>();
+      replies.set(scopeKey(query), pending);
+      return pending.promise;
+    });
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+
+    // Three distinct sources are re-reading, and every surface says so while
+    // keeping the figures it already had.
+    expect(replies.size).toBe(3);
+    expect(monthCard("2026-11").querySelector("[data-month-stale]")).not.toBeNull();
+    expect(document.querySelector("[data-month-browser-stale]")).not.toBeNull();
+    expect(
+      document.querySelector("[data-month-browser]")?.getAttribute(
+        "data-month-browser-refreshing"
+      )
+    ).toBe("true");
+    expect(document.querySelector("[data-category-stale]")).not.toBeNull();
+    expect(document.body.textContent).toContain("Rp480.000.000");
+    expect(document.body.textContent).toContain("Rp120.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    await act(async () => {
+      for (const pending of replies.values()) {
+        pending.reject(new Error("Network is unreachable."));
+      }
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain("Network is unreachable.");
+    expect(monthCard("2026-11").textContent).toContain("Rp190.000.000");
+    expect(document.querySelector("[data-category-aggregate]")).not.toBeNull();
+    expect(button("Retry month")).not.toBeNull();
+    expect(button("Retry report")).not.toBeNull();
+    expect(button("Retry categories")).not.toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+
+    // Retry month re-reads only that month's annual source.
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    const beforeMonthRetry = calls().length;
+    await act(async () => {
+      button("Retry month").click();
+    });
+    await flush();
+    expect(calls()).toHaveLength(beforeMonthRetry + 1);
+    expect(calls().at(-1)).toEqual(annual2026FM);
+    expect(monthCard("2026-11").querySelector("[data-month-stale]")).toBeNull();
+    // Performance and the category browser are still honestly failed.
+    expect(button("Export PDF").disabled).toBe(true);
+
+    const beforeReportRetry = calls().length;
+    await act(async () => {
+      button("Retry report").click();
+    });
+    await flush();
+    expect(calls()).toHaveLength(beforeReportRetry + 1);
+    expect(calls().at(-1)).toEqual(thisYearFM);
+    expect(button("Export PDF").disabled).toBe(true);
+
+    const beforeCategoryRetry = calls().length;
+    await act(async () => {
+      button("Retry categories").click();
+    });
+    await flush();
+    expect(calls()).toHaveLength(beforeCategoryRetry + 1);
+    expect(calls().at(-1)).toEqual(thisYear);
+    expect(document.body.textContent).not.toContain("Network is unreachable.");
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("labels the annual aggregate stale and keeps its recorded total on failure", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+    // A relative preset makes the overview non-annual, so the Aggregate has a
+    // distinct annual source of its own.
+    await choose("Date range preset", "This year");
+    await choose("Category", "Facility Management");
+    // All twelve 2026 months in Aggregate read the restricted annual source.
+    await clickNode(monthTrigger());
+    await clickNode(pickerNode("[data-picker-all]"));
+    await clickNode(pickerNode("[data-picker-close]"));
+    const aggregate = document.querySelector<HTMLElement>(
+      "[data-month-aggregate]"
+    );
+    if (aggregate === null) throw new Error("no annual aggregate");
+    expect(aggregate.textContent).toContain("Recorded total");
+
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(() => pending.promise);
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+
+    expect(
+      aggregate.querySelector("[data-month-aggregate-stale]")
+    ).not.toBeNull();
+    expect(
+      aggregate
+        .querySelector("[data-month-aggregate-stale]")
+        ?.getAttribute("data-month-aggregate-refreshing")
+    ).toBe("true");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    await act(async () => {
+      pending.reject(new Error("The annual API is unreachable."));
+    });
+    await flush();
+
+    expect(aggregate.textContent).toContain(
+      "This annual snapshot could not be refreshed"
+    );
+    expect(aggregate.textContent).toContain("Recorded total");
+    expect(button("Retry month")).not.toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+  });
+
+  it("does not stale-mark an independent annual aggregate from a current-month overview (NB1)", async () => {
+    // January is the only month where the annual aggregate's first month is
+    // also the current month. Performance on Current month (bucket "day") then
+    // looks like the aggregate's owner, but the aggregate is backed by its own
+    // annual registry entry. Only that entry's freshness may label it.
+    vi.setSystemTime(new Date("2027-01-15T03:00:00Z"));
+    function januaryDay(query: Query): PurchaseOrderReportData {
+      const report = purchaseOrderReportMonthFixture();
+      report.filter = { ...query };
+      report.asOf = "2027-01-15";
+      const summary = report.monthSummary;
+      if (summary !== undefined) {
+        report.monthSummary = {
+          ...summary,
+          month: "2027-01",
+          from: "2027-01-01",
+          to: "2027-02-01",
+          asOf: "2027-01-15",
+        };
+      }
+      return report;
+    }
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.bucket === "day") return januaryDay(query);
+      const annual = zeroAnnual(2027, query);
+      annual.asOf = "2027-01-15";
+      return annual;
+    });
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+
+    // All twelve 2027 months in Aggregate, then Current month makes the
+    // overview a day report so the aggregate needs its own annual source.
+    await clickNode(monthTrigger());
+    await clickNode(pickerNode("[data-picker-all]"));
+    await clickNode(pickerNode("[data-picker-close]"));
+    await clickNode(
+      document.querySelector<HTMLElement>('button[data-report-period="month"]')!
+    );
+    const aggregate = document.querySelector<HTMLElement>(
+      "[data-month-aggregate]"
+    );
+    if (aggregate === null) throw new Error("no annual aggregate");
+    expect(
+      aggregate.querySelector("[data-month-aggregate-stale]")
+    ).toBeNull();
+
+    // Edit the Performance range only. The annual source stays cached and
+    // fresh while the overview re-reads; the aggregate must not inherit that
+    // overview staleness.
+    await clickNode(
+      document.querySelector<HTMLElement>('button[data-report-period="custom"]')!
+    );
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(() => pending.promise);
+    await typeDate("From date", "2027-01-10");
+    await flush();
+
+    expect(document.querySelector("[data-report-overview-stale]")).not.toBeNull();
+    expect(
+      aggregate.querySelector("[data-month-aggregate-stale]")
+    ).toBeNull();
+
+    const last = calls().at(-1);
+    if (last === undefined) throw new Error("no pending overview query");
+    await act(async () => {
+      pending.resolve(
+        last.bucket === "day"
+          ? januaryDay(last)
+          : zeroAnnual(2027, last)
+      );
+    });
+    await flush();
+    expect(
+      aggregate.querySelector("[data-month-aggregate-stale]")
+    ).toBeNull();
+  });
+
+  it("isolates a failed annual month source from Performance and the categories", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/645.pdf" });
+    await selectMonth("2025-01", 1);
+    expect(calls()).toEqual([initial, annual2025All]);
+
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.from === annual2025All.from && query.to === annual2025All.to) {
+        throw new Error("The 2025 annual API is unreachable.");
+      }
+      return respond(query);
+    });
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+
+    const failed = monthCard("2025-01");
+    expect(failed.textContent).toContain("The 2025 annual API is unreachable.");
+    expect(failed.querySelector("[data-month-stale]")).not.toBeNull();
+    expect(failed.textContent).toContain("Rp0");
+    // Sibling surfaces are untouched and still show their evidence.
+    expect(
+      document.querySelector('[aria-label="Report KPIs"]')?.textContent
+    ).toContain("Rp641.200.000");
+    expect(document.querySelector("[data-category-aggregate]")).not.toBeNull();
+    expect(
+      document.querySelector('[data-category-row="FAB"]')?.textContent
+    ).toContain("Rp128.240.000");
+    expect(monthCard("2026-11").querySelector("[data-month-stale]")).toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+
+    const beforeRetry = calls().length;
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await act(async () => {
+      button("Retry month").click();
+    });
+    await flush();
+    expect(calls()).toHaveLength(beforeRetry + 1);
+    expect(calls().at(-1)).toEqual(annual2025All);
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("never lets a late IDR reply repaint a USD view", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport: async () => "/tmp/opencode/usd.pdf" });
+    expect(calls()).toEqual([initial]);
+
+    // A second IDR scope is in flight when the user switches to USD: the
+    // yearly IDR read still belongs to the previous view.
+    const pendingIDR = deferred<PurchaseOrderReportData>();
+    const yearlyIDR: Query = { ...initial, bucket: "year" };
+    reportMock.mockImplementation((query: Query) =>
+      query.bucket === "year" && query.currency === "IDR"
+        ? pendingIDR.promise
+        : Promise.resolve(respond(query))
+    );
+    await choose("Bucket", "Year");
+    expect(calls().at(-1)).toEqual(yearlyIDR);
+
+    await choose("Currency", "USD");
+    expect(calls()).toContainEqual({ ...yearlyIDR, currency: "USD" });
+    expect(document.body.textContent).toContain("$4,800,000.00");
+    expect(button("Export PDF").disabled).toBe(false);
+    const beforeLate = calls().length;
+
+    act(() => {
+      pendingIDR.resolve(respond(yearlyIDR));
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain("$4,800,000.00");
+    expect(document.body.textContent).not.toContain("Rp480.000.000");
+    expect(button("Export PDF").disabled).toBe(false);
+    expect(calls()).toHaveLength(beforeLate);
+  });
+
+  it("keeps explicit empty sections through Refresh and exports them as empty", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/empty.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport });
+
+    // Remove the only selected month and every category.
+    await selectMonth("2026-11");
+    await selectCategory("FAB");
+    await selectCategory("FAB");
+    expect(document.querySelector("[data-month-empty]")).not.toBeNull();
+    expect(document.querySelector("[data-category-empty]")).not.toBeNull();
+
+    const beforeRefresh = calls().length;
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+    // No financial source is required for empty sections; only Performance
+    // revalidates.
+    expect(calls().slice(beforeRefresh)).toEqual([initial]);
+    expect(document.querySelector("[data-month-empty]")).not.toBeNull();
+    expect(document.querySelector("[data-category-empty]")).not.toBeNull();
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const view = onExport.mock.calls[0][0] as PurchaseOrderReportView;
+    expect(view.periods).toEqual({
+      sources: [],
+      months: [],
+      layout: "individual",
+    });
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: [],
+      layout: "individual",
+    });
+    expect(view.sources).toHaveLength(1);
+  });
+
+  it("freezes the export envelope against a concurrent Refresh and selection change", async () => {
+    const save = deferred<string>();
+    const onExport = vi.fn((_view: PurchaseOrderReportView) => save.promise);
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport });
+    const original = respond(initial);
+    expect(document.body.textContent).toContain("Rp641.200.000");
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const frozen = onExport.mock.calls[0][0];
+    expect(frozen.sources[0].totals.amountMinor).toBe(
+      original.totals.amountMinor
+    );
+    expect(frozen.periods.months).toEqual(["2026-11"]);
+
+    // A Refresh and local selection changes start while the save is pending.
+    const refreshReplies = new Map<
+      string,
+      {
+        promise: Promise<PurchaseOrderReportData>;
+        resolve: (value: PurchaseOrderReportData) => void;
+        reject: (error: unknown) => void;
+      }
+    >();
+    const refreshQueries = new Map<string, Query>();
+    reportMock.mockImplementation((query: Query) => {
+      const pending = deferred<PurchaseOrderReportData>();
+      const key = [
+        query.from,
+        query.to,
+        query.bucket,
+        query.category,
+        query.currency,
+      ].join("|");
+      refreshReplies.set(key, pending);
+      refreshQueries.set(key, query);
+      return pending.promise;
+    });
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+    await selectMonth("2026-10");
+    await selectCategory("FAB");
+
+    expect(button("Refresh report").disabled).toBe(true);
+    expect(button("Export PDF").disabled).toBe(true);
+
+    // The refresh answers with decisively different numbers.
+    act(() => {
+      for (const [key, pending] of refreshReplies) {
+        const query = refreshQueries.get(key);
+        if (query === undefined) throw new Error("no refresh query");
+        const report = respond(query);
+        report.totals = { ...report.totals, amountMinor: 999_000_000 };
+        pending.resolve(report);
+      }
+    });
+    await flush();
+    expect(document.body.textContent).toContain("Rp999.000.000");
+
+    act(() => {
+      save.resolve("/tmp/opencode/frozen.pdf");
+    });
+    await flush();
+
+    // The document being saved is still the envelope captured at click time.
+    expect(frozen.sources[0].totals.amountMinor).toBe(
+      original.totals.amountMinor
+    );
+    expect(frozen.periods.months).toEqual(["2026-11"]);
+    expect(frozen.categories.codes).toEqual(
+      original.categories.map((row) => row.businessCategory)
+    );
+    expect(document.body.textContent).toContain(
+      "Report saved to /tmp/opencode/frozen.pdf"
+    );
+  });
+
+  it("refuses a direct export call while the visible evidence is stale (NB3)", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/guarded.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderLifecycle({ onExport });
+
+    // Explicit empty sections need no financial source, so both selections
+    // can stay resolvable while the overview re-reads. That is the one state
+    // where the button is disabled but the handler's own gate is the only
+    // thing refusing a stale Performance snapshot.
+    await selectMonth("2026-11");
+    await selectCategory("FAB");
+    await selectCategory("FAB");
+    expect(document.querySelector("[data-month-empty]")).not.toBeNull();
+    expect(document.querySelector("[data-category-empty]")).not.toBeNull();
+
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(() => pending.promise);
+    await act(async () => {
+      button("Refresh report").click();
+    });
+    await flush();
+    expect(button("Export PDF").disabled).toBe(true);
+
+    const exportButton = button("Export PDF");
+    // React suppresses a real click on a button whose *prop* is disabled, so
+    // the only way to reach the handler is the programmatic path the guard
+    // exists for: the component's own onClick closure.
+    const propsKey = Object.keys(exportButton).find((candidate) =>
+      candidate.startsWith("__reactProps$")
+    );
+    if (propsKey === undefined) throw new Error("no React props on the button");
+    const onClick = (
+      exportButton as unknown as Record<string, { onClick?: () => void }>
+    )[propsKey].onClick;
+    if (onClick === undefined) throw new Error("no click handler");
+    act(() => {
+      onClick();
+    });
+    await flush();
+
+    expect(onExport).not.toHaveBeenCalled();
+    await act(async () => {
+      pending.resolve(respond(initial));
+    });
+    await flush();
+  });
+});
+
+// Issue #645 Q645-5: one WIB-midnight timeout while active, a focus/visibility
+// recheck after sleep, and a return from hidden. Time-dependent evidence is
+// revalidated; a relative control rebases to the new WIB date; custom dates and
+// explicit local month/category selections are never rewritten.
+describe("WIB midnight freshness (issue #645)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function settle(): Promise<void> {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  function annualYear(query: Query): number | null {
+    if (query.bucket !== "month") return null;
+    const match = /^(\d{4})-01-01$/.exec(query.from);
+    if (match === null) return null;
+    const year = Number(match[1]);
+    return query.to === `${year + 1}-01-01` ? year : null;
+  }
+
+  function respond(query: Query): PurchaseOrderReportData {
+    if (
+      query.bucket === "day" &&
+      query.from === "2026-11-01" &&
+      query.to === "2026-12-01"
+    ) {
+      const report = purchaseOrderReportMonthFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    if (annualYear(query) === 2026) {
+      const report = purchaseOrderReportYearFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    return reportFor(query);
+  }
+
+  interface WibOptions {
+    active?: boolean;
+    mutationEpoch?: number;
+  }
+
+  async function renderWib(options: WibOptions = {}): Promise<void> {
+    await act(async () => {
+      root.render(
+        <ToastProvider>
+          <PurchaseOrderReportsPage
+            defaultCurrency="IDR"
+            currencyCatalogue={CATALOGUE}
+            active={options.active}
+            mutationEpoch={options.mutationEpoch}
+          />
+        </ToastProvider>
+      );
+    });
+    await settle();
+  }
+
+  async function clickNode(node: HTMLElement): Promise<void> {
+    await act(async () => {
+      node.click();
+      await Promise.resolve();
+    });
+    await settle();
+  }
+
+  async function chooseLocal(control: string, option: string): Promise<void> {
+    if (
+      (control === "Bucket" || control === "Date range preset") &&
+      document.querySelector(`button[aria-label="${control}"]`) === null
+    ) {
+      await clickNode(
+        document.querySelector<HTMLElement>('button[data-report-period="custom"]')!
+      );
+    }
+    await clickNode(button(control));
+    const found = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="option"]')
+    ).find((node) => node.textContent?.trim() === option);
+    if (found === undefined) throw new Error(`no option ${option} in ${control}`);
+    await clickNode(found);
+  }
+
+  function pickerNode(selector: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(selector);
+    if (found === null) throw new Error(`no picker node ${selector}`);
+    return found;
+  }
+
+  async function selectMonth(month: string): Promise<void> {
+    await clickNode(button("Choose months"));
+    await clickNode(pickerNode(`[data-picker-key="${month}"]`));
+    await clickNode(pickerNode("[data-picker-close]"));
+  }
+
+  async function selectCategory(code: string): Promise<void> {
+    await clickNode(button("Choose categories"));
+    await clickNode(pickerNode(`[data-picker-key="${code}"]`));
+    await clickNode(pickerNode("[data-picker-close]"));
+  }
+
+  it("revalidates once across WIB midnight with a single timeout, keeping explicit selections", async () => {
+    vi.setSystemTime(new Date("2026-11-19T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+
+    const initial = calls()[0];
+    expect(calls()).toHaveLength(1);
+
+    await selectMonth("2026-10");
+    await selectCategory("FAB");
+    expect(calls()).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await settle();
+
+    // The single midnight timeout re-reads the required overview exactly once;
+    // the month and category sources share it at this scope.
+    expect(calls().slice(1)).toEqual([initial]);
+    expect(
+      button("Choose months").getAttribute("data-month-selection-summary")
+    ).toBe("2 months · 2026");
+    expect(
+      button("Choose categories").getAttribute(
+        "data-category-selection-summary"
+      )
+    ).toBe("Fabrication");
+
+    // No polling: a minute of idle time after the boundary reads nothing more.
+    const afterMidnight = calls().length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await settle();
+    expect(calls()).toHaveLength(afterMidnight);
+  });
+
+  it("never rewrites a custom date range at midnight", async () => {
+    vi.setSystemTime(new Date("2026-11-30T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+    const initial = calls()[0];
+
+    await clickNode(
+      document.querySelector<HTMLElement>('button[data-report-period="custom"]')!
+    );
+    expect(calls()).toHaveLength(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await settle();
+
+    // WIB moved to 1 December, but the user's own range is untouched: the
+    // revalidation repeats the same query instead of moving it.
+    expect(calls()).toEqual([initial, initial]);
+  });
+
+  it("rebases a relative 'This year' preset across New Year", async () => {
+    vi.setSystemTime(new Date("2026-12-31T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+    expect(calls()).toEqual([
+      toReportQuery(initialReportFilters("2026-12-31", "IDR")),
+    ]);
+
+    await chooseLocal("Date range preset", "This year");
+    expect(calls()).toHaveLength(1);
+    await selectMonth("2026-10");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await settle();
+
+    // The rebased 2027 relative range is a new scope; the still-selected
+    // November 2026 card needs its own annual source, which the invalidation
+    // made stale. Both are fetched once, in surface order.
+    expect(calls().slice(1)).toEqual([
+      {
+        from: "2027-01-01",
+        to: "2027-01-02",
+        bucket: "month",
+        category: "all",
+        currency: "IDR",
+      },
+      toReportQuery(initialReportFilters("2026-12-31", "IDR")),
+    ]);
+    // The explicit local month selection is not rewritten by the rebase.
+    expect(
+      button("Choose months").getAttribute("data-month-selection-summary")
+    ).toBe("2 months · 2026");
+  });
+
+  it("rebases the current-month toggle to the new month", async () => {
+    vi.setSystemTime(new Date("2026-11-30T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+
+    await clickNode(button("Month view"));
+    expect(calls()).toHaveLength(2);
+    expect(calls()[1]).toMatchObject({
+      from: "2026-11-01",
+      to: "2026-12-01",
+      bucket: "day",
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await settle();
+
+    // The toggle rebases to the new WIB month. The category section still
+    // shows the inherited previous scope until the new overview lands, so that
+    // scope is revalidated too; the retained November section then refreshes
+    // its own annual source. Each is read once.
+    expect(calls().slice(2)).toEqual([
+      {
+        from: "2026-12-01",
+        to: "2027-01-01",
+        bucket: "day",
+        category: "all",
+        currency: "IDR",
+      },
+      {
+        from: "2026-11-01",
+        to: "2026-12-01",
+        bucket: "day",
+        category: "all",
+        currency: "IDR",
+      },
+      toReportQuery(initialReportFilters("2026-11-30", "IDR")),
+    ]);
+  });
+
+  it("waits while hidden, then rebases and revalidates on return", async () => {
+    vi.setSystemTime(new Date("2026-12-31T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+    await chooseLocal("Date range preset", "This year");
+    expect(calls()).toHaveLength(1);
+
+    await renderWib({ active: false });
+    const hiddenCalls = calls().length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    await settle();
+    expect(calls()).toHaveLength(hiddenCalls);
+
+    await renderWib({ active: true });
+    expect(calls().slice(hiddenCalls)).toEqual([
+      {
+        from: "2027-01-01",
+        to: "2027-01-02",
+        bucket: "month",
+        category: "all",
+        currency: "IDR",
+      },
+      toReportQuery(initialReportFilters("2026-12-31", "IDR")),
+    ]);
+  });
+
+  it("checks the WIB date on focus and on a visible tab after sleep", async () => {
+    vi.setSystemTime(new Date("2026-11-19T16:59:55Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderWib();
+    const initial = calls()[0];
+
+    // The machine slept past midnight: no timeout fired, then the window is
+    // focused.
+    vi.setSystemTime(new Date("2026-11-20T00:00:05Z"));
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(calls().slice(1)).toEqual([initial]);
+
+    // A second day passes behind a hidden tab; the tab becomes visible again.
+    vi.setSystemTime(new Date("2026-11-21T00:00:05Z"));
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    await settle();
+    expect(calls().slice(2)).toEqual([initial]);
   });
 });

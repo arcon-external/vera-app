@@ -1421,9 +1421,19 @@ describe("Reports workspace (#630)", () => {
 
     expect(workspace()).toBe("reports");
     expect(button("Bucket").textContent).toContain("Year");
+    // Issue #645 Q645-4: returning revalidates the currently required visible
+    // scopes exactly once — the year-bucketed Performance overview and the
+    // exact monthly snapshot By period still shows — while the filters and
+    // local selections survive. It is never a silent stale-cache return, and
+    // never a background sweep of scopes the screen does not require.
     expect(
       mocks.getPurchaseOrderReport.mock.calls.map((call) => call[0])
-    ).toEqual([initialQuery, yearlyQuery]);
+    ).toEqual([initialQuery, yearlyQuery, yearlyQuery, initialQuery]);
+    expect(
+      (mocks.getPurchaseOrderReport.mock.calls as unknown[][]).filter(
+        (call) => (call[0] as { bucket: string }).bucket === "month"
+      )
+    ).toHaveLength(2);
   });
 
   it("keeps the existing unsaved-document guard after a Reports visit", async () => {
