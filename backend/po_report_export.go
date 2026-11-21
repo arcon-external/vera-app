@@ -13,20 +13,22 @@ import (
 	"vera-app/backend/render/report"
 )
 
-// ExportPurchaseOrderReport writes the supplied report snapshot through the
-// native save dialog and returns the chosen path. An empty path means the user
-// cancelled; that is not an error.
+// ExportPurchaseOrderReport writes the supplied report snapshot or versioned
+// view through the native save dialog and returns the chosen path. An empty
+// path means the user cancelled; that is not an error.
 //
-// The snapshot is the only source of the document. This binding does not call
+// The payload is the only source of the document. This binding does not call
 // the report endpoint, recalculate a figure, store an archive or touch the
 // signing path: the screen already holds the report it showed, and the PDF has
-// to be the same document. Malformed, oversized or out-of-range snapshots are
-// refused before the dialog opens.
+// to be the same document. A payload without a version is the strict legacy
+// report-only snapshot; a versioned view is decoded and validated as its own
+// document. Malformed, oversized or out-of-range payloads are refused before
+// the dialog opens.
 func (q *Quotation) ExportPurchaseOrderReport(reportJSON string) (string, error) {
 	if err := q.requireUser(q.ctx); err != nil {
 		return "", err
 	}
-	snapshot, err := report.DecodeSnapshot([]byte(reportJSON))
+	document, err := report.DecodeExport([]byte(reportJSON))
 	if err != nil {
 		return "", err
 	}
@@ -38,14 +40,15 @@ func (q *Quotation) ExportPurchaseOrderReport(reportJSON string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("load report fonts: %w", err)
 	}
-	pdf, err := report.Render(snapshot, fonts)
+	pdf, err := report.RenderExport(document, fonts)
 	if err != nil {
 		return "", fmt.Errorf("render purchase order report: %w", err)
 	}
+	overview := document.Overview()
 
 	filePath, err := saveFileDialog(q.ctx, runtime.SaveDialogOptions{
 		Title:           "Save Purchase Order Report",
-		DefaultFilename: reportFilename(snapshot),
+		DefaultFilename: reportFilename(overview),
 		Filters:         []runtime.FileFilter{{DisplayName: "PDF Files (*.pdf)", Pattern: "*.pdf"}},
 	})
 	if err != nil {

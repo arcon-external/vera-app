@@ -138,6 +138,43 @@ export interface PurchaseOrderReportCurrentMonthProjection {
 }
 
 /**
+ * The current month's forecast remainder, or the stable reason it could not be
+ * produced. `remainder` is present only when available; a month-end zero
+ * remainder is still an available forecast.
+ */
+export interface PurchaseOrderReportMonthSummaryProjection {
+  status: string;
+  /** Absent when available; a stable reason code otherwise. */
+  reason?: string;
+  method: string;
+  remainder?: PurchaseOrderReportCurrentProjectionRemainder;
+}
+
+/**
+ * The server-owned current-month readout. `actual` is month-to-date evidence,
+ * `recordedFuture` is saved evidence dated after the as-of day, and the
+ * projection is an estimate. They are three quantities and no two are summed.
+ * A report outside the exact current-month/day or current-year/month shape has
+ * no monthSummary at all (absent is not zero).
+ */
+export interface PurchaseOrderReportMonthSummary {
+  /** Canonical YYYY-MM. */
+  month: string;
+  /** YYYY-MM-01, inclusive. */
+  from: string;
+  /** First day of the next month, exclusive. */
+  to: string;
+  /** WIB business date, YYYY-MM-DD. */
+  asOf: string;
+  /** "day" or "month". */
+  mode: string;
+  actual: PurchaseOrderReportMetrics;
+  /** Present only when recorded future-dated evidence exists. */
+  recordedFuture?: PurchaseOrderReportMetrics;
+  projection: PurchaseOrderReportMonthSummaryProjection;
+}
+
+/**
  * The forecast for the period still in progress. `mode` is "day" when the
  * report is exactly the current month bucketed by day, "month" when it is
  * exactly the current year, and "none" otherwise. Buckets are future days
@@ -177,6 +214,11 @@ export interface PurchaseOrderReportData {
    * can never be summed into totals or period rows.
    */
   currentProjection: PurchaseOrderReportCurrentProjection;
+  /**
+   * The server-owned current-month readout, absent outside an exact current
+   * month/day or current year/month report.
+   */
+  monthSummary?: PurchaseOrderReportMonthSummary;
   notes: PurchaseOrderReportNote[];
 }
 
@@ -327,6 +369,62 @@ function normalizeCurrentMonth(
 }
 
 /**
+ * The server-owned current-month readout. A malformed or incomplete summary is
+ * absent rather than patched with invented figures: the month browser can then
+ * show its unavailable state instead of zeros that never came from the server.
+ */
+function normalizeMonthSummary(
+  input: poreport.MonthSummary | null | undefined
+): PurchaseOrderReportMonthSummary | null {
+  if (input === null || input === undefined || typeof input !== "object") {
+    return null;
+  }
+  if (
+    typeof input.month !== "string" ||
+    typeof input.from !== "string" ||
+    typeof input.to !== "string" ||
+    typeof input.asOf !== "string" ||
+    typeof input.mode !== "string" ||
+    input.actual === null ||
+    input.actual === undefined ||
+    input.projection === null ||
+    input.projection === undefined
+  ) {
+    return null;
+  }
+  const projection: PurchaseOrderReportMonthSummaryProjection = {
+    status:
+      typeof input.projection.status === "string"
+        ? input.projection.status
+        : "unavailable",
+    method:
+      typeof input.projection.method === "string"
+        ? input.projection.method
+        : "",
+  };
+  if (typeof input.projection.reason === "string") {
+    projection.reason = input.projection.reason;
+  }
+  const remainder = normalizeCurrentRemainder(input.projection.remainder);
+  if (remainder !== null) {
+    projection.remainder = remainder;
+  }
+  const summary: PurchaseOrderReportMonthSummary = {
+    month: input.month,
+    from: input.from,
+    to: input.to,
+    asOf: input.asOf,
+    mode: input.mode,
+    actual: normalizeMetrics(input.actual),
+    projection,
+  };
+  if (input.recordedFuture !== null && input.recordedFuture !== undefined) {
+    summary.recordedFuture = normalizeMetrics(input.recordedFuture);
+  }
+  return summary;
+}
+
+/**
  * The current-period forecast, normalized even when the server omitted it (an
  * older API, or a hand-built fixture). A missing object is mode none and
  * unavailable with the stable not-current-period reason; it is never treated as
@@ -371,7 +469,7 @@ function normalizeCurrentProjection(
  * absent, so the result is safe to serialize or hand to #630 and #631.
  */
 export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOrderReportData {
-  return {
+  const report: PurchaseOrderReportData = {
     generatedAt: input.generatedAt,
     asOf: input.asOf,
     filter: { ...input.filter },
@@ -398,4 +496,11 @@ export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOr
     ),
     notes: input.notes.map((note) => ({ code: note.code, text: note.text })),
   };
+  const monthSummary = normalizeMonthSummary(
+    input.monthSummary as poreport.MonthSummary | null | undefined
+  );
+  if (monthSummary !== null) {
+    report.monthSummary = monthSummary;
+  }
+  return report;
 }

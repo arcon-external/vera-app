@@ -37,7 +37,14 @@ import {
 } from "../poReport";
 import { todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
+import { usePOReportMonthBrowser } from "../usePOReportSources";
+import {
+  buildPurchaseOrderReportView,
+  type PurchaseOrderReportView,
+} from "../poReportExport";
+import type { PurchaseOrderMonthReadout } from "../poReportComparison";
 import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
+import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
 import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
@@ -62,7 +69,7 @@ export interface PurchaseOrderReportsPageProps {
    * merge, the export button stays disabled and this page never guesses a
    * file path or success.
    */
-  onExport?: (report: PurchaseOrderReportData) => Promise<string>;
+  onExport?: (view: PurchaseOrderReportView) => Promise<string>;
 }
 
 export interface PurchaseOrderReportsViewProps {
@@ -84,6 +91,11 @@ export interface PurchaseOrderReportsViewProps {
   onCurrencyChange: (value: string) => void;
   onRetry: () => void;
   onExport: () => void;
+  /** Optional so direct fixture/harness callers keep the pre-#641 table. */
+  monthReadout?: PurchaseOrderMonthReadout | null;
+  onPreviousMonth?: () => void;
+  onNextMonth?: () => void;
+  onRetryMonth?: () => void;
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
@@ -406,6 +418,10 @@ export function PurchaseOrderReportsView({
   onCurrencyChange,
   onRetry,
   onExport,
+  monthReadout,
+  onPreviousMonth,
+  onNextMonth,
+  onRetryMonth,
 }: PurchaseOrderReportsViewProps) {
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
@@ -615,11 +631,22 @@ export function PurchaseOrderReportsView({
 
       {showSkeleton ? <LoadingSkeleton /> : null}
       {showEmpty && report !== null ? (
-        <EmptyReport
-          report={report}
-          period={filters.period}
-          onPeriodChange={onPeriodChange}
-        />
+        <>
+          <EmptyReport
+            report={report}
+            period={filters.period}
+            onPeriodChange={onPeriodChange}
+          />
+          {monthReadout !== undefined && monthReadout !== null ? (
+            <PurchaseOrderReportMonthTable
+              readout={monthReadout}
+              entry={entry}
+              onPrevious={onPreviousMonth ?? (() => undefined)}
+              onNext={onNextMonth ?? (() => undefined)}
+              onRetry={onRetryMonth ?? onRetry}
+            />
+          ) : null}
+        </>
       ) : null}
       {showFigures && report !== null ? (
         <>
@@ -631,11 +658,23 @@ export function PurchaseOrderReportsView({
             onPeriodChange={onPeriodChange}
           />
           <CategoryTable report={report} entry={entry} />
-          <PeriodTable
-            report={report}
-            entry={entry}
-            periods={displayedPeriods}
-          />
+          {monthReadout !== undefined ? (
+            monthReadout === null ? null : (
+              <PurchaseOrderReportMonthTable
+                readout={monthReadout}
+                entry={entry}
+                onPrevious={onPreviousMonth ?? (() => undefined)}
+                onNext={onNextMonth ?? (() => undefined)}
+                onRetry={onRetryMonth ?? onRetry}
+              />
+            )
+          ) : (
+            <PeriodTable
+              report={report}
+              entry={entry}
+              periods={displayedPeriods}
+            />
+          )}
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -671,6 +710,9 @@ export function PurchaseOrderReportsPage({
   const [error, setError] = useState("");
   const [retryToken, setRetryToken] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // The independent month registry lives with this authenticated page mount.
+  // Reports unmounts on sign-out, so no source survives a different session.
+  const monthBrowser = usePOReportMonthBrowser(report);
 
   const validation = reportFilterValidation(filters);
   const query = useMemo<PurchaseOrderReportQuery | null>(
@@ -754,15 +796,38 @@ export function PurchaseOrderReportsPage({
     report !== null &&
     !loading &&
     !stale &&
-    !exporting;
+    !exporting &&
+    monthBrowser.canExport;
 
   const handleExport = useCallback(() => {
     if (!onExport || report === null || exporting || loading || stale) return;
-    const snapshot = report;
+    if (
+      !monthBrowser.canExport ||
+      monthBrowser.readout === null ||
+      monthBrowser.source === null
+    ) {
+      return;
+    }
+    // Freeze the whole v1 envelope before the binding call. A later month or
+    // filter change cannot alter the document already being saved.
+    let view: PurchaseOrderReportView;
+    try {
+      view = buildPurchaseOrderReportView(report, {
+        month: monthBrowser.month,
+        source: monthBrowser.source,
+        usesOverviewMonthSummary: monthBrowser.usesOverviewMonthSummary,
+      });
+    } catch (caught) {
+      pushToast(
+        "error",
+        errorMessage(caught, "The selected month cannot be exported.")
+      );
+      return;
+    }
     setExporting(true);
     void (async () => {
       try {
-        const path = await onExport(snapshot);
+        const path = await onExport(view);
         if (path.trim() !== "") {
           pushToast("success", `Report saved to ${path}`);
         }
@@ -778,7 +843,19 @@ export function PurchaseOrderReportsPage({
         setExporting(false);
       }
     })();
-  }, [exporting, loading, onExport, pushToast, report, stale]);
+  }, [
+    exporting,
+    loading,
+    monthBrowser.canExport,
+    monthBrowser.month,
+    monthBrowser.readout,
+    monthBrowser.source,
+    monthBrowser.usesOverviewMonthSummary,
+    onExport,
+    pushToast,
+    report,
+    stale,
+  ]);
 
   return (
     <PurchaseOrderReportsView
@@ -806,6 +883,10 @@ export function PurchaseOrderReportsPage({
       onCurrencyChange={(value) => changeFilters({ currency: value })}
       onRetry={() => setRetryToken((current) => current + 1)}
       onExport={handleExport}
+      monthReadout={monthBrowser.readout}
+      onPreviousMonth={monthBrowser.selectPrevious}
+      onNextMonth={monthBrowser.selectNext}
+      onRetryMonth={monthBrowser.retryMonth}
     />
   );
 }
