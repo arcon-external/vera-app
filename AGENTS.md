@@ -457,26 +457,74 @@ Close the issue only after:
 
 ## 12. The Orchestrated Workflow
 
-Work on an issue is run by an **orchestrator** — the assistant — directing five
-subordinate roles. The orchestrator plans, decides and verifies; the subordinates
-do their role and stop. No issue is started without a plan and none is merged
-without validation.
+Work is run by an **orchestrator** — the assistant in this session — acting as
+**chief of staff**. The orchestrator does not write the implementation. It
+decomposes the problem, briefs the people who do the work, validates what comes
+back, runs the gates, commits and reports. Two of those people are **persistent
+Antigravity sessions** (Gemini 4 Neon High) driven through tmux: the **Planner**
+and the **Judge**. **Workers** are OpenCode subagents on
+`opencode-go/deepseek-v4.1-flash#max`. No implementation starts without a plan the
+user has approved, and nothing merges without a Judge verdict.
 
-### 12.1 The roles
+### 12.1 The roles and the three persistent sessions
 
-| Role        | Job                                                                            |
-| ----------- | ------------------------------------------------------------------------------ |
-| **Worker**  | Writes code and tests. Loads `tdd` on every change and `diagnosing-bugs` for a bug; `prototype` only when the brief timeboxes it. |
-| **Riddler** | Interrogates with `grilling`; loads `research`/`domain-modeling` when facts or vocabulary are missing. Never verifies or decides. |
-| **Advisor** | Advises. Loads `codebase-design` for design forks and `karpathy-guideline` as the surgical lens; may evaluate a `prototype`. Never decides. |
-| **Judge**   | Assumes everything is wrong; verifies by running; uses `tdd`, `diagnosing-bugs` and `code-review` as lenses. PASS/NOT PASS. |
-| **Checker** | Watches CI after every push. Reports every check's true state and the failing step/log. It never edits, fixes or merges. |
+| Role             | Who                                                        | Job                                                                                       |
+| ---------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Orchestrator** | this OpenCode session (chief of staff)                     | decompose, brief, dispatch, validate, run gates, commit, merge, report. No IC coding.      |
+| **Planner**      | persistent agy TUI, Gemini 4 Neon High                     | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
+| **Worker**       | `subagent` with `opencode-go/deepseek-v4.1-flash#max`      | implement one closed slice, with its test, and stop                                        |
+| **Judge**        | persistent agy TUI, Gemini 4 Neon High                     | independently verify a finished ticket/PR and return PASS/NOT PASS                        |
 
-The exact model references (`provider/model#variant`), every role's fallback
-chain and the cross-family reviewer rule live in `docs/agents/models.md`. This
-table is the role summary; the models doc is what a dispatch is read from.
+The Planner and Judge are **not** OpenCode subagents: they are the two agy panes
+below, and their model is `agy --model gemini-4-neon-high --effort high`. Workers
+never use a fallback model; the requested `#max` variant is part of the dispatch.
 
-Every brief carries five things: the context, the top-level plan, the exact
+#### 12.1.1 The session contract (tmux)
+
+Three long-lived roles, one tmux session, no new agent sessions for chat:
+
+| Role         | tmux pane          | Runtime identity                                                                      | Address it with                                     |
+| ------------ | ------------------ | ------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Orchestrator | `vera-640.0`       | OpenCode `ses_f13c0a26dffel94rbZI4jwKnL8` (`$OPENCODE_SESSION_ID`)                    | `tmux send-keys -t vera-640.0 '<text>' Enter`       |
+| Planner      | `vera-640.1` (top-right)    | agy conversation `a3a93336-3d4b-445e-bb5d-e4b194cb1797`                        | `tmux send-keys -t vera-640.1 '<text>' Enter`       |
+| Judge        | `vera-640.2` (bottom-right) | agy conversation `d080d68f-f93c-440e-8f8f-243a2ecaff7e`                        | `tmux send-keys -t vera-640.2 '<text>' Enter`       |
+
+The layout is a full-height left pane (orchestrator) and a right column split into
+Planner above Judge. Re-read the live mapping with:
+
+```bash
+tmux list-panes -t vera-640 -F '#{pane_index} #{pane_title} #{pane_current_command}'
+echo "$OPENCODE_SESSION_ID"
+```
+
+If the session is recreated, update this table in the same commit as the new IDs.
+Never address a role by launching a fresh `opencode` or `agy`: that starts a new
+session and is forbidden for messaging. Continue an existing agy conversation with
+`agy --conversation <id>` or `agy -c` only when its pane is gone.
+
+#### 12.1.2 Dispatch protocol
+
+1. Write the full brief to a file (`/tmp/opencode/spec640/dispatch/<role>-<ticket>-<topic>.md`
+   in the current run, or `.agent-link/` when the repository carries it).
+2. Send a short pointer into the pane: `Read <path> and follow it exactly.` plus
+   the required final marker. Do not paste a long brief into a TUI.
+3. Let the pane work. Capture it with `tmux capture-pane -p -t <pane> | tail -40`
+   when you need status; do not poll in a tight loop.
+4. Approve agy's permission prompt (`Run this command?` → Enter on **Yes**) when it
+   appears. Its sandbox cannot open `/tmp/tmux-1000` itself; approval is expected,
+   not a failure.
+5. Read the artifact from disk. The pane transcript is status, never the
+   deliverable. Planner ends with `PLAN-READY <path>`; Judge ends with
+   `VERDICT PASS|NOT PASS <path>`.
+
+Planner and Judge are read-only on the repository: they may read anything and write
+only their own report file. They never edit source, never commit, never send into
+another pane unless the orchestrator explicitly asks for a communication check, and
+never start another agent session.
+
+#### 12.1.3 Workers
+
+Every worker brief carries five things: the context, the top-level plan, the exact
 instructions, the frozen interfaces, and the success criteria. It also carries the
 rule that the worker **stops the moment the criteria are checked** — pass or fail —
 and reports everything: every command, every failure, every dead end, and anything
@@ -487,50 +535,62 @@ with the gap named rather than filling it in from the diff — the diff shows wh
 changed, never what was tried and abandoned, and the abandoned attempt is often the
 most useful thing in the report.
 
-**The Advisor finds its own skills.** Before advising, it discovers the available Agent Skills and loads those relevant to the task — stating which it loaded and which it deliberately did not. The orchestrator's brief may suggest candidates, but suggestion is not substitution: the Advisor is responsible for finding what it needs, and a review that never looked for a relevant skill is an incomplete review. The `karpathy-guideline` skill is the default lens for judging whether a change is surgical; the Advisor says whether it used it or why it did not. For a design fork it starts from `codebase-design`; for a failure, `diagnosing-bugs`; for a diff, `code-review`.
+Workers are dispatched with `subagent` and the exact model
+`opencode-go/deepseek-v4.1-flash#max`. A dispatch that cannot use that model stops
+and reports it; it does not silently fall back.
 
-**The Checker watches CI after every push.** It is dispatched in the background
-against the pushed SHA and reports **every** check, not just the first red one. A
-check that is pending, skipped, cancelled or missing is **not green**, and a green
-run on an older SHA is **stale** — both are reported as failures of the read, not
-as passes. For each red check it reads the log to the decisive step or test, quotes
-the line, and classifies the cause as **code** (a test or compile failure the
-Worker must fix) or **infrastructure** (timeout, missing binary, network, runner
-capacity). It never edits, reruns or merges anything, and it never guesses: if the
-checks are still running it says so and when to look again. The agent type lives
-at `.opencode/agents/checker.md`; dispatch it every time a push changes the PR
-head, and carry its read in the orchestrator's report.
+#### 12.1.4 Planner quality bar and the user's final validation
 
-**The Riddler interrogates the problem.** Fed one or more problems, it produces 10–20
-questions per problem that map the surface before anyone designs against it. Its
-output is held to a bar, because padded questions cost more than they return: every
-question names a surface (an edge value, a mirror struct, a legacy path, an empty
-state, a signed-payload line, a viewport width); every question is answerable by
-evidence (a test, a measurement, a `file:line`), never by opinion; every question
-states why it is still open rather than already answered in the issue or plan; and
-the output is numbered and grouped by surface, so the consumers can lift it
-wholesale. It runs once per issue after the issue is understood and before the plan
-is frozen: the plan comment answers its questions, the Advisor's brief takes the
-design-fork subset, and the Judge's brief takes the full set as its verification
-checklist. It loads `grilling` for the interrogation, `research` when the answer is
-outside the repo, and `domain-modeling` when the vocabulary is unsettled. A feature
-earns a second pass before merge. It never verifies and never decides — it widens the
-interrogation surface; the Judge deepens it.
+The Planner receives the problem, revision or feature request plus the relevant
+issue, code pointers and frozen contracts. Its plan is held to a bar:
+
+- exact files/interfaces/signatures and the order of changes;
+- alternatives considered and why the chosen one wins;
+- failure modes, edge values, empty/error/stale states and migration/rollback;
+- a test plan with the seams that prove each requirement;
+- a performance budget and how it will be measured, not a vague "should be fast";
+- risks, assumptions and open questions, each answerable by evidence.
+
+The orchestrator **validates** the plan before showing it to the user: every
+`file:line` and API it names must exist, it must respect the domain invariants in
+Section 10, and its scope must match the issue. Unsupported claims go back to the
+Planner with the evidence named; they are not quietly fixed in the relay.
+
+The orchestrator then explains the technical plan to the user in **simpler terms**.
+That relay is a translation, not a summary: every requirement, file, risk, test and
+decision appears, in language the user can judge. **The user is the final validator
+of every plan**; implementation waits for explicit approval.
+
+#### 12.1.5 Judge verdicts
+
+The Judge is dispatched whenever a ticket is finished or a PR is about to open. It
+assumes everything is wrong, verifies by running, and returns PASS or NOT PASS with
+findings, commands and direct exit codes. It never edits, fixes, reruns a failed
+gate or merges.
+
+A Judge runs on a quiescent tree: every worker has reported and stopped. On NOT
+PASS the findings become the next worker wave, and the **same** Judge conversation
+is resumed with the fixes and asked whether each finding is closed. Replacing the
+Judge is the exception, not the habit.
 
 ### 12.2 The loop
 
 ```
-Discovery: research / grilling / domain-modeling / codebase-design / prototype
+Problem / feature / revision
       |
-Riddler (questions) + plan comment: decide design, freeze interfaces, todolist
+Planner (agy, Gemini 4 Neon High) -> plan artifact
       |
-Worker waves (tdd / diagnosing-bugs)  -->  Advisor (design forks)  -->  Judge
-   ^                               |
-   +--------- NOT PASS ------------+
-                                   |
-                                 PASS
-                                   |
-              code-review (behaviour/large changes) -> pr -> orchestrator validation -> ship
+Orchestrator validates evidence -> explains plan in simple terms -> user approves
+      |
+Plan comment + frozen interfaces
+      |
+Worker waves (deepseek-v4.1-flash#max, tdd / diagnosing-bugs)
+      |
+Judge (agy, Gemini 4 Neon High) -> NOT PASS -> next worker wave
+      |
+    PASS
+      |
+code-review -> PR -> CI read -> orchestrator validation -> ship
 ```
 
 - **On PASS** the orchestrator re-validates everything personally and then decides
@@ -676,7 +736,7 @@ build` writes `frontend/dist`, which `backend/**` embeds.
 
 | Change                                                      | Minimum                                                                                   |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Behaviour, or anything staff see                            | Worker waves → Advisor, when there is a design decision → Judge → orchestrator validation |
+| Behaviour, or anything staff see                            | Planner → user approval → Worker waves → Judge → orchestrator validation                 |
 | Pricing, tax, persistence, the renderer, the signed payload | The full loop, plus the Postgres integration test (Section 7)                             |
 | Comments, docs, formatting only                             | One Worker, the gates (Section 13), and orchestrator validation                           |
 | Bug, regression or incident                                 | `diagnosing-bugs` first: a red loop and its permanent regression test, then the normal loop |
@@ -709,7 +769,7 @@ corrupt. Every exit code is read directly (Section 12.5).
    saved, and what the next run should do differently.
 5. The Dependabot read — before the PR and after the merge (Section 11). Both, not
    one.
-6. The Checker's CI read for the pushed SHA — every check, or the failure with its
+6. The CI read for the pushed SHA — every check, or the failure with its
    decisive log line and whether it is code or infrastructure.
 7. Which skills were loaded, what each changed, and which were deliberately not
    loaded.
@@ -727,9 +787,9 @@ loaded and the ones deliberately skipped, with the reason.
 
 | Phase | Skills | Who |
 | --- | --- | --- |
-| Discovery and plan | `research`, `grilling`, `domain-modeling`, `codebase-design`, `prototype` | orchestrator, Riddler, Advisor |
+| Discovery and plan | `research`, `grilling`, `domain-modeling`, `codebase-design`, `prototype` | orchestrator, Planner |
 | Build | `tdd`, `diagnosing-bugs`, `prototype`, `writing-for-agents` | Worker; the orchestrator may load them too |
-| Review and merge | `code-review`, `tdd`, `diagnosing-bugs`, `pr` | orchestrator, Judge, Checker for a red check |
+| Review and merge | `code-review`, `tdd`, `diagnosing-bugs`, `pr` | orchestrator, Judge |
 | Human handoff | `wizard` | orchestrator generates; the user runs it |
 
 | Skill | Load it when | It is done when |
@@ -749,7 +809,7 @@ loaded and the ones deliberately skipped, with the reason.
 A skill's instructions do not override this guide; if they conflict, this guide wins
 and the conflict is reported. `prototype` and `research` produce evidence, not shipped
 code; `code-review` and `pr` do not replace the Judge. The `karpathy-guideline` remains
-the Advisor's default surgical lens.
+the Planner and Judge default surgical lens.
 
 ---
 
