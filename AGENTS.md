@@ -461,8 +461,8 @@ Work is run by an **orchestrator** — the assistant in this session — acting 
 **chief of staff**. The orchestrator does not write the implementation. It
 decomposes the problem, briefs the people who do the work, validates what comes
 back, runs the gates, commits and reports. Two of those people are **persistent
-Antigravity sessions** (Gemini 4 Neon High) driven through tmux: the **Planner**
-and the **Judge**. **Workers** are OpenCode subagents on
+Antigravity sessions** driven through tmux: the **Planner** (Claude Opus 5.5)
+and the **Judge** (Gemini 4 Neon High). **Workers** are OpenCode subagents on
 `opencode-go/deepseek-v4.1-flash#max`. No implementation starts without a plan the
 user has approved, and nothing merges without a Judge verdict.
 
@@ -471,13 +471,15 @@ user has approved, and nothing merges without a Judge verdict.
 | Role             | Who                                                        | Job                                                                                       |
 | ---------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **Orchestrator** | this OpenCode session (chief of staff)                     | decompose, brief, dispatch, validate, run gates, commit, merge, report. No IC coding.      |
-| **Planner**      | persistent agy TUI, Gemini 4 Neon High                     | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
+| **Planner**      | persistent agy TUI, Claude Opus 5.5                        | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
 | **Worker**       | `subagent` with `opencode-go/deepseek-v4.1-flash#max`      | implement one closed slice, with its test, and stop                                        |
 | **Judge**        | persistent agy TUI, Gemini 4 Neon High                     | independently verify a finished ticket/PR and return PASS/NOT PASS                        |
 
 The Planner and Judge are **not** OpenCode subagents: they are the two agy panes
-below, and their model is `agy --model gemini-4-neon-high --effort high`. Workers
-never use a fallback model; the requested `#max` variant is part of the dispatch.
+below. The Planner runs Claude Opus 5.5 (`agy --model claude-opus-5-5-medium
+--effort medium` at the time of writing); the Judge runs Gemini 4 Neon High
+(`agy --model gemini-4-neon-high --effort high`). Workers never use a fallback
+model; the requested `#max` variant is part of the dispatch.
 
 #### 12.1.1 The session contract (tmux)
 
@@ -516,9 +518,12 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
 5. Read the artifact from disk. The pane transcript is status, never the
    deliverable. Planner ends with `PLAN-READY <path>`; Judge ends with
    `VERDICT PASS|NOT PASS <path>`.
-6. **Completion ping.** As soon as the artifact is written, the Planner/Judge
-   enqueues one short line into the orchestrator session so it wakes and reads the
-   artifact on its next step:
+6. **Completion.** End the pane reply with `PLAN-READY <path>` or
+   `VERDICT PASS|NOT PASS <path>` and write the artifact. The orchestrator's
+   watcher polls both panes and detects those markers, so **no separate ping is
+   needed**. If the orchestrator explicitly asks for one, or the marker cannot be
+   shown, the fallback is the non-blocking API call below (never blocking
+   `opencode run`):
 
    ```bash
    $HOME/.local/bin/opencode api POST \
@@ -526,16 +531,46 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
      -d '{"text":"PING <planner|judge> DONE <artifact path>","delivery":"queue"}'
    ```
 
-   This returns immediately (it enqueues, it does not wait for a reply) and must
-   not be replaced by a blocking `opencode run`. The ping is a trigger, never the
-   deliverable; it must not replace or summarize the artifact. If the command is
-   blocked or unavailable, the role still stops and the artifact stands — the
-   orchestrator will read it on the next capture.
+   The artifact is the deliverable, never a summary or the ping.
 7. **Questions.** If a decision is needed mid-task, print a single line
    `QUESTION: <one sentence>` in the pane and stop there. Never guess an
    ambiguous requirement. The orchestrator watches both panes for that marker,
    approval prompts and interrupted prompts, and answers in-pane before work
    continues. Do not use the question marker for the final artifact.
+
+#### 12.1.2.1 The pane watcher
+
+`/tmp/opencode/spec640/watch-agy-permissions.sh` runs in the background
+(`nohup`, log `/tmp/opencode/spec640/watch-agy.log`, state
+`/tmp/opencode/spec640/agy-watch-state`). It polls `vera-640.1` and
+`vera-640.2` every four seconds and enqueues one short trigger into the
+orchestrator session with the non-blocking API call when a marker is new:
+
+| Pane output | Wake kind |
+| --- | --- |
+| `PLAN-READY /…` or `VERDICT PASS\|NOT PASS /…` | `DONE` |
+| `QUESTION: …` | `QUESTION` |
+| `Run this command?`, `Allow access to this file?`, `Do you trust the contents` | `PERMISSION` |
+| `What should Antigravity CLI do instead?` | `INTERRUPTED` |
+| `Please re-send the full command` | `TRUNCATED` |
+
+The watcher never answers anything. It matches only real markers — a path after
+`PLAN-READY`/`VERDICT`, never the placeholder text of a dispatch — **baselines
+the visible markers at startup** so a restart cannot replay old work, hashes the
+matches so one prompt wakes the orchestrator once, and clears its state when the
+marker disappears. The artifact on disk remains the deliverable; the wake is
+notification only.
+
+Start or restart it with:
+
+```bash
+nohup /tmp/opencode/spec640/watch-agy-permissions.sh \
+  >/tmp/opencode/spec640/watch-agy.log 2>&1 &
+```
+
+If the tmux session is recreated, update the pane IDs in the script and restart
+it before dispatching work. Without the watcher, the orchestrator must poll the
+panes or rely on the fallback ping.
 
 Planner and Judge are read-only on the repository: they may read anything and write
 only their own report file. They never edit source, never commit, and never send
@@ -578,9 +613,16 @@ Section 10, and its scope must match the issue. Unsupported claims go back to th
 Planner with the evidence named; they are not quietly fixed in the relay.
 
 The orchestrator then explains the technical plan to the user in **simpler terms**.
-That relay is a translation, not a summary: every requirement, file, risk, test and
-decision appears, in language the user can judge. **The user is the final validator
-of every plan**; implementation waits for explicit approval.
+Write for an intelligent manager who does not write code: lead with what changes
+for the people using the app, then what the system will do, what can go wrong and
+what will be tested. Replace internal names with a plain description the first
+time (“the shared report cache”, “the Reports screen”); keep a file, type or
+model name only where the decision genuinely depends on it. Expand acronyms on
+first use and avoid chains of internal jargon. Do not talk down or use childish
+analogies — the reader is smart, just not close to the code. The relay is still a
+translation, not a summary: every requirement, file group, risk, test and
+decision appears. **The user is the final validator of every plan**;
+implementation waits for explicit approval.
 
 #### 12.1.5 Judge verdicts
 
@@ -599,7 +641,7 @@ Judge is the exception, not the habit.
 ```
 Problem / feature / revision
       |
-Planner (agy, Gemini 4 Neon High) -> plan artifact
+Planner (agy, Claude Opus 5.5) -> plan artifact
       |
 Orchestrator validates evidence -> explains plan in simple terms -> user approves
       |
