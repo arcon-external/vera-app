@@ -531,6 +531,11 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
    deliverable; it must not replace or summarize the artifact. If the command is
    blocked or unavailable, the role still stops and the artifact stands — the
    orchestrator will read it on the next capture.
+7. **Questions.** If a decision is needed mid-task, print a single line
+   `QUESTION: <one sentence>` in the pane and stop there. Never guess an
+   ambiguous requirement. The orchestrator watches both panes for that marker,
+   approval prompts and interrupted prompts, and answers in-pane before work
+   continues. Do not use the question marker for the final artifact.
 
 Planner and Judge are read-only on the repository: they may read anything and write
 only their own report file. They never edit source, never commit, and never send
