@@ -76,3 +76,5 @@ ui-screens-*/
 # Antigravity skill symlinks and local customization; machine-specific, never commit.
 .agents/
 
+# ensemble
+.ensemble/
