@@ -3,6 +3,7 @@ package backend
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -292,6 +293,12 @@ func TestExportPurchaseOrderReportRefusesAnInvalidViewBeforeTheDialog(t *testing
 	badMonth := base
 	badMonth.Periods.Months = []string{"2025-02"}
 
+	badAggregate := base
+	badAggregate.Periods.Layout = report.ViewLayoutAggregate
+
+	emptyOverride := emptyReportViewFixture()
+	emptyOverride.Periods.CurrentMonthSource = reportViewIntPointer(0)
+
 	badCurrency := base
 	other := reportExportFixture()
 	other.Filter.Currency = "USD"
@@ -331,6 +338,8 @@ func TestExportPurchaseOrderReportRefusesAnInvalidViewBeforeTheDialog(t *testing
 		{name: "month not covered", payload: viewJSON(t, badMonth)},
 		{name: "foreign currency source", payload: viewJSON(t, badCurrency)},
 		{name: "as-of mismatch", payload: viewJSON(t, asOfMismatch)},
+		{name: "single month as aggregate", payload: viewJSON(t, badAggregate)},
+		{name: "empty selection with current-month override", payload: viewJSON(t, emptyOverride)},
 		{name: "legacy with selection", payload: string(legacyMutated)},
 		{name: "zero version", payload: `{"version":0,"sources":[],"overview":0,"periods":{"sources":[],"months":[],"layout":"individual"},"categories":{"source":0,"codes":[],"layout":"aggregate"}}`},
 		{name: "null version", payload: `{"version":null,"sources":[],"overview":0,"periods":{"sources":[],"months":[],"layout":"individual"},"categories":{"source":0,"codes":[],"layout":"aggregate"}}`},
@@ -353,6 +362,110 @@ func TestExportPurchaseOrderReportRefusesAnInvalidViewBeforeTheDialog(t *testing
 			}
 			if dialogOpened {
 				t.Fatal("the save dialog opened before the invalid view was refused")
+			}
+		})
+	}
+}
+
+// Issue #642: the same binding accepts the extended v1 selections without a
+// second version or a second reader. The empty selection and a one-calendar-year
+// Aggregate are still validated before the save dialog opens.
+func reportAggregateFixture() poreport.Report {
+	snapshot := reportExportFixture()
+	snapshot.Filter = poreport.Query{
+		From: "2025-01-01", To: "2026-01-01", Bucket: poreport.BucketMonth,
+		Category: poreport.CategoryAll, Currency: "IDR",
+	}
+	periods := make([]poreport.Period, 0, 12)
+	for month := 1; month <= 12; month++ {
+		periods = append(periods, poreport.Period{
+			PeriodStart: fmt.Sprintf("2025-%02d-01", month),
+			Metrics: poreport.Metrics{
+				PoCount: 1, AmountMinor: 1_000_000, CostedMinor: 900_000,
+				UncostedMinor: 100_000, CapitalMinor: 700_000, MarginMinor: 200_000,
+				MarginBps: int64Pointer(2857), CoverageBps: int64Pointer(9000),
+			},
+		})
+	}
+	snapshot.Periods = periods
+	snapshot.Totals = poreport.Metrics{
+		PoCount: 12, AmountMinor: 12_000_000, CostedMinor: 10_800_000,
+		UncostedMinor: 1_200_000, CapitalMinor: 8_400_000, MarginMinor: 2_400_000,
+		MarginBps: int64Pointer(2857), CoverageBps: int64Pointer(9000),
+	}
+	return snapshot
+}
+
+func reportViewIntPointer(value int) *int { return &value }
+
+func emptyReportViewFixture() report.ViewEnvelope {
+	return report.ViewEnvelope{
+		Version:  report.ViewVersion,
+		Sources:  []poreport.Report{reportExportFixture()},
+		Overview: 0,
+		Periods: report.ViewPeriods{
+			Sources: []int{}, Months: []string{}, Layout: report.ViewLayoutIndividual,
+		},
+		Categories: report.ViewCategories{
+			Source: 0, Codes: []string{}, Layout: report.ViewLayoutAggregate,
+		},
+	}
+}
+
+func aggregateReportViewFixture() report.ViewEnvelope {
+	snapshot := reportAggregateFixture()
+	months := make([]string, 0, 12)
+	for month := 1; month <= 12; month++ {
+		months = append(months, fmt.Sprintf("2025-%02d", month))
+	}
+	return report.ViewEnvelope{
+		Version:  report.ViewVersion,
+		Sources:  []poreport.Report{snapshot},
+		Overview: 0,
+		Periods: report.ViewPeriods{
+			Sources: []int{0}, Months: months, Layout: report.ViewLayoutAggregate,
+		},
+		Categories: report.ViewCategories{
+			Source: 0, Codes: []string{}, Layout: report.ViewLayoutAggregate,
+		},
+	}
+}
+
+func TestExportPurchaseOrderReportWritesEmptyAndAggregateViews(t *testing.T) {
+	cases := []struct {
+		name string
+		view report.ViewEnvelope
+	}{
+		{name: "empty selection", view: emptyReportViewFixture()},
+		{name: "one-calendar-year aggregate", view: aggregateReportViewFixture()},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			q := staffQuotation()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "extended-view.pdf")
+			previousDialog := saveFileDialog
+			saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+				return path, nil
+			}
+			t.Cleanup(func() { saveFileDialog = previousDialog })
+			previousClient := apiClient
+			apiClient = nil
+			t.Cleanup(func() { apiClient = previousClient })
+
+			got, err := q.ExportPurchaseOrderReport(viewJSON(t, test.view))
+			if err != nil {
+				t.Fatalf("ExportPurchaseOrderReport(view): %v", err)
+			}
+			if got != path {
+				t.Errorf("returned path = %q, want %q", got, path)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read written view: %v", err)
+			}
+			if !strings.HasPrefix(string(raw), "%PDF") {
+				t.Fatalf("written view is not a PDF (%d bytes)", len(raw))
 			}
 		})
 	}

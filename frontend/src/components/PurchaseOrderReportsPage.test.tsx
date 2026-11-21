@@ -1762,3 +1762,990 @@ describe("independent month browser (issue #641)", () => {
     expect(monthBrowser().textContent).not.toContain("Rp110.777.000");
   });
 });
+
+describe("month comparison (issue #642)", () => {
+  const PINNED_TODAY = "2026-11-19";
+  const ZERO = {
+    poCount: 0,
+    amountMinor: 0,
+    costedMinor: 0,
+    uncostedMinor: 0,
+    capitalMinor: 0,
+    marginMinor: 0,
+    marginBps: null,
+    coverageBps: null,
+  } as const;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${PINNED_TODAY}T03:00:00Z`));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function annualQueryFor(query: Query): number | null {
+    if (query.bucket !== "month") return null;
+    const match = /^(\d{4})-01-01$/.exec(query.from);
+    if (match === null) return null;
+    const year = Number(match[1]);
+    return query.to === `${year + 1}-01-01` ? year : null;
+  }
+
+  function zeroAnnual(year: number, query?: Query): PurchaseOrderReportData {
+    const source = purchaseOrderReportYearFixture();
+    source.filter = {
+      from: `${year}-01-01`,
+      to: `${year + 1}-01-01`,
+      bucket: "month",
+      category: query?.category ?? "all",
+      currency: query?.currency ?? "IDR",
+    };
+    source.periods = Array.from({ length: 12 }, (_, index) => ({
+      periodStart: `${year}-${String(index + 1).padStart(2, "0")}-01`,
+      partial: false,
+      inProgress: false,
+      ...ZERO,
+    }));
+    source.totals = { ...ZERO };
+    source.categories = source.categories.map((category) => ({
+      ...category,
+      ...ZERO,
+    }));
+    source.currentProjection = {
+      ...source.currentProjection,
+      mode: "none",
+      status: "unavailable",
+      reason: "not_current_period",
+      buckets: [],
+      currentMonth: undefined,
+    };
+    source.monthSummary = undefined;
+    return source;
+  }
+
+  function respond(query: Query): PurchaseOrderReportData {
+    if (
+      query.bucket === "day" &&
+      query.from === "2026-11-01" &&
+      query.to === "2026-12-01"
+    ) {
+      const report = purchaseOrderReportMonthFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    const annualYear = annualQueryFor(query);
+    if (annualYear === 2026) {
+      const report = purchaseOrderReportYearFixture();
+      report.filter = { ...query };
+      return report;
+    }
+    if (annualYear !== null) {
+      return zeroAnnual(annualYear, query);
+    }
+    const report = purchaseOrderReportFixture();
+    report.filter = { ...query };
+    return report;
+  }
+
+  function pickerDialog(): HTMLElement | null {
+    return document.querySelector<HTMLElement>("[data-report-picker]");
+  }
+
+  function pickerItem(month: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(
+      `[data-picker-key="${month}"]`
+    );
+    if (found === null) throw new Error(`no picker item ${month}`);
+    return found;
+  }
+
+  function pickerAll(): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>("[data-picker-all]");
+    if (found === null) throw new Error("no All months control");
+    return found;
+  }
+
+  function pickerClose(): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>("[data-picker-close]");
+    if (found === null) throw new Error("no picker close");
+    return found;
+  }
+
+  function trigger(): HTMLButtonElement {
+    return button("Choose months");
+  }
+
+  function cards(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>("[data-month-card]"));
+  }
+
+  function card(month: string): HTMLElement {
+    const found = document.querySelector<HTMLElement>(
+      `[data-month-card][data-month-key="${month}"]`
+    );
+    if (found === null) throw new Error(`no month card ${month}`);
+    return found;
+  }
+
+  function activeCard(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('[data-month-active="true"]');
+  }
+
+  function aggregate(): HTMLElement {
+    const found = document.querySelector<HTMLElement>("[data-month-aggregate]");
+    if (found === null) throw new Error("no aggregate");
+    return found;
+  }
+
+  async function openPicker(): Promise<void> {
+    await act(async () => {
+      trigger().click();
+    });
+    await flush();
+  }
+
+  async function clickPicker(control: HTMLButtonElement): Promise<void> {
+    await act(async () => {
+      control.click();
+    });
+    await flush();
+  }
+
+  async function previousPage(times = 1): Promise<void> {
+    for (let index = 0; index < times; index += 1) {
+      await clickPicker(button("Previous page"));
+    }
+  }
+
+  async function nextPage(times = 1): Promise<void> {
+    for (let index = 0; index < times; index += 1) {
+      await clickPicker(button("Next page"));
+    }
+  }
+
+  function chartMarks(): Element | null {
+    return document.querySelector("[data-chart-marks]");
+  }
+
+  it("opens on the selected year and commits while the picker stays open", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "November 2026"
+    );
+
+    await openPicker();
+    expect(pickerDialog()).not.toBeNull();
+    expect(pickerItem("2026-11").getAttribute("aria-pressed")).toBe("true");
+    expect(pickerItem("2026-10").getAttribute("aria-pressed")).toBe("false");
+    expect(pickerAll().getAttribute("aria-pressed")).toBe("false");
+    expect(pickerAll().textContent).toContain("All months in 2026");
+
+    await clickPicker(pickerItem("2026-10"));
+    expect(pickerDialog()).not.toBeNull();
+    expect(pickerItem("2026-10").getAttribute("aria-pressed")).toBe("true");
+    expect(pickerItem("2026-11").getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "2 selected"
+    );
+    expect(cards()).toHaveLength(2);
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual([
+      "2026-10",
+      "2026-11",
+    ]);
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dismiss on an item, the backdrop or Escape; the X closes and keeps the selection", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+
+    await clickPicker(pickerItem("2026-10"));
+    expect(pickerDialog()).not.toBeNull();
+
+    const backdrop = document.querySelector<HTMLElement>(
+      "[data-report-picker-backdrop]"
+    );
+    if (backdrop === null) throw new Error("no backdrop");
+    await act(async () => {
+      backdrop.click();
+    });
+    await flush();
+    expect(pickerDialog()).not.toBeNull();
+
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    await flush();
+    expect(pickerDialog()).not.toBeNull();
+
+    await clickPicker(pickerClose());
+    expect(pickerDialog()).toBeNull();
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "2 months · 2026"
+    );
+    expect(cards()).toHaveLength(2);
+    expect(cards()[0].getAttribute("data-month-key")).toBe("2026-10");
+  });
+
+  it("returns focus to the same trigger node after its text changes", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    const opener = trigger();
+    await openPicker();
+    await clickPicker(pickerAll());
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "12 months · 2026"
+    );
+    await clickPicker(pickerClose());
+    expect(document.querySelector("[data-report-picker]")).toBeNull();
+    expect(trigger()).toBe(opener);
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("pages the picker year without changing selection, membership or requests", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+    const openerSummary = trigger().getAttribute("data-month-selection-summary");
+
+    await nextPage();
+    expect(pickerItem("2027-01")).not.toBeNull();
+    expect(document.querySelector('[data-picker-key="2026-01"]')).toBeNull();
+    expect(pickerAll().textContent).toContain("All months in 2027");
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      openerSummary
+    );
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "1 selected"
+    );
+
+    await nextPage();
+    expect(pickerAll().textContent).toContain("All months in 2028");
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    await clickPicker(pickerClose());
+
+    // Reopening starts at the active/selected month's year, not the page last
+    // browsed.
+    await openPicker();
+    expect(pickerItem("2026-11")).not.toBeNull();
+    expect(document.querySelector('[data-picker-key="2028-01"]')).toBeNull();
+  });
+
+  it("All replaces the set with one year's twelve and Aggregate reads the server total", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = respond(query);
+      if (annualQueryFor(query) === 2026) {
+        // A total that deliberately differs from the row sum: the aggregate
+        // must print the server total, never add the rows itself.
+        report.totals = { ...report.totals, amountMinor: 999_000_000 };
+      }
+      return report;
+    });
+    await renderPage();
+    const marks = chartMarks();
+    const kpiBefore = document.querySelector(
+      '[aria-label="Report KPIs"]'
+    )?.textContent;
+    const categoryTable = document.querySelector(
+      '[aria-label="Category totals"]'
+    );
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+
+    expect(cards()).toHaveLength(0);
+    const table = aggregate();
+    expect(document.querySelector("#report-period-table")).not.toBeNull();
+    expect(table.textContent).toContain("Recorded total");
+    const total = table.querySelector(
+      '[data-aggregate-total-metric="Amount"]'
+    );
+    expect(total?.textContent).toBe("Rp999.000.000");
+    const rowSum = Array.from(
+      table.querySelectorAll<HTMLElement>(
+        '[data-aggregate-row] [data-aggregate-metric="Amount"]'
+      )
+    ).reduce(
+      (sum, cell) =>
+        sum +
+        Number((cell.textContent ?? "").replace(/[^0-9-]/g, "")),
+      0
+    );
+    expect(rowSum).not.toBe(999_000_000);
+    expect(
+      table.querySelectorAll("[data-aggregate-row]")
+    ).toHaveLength(12);
+    expect(table.textContent).toContain("not a sum of the rows");
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(chartMarks()).toBe(marks);
+    expect(
+      document.querySelector('[aria-label="Report KPIs"]')?.textContent
+    ).toBe(kpiBefore);
+    expect(document.querySelector('[aria-label="Category totals"]')).toBe(
+      categoryTable
+    );
+
+    // All months is exactly the year, and the picker marks it checked.
+    await openPicker();
+    expect(pickerAll().getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "12 selected"
+    );
+  });
+
+  it("keeps the daily current-month precedence when All is compared from Month view", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/day-all.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+    // The initial annual overview is retained, so All adds no request.
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(aggregate().textContent).toContain("2026 monthly comparison");
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    const current = card("2026-11");
+    expect(current.textContent).toContain("Actual to date");
+    expect(
+      current.querySelector('[data-month-evidence="estimated"]')?.textContent
+    ).toContain("Estimated remainder (not actual)");
+    expect(
+      current.querySelector("[data-month-scope]")?.textContent
+    ).toContain("Performance snapshot");
+    expect(
+      card("2026-10").querySelector("[data-month-scope]")?.textContent
+    ).toContain("Monthly snapshot");
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const view = onExport.mock.calls[0][0];
+    expect(view.periods.sources).toEqual([1, 0]);
+    expect(view.periods.currentMonthSource).toBe(0);
+    expect(view.sources[0].filter.bucket).toBe("day");
+    expect(view.sources[1].filter).toEqual(calls()[0]);
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("remembers an explicit Individual display through All, single and All again", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    const marks = chartMarks();
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    expect(document.querySelector("[data-month-aggregate]")).toBeNull();
+    expect(document.querySelector("[data-comparison-grid]")).not.toBeNull();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(chartMarks()).toBe(marks);
+
+    await openPicker();
+    await clickPicker(pickerItem("2026-10"));
+    await clickPicker(pickerClose());
+    expect(cards()).toHaveLength(1);
+    expect(document.querySelector('[data-month-layout="aggregate"]')).toBeNull();
+
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+    expect(cards()).toHaveLength(12);
+    expect(document.querySelector("[data-month-aggregate]")).toBeNull();
+    expect(
+      document.querySelector('[data-month-layout="individual"]')?.getAttribute(
+        "aria-pressed"
+      )
+    ).toBe("true");
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses single arrows to replace the month and subset arrows to move active focus only", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(cards()[0].getAttribute("data-month-key")).toBe("2026-10");
+    expect(reportMock).toHaveBeenCalledTimes(1);
+
+    await openPicker();
+    await clickPicker(pickerItem("2026-11"));
+    await clickPicker(pickerClose());
+    expect(cards()).toHaveLength(2);
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual([
+      "2026-10",
+      "2026-11",
+    ]);
+    expect(activeCard()?.getAttribute("data-month-key")).toBe("2026-11");
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(2);
+    expect(activeCard()?.getAttribute("data-month-key")).toBe("2026-10");
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(button("Previous month").disabled).toBe(true);
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(2);
+    expect(activeCard()?.getAttribute("data-month-key")).toBe("2026-11");
+
+    // All/Individual arrows move focus among the twelve cards, not membership.
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    const scrollCalls: Element[] = [];
+    Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
+      scrollCalls.push(this);
+    };
+    const before = cards().map((node) => node.getAttribute("data-month-key"));
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual(
+      before
+    );
+    expect(activeCard()?.getAttribute("data-month-key")).toBe("2026-02");
+    expect(scrollCalls.at(-1)).toBe(activeCard()?.parentElement);
+    expect(reportMock).toHaveBeenCalledTimes(1);
+
+    // Aggregate has no card target, so its navigation is absent.
+    await act(async () => {
+      button("Aggregate").click();
+    });
+    await flush();
+    expect(document.querySelector('[data-month-nav="previous"]')).toBeNull();
+    expect(document.querySelector('[data-month-nav="next"]')).toBeNull();
+  });
+
+  it("keeps cross-year months canonical and loads exactly one source per year", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerItem("2025-01"));
+    await clickPicker(pickerClose());
+
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1]).toEqual({
+      from: "2025-01-01",
+      to: "2026-01-01",
+      bucket: "month",
+      category: "all",
+      currency: "IDR",
+    });
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual([
+      "2025-01",
+      "2026-11",
+    ]);
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "2 months · 2025–2026"
+    );
+
+    await openPicker();
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "2 selected"
+    );
+    expect(pickerItem("2025-01")).not.toBeNull();
+    await nextPage();
+    expect(document.querySelector('[data-picker-key="2025-01"]')).toBeNull();
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "2 selected"
+    );
+    await clickPicker(pickerItem("2026-01"));
+    await clickPicker(pickerClose());
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual([
+      "2025-01",
+      "2026-01",
+      "2026-11",
+    ]);
+    expect(
+      document.querySelectorAll("[data-comparison-card]")
+    ).toHaveLength(3);
+    expect(
+      document.querySelectorAll("[data-comparison-last-odd]")
+    ).toHaveLength(1);
+  });
+
+  it("discloses independently generated source timestamps across a selection", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = respond(query);
+      if (annualQueryFor(query) === 2025) {
+        report.generatedAt = "2026-11-20T05:00:00Z";
+      }
+      return report;
+    });
+    await renderPage();
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerItem("2025-01"));
+    await clickPicker(pickerClose());
+
+    const provenance = document.querySelector("[data-month-provenance]");
+    expect(provenance?.textContent).toContain(
+      "independently generated snapshots"
+    );
+    expect(card("2025-01").textContent).toContain("2026-11-20T05:00:00Z");
+    expect(card("2026-11").textContent).toContain("2026-11-19T05:00:00Z");
+  });
+
+  it("shows no independent-snapshot note above an Aggregate built from one annual source", async () => {
+    // Year view → Month view reads a day snapshot; the retained annual
+    // snapshot is a different generation. All/Aggregate still reads every row
+    // and the Recorded total from that one annual source and renders no cards,
+    // so the cards-only note must not appear above it. Individual keeps the
+    // note, because its current-month card really is the day snapshot.
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = respond(query);
+      if (query.bucket === "day") {
+        report.generatedAt = "2026-11-19T05:00:00Z";
+      }
+      if (annualQueryFor(query) === 2026) {
+        report.generatedAt = "2026-11-20T05:00:00Z";
+      }
+      return report;
+    });
+    await renderPage();
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+
+    expect(aggregate().textContent).toContain("2026 monthly comparison");
+    expect(aggregate().textContent).toContain(
+      "annual snapshot 2026-11-20T05:00:00Z"
+    );
+    expect(cards()).toHaveLength(0);
+    expect(document.querySelector("[data-month-provenance]")).toBeNull();
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    expect(
+      document.querySelector("[data-month-provenance]")?.textContent
+    ).toContain("independently generated snapshots");
+    expect(card("2026-11").textContent).toContain("2026-11-19T05:00:00Z");
+    expect(card("2026-10").textContent).toContain("2026-11-20T05:00:00Z");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("begins an explicit empty selection, keeps the picker open and exports the empty section", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/empty.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerItem("2026-10"));
+    await clickPicker(pickerItem("2026-10"));
+    expect(pickerDialog()).not.toBeNull();
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "0 selected"
+    );
+    await clickPicker(pickerClose());
+
+    // With no selected month, the picker opens at the server's current year.
+    await openPicker();
+    expect(pickerItem("2026-01")).not.toBeNull();
+    expect(document.querySelector('[data-picker-key="2025-01"]')).toBeNull();
+    await clickPicker(pickerClose());
+
+    const empty = document.querySelector("[data-month-empty]");
+    expect(empty?.textContent).toContain("Choose months");
+    expect(document.querySelector("#report-period-table")).not.toBeNull();
+    expect(cards()).toHaveLength(0);
+    expect(button("Export PDF").disabled).toBe(false);
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const view = onExport.mock.calls[0][0];
+    expect(view.periods).toEqual({
+      sources: [],
+      months: [],
+      layout: "individual",
+    });
+    expect(view.sources).toHaveLength(1);
+    expect(view.categories.codes).toEqual(
+      purchaseOrderReportYearFixture().categories.map(
+        (row) => row.businessCategory
+      )
+    );
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a 120-month span, keeps the selection and makes no request", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+    await previousPage(11);
+    expect(pickerItem("2015-01")).not.toBeNull();
+    await clickPicker(pickerItem("2015-01"));
+
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(document.querySelector("[data-month-limit-notice]")?.textContent).toContain(
+      "120 months"
+    );
+    expect(pickerDialog()?.textContent).toContain("120 months");
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "November 2026"
+    );
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "1 selected"
+    );
+
+    // An accepted action clears the message.
+    await nextPage(11);
+    await clickPicker(pickerItem("2026-10"));
+    expect(document.querySelector("[data-month-limit-notice]")).toBeNull();
+    expect(trigger().getAttribute("data-month-selection-summary")).toBe(
+      "2 months · 2026"
+    );
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a loaded zero past year as real zeros and a future year as unavailable", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1]).toEqual({
+      from: "2025-01-01",
+      to: "2026-01-01",
+      bucket: "month",
+      category: "all",
+      currency: "IDR",
+    });
+    expect(aggregate().textContent).toContain("2025 monthly comparison");
+    const zeroRow = aggregate().querySelector(
+      '[data-aggregate-row="2025-01"] [data-aggregate-metric="POs"]'
+    );
+    expect(zeroRow?.textContent).toBe("0");
+    expect(
+      aggregate().querySelector(
+        '[data-aggregate-row="2025-01"] [data-aggregate-metric="Amount"]'
+      )?.textContent
+    ).toBe("Rp0");
+    expect(
+      aggregate().querySelector(
+        '[data-aggregate-row="2025-01"] [data-aggregate-metric="Margin %"]'
+      )?.textContent
+    ).toBe("-");
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(cards()).toHaveLength(12);
+    expect(
+      card("2025-01").querySelector('[data-month-metric="POs"]')?.textContent
+    ).toBe("0");
+    expect(
+      card("2025-01").querySelector('[data-month-metric="PO amount"]')
+        ?.textContent
+    ).toBe("Rp0");
+
+    await openPicker();
+    await nextPage(3);
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+    expect(reportMock).toHaveBeenCalledTimes(3);
+    await act(async () => {
+      button("Aggregate").click();
+    });
+    await flush();
+    expect(aggregate().textContent).toContain("2028 monthly comparison");
+    expect(aggregate().textContent).toContain("Forecast unavailable");
+    expect(
+      aggregate().querySelector(
+        '[data-aggregate-row="2028-01"] [data-aggregate-metric="Amount"]'
+      )?.textContent
+    ).toBe("-");
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(card("2028-01").textContent).toContain("beyond the current year");
+    expect(card("2028-01").textContent).not.toContain("Rp0");
+  });
+
+  it("loads several selected months of one year with a single read each time", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await openPicker();
+    await clickPicker(pickerItem("2026-03"));
+    await clickPicker(pickerItem("2026-05"));
+    await clickPicker(pickerItem("2026-09"));
+    await previousPage();
+    await clickPicker(pickerItem("2025-06"));
+    await clickPicker(pickerItem("2025-10"));
+    await clickPicker(pickerClose());
+
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1]).toEqual({
+      from: "2025-01-01",
+      to: "2026-01-01",
+      bucket: "month",
+      category: "all",
+      currency: "IDR",
+    });
+    expect(cards().map((node) => node.getAttribute("data-month-key"))).toEqual([
+      "2025-06",
+      "2025-10",
+      "2026-03",
+      "2026-05",
+      "2026-09",
+      "2026-11",
+    ]);
+
+    // Picker paging and re-selecting loaded months make no request.
+    await openPicker();
+    await nextPage();
+    await clickPicker(pickerItem("2026-05"));
+    await clickPicker(pickerItem("2026-05"));
+    await clickPicker(pickerClose());
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("deduplicates an in-flight read for several months in the same year", async () => {
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    reportMock.mockImplementationOnce(() => pending.promise);
+
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerItem("2025-01"));
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(card("2025-01").textContent).toContain("Loading January 2025");
+    await clickPicker(pickerItem("2025-06"));
+    await clickPicker(pickerItem("2025-10"));
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(pickerDialog()).not.toBeNull();
+
+    await act(async () => {
+      pending.resolve(zeroAnnual(2025));
+    });
+    await flush();
+    expect(pickerDialog()).not.toBeNull();
+    // The open picker's marks updated in place; the background cards became
+    // real zero evidence without a remount.
+    expect(pickerItem("2025-01").getAttribute("aria-pressed")).toBe("true");
+    expect(card("2025-01").textContent).toContain("Recorded");
+    expect(
+      card("2025-01").querySelector('[data-month-metric="POs"]')?.textContent
+    ).toBe("0");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never paints old money for a new scope and retries a failed year per browser", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport: async () => "/tmp/opencode/retry.pdf" });
+    await choose("Date range preset", "This year");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    const pendingAnnual = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => {
+      if (annualQueryFor(query) === 2026 && query.category === "UNASSIGNED") {
+        return pendingAnnual.promise;
+      }
+      return respond(query);
+    });
+    await choose("Category", "Unassigned");
+    await flush();
+
+    // The partial UNASSIGNED overview arrived; its annual source is still in
+    // flight. The card must not keep the old ALL money under the new heading.
+    expect(calls().at(-1)).toMatchObject({
+      from: "2026-01-01",
+      to: "2027-01-01",
+      bucket: "month",
+      category: "UNASSIGNED",
+      currency: "IDR",
+    });
+    expect(cards()[0].textContent).toContain("Loading November 2026");
+    expect(cards()[0].textContent).not.toContain("Rp190.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    await act(async () => {
+      pendingAnnual.reject(new Error("The monthly API is unreachable."));
+    });
+    await flush();
+    expect(cards()[0].textContent).toContain("The monthly API is unreachable.");
+    expect(cards()[0].textContent).not.toContain("Rp190.000.000");
+    expect(button("Retry month")).not.toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+
+    const beforeRetry = reportMock.mock.calls.length;
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await act(async () => {
+      button("Retry month").click();
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(beforeRetry + 1);
+    expect(cards()[0].textContent).not.toContain(
+      "The monthly API is unreachable."
+    );
+    expect(cards()[0].textContent).toContain("Actual to date");
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("blocks export until every visible selected source and the overview agree", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/compare.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = respond(query);
+      if (annualQueryFor(query) === 2025) {
+        report.asOf = "2026-11-20";
+      }
+      return report;
+    });
+    await renderPage({ onExport });
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerItem("2025-01"));
+    await clickPicker(pickerClose());
+
+    expect(card("2025-01").textContent).toContain(
+      "different business date from the overview"
+    );
+    expect(button("Export PDF").disabled).toBe(true);
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).not.toHaveBeenCalled();
+  });
+
+  it("exports the canonical selected envelope and freezes it before the binding call", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/compare.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+    await openPicker();
+    await previousPage();
+    await clickPicker(pickerItem("2025-01"));
+    await clickPicker(pickerClose());
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const view = onExport.mock.calls[0][0];
+    expect(view.periods.months).toEqual(["2025-01", "2026-11"]);
+    expect(view.periods.sources).toEqual([1, 0]);
+    expect(view.periods.layout).toBe("individual");
+    expect(view.sources).toHaveLength(2);
+    expect(view.sources[1].filter).toEqual(calls()[1]);
+
+    const frozen = JSON.stringify(view);
+    await openPicker();
+    await nextPage();
+    await clickPicker(pickerItem("2026-10"));
+    await clickPicker(pickerClose());
+    expect(JSON.stringify(view)).toBe(frozen);
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports the All aggregate and All individual shapes without a row sum", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/all.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+    await openPicker();
+    await clickPicker(pickerAll());
+    await clickPicker(pickerClose());
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    const aggregateView = onExport.mock.calls[0][0];
+    expect(aggregateView.periods).toEqual({
+      sources: [0],
+      months: Array.from({ length: 12 }, (_, index) =>
+        `2026-${String(index + 1).padStart(2, "0")}`
+      ),
+      layout: "aggregate",
+    });
+    expect(aggregateView.sources[0].totals).toEqual(
+      purchaseOrderReportYearFixture().totals
+    );
+
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    const individualView = onExport.mock.calls[1][0];
+    expect(individualView.periods.layout).toBe("individual");
+    expect(individualView.periods.months).toHaveLength(12);
+    expect(individualView.periods.sources).toEqual([0]);
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+});

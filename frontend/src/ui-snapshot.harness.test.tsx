@@ -20,7 +20,7 @@
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ReactElement } from "react";
+import { createRef, type ReactElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { backend, poreport } from "@backend/models";
@@ -41,6 +41,7 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import { PurchaseOrderReportPickerView } from "./components/PurchaseOrderReportPicker";
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
@@ -54,8 +55,13 @@ import {
   purchaseOrderReportYearWithRecordedFutureFixture,
 } from "./poReportFixtures";
 import {
+  allMonthsOfYear,
+  allYearForMonths,
+  monthLabel,
+  resolveMonthAggregate,
   resolveMonthReadout,
   type PurchaseOrderMonthReadout,
+  type ReportMonthLayout,
 } from "./poReportComparison";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
@@ -1516,10 +1522,21 @@ function monthReportView(
       onCurrencyChange={() => undefined}
       onRetry={() => undefined}
       onExport={() => undefined}
-      monthReadout={readout}
-      onPreviousMonth={() => undefined}
-      onNextMonth={() => undefined}
-      onRetryMonth={() => undefined}
+      monthBrowser={{
+        months: readout.month === "" ? [] : [readout.month],
+        activeMonth: readout.month === "" ? null : readout.month,
+        allYear: null,
+        layout: "individual",
+        notice: "",
+        readouts: [readout],
+        aggregate: null,
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetryMonth: () => undefined,
+      }}
     />
   );
 }
@@ -1593,6 +1610,114 @@ function reportChartView(
       onCurrencyChange={() => undefined}
       onRetry={() => undefined}
       onExport={() => undefined}
+    />
+  );
+}
+
+// Issue #642: static evidence for the live month comparison. The readouts and
+// the aggregate are the same pure selection results the hook passes; every
+// figure is read from a supplied server snapshot. These cases cannot show the
+// live modal, focus restoration, paging or request counts — the DOM suites own
+// those.
+function monthComparisonSource(
+  report: PurchaseOrderReportData,
+  months: readonly string[],
+  annualSource: PurchaseOrderReportData | null = null
+): PurchaseOrderMonthReadout[] {
+  return months.map((month) =>
+    resolveMonthReadout({
+      overview: report,
+      month,
+      annualSource,
+      annualStatus: annualSource === null ? "loading" : "ready",
+      annualError: "",
+    })
+  );
+}
+
+function zeroAnnualMonthSource(year: string): PurchaseOrderReportData {
+  const source = cloneReport(purchaseOrderReportYearFixture());
+  source.filter = {
+    from: `${year}-01-01`,
+    to: `${Number(year) + 1}-01-01`,
+    bucket: "month",
+    category: "all",
+    currency: "IDR",
+  };
+  source.periods = allMonthsOfYear(year).map((month) => ({
+    periodStart: `${month}-01`,
+    partial: false,
+    inProgress: false,
+    ...zeroMonthMetrics(),
+  }));
+  source.totals = zeroMonthMetrics();
+  source.categories = source.categories.map((category) => ({
+    ...category,
+    ...zeroMonthMetrics(),
+  }));
+  source.currentProjection = {
+    ...source.currentProjection,
+    mode: "none",
+    status: "unavailable",
+    reason: "not_current_period",
+    buckets: [],
+    currentMonth: undefined,
+  };
+  source.monthSummary = undefined;
+  return source;
+}
+
+function monthComparisonView(
+  report: PurchaseOrderReportData,
+  months: readonly string[],
+  layout: ReportMonthLayout,
+  annualSource: PurchaseOrderReportData | null = null
+): ReactElement {
+  const allYear = allYearForMonths(months);
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(report)}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      monthBrowser={{
+        months,
+        activeMonth: months[0] ?? null,
+        allYear,
+        layout,
+        notice: "",
+        readouts: monthComparisonSource(report, months, annualSource),
+        aggregate:
+          allYear === null
+            ? null
+            : resolveMonthAggregate({
+                overview: report,
+                year: allYear,
+                annualSource: null,
+                annualStatus: "loading",
+                annualError: "",
+              }),
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetryMonth: () => undefined,
+      }}
     />
   );
 }
@@ -1988,10 +2113,21 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
-        monthReadout={REPORT_MONTH_CURRENT_READOUT}
-        onPreviousMonth={() => undefined}
-        onNextMonth={() => undefined}
-        onRetryMonth={() => undefined}
+        monthBrowser={{
+          months: ["2026-11"],
+          activeMonth: "2026-11",
+          allYear: null,
+          layout: "individual",
+          notice: "",
+          readouts: [REPORT_MONTH_CURRENT_READOUT],
+          aggregate: null,
+          triggerRef: createRef<HTMLButtonElement>(),
+          onOpenPicker: () => undefined,
+          onLayoutChange: () => undefined,
+          onPrevious: () => undefined,
+          onNext: () => undefined,
+          onRetryMonth: () => undefined,
+        }}
       />
     ),
   },
@@ -2023,6 +2159,98 @@ const CASES: SnapshotCase[] = [
       REPORT_MONTH_FUTURE_UNAVAILABLE,
       REPORT_MONTH_FUTURE_UNAVAILABLE_READOUT,
       reportChartFilters(REPORT_MONTH_FUTURE_UNAVAILABLE, "year")
+    ),
+  },
+  {
+    // Issue #642: three selected months, chronological, with the odd final card
+    // spanning the last row above the lg breakpoint. The same vertical metric
+    // table is used as the single-month table. Cropped to its heading so the
+    // screenshot frames the section, not the report's top.
+    name: "ReportsMonthComparisonGrid",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      ["2026-01", "2026-06", "2026-11"],
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: December 2025 before January 2026, with each card naming its
+    // own snapshot/as-of. The 2025 source is a loaded zero year, so the card is
+    // genuine zero evidence rather than an unfetched guess.
+    name: "ReportsMonthCrossYear",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      ["2025-12", "2026-01"],
+      "individual",
+      zeroAnnualMonthSource("2025")
+    ),
+  },
+  {
+    // Issue #642: the default All presentation: one wide twelve-row table and
+    // the annual server snapshot's Recorded total, with December's forecast as
+    // a separate marked line below the table.
+    name: "ReportsMonthAllAggregate",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      allMonthsOfYear("2026"),
+      "aggregate"
+    ),
+  },
+  {
+    // Issue #642: the remembered All/Individual display: the year's twelve
+    // vertical cards in the two-column comparison grid.
+    name: "ReportsMonthAllIndividual",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      allMonthsOfYear("2026"),
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: the explicit choose-months state. It is not a zero-valued
+    // financial report; the picker trigger stays available above it.
+    name: "ReportsMonthEmpty",
+    cropToHeading: "By period",
+    element: monthComparisonView(
+      purchaseOrderReportYearFixture(),
+      [],
+      "individual"
+    ),
+  },
+  {
+    // Issue #642: the real open picker surface (the same controller surface,
+    // statically rendered) over the report. Item clicks and paging are DOM
+    // behaviour and are covered by the page suite; this case is the 360/1280
+    // visual read of labels, checks, count and the conspicuous X.
+    name: "ReportsMonthPickerOpen",
+    element: (
+      <div>
+        {monthComparisonView(
+          purchaseOrderReportYearFixture(),
+          ["2026-11"],
+          "individual"
+        )}
+        <PurchaseOrderReportPickerView
+          title="Choose months"
+          items={allMonthsOfYear("2026").map((month) => ({
+            key: month,
+            label: monthLabel(month),
+          }))}
+          selectedKeys={["2026-11"]}
+          allLabel="All months in 2026"
+          allSelected={false}
+          onSelectAll={() => undefined}
+          onToggle={() => undefined}
+          onClose={() => undefined}
+          pageLabel="2026"
+          onPreviousPage={() => undefined}
+          onNextPage={() => undefined}
+        />
+      </div>
     ),
   },
   {

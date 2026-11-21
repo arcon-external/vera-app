@@ -7,10 +7,11 @@ import (
 	"vera-app/backend/poreport"
 )
 
-// Issue #641: the selected-month section replaces the legacy bucket-following
-// period table in a view export. It prints exactly one month's six metrics from
-// the frozen source, then the separate recorded-future and estimated lines.
-// Nothing here adds an estimate to an actual, and no figure is recomputed.
+// Issue #641/#642: the selected-month section replaces the legacy
+// bucket-following period table in a view export. It prints exactly the chosen
+// months' six metrics from their frozen sources, then the separate
+// recorded-future and estimated lines. Nothing here adds an estimate to an
+// actual, sums months, or recomputes a figure.
 
 func monthHeading(month string) string {
 	parsed, err := time.Parse("2006-01", month)
@@ -24,74 +25,121 @@ func (r *reportRenderer) drawSelectedMonthSections() {
 	if r.resolved == nil {
 		return
 	}
-	for _, month := range r.resolved.Months {
-		r.drawSelectedMonthSection(month)
+	switch {
+	case r.resolved.Aggregate != nil:
+		r.drawAggregateMonths()
+	case len(r.resolved.Months) == 0:
+		r.drawEmptyMonthSection()
+	default:
+		r.drawIndividualMonths()
 	}
 }
 
-func (r *reportRenderer) drawSelectedMonthSection(month resolvedMonth) {
-	var primary *poreport.Metrics
-	note := ""
+// drawEmptyMonthSection prints the explicit empty state. It is not a
+// zero-valued financial report: it has no metric rows, no total and no
+// estimate, only the section scope and a direction to choose a month.
+func (r *reportRenderer) drawEmptyMonthSection() {
+	overview := r.resolved.Overview
+	scope := fmt.Sprintf("0 months selected  ·  %s  ·  %s  ·  As of %s  ·  Snapshot %s",
+		categoryFilterLabel(overview.Filter.Category),
+		overview.Filter.Currency,
+		overview.AsOf,
+		generatedLabel(overview.GeneratedAt))
+	r.canvas.ensure(r.titleBlockHeight(scope) + 56)
+	r.sectionTitle("By period", scope)
+	r.emptyState("No months selected",
+		"Choose at least one month to print a period comparison. No figures and no total are shown here.")
+}
+
+type monthEvidence struct {
+	label     string
+	body      string
+	estimated bool
+}
+
+// monthEvidenceItems returns the separate evidence lines for one selected
+// month. A current month adds its recorded future-dated evidence and its
+// remainder estimate; a future month adds its full-month estimate or the stable
+// unavailable reason. A past month has none.
+func (r *reportRenderer) monthEvidenceItems(month resolvedMonth) []monthEvidence {
+	var items []monthEvidence
+	if month.IsCurrent && month.Summary != nil && month.Summary.RecordedFuture != nil {
+		items = append(items, monthEvidence{
+			label: "Future-dated recorded",
+			body:  metricsEvidence(r, *month.Summary.RecordedFuture),
+		})
+	}
+	if item, ok := r.monthForecastEvidence(month); ok {
+		items = append(items, item)
+	}
+	return items
+}
+
+func (r *reportRenderer) monthForecastEvidence(month resolvedMonth) (monthEvidence, bool) {
 	switch {
 	case month.IsCurrent:
-		if month.Summary != nil {
-			actual := month.Summary.Actual
-			primary = &actual
+		if month.Summary == nil {
+			return monthEvidence{}, false
 		}
-		note = "Actual to date (month-to-date). Actual figures only; future-dated records and estimates are separate lines below and are never added to these figures."
+		projection := month.Summary.Projection
+		if projection.Status != poreport.ProjectionStatusAvailable || projection.Remainder == nil {
+			return monthEvidence{
+				label: "Forecast unavailable",
+				body:  projectionReasonLabel(projection.Reason),
+			}, true
+		}
+		return monthEvidence{
+			label:     "Estimated remainder",
+			body:      estimateEvidence(r, *projection.Remainder),
+			estimated: true,
+		}, true
 	case month.IsFuture:
-		if month.Period != nil && month.Period.PoCount > 0 {
-			recorded := month.Period.Metrics
-			primary = &recorded
-			note = "Recorded evidence in the selected future month. The full-month forecast is a separate alternative below and is never added to it."
-		} else {
-			note = "No recorded purchase orders in this future month. The full-month forecast is shown separately below as an estimate, never as actual zero."
+		currentYear := firstSeven(r.resolved.Overview.AsOf)[:4]
+		if month.Month[:4] != currentYear {
+			return monthEvidence{
+				label: "Forecast unavailable",
+				body:  "Future months beyond the current year have no current-year forecast. No retired projection is used as a fallback.",
+			}, true
 		}
+		current := month.Source.CurrentProjection
+		if current.Mode != poreport.ProjectionModeMonth ||
+			current.Status != poreport.ProjectionStatusAvailable {
+			reason := current.Reason
+			if current.Mode != poreport.ProjectionModeMonth {
+				reason = poreport.ReasonNotCurrentPeriod
+			}
+			return monthEvidence{
+				label: "Forecast unavailable",
+				body:  projectionReasonLabel(reason),
+			}, true
+		}
+		wanted := month.Month + "-01"
+		for _, bucket := range current.Buckets {
+			if bucket.PeriodStart != wanted {
+				continue
+			}
+			remainder := poreport.CurrentProjectionRemainder{
+				LowMinor:     bucket.AmountLowMinor,
+				BaseMinor:    bucket.AmountBaseMinor,
+				HighMinor:    bucket.AmountHighMinor,
+				CapitalMinor: bucket.CapitalMinor,
+				MarginMinor:  bucket.MarginMinor,
+				MarginBps:    bucket.MarginBps,
+				SampleSize:   bucket.SampleSize,
+				Source:       bucket.Source,
+			}
+			return monthEvidence{
+				label:     "Estimated forecast",
+				body:      estimateEvidence(r, remainder),
+				estimated: true,
+			}, true
+		}
+		return monthEvidence{
+			label: "Forecast unavailable",
+			body:  "No projection bucket is supplied for this month.",
+		}, true
 	default:
-		if month.Period != nil {
-			recorded := month.Period.Metrics
-			primary = &recorded
-			note = "Recorded figures for the selected month. A zero row is a loaded month with no purchase orders, not missing data."
-		}
-	}
-
-	columns := []tableColumn{
-		{title: "METRIC", width: 150, align: alignLeft},
-		{title: "VALUE", width: contentWidth - 150, align: alignRight},
-	}
-	values := []string{"-", "-", "-", "-", "-", "-"}
-	if primary != nil {
-		values = []string{
-			formatCount(primary.PoCount),
-			r.money(primary.AmountMinor),
-			r.money(primary.CostedMinor),
-			r.money(primary.CapitalMinor),
-			r.signedMoney(primary.MarginMinor),
-			formatPct(primary.MarginBps),
-		}
-	}
-	labels := []string{"POs", "PO amount", "Costed amount", "Capital", "PO margin", "PO margin %"}
-	rows := make([]tableRow, 0, len(labels))
-	for index, label := range labels {
-		rows = append(rows, tableRow{cells: []string{label, values[index]}})
-	}
-
-	scope := fmt.Sprintf("%s  ·  %s  ·  %s  ·  As of %s  ·  Snapshot %s",
-		monthHeading(month.Month),
-		categoryFilterLabel(month.Source.Filter.Category),
-		month.Source.Filter.Currency,
-		month.Source.AsOf,
-		generatedLabel(month.Source.GeneratedAt))
-	r.drawTable("By period — "+monthHeading(month.Month), scope+"\n"+note, columns, rows, nil)
-
-	if month.IsCurrent && month.Summary != nil {
-		if month.Summary.RecordedFuture != nil {
-			r.drawEvidenceLine("Future-dated recorded",
-				metricsEvidence(r, *month.Summary.RecordedFuture), false)
-		}
-		r.drawMonthForecast(month)
-	} else if month.IsFuture {
-		r.drawMonthForecast(month)
+		return monthEvidence{}, false
 	}
 }
 
@@ -119,61 +167,9 @@ func estimateEvidence(r *reportRenderer, remainder poreport.CurrentProjectionRem
 		projectionSourceLabel(remainder.Source))
 }
 
-func (r *reportRenderer) drawMonthForecast(month resolvedMonth) {
-	switch {
-	case month.IsCurrent:
-		if month.Summary == nil {
-			return
-		}
-		projection := month.Summary.Projection
-		if projection.Status != poreport.ProjectionStatusAvailable || projection.Remainder == nil {
-			r.drawEvidenceLine("Forecast unavailable", projectionReasonLabel(projection.Reason), false)
-			return
-		}
-		r.drawEvidenceLine("Estimated remainder", estimateEvidence(r, *projection.Remainder), true)
-	case month.IsFuture:
-		currentYear := firstSeven(r.resolved.Overview.AsOf)[:4]
-		if month.Month[:4] != currentYear {
-			r.drawEvidenceLine("Forecast unavailable",
-				"Future months beyond the current year have no current-year forecast. No retired projection is used as a fallback.",
-				false)
-			return
-		}
-		current := month.Source.CurrentProjection
-		if current.Mode != poreport.ProjectionModeMonth ||
-			current.Status != poreport.ProjectionStatusAvailable {
-			reason := current.Reason
-			if current.Mode != poreport.ProjectionModeMonth {
-				reason = poreport.ReasonNotCurrentPeriod
-			}
-			r.drawEvidenceLine("Forecast unavailable", projectionReasonLabel(reason), false)
-			return
-		}
-		wanted := month.Month + "-01"
-		for _, bucket := range current.Buckets {
-			if bucket.PeriodStart != wanted {
-				continue
-			}
-			remainder := poreport.CurrentProjectionRemainder{
-				LowMinor:     bucket.AmountLowMinor,
-				BaseMinor:    bucket.AmountBaseMinor,
-				HighMinor:    bucket.AmountHighMinor,
-				CapitalMinor: bucket.CapitalMinor,
-				MarginMinor:  bucket.MarginMinor,
-				MarginBps:    bucket.MarginBps,
-				SampleSize:   bucket.SampleSize,
-				Source:       bucket.Source,
-			}
-			r.drawEvidenceLine("Estimated forecast", estimateEvidence(r, remainder), true)
-			return
-		}
-		r.drawEvidenceLine("Forecast unavailable",
-			"No projection bucket is supplied for this month.", false)
-	}
-}
-
-// drawEvidenceLine prints one explicitly labelled line. An estimated line is
-// muted and says "estimated" in its label; the label is text, not colour alone.
+// drawEvidenceLine prints one explicitly labelled line outside the comparison
+// cards or the aggregate table. An estimated line is muted and says
+// "estimated" in its label; the label is text, not colour alone.
 func (r *reportRenderer) drawEvidenceLine(label, body string, estimated bool) {
 	prefix := label
 	if estimated {

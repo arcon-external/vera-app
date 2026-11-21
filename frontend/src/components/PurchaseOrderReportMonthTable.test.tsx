@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
-import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
+import {
+  PurchaseOrderReportMonthCard,
+  PurchaseOrderReportMonthTable,
+} from "./PurchaseOrderReportMonthTable";
 import { resolveMonthReadout } from "../poReportComparison";
 import {
+  purchaseOrderReportFixture,
   purchaseOrderReportMonthFixture,
   purchaseOrderReportMonthWithRecordedFutureFixture,
+  purchaseOrderReportYearFixture,
 } from "../poReportFixtures";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderMonthReadout } from "../poReportComparison";
@@ -193,5 +198,101 @@ describe("PurchaseOrderReportMonthTable estimate readability (issue #641 F1)", (
     )) {
       expect(value.className).toContain("tnum");
     }
+  });
+});
+
+describe("comparison card reuses the same vertical table (issue #642)", () => {
+  function renderCard(
+    readout: PurchaseOrderMonthReadout,
+    active = false,
+    onRetry = () => undefined
+  ): HTMLElement {
+    document.body.innerHTML = renderToString(
+      <PurchaseOrderReportMonthCard
+        readout={readout}
+        entry={IDR}
+        active={active}
+        onRetry={onRetry}
+      />
+    );
+    return document.body;
+  }
+
+  it("prints the same six metric rows as the standalone month table", () => {
+    const readout = currentReadout();
+    const standalone = render(readout);
+    const standaloneRows = Array.from(
+      standalone.querySelectorAll<HTMLElement>("[data-month-metric]")
+    ).map((node) => [node.getAttribute("data-month-metric"), node.textContent]);
+    const card = renderCard(readout, true);
+    const cardRows = Array.from(
+      card.querySelectorAll<HTMLElement>("[data-month-metric]")
+    ).map((node) => [node.getAttribute("data-month-metric"), node.textContent]);
+
+    expect(cardRows).toEqual(standaloneRows);
+    expect(cardRows.map(([label]) => label)).toEqual([
+      "POs",
+      "PO amount",
+      "Costed amount",
+      "Capital",
+      "PO margin",
+      "PO margin %",
+    ]);
+    expect(document.querySelector("[data-month-card]")).not.toBeNull();
+    expect(
+      document.querySelector("[data-month-card]")?.getAttribute("data-month-key")
+    ).toBe("2026-11");
+    expect(
+      document.querySelector("[data-month-card]")?.getAttribute("data-month-active")
+    ).toBe("true");
+    // The card is a piece of a comparison, not a second browser chrome.
+    expect(document.querySelector("[data-month-browser]")).toBeNull();
+    expect(document.querySelector('[data-month-nav="previous"]')).toBeNull();
+    expect(document.querySelector("[data-month-evidence='estimated']")).not.toBeNull();
+  });
+
+  it("shows a per-card retry and no money when its year source failed", () => {
+    const readout = resolveMonthReadout({
+      overview: purchaseOrderReportMonthFixture(),
+      month: "2025-12",
+      annualSource: null,
+      annualStatus: "error",
+      annualError: "The monthly API is unreachable.",
+    });
+    renderCard(readout);
+    expect(document.body.textContent).toContain("The monthly API is unreachable.");
+    expect(document.body.textContent).toContain("Retry");
+    expect(document.querySelector("[data-month-metric]")).toBeNull();
+    expect(document.body.textContent).not.toContain("Rp");
+  });
+
+  it("renders a loaded zero month as six real zero cells", () => {
+    const annual = purchaseOrderReportYearFixture();
+    const january = annual.periods[0];
+    january.poCount = 0;
+    january.amountMinor = 0;
+    january.costedMinor = 0;
+    january.uncostedMinor = 0;
+    january.capitalMinor = 0;
+    january.marginMinor = 0;
+    january.marginBps = null;
+    january.coverageBps = null;
+    const readout = resolveMonthReadout({
+      overview: purchaseOrderReportFixture(),
+      month: "2026-01",
+      annualSource: annual,
+      annualStatus: "ready",
+      annualError: "",
+    });
+    renderCard(readout);
+    expect(
+      document.querySelector('[data-month-metric="POs"]')?.textContent
+    ).toBe("0");
+    expect(
+      document.querySelector('[data-month-metric="PO amount"]')?.textContent
+    ).toBe("Rp0");
+    expect(
+      document.querySelector('[data-month-metric="PO margin %"]')?.textContent
+    ).toBe("-");
   });
 });

@@ -37,14 +37,23 @@ import {
 } from "../poReport";
 import { todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
-import { usePOReportMonthBrowser } from "../usePOReportSources";
+import { usePOReportMonthComparison } from "../usePOReportSources";
 import {
   buildPurchaseOrderReportView,
   type PurchaseOrderReportView,
 } from "../poReportExport";
-import type { PurchaseOrderMonthReadout } from "../poReportComparison";
+import {
+  allMonthsOfYear,
+  monthLabel,
+  type PurchaseOrderMonthReadout,
+} from "../poReportComparison";
 import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
 import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
+import {
+  PurchaseOrderReportMonthBrowser,
+  type PurchaseOrderReportMonthBrowserProps,
+} from "./PurchaseOrderReportMonthBrowser";
+import { PurchaseOrderReportPicker } from "./PurchaseOrderReportPicker";
 import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
@@ -96,6 +105,8 @@ export interface PurchaseOrderReportsViewProps {
   onPreviousMonth?: () => void;
   onNextMonth?: () => void;
   onRetryMonth?: () => void;
+  /** The live #642 comparison; absent for direct fixture/harness callers. */
+  monthBrowser?: Omit<PurchaseOrderReportMonthBrowserProps, "entry"> | null;
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
@@ -422,6 +433,7 @@ export function PurchaseOrderReportsView({
   onPreviousMonth,
   onNextMonth,
   onRetryMonth,
+  monthBrowser,
 }: PurchaseOrderReportsViewProps) {
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
@@ -438,6 +450,18 @@ export function PurchaseOrderReportsView({
   const showEmpty = report !== null && report.totals.poCount === 0;
   const showFigures = report !== null && report.totals.poCount > 0;
   const unresolvedCurrency = report !== null && entry === null;
+  const monthSection =
+    monthBrowser !== undefined && monthBrowser !== null ? (
+      <PurchaseOrderReportMonthBrowser {...monthBrowser} entry={entry} />
+    ) : monthReadout !== undefined && monthReadout !== null ? (
+      <PurchaseOrderReportMonthTable
+        readout={monthReadout}
+        entry={entry}
+        onPrevious={onPreviousMonth ?? (() => undefined)}
+        onNext={onNextMonth ?? (() => undefined)}
+        onRetry={onRetryMonth ?? onRetry}
+      />
+    ) : null;
 
   // The report materializes the whole current month/year, including days and
   // months that have not happened. Those are ghost territory, not actual table
@@ -637,15 +661,7 @@ export function PurchaseOrderReportsView({
             period={filters.period}
             onPeriodChange={onPeriodChange}
           />
-          {monthReadout !== undefined && monthReadout !== null ? (
-            <PurchaseOrderReportMonthTable
-              readout={monthReadout}
-              entry={entry}
-              onPrevious={onPreviousMonth ?? (() => undefined)}
-              onNext={onNextMonth ?? (() => undefined)}
-              onRetry={onRetryMonth ?? onRetry}
-            />
-          ) : null}
+          {monthSection}
         </>
       ) : null}
       {showFigures && report !== null ? (
@@ -658,23 +674,17 @@ export function PurchaseOrderReportsView({
             onPeriodChange={onPeriodChange}
           />
           <CategoryTable report={report} entry={entry} />
-          {monthReadout !== undefined ? (
-            monthReadout === null ? null : (
-              <PurchaseOrderReportMonthTable
-                readout={monthReadout}
-                entry={entry}
-                onPrevious={onPreviousMonth ?? (() => undefined)}
-                onNext={onNextMonth ?? (() => undefined)}
-                onRetry={onRetryMonth ?? onRetry}
-              />
-            )
-          ) : (
-            <PeriodTable
-              report={report}
-              entry={entry}
-              periods={displayedPeriods}
-            />
-          )}
+          {monthBrowser !== undefined && monthBrowser !== null
+            ? monthSection
+            : monthReadout !== undefined
+              ? monthSection
+              : (
+                  <PeriodTable
+                    report={report}
+                    entry={entry}
+                    periods={displayedPeriods}
+                  />
+                )}
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -710,9 +720,36 @@ export function PurchaseOrderReportsPage({
   const [error, setError] = useState("");
   const [retryToken, setRetryToken] = useState(0);
   const [exporting, setExporting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState("");
+  const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   // The independent month registry lives with this authenticated page mount.
   // Reports unmounts on sign-out, so no source survives a different session.
-  const monthBrowser = usePOReportMonthBrowser(report);
+  const monthComparison = usePOReportMonthComparison(report);
+
+  const openPicker = useCallback(() => {
+    setPickerYear(monthComparison.pickerStartYear());
+    setPickerOpen(true);
+  }, [monthComparison.pickerStartYear]);
+
+  const shiftPickerYear = useCallback((delta: number) => {
+    setPickerYear((current) => {
+      const year = Number(current);
+      if (!Number.isInteger(year) || year < 1) return current;
+      const next = year + delta;
+      if (next < 1 || next > 9998) return current;
+      return String(next);
+    });
+  }, []);
+
+  const pickerItems = useMemo(
+    () =>
+      allMonthsOfYear(pickerYear).map((month) => ({
+        key: month,
+        label: monthLabel(month),
+      })),
+    [pickerYear]
+  );
 
   const validation = reportFilterValidation(filters);
   const query = useMemo<PurchaseOrderReportQuery | null>(
@@ -797,30 +834,21 @@ export function PurchaseOrderReportsPage({
     !loading &&
     !stale &&
     !exporting &&
-    monthBrowser.canExport;
+    monthComparison.canExport;
 
   const handleExport = useCallback(() => {
     if (!onExport || report === null || exporting || loading || stale) return;
-    if (
-      !monthBrowser.canExport ||
-      monthBrowser.readout === null ||
-      monthBrowser.source === null
-    ) {
-      return;
-    }
-    // Freeze the whole v1 envelope before the binding call. A later month or
-    // filter change cannot alter the document already being saved.
+    const selection = monthComparison.exportSelection;
+    if (selection === null) return;
+    // Freeze the whole v1 envelope before the binding call. A later month,
+    // layout or filter change cannot alter the document already being saved.
     let view: PurchaseOrderReportView;
     try {
-      view = buildPurchaseOrderReportView(report, {
-        month: monthBrowser.month,
-        source: monthBrowser.source,
-        usesOverviewMonthSummary: monthBrowser.usesOverviewMonthSummary,
-      });
+      view = buildPurchaseOrderReportView(report, selection);
     } catch (caught) {
       pushToast(
         "error",
-        errorMessage(caught, "The selected month cannot be exported.")
+        errorMessage(caught, "The selected months cannot be exported.")
       );
       return;
     }
@@ -846,11 +874,7 @@ export function PurchaseOrderReportsPage({
   }, [
     exporting,
     loading,
-    monthBrowser.canExport,
-    monthBrowser.month,
-    monthBrowser.readout,
-    monthBrowser.source,
-    monthBrowser.usesOverviewMonthSummary,
+    monthComparison.exportSelection,
     onExport,
     pushToast,
     report,
@@ -858,35 +882,69 @@ export function PurchaseOrderReportsPage({
   ]);
 
   return (
-    <PurchaseOrderReportsView
-      filters={filters}
-      report={report}
-      loading={loading}
-      stale={stale}
-      error={error}
-      validation={validation}
-      catalogue={currencyCatalogue}
-      exporting={exporting}
-      canExport={canExport}
-      onPresetChange={changePreset}
-      onPeriodChange={changePeriod}
-      onFromChange={(value) =>
-        changeFilters({ preset: "custom", period: null, from: value })
-      }
-      onToChange={(value) =>
-        changeFilters({ preset: "custom", period: null, to: value })
-      }
-      onBucketChange={(value) =>
-        changeFilters({ period: null, bucket: value })
-      }
-      onCategoryChange={(value) => changeFilters({ category: value })}
-      onCurrencyChange={(value) => changeFilters({ currency: value })}
-      onRetry={() => setRetryToken((current) => current + 1)}
-      onExport={handleExport}
-      monthReadout={monthBrowser.readout}
-      onPreviousMonth={monthBrowser.selectPrevious}
-      onNextMonth={monthBrowser.selectNext}
-      onRetryMonth={monthBrowser.retryMonth}
-    />
+    <>
+      <PurchaseOrderReportsView
+        filters={filters}
+        report={report}
+        loading={loading}
+        stale={stale}
+        error={error}
+        validation={validation}
+        catalogue={currencyCatalogue}
+        exporting={exporting}
+        canExport={canExport}
+        onPresetChange={changePreset}
+        onPeriodChange={changePeriod}
+        onFromChange={(value) =>
+          changeFilters({ preset: "custom", period: null, from: value })
+        }
+        onToChange={(value) =>
+          changeFilters({ preset: "custom", period: null, to: value })
+        }
+        onBucketChange={(value) =>
+          changeFilters({ period: null, bucket: value })
+        }
+        onCategoryChange={(value) => changeFilters({ category: value })}
+        onCurrencyChange={(value) => changeFilters({ currency: value })}
+        onRetry={() => setRetryToken((current) => current + 1)}
+        onExport={handleExport}
+        monthBrowser={{
+          months: monthComparison.months,
+          activeMonth: monthComparison.activeMonth,
+          allYear: monthComparison.allYear,
+          layout: monthComparison.layout,
+          notice: monthComparison.notice,
+          readouts: monthComparison.readouts,
+          aggregate: monthComparison.aggregate,
+          triggerRef: pickerTriggerRef,
+          onOpenPicker: openPicker,
+          onLayoutChange: monthComparison.setLayout,
+          onPrevious: monthComparison.selectPrevious,
+          onNext: monthComparison.selectNext,
+          onRetryMonth: monthComparison.retryMonth,
+        }}
+      />
+      <PurchaseOrderReportPicker
+        title={
+          monthComparison.notice === ""
+            ? "Choose months"
+            : `Choose months — ${monthComparison.notice}`
+        }
+        open={pickerOpen}
+        items={pickerItems}
+        selectedKeys={monthComparison.months}
+        allLabel={`All months in ${pickerYear}`}
+        allSelected={
+          pickerYear !== "" && monthComparison.allYear === pickerYear
+        }
+        onSelectAll={() => monthComparison.selectAll(pickerYear)}
+        onToggle={monthComparison.toggleMonth}
+        onClose={() => setPickerOpen(false)}
+        returnFocusRef={pickerTriggerRef}
+        pageLabel={pickerYear}
+        onPreviousPage={() => shiftPickerYear(-1)}
+        onNextPage={() => shiftPickerYear(1)}
+      />
+    </>
   );
 }

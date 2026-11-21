@@ -74,6 +74,10 @@ type reportRenderer struct {
 	faces    *faces
 	pal      palette
 	canvas   *canvas
+	// cards records the comparison-card boxes the layout drew. It is evidence
+	// for the geometry tests (pair widths, odd full-width final card, one page
+	// per card); it carries no financial value and is never printed.
+	cards []cardBox
 }
 
 func (r *reportRenderer) draw() {

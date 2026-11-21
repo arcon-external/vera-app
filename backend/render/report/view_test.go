@@ -311,9 +311,16 @@ func TestValidateViewEnforcesScopeAndReferences(t *testing.T) {
 	})
 	t.Run("unsupported layouts", func(t *testing.T) {
 		view := base
+		view.Periods.Layout = "sideways"
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted an unknown period layout")
+		}
+		// Aggregate is frozen vocabulary, but it requires all twelve months of
+		// one calendar year; one month is not an aggregate.
+		view = base
 		view.Periods.Layout = ViewLayoutAggregate
 		if err := ValidateView(view); err == nil {
-			t.Fatal("accepted an unsupported aggregate period layout")
+			t.Fatal("accepted a single month as an aggregate")
 		}
 		view = base
 		view.Categories.Layout = ViewLayoutIndividual
@@ -879,4 +886,361 @@ func TestRenderViewPrintsAZeroMonthUnderAnEmptyOverview(t *testing.T) {
 		"purchase order(s) in this range have a deleted source quotation",
 		formatMoney("IDR", 152_000_000),
 	)
+}
+
+// Issue #642: the v1 envelope now covers an empty, subset and cross-year
+// selection plus one-calendar-year Aggregate, without a version bump. These
+// helpers build immutable annual snapshots for the tests; no source is
+// re-fetched and no figure is recalculated.
+func annualViewReport(year int, asOf string, amounts []int64) poreport.Report {
+	snapshot := currentYearReport()
+	snapshot.AsOf = asOf
+	snapshot.Filter = poreport.Query{
+		From: fmt.Sprintf("%04d-01-01", year), To: fmt.Sprintf("%04d-01-01", year+1),
+		Bucket: poreport.BucketMonth, Category: poreport.CategoryAll, Currency: "IDR",
+	}
+	periods := make([]poreport.Period, 0, 12)
+	for month := 1; month <= 12; month++ {
+		amount := int64(100_000_000)
+		if month <= len(amounts) && amounts[month-1] > 0 {
+			amount = amounts[month-1]
+		}
+		costed := amount - 1_000
+		capital := amount / 2
+		margin := costed - capital
+		periods = append(periods, poreport.Period{
+			PeriodStart: monthStart(year, time.Month(month)),
+			Metrics: poreport.Metrics{
+				PoCount: 2, AmountMinor: amount, CostedMinor: costed,
+				UncostedMinor: 1_000, CapitalMinor: capital, MarginMinor: margin,
+				MarginBps:   fixtureRatio(margin, capital),
+				CoverageBps: fixtureRatio(costed, amount),
+			},
+		})
+	}
+	snapshot.Periods = periods
+	snapshot.Categories = nil
+	snapshot.CategorySeries = nil
+	snapshot.MonthSummary = nil
+	snapshot.Totals = periods[0].Metrics
+	snapshot.Projection = poreport.Projection{
+		Monthly: poreport.ProjectionSeries{
+			Status: poreport.ProjectionStatusUnavailable, Reason: poreport.ReasonInsufficientHistory,
+			Method: poreport.MethodMonthly, Basis: poreport.ProjectionBasis{AsOf: asOf},
+		},
+		Yearly: poreport.ProjectionSeries{
+			Status: poreport.ProjectionStatusUnavailable, Reason: poreport.ReasonInsufficientHistory,
+			Method: poreport.MethodYearly, Basis: poreport.ProjectionBasis{AsOf: asOf},
+		},
+	}
+	snapshot.CurrentProjection = unavailableCurrentProjection(
+		poreport.ProjectionModeNone, poreport.ReasonNotCurrentPeriod, poreport.MethodCurrentNone,
+		poreport.CurrentProjectionBasis{AsOf: asOf})
+	return snapshot
+}
+
+func monthsOfYear(year int) []string {
+	months := make([]string, 0, 12)
+	for month := 1; month <= 12; month++ {
+		months = append(months, fmt.Sprintf("%04d-%02d", year, month))
+	}
+	return months
+}
+
+func annualAggregateView(source poreport.Report) ViewEnvelope {
+	year := 0
+	fmt.Sscanf(source.Filter.From, "%04d", &year)
+	return ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{source},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{0},
+			Months:  monthsOfYear(year),
+			Layout:  ViewLayoutAggregate,
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(source), Layout: ViewLayoutAggregate},
+	}
+}
+
+func viewPeriodSectionText(text string) string {
+	start := strings.Index(text, "By period")
+	if start < 0 {
+		return ""
+	}
+	end := len(text)
+	for _, marker := range []string{"Current-period projection", "Report notes", "Definitions"} {
+		if index := strings.Index(text[start:], marker); index >= 0 && start+index < end {
+			end = start + index
+		}
+	}
+	return text[start:end]
+}
+
+func TestDecodeViewAllowsAnEmptyMonthSelection(t *testing.T) {
+	overview := currentYearReport()
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{overview},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{}, Months: []string{}, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(overview), Layout: ViewLayoutAggregate},
+	}
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("empty selection refused: %v", err)
+	}
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal empty view: %v", err)
+	}
+	document, err := DecodeExport(raw)
+	if err != nil {
+		t.Fatalf("DecodeExport(empty view): %v", err)
+	}
+	if document.View == nil || document.Legacy != nil {
+		t.Fatalf("empty view was not decoded through the v1 path: %+v", document)
+	}
+	pdf, err := RenderExport(document, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderExport(empty view): %v", err)
+	}
+	text := strings.Join(binaryPDFText(t, pdf), "\n")
+	requireText(t, text, "By period", "No months selected", "0 months selected", "As of 2026-11-19")
+	section := viewPeriodSectionText(text)
+	if section == "" {
+		t.Fatal("the rendered PDF has no By period section")
+	}
+	requireNoText(t, "empty selection section", section,
+		"Recorded total", "Estimated", "POs ", formatMoney("IDR", 0))
+
+	// The layout preference is independent of an empty selection: the same
+	// explicit empty section prints whether the last preference was Individual
+	// or Aggregate, and neither invents a year or a total.
+	aggregateEmpty := view
+	aggregateEmpty.Periods.Layout = ViewLayoutAggregate
+	aggregatePDF, err := RenderView(aggregateEmpty, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView(empty aggregate): %v", err)
+	}
+	aggregateSection := viewPeriodSectionText(strings.Join(binaryPDFText(t, aggregatePDF), "\n"))
+	requireText(t, aggregateSection, "No months selected", "0 months selected")
+	requireNoText(t, "empty aggregate section", aggregateSection, "Recorded total", "all months in")
+
+	// An empty selection cannot claim that one month is the current-month
+	// override, and it cannot carry a foreign source reference.
+	bad := view
+	bad.Periods.CurrentMonthSource = intPointer(0)
+	if err := ValidateView(bad); err == nil {
+		t.Fatal("accepted a current-month override in an empty selection")
+	}
+	bad = view
+	bad.Periods.Sources = []int{2}
+	if err := ValidateView(bad); err == nil {
+		t.Fatal("accepted a foreign period source in an empty selection")
+	}
+}
+
+func TestValidateViewAllowsOneCalendarYearAggregate(t *testing.T) {
+	source := annualViewReport(2025, "2025-12-20", nil)
+	view := annualAggregateView(source)
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("valid aggregate refused: %v", err)
+	}
+
+	t.Run("eleven months", func(t *testing.T) {
+		short := view
+		short.Periods.Months = monthsOfYear(2025)[:11]
+		if err := ValidateView(short); err == nil {
+			t.Fatal("accepted an aggregate of eleven months")
+		}
+	})
+	t.Run("cross-year twelve", func(t *testing.T) {
+		other := annualViewReport(2026, "2025-12-20", nil)
+		crossYear := ViewEnvelope{
+			Version:  ViewVersion,
+			Sources:  []poreport.Report{source, other},
+			Overview: 0,
+			Periods: ViewPeriods{
+				Sources: []int{0, 1},
+				Months:  append([]string{"2025-12"}, monthsOfYear(2026)[:11]...),
+				Layout:  ViewLayoutAggregate,
+			},
+			Categories: ViewCategories{Source: 0, Codes: viewCodes(source), Layout: ViewLayoutAggregate},
+		}
+		if err := ValidateView(crossYear); err == nil {
+			t.Fatal("accepted a cross-year twelve as an aggregate")
+		}
+	})
+	t.Run("no annual source for the selected year", func(t *testing.T) {
+		wrongYear := view
+		wrongYear.Periods.Months = monthsOfYear(2026)
+		if err := ValidateView(wrongYear); err == nil {
+			t.Fatal("accepted aggregate months with no referenced annual source for that year")
+		}
+	})
+	t.Run("empty aggregate is the explicit empty section", func(t *testing.T) {
+		empty := view
+		empty.Periods.Sources = []int{}
+		empty.Periods.Months = []string{}
+		if err := ValidateView(empty); err != nil {
+			t.Fatalf("empty aggregate selection refused: %v", err)
+		}
+	})
+	t.Run("current-month override is allowed but not the aggregate total source", func(t *testing.T) {
+		year := currentYearReport()
+		day := dayMonthFixture(t)
+		withOverride := ViewEnvelope{
+			Version:  ViewVersion,
+			Sources:  []poreport.Report{year, day},
+			Overview: 0,
+			Periods: ViewPeriods{
+				Sources: []int{0, 1}, Months: monthsOfYear(2026),
+				Layout: ViewLayoutAggregate, CurrentMonthSource: intPointer(1),
+			},
+			Categories: ViewCategories{Source: 0, Codes: viewCodes(year), Layout: ViewLayoutAggregate},
+		}
+		if err := ValidateView(withOverride); err != nil {
+			t.Fatalf("aggregate with a current-month override refused: %v", err)
+		}
+	})
+}
+
+func TestValidateViewExtendsToCrossYearSubsets(t *testing.T) {
+	overview := currentYearReport()
+	previous := annualViewReport(2025, "2026-11-19", nil)
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{overview, previous},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{0, 1},
+			Months:  []string{"2025-12", "2026-01"},
+			Layout:  ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(overview), Layout: ViewLayoutAggregate},
+	}
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("cross-year subset refused: %v", err)
+	}
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView(cross-year): %v", err)
+	}
+	section := viewPeriodSectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section, "By period — 2 selected months", "December 2025", "January 2026")
+	requireInOrder(t, section, "December 2025", "January 2026")
+}
+
+func TestValidateViewKeepsTheSourceAndSpanBounds(t *testing.T) {
+	overview := currentYearReport()
+	years := []int{2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025}
+	months := make([]string, 0, 120)
+	sources := []poreport.Report{overview}
+	refs := make([]int, 0, len(years))
+	for index, year := range years {
+		sources = append(sources, annualViewReport(year, "2026-11-19", nil))
+		refs = append(refs, index+1)
+		months = append(months, monthsOfYear(year)...)
+	}
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  sources,
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: refs, Months: months, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(overview), Layout: ViewLayoutAggregate},
+	}
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("120-month inclusive span refused: %v", err)
+	}
+
+	// Seventeen immutable sources are still refused by the existing cap.
+	tooMany := view
+	tooMany.Sources = append([]poreport.Report{}, sources...)
+	for year := 2000; year <= 2006; year++ {
+		tooMany.Sources = append(tooMany.Sources, annualViewReport(year, "2026-11-19", nil))
+	}
+	if err := ValidateView(tooMany); err == nil {
+		t.Fatal("accepted more than sixteen sources")
+	}
+
+	// One hundred twenty selected months spanning 121 inclusive months is
+	// refused: both the count cap and the inclusive span cap remain in force.
+	spanSources := []poreport.Report{overview}
+	spanRefs := make([]int, 0, 11)
+	spanMonths := make([]string, 0, 120)
+	for year := 2016; year <= 2025; year++ {
+		spanSources = append(spanSources, annualViewReport(year, "2026-11-19", nil))
+		spanRefs = append(spanRefs, len(spanSources)-1)
+		spanMonths = append(spanMonths, monthsOfYear(year)...)
+	}
+	spanRefs = append(spanRefs, 0)
+	spanMonths = append(spanMonths, "2026-01")
+	// Drop one middle month so the count stays at 120 while the inclusive span
+	// becomes 121 months.
+	spanMonths = append(spanMonths[:54], spanMonths[55:]...)
+	spanView := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  spanSources,
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: spanRefs, Months: spanMonths, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(overview), Layout: ViewLayoutAggregate},
+	}
+	if err := ValidateView(spanView); err == nil {
+		t.Fatal("accepted a 121-month inclusive span")
+	}
+}
+
+func TestResolveViewUsesTheCurrentMonthOverrideOnce(t *testing.T) {
+	annual := currentYearReport()
+	day := dayMonthFixture(t)
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{annual, day},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{0, 1}, Months: []string{"2026-10", "2026-11"},
+			Layout: ViewLayoutIndividual, CurrentMonthSource: intPointer(1),
+		},
+		Categories: ViewCategories{Source: 0, Codes: viewCodes(annual), Layout: ViewLayoutAggregate},
+	}
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("dual current-month sources refused: %v", err)
+	}
+	renderer := viewRenderer(t, view)
+	var november *cardBox
+	for index := range renderer.cards {
+		if renderer.cards[index].Month == "2026-11" {
+			november = &renderer.cards[index]
+		}
+	}
+	if november == nil {
+		t.Fatal("the laid-out document has no November 2026 card")
+	}
+	actual := day.MonthSummary.Actual
+	novemberText := pdfText(strings.Join(cardTexts(renderer, *november), " "))
+	requireText(t, novemberText,
+		"Actual to date (month-to-date)",
+		formatMoney("IDR", actual.AmountMinor),
+		"Future-dated recorded",
+		formatMoney("IDR", day.MonthSummary.RecordedFuture.AmountMinor),
+	)
+	// The annual November row is the recorded month, including any
+	// future-dated row; the override must not be printed as the actual card.
+	annualRow := annual.Periods[10].Metrics
+	if annualRow.AmountMinor == actual.AmountMinor {
+		t.Fatal("fixture error: the annual and actual amounts are indistinguishable")
+	}
+	requireNoText(t, "current-month card", novemberText, formatMoney("IDR", annualRow.AmountMinor))
+
+	mismatch := view
+	mismatch.Sources = []poreport.Report{annual, annualViewReport(2025, "2026-11-19", nil)}
+	if err := ValidateView(mismatch); err == nil {
+		t.Fatal("accepted a current-month override with no matching summary")
+	}
 }

@@ -201,7 +201,7 @@ func ValidateView(view ViewEnvelope) error {
 		}
 	}
 
-	if view.Periods.Layout != ViewLayoutIndividual {
+	if view.Periods.Layout != ViewLayoutIndividual && view.Periods.Layout != ViewLayoutAggregate {
 		return fmt.Errorf("purchase order report view: periods layout %q is not supported by this build", view.Periods.Layout)
 	}
 	if view.Categories.Layout != ViewLayoutAggregate {
@@ -226,11 +226,35 @@ type resolvedMonth struct {
 	IsFuture  bool
 }
 
+type resolvedAggregateMonth struct {
+	Month string
+	Row   *poreport.Period
+	// Recorded is true for every past and current month row and for a future
+	// month whose supplied row carries a recorded purchase order. A future
+	// month with no recorded purchase order prints dashes, never a zero actual.
+	Recorded    bool
+	IsCurrent   bool
+	IsFuture    bool
+	FutureDated bool
+}
+
+// resolvedAggregate is the one-calendar-year All view. It reads its month rows
+// and its total from one immutable annual snapshot; it never sums rows and
+// never combines an estimate with a recorded figure.
+type resolvedAggregate struct {
+	Year                string
+	SourceIndex         int
+	Source              poreport.Report
+	Months              []resolvedAggregateMonth
+	IncludesFutureDated bool
+}
+
 type resolvedView struct {
 	View       ViewEnvelope
 	Overview   poreport.Report
 	Months     []resolvedMonth
 	Categories poreport.Report
+	Aggregate  *resolvedAggregate
 }
 
 func (resolved resolvedView) currentMonthKey() string {
@@ -251,15 +275,12 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 	if view.Categories.Source < 0 || view.Categories.Source >= len(view.Sources) {
 		return resolvedView{}, fmt.Errorf("purchase order report view: categories source %d is out of range", view.Categories.Source)
 	}
-	if len(view.Periods.Sources) == 0 {
-		return resolvedView{}, fmt.Errorf("purchase order report view: periods.sources is empty")
-	}
-	if len(view.Periods.Months) == 0 {
-		return resolvedView{}, fmt.Errorf("purchase order report view: periods.months is empty")
-	}
 	if len(view.Periods.Months) > MaxViewMonths {
 		return resolvedView{}, fmt.Errorf("purchase order report view: %d months; the cap is %d",
 			len(view.Periods.Months), MaxViewMonths)
+	}
+	if len(view.Periods.Months) == 0 && view.Periods.CurrentMonthSource != nil {
+		return resolvedView{}, fmt.Errorf("purchase order report view: an empty selection cannot set currentMonthSource")
 	}
 
 	refs := make(map[int]struct{}, len(view.Periods.Sources))
@@ -319,7 +340,6 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 
 	seenMonths := make(map[string]struct{}, len(view.Periods.Months))
 	previousIndex := -1
-	resolved := make([]resolvedMonth, 0, len(view.Periods.Months))
 	for _, month := range view.Periods.Months {
 		index, ok := parseViewMonth(month)
 		if !ok {
@@ -333,54 +353,73 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 			return resolvedView{}, fmt.Errorf("purchase order report view: months are not strictly chronological at %s", month)
 		}
 		previousIndex = index
-
-		isCurrent := month == currentKey
-		isFuture := month > currentKey
-		var sourceIndex int
-		var periodRow *poreport.Period
-		var summary *poreport.MonthSummary
-
-		switch {
-		case isCurrent && currentMonthSource != nil:
-			sourceIndex = *view.Periods.CurrentMonthSource
-			summary = currentMonthSource.MonthSummary
-		default:
-			found, err := resolveAnnualMonth(view, month, refs)
-			if err != nil {
-				return resolvedView{}, err
-			}
-			sourceIndex = found.sourceIndex
-			periodRow = found.period
-			if isCurrent && view.Sources[sourceIndex].MonthSummary != nil {
-				summary = view.Sources[sourceIndex].MonthSummary
-			}
-		}
-
-		source := view.Sources[sourceIndex]
-		if summary != nil && summary.Month != month {
-			return resolvedView{}, fmt.Errorf("purchase order report view: month %s resolved to a monthSummary for %s",
-				month, summary.Month)
-		}
-		if isCurrent && summary == nil {
-			return resolvedView{}, fmt.Errorf("purchase order report view: current month %s has no server monthSummary", month)
-		}
-		resolved = append(resolved, resolvedMonth{
-			Month:       month,
-			SourceIndex: sourceIndex,
-			Source:      source,
-			Period:      periodRow,
-			Summary:     summary,
-			IsCurrent:   isCurrent,
-			IsFuture:    isFuture,
-		})
 	}
 
-	// The 120-month span is inclusive of both endpoint months.
-	first, _ := parseViewMonth(view.Periods.Months[0])
-	last, _ := parseViewMonth(view.Periods.Months[len(view.Periods.Months)-1])
-	if last-first+1 > MaxViewMonthSpan {
-		return resolvedView{}, fmt.Errorf("purchase order report view: selected months span %d months; the cap is %d",
-			last-first+1, MaxViewMonthSpan)
+	var resolved []resolvedMonth
+	var aggregate *resolvedAggregate
+	switch {
+	case len(view.Periods.Months) == 0:
+		// An explicit empty selection prints an explicit empty section. It has
+		// no financial total and requires no period source.
+	case view.Periods.Layout == ViewLayoutAggregate:
+		found, err := resolveAggregateMonths(view, currentKey)
+		if err != nil {
+			return resolvedView{}, err
+		}
+		aggregate = found
+	default:
+		resolved = make([]resolvedMonth, 0, len(view.Periods.Months))
+		for _, month := range view.Periods.Months {
+			isCurrent := month == currentKey
+			isFuture := month > currentKey
+			var sourceIndex int
+			var periodRow *poreport.Period
+			var summary *poreport.MonthSummary
+
+			switch {
+			case isCurrent && currentMonthSource != nil:
+				sourceIndex = *view.Periods.CurrentMonthSource
+				summary = currentMonthSource.MonthSummary
+			default:
+				found, err := resolveAnnualMonth(view, month, refs)
+				if err != nil {
+					return resolvedView{}, err
+				}
+				sourceIndex = found.sourceIndex
+				periodRow = found.period
+				if isCurrent && view.Sources[sourceIndex].MonthSummary != nil {
+					summary = view.Sources[sourceIndex].MonthSummary
+				}
+			}
+
+			source := view.Sources[sourceIndex]
+			if summary != nil && summary.Month != month {
+				return resolvedView{}, fmt.Errorf("purchase order report view: month %s resolved to a monthSummary for %s",
+					month, summary.Month)
+			}
+			if isCurrent && summary == nil {
+				return resolvedView{}, fmt.Errorf("purchase order report view: current month %s has no server monthSummary", month)
+			}
+			resolved = append(resolved, resolvedMonth{
+				Month:       month,
+				SourceIndex: sourceIndex,
+				Source:      source,
+				Period:      periodRow,
+				Summary:     summary,
+				IsCurrent:   isCurrent,
+				IsFuture:    isFuture,
+			})
+		}
+	}
+
+	if len(view.Periods.Months) > 0 {
+		// The 120-month span is inclusive of both endpoint months.
+		first, _ := parseViewMonth(view.Periods.Months[0])
+		last, _ := parseViewMonth(view.Periods.Months[len(view.Periods.Months)-1])
+		if last-first+1 > MaxViewMonthSpan {
+			return resolvedView{}, fmt.Errorf("purchase order report view: selected months span %d months; the cap is %d",
+				last-first+1, MaxViewMonthSpan)
+		}
 	}
 	if view.Periods.CurrentMonthSource != nil {
 		if _, selected := seenMonths[currentKey]; !selected {
@@ -421,7 +460,108 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 		Overview:   overview,
 		Months:     resolved,
 		Categories: categories,
+		Aggregate:  aggregate,
 	}, nil
+}
+
+// resolveAggregateMonths validates the one-calendar-year All/aggregate shape
+// and reads its twelve rows from the single exact annual snapshot. The month
+// count, order and year are enforced here because the layout has no year field:
+// twelve chronological months are one year only when they are January through
+// December of the same year.
+func resolveAggregateMonths(view ViewEnvelope, currentKey string) (*resolvedAggregate, error) {
+	months := view.Periods.Months
+	if len(months) != 12 {
+		return nil, fmt.Errorf("purchase order report view: aggregate needs twelve months; got %d", len(months))
+	}
+	year := months[0][:4]
+	for index, month := range months {
+		want := fmt.Sprintf("%s-%02d", year, index+1)
+		if month != want {
+			return nil, fmt.Errorf("purchase order report view: aggregate months must be the twelve calendar months of one year; month %d is %s, want %s",
+				index, month, want)
+		}
+	}
+	from := year + "-01-01"
+	to := nextYearFirst(year)
+	sourceIndex := -1
+	for _, ref := range view.Periods.Sources {
+		query, err := poreport.NormalizeQuery(view.Sources[ref].Filter)
+		if err != nil {
+			return nil, fmt.Errorf("purchase order report view: aggregate source %d filter: %w", ref, err)
+		}
+		if query.Bucket != poreport.BucketMonth || query.From != from || query.To != to {
+			continue
+		}
+		if sourceIndex >= 0 {
+			return nil, fmt.Errorf("purchase order report view: aggregate year %s is covered by more than one source", year)
+		}
+		sourceIndex = ref
+	}
+	if sourceIndex < 0 {
+		return nil, fmt.Errorf("purchase order report view: aggregate year %s has no referenced annual/monthly source", year)
+	}
+	source := view.Sources[sourceIndex]
+	byStart := make(map[string]*poreport.Period, len(source.Periods))
+	for index := range source.Periods {
+		byStart[source.Periods[index].PeriodStart] = &source.Periods[index]
+	}
+	resolved := resolvedAggregate{
+		Year:        year,
+		SourceIndex: sourceIndex,
+		Source:      source,
+		Months:      make([]resolvedAggregateMonth, 0, 12),
+	}
+	for _, month := range months {
+		row := byStart[month+"-01"]
+		if row == nil {
+			return nil, fmt.Errorf("purchase order report view: aggregate source %d has no row for %s", sourceIndex, month)
+		}
+		isCurrent := month == currentKey
+		isFuture := month > currentKey
+		recorded := !isFuture || row.PoCount > 0
+		futureDated := isCurrent && currentMonthRowCarriesFutureDated(source, *row)
+		if isFuture && row.PoCount > 0 {
+			resolved.IncludesFutureDated = true
+		}
+		if futureDated {
+			resolved.IncludesFutureDated = true
+		}
+		resolved.Months = append(resolved.Months, resolvedAggregateMonth{
+			Month:       month,
+			Row:         row,
+			Recorded:    recorded,
+			IsCurrent:   isCurrent,
+			IsFuture:    isFuture,
+			FutureDated: futureDated,
+		})
+	}
+	return &resolved, nil
+}
+
+// currentMonthRowCarriesFutureDated reports whether the annual current-month
+// row differs from the server's actual-to-date readout, which is the evidence
+// that at least one record is dated after the as-of date. It compares supplied
+// figures field by field; it performs no subtraction and invents no count.
+func currentMonthRowCarriesFutureDated(source poreport.Report, row poreport.Period) bool {
+	var actual *poreport.Metrics
+	if source.MonthSummary != nil && source.MonthSummary.Month == firstSeven(source.AsOf) {
+		value := source.MonthSummary.Actual
+		actual = &value
+	} else if source.CurrentProjection.Mode == poreport.ProjectionModeMonth &&
+		source.CurrentProjection.CurrentMonth != nil {
+		value := source.CurrentProjection.CurrentMonth.Actual
+		actual = &value
+	}
+	if actual == nil {
+		return false
+	}
+	return row.PoCount != actual.PoCount ||
+		row.AmountMinor != actual.AmountMinor ||
+		row.CostedMinor != actual.CostedMinor ||
+		row.UncostedMinor != actual.UncostedMinor ||
+		row.CapitalMinor != actual.CapitalMinor ||
+		row.MarginMinor != actual.MarginMinor
 }
 
 type annualResolution struct {

@@ -9,7 +9,7 @@ import type {
   PurchaseOrderReportData,
   PurchaseOrderReportQuery,
 } from "./poReport";
-import { purchaseOrderReportFixture } from "./poReportFixtures";
+import { purchaseOrderReportFixture, purchaseOrderReportYearFixture } from "./poReportFixtures";
 import { buildPurchaseOrderReportView, type PurchaseOrderReportView } from "./poReportExport";
 import { nextMonthStart } from "./poReportComparison";
 import {
@@ -355,9 +355,10 @@ describe("Reports export wiring through the real App (issue #632)", () => {
       reportFor(reportCalls()[0])
     );
     const expectedView = buildPurchaseOrderReportView(expected, {
-      month: "2026-11",
-      source: expected,
-      usesOverviewMonthSummary: false,
+      months: [
+        { month: "2026-11", source: expected, usesOverviewMonthSummary: false },
+      ],
+      layout: "individual",
     });
     const sent = mocks.exportPurchaseOrderReport.mock.calls[0][0] as string;
     expect(sent).toBe(JSON.stringify(expectedView));
@@ -393,6 +394,53 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     expect(document.body.textContent).toContain(
       "Report saved to /tmp/opencode/report.pdf"
     );
+  });
+
+  it("exports the All/Aggregate shape chosen through the live month picker", async () => {
+    // The annual source is the coherent 12-row year fixture; the base export
+    // fixture is a partial-year payload and an Aggregate of it is correctly
+    // refused as incomplete.
+    mocks.getPurchaseOrderReport.mockImplementation(async (query: unknown) => {
+      const report = purchaseOrderReportYearFixture();
+      report.filter = { ...(query as PurchaseOrderReportQuery) };
+      return report as unknown as poreport.Report;
+    });
+    await openReports();
+    expect(button("Export PDF").disabled).toBe(false);
+
+    await act(async () => {
+      button("Choose months").click();
+    });
+    await flush();
+    const all = document.querySelector<HTMLButtonElement>("[data-picker-all]");
+    if (all === null) throw new Error("no All months control");
+    await act(async () => {
+      all.click();
+    });
+    await flush();
+    const close = document.querySelector<HTMLButtonElement>("[data-picker-close]");
+    if (close === null) throw new Error("no picker close");
+    await act(async () => {
+      close.click();
+    });
+    await flush();
+
+    expect(document.querySelector("[data-month-aggregate]")).not.toBeNull();
+    expect(button("Export PDF").disabled).toBe(false);
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+    const view = sentSnapshot();
+    expect(view.periods.layout).toBe("aggregate");
+    expect(view.periods.months).toHaveLength(12);
+    expect(view.periods.months[0]).toBe("2026-01");
+    expect(view.periods.months[11]).toBe("2026-12");
+    expect(view.periods.sources).toEqual([0]);
+    expect(view.sources).toHaveLength(1);
+    expect(view.sources[0].filter).toEqual(reportCalls()[0]);
   });
 
   it("treats an empty binding result as a cancel, with no success toast", async () => {

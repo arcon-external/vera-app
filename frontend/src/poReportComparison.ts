@@ -94,6 +94,171 @@ export function shiftMonth(month: string, delta: number): string {
   )}`;
 }
 
+/** Issue #642: the selection cap the native view enforces. */
+export const MAX_COMPARISON_MONTHS = 120;
+/** The inclusive first-to-last month span the native view enforces. */
+export const MAX_COMPARISON_MONTH_SPAN = 120;
+
+/** The All display preference; subset/single always use individual cards. */
+export type ReportMonthLayout = "aggregate" | "individual";
+
+/** Valid canonical months, deduplicated and chronological. */
+export function canonicalMonths(months: readonly string[]): string[] {
+  return Array.from(new Set(months.filter((month) => parseMonth(month) !== null))).sort(
+    (left, right) => (left < right ? -1 : left > right ? 1 : 0)
+  );
+}
+
+/** The four-digit year of a canonical month, or "". */
+export function monthYear(month: string): string {
+  const parsed = parseMonth(month);
+  return parsed === null ? "" : String(parsed.year).padStart(4, "0");
+}
+
+/** January through December of one year, or [] for a malformed year. */
+export function allMonthsOfYear(year: string | number): string[] {
+  const text = String(year).trim();
+  if (!/^\d{4}$/.test(text) || Number(text) < 1) return [];
+  return Array.from({ length: 12 }, (_, index) =>
+    `${text}-${String(index + 1).padStart(2, "0")}`
+  );
+}
+
+/**
+ * The year when the selection is exactly one calendar year's twelve months.
+ * Twelve months that cross a year boundary are a subset, not All.
+ */
+export function allYearForMonths(months: readonly string[]): string | null {
+  const canonical = canonicalMonths(months);
+  if (canonical.length !== 12) return null;
+  const year = canonical[0].slice(0, 4);
+  return canonical.every(
+    (month, index) => month === `${year}-${String(index + 1).padStart(2, "0")}`
+  )
+    ? year
+    : null;
+}
+
+/** Inclusive count from the first selected month to the last; 0 when empty. */
+export function monthSpanCount(months: readonly string[]): number {
+  const canonical = canonicalMonths(months);
+  if (canonical.length === 0) return 0;
+  const first = parseMonth(canonical[0]);
+  const last = parseMonth(canonical[canonical.length - 1]);
+  if (first === null || last === null) return 0;
+  return last.year * 12 + last.monthIndex - (first.year * 12 + first.monthIndex) + 1;
+}
+
+/** "" when the set is selectable; otherwise the concise refusal message. */
+export function selectionLimitViolation(months: readonly string[]): string {
+  if (months.length > MAX_COMPARISON_MONTHS) {
+    return `A comparison can include at most ${MAX_COMPARISON_MONTHS} months. Deselect a month before adding another.`;
+  }
+  if (monthSpanCount(months) > MAX_COMPARISON_MONTH_SPAN) {
+    return `A comparison can span at most ${MAX_COMPARISON_MONTH_SPAN} months. Deselect a month before adding another.`;
+  }
+  return "";
+}
+
+export interface MonthSelectionChange {
+  months: string[];
+  rejected: boolean;
+  message: string;
+}
+
+/**
+ * One specific-month click. While All is selected a specific click focuses that
+ * month (Q642-2); afterwards clicks toggle membership. A refused candidate
+ * preserves the previous set exactly.
+ */
+export function toggleMonthInSelection(
+  months: readonly string[],
+  month: string
+): MonthSelectionChange {
+  if (parseMonth(month) === null) {
+    return {
+      months: [...months],
+      rejected: true,
+      message: `"${month}" is not a canonical YYYY-MM month.`,
+    };
+  }
+  if (allYearForMonths(months) !== null) {
+    return { months: [month], rejected: false, message: "" };
+  }
+  if (months.includes(month)) {
+    return {
+      months: canonicalMonths(months.filter((current) => current !== month)),
+      rejected: false,
+      message: "",
+    };
+  }
+  const candidate = canonicalMonths([...months, month]);
+  const violation = selectionLimitViolation(candidate);
+  if (violation !== "") {
+    return { months: [...months], rejected: true, message: violation };
+  }
+  return { months: candidate, rejected: false, message: "" };
+}
+
+/** `All months in YEAR`: replaces the selection with that year's twelve months. */
+export function allYearSelection(year: string | number): MonthSelectionChange {
+  const months = allMonthsOfYear(year);
+  if (months.length === 0) {
+    return {
+      months: [],
+      rejected: true,
+      message: `"${String(year)}" is not a calendar year.`,
+    };
+  }
+  return { months, rejected: false, message: "" };
+}
+
+/** A concise, honest name for the current selection. */
+export function monthSelectionSummary(months: readonly string[]): string {
+  const canonical = canonicalMonths(months);
+  if (canonical.length === 0) return "No months selected";
+  const allYear = allYearForMonths(canonical);
+  if (allYear !== null) return `12 months · ${allYear}`;
+  if (canonical.length === 1) return monthLabel(canonical[0]);
+  const years = canonical.map(monthYear).filter((year) => year !== "");
+  const first = years[0];
+  const last = years[years.length - 1];
+  const yearLabel = first === last ? first : `${first}–${last}`;
+  return `${canonical.length} months · ${yearLabel}`;
+}
+
+/**
+ * The picker page a fresh open shows: the active card's year, else the newest
+ * selected month's year, else the server's current year. Never a browser clock.
+ */
+export function initialPickerYear(
+  months: readonly string[],
+  activeMonth: string | null,
+  serverYear: string
+): string {
+  const activeYear = monthYear(activeMonth ?? "");
+  if (activeYear !== "") return activeYear;
+  const canonical = canonicalMonths(months);
+  const selectedYear = monthYear(canonical[canonical.length - 1] ?? "");
+  if (selectedYear !== "") return selectedYear;
+  return /^\d{4}$/.test(serverYear) ? serverYear : "";
+}
+
+/** Moves active focus within the selected set without changing membership. */
+export function nextActiveMonth(
+  months: readonly string[],
+  activeMonth: string | null,
+  delta: number
+): string | null {
+  if (months.length === 0) return null;
+  const current = months.indexOf(activeMonth ?? months[0]);
+  const nextIndex = Math.min(
+    months.length - 1,
+    Math.max(0, (current < 0 ? 0 : current) + delta)
+  );
+  return months[nextIndex];
+}
+
 function normalizedCategory(category: string): string {
   return category.trim() === "" ? "all" : category.trim();
 }
@@ -596,4 +761,210 @@ function projectionReasonLabelOrFallback(reason: string): string {
     default:
       return `Forecast unavailable (${reason}).`;
   }
+}
+
+// Issue #642: the All/Aggregate readout. It is the one-calendar-year annual
+// snapshot printed as twelve month rows plus that snapshot's own total. A row
+// sum is never computed, and a future month without recorded evidence is a gap
+// (`-`), not a zero observation.
+
+export interface PurchaseOrderMonthAggregateRow {
+  month: string;
+  /** The supplied annual row, or null when it carries no recorded evidence. */
+  metrics: PurchaseOrderReportMetrics | null;
+  recorded: boolean;
+  current: boolean;
+  future: boolean;
+  /** The current annual row carries at least one future-dated record. */
+  futureDated: boolean;
+}
+
+export interface PurchaseOrderMonthAggregateForecast {
+  month: string;
+  estimate: PurchaseOrderMonthEstimate;
+}
+
+export interface PurchaseOrderMonthAggregate {
+  year: string;
+  status: MonthSourceStatus;
+  error: string;
+  asOf: string;
+  generatedAt: string;
+  category: string;
+  currency: string;
+  sourceLabel: MonthSourceLabel;
+  rows: PurchaseOrderMonthAggregateRow[];
+  /** The annual snapshot's own `totals`; never a sum of `rows`. */
+  total: PurchaseOrderReportMetrics | null;
+  /** Future-month forecasts, always separate from rows and total. */
+  forecasts: PurchaseOrderMonthAggregateForecast[];
+  unavailableReason: string;
+  includesFutureDated: boolean;
+  scopeMatchesOverview: boolean;
+  /** Every one of the twelve months has a supplied row, so the native page can print it. */
+  complete: boolean;
+}
+
+function sameMetrics(
+  left: PurchaseOrderReportMetrics,
+  right: PurchaseOrderReportMetrics
+): boolean {
+  return (
+    left.poCount === right.poCount &&
+    left.amountMinor === right.amountMinor &&
+    left.costedMinor === right.costedMinor &&
+    left.uncostedMinor === right.uncostedMinor &&
+    left.capitalMinor === right.capitalMinor &&
+    left.marginMinor === right.marginMinor
+  );
+}
+
+/**
+ * True when the annual current-month row differs from the server's actual-to-date
+ * readout. That difference is future-dated recorded evidence; it is compared,
+ * never subtracted and never added to an estimate.
+ */
+function aggregateRowCarriesFutureDated(
+  source: PurchaseOrderReportData,
+  row: PurchaseOrderReportMetrics
+): boolean {
+  let actual: PurchaseOrderReportMetrics | null = null;
+  if (
+    source.monthSummary !== undefined &&
+    source.monthSummary.month === source.asOf.slice(0, 7)
+  ) {
+    actual = source.monthSummary.actual;
+  } else if (
+    source.currentProjection.mode === "month" &&
+    source.currentProjection.currentMonth !== undefined
+  ) {
+    actual = source.currentProjection.currentMonth.actual;
+  }
+  return actual !== null && !sameMetrics(actual, row);
+}
+
+export function resolveMonthAggregate(input: {
+  overview: PurchaseOrderReportData;
+  year: string;
+  annualSource: PurchaseOrderReportData | null;
+  annualStatus: MonthSourceStatus;
+  annualError: string;
+}): PurchaseOrderMonthAggregate {
+  const { overview, year, annualSource, annualStatus, annualError } = input;
+  const aggregate: PurchaseOrderMonthAggregate = {
+    year,
+    status: "loading",
+    error: "",
+    asOf: "",
+    generatedAt: "",
+    category: overview.filter.category,
+    currency: overview.filter.currency,
+    sourceLabel: "Monthly snapshot",
+    rows: [],
+    total: null,
+    forecasts: [],
+    unavailableReason: "",
+    includesFutureDated: false,
+    scopeMatchesOverview: false,
+    complete: false,
+  };
+  const january = `${year}-01`;
+  if (parseMonth(`${year}-01`) === null || monthStart(january) === "") {
+    return {
+      ...aggregate,
+      status: "error",
+      error: `"${year}" is not a calendar year.`,
+    };
+  }
+
+  let source: PurchaseOrderReportData | null = null;
+  if (annualSourceCoversMonth(overview, january)) {
+    source = overview;
+    aggregate.sourceLabel = "Performance snapshot";
+  } else if (annualStatus === "error") {
+    return {
+      ...aggregate,
+      status: "error",
+      error:
+        annualError === ""
+          ? "The annual snapshot could not be loaded."
+          : annualError,
+    };
+  } else if (annualStatus !== "ready" || annualSource === null) {
+    return aggregate;
+  } else if (!annualSourceCoversMonth(annualSource, january)) {
+    return {
+      ...aggregate,
+      status: "error",
+      error: `The loaded snapshot does not cover ${year}.`,
+    };
+  } else {
+    source = annualSource;
+  }
+
+  const currentKey = monthKeyFromDate(overview.asOf);
+  const currentYear = currentKey.slice(0, 4);
+  aggregate.status = "ready";
+  aggregate.asOf = source.asOf;
+  aggregate.generatedAt = source.generatedAt;
+  aggregate.category = source.filter.category;
+  aggregate.currency = source.filter.currency;
+  aggregate.scopeMatchesOverview = sourceScopeMatches(overview, source);
+  aggregate.total = source.totals;
+  aggregate.complete = true;
+
+  for (let index = 0; index < 12; index += 1) {
+    const month = `${year}-${String(index + 1).padStart(2, "0")}`;
+    const row =
+      source.periods.find(
+        (period) => period.periodStart === `${month}-01`
+      ) ?? null;
+    const isCurrent = month === currentKey;
+    const isFuture = month > currentKey;
+    const recorded =
+      row !== null && (!isFuture || row.poCount > 0);
+    const futureDated =
+      isCurrent && row !== null && aggregateRowCarriesFutureDated(source, row);
+    if (futureDated || (isFuture && row !== null && row.poCount > 0)) {
+      aggregate.includesFutureDated = true;
+    }
+    if (row === null) aggregate.complete = false;
+    aggregate.rows.push({
+      month,
+      metrics: recorded ? row : null,
+      recorded,
+      current: isCurrent,
+      future: isFuture,
+      futureDated,
+    });
+  }
+
+  const futureRows = aggregate.rows.filter((row) => row.future);
+  if (futureRows.length > 0) {
+    if (year > currentYear) {
+      aggregate.unavailableReason = "outside_current_year";
+    } else if (year === currentYear) {
+      const projection = source.currentProjection;
+      if (projection.mode !== "month") {
+        aggregate.unavailableReason = "not_current_period";
+      } else if (projection.status !== "available") {
+        aggregate.unavailableReason = projection.reason ?? "not_current_period";
+      } else {
+        for (const row of futureRows) {
+          const bucket = projection.buckets.find(
+            (entry) => entry.periodStart === `${row.month}-01`
+          );
+          if (bucket === undefined) {
+            aggregate.unavailableReason = "no_bucket";
+            continue;
+          }
+          aggregate.forecasts.push({
+            month: row.month,
+            estimate: estimateFromBucket(bucket, projection.method),
+          });
+        }
+      }
+    }
+  }
+  return aggregate;
 }

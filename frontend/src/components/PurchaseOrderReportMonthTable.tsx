@@ -1,8 +1,9 @@
-// Issue #641: one selected month, six vertical metrics. The actual,
+// Issue #641/#642: one selected month, six vertical metrics. The actual,
 // future-dated recorded and estimated quantities are separate blocks; the
 // estimate alone gets the muted/hatched treatment and an accessible label, so
 // a reader never mistakes it for recorded evidence. The server owns every
-// figure and every percentage.
+// figure and every percentage. The card composition reuses this same vertical
+// table instead of introducing a parallel per-month implementation.
 
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
@@ -30,12 +31,18 @@ export interface PurchaseOrderReportMonthTableProps {
   onRetry: () => void;
 }
 
-function money(entry: CurrencyInfo | null, minor: number): string {
-  return entry === null ? "-" : formatMoney(entry, minor);
+export interface PurchaseOrderReportMonthCardProps {
+  readout: PurchaseOrderMonthReadout;
+  entry: CurrencyInfo | null;
+  /** The focused comparison card; arrows move this in subset/All-Individual. */
+  active?: boolean;
+  /** Only the first visible table carries the chart's period anchor. */
+  anchor?: boolean;
+  onRetry: () => void;
 }
 
-function marginClass(value: number): string {
-  return value < 0 ? "text-danger-700" : "text-ink-900";
+function money(entry: CurrencyInfo | null, minor: number): string {
+  return entry === null ? "-" : formatMoney(entry, minor);
 }
 
 function EvidenceGrid({
@@ -200,14 +207,41 @@ function EstimateBlock({
   );
 }
 
-export function PurchaseOrderReportMonthTable({
+/** The section's own scope, as-of, currency and snapshot provenance. */
+function MonthScope({ readout }: { readout: PurchaseOrderMonthReadout }) {
+  return (
+    <p
+      data-month-scope=""
+      className="mt-1 text-small leading-relaxed text-ink-500"
+    >
+      {reportCategoryLabel(readout.category)} · {readout.currency || "-"}
+      {readout.sourceLabel === "" ? null : ` · ${readout.sourceLabel}`}
+      {readout.asOf === ""
+        ? null
+        : ` · As of ${formatReportDate(readout.asOf)}`}
+      {readout.generatedAt === "" ? null : (
+        <span className="tnum"> · snapshot {readout.generatedAt}</span>
+      )}
+    </p>
+  );
+}
+
+/**
+ * The vertical six-metric table plus its truthful loading/error/zero/estimate
+ * states. `anchor` is true for the one table the chart's `#report-period-table`
+ * link targets; in a comparison grid only the first card carries it.
+ */
+function MonthReadoutBody({
   readout,
   entry,
-  onPrevious,
-  onNext,
   onRetry,
-}: PurchaseOrderReportMonthTableProps) {
-  const heading = readout.month === "" ? "By period" : monthLabel(readout.month);
+  anchor,
+}: {
+  readout: PurchaseOrderMonthReadout;
+  entry: CurrencyInfo | null;
+  onRetry: () => void;
+  anchor: boolean;
+}) {
   const primary = readout.primary;
   const rows: { label: string; value: string; negative?: boolean }[] = [
     { label: "POs", value: primary ? formatReportCount(primary.poCount) : "-" },
@@ -229,6 +263,139 @@ export function PurchaseOrderReportMonthTable({
   ];
 
   return (
+    <>
+      {readout.status === "loading" ? (
+        <p role="status" className="text-body text-ink-500">
+          Loading {readout.month === "" ? "month" : monthLabel(readout.month)}…
+        </p>
+      ) : null}
+      {readout.status === "error" ? (
+        <div className="grid gap-3">
+          <StatusBanner tone="danger">{readout.error}</StatusBanner>
+          <div>
+            <Button aria-label="Retry month" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {readout.status === "ready" ? (
+        <div className="grid gap-4">
+          {readout.scopeMatchesOverview ? null : (
+            <StatusBanner tone="info">
+              This month's snapshot has a different business date from the
+              overview. Export stays off until both are refreshed together.
+            </StatusBanner>
+          )}
+          {readout.message === "" ? null : (
+            <p className="text-small leading-relaxed text-ink-500">
+              {readout.message}
+            </p>
+          )}
+          <div>
+            {readout.primaryLabel === "" ? null : (
+              <p
+                data-month-primary-label={readout.primaryLabel}
+                className="mb-2 text-caption font-medium uppercase tracking-[0.1em] text-ink-500"
+              >
+                {readout.primaryLabel}
+              </p>
+            )}
+            <table
+              {...(anchor
+                ? {
+                    id: "report-period-table",
+                    tabIndex: -1,
+                    "aria-label": "Period totals",
+                  }
+                : { "aria-label": `${monthLabel(readout.month)} metrics` })}
+              className="w-full scroll-mt-6 text-left text-body"
+            >
+              <thead>
+                <tr className="border-y border-rule bg-paper-subtle/60 text-micro uppercase tracking-[0.1em] text-ink-500">
+                  <th className="py-2 pr-4 font-medium">Metric</th>
+                  <th className="py-2 text-right font-medium">Value</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-rule">
+                {rows.map((row) => (
+                  <tr key={row.label}>
+                    <th
+                      scope="row"
+                      className="py-2.5 pr-4 text-left align-middle font-medium text-ink-700"
+                    >
+                      {row.label}
+                    </th>
+                    <td
+                      data-month-metric={row.label}
+                      className={`tnum whitespace-nowrap py-2.5 text-right align-middle ${
+                        row.negative
+                          ? "text-danger-700"
+                          : "text-ink-900"
+                      }`}
+                    >
+                      {row.value}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {readout.recordedFuture === null ? null : (
+            <div data-month-evidence="recorded-future-label">
+              <p className="mb-2 text-small font-semibold text-ink-900">
+                Future-dated recorded
+              </p>
+              <EvidenceGrid
+                metrics={readout.recordedFuture}
+                entry={entry}
+                testId="recorded-future"
+              />
+            </div>
+          )}
+
+          {readout.estimate === null ? (
+            readout.unavailableReason === "" ? null : (
+              <div data-month-evidence="unavailable">
+                <p className="text-small font-semibold text-ink-700">
+                  Forecast unavailable
+                </p>
+                <p className="text-small leading-relaxed text-ink-500">
+                  {monthUnavailableLabel(readout.unavailableReason)}
+                </p>
+              </div>
+            )
+          ) : (
+            <EstimateBlock estimate={readout.estimate} entry={entry} />
+          )}
+
+          <p className="text-caption leading-relaxed text-ink-500">
+            Actual, future-dated recorded and estimated figures are separate.
+            Estimates are never added to recorded evidence or to the month's
+            actual figures.
+          </p>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * #641's standalone single-month browser. It stays callable directly by
+ * fixture/harness callers and keeps its own heading, scope, navigation and
+ * chart anchor.
+ */
+export function PurchaseOrderReportMonthTable({
+  readout,
+  entry,
+  onPrevious,
+  onNext,
+  onRetry,
+}: PurchaseOrderReportMonthTableProps) {
+  const heading = readout.month === "" ? "By period" : monthLabel(readout.month);
+
+  return (
     <Card className="min-w-0" data-month-browser="">
       <div className="flex flex-wrap items-start justify-between gap-3 px-5 pt-5">
         <div className="min-w-0">
@@ -239,19 +406,7 @@ export function PurchaseOrderReportMonthTable({
           <h3 className="mt-2 text-title font-semibold text-ink-950">
             {heading}
           </h3>
-          <p
-            data-month-scope=""
-            className="mt-1 text-small leading-relaxed text-ink-500"
-          >
-            {reportCategoryLabel(readout.category)} · {readout.currency || "-"}
-            {readout.sourceLabel === "" ? null : ` · ${readout.sourceLabel}`}
-            {readout.asOf === ""
-              ? null
-              : ` · As of ${formatReportDate(readout.asOf)}`}
-            {readout.generatedAt === "" ? null : (
-              <span className="tnum"> · snapshot {readout.generatedAt}</span>
-            )}
-          </p>
+          <MonthScope readout={readout} />
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -268,115 +423,57 @@ export function PurchaseOrderReportMonthTable({
       </div>
 
       <div className="px-5 pb-5 pt-3">
-        {readout.status === "loading" ? (
-          <p role="status" className="text-body text-ink-500">
-            Loading {heading}…
-          </p>
-        ) : null}
-        {readout.status === "error" ? (
-          <div className="grid gap-3">
-            <StatusBanner tone="danger">{readout.error}</StatusBanner>
-            <div>
-              <Button aria-label="Retry month" onClick={onRetry}>
-                Retry
-              </Button>
-            </div>
-          </div>
-        ) : null}
-        {readout.status === "ready" ? (
-          <div className="grid gap-4">
-            {readout.scopeMatchesOverview ? null : (
-              <StatusBanner tone="info">
-                This month's snapshot has a different business date from the
-                overview. Export stays off until both are refreshed together.
-              </StatusBanner>
-            )}
-            {readout.message === "" ? null : (
-              <p className="text-small leading-relaxed text-ink-500">
-                {readout.message}
-              </p>
-            )}
-            <div>
-              {readout.primaryLabel === "" ? null : (
-                <p
-                  data-month-primary-label={readout.primaryLabel}
-                  className="mb-2 text-caption font-medium uppercase tracking-[0.1em] text-ink-500"
-                >
-                  {readout.primaryLabel}
-                </p>
-              )}
-              <table
-                id="report-period-table"
-                tabIndex={-1}
-                aria-label="Period totals"
-                className="w-full scroll-mt-6 text-left text-body"
-              >
-                <thead>
-                  <tr className="border-y border-rule bg-paper-subtle/60 text-micro uppercase tracking-[0.1em] text-ink-500">
-                    <th className="py-2 pr-4 font-medium">Metric</th>
-                    <th className="py-2 text-right font-medium">Value</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-rule">
-                  {rows.map((row) => (
-                    <tr key={row.label}>
-                      <th
-                        scope="row"
-                        className="py-2.5 pr-4 text-left align-middle font-medium text-ink-700"
-                      >
-                        {row.label}
-                      </th>
-                      <td
-                        data-month-metric={row.label}
-                        className={`tnum whitespace-nowrap py-2.5 text-right align-middle ${
-                          row.negative
-                            ? "text-danger-700"
-                            : "text-ink-900"
-                        }`}
-                      >
-                        {row.value}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <MonthReadoutBody
+          readout={readout}
+          entry={entry}
+          onRetry={onRetry}
+          anchor
+        />
+      </div>
+    </Card>
+  );
+}
 
-            {readout.recordedFuture === null ? null : (
-              <div data-month-evidence="recorded-future-label">
-                <p className="mb-2 text-small font-semibold text-ink-900">
-                  Future-dated recorded
-                </p>
-                <EvidenceGrid
-                  metrics={readout.recordedFuture}
-                  entry={entry}
-                  testId="recorded-future"
-                />
-              </div>
-            )}
-
-            {readout.estimate === null ? (
-              readout.unavailableReason === "" ? null : (
-                <div data-month-evidence="unavailable">
-                  <p className="text-small font-semibold text-ink-700">
-                    Forecast unavailable
-                  </p>
-                  <p className="text-small leading-relaxed text-ink-500">
-                    {monthUnavailableLabel(readout.unavailableReason)}
-                  </p>
-                </div>
-              )
-            ) : (
-              <EstimateBlock estimate={readout.estimate} entry={entry} />
-            )}
-
-            <p className="text-caption leading-relaxed text-ink-500">
-              Actual, future-dated recorded and estimated figures are separate.
-              Estimates are never added to recorded evidence or to the month's
-              actual figures.
-            </p>
-          </div>
-        ) : null}
+/**
+ * One comparison card: the same vertical metric table, headed by its own month
+ * and carrying its own scope/provenance. It is the unit the comparison grid
+ * arranges; no second table implementation exists.
+ */
+export function PurchaseOrderReportMonthCard({
+  readout,
+  entry,
+  active = false,
+  anchor = false,
+  onRetry,
+}: PurchaseOrderReportMonthCardProps) {
+  const heading = readout.month === "" ? "By period" : monthLabel(readout.month);
+  return (
+    <Card
+      className={`min-w-0 ${
+        active ? "ring-2 ring-accent-400/70 ring-offset-2 ring-offset-paper" : ""
+      }`}
+      data-month-card=""
+      data-month-key={readout.month}
+      data-month-active={active ? "true" : "false"}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-4">
+        <h3
+          data-month-card-heading=""
+          className="min-w-0 text-title font-semibold text-ink-950"
+        >
+          {heading}
+        </h3>
+      </div>
+      <div className="px-4 pb-4">
+        <MonthScope readout={readout} />
+        <div className="mt-3">
+          <MonthReadoutBody
+            readout={readout}
+            entry={entry}
+            onRetry={onRetry}
+            anchor={anchor}
+          />
+        </div>
       </div>
     </Card>
   );
