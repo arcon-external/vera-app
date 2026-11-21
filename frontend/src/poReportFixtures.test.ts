@@ -4,7 +4,9 @@ import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
+  purchaseOrderReportMonthWithRecordedFutureFixture,
   purchaseOrderReportYearFixture,
+  purchaseOrderReportYearWithRecordedFutureFixture,
 } from "./poReportFixtures";
 import type {
   PurchaseOrderReportData,
@@ -209,6 +211,136 @@ describe("purchase order report fixtures (issue #632)", () => {
     expect(remainder.marginBps).toBe(
       fixtureRatioBps(remainder.margin, remainder.capital)
     );
+  });
+
+  it("shares the current month's day buckets and month summary arithmetic", () => {
+    const month = purchaseOrderReportMonthFixture();
+    const summary = month.monthSummary!;
+    expect(summary.actual).toEqual(month.totals);
+    expect(summary.recordedFuture).toBeUndefined();
+    const buckets = month.currentProjection.buckets;
+    const summed = buckets.reduce(
+      (total, bucket) => ({
+        low: total.low + bucket.amountLowMinor,
+        base: total.base + bucket.amountBaseMinor,
+        high: total.high + bucket.amountHighMinor,
+        capital: total.capital + bucket.capitalMinor,
+        margin: total.margin + bucket.marginMinor,
+      }),
+      { low: 0, base: 0, high: 0, capital: 0, margin: 0 }
+    );
+    expect(summary.projection.remainder).toEqual({
+      low: summed.low,
+      base: summed.base,
+      high: summed.high,
+      capital: summed.capital,
+      margin: summed.margin,
+      marginBps: fixtureRatioBps(summed.margin, summed.capital),
+      sampleSize: 19,
+      source: "elapsed_days",
+    });
+
+    const year = purchaseOrderReportYearFixture();
+    const yearSummary = year.monthSummary!;
+    expect(yearSummary.mode).toBe("month");
+    expect(yearSummary.actual).toEqual(month.totals);
+    expect(yearSummary.projection.remainder).toEqual(
+      summary.projection.remainder
+    );
+    expect(year.currentProjection.currentMonth!.actual).toEqual(month.totals);
+    expect(year.currentProjection.currentMonth!.remainder).toEqual(
+      summary.projection.remainder
+    );
+    const november = year.periods.find(
+      (period) => period.periodStart === "2026-11-01"
+    )!;
+    expect(november.amountMinor).toBe(month.totals.amountMinor);
+    // The annual source's complete months are fully costed, so its available
+    // month-mode forecast is legal rather than an incomplete-cost estimate.
+    for (const period of year.periods.slice(0, 10)) {
+      expect(period.uncostedMinor).toBe(0);
+    }
+  });
+
+
+  it("adds recorded future evidence to the raw rows, totals and categories", () => {
+    const cases = [
+      {
+        report: purchaseOrderReportMonthWithRecordedFutureFixture(),
+        baseline: purchaseOrderReportMonthFixture(),
+        futurePeriod: "2026-11-25",
+        annual: false,
+      },
+      {
+        report: purchaseOrderReportYearWithRecordedFutureFixture(),
+        baseline: purchaseOrderReportYearFixture(),
+        futurePeriod: "2026-11-01",
+        annual: true,
+      },
+    ];
+    for (const { report, baseline, futurePeriod, annual } of cases) {
+      assertFooting(report);
+      assertRow("future totals", report.totals);
+      for (const category of report.categories) {
+        assertRow(`future category ${category.businessCategory}`, category);
+      }
+
+      const summary = report.monthSummary!;
+      const recorded = summary.recordedFuture!;
+      expect(recorded.poCount).toBe(1);
+      expect(recorded.amountMinor).toBe(777_000);
+      expect(baseline.totals.poCount + recorded.poCount).toBe(
+        report.totals.poCount
+      );
+      expect(baseline.totals.amountMinor + recorded.amountMinor).toBe(
+        report.totals.amountMinor
+      );
+      expect(baseline.totals.costedMinor + recorded.costedMinor).toBe(
+        report.totals.costedMinor
+      );
+      expect(baseline.totals.uncostedMinor + recorded.uncostedMinor).toBe(
+        report.totals.uncostedMinor
+      );
+      expect(baseline.totals.capitalMinor + recorded.capitalMinor).toBe(
+        report.totals.capitalMinor
+      );
+      expect(baseline.totals.marginMinor + recorded.marginMinor).toBe(
+        report.totals.marginMinor
+      );
+      if (!annual) {
+        // A day report's totals are current-month evidence, so its actual plus
+        // the recorded future order foots to the snapshot's totals.
+        expect(summary.actual.poCount + recorded.poCount).toBe(
+          report.totals.poCount
+        );
+        expect(summary.actual.amountMinor + recorded.amountMinor).toBe(
+          report.totals.amountMinor
+        );
+      }
+
+      const futureRow = report.periods.find(
+        (period) => period.periodStart === futurePeriod
+      )!;
+      assertRow(`future row ${futurePeriod}`, futureRow);
+      if (annual) {
+        // The annual current-month row is the raw month (actual + future).
+        expect(futureRow.poCount).toBe(summary.actual.poCount + recorded.poCount);
+        expect(futureRow.amountMinor).toBe(
+          summary.actual.amountMinor + recorded.amountMinor
+        );
+        expect(report.currentProjection.currentMonth?.actual).toEqual(
+          summary.actual
+        );
+      } else {
+        // The day fixture's future day row is exactly the recorded order; the
+        // elapsed actual rows and the projection basis exclude it.
+        expect(futureRow.poCount).toBe(recorded.poCount);
+        expect(futureRow.amountMinor).toBe(recorded.amountMinor);
+        expect(report.currentProjection.basis.poCount).toBe(
+          summary.actual.poCount
+        );
+      }
+    }
   });
 
   it("keeps the maximum exact fixture footed with derived ratios", () => {

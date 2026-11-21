@@ -530,6 +530,284 @@ func unavailableCurrentReport() poreport.Report {
 	return snapshot
 }
 
+// monthSummaryFromSnapshot derives the server's current-month readout from the
+// snapshot's own supplied evidence. Test fixtures use it so the summary they
+// print is the one BuildMonthSummary would have produced for the same rows and
+// ghost buckets, instead of a hand-typed band that no chart or total supports.
+func monthSummaryFromSnapshot(t *testing.T, snapshot poreport.Report) *poreport.MonthSummary {
+	t.Helper()
+	asOf, err := time.Parse(time.DateOnly, snapshot.AsOf)
+	if err != nil {
+		t.Fatalf("snapshot asOf %q: %v", snapshot.AsOf, err)
+	}
+	current := snapshot.CurrentProjection
+	var daily []poreport.HistoryDay
+	switch current.Mode {
+	case poreport.ProjectionModeDay:
+		for _, period := range snapshot.Periods {
+			if period.PeriodStart > snapshot.AsOf {
+				continue
+			}
+			daily = append(daily, poreport.HistoryDay{Date: period.PeriodStart, Metrics: period.Metrics})
+		}
+	case poreport.ProjectionModeMonth:
+		monthStart := snapshot.AsOf[:7] + "-01"
+		for _, period := range snapshot.Periods {
+			if period.PeriodStart != monthStart {
+				continue
+			}
+			daily = append(daily, poreport.HistoryDay{Date: period.PeriodStart, Metrics: period.Metrics})
+		}
+	default:
+		t.Fatalf("snapshot current projection mode %q cannot own a month summary", current.Mode)
+	}
+	summary, err := poreport.BuildMonthSummary(
+		snapshot.Periods, daily, current, snapshot.Filter, asOf, false)
+	if err != nil {
+		t.Fatalf("BuildMonthSummary: %v", err)
+	}
+	if summary == nil {
+		t.Fatalf("BuildMonthSummary returned no summary for filter %+v and as-of %s",
+			snapshot.Filter, snapshot.AsOf)
+	}
+	return summary
+}
+
+// dayMonthFixture is the current month bucketed by day with one future-dated
+// saved PO: the row is in Periods and in Totals, Actual stops at the as-of day,
+// and the server monthSummary carries that row as recorded future evidence.
+func dayMonthFixture(t *testing.T) poreport.Report {
+	t.Helper()
+	snapshot := dayReport()
+	future := poreport.Metrics{
+		PoCount: 1, AmountMinor: 7_777_000, CostedMinor: 7_000_000,
+		UncostedMinor: 777_000, CapitalMinor: 6_000_000, MarginMinor: 1_000_000,
+	}
+	metrics := make([]poreport.Metrics, 0, len(snapshot.Periods))
+	for _, period := range snapshot.Periods {
+		if period.PeriodStart == "2026-11-25" {
+			period.Metrics = future
+		}
+		metrics = append(metrics, period.Metrics)
+	}
+	grid := fixtureGrid(metrics)
+	periods := make([]poreport.Period, 0, len(metrics))
+	for index, row := range metrics {
+		start := time.Date(2026, time.November, index+1, 0, 0, 0, 0, time.UTC)
+		periods = append(periods, poreport.Period{
+			PeriodStart: start.Format(time.DateOnly),
+			InProgress:  index == 18,
+			Metrics:     fixtureMetrics(row.PoCount, grid[index]),
+		})
+	}
+	snapshot.Periods = periods
+	snapshot.Categories = fixtureCategories(grid, []int64{8, 5, 3, 2, 2})
+	snapshot.CategorySeries = fixtureCategorySeries(grid)
+
+	totalCells := make([]fixtureCell, 0, len(grid)*len(fixtureCategoryCodes))
+	for _, row := range grid {
+		totalCells = append(totalCells, row...)
+	}
+	snapshot.Totals = fixtureMetrics(20, totalCells)
+	snapshot.MonthSummary = monthSummaryFromSnapshot(t, snapshot)
+	return snapshot
+}
+
+// yearMonthFixture is the current year bucketed by month with the server
+// monthSummary built from its own November row and its own current-month
+// remainder, so the printed actual and estimated remainder cannot contradict
+// the annual snapshot beside them.
+func yearMonthFixture(t *testing.T) poreport.Report {
+	t.Helper()
+	snapshot := currentYearReport()
+	snapshot.MonthSummary = monthSummaryFromSnapshot(t, snapshot)
+	return snapshot
+}
+
+// emptyMonthReport is a current day-bucketed month with no purchase orders at
+// all. Every empty surface agrees: zero totals, no rows or categories, the
+// projection the server derives from an empty daily sample (elapsed days, zero
+// POs, no_data), and no missing-source evidence. The month section can print a
+// genuine zero month without a contradictory global forecast beside it.
+func emptyMonthReport(t *testing.T) poreport.Report {
+	t.Helper()
+	snapshot := dayReport()
+	asOf, err := time.Parse(time.DateOnly, snapshot.AsOf)
+	if err != nil {
+		t.Fatalf("snapshot asOf %q: %v", snapshot.AsOf, err)
+	}
+	snapshot.Totals = poreport.Metrics{}
+	snapshot.Periods = nil
+	snapshot.Categories = nil
+	snapshot.CategorySeries = nil
+	snapshot.Notes = nil
+	snapshot.Population.SourceMissingPoCount = 0
+	snapshot.Population.HasUnassigned = false
+	snapshot.CurrentProjection = poreport.ProjectCurrent(
+		nil, nil, snapshot.Filter, asOf, false, false)
+	snapshot.MonthSummary = monthSummaryFromSnapshot(t, snapshot)
+	return snapshot
+}
+
+// assertMonthSummaryFootsToSnapshot checks a fixture summary against the
+// evidence printed beside it, never against BuildMonthSummary itself: actual
+// must be the elapsed period rows, recorded future must be the future period
+// rows, the day remainder must be the sum of the ghost buckets, the month-mode
+// remainder and actual must be the snapshot's own current-month figures, and a
+// day report's totals must be actual plus recorded. A hand-typed band, a
+// recorded row missing from totals, or an empty report keeping an available
+// forecast fails here even though every individual value is in range.
+func assertMonthSummaryFootsToSnapshot(t *testing.T, name string, snapshot poreport.Report) {
+	t.Helper()
+	summary := snapshot.MonthSummary
+	if summary == nil {
+		t.Fatalf("%s has no monthSummary", name)
+	}
+	current := snapshot.CurrentProjection
+	if summary.AsOf != snapshot.AsOf {
+		t.Errorf("%s summary asOf = %s; want %s", name, summary.AsOf, snapshot.AsOf)
+	}
+	if summary.Month != firstSeven(snapshot.AsOf) {
+		t.Errorf("%s summary month = %s; want the as-of month %s",
+			name, summary.Month, firstSeven(snapshot.AsOf))
+	}
+	if summary.From != summary.Month+"-01" || summary.To != nextMonthFirst(summary.Month) {
+		t.Errorf("%s summary from/to = %s/%s; want the calendar month %s",
+			name, summary.From, summary.To, summary.Month)
+	}
+	if summary.Mode != current.Mode {
+		t.Errorf("%s summary mode = %s; want the current projection's %s", name, summary.Mode, current.Mode)
+	}
+
+	var elapsed, future []poreport.Metrics
+	for _, period := range snapshot.Periods {
+		switch {
+		case period.PeriodStart >= summary.Month+"-01" && period.PeriodStart <= snapshot.AsOf:
+			elapsed = append(elapsed, period.Metrics)
+		case period.PeriodStart > snapshot.AsOf && firstSeven(period.PeriodStart) == summary.Month:
+			future = append(future, period.Metrics)
+		}
+	}
+	wantActual := sumMetrics(elapsed)
+	if got, want := metricsFields(summary.Actual), metricsFields(wantActual); got != want {
+		t.Errorf("%s summary actual = %v; want the elapsed period rows %v", name, got, want)
+	}
+	assertDerivedMetrics(t, name+" summary actual", summary.Actual)
+
+	wantRecorded := sumMetrics(future)
+	gotRecorded := poreport.Metrics{}
+	if summary.RecordedFuture != nil {
+		gotRecorded = *summary.RecordedFuture
+		assertDerivedMetrics(t, name+" summary recorded future", gotRecorded)
+	}
+	if got, want := metricsFields(gotRecorded), metricsFields(wantRecorded); got != want {
+		t.Errorf("%s summary recorded future = %v; want the future period rows %v", name, got, want)
+	}
+	if summary.RecordedFuture == nil && len(future) > 0 {
+		t.Errorf("%s summary omits recorded future evidence the snapshot supplies", name)
+	}
+	if summary.RecordedFuture != nil && len(future) == 0 {
+		t.Errorf("%s summary invents recorded future evidence the snapshot does not supply", name)
+	}
+
+	switch summary.Mode {
+	case poreport.ProjectionModeDay:
+		if current.Status == poreport.ProjectionStatusAvailable {
+			if summary.Projection.Status != poreport.ProjectionStatusAvailable ||
+				summary.Projection.Remainder == nil {
+				t.Errorf("%s day forecast = %s/%+v; want the available remainder",
+					name, summary.Projection.Status, summary.Projection.Remainder)
+				break
+			}
+			var low, base, high, capital, margin int64
+			for _, bucket := range current.Buckets {
+				low += bucket.AmountLowMinor
+				base += bucket.AmountBaseMinor
+				high += bucket.AmountHighMinor
+				capital += bucket.CapitalMinor
+				margin += bucket.MarginMinor
+			}
+			remainder := summary.Projection.Remainder
+			if got, want := [5]int64{remainder.LowMinor, remainder.BaseMinor, remainder.HighMinor,
+				remainder.CapitalMinor, remainder.MarginMinor}, [5]int64{low, base, high, capital, margin}; got != want {
+				t.Errorf("%s day remainder = %v; want the supplied ghost bucket sum %v", name, got, want)
+			}
+			assertDerivedRatio(t, name+" summary remainder", "marginBps",
+				remainder.MarginBps, remainder.MarginMinor, remainder.CapitalMinor)
+			if remainder.SampleSize != current.Basis.Units {
+				t.Errorf("%s remainder sample = %d; want the projection's %d elapsed days",
+					name, remainder.SampleSize, current.Basis.Units)
+			}
+			if remainder.Source != poreport.SourceElapsedDays {
+				t.Errorf("%s remainder source = %s; want %s", name, remainder.Source, poreport.SourceElapsedDays)
+			}
+		}
+		// A day report materializes the whole month, so its totals are the
+		// elapsed actual plus the future-dated recorded row; a projection is
+		// never part of either.
+		assertMetricSums(t, name+" actual+recorded totals",
+			[]poreport.Metrics{summary.Actual, gotRecorded}, snapshot.Totals)
+		if current.Status == poreport.ProjectionStatusAvailable &&
+			summary.Actual.PoCount != current.Basis.PoCount {
+			t.Errorf("%s actual POs = %d; want the projection's elapsed sample of %d",
+				name, summary.Actual.PoCount, current.Basis.PoCount)
+		}
+	case poreport.ProjectionModeMonth:
+		if current.Status != poreport.ProjectionStatusAvailable {
+			break
+		}
+		if current.CurrentMonth == nil {
+			t.Fatalf("%s month projection is available without a current month", name)
+		}
+		if got, want := metricsFields(summary.Actual), metricsFields(current.CurrentMonth.Actual); got != want {
+			t.Errorf("%s month-mode actual = %v; want the snapshot's month-to-date %v", name, got, want)
+		}
+		if summary.Projection.Status != poreport.ProjectionStatusAvailable ||
+			summary.Projection.Remainder == nil {
+			t.Fatalf("%s month forecast = %s/%+v; want the snapshot's own remainder",
+				name, summary.Projection.Status, summary.Projection.Remainder)
+		}
+		got, want := *summary.Projection.Remainder, current.CurrentMonth.Remainder
+		if got.LowMinor != want.LowMinor || got.BaseMinor != want.BaseMinor ||
+			got.HighMinor != want.HighMinor || got.CapitalMinor != want.CapitalMinor ||
+			got.MarginMinor != want.MarginMinor || got.SampleSize != want.SampleSize ||
+			got.Source != want.Source || !sameOptionalTestInt64(got.MarginBps, want.MarginBps) {
+			t.Errorf("%s month remainder = %+v; want the snapshot's own %+v", name, got, want)
+		}
+	}
+}
+
+func sameOptionalTestInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+// TestFixtureMonthSummariesFootToTheirOwnEvidence is the permanent guard behind
+// every selected-month PDF assertion. The fixtures' summaries are built by the
+// production constructor, then checked against the rows, buckets and totals that
+// the same snapshot supplies. A band that the chart cannot produce, a recorded
+// row missing from totals, an annual summary contradicting its own current-month
+// figures, or an empty snapshot keeping an available forecast fails here.
+func TestFixtureMonthSummariesFootToTheirOwnEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot poreport.Report
+	}{
+		{"day with recorded future", dayMonthFixture(t)},
+		{"current year", yearMonthFixture(t)},
+		{"empty month", emptyMonthReport(t)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateSnapshot(tc.snapshot); err != nil {
+				t.Fatalf("%s fixture does not validate: %v", tc.name, err)
+			}
+			assertMonthSummaryFootsToSnapshot(t, tc.name, tc.snapshot)
+		})
+	}
+}
+
 // distribute splits an exact integer total across fixed weights. The last
 // share absorbs the remainder, so the parts always sum back to the total.
 func distribute(total int64, weights []int64) []int64 {

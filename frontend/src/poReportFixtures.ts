@@ -244,7 +244,10 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
   // the table lied line by line.
   const active = counts.filter((count) => count > 0).length;
   const amounts = splitExact(190_000_000, active);
-  const uncosted = splitExact(19_000_000, active);
+  // The current-period forecast requires a fully costed sample: an uncosted
+  // figure is never treated as margin. The day and year fixtures share this
+  // current-month arithmetic so their tables and remainder agree.
+  const uncosted = splitExact(0, active);
   const capitals = splitExact(152_000_000, active);
   let activeIndex = 0;
 
@@ -393,45 +396,104 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
       },
       buckets,
     },
+    monthSummary: {
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: "2026-11-19",
+      mode: "day",
+      actual: totals,
+      projection: {
+        status: "available",
+        method:
+          "Elapsed-day average of the current month; P25-P75 range of elapsed daily totals (min-max under four observations).",
+        remainder: {
+          low: low * (totalDays - elapsed),
+          base: base * (totalDays - elapsed),
+          high: high * (totalDays - elapsed),
+          capital: capital * (totalDays - elapsed),
+          margin: margin * (totalDays - elapsed),
+          marginBps: fixtureRatioBps(margin, capital),
+          sampleSize: elapsed,
+          source: "elapsed_days",
+        },
+      },
+    },
     notes: [],
   };
 }
 
 /**
- * Issue #638: the current calendar year, bucketed by month. January to
- * November are actual (November is month-to-date), December is the ghost
- * month, and the current month's remainder is the stacked projection. It
- * reuses the historical fixture's footed actual rows so the KPI strip and both
- * tables keep agreeing with the chart.
+ * Issue #641: the current calendar year, bucketed by month. It shares the
+ * month fixture's current-month actual and remainder so the day table, the
+ * monthly table and the chart quote one arithmetic. January to October are
+ * complete, fully costed months; November is the month-to-date current month;
+ * December is the single ghost month. No forecast is summed into an actual.
  */
 export function purchaseOrderReportYearFixture(): PurchaseOrderReportData {
+  const month = purchaseOrderReportMonthFixture();
   const base = purchaseOrderReportFixture();
-  const periods = base.periods.map((period) =>
-    period.periodStart === "2026-11-01"
-      ? { ...period, partial: false, inProgress: true }
-      : { ...period, partial: false, inProgress: false }
-  );
+  const monthSummary = month.monthSummary!;
+
+  const periods = base.periods.slice(0, 10).map((period) => ({
+    periodStart: period.periodStart,
+    partial: false,
+    inProgress: false,
+    ...metrics(period.poCount, period.amountMinor, 0, period.capitalMinor),
+  }));
+  periods.push({
+    periodStart: "2026-11-01",
+    partial: false,
+    inProgress: true,
+    ...month.totals,
+  });
   periods.push({
     periodStart: "2026-12-01",
     partial: false,
     inProgress: false,
     ...metrics(0, 0, 0, 0),
-    marginBps: null,
-    coverageBps: null,
   });
-  const currentMonth = periods.find(
-    (period) => period.periodStart === "2026-11-01"
-  )!;
 
-  const remainder = {
-    low: 15_000_000,
-    base: 20_000_000,
-    high: 25_000_000,
-    capital: 16_000_000,
-    margin: 4_000_000,
-    marginBps: fixtureRatioBps(4_000_000, 16_000_000),
-    sampleSize: 19,
-    source: "elapsed_days",
+  const totalCount = periods.reduce((sum, period) => sum + period.poCount, 0);
+  const totalAmount = periods.reduce((sum, period) => sum + period.amountMinor, 0);
+  const totalCapital = periods.reduce(
+    (sum, period) => sum + period.capitalMinor,
+    0
+  );
+  const totals = metrics(totalCount, totalAmount, 0, totalCapital);
+
+  const categoryDefinitions = [
+    { businessCategory: "FM", label: "Facility Management" },
+    { businessCategory: "FAB", label: "Fabrication" },
+    { businessCategory: "SUPPLY_GEN", label: "Goods Supply & General" },
+    { businessCategory: "OTHERS", label: "Others" },
+    { businessCategory: "UNASSIGNED", label: "Unassigned" },
+  ] as const;
+  const categoryCounts = splitExact(totals.poCount, categoryDefinitions.length);
+  const categoryAmounts = splitExact(
+    totals.amountMinor,
+    categoryDefinitions.length
+  );
+  const categoryCapitals = splitExact(
+    totals.capitalMinor,
+    categoryDefinitions.length
+  );
+  const categories = categoryDefinitions.map((row, index) => ({
+    ...row,
+    ...metrics(
+      categoryCounts[index],
+      categoryAmounts[index],
+      0,
+      categoryCapitals[index]
+    ),
+  }));
+
+  const basis = {
+    historyFrom: "2026-03-01",
+    historyTo: "2026-11-01",
+    completeMonths: 8,
+    poCount: 8,
+    asOf: "2026-11-19",
   };
 
   return {
@@ -443,32 +505,23 @@ export function purchaseOrderReportYearFixture(): PurchaseOrderReportData {
       category: "all",
       currency: "IDR",
     },
+    totals,
     periods,
+    categories,
+    categorySeries: [],
     projection: {
       monthly: {
         status: "unavailable",
         reason: "not_current_period",
         method: "",
-        basis: {
-          historyFrom: "",
-          historyTo: "",
-          completeMonths: 0,
-          poCount: 0,
-          asOf: "2026-11-19",
-        },
+        basis,
         buckets: [],
       },
       yearly: {
         status: "unavailable",
         reason: "not_current_period",
         method: "",
-        basis: {
-          historyFrom: "",
-          historyTo: "",
-          completeMonths: 0,
-          poCount: 0,
-          asOf: "2026-11-19",
-        },
+        basis,
         buckets: [],
       },
     },
@@ -498,19 +551,25 @@ export function purchaseOrderReportYearFixture(): PurchaseOrderReportData {
         },
       ],
       currentMonth: {
-        actual: {
-          poCount: currentMonth.poCount,
-          amountMinor: currentMonth.amountMinor,
-          costedMinor: currentMonth.costedMinor,
-          uncostedMinor: currentMonth.uncostedMinor,
-          capitalMinor: currentMonth.capitalMinor,
-          marginMinor: currentMonth.marginMinor,
-          marginBps: currentMonth.marginBps,
-          coverageBps: currentMonth.coverageBps,
-        },
-        remainder,
+        actual: month.totals,
+        remainder: monthSummary.projection.remainder!,
       },
     },
+    monthSummary: {
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: "2026-11-19",
+      mode: "month",
+      actual: month.totals,
+      projection: {
+        status: "available",
+        method:
+          "Median of the complete months in trailing history; P25-P75 range of their monthly totals. The current month's remainder uses the elapsed-day average.",
+        remainder: monthSummary.projection.remainder!,
+      },
+    },
+    notes: base.notes,
   };
 }
 
@@ -597,4 +656,88 @@ export function purchaseOrderReportMaxFixture(): PurchaseOrderReportData {
     coverageBps: fixtureRatioBps(costed, max),
   };
   return report;
+}
+
+/**
+ * Issue #641 correction F2: a recorded future-dated purchase order is real
+ * saved evidence, not a line added only to monthSummary. These fixtures add the
+ * same order to the raw period row, totals, the FM category row and the
+ * monthSummary.recordedFuture, so the month browser's actual + recorded future
+ * foots to the snapshot's totals and every category/coverage ratio is derived
+ * from the updated money.
+ */
+const RECORDED_FUTURE_METRICS: PurchaseOrderReportMetrics = {
+  poCount: 1,
+  amountMinor: 777_000,
+  costedMinor: 700_000,
+  uncostedMinor: 77_000,
+  capitalMinor: 600_000,
+  marginMinor: 100_000,
+  marginBps: fixtureRatioBps(100_000, 600_000),
+  coverageBps: fixtureRatioBps(700_000, 777_000),
+};
+
+function addFixtureMetrics(
+  base: PurchaseOrderReportMetrics,
+  add: PurchaseOrderReportMetrics
+): PurchaseOrderReportMetrics {
+  return metrics(
+    base.poCount + add.poCount,
+    base.amountMinor + add.amountMinor,
+    base.uncostedMinor + add.uncostedMinor,
+    base.capitalMinor + add.capitalMinor
+  );
+}
+
+function withRecordedFuture(
+  report: PurchaseOrderReportData,
+  periodStart: string
+): PurchaseOrderReportData {
+  const future = { ...RECORDED_FUTURE_METRICS };
+  const periods = report.periods.map((period) =>
+    period.periodStart === periodStart
+      ? { ...period, ...addFixtureMetrics(period, future) }
+      : period
+  );
+  const categories = report.categories.map((category) =>
+    category.businessCategory === "FM"
+      ? { ...category, ...addFixtureMetrics(category, future) }
+      : category
+  );
+  return {
+    ...report,
+    totals: addFixtureMetrics(report.totals, future),
+    periods,
+    categories,
+    monthSummary: {
+      ...report.monthSummary!,
+      recordedFuture: future,
+    },
+  };
+}
+
+/**
+ * The coherent day fixture with one future-dated saved order. The day row is
+ * future-dated, so the chart's actual period filter still excludes it while
+ * the raw totals and category rows include it; monthSummary.actual remains the
+ * elapsed sample and recordedFuture carries the one order separately.
+ */
+export function purchaseOrderReportMonthWithRecordedFutureFixture(): PurchaseOrderReportData {
+  return withRecordedFuture(
+    structuredClone(purchaseOrderReportMonthFixture()),
+    "2026-11-25"
+  );
+}
+
+/**
+ * The coherent year fixture with one future-dated saved order. November's raw
+ * row and the year totals include it; monthSummary.actual and
+ * currentProjection.currentMonth.actual stay month-to-date, and the difference
+ * is recordedFuture.
+ */
+export function purchaseOrderReportYearWithRecordedFutureFixture(): PurchaseOrderReportData {
+  return withRecordedFuture(
+    structuredClone(purchaseOrderReportYearFixture()),
+    "2026-11-01"
+  );
 }

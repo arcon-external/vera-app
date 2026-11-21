@@ -52,7 +52,7 @@ import { Button, Card, SectionHeading, StatusBanner } from "./components/ui";
 import { MAX_MARGIN_PERCENT, parseMoneyInput } from "./format";
 import type { CurrencyInfo } from "./format";
 import type { CustomerPreview, InternalBreakdown } from "./preview";
-import type { PurchaseOrderReportData } from "./poReport";
+import type { PurchaseOrderReportView } from "./poReportExport";
 import { ArchivedQuotation, resolveLiveEntry } from "./archive";
 import {
   applyQuotationCopy,
@@ -2410,8 +2410,8 @@ function App() {
   // only passes that exact snapshot to the native renderer. The binding never
   // refetches, so the PDF cannot disagree with the screen.
   const handleExportPurchaseOrderReport = useCallback(
-    (report: PurchaseOrderReportData) =>
-      ExportPurchaseOrderReport(JSON.stringify(report)),
+    (view: PurchaseOrderReportView) =>
+      ExportPurchaseOrderReport(JSON.stringify(view)),
     []
   );
 

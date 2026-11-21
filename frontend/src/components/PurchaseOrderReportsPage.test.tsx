@@ -7,15 +7,20 @@ import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
+  purchaseOrderReportMonthWithRecordedFutureFixture,
   purchaseOrderReportYearFixture,
+  purchaseOrderReportYearWithRecordedFutureFixture,
 } from "../poReportFixtures";
 import {
   initialReportFilters,
   reportPeriodRange,
+  reportPresetRange,
   reportRangeLabel,
   toReportQuery,
 } from "../poReportPage";
 import type { PurchaseOrderReportData } from "../poReport";
+import type { PurchaseOrderReportView } from "../poReportExport";
+import { nextMonthStart } from "../poReportComparison";
 import type { CurrencyInfo } from "../format";
 import { todayWIB } from "../workspaceSettings";
 import { ToastProvider } from "../toast";
@@ -62,9 +67,45 @@ const CATALOGUE = [IDR, USD];
 
 type Query = ReturnType<typeof toReportQuery>;
 
+/**
+ * The base fixture is a partial "this year" snapshot and predates the
+ * server-owned monthSummary. These tests are about the page's older seams, so
+ * they attach a truthful current-month readout from the report's own period
+ * row: actual-to-date is present while the month forecast is explicitly
+ * unavailable (the fixture's history is not a current-year sample). The
+ * dedicated month tests below use the coherent year/month fixtures.
+ */
 function reportFor(query: Query): PurchaseOrderReportData {
   const report = purchaseOrderReportFixture();
   report.filter = { ...query };
+  const month = report.asOf.slice(0, 7);
+  const period = report.periods.find(
+    (row) => row.periodStart === `${month}-01`
+  );
+  if (period !== undefined && report.monthSummary === undefined) {
+    report.monthSummary = {
+      month,
+      from: `${month}-01`,
+      to: nextMonthStart(month),
+      asOf: report.asOf,
+      mode: "month",
+      actual: {
+        poCount: period.poCount,
+        amountMinor: period.amountMinor,
+        costedMinor: period.costedMinor,
+        uncostedMinor: period.uncostedMinor,
+        capitalMinor: period.capitalMinor,
+        marginMinor: period.marginMinor,
+        marginBps: period.marginBps,
+        coverageBps: period.coverageBps,
+      },
+      projection: {
+        status: "unavailable",
+        reason: "insufficient_months",
+        method: "No current-year forecast in this fixture.",
+      },
+    };
+  }
   return report;
 }
 
@@ -158,7 +199,7 @@ function calls(): Query[] {
 interface RenderOptions {
   defaultCurrency?: string;
   catalogue?: CurrencyInfo[] | null;
-  onExport?: (report: PurchaseOrderReportData) => Promise<string>;
+  onExport?: (view: PurchaseOrderReportView) => Promise<string>;
 }
 
 async function renderPage(options: RenderOptions = {}): Promise<void> {
@@ -222,8 +263,11 @@ describe("Reports filters (issue #630)", () => {
     expect(calls()[3].currency).toBe("USD");
 
     await choose("Bucket", "Year");
+    // The year-bucketed overview is a new read, but the month browser reuses
+    // the exact annual snapshot the initial Year view already loaded.
     expect(reportMock).toHaveBeenCalledTimes(5);
     expect(calls()[4].bucket).toBe("year");
+    expect(calls()[3].bucket).toBe("month");
 
     await typeDate("From date", "2025-12-01");
     await flush();
@@ -250,12 +294,13 @@ describe("Reports filters (issue #630)", () => {
     reportMock.mockImplementationOnce(async (query: Query) => reportFor(query));
     reportMock.mockImplementationOnce(() => pending.promise);
     await renderPage({ onExport: async () => "/tmp/opencode/x.pdf" });
-    expect(document.body.textContent).toContain("Jan 2026");
+    expect(document.body.textContent).toContain("November 2026");
 
     await choose("Bucket", "Year");
 
-    // The previous monthly table is still visible, labelled as updating.
-    expect(document.body.textContent).toContain("Jan 2026");
+    // The previous month section stays visible under its own heading while
+    // the next overview loads; it never repaints old money as the new period.
+    expect(document.body.textContent).toContain("November 2026");
     expect(document.body.textContent).toContain("Updating the report");
     expect(button("Export PDF").disabled).toBe(true);
 
@@ -264,10 +309,9 @@ describe("Reports filters (issue #630)", () => {
     });
     await flush();
 
-    expect(document.body.textContent).toContain("2026");
-    expect(document.body.textContent).not.toContain("Jan 2026");
     expect(document.body.textContent).not.toContain("Updating the report");
     expect(button("Export PDF").disabled).toBe(false);
+    expect(document.body.textContent).toContain("November 2026");
   });
 
   it("drops a late response from the previous filter", async () => {
@@ -394,22 +438,31 @@ describe("Reports figures (issue #630)", () => {
     expect(unassigned?.textContent).not.toContain("0.00%");
   });
 
-  it("marks a partial period and foots both tables", async () => {
+  it("foots the category table and shows the selected month's six metrics", async () => {
     await renderPage();
 
-    expect(document.body.textContent).toContain("Partial");
-    const tables = [
-      document.querySelector('table[aria-label="Category totals"]'),
-      document.querySelector('table[aria-label="Period totals"]'),
-    ];
-    for (const table of tables) {
-      if (table === null) throw new Error("expected both actual tables");
-      const foot = table.querySelector("tfoot");
-      expect(foot?.textContent).toContain("Total");
-      expect(foot?.textContent).toContain("Rp480.000.000");
-      expect(foot?.textContent).toContain("Rp42.000.000");
-      expect(foot?.textContent).toContain("10.77%");
-    }
+    expect(document.body.textContent).toContain("Actual to date");
+    const category = document.querySelector(
+      'table[aria-label="Category totals"]'
+    );
+    expect(category).not.toBeNull();
+    expect(category?.querySelector("tfoot")?.textContent).toContain(
+      "Rp480.000.000"
+    );
+    const month = document.querySelector('table[aria-label="Period totals"]');
+    expect(month).not.toBeNull();
+    expect(month?.querySelectorAll("tbody tr")).toHaveLength(6);
+    const labels = Array.from(month?.querySelectorAll("tbody th") ?? []).map(
+      (node) => node.textContent
+    );
+    expect(labels).toEqual([
+      "POs",
+      "PO amount",
+      "Costed amount",
+      "Capital",
+      "PO margin",
+      "PO margin %",
+    ]);
   });
 
   it("keeps the last column's body values inside the same right inset as its header", async () => {
@@ -420,8 +473,8 @@ describe("Reports figures (issue #630)", () => {
       if (table === null) throw new Error(`expected the ${label} table`);
       const header = table.querySelector("thead th:last-child");
       const cell = table.querySelector("tbody td:last-child");
-      expect(header?.className).toContain("pr-5");
-      expect(cell?.className).toContain("pr-5");
+      expect(header?.className).toContain("text-right");
+      expect(cell?.className).toContain("text-right");
     }
   });
 
@@ -468,7 +521,11 @@ describe("Reports figures (issue #630)", () => {
 
     expect(document.body.textContent).toContain("No purchase orders");
     expect(document.body.textContent).toContain(reportRangeLabel(calls()[0]));
-    expect(document.body.textContent).not.toContain("PO amount");
+    expect(document.querySelector('[aria-label="Report KPIs"]')).toBeNull();
+    // The independent month browser is not hidden by the empty overview.
+    expect(
+      document.querySelector("[data-month-browser]")
+    ).not.toBeNull();
   });
 
   it("shows a real error state with retry, never fake zeros", async () => {
@@ -648,11 +705,11 @@ describe("current period toggle (issue #638)", () => {
     expect(
       document.querySelector("[data-report-period-context]")?.textContent
     ).toBe("Current year to date");
-    expect(kpi?.textContent).toContain("Rp480.000.000");
-    // The ghost December base is Rp50m and the November remainder is Rp20m;
+    expect(kpi?.textContent).toContain("Rp641.200.000");
+    // The ghost December base is Rp50m and the November remainder is Rp110m;
     // neither may appear in the actual total.
-    expect(kpi?.textContent).not.toContain("Rp530.000.000");
-    expect(kpi?.textContent).not.toContain("Rp500.000.000");
+    expect(kpi?.textContent).not.toContain("Rp691.200.000");
+    expect(kpi?.textContent).not.toContain("Rp751.200.000");
 
     expect(summary()?.textContent).toContain("Rest of this month");
     expect(summary()?.textContent).toContain("Per remaining month");
@@ -695,10 +752,8 @@ describe("current period toggle (issue #638)", () => {
     const periodRows = document.querySelectorAll(
       'table[aria-label="Period totals"] tbody tr'
     );
-    expect(periodRows).toHaveLength(19);
-    expect(
-      document.querySelector('table[aria-label="Period totals"]')?.textContent
-    ).not.toContain("30 Nov");
+    expect(periodRows).toHaveLength(6);
+    expect(document.body.textContent).toContain("Actual to date");
     expect(document.querySelector("[data-chart-remainder]")).toBeNull();
     expect(
       document.querySelectorAll('[data-chart-bucket][data-projected="true"]')
@@ -727,13 +782,13 @@ describe("current period toggle (issue #638)", () => {
     expect(button("Year view").getAttribute("aria-pressed")).toBe("true");
     expect(
       document.querySelector('[aria-label="Report KPIs"]')?.textContent
-    ).toContain("Rp480.000.000");
+    ).toContain("Rp641.200.000");
     expect(document.querySelector("[data-chart-remainder]")).not.toBeNull();
     expect(
       document.querySelectorAll(
         'table[aria-label="Period totals"] tbody tr'
       )
-    ).toHaveLength(11);
+    ).toHaveLength(6);
   });
 
   it("clears the toggle and draws no ghost for a historical preset", async () => {
@@ -742,11 +797,27 @@ describe("current period toggle (issue #638)", () => {
 
     await choose("Date range preset", "Last year");
 
-    expect(calls().at(-1)).toMatchObject({
-      from: "2025-01-01",
-      to: "2026-01-01",
-      bucket: "month",
-    });
+    expect(
+      calls().find(
+        (call) =>
+          call.from === "2025-01-01" &&
+          call.to === "2026-01-01" &&
+          call.bucket === "month"
+      )
+    ).toBeDefined();
+    // The selected current month is still 2026-11, and the initial Year view
+    // already loaded that exact monthly snapshot. No new annual read is needed
+    // when Performance becomes historical.
+    expect(
+      calls()
+        .slice(1)
+        .filter(
+          (call) =>
+            call.from === "2026-01-01" &&
+            call.to === "2027-01-01" &&
+            call.bucket === "month"
+        )
+    ).toHaveLength(0);
     expect(button("Month view").getAttribute("aria-pressed")).toBe("false");
     expect(button("Year view").getAttribute("aria-pressed")).toBe("false");
     expect(summary()?.getAttribute("data-projection-mode")).toBe("none");
@@ -797,7 +868,7 @@ describe("current period toggle (issue #638)", () => {
   it("exports the same currentProjection the screen is showing", async () => {
     usePeriodReport();
     const onExport = vi.fn(
-      async (_report: PurchaseOrderReportData) => "/tmp/opencode/report.pdf"
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/report.pdf"
     );
     await renderPage({ onExport });
 
@@ -806,13 +877,17 @@ describe("current period toggle (issue #638)", () => {
     });
     await flush();
 
-    const yearSnapshot = onExport.mock.calls[0][0] as PurchaseOrderReportData;
-    expect(yearSnapshot.currentProjection.mode).toBe("month");
-    expect(yearSnapshot.currentProjection.status).toBe("available");
-    expect(yearSnapshot.currentProjection.buckets).toHaveLength(1);
+    const yearView = onExport.mock.calls[0][0] as PurchaseOrderReportView;
+    expect(yearView.version).toBe(1);
+    expect(yearView.sources).toHaveLength(1);
+    expect(yearView.sources[0].currentProjection.mode).toBe("month");
+    expect(yearView.sources[0].currentProjection.status).toBe("available");
+    expect(yearView.sources[0].currentProjection.buckets).toHaveLength(1);
     expect(
-      yearSnapshot.currentProjection.currentMonth?.remainder.base
-    ).toBe(20_000_000);
+      yearView.sources[0].currentProjection.currentMonth?.remainder.base
+    ).toBe(110_000_000);
+    expect(yearView.periods.months).toEqual(["2026-11"]);
+    expect("currentMonthSource" in yearView.periods).toBe(false);
 
     await act(async () => {
       button("Month view").click();
@@ -823,10 +898,12 @@ describe("current period toggle (issue #638)", () => {
     });
     await flush();
 
-    const monthSnapshot = onExport.mock.calls[1][0] as PurchaseOrderReportData;
-    expect(monthSnapshot.currentProjection.mode).toBe("day");
-    expect(monthSnapshot.currentProjection.buckets).toHaveLength(11);
-    expect(monthSnapshot.filter).toEqual(calls().at(-1));
+    const monthView = onExport.mock.calls[1][0] as PurchaseOrderReportView;
+    expect(monthView.sources[0].currentProjection.mode).toBe("day");
+    expect(monthView.sources[0].currentProjection.buckets).toHaveLength(11);
+    expect(monthView.sources[0].filter).toEqual(calls().at(-1));
+    expect(monthView.periods.currentMonthSource).toBe(0);
+    expect(monthView.periods.sources).toEqual([0]);
   });
 });
 
@@ -838,7 +915,7 @@ describe("Reports export seam (issue #630)", () => {
 
   it("sends the visible normalized snapshot to the callback", async () => {
     const onExport = vi.fn(
-      async (_report: PurchaseOrderReportData) => "/tmp/opencode/po-report.pdf"
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/po-report.pdf"
     );
     await renderPage({ onExport });
 
@@ -849,9 +926,11 @@ describe("Reports export seam (issue #630)", () => {
     await flush();
 
     expect(onExport).toHaveBeenCalledTimes(1);
-    const sent = onExport.mock.calls[0][0] as PurchaseOrderReportData;
-    expect(sent.filter).toEqual(calls()[0]);
-    expect(sent.totals).toEqual(purchaseOrderReportFixture().totals);
+    const sent = onExport.mock.calls[0][0] as PurchaseOrderReportView;
+    expect(sent.version).toBe(1);
+    expect(sent.overview).toBe(0);
+    expect(sent.sources[0].filter).toEqual(calls()[0]);
+    expect(sent.sources[0].totals).toEqual(purchaseOrderReportFixture().totals);
     expect(document.body.textContent).toContain(
       "Report saved to /tmp/opencode/po-report.pdf"
     );
@@ -917,3 +996,769 @@ function deferred<T>(): {
   });
   return { promise, resolve, reject };
 }
+
+describe("independent month browser (issue #641)", () => {
+  const PINNED_TODAY = "2026-11-19";
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${PINNED_TODAY}T03:00:00Z`));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function isCurrentDayQuery(query: Query): boolean {
+    return (
+      query.bucket === "day" &&
+      query.from === "2026-11-01" &&
+      query.to === "2026-12-01"
+    );
+  }
+
+  function isAnnual2026Query(query: Query): boolean {
+    return (
+      query.bucket === "month" &&
+      query.from === "2026-01-01" &&
+      query.to === "2027-01-01"
+    );
+  }
+
+  function respond(query: Query): PurchaseOrderReportData {
+    let report: PurchaseOrderReportData;
+    if (isCurrentDayQuery(query)) {
+      report = purchaseOrderReportMonthFixture();
+    } else if (isAnnual2026Query(query)) {
+      report = purchaseOrderReportYearFixture();
+    } else if (
+      query.bucket === "month" &&
+      query.from === "2027-01-01" &&
+      query.to === "2028-01-01"
+    ) {
+      report = purchaseOrderReportYearFixture();
+      report.filter = { ...query };
+      report.periods = report.periods.map((period, index) => ({
+        ...period,
+        periodStart: `2027-${String(index + 1).padStart(2, "0")}-01`,
+        ...{
+          poCount: 0,
+          amountMinor: 0,
+          costedMinor: 0,
+          uncostedMinor: 0,
+          capitalMinor: 0,
+          marginMinor: 0,
+          marginBps: null,
+          coverageBps: null,
+        },
+      }));
+      report.currentProjection = {
+        ...report.currentProjection,
+        mode: "none",
+        status: "unavailable",
+        reason: "not_current_period",
+        buckets: [],
+        currentMonth: undefined,
+      };
+      report.monthSummary = undefined;
+      return report;
+    } else {
+      report = purchaseOrderReportFixture();
+      report.filter = { ...query };
+      const month = report.asOf.slice(0, 7);
+      const period = report.periods.find(
+        (row) => row.periodStart === `${month}-01`
+      );
+      if (period !== undefined) {
+        report.monthSummary = {
+          month,
+          from: `${month}-01`,
+          to: nextMonthStart(month),
+          asOf: report.asOf,
+          mode: "month",
+          actual: {
+            poCount: period.poCount,
+            amountMinor: period.amountMinor,
+            costedMinor: period.costedMinor,
+            uncostedMinor: period.uncostedMinor,
+            capitalMinor: period.capitalMinor,
+            marginMinor: period.marginMinor,
+            marginBps: period.marginBps,
+            coverageBps: period.coverageBps,
+          },
+          projection: {
+            status: "unavailable",
+            reason: "insufficient_months",
+            method: "No current-year forecast in this fixture.",
+          },
+        };
+      }
+    }
+    report.filter = { ...query };
+    return report;
+  }
+
+  function zeroYearReport(): PurchaseOrderReportData {
+    const report = purchaseOrderReportYearFixture();
+    const zero = {
+      poCount: 0,
+      amountMinor: 0,
+      costedMinor: 0,
+      uncostedMinor: 0,
+      capitalMinor: 0,
+      marginMinor: 0,
+      marginBps: null,
+      coverageBps: null,
+    } as const;
+    report.totals = { ...zero };
+    report.periods = report.periods.map((period) => ({ ...period, ...zero }));
+    report.categories = report.categories.map((category) => ({
+      ...category,
+      ...zero,
+    }));
+    report.currentProjection = {
+      ...report.currentProjection,
+      status: "unavailable",
+      reason: "no_data",
+      buckets: [],
+      currentMonth: undefined,
+    };
+    report.monthSummary = {
+      ...report.monthSummary!,
+      actual: { ...zero },
+      projection: {
+        status: "unavailable",
+        reason: "no_data",
+        method: report.monthSummary!.projection.method,
+      },
+    };
+    return report;
+  }
+
+  function monthBrowser(): HTMLElement {
+    const found = document.querySelector<HTMLElement>("[data-month-browser]");
+    if (found === null) throw new Error("no month browser");
+    return found;
+  }
+
+  function chartMarks(): Element | null {
+    return document.querySelector("[data-chart-marks]");
+  }
+
+  it("seeds the month from the server's WIB as-of, not the client clock", async () => {
+    vi.setSystemTime(new Date("2026-12-02T03:00:00Z"));
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+
+    await renderPage();
+
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(monthBrowser().textContent).toContain("November 2026");
+    expect(monthBrowser().textContent).not.toContain("December 2026");
+  });
+
+  it("opens the default Year view with one query and browses months without another", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    const marks = chartMarks();
+    const kpiBefore = document.querySelector('[aria-label="Report KPIs"]')
+      ?.textContent;
+    expect(monthBrowser().textContent).toContain("November 2026");
+    expect(monthBrowser().textContent).toContain("Actual to date");
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(monthBrowser().textContent).toContain("October 2026");
+    expect(monthBrowser().textContent).toContain("Recorded");
+    expect(document.querySelector('[aria-label="Report KPIs"]')?.textContent).toBe(
+      kpiBefore
+    );
+    expect(chartMarks()).toBe(marks);
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(monthBrowser().textContent).toContain("November 2026");
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(monthBrowser().textContent).toContain("December 2026");
+    const estimated = monthBrowser().querySelector(
+      '[data-month-evidence="estimated"]'
+    );
+    expect(estimated?.textContent).toContain("Estimated forecast (not actual)");
+    expect(estimated?.textContent).toContain("Rp50.000.000");
+    expect(estimated?.getAttribute("aria-label")).toContain(
+      "Estimates are not actual evidence"
+    );
+    expect(chartMarks()).toBe(marks);
+  });
+
+  it("preserves an explicit month across a Performance filter change", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("October 2026");
+
+    await choose("Category", "Unassigned");
+    await flush();
+
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1].category).toBe("UNASSIGNED");
+    expect(monthBrowser().textContent).toContain("October 2026");
+    expect(monthBrowser().textContent).not.toContain("November 2026");
+  });
+
+  it("does not treat a This year partial preset as the annual monthly source", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    const initial = calls()[0];
+    expect(initial).toEqual(
+      toReportQuery(initialReportFilters(PINNED_TODAY, "IDR"))
+    );
+
+    await choose("Date range preset", "This year");
+
+    const partial = toReportQuery({
+      ...initialReportFilters(PINNED_TODAY, "IDR"),
+      preset: "this-year",
+      period: null,
+      ...reportPresetRange("this-year", PINNED_TODAY),
+    });
+    expect(calls()).toEqual([initial, partial]);
+    expect(partial.bucket).toBe("month");
+    expect(partial.to).not.toBe(initial.to);
+    // The partial preset did not become an annual source; the browser reuses
+    // the exact annual snapshot from the initial Year view.
+    expect(monthBrowser().textContent).toContain("Monthly snapshot");
+    expect(monthBrowser().textContent).toContain("November 2026");
+  });
+
+  it("reuses the cached annual snapshot for a day view's previous month", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    const marks = chartMarks();
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(monthBrowser().textContent).toContain("October 2026");
+    expect(monthBrowser().textContent).toContain("Monthly snapshot");
+    expect(chartMarks()).toBe(marks);
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(monthBrowser().textContent).toContain("November 2026");
+    expect(monthBrowser().textContent).toContain("Rp190.000.000");
+    expect(chartMarks()).toBe(marks);
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(monthBrowser().textContent).toContain("December 2026");
+    expect(
+      monthBrowser().querySelector('[data-month-evidence="estimated"]')
+        ?.textContent
+    ).toContain("Rp50.000.000");
+    expect(chartMarks()).toBe(marks);
+  });
+
+  it("fetches a monthly source when the year overview has no cached match", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    const initial = calls()[0];
+
+    await choose("Bucket", "Year");
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1].bucket).toBe("year");
+
+    // A year-bucketed overview with a new category is not a monthly source. The
+    // browser must load the exact annual monthly snapshot for that category.
+    await choose("Category", "Unassigned");
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(calls()[2]).toMatchObject({
+      from: initial.from,
+      to: initial.to,
+      bucket: "year",
+      category: "UNASSIGNED",
+    });
+    expect(calls()[3]).toEqual({
+      ...initial,
+      category: "UNASSIGNED",
+      bucket: "month",
+    });
+    expect(monthBrowser().textContent).toContain("Monthly snapshot");
+    expect(monthBrowser().textContent).toContain("November 2026");
+  });
+
+  it("loads a new year once and reuses it when the selection returns", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    const marks = chartMarks();
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("December 2026");
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1]).toMatchObject({
+      from: "2027-01-01",
+      to: "2028-01-01",
+      bucket: "month",
+    });
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(monthBrowser().textContent).toContain("beyond the current year");
+    expect(
+      monthBrowser().querySelector("[data-month-scope]")?.textContent
+    ).toContain("All categories");
+    expect(
+      monthBrowser().querySelector("[data-month-scope]")?.textContent
+    ).toContain("IDR");
+    expect(chartMarks()).toBe(marks);
+    expect(chartMarks()?.getAttribute("data-chart-motion")).toBe(
+      marks?.getAttribute("data-chart-motion")
+    );
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(monthBrowser().textContent).toContain("December 2026");
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(chartMarks()).toBe(marks);
+  });
+
+  it("deduplicates an in-flight annual read when the selection returns", async () => {
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    reportMock.mockImplementationOnce(() => pending.promise);
+
+    // December 2026 is covered by the cached year snapshot; January 2027 is a
+    // new year and starts the one in-flight annual read.
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(3);
+    expect(monthBrowser().textContent).toContain("Loading January 2027");
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      pending.resolve(
+        respond({
+          from: "2027-01-01",
+          to: "2028-01-01",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        })
+      );
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(monthBrowser().textContent).toContain("beyond the current year");
+  });
+
+  it("prints a maximum exact month amount without rounding or clipping", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = purchaseOrderReportMaxFixture();
+      report.filter = { ...query };
+      report.monthSummary = {
+        month: "2026-11",
+        from: "2026-11-01",
+        to: "2026-12-01",
+        asOf: report.asOf,
+        mode: "month",
+        actual: report.totals,
+        projection: {
+          status: "unavailable",
+          reason: "insufficient_months",
+          method: "No current-year forecast in this fixture.",
+        },
+      };
+      return report;
+    });
+    await renderPage();
+
+    expect(
+      monthBrowser().querySelector('[data-month-metric="PO amount"]')
+        ?.textContent
+    ).toBe("Rp9.007.199.254.740.991");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="POs"]')?.textContent
+    ).toBe("9,007,199,254,740,991");
+  });
+
+  it("keeps a negative month margin signed and danger-toned", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = purchaseOrderReportMonthFixture();
+      report.filter = { ...query };
+      report.monthSummary!.actual.marginMinor = -1_000_000;
+      report.monthSummary!.actual.marginBps = -10000;
+      return report;
+    });
+    await renderPage();
+
+    const margin = monthBrowser().querySelector(
+      '[data-month-metric="PO margin"]'
+    );
+    expect(margin?.textContent).toContain("Rp-1.000.000");
+    expect(margin?.className).toContain("text-danger-700");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="PO margin %"]')
+        ?.textContent
+    ).toBe("-100.00%");
+  });
+
+  it("never paints old money under a loading or failed new month", async () => {
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport: async () => "/tmp/opencode/loading.pdf" });
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("Rp190.000.000");
+    reportMock.mockImplementationOnce(() => pending.promise);
+
+    // Move through the cached December into an uncached January 2027, whose
+    // annual source is still in flight.
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(monthBrowser().textContent).toContain("Loading January 2027");
+    expect(monthBrowser().textContent).not.toContain("Rp190.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    await act(async () => {
+      pending.resolve(
+        respond({
+          from: "2027-01-01",
+          to: "2028-01-01",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        })
+      );
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("beyond the current year");
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("reports a failed selected source without old money and blocks export", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+    reportMock.mockRejectedValueOnce(
+      new Error("The monthly API is unreachable.")
+    );
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(monthBrowser().textContent).toContain(
+      "The monthly API is unreachable."
+    );
+    expect(monthBrowser().textContent).not.toContain("Rp190.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+    expect(monthBrowser().textContent).toContain("Retry");
+
+    reportMock.mockImplementationOnce(async (query: Query) => {
+      const report = respond({
+        from: "2027-01-01",
+        to: "2028-01-01",
+        bucket: "month",
+        category: "all",
+        currency: "IDR",
+      });
+      report.filter = { ...query };
+      return report;
+    });
+    await act(async () => {
+      button("Retry month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(monthBrowser().textContent).not.toContain(
+      "The monthly API is unreachable."
+    );
+    expect(monthBrowser().textContent).toContain("beyond the current year");
+  });
+
+  it("keeps the zero month browser visible under an empty overview", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = zeroYearReport();
+      report.filter = { ...query };
+      return report;
+    });
+    await renderPage({ onExport: async () => "/tmp/opencode/zero.pdf" });
+
+    expect(document.body.textContent).toContain("No purchase orders");
+    expect(document.querySelector('[aria-label="Report KPIs"]')).toBeNull();
+    expect(document.querySelector("[data-chart-marks]")).toBeNull();
+    expect(monthBrowser().textContent).toContain("November 2026");
+    expect(monthBrowser().textContent).toContain("Actual to date");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="POs"]')?.textContent
+    ).toBe("0");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="PO margin %"]')
+        ?.textContent
+    ).toBe("-");
+    expect(button("Export PDF").disabled).toBe(false);
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(monthBrowser().textContent).toContain("October 2026");
+    expect(monthBrowser().textContent).toContain("Recorded");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="PO amount"]')
+        ?.textContent
+    ).toContain("Rp0");
+  });
+
+  it("blocks export and labels the section when the annual as-of differs", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = respond(query);
+      if (query.from === "2027-01-01" && query.to === "2028-01-01") {
+        report.asOf = "2026-11-20";
+      }
+      report.filter = { ...query };
+      return report;
+    });
+    await renderPage();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+
+    expect(monthBrowser().textContent).toContain("January 2027");
+    expect(monthBrowser().textContent).toContain(
+      "different business date from the overview"
+    );
+    expect(monthBrowser().textContent).toContain("As of 20 Nov 2026");
+    expect(button("Export PDF").disabled).toBe(true);
+  });
+
+  it("exports the frozen selected month with no extra request", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/month.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    const view = onExport.mock.calls[0][0] as PurchaseOrderReportView;
+    expect(view.version).toBe(1);
+    expect(view.sources).toHaveLength(2);
+    expect(view.sources[0].filter.bucket).toBe("day");
+    expect(view.sources[1].filter).toEqual(calls()[0]);
+    expect(view.periods.months).toEqual(["2026-10"]);
+    expect(view.periods.sources).toEqual([1]);
+    expect("currentMonthSource" in view.periods).toBe(false);
+
+    // A later selection cannot alter the envelope already handed over.
+    const frozen = JSON.stringify(view);
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    expect(JSON.stringify(view)).toBe(frozen);
+  });
+
+  it("shows recorded future evidence separately from the estimated remainder", async () => {
+    const annualQuery = toReportQuery(initialReportFilters(PINNED_TODAY, "IDR"));
+    const dayQuery = toReportQuery({
+      ...initialReportFilters(PINNED_TODAY, "IDR"),
+      preset: "custom",
+      period: "month",
+      ...reportPeriodRange("month", PINNED_TODAY),
+      bucket: "day",
+    });
+    const sameQuery = (left: Query, right: Query): boolean =>
+      left.from === right.from &&
+      left.to === right.to &&
+      left.bucket === right.bucket &&
+      left.category === right.category &&
+      left.currency === right.currency;
+    const mocked: {
+      query: Query;
+      mode: "year" | "day";
+      report: PurchaseOrderReportData;
+    }[] = [];
+
+    reportMock.mockImplementation(async (query: Query) => {
+      // The mocked source must match the requested scope. A default
+      // Year/monthly request is answered by the coherent year fixture; only an
+      // actual Month/day request may receive the day fixture. Any other query
+      // is an unsupported relabelling and must fail loudly.
+      if (sameQuery(query, annualQuery)) {
+        const report = purchaseOrderReportYearWithRecordedFutureFixture();
+        report.filter = { ...query };
+        mocked.push({ query, mode: "year", report });
+        return report;
+      }
+      if (sameQuery(query, dayQuery)) {
+        const report = purchaseOrderReportMonthWithRecordedFutureFixture();
+        report.filter = { ...query };
+        mocked.push({ query, mode: "day", report });
+        return report;
+      }
+      throw new Error(`unexpected source query ${JSON.stringify(query)}`);
+    });
+
+    await renderPage();
+    expect(mocked.map(({ query, mode }) => ({ query, mode }))).toEqual([
+      { query: annualQuery, mode: "year" },
+    ]);
+    expect(mocked[0].report.filter).toEqual(annualQuery);
+    expect(mocked[0].report.currentProjection.mode).toBe("month");
+    expect(
+      mocked[0].report.periods.every((period) => period.periodStart.endsWith("-01"))
+    ).toBe(true);
+
+    await act(async () => {
+      button("Month view").click();
+    });
+    await flush();
+
+    expect(calls()).toEqual([annualQuery, dayQuery]);
+    expect(mocked.map(({ query, mode }) => ({ query, mode }))).toEqual([
+      { query: annualQuery, mode: "year" },
+      { query: dayQuery, mode: "day" },
+    ]);
+    expect(mocked[1].report.filter).toEqual(dayQuery);
+    expect(mocked[1].report.currentProjection.mode).toBe("day");
+    expect(mocked[1].report.totals.amountMinor).toBe(190_777_000);
+    expect(
+      mocked[1].report.periods.find(
+        (period) => period.periodStart === "2026-11-25"
+      )?.amountMinor
+    ).toBe(777_000);
+
+    const recorded = monthBrowser().querySelector(
+      '[data-month-evidence="recorded-future"]'
+    );
+    const estimated = monthBrowser().querySelector(
+      '[data-month-evidence="estimated"]'
+    );
+    expect(recorded?.textContent).toContain("Rp777.000");
+    expect(recorded?.textContent).toContain("Rp600.000");
+    expect(estimated?.textContent).toContain("Estimated remainder (not actual)");
+    expect(estimated?.textContent).toContain("Rp110.000.000");
+    expect(estimated?.getAttribute("data-estimated")).toBe("true");
+    expect(
+      monthBrowser().querySelector("table")?.getAttribute("data-estimated")
+    ).toBeNull();
+    // The future order is in the raw totals/period/category rows (coherent
+    // day fixture), but the month actual remains month-to-date and the
+    // estimate stays a separate alternative. No cell renders recorded+forecast.
+    expect(
+      document.querySelector('[aria-label="Report KPIs"]')?.textContent
+    ).toContain("Rp190.777.000");
+    expect(
+      monthBrowser().querySelector('[data-month-metric="PO amount"]')
+        ?.textContent
+    ).toBe("Rp190.000.000");
+    expect(monthBrowser().textContent).not.toContain("Rp110.777.000");
+  });
+});

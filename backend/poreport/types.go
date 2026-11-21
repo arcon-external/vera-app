@@ -206,7 +206,13 @@ type Report struct {
 	// object so it can never be summed into totals or actual periods: a
 	// forecast is not evidence.
 	CurrentProjection CurrentProjection `json:"currentProjection"`
-	Notes             []Note            `json:"notes"`
+	// MonthSummary is the current calendar month's server-owned readout: the
+	// month-to-date actuals, any recorded future-dated evidence, and the
+	// current-period remainder. It exists only for an exact current-month/day
+	// or exact current-year/month report and is absent otherwise ("omitted" is
+	// not "zero"). No field in it is ever added to Totals or Periods.
+	MonthSummary *MonthSummary `json:"monthSummary,omitempty"`
+	Notes        []Note        `json:"notes"`
 }
 
 // Projection holds the two independent forecast series. A quarterly actual
@@ -322,4 +328,31 @@ type CurrentProjectionRemainder struct {
 	MarginBps    *int64 `json:"marginBps"`
 	SampleSize   int    `json:"sampleSize"`
 	Source       string `json:"source"`
+}
+
+// MonthSummary is the current calendar month's readout. Actual is month-to-date
+// evidence from the elapsed-day sample; RecordedFuture is saved evidence dated
+// after the as-of day but inside the month; Projection is an estimate. They are
+// three distinct quantities and no two are summed. Actual survives an
+// unavailable projection because a guard that blocks a forecast does not erase
+// orders that already happened.
+type MonthSummary struct {
+	Month          string                 `json:"month"`
+	From           string                 `json:"from"`
+	To             string                 `json:"to"`
+	AsOf           string                 `json:"asOf"`
+	Mode           string                 `json:"mode"`
+	Actual         Metrics                `json:"actual"`
+	RecordedFuture *Metrics               `json:"recordedFuture,omitempty"`
+	Projection     MonthSummaryProjection `json:"projection"`
+}
+
+// MonthSummaryProjection is the current month's remainder forecast, or the
+// stable reason it could not be produced. Remainder is present only when
+// available; a month-end zero remainder is still an available forecast.
+type MonthSummaryProjection struct {
+	Status    string                      `json:"status"`
+	Reason    string                      `json:"reason,omitempty"`
+	Method    string                      `json:"method"`
+	Remainder *CurrentProjectionRemainder `json:"remainder,omitempty"`
 }

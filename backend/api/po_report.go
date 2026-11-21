@@ -132,6 +132,20 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 		snapshot.HistoryOutOfRange,
 		snapshot.DailyOutOfRange,
 	)
+	monthSummary, err := poreport.BuildMonthSummary(
+		snapshot.Periods,
+		snapshot.Daily,
+		currentProjection,
+		query,
+		snapshot.AsOf,
+		snapshot.DailyOutOfRange,
+	)
+	if err != nil {
+		if errors.Is(err, poreport.ErrValueOutOfRange) {
+			return reportError(context, http.StatusUnprocessableEntity, reportErrorValueOutOfRange, err)
+		}
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "derive current month summary"})
+	}
 	report := poreport.Report{
 		GeneratedAt: now.UTC().Format(time.RFC3339),
 		AsOf:        snapshot.AsOf.Format(time.DateOnly),
@@ -151,6 +165,7 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 		CategorySeries:    snapshot.CategorySeries,
 		Projection:        projection,
 		CurrentProjection: currentProjection,
+		MonthSummary:      monthSummary,
 		Notes:             notes,
 	}
 	return context.JSON(http.StatusOK, apicontract.PurchaseOrderReport(report))

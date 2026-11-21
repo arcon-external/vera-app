@@ -184,6 +184,9 @@ func ValidateSnapshot(snapshot poreport.Report) error {
 	if err := validateCurrentProjection("currentProjection", snapshot.CurrentProjection); err != nil {
 		return err
 	}
+	if err := validateMonthSummary("monthSummary", snapshot.MonthSummary, filter, snapshot.AsOf); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -448,6 +451,96 @@ func knownCurrentProjectionReason(reason string) bool {
 	default:
 		return false
 	}
+}
+
+// validateMonthSummary pins the additive current-month readout. It is optional
+// on a report, but when present every field must describe this exact report: a
+// summary for a different month, a remainder alongside an unavailable forecast,
+// or an inexact figure is refused rather than printed under the wrong heading.
+func validateMonthSummary(name string, summary *poreport.MonthSummary, filter poreport.Query, asOf string) error {
+	if summary == nil {
+		return nil
+	}
+	month, err := time.Parse("2006-01", summary.Month)
+	if err != nil || month.Format("2006-01") != summary.Month {
+		return fmt.Errorf("purchase order report snapshot: %s.month %q is not a zero-padded YYYY-MM identifier",
+			name, summary.Month)
+	}
+	nextMonth := month.AddDate(0, 1, 0).Format(time.DateOnly)
+	if summary.From != summary.Month+"-01" || summary.To != nextMonth {
+		return fmt.Errorf("purchase order report snapshot: %s from/to %q/%q is not the calendar month %s",
+			name, summary.From, summary.To, summary.Month)
+	}
+	if summary.AsOf != asOf {
+		return fmt.Errorf("purchase order report snapshot: %s.asOf %q differs from the report's %q",
+			name, summary.AsOf, asOf)
+	}
+	if firstSeven(asOf) != summary.Month {
+		return fmt.Errorf("purchase order report snapshot: %s.month %q is not the report's as-of month %s",
+			name, summary.Month, firstSeven(asOf))
+	}
+	if err := validateDate(name+".asOf", summary.AsOf, true); err != nil {
+		return err
+	}
+
+	switch summary.Mode {
+	case poreport.ProjectionModeDay:
+		if filter.Bucket != poreport.BucketDay ||
+			filter.From != summary.From || filter.To != summary.To {
+			return fmt.Errorf("purchase order report snapshot: %s day readout does not match the report's day filter", name)
+		}
+	case poreport.ProjectionModeMonth:
+		yearStart := time.Date(month.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
+		if filter.Bucket != poreport.BucketMonth ||
+			filter.From != yearStart.Format(time.DateOnly) ||
+			filter.To != yearStart.AddDate(1, 0, 0).Format(time.DateOnly) {
+			return fmt.Errorf("purchase order report snapshot: %s month readout does not match the report's current-year filter", name)
+		}
+	default:
+		return fmt.Errorf("purchase order report snapshot: %s.mode %q is not day or month", name, summary.Mode)
+	}
+
+	if err := validateMetrics(name+".actual", summary.Actual); err != nil {
+		return err
+	}
+	if summary.RecordedFuture != nil {
+		if err := validateMetrics(name+".recordedFuture", *summary.RecordedFuture); err != nil {
+			return err
+		}
+	}
+
+	projection := summary.Projection
+	switch projection.Status {
+	case poreport.ProjectionStatusAvailable:
+		if strings.TrimSpace(projection.Reason) != "" {
+			return fmt.Errorf("purchase order report snapshot: %s.projection is available with reason %q",
+				name, projection.Reason)
+		}
+		if projection.Remainder == nil {
+			return fmt.Errorf("purchase order report snapshot: %s.projection is available without a remainder", name)
+		}
+		if err := validateCurrentRemainder(name+".projection.remainder", *projection.Remainder); err != nil {
+			return err
+		}
+	case poreport.ProjectionStatusUnavailable:
+		if strings.TrimSpace(projection.Reason) == "" {
+			return fmt.Errorf("purchase order report snapshot: %s.projection is unavailable without a reason", name)
+		}
+		if !knownCurrentProjectionReason(projection.Reason) {
+			return fmt.Errorf("purchase order report snapshot: %s.projection reason %q is not a stable current-period code",
+				name, projection.Reason)
+		}
+		if projection.Remainder != nil {
+			return fmt.Errorf("purchase order report snapshot: %s.projection is unavailable with a remainder", name)
+		}
+	default:
+		return fmt.Errorf("purchase order report snapshot: %s.projection status %q is not available or unavailable",
+			name, projection.Status)
+	}
+	if len(projection.Reason) > 64 || len(projection.Method) > 1024 {
+		return fmt.Errorf("purchase order report snapshot: %s.projection method or reason is too long", name)
+	}
+	return nil
 }
 
 func validateMetrics(name string, metrics poreport.Metrics) error {

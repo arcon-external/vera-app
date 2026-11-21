@@ -528,9 +528,21 @@ _Avoid_: Confidence, completeness score
 A calendar month that has ended before both the report end month and the as-of month in WIB. Months between the first observed PO month and the last complete month count even when they contain no orders; earlier months are not invented.
 _Avoid_: Full month, closed month
 
-**PO projection**:
-A range for the next twelve months or three years, derived from complete-month history as a low, base and high amount with a stated method and sample. It is never actual evidence and never enters a total.
-_Avoid_: Forecast actual, trend, confidence interval
+**Current-period projection**:
+The forecast for the month or year still in progress, derived from elapsed days or complete trailing months with a stated method and sample. It is an estimate, never actual evidence, and never enters an actual total.
+_Avoid_: PO projection, forecast actual, trend, confidence interval
+
+**Current month summary**:
+The server-owned readout of the current calendar month: month-to-date actuals, recorded future-dated evidence, and the current-period remainder. Actual, recorded and estimated figures are separate quantities, and none is added to another.
+_Avoid_: Monthly total, projected actual, forecast total
+
+**Recorded future-dated evidence**:
+A saved purchase order dated after the report's as-of day but inside its month. It is recorded evidence, not an estimate; it is shown separately and is never added to a forecast.
+_Avoid_: Future actual, forecast, expected order
+
+**Aggregate display**:
+A reporting layout that shows the selected section's combined rows from the server-supplied snapshot. It is a display selection, not a newly calculated total and not a change to the money definitions.
+_Avoid_: Aggregate total, summed view, combined actual
 
 ### Verification and retention
 

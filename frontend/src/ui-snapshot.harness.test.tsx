@@ -44,13 +44,19 @@ import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage"
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
+  type PurchaseOrderReportMetrics,
 } from "./poReport";
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
   purchaseOrderReportYearFixture,
+  purchaseOrderReportYearWithRecordedFutureFixture,
 } from "./poReportFixtures";
+import {
+  resolveMonthReadout,
+  type PurchaseOrderMonthReadout,
+} from "./poReportComparison";
 import { ToastProvider } from "./toast";
 import { PurchaseOrderListView } from "./components/PurchaseOrderListPage";
 import { ReconciliationPaneContent, ReconciliationSheetTrigger } from "./components/ReconciliationPane";
@@ -1341,6 +1347,183 @@ const DELETION_CHANGED = deletionReducer(DELETION_CHAIN_READY, {
 const REPORTS_MAX_AED = purchaseOrderReportMaxFixture();
 REPORTS_MAX_AED.filter = { ...REPORTS_MAX_AED.filter, currency: "AED" };
 
+function cloneReport(report: PurchaseOrderReportData): PurchaseOrderReportData {
+  return structuredClone(report);
+}
+
+function periodMetrics(
+  period: PurchaseOrderReportData["periods"][number]
+): PurchaseOrderReportMetrics {
+  return {
+    poCount: period.poCount,
+    amountMinor: period.amountMinor,
+    costedMinor: period.costedMinor,
+    uncostedMinor: period.uncostedMinor,
+    capitalMinor: period.capitalMinor,
+    marginMinor: period.marginMinor,
+    marginBps: period.marginBps,
+    coverageBps: period.coverageBps,
+  };
+}
+
+function zeroMonthMetrics() {
+  return {
+    poCount: 0,
+    amountMinor: 0,
+    costedMinor: 0,
+    uncostedMinor: 0,
+    capitalMinor: 0,
+    marginMinor: 0,
+    marginBps: null,
+    coverageBps: null,
+  };
+}
+
+// Issue #641: the static Reports evidence must include the real month browser,
+// not the old fallback period table. These readouts are the same pure selection
+// the live hook passes; no financial figure is recomputed here.
+const REPORT_MONTH_ANNUAL = purchaseOrderReportYearWithRecordedFutureFixture();
+const REPORT_MONTH_CURRENT_READOUT = resolveMonthReadout({
+  overview: purchaseOrderReportFixture(),
+  month: "2026-11",
+  annualSource: REPORT_MONTH_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+const REPORT_MONTH_PAST_ZERO = cloneReport(purchaseOrderReportYearFixture());
+REPORT_MONTH_PAST_ZERO.periods[0] = {
+  ...REPORT_MONTH_PAST_ZERO.periods[0],
+  ...zeroMonthMetrics(),
+};
+const REPORT_MONTH_PAST_ZERO_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_PAST_ZERO,
+  month: "2026-01",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MONTH_FUTURE = purchaseOrderReportYearFixture();
+const REPORT_MONTH_FUTURE_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_FUTURE,
+  month: "2026-12",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MONTH_FUTURE_UNAVAILABLE = cloneReport(
+  purchaseOrderReportYearFixture()
+);
+REPORT_MONTH_FUTURE_UNAVAILABLE.currentProjection = {
+  ...REPORT_MONTH_FUTURE_UNAVAILABLE.currentProjection,
+  status: "unavailable",
+  reason: "insufficient_days",
+  buckets: [],
+  currentMonth: undefined,
+};
+const REPORT_MONTH_FUTURE_UNAVAILABLE_READOUT = resolveMonthReadout({
+  overview: REPORT_MONTH_FUTURE_UNAVAILABLE,
+  month: "2026-12",
+  annualSource: null,
+  annualStatus: "loading",
+  annualError: "",
+});
+
+const REPORT_MAX_CURRENT = purchaseOrderReportMaxFixture();
+REPORT_MAX_CURRENT.monthSummary = {
+  month: "2026-11",
+  from: "2026-11-01",
+  to: "2026-12-01",
+  asOf: REPORT_MAX_CURRENT.asOf,
+  mode: "month",
+  actual: periodMetrics(REPORT_MAX_CURRENT.periods[10]),
+  projection: {
+    status: "unavailable",
+    reason: "insufficient_months",
+    method: "No current-year forecast in this fixture.",
+  },
+};
+const REPORT_MAX_ANNUAL = cloneReport(REPORT_MAX_CURRENT);
+REPORT_MAX_ANNUAL.filter = {
+  from: "2026-01-01",
+  to: "2027-01-01",
+  bucket: "month",
+  category: "all",
+  currency: "IDR",
+};
+const REPORT_MAX_CURRENT_READOUT = resolveMonthReadout({
+  overview: REPORT_MAX_CURRENT,
+  month: "2026-11",
+  annualSource: REPORT_MAX_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+const REPORT_MAX_AED_CURRENT = cloneReport(REPORTS_MAX_AED);
+REPORT_MAX_AED_CURRENT.monthSummary = {
+  month: "2026-11",
+  from: "2026-11-01",
+  to: "2026-12-01",
+  asOf: REPORT_MAX_AED_CURRENT.asOf,
+  mode: "month",
+  actual: periodMetrics(REPORT_MAX_AED_CURRENT.periods[10]),
+  projection: {
+    status: "unavailable",
+    reason: "insufficient_months",
+    method: "No current-year forecast in this fixture.",
+  },
+};
+const REPORT_MAX_AED_ANNUAL = cloneReport(REPORT_MAX_AED_CURRENT);
+REPORT_MAX_AED_ANNUAL.filter = {
+  from: "2026-01-01",
+  to: "2027-01-01",
+  bucket: "month",
+  category: "all",
+  currency: "AED",
+};
+const REPORT_MAX_AED_CURRENT_READOUT = resolveMonthReadout({
+  overview: REPORT_MAX_AED_CURRENT,
+  month: "2026-11",
+  annualSource: REPORT_MAX_AED_ANNUAL,
+  annualStatus: "ready",
+  annualError: "",
+});
+
+function monthReportView(
+  report: PurchaseOrderReportData,
+  readout: PurchaseOrderMonthReadout,
+  filters: ReportFilterState = reportChartFilters(report)
+): ReactElement {
+  return (
+    <PurchaseOrderReportsView
+      filters={filters}
+      report={report}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      monthReadout={readout}
+      onPreviousMonth={() => undefined}
+      onNextMonth={() => undefined}
+      onRetryMonth={() => undefined}
+    />
+  );
+}
+
 // Issue #631: the chart snapshot cases share the Reports view's real props and
 // the same normalized server snapshot the screen consumes. The harness renders
 // to a string and screenshots at 360 and 1280 only (there is no 390 viewport).
@@ -1805,7 +1988,41 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthReadout={REPORT_MONTH_CURRENT_READOUT}
+        onPreviousMonth={() => undefined}
+        onNextMonth={() => undefined}
+        onRetryMonth={() => undefined}
       />
+    ),
+  },
+  {
+    // Issue #641: a loaded past month with no orders is genuine zero evidence,
+    // not a hidden section. The year KPI strip stays its own actual figures.
+    name: "ReportsMonthPastZero",
+    element: monthReportView(
+      REPORT_MONTH_PAST_ZERO,
+      REPORT_MONTH_PAST_ZERO_READOUT,
+      reportChartFilters(REPORT_MONTH_PAST_ZERO, "year")
+    ),
+  },
+  {
+    // Issue #641: a future month inside the current year reads only the
+    // current-year projection bucket. POs and Costed amount are not forecast.
+    name: "ReportsMonthFutureAvailable",
+    element: monthReportView(
+      REPORT_MONTH_FUTURE,
+      REPORT_MONTH_FUTURE_READOUT,
+      reportChartFilters(REPORT_MONTH_FUTURE, "year")
+    ),
+  },
+  {
+    // Issue #641: an unavailable future forecast states its stable reason and
+    // never invents zeros. The month table remains visible.
+    name: "ReportsMonthFutureUnavailable",
+    element: monthReportView(
+      REPORT_MONTH_FUTURE_UNAVAILABLE,
+      REPORT_MONTH_FUTURE_UNAVAILABLE_READOUT,
+      reportChartFilters(REPORT_MONTH_FUTURE_UNAVAILABLE, "year")
     ),
   },
   {
@@ -1880,7 +2097,7 @@ const CASES: SnapshotCase[] = [
           category: "all",
           currency: "IDR",
         }}
-        report={purchaseOrderReportMaxFixture()}
+        report={REPORT_MAX_CURRENT}
         loading={false}
         stale={false}
         error=""
@@ -1916,6 +2133,10 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthReadout={REPORT_MAX_CURRENT_READOUT}
+        onPreviousMonth={() => undefined}
+        onNextMonth={() => undefined}
+        onRetryMonth={() => undefined}
       />
     ),
   },
@@ -1934,7 +2155,7 @@ const CASES: SnapshotCase[] = [
           category: "all",
           currency: "AED",
         }}
-        report={REPORTS_MAX_AED}
+        report={REPORT_MAX_AED_CURRENT}
         loading={false}
         stale={false}
         error=""
@@ -1970,6 +2191,10 @@ const CASES: SnapshotCase[] = [
         onCurrencyChange={() => undefined}
         onRetry={() => undefined}
         onExport={() => undefined}
+        monthReadout={REPORT_MAX_AED_CURRENT_READOUT}
+        onPreviousMonth={() => undefined}
+        onNextMonth={() => undefined}
+        onRetryMonth={() => undefined}
       />
     ),
   },

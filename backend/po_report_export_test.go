@@ -12,6 +12,7 @@ import (
 
 	"vera-app/backend/auth"
 	"vera-app/backend/poreport"
+	"vera-app/backend/render/report"
 )
 
 func int64Pointer(value int64) *int64 { return &value }
@@ -207,5 +208,152 @@ func TestExportPurchaseOrderReportRequiresASignedInUser(t *testing.T) {
 	t.Cleanup(func() { apiClient = previousClient })
 	if _, err := q.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture())); err == nil {
 		t.Errorf("an unauthenticated export was accepted")
+	}
+}
+
+// Issue #641: the same binding accepts a versioned view without changing its
+// signature, but a view still has to be validated before the save dialog opens.
+// The selected month is frozen in the payload; the renderer never fetches.
+func reportViewFixture() report.ViewEnvelope {
+	return report.ViewEnvelope{
+		Version:  report.ViewVersion,
+		Sources:  []poreport.Report{reportExportFixture()},
+		Overview: 0,
+		Periods: report.ViewPeriods{
+			Sources: []int{0},
+			Months:  []string{"2025-01"},
+			Layout:  report.ViewLayoutIndividual,
+		},
+		Categories: report.ViewCategories{
+			Source: 0,
+			Codes:  []string{},
+			Layout: report.ViewLayoutAggregate,
+		},
+	}
+}
+
+func viewJSON(t *testing.T, view report.ViewEnvelope) string {
+	t.Helper()
+	raw, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	return string(raw)
+}
+
+func TestExportPurchaseOrderReportWritesAVersionedView(t *testing.T) {
+	q := staffQuotation()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "selected-month.pdf")
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		return path, nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+	previousClient := apiClient
+	apiClient = nil
+	t.Cleanup(func() { apiClient = previousClient })
+
+	got, err := q.ExportPurchaseOrderReport(viewJSON(t, reportViewFixture()))
+	if err != nil {
+		t.Fatalf("ExportPurchaseOrderReport(view): %v", err)
+	}
+	if got != path {
+		t.Errorf("returned path = %q, want %q", got, path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written view: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), "%PDF") {
+		t.Fatalf("written view is not a PDF (%d bytes)", len(raw))
+	}
+}
+
+func TestExportPurchaseOrderReportRefusesAnInvalidViewBeforeTheDialog(t *testing.T) {
+	base := reportViewFixture()
+	badVersion := base
+	badVersion.Version = report.EnvelopeVersion(2)
+
+	badFields := json.RawMessage(viewJSON(t, base))
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(badFields, &object); err != nil {
+		t.Fatalf("unmarshal view: %v", err)
+	}
+	object["selection"] = json.RawMessage(`{"layout":"individual"}`)
+	withUnknown, err := json.Marshal(object)
+	if err != nil {
+		t.Fatalf("marshal unknown-field view: %v", err)
+	}
+
+	badRef := base
+	badRef.Periods.Sources = []int{4}
+
+	badMonth := base
+	badMonth.Periods.Months = []string{"2025-02"}
+
+	badCurrency := base
+	other := reportExportFixture()
+	other.Filter.Currency = "USD"
+	badCurrency.Sources = []poreport.Report{base.Sources[0], other}
+
+	asOfMismatch := base
+	other = reportExportFixture()
+	other.AsOf = "2026-01-05"
+	other.Filter.From = "2024-01-01"
+	other.Filter.To = "2025-01-01"
+	other.Projection.Monthly.Basis.AsOf = "2026-01-05"
+	other.Projection.Yearly.Basis.AsOf = "2026-01-05"
+	asOfMismatch.Sources = []poreport.Report{base.Sources[0], other}
+
+	legacyWithSelection := map[string]any{}
+	legacySource := reportExportFixture()
+	legacyRaw, err := json.Marshal(legacySource)
+	if err != nil {
+		t.Fatalf("marshal legacy source: %v", err)
+	}
+	if err := json.Unmarshal(legacyRaw, &legacyWithSelection); err != nil {
+		t.Fatalf("unmarshal legacy source: %v", err)
+	}
+	legacyWithSelection["selection"] = map[string]any{"months": []string{"2025-01"}}
+	legacyMutated, err := json.Marshal(legacyWithSelection)
+	if err != nil {
+		t.Fatalf("marshal legacy mutation: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{name: "unknown version", payload: viewJSON(t, badVersion)},
+		{name: "unknown field", payload: string(withUnknown)},
+		{name: "missing annual source", payload: viewJSON(t, badRef)},
+		{name: "month not covered", payload: viewJSON(t, badMonth)},
+		{name: "foreign currency source", payload: viewJSON(t, badCurrency)},
+		{name: "as-of mismatch", payload: viewJSON(t, asOfMismatch)},
+		{name: "legacy with selection", payload: string(legacyMutated)},
+		{name: "zero version", payload: `{"version":0,"sources":[],"overview":0,"periods":{"sources":[],"months":[],"layout":"individual"},"categories":{"source":0,"codes":[],"layout":"aggregate"}}`},
+		{name: "null version", payload: `{"version":null,"sources":[],"overview":0,"periods":{"sources":[],"months":[],"layout":"individual"},"categories":{"source":0,"codes":[],"layout":"aggregate"}}`},
+	}
+
+	q := staffQuotation()
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return filepath.Join(t.TempDir(), "never.pdf"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			dialogOpened = false
+			if _, err := q.ExportPurchaseOrderReport(test.payload); err == nil {
+				t.Fatal("invalid view was accepted")
+			}
+			if dialogOpened {
+				t.Fatal("the save dialog opened before the invalid view was refused")
+			}
+		})
 	}
 }

@@ -10,6 +10,8 @@ import type {
   PurchaseOrderReportQuery,
 } from "./poReport";
 import { purchaseOrderReportFixture } from "./poReportFixtures";
+import { buildPurchaseOrderReportView, type PurchaseOrderReportView } from "./poReportExport";
+import { nextMonthStart } from "./poReportComparison";
 import {
   initialReportFilters,
   toReportQuery,
@@ -165,7 +167,39 @@ vi.mock("@backend/backend/UpdateAPI", async (importOriginal) => {
 
 /** The shared normalized fixture, read through the wire shape the binding returns. */
 function reportWire(): poreport.Report {
-  return purchaseOrderReportFixture() as unknown as poreport.Report;
+  const report = purchaseOrderReportFixture();
+  const month = report.asOf.slice(0, 7);
+  const period = report.periods.find(
+    (row) => row.periodStart === `${month}-01`
+  );
+  if (period !== undefined) {
+    // The base fixture predates the server-owned monthSummary. The page now
+    // requires current-month evidence before export, so attach the fixture's
+    // own month-to-date row with an explicitly unavailable forecast.
+    report.monthSummary = {
+      month,
+      from: `${month}-01`,
+      to: nextMonthStart(month),
+      asOf: report.asOf,
+      mode: "month",
+      actual: {
+        poCount: period.poCount,
+        amountMinor: period.amountMinor,
+        costedMinor: period.costedMinor,
+        uncostedMinor: period.uncostedMinor,
+        capitalMinor: period.capitalMinor,
+        marginMinor: period.marginMinor,
+        marginBps: period.marginBps,
+        coverageBps: period.coverageBps,
+      },
+      projection: {
+        status: "unavailable",
+        reason: "insufficient_months",
+        method: "No current-year forecast in this fixture.",
+      },
+    };
+  }
+  return report as unknown as poreport.Report;
 }
 
 function reportFor(query: PurchaseOrderReportQuery): poreport.Report {
@@ -277,12 +311,12 @@ function reportCalls(): PurchaseOrderReportQuery[] {
   );
 }
 
-function sentSnapshot(): PurchaseOrderReportData {
-  const sent = mocks.exportPurchaseOrderReport.mock.calls[0]?.[0];
+function sentSnapshot(call = 0): PurchaseOrderReportView {
+  const sent = mocks.exportPurchaseOrderReport.mock.calls[call]?.[0];
   if (typeof sent !== "string") {
     throw new Error("the export binding received no JSON string");
   }
-  return JSON.parse(sent) as PurchaseOrderReportData;
+  return JSON.parse(sent) as PurchaseOrderReportView;
 }
 
 describe("Reports export wiring through the real App (issue #632)", () => {
@@ -320,27 +354,39 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     const expected = normalizePurchaseOrderReport(
       reportFor(reportCalls()[0])
     );
+    const expectedView = buildPurchaseOrderReportView(expected, {
+      month: "2026-11",
+      source: expected,
+      usesOverviewMonthSummary: false,
+    });
     const sent = mocks.exportPurchaseOrderReport.mock.calls[0][0] as string;
-    expect(sent).toBe(JSON.stringify(expected));
+    expect(sent).toBe(JSON.stringify(expectedView));
 
     const parsed = sentSnapshot();
-    expect(parsed).toEqual(expected);
-    expect(parsed.filter).toEqual(expected.filter);
-    expect(parsed.generatedAt).toBe(expected.generatedAt);
-    expect(parsed.asOf).toBe(expected.asOf);
-    expect(parsed.generatedAt).not.toBe("");
-    expect(parsed.asOf).not.toBe("");
+    expect(parsed).toEqual(expectedView);
+    expect(parsed.version).toBe(1);
+    expect(parsed.sources).toHaveLength(1);
+    expect(parsed.overview).toBe(0);
+    expect(parsed.periods).toEqual({
+      sources: [0],
+      months: ["2026-11"],
+      layout: "individual",
+    });
+    const overview = parsed.sources[0];
+    expect(overview.filter).toEqual(expected.filter);
+    expect(overview.generatedAt).toBe(expected.generatedAt);
+    expect(overview.asOf).toBe(expected.asOf);
     // The current-period forecast is part of the exported snapshot, not only
     // of the screen state, so the PDF renderer can draw the same ghost.
-    expect(parsed.currentProjection).toEqual(expected.currentProjection);
-    expect(parsed.currentProjection.mode).toBe("none");
+    expect(overview.currentProjection).toEqual(expected.currentProjection);
+    expect(overview.currentProjection.mode).toBe("none");
     // The fixture carries the two values a lossy serializer would flatten.
     expect(
-      parsed.categories.find(
+      overview.categories.find(
         (category) => category.businessCategory === "UNASSIGNED"
       )?.marginBps
     ).toBeNull();
-    expect(parsed.categories.some((category) => category.marginMinor < 0)).toBe(
+    expect(overview.categories.some((category) => category.marginMinor < 0)).toBe(
       true
     );
 
@@ -426,7 +472,13 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     await flush();
 
     expect(mocks.exportPurchaseOrderReport).toHaveBeenCalledTimes(1);
+    // The year-bucketed overview plus the exact monthly snapshot the initial
+    // Year view already loaded. The overview alone is not a monthly source.
     expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
-    expect(sentSnapshot().filter).toEqual(reportCalls()[1]);
+    const view = sentSnapshot();
+    expect(view.sources[0].filter).toEqual(reportCalls()[1]);
+    expect(view.sources[1].filter).toEqual(reportCalls()[0]);
+    expect(view.periods.months).toEqual(["2026-11"]);
+    expect(view.periods.sources).toEqual([1]);
   });
 });
