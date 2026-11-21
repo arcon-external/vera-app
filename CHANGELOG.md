@@ -4,6 +4,44 @@ Staff-facing release notes for Vera. Entries use plain language and only
 describe user-visible changes; internal chores never appear here. Sections
 per version: Added, Changed, Fixed, Security.
 
+## [0.23.0] - 2026-11-21
+
+### Added
+
+- **Compare any month or Business category on its own.** Reports now has a By
+  period picker and a By category picker. Choose one, several, or all entries,
+  switch between cards and a combined table, and see the same six values for
+  each: purchase orders, amount, costed amount, capital, margin and margin %.
+  An all-month comparison uses the report's own annual total, never a sum of the
+  rows. (#641, #642, #643)
+- **Matching comparison PDFs.** Export prints exactly the months and categories
+  selected on screen, with the same values, warnings and empty sections.
+  (#641, #642, #643)
+- **Refresh and automatic freshness.** A Refresh button rechecks only what is on
+  screen. Saving, correcting or deleting purchase orders and quotations marks
+  report data as out of date and reloads it when you return, without losing your
+  selected months or categories. (#645)
+- **Reports follows the WIB business date.** At midnight the report moves to the
+  new day by itself, and relative ranges such as "Current month" or "This year"
+  stay truthful. Custom dates and explicit selections are left alone. (#645)
+
+### Changed
+
+- **A calmer Performance workspace.** Controls, actual figures, cost coverage,
+  chart status and the chart now sit in one panel; detailed method and legend
+  notes are behind one expandable Details area. No figures changed. (#644)
+
+### Fixed
+
+- **No stale or mismatched report money.** Loading or failing a new range,
+  month, category or currency never shows old values under the new heading, and
+  one failed section does not blank the others. (#645)
+- **Exports freeze the visible evidence.** Once Export starts, later refreshes
+  or selection changes cannot alter the PDF. (#645)
+- **Forecast ranges stay readable on narrow windows.** Estimated low-to-high
+  ranges wrap instead of being clipped. (#641)
+- **Selected-month PDF tables no longer split after one row.** (#642)
+
 ## [0.22.0] - 2026-11-20
 
 ### Added
