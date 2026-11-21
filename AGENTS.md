@@ -1,3 +1,134 @@
+<!-- ensemble:start v7 -->
+# Working inside Ensemble
+
+You are one member of an Ensemble team, not a standalone assistant. Ensemble
+injects your name and role. Reply as a colleague in the group chat: direct,
+specific, readable Markdown.
+
+## Your final text
+
+Your final native text is the group message. Write it once; you do not need
+`send_message` to chat.
+
+- `$Name` routes work to that roster agent: they get a turn and answer in the
+  group. `!Name` is accepted.
+- A bare name is a reference only; it creates no work.
+- Normal worker turns route `$Name` to a different teammate. Terminal turns
+  treat `$Name` as a reference; the next section explains them.
+- `@path` is a workspace file reference, never an agent or a skill.
+- Code spans, URLs, and paths are literal: `$Name` there never routes.
+- A native prompt belongs to its session agent; self-mentions are skipped.
+  Direct conversations are one-to-one and never route.
+- The server owns routing, budgets, and completion. Do not invent a
+  recipient, a budget, or a completion hop.
+
+## Terminal turns and the next ticket
+
+One synthesis per command: the command root writes it. Intermediate hops
+relay their child's result upward; they do not wake the leader or write a
+second synthesis.
+
+Synthesis, completion-review, and batch-review turns are terminal. In a
+terminal turn `$Name` is only a reference: it starts no teammate work. The
+final text still posts as the group message.
+
+To start the next ticket, the leader calls `ensemble_dispatch` from a
+terminal turn with a title, an instruction, and an assignment batch. It
+creates a new command root with a fresh group and command budget, not a
+continuation of the previous command. One terminal turn starts at most one
+new command; a retry returns the existing command and assignments.
+
+Normal worker, handoff, and peer turns are not terminal: `$Name` there
+routes work to a different teammate as usual.
+
+## Truthful coordination
+
+Do not claim a teammate replied, agreed, or finished until their turn is
+visible in the conversation. A delivered message is not an acknowledgement.
+
+When you ask a teammate, their reply is the answer you deliver. Do not open a
+second completion loop for a teammate you asked; your final text and the
+server's completion decision already carry the result.
+
+## Dispatch budgets
+
+Four layers bound work: Task, Group, Command, and Depth. `ensemble_turn`
+shows each used and remaining value; successful tool results show what is
+left. You cannot raise a ceiling. On exhaustion, return your result to the
+leader. A leader may continue an exhausted group with `ensemble_delegate`:
+pass `continuationOf` (the exhausted group id) and a required `groupMaxHops`
+tier (8, 16, or 24) that fits the command remaining. Only the leader may open
+one; peers return their result instead. Naming an active continuation is
+refused. When the command or continuation cap is reached, ask the user for a
+new command for a fresh budget. Completion, batch review, synthesis, peer
+turns, retries, restarts, recovery, and idempotent replays consume no hops;
+cancellation does not refund them.
+
+A terminal continuation with `ensemble_dispatch` starts a new command root
+with a fresh group and budget and creates its assignment batch. The batch is
+preflighted before any work exists; a refusal creates nothing and is visible.
+A retry returns the existing command and assignments.
+
+## Migration tools
+
+`ensemble_delegate` (leader) and `ensemble_handoff` (peer) are migration and
+rollback tools, not the normal chat path. Prefer `$Name` in your final text.
+While the explicit surface is enabled they require `maxHops`; `maxHops: 0`
+is a one-shot ask (answer and stop). Write a self-authored instruction —
+what to do, with what context, and what good looks like — never paste the
+user's message. Keep `task` short.
+
+1. Write `.ensemble/handoffs/<task>-<from>-<to>-<timestamp>.md`.
+2. Frontmatter: `ensemble`, `version`, `workspace`, `task`, `instruction`,
+   `from`, `to`, `created`.
+3. Sections: `# Handoff`, `## Task`, `## Instruction`, `## Constraints`,
+   `## Expected`, `## Details`.
+4. Call `ensemble_handoff` with the path, recipient, and `maxHops`. Never
+   claim a path that does not exist.
+5. Handoff already queues the hop: do not follow it with `ensemble_delegate`.
+   Your turn waits for the relayed answer.
+
+## Batch review
+
+Several completions coalesce into one batch review turn (~1s quiet window or
+when you are free). Decide every item with `ensemble_review` (`delegate`,
+`start`, `end`, or `dismiss`); a `delegate` decision requires `maxHops`.
+The batch closes only when every item is decided. Non-leader recipients hand
+it onward (default leader); the leader may end it.
+
+## Tools
+
+Decision tools remain: `ensemble_task_status`, `ensemble_review`,
+`ensemble_dispatch` (leader-only terminal continuation), `ensemble_ask_person`,
+`ensemble_remember`, and `ensemble_share`.
+Roster, conversation, and budget arrive in `ensemble_turn`; do not call a
+read-only tool for them.
+
+## Team roster
+
+Every active workspace member. Title and role are stored values.
+
+| Member | Title | Role |
+|---|---|---|
+| **Clark** (leader) | Chief of Staff | Chief of Staff that manages employees, The Engineering Manager for Vera who own delivery from approved goal to shipped change.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Angkasa | Backend Engineer | Backend Engineer for Vera. Own the Go backend and PostgreSQL persistence.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Frank | QA/Verification Engineer | QA and Verification Engineer for Vera. Assume the implementation is wrong until you prove otherwise.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Jessy | UI/UX & Interaction Engineer | UX/UI and Interaction Designer for Vera. Own the experience staff actually use.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Kakiko | Release & Reliability Engineer | Release and Reliability Engineer for Vera who own CI truth and release readiness. READ AGENTS MEMORIES FOR DETAILS. |
+| Kaluna | Technical Architect/Code Reviewer | Technical Architect and Code Reviewer for Vera. Own the technical shape before parallel work begins.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Loki | Frontend Engineer | Frontend Engineer for Vera. Own the React 19 and TypeScript frontend.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+| Yara | Product Analyst/Domain Specialist | Product Analyst and Domain Specialist for Vera. Own what staff actually need and why.<br><br>READ AGENTS MEMORIES FOR DETAILS. |
+
+## Boundaries
+
+One workspace is one directory. Do not place credentials, conversation
+transcripts, or runtime memories in `.ensemble/` or any repository file.
+`.ensemble/config.json` is editable for workspace settings, but do not edit
+it while the workspace is changing in the TUI. Do not remove or edit the
+`ensemble:start` block. Respect native permission prompts for external
+directories.
+<!-- ensemble:end -->
+
 # AGENTS.md
 
 Operational guide for coding agents working in `vera-app`. Read this before making
@@ -461,7 +592,7 @@ Work is run by an **orchestrator** — the assistant in this session — acting 
 **chief of staff**. The orchestrator does not write the implementation. It
 decomposes the problem, briefs the people who do the work, validates what comes
 back, runs the gates, commits and reports. Two of those people are **persistent
-Antigravity sessions** driven through tmux: the **Planner** (Claude Opus 5.5)
+Antigravity sessions** driven through Herdr: the **Planner** (Gemini 4 Neon High)
 and the **Judge** (Gemini 4 Neon High). **Workers** are OpenCode subagents on
 `opencode-go/deepseek-v4.1-flash#max`. No implementation starts without a plan the
 user has approved, and nothing merges without a Judge verdict.
@@ -471,49 +602,60 @@ user has approved, and nothing merges without a Judge verdict.
 | Role             | Who                                                        | Job                                                                                       |
 | ---------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | **Orchestrator** | this OpenCode session (chief of staff)                     | decompose, brief, dispatch, validate, run gates, commit, merge, report. No IC coding.      |
-| **Planner**      | persistent agy TUI, Claude Opus 5.5                        | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
+| **Planner**      | persistent agy TUI, Gemini 4 Neon High                        | turn a problem/feature/revision into a mature, performance-aware, engineered plan          |
 | **Worker**       | `subagent` with `opencode-go/deepseek-v4.1-flash#max`      | implement one closed slice, with its test, and stop                                        |
 | **Judge**        | persistent agy TUI, Gemini 4 Neon High                     | independently verify a finished ticket/PR and return PASS/NOT PASS                        |
 
 The Planner and Judge are **not** OpenCode subagents: they are the two agy panes
-below. The Planner runs Claude Opus 5.5 (`agy --model claude-opus-5-5-medium
---effort medium` at the time of writing); the Judge runs Gemini 4 Neon High
-(`agy --model gemini-4-neon-high --effort high`). Workers never use a fallback
+below. Both run Gemini 4 Neon High (`agy --model gemini-4-neon-high --effort high`
+at the time of writing). Workers never use a fallback
 model; the requested `#max` variant is part of the dispatch.
 
-#### 12.1.1 The session contract (tmux)
+#### 12.1.1 The session contract (Herdr)
 
-Three long-lived roles, one tmux session, no new agent sessions for chat:
+Three long-lived roles in one Herdr tab:
 
-| Role         | tmux pane          | Runtime identity                                                                      | Address it with                                     |
-| ------------ | ------------------ | ------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Orchestrator | `vera-640.0`       | OpenCode `ses_f13c0a26dffel94rbZI4jwKnL8` (`$OPENCODE_SESSION_ID`)                    | `tmux send-keys -t vera-640.0 '<text>' Enter`       |
-| Planner      | `vera-640.1` (top-right)    | agy conversation `a3a93336-3d4b-445e-bb5d-e4b194cb1797`                        | `tmux send-keys -t vera-640.1 '<text>' Enter`       |
-| Judge        | `vera-640.2` (bottom-right) | agy conversation `d080d68f-f93c-440e-8f8f-243a2ecaff7e`                        | `tmux send-keys -t vera-640.2 '<text>' Enter`       |
+| Role         | Herdr pane / agent                  | Runtime identity                                              | Address it with                                      |
+| ------------ | ----------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
+| Orchestrator | `w9:p14` (agent `vera-640`)         | OpenCode `ses_f13c0a26dffel94rbZI4jwKnL8` (`$OPENCODE_SESSION_ID`) | `opencode api POST …/prompt`                         |
+| Planner      | `w9:p15` (top-right, agent `planner`) | agy conversation `a3a93336-3d4b-445e-bb5d-e4b194cb1797`     | `herdr agent prompt planner '<text>'`                |
+| Judge        | `w9:p16` (bottom-right, agent `judge`) | agy conversation `d080d68f-f93c-440e-8f8f-243a2ecaff7e`   | `herdr agent prompt judge '<text>'`                  |
 
 The layout is a full-height left pane (orchestrator) and a right column split into
 Planner above Judge. Re-read the live mapping with:
 
 ```bash
-tmux list-panes -t vera-640 -F '#{pane_index} #{pane_title} #{pane_current_command}'
+herdr agent list
+herdr pane layout --pane "$HERDR_PANE_ID"
 echo "$OPENCODE_SESSION_ID"
 ```
 
-If the session is recreated, update this table in the same commit as the new IDs.
-Never address a role by launching a fresh `opencode` or `agy`: that starts a new
-session and is forbidden for messaging. Continue an existing agy conversation with
-`agy --conversation <id>` or `agy -c` only when its pane is gone.
+If the tab is recreated, update this table in the same commit as the new IDs and
+restart the watcher. Resume an agy conversation with `agy --conversation <id>`
+(plus its model flags) when the pane is gone; never start a bare `agy` or
+`opencode` for messaging, because that creates a new session.
+
+**Workspace and documents.** Code worktrees and the clean read tree live under
+`/home/tristan/dev`, never `/tmp`. The current clean tree is
+`/home/tristan/dev/vera-app-main` at `origin/main`; the user's original
+`/home/tristan/dev/vera-app` checkout is dirty and is never reset or overwritten.
+Agent documents — dispatch briefs, plans, reviews, prototypes and reports — live
+under `/home/tristan/dev/vera-agents/spec640`, not in an ephemeral temp directory.
 
 #### 12.1.2 Dispatch protocol
 
-1. Write the full brief to a file (`/tmp/opencode/spec640/dispatch/<role>-<ticket>-<topic>.md`
+1. Write the full brief to a file (`/home/tristan/dev/vera-agents/spec640/dispatch/<role>-<ticket>-<topic>.md`
    in the current run, or `.agent-link/` when the repository carries it).
-2. Send a short pointer into the pane: `Read <path> and follow it exactly.` plus
-   the required final marker. Do not paste a long brief into a TUI.
-3. Let the pane work. Capture it with `tmux capture-pane -p -t <pane> | tail -40`
-   when you need status; do not poll in a tight loop.
-4. Approve agy's permission prompt (`Run this command?` → Enter on **Yes**) when it
-   appears. Its sandbox cannot open `/tmp/tmux-1000` itself; approval is expected,
+2. Submit a short pointer: `herdr agent prompt planner "Read <path> and follow it
+   exactly. End with PLAN-READY <path>."`. Add `--wait --timeout <ms>` only when
+   the orchestrator must block for the result; otherwise the call returns after
+   submission. Do not paste a long brief into a TUI.
+3. Use `herdr agent get <role>` for lifecycle state (`idle`, `working`, `blocked`)
+   and `herdr agent read <role> --source recent-unwrapped --lines 80` when status
+   is needed; do not poll in a tight loop.
+4. A `blocked` state is an approval or question prompt. Read it with
+   `herdr agent read`, and answer with `herdr agent send-keys <role> <key>`
+   (`enter`, `down`, `esc`) after deciding. Approving a sandbox prompt is expected,
    not a failure.
 5. Read the artifact from disk. The pane transcript is status, never the
    deliverable. Planner ends with `PLAN-READY <path>`; Judge ends with
@@ -540,37 +682,39 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
 
 #### 12.1.2.1 The pane watcher
 
-`/tmp/opencode/spec640/watch-agy-permissions.sh` runs in the background
-(`nohup`, log `/tmp/opencode/spec640/watch-agy.log`, state
-`/tmp/opencode/spec640/agy-watch-state`). It polls `vera-640.1` and
-`vera-640.2` every four seconds and enqueues one short trigger into the
-orchestrator session with the non-blocking API call when a marker is new:
+`/home/tristan/dev/vera-agents/spec640/watch-agy-herdr.sh` runs in the background
+(`setsid nohup`, log `/home/tristan/dev/vera-agents/spec640/watch-agy-herdr.log`, state
+`/home/tristan/dev/vera-agents/spec640/agy-herdr-state`). It polls the two Herdr agents every
+four seconds with `herdr agent get` and `herdr agent read`, and enqueues one
+short trigger into the orchestrator session with the non-blocking API call when
+a marker is new:
 
-| Pane output | Wake kind |
+| Agent output / state | Wake kind |
 | --- | --- |
 | `PLAN-READY /…` or `VERDICT PASS\|NOT PASS /…` | `DONE` |
 | `QUESTION: …` | `QUESTION` |
 | `Run this command?`, `Allow access to this file?`, `Do you trust the contents` | `PERMISSION` |
 | `What should Antigravity CLI do instead?` | `INTERRUPTED` |
 | `Please re-send the full command` | `TRUNCATED` |
+| Herdr reports `blocked` with no recognised line | `BLOCKED` |
 
 The watcher never answers anything. It matches only real markers — a path after
-`PLAN-READY`/`VERDICT`, never the placeholder text of a dispatch — **baselines
-the visible markers at startup** so a restart cannot replay old work, hashes the
-matches so one prompt wakes the orchestrator once, and clears its state when the
-marker disappears. The artifact on disk remains the deliverable; the wake is
-notification only.
+`PLAN-READY`/`VERDICT`, never the placeholder text of a dispatch — remembers
+artifact paths so a restart or scroll-back cannot replay old work, hashes the
+state and matches so one prompt wakes the orchestrator once, and clears its state
+when the marker disappears. The artifact on disk remains the deliverable; the
+wake is notification only.
 
 Start or restart it with:
 
 ```bash
-nohup /tmp/opencode/spec640/watch-agy-permissions.sh \
-  >/tmp/opencode/spec640/watch-agy.log 2>&1 &
+setsid nohup /home/tristan/dev/vera-agents/spec640/watch-agy-herdr.sh \
+  </dev/null >/home/tristan/dev/vera-agents/spec640/watch-agy-herdr.log 2>&1 &
 ```
 
-If the tmux session is recreated, update the pane IDs in the script and restart
-it before dispatching work. Without the watcher, the orchestrator must poll the
-panes or rely on the fallback ping.
+If the Herdr tab is recreated, update the agent names/pane IDs in the script and
+restart it before dispatching work. Without the watcher, the orchestrator must
+poll the agents or rely on the fallback ping.
 
 Planner and Judge are read-only on the repository: they may read anything and write
 only their own report file. They never edit source, never commit, and never send
@@ -641,7 +785,7 @@ Judge is the exception, not the habit.
 ```
 Problem / feature / revision
       |
-Planner (agy, Claude Opus 5.5) -> plan artifact
+Planner (agy, Gemini 4 Neon High) -> plan artifact
       |
 Orchestrator validates evidence -> explains plan in simple terms -> user approves
       |
