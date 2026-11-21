@@ -536,6 +536,40 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
    approval prompts and interrupted prompts, and answers in-pane before work
    continues. Do not use the question marker for the final artifact.
 
+#### 12.1.2.1 The pane watcher
+
+`/tmp/opencode/spec640/watch-agy-permissions.sh` runs in the background
+(`nohup`, log `/tmp/opencode/spec640/watch-agy.log`, state
+`/tmp/opencode/spec640/agy-watch-state`). It polls `vera-640.1` and
+`vera-640.2` every four seconds and enqueues one short trigger into the
+orchestrator session with the non-blocking API call when a marker is new:
+
+| Pane output | Wake kind |
+| --- | --- |
+| `PLAN-READY /…` or `VERDICT PASS\|NOT PASS /…` | `DONE` |
+| `QUESTION: …` | `QUESTION` |
+| `Run this command?`, `Allow access to this file?`, `Do you trust the contents` | `PERMISSION` |
+| `What should Antigravity CLI do instead?` | `INTERRUPTED` |
+| `Please re-send the full command` | `TRUNCATED` |
+
+The watcher never answers anything. It matches only real markers — a path after
+`PLAN-READY`/`VERDICT`, never the placeholder text of a dispatch — **baselines
+the visible markers at startup** so a restart cannot replay old work, hashes the
+matches so one prompt wakes the orchestrator once, and clears its state when the
+marker disappears. The artifact on disk remains the deliverable; the wake is
+notification only.
+
+Start or restart it with:
+
+```bash
+nohup /tmp/opencode/spec640/watch-agy-permissions.sh \
+  >/tmp/opencode/spec640/watch-agy.log 2>&1 &
+```
+
+If the tmux session is recreated, update the pane IDs in the script and restart
+it before dispatching work. Without the watcher, the orchestrator must poll the
+panes or rely on the fallback ping.
+
 Planner and Judge are read-only on the repository: they may read anything and write
 only their own report file. They never edit source, never commit, and never send
 into another pane except for the completion ping above or an explicit
